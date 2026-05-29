@@ -6,17 +6,21 @@
  */
 
 import { useState } from 'react';
-import { ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
+import { ShieldCheck, AlertCircle, Loader2, GitCompare } from 'lucide-react';
 import { VerifyStats } from './VerifyStats';
 import { DriftTypeBadge, driftType, humanizeKind } from './driftType';
 import { EmptyState } from '@/components/ui/empty-state';
-import type { ContractDrift, DriftSeverity, VerifyState } from '@/lib/api';
+import type { ContractDrift, DriftSeverity, VerifyState, VerifyDiff } from '@/lib/api';
 
 interface VerifyPanelProps {
   state: VerifyState | null;
+  diff: VerifyDiff | null;
   isLoading: boolean;
+  isDiffing: boolean;
   error: string | null;
   activeDriftId: string | null;
+  /** Compute a fresh diff against the committed LATEST baseline. */
+  onRunDiff: () => void;
   /** Open a drift in the right pane. `pinned=false` opens it as a
    * preview tab (replaces the existing preview); `pinned=true` pins it
    * as a permanent tab. Mirrors the file / contracts viewer pattern. */
@@ -35,13 +39,17 @@ const SEVERITY_TONE: Record<DriftSeverity, string> = {
 
 export function VerifyPanel({
   state,
+  diff,
   isLoading,
+  isDiffing,
   error,
   activeDriftId,
+  onRunDiff,
   onOpenDrift,
 }: VerifyPanelProps) {
   // Filter by drift "type" (artifact kind), 'all' shows everything.
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [mode, setMode] = useState<'current' | 'diff'>('current');
 
   if (isLoading && !state) {
     return (
@@ -102,6 +110,24 @@ export function VerifyPanel({
 
   return (
     <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+        <ModeTab label="Current" active={mode === 'current'} onClick={() => setMode('current')} />
+        <ModeTab label="Diff vs baseline" active={mode === 'diff'} onClick={() => setMode('diff')} />
+        <button
+          type="button"
+          onClick={onRunDiff}
+          disabled={isDiffing}
+          title="Recompute drift diff against the committed LATEST baseline"
+          className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+        >
+          {isDiffing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitCompare className="h-3.5 w-3.5" />}
+          {diff ? 'Recompute' : 'Compute diff'}
+        </button>
+      </div>
+      {mode === 'diff' ? (
+        <VerifyDiffView diff={diff} isDiffing={isDiffing} />
+      ) : (
+      <>
       <VerifyStats state={state} />
       {state.drifts.length > 0 && (
         <div className="shrink-0 border-b border-border px-3 py-2">
@@ -152,6 +178,101 @@ export function VerifyPanel({
           ))
         )}
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+function ModeTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+        active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function VerifyDiffView({ diff, isDiffing }: { diff: VerifyDiff | null; isDiffing: boolean }) {
+  if (isDiffing && !diff) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!diff) {
+    return (
+      <EmptyState
+        icon={GitCompare}
+        title="No diff computed yet"
+        body="Click Compute diff to compare the current code's drifts against the committed LATEST baseline."
+      />
+    );
+  }
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 gap-4 border-b border-border px-4 py-2 text-xs">
+        <span className="text-red-600 dark:text-red-400">+{diff.summary.added} added</span>
+        <span className="text-green-600 dark:text-green-400">−{diff.summary.resolved} resolved</span>
+        <span className="text-muted-foreground">{diff.summary.unchanged} unchanged</span>
+      </div>
+      <div className="flex-1 overflow-auto">
+        {diff.added.length === 0 && diff.resolved.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="No change vs baseline"
+            body="The current code drifts match the committed baseline exactly."
+          />
+        ) : (
+          <>
+            <DiffSection title="added" count={diff.added.length} tone="bg-red-500/15 text-red-700 dark:text-red-300">
+              {diff.added.map((d) => <DiffRow key={d.id} drift={d} />)}
+            </DiffSection>
+            <DiffSection title="resolved" count={diff.resolved.length} tone="bg-green-500/15 text-green-700 dark:text-green-300">
+              {diff.resolved.map((d) => <DiffRow key={d.id} drift={d} />)}
+            </DiffSection>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DiffSection({ title, count, tone, children }: { title: string; count: number; tone: string; children: React.ReactNode }) {
+  if (count === 0) return null;
+  return (
+    <div>
+      <div className="sticky top-0 z-10 bg-background">
+        <div className={`flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${tone}`}>
+          <span>{title}</span>
+          <span>{count}</span>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DiffRow({ drift }: { drift: ContractDrift }) {
+  const identity = drift.artifactRef?.identity ?? '(no ref)';
+  const loc =
+    drift.filePath != null
+      ? `${drift.filePath.split('/').slice(-1)[0]}${drift.lineStart != null ? `:${drift.lineStart}` : ''}`
+      : '';
+  return (
+    <div className="flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-4 py-2 text-left text-xs">
+      <div className="flex w-full items-center gap-2">
+        <DriftTypeBadge kind={driftType(drift)} />
+        <span className="font-mono text-[11px] text-muted-foreground truncate min-w-0 flex-1">{identity}</span>
+        {loc && <span className="shrink-0 text-[10px] text-muted-foreground">{loc}</span>}
+      </div>
+      <div className="text-foreground line-clamp-2 leading-snug">{drift.obligationKey}</div>
     </div>
   );
 }

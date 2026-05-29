@@ -60,6 +60,25 @@ import {
 } from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { getGit } from '../lib/git.js';
+import {
+  writeVerifyRun,
+  writeVerifyLatest,
+  readVerifyLatest,
+  appendVerifyHistory,
+  deleteVerifyDiff,
+  writeVerifyDiff,
+} from '../lib/verify-store.js';
+export { readVerifyDiff, verifyLatestPath } from '../lib/verify-store.js';
+export type { VerifyDiff, VerifyLatest } from '../types/verify-snapshot.js';
+import {
+  diffDrifts,
+  summarizeDrifts,
+  type VerifyRunSnapshot,
+  type VerifyLatest,
+  type VerifyDiff,
+} from '../types/verify-snapshot.js';
 import type { StepTracker } from '../progress.js';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +140,13 @@ export interface VerifyInProcessResult {
   verify: VerifyResult;
   /** State persisted to disk for the dashboard to consume on next mount. */
   state: VerifyState;
+}
+
+export interface VerifyDiffInProcessResult {
+  /** Verifier output for the current working tree. */
+  verify: VerifyResult;
+  /** The computed + persisted diff against the committed LATEST baseline. */
+  diff: VerifyDiff;
 }
 
 /**
@@ -669,6 +695,22 @@ export function verifyStatePath(repoRoot: string): string {
 }
 
 export function readVerifyState(repoRoot: string): VerifyState | null {
+  // Prefer the new verifier store's LATEST.json; map it to the VerifyState
+  // shape dashboard/CLI consumers expect.
+  const latest = readVerifyLatest(repoRoot);
+  if (latest) {
+    return {
+      verifiedAt: latest.run.verifiedAt,
+      contractsDir: latest.run.contractsDir,
+      codeDir: latest.run.codeDir,
+      artifactCount: latest.artifactCount,
+      extractedOperationCount: latest.extractedOperationCount,
+      drifts: latest.drifts,
+      resolverErrors: latest.resolverErrors,
+      unresolvedRefs: latest.unresolvedRefs,
+    };
+  }
+  // Legacy fallback (one release): the pre-store `.cache/verifier/verify-state.json`.
   const file = verifyStatePath(repoRoot);
   if (!fs.existsSync(file)) return null;
   try {
@@ -758,8 +800,16 @@ export async function verifyInProcess(
     `${result.drifts.length} drift${result.drifts.length === 1 ? '' : 's'}`,
   );
 
-  const state: VerifyState = {
-    verifiedAt: new Date().toISOString(),
+  // Persist mirroring analyze: write a per-run snapshot, materialize LATEST
+  // (the diff baseline), append a history summary, and drop any stale diff.
+  const verifiedAt = new Date().toISOString();
+  const { branch, commitHash } = await gitMeta(repoRoot);
+  const runId = randomUUID();
+  const snapshot: VerifyRunSnapshot = {
+    id: runId,
+    verifiedAt,
+    branch,
+    commitHash,
     contractsDir,
     codeDir,
     artifactCount: result.artifactCount,
@@ -768,9 +818,118 @@ export async function verifyInProcess(
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
   };
-  writeVerifyState(repoRoot, state);
+  const { filename } = writeVerifyRun(repoRoot, snapshot);
+  const summary = summarizeDrifts(result.drifts);
+  const latest: VerifyLatest = {
+    head: filename,
+    run: { id: runId, verifiedAt, branch, commitHash, contractsDir, codeDir },
+    artifactCount: result.artifactCount,
+    extractedOperationCount: result.extractedOperationCount,
+    drifts: result.drifts,
+    resolverErrors: result.resolverErrors,
+    unresolvedRefs: result.unresolvedRefs,
+    summary,
+  };
+  writeVerifyLatest(repoRoot, latest);
+  appendVerifyHistory(repoRoot, {
+    id: runId,
+    filename,
+    verifiedAt,
+    artifactCount: result.artifactCount,
+    driftCount: result.drifts.length,
+    bySeverity: summary.bySeverity,
+  });
+  deleteVerifyDiff(repoRoot); // baseline moved — any prior diff is obsolete
+
+  const state: VerifyState = {
+    verifiedAt,
+    contractsDir,
+    codeDir,
+    artifactCount: result.artifactCount,
+    extractedOperationCount: result.extractedOperationCount,
+    drifts: result.drifts,
+    resolverErrors: result.resolverErrors,
+    unresolvedRefs: result.unresolvedRefs,
+  };
 
   return { verify: result, state };
+}
+
+/** Best-effort current branch + commit; null when not a git repo. */
+async function gitMeta(repoRoot: string): Promise<{ branch: string | null; commitHash: string | null }> {
+  try {
+    const git = await getGit(repoRoot);
+    const branch = (await git.branch()).current || null;
+    const commitHash = (await git.revparse(['HEAD'])).trim() || null;
+    return { branch, commitHash };
+  } catch {
+    return { branch: null, commitHash: null };
+  }
+}
+
+/**
+ * Diff the current working tree's drifts against the committed `LATEST.json`
+ * baseline (mirrors `analyze --diff`). Drifts are matched by obligation key
+ * (`driftKey`) so the comparison is stable even though `ContractDrift.id`
+ * regenerates each run. Writes `verifier/diff.json` and does NOT touch LATEST.
+ */
+export async function verifyDiffInProcess(
+  repoRoot: string,
+  options: VerifyInProcessOptions = {},
+): Promise<VerifyDiffInProcessResult> {
+  const { tracker } = options;
+  const contractsDir =
+    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
+  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
+
+  const baseline = readVerifyLatest(repoRoot);
+  if (!baseline) {
+    const err = new Error(
+      'No verify baseline found. Run `truecourse verify` first to establish LATEST.json.',
+    );
+    tracker?.error('load', err.message);
+    throw err;
+  }
+  if (!fs.existsSync(contractsDir)) {
+    const err = new Error(
+      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
+    );
+    tracker?.error('load', err.message);
+    throw err;
+  }
+
+  tracker?.start('load');
+  let result: VerifyResult;
+  try {
+    result = await verify({ contractsDir, codeDir });
+  } catch (e) {
+    tracker?.error('load', (e as Error).message);
+    throw e;
+  }
+  tracker?.done('load', `${result.artifactCount} artifact${result.artifactCount === 1 ? '' : 's'}`);
+
+  tracker?.start('extract-code');
+  tracker?.done('extract-code', `${result.extractedOperationCount} operation${result.extractedOperationCount === 1 ? '' : 's'}`);
+
+  tracker?.start('compare');
+  const { added, resolved, unchangedCount } = diffDrifts(baseline.drifts, result.drifts);
+
+  const { branch, commitHash } = await gitMeta(repoRoot);
+  const diff: VerifyDiff = {
+    id: randomUUID(),
+    baseRunId: baseline.run.id,
+    verifiedAt: new Date().toISOString(),
+    branch,
+    commitHash,
+    added,
+    resolved,
+    unchangedCount,
+    summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
+  };
+  writeVerifyDiff(repoRoot, diff);
+  tracker?.done('compare', `+${added.length} / -${resolved.length} drift${added.length + resolved.length === 1 ? '' : 's'}`);
+
+  return { verify: result, diff };
 }
 
 export interface InferInProcessOptions {

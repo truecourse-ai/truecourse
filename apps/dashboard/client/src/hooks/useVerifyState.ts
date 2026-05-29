@@ -13,12 +13,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import * as api from '@/lib/api';
-import type { VerifyState } from '@/lib/api';
+import type { VerifyState, VerifyDiff } from '@/lib/api';
 
 export function useVerifyState(repoId: string | undefined) {
   const [state, setState] = useState<VerifyState | null>(null);
+  const [diff, setDiff] = useState<VerifyDiff | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isDiffing, setIsDiffing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
@@ -26,8 +28,12 @@ export function useVerifyState(repoId: string | undefined) {
     setIsLoading(true);
     setError(null);
     try {
-      const s = await api.getVerifyState(repoId);
+      const [s, d] = await Promise.all([
+        api.getVerifyState(repoId),
+        api.getVerifyDiff(repoId),
+      ]);
       setState(s);
+      setDiff(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load verify state');
     } finally {
@@ -42,6 +48,7 @@ export function useVerifyState(repoId: string | undefined) {
     try {
       const s = await api.postVerifyRun(repoId);
       setState(s);
+      setDiff(null); // a fresh full run moves the baseline — any diff is stale
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Verify failed';
       setError(message);
@@ -51,9 +58,23 @@ export function useVerifyState(repoId: string | undefined) {
     }
   }, [repoId]);
 
+  const runDiff = useCallback(async () => {
+    if (!repoId) return;
+    setIsDiffing(true);
+    try {
+      const d = await api.postVerifyDiff(repoId);
+      setDiff(d);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Verify diff failed';
+      toast.error('Verify diff failed', { description: message });
+    } finally {
+      setIsDiffing(false);
+    }
+  }, [repoId]);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  return { state, isLoading, isRunning, error, refetch, run };
+  return { state, diff, isLoading, isRunning, isDiffing, error, refetch, run, runDiff };
 }

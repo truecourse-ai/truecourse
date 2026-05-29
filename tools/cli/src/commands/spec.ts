@@ -24,6 +24,7 @@ import {
   scanInProcess,
   SCAN_STEPS,
   verifyInProcess,
+  verifyDiffInProcess,
   VERIFY_STEPS,
   inferInProcess,
   INFER_STEPS,
@@ -157,9 +158,12 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
 export interface RunVerifyOptions extends RunSpecOptions {
   /** Override the code dir (default: auto-detect repo/code or repoRoot). */
   codeDir?: string;
+  /** Diff the working tree's drifts against the committed LATEST baseline. */
+  diff?: boolean;
 }
 
 export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
+  if (opts.diff) return runVerifyDiff(opts);
   const root = repoRoot(opts);
   p.intro("Verify");
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
@@ -203,6 +207,43 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
     p.cancel(`Failed: ${(e as Error).message}`);
   }
 }
+
+async function runVerifyDiff(opts: RunVerifyOptions): Promise<void> {
+  const root = repoRoot(opts);
+  p.intro("Verify diff");
+  const { renderer, tracker } = withTracker(VERIFY_STEPS);
+  try {
+    const { diff } = await verifyDiffInProcess(root, { tracker, codeDir: opts.codeDir });
+    renderer.dispose();
+
+    p.log.step(`added       ${diff.summary.added}`);
+    p.log.step(`resolved    ${diff.summary.resolved}`);
+    p.log.step(`unchanged   ${diff.summary.unchanged}`);
+
+    const list = (label: string, drifts: typeof diff.added) => {
+      if (drifts.length === 0) return;
+      p.log.message("");
+      p.log.message(`${label}:`);
+      for (const d of drifts.slice(0, 20)) {
+        const loc = d.filePath ? ` ${path.relative(root, d.filePath)}:${d.lineStart ?? "?"}` : "";
+        p.log.message(`  [${d.severity}] ${d.obligationKey}${loc}`);
+      }
+      if (drifts.length > 20) p.log.message(`  … (+${drifts.length - 20} more)`);
+    };
+    list("Added", diff.added);
+    list("Resolved", diff.resolved);
+
+    p.outro(
+      diff.summary.added === 0
+        ? `No new drift vs baseline (${diff.summary.resolved} resolved).`
+        : `${diff.summary.added} new drift${diff.summary.added === 1 ? "" : "s"} vs baseline.`,
+    );
+  } catch (e) {
+    renderer.dispose();
+    p.cancel(`Failed: ${(e as Error).message}`);
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // infer

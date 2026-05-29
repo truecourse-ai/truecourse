@@ -16,6 +16,8 @@ import {
   VERIFY_STEPS,
   readVerifyState,
   verifyInProcess,
+  verifyDiffInProcess,
+  readVerifyDiff,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
@@ -60,6 +62,50 @@ router.post(
       const { state } = await verifyInProcess(repo.path, { tracker });
       emitSpecComplete(repoIdForCleanup, 'verify');
       res.json(state);
+    } catch (e) {
+      if (repoIdForCleanup) {
+        emitSpecProgress(repoIdForCleanup, {
+          step: 'error',
+          percent: 100,
+          detail: (e as Error).message,
+        });
+      }
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/verify/diff',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const diff = readVerifyDiff(repo.path);
+      if (!diff) {
+        res.status(404).json({ error: 'No verify diff has been computed yet.' });
+        return;
+      }
+      res.json(diff);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/:id/verify/diff',
+  async (req: Request, res: Response, next: NextFunction) => {
+    let repoIdForCleanup: string | null = null;
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      repoIdForCleanup = req.params.id as string;
+      const tracker = createSocketSpecTracker(
+        repoIdForCleanup,
+        VERIFY_STEPS.map((s) => ({ ...s })),
+      );
+      const { diff } = await verifyDiffInProcess(repo.path, { tracker });
+      emitSpecComplete(repoIdForCleanup, 'verify');
+      res.json(diff);
     } catch (e) {
       if (repoIdForCleanup) {
         emitSpecProgress(repoIdForCleanup, {

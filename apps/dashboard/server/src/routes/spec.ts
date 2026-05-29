@@ -48,6 +48,7 @@ import {
   scanInProcess,
   upsertDecision,
   verifyStatePath,
+  verifyLatestPath,
 } from '@truecourse/core/commands/spec-in-process';
 import {
   createSocketSpecTracker,
@@ -307,7 +308,10 @@ router.get(
       const repo = resolveProjectForRequest(req.params.id as string);
       const claimsMtime = mtimeIfExists(claimsFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
-      const verifiedMtime = mtimeIfExists(verifyStatePath(repo.path));
+      // Prefer the new verifier store's LATEST.json; fall back to the legacy
+      // verify-state.json so staleness stays correct through the migration.
+      const verifiedMtime =
+        mtimeIfExists(verifyLatestPath(repo.path)) ?? mtimeIfExists(verifyStatePath(repo.path));
 
       const contractsStale =
         claimsMtime !== null &&

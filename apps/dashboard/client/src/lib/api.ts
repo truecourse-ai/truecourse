@@ -872,6 +872,35 @@ export function postVerifyRun(repoId: string): Promise<VerifyState> {
   });
 }
 
+export type VerifyDiff = {
+  id: string;
+  baseRunId: string;
+  verifiedAt: string;
+  branch: string | null;
+  commitHash: string | null;
+  added: ContractDrift[];
+  resolved: ContractDrift[];
+  unchangedCount: number;
+  summary: { added: number; resolved: number; unchanged: number };
+};
+
+/** Read the last-computed verify diff. Null on 404 (none computed yet). */
+export async function getVerifyDiff(repoId: string): Promise<VerifyDiff | null> {
+  try {
+    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Compute + persist a fresh verify diff against the committed baseline. */
+export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
+  return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
+    method: 'POST',
+  });
+}
+
 /**
  * Read the persisted scan-state. Returns null when the server
  * responds 404 (no scan has been run yet) — any other error

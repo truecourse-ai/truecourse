@@ -282,11 +282,14 @@ function RepoPageInner() {
   } = useCanonicalSpecTree(repoId);
   const {
     state: verifyState,
+    diff: verifyDiff,
     isLoading: verifyLoading,
     isRunning: verifyRunning,
+    isDiffing: verifyDiffing,
     error: verifyError,
     refetch: refetchVerify,
     run: runVerify,
+    runDiff: runVerifyDiff,
   } = useVerifyState(repoId);
   const {
     generating: contractsGenerating,
@@ -936,9 +939,12 @@ function RepoPageInner() {
           {leftTab === 'verify' && (
             <VerifyPanel
               state={verifyState}
+              diff={verifyDiff}
               isLoading={verifyLoading}
+              isDiffing={verifyDiffing}
               error={verifyError}
               activeDriftId={activeDriftId}
+              onRunDiff={runVerifyDiff}
               onOpenDrift={handleOpenDrift}
             />
           )}

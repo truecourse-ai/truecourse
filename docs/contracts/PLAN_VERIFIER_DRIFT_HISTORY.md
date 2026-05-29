@@ -1,6 +1,23 @@
 # Plan — verifier drift history (LATEST.json equivalent for drifts)
 
-Status: DEFERRED. Captured 2026-05-24. Not scheduled.
+Status: DONE (2026-05-28). Implemented in `packages/core/src/lib/verify-store.ts` +
+`types/verify-snapshot.ts`; `verifyInProcess` persists runs/LATEST/history,
+`verifyDiffInProcess` + `truecourse verify --diff` compute the baseline diff.
+
+Resolved open questions:
+1. **Promoted** out of `.cache/` → `<repo>/.truecourse/verifier/` (committable `LATEST.json`).
+2. **Stable identity:** drift ids ARE regenerated per run, so diffs key on the
+   obligation `Type:identity / obligationKey` (the IL-DRIFT marker key) — not a
+   filePath/line hash, so it's stable under line moves.
+3. **Retention:** keep all runs (matches analyze).
+4. **diff.json** is a separate run mode (`verify --diff`), mirroring `analyze --diff`.
+5. **Dashboard:** Verify panel gained a "Diff vs baseline" view; no runs picker yet.
+`readVerifyState` reads the new LATEST with a one-release fallback to the legacy
+`.cache/verifier/verify-state.json`.
+
+---
+
+Original plan (captured 2026-05-24) follows.
 
 ## The gap
 

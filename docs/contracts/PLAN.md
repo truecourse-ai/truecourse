@@ -515,10 +515,10 @@ The original Phase 7 folded verification into `analyze`. Reversal:
 |-----------|------------------------------------------------------------------------|--------|
 | **C.1**  | Restore `truecourse verify` as a top-level command (NOT removed)        | TODO   |
 | **C.2**  | Module 2 reads `.truecourse/spec/` by default; `specs.yaml` falls back as escape hatch | TODO   |
-| **C.3**  | Module 3 writes `.truecourse/verify/LATEST.json` (own baseline) instead of feeding `analyze`'s `LATEST.json` | TODO   |
+| **C.3**  | Module 3 writes `.truecourse/verifier/LATEST.json` (own baseline) — full store mirror (runs/LATEST/history/diff) per `PLAN_VERIFIER_DRIFT_HISTORY.md` | DONE   |
 | **C.4**  | Optional fan-out: `truecourse verify --publish-as-violations` adapts drifts into `analyze`'s `Violation[]` for users who want one combined view | TODO   |
 | **C.5**  | Dashboard "Contracts" tab — IL browser, spec-vs-IL diff, regenerate trigger | TODO   |
-| **C.6**  | Dashboard "Verification" tab — drift report, module-level grouping, --diff mode against committed `LATEST.json` | TODO   |
+| **C.6**  | Dashboard "Verification" tab — drift report + "Diff vs baseline" view (added/resolved/unchanged) against committed `LATEST.json`; module-level grouping still TODO | PARTIAL |
 | **C.7**  | Module-level matching: spec module `scope` → code-side detected module; emit `module.spec-without-impl` / `module.impl-without-spec` drifts | TODO   |
 | **C.8**  | Status-aware suppression: `planned` / `deferred` ops don't fire `implementation.missing` | TODO   |
 | **C.9**  | Negative-spec drift: `out-of-scope.implemented` when code ships something spec excluded | TODO   |

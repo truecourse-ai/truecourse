@@ -369,8 +369,9 @@ program
   .command("verify")
   .description("Compare code against the canonical TC contracts")
   .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .option("--diff", "Diff current drifts against the committed LATEST baseline")
   .action(async (options) => {
-    await runVerify({ codeDir: options.codeDir });
+    await runVerify({ codeDir: options.codeDir, diff: options.diff });
   });
 
 // Infer — reverse-engineers undocumented decisions from code into _inferred/.

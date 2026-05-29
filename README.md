@@ -130,7 +130,8 @@ truecourse contracts list                          # List generated contracts
 truecourse contracts validate                      # Parse + resolve TC files; report unresolved refs
 
 # Verification (code against contracts) — separate command, not part of `analyze`
-truecourse verify
+truecourse verify                                   # Full run: writes verifier/runs + LATEST + history
+truecourse verify --diff                            # Diff drifts vs the committed LATEST baseline (added/resolved/unchanged)
 
 # Inference (code → inferred contracts) — reverse-engineer undocumented decisions
 truecourse infer                                   # Write inferred .tc files to contracts/_inferred/
@@ -221,7 +222,12 @@ unresolved cross-references). On the bundled fixture this hits
 ├── contracts/               ← generated TC contract artifacts (gitignored by default)
 │   └── _inferred/            ← reverse-engineered, undocumented decisions (`truecourse infer`)
 ├── analyses/                ← analysis snapshots (gitignored)
-├── LATEST.json              ← current-state view (committable)
+├── LATEST.json              ← analyze current-state view (committable)
+├── verifier/                ← drift store (mirrors analyze; `truecourse verify`)
+│   ├── runs/                 ← per-run drift snapshots (gitignored)
+│   ├── LATEST.json           ← current drift state + diff baseline (committable)
+│   ├── history.json          ← per-run summaries (gitignored)
+│   └── diff.json             ← current-vs-baseline drift diff (gitignored)
 └── .cache/                  ← LLM + slice cache (gitignored)
 ```
 
