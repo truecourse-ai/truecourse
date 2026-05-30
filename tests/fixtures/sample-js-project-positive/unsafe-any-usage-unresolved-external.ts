@@ -13,6 +13,8 @@ import { useState } from 'unresolved-ui-lib';
 import { prismaLike } from 'unresolved-orm-lib';
 import type { Envelope } from 'unresolved-orm-lib';
 import { Controller } from 'unresolved-form-lib';
+import { CanvasGroup } from 'unresolved-canvas-lib';
+import { useCurrentTeam } from 'unresolved-context-lib';
 
 // 1) Schema parse — `.parse()` would give back the inferred output type.
 const SearchParamsSchema = z.object({ q: z.string() });
@@ -64,4 +66,29 @@ export function FieldControl(): unknown {
       return field.value;
     },
   });
+}
+
+// 7) `new` of an unresolved class. `group` is `any` because `CanvasGroup`'s
+// type can't resolve — calling `.add()` must NOT fire.
+export function buildGroup(): unknown {
+  const group = new CanvasGroup({ x: 0, y: 0 });
+  group.add({ kind: 'rect' });
+  return group;
+}
+
+// 8) Local const-arrow helper whose return type is inferred-any (its body
+// returns an unresolved-typed value). `const team = useCurrentTeam()` is any,
+// so `team.id` must NOT fire.
+const resolveTeam = () => useCurrentTeam();
+
+export function readTeamId(): string {
+  const team = resolveTeam();
+  return team.id;
+}
+
+// 9) Variable with a type annotation referencing an unresolved import. `record`
+// is `any` only because `Envelope` can't resolve — `record.id` must NOT fire.
+export function readScope(load: () => unknown): string {
+  const record: Envelope = load() as Envelope;
+  return record.id;
 }
