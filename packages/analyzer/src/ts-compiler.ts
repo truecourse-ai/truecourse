@@ -619,6 +619,12 @@ function tracesAnyToExternalSource(
   if (ts.isCallExpression(node)) {
     return tracesAnyToExternalSource(checker, node.expression, visited)
   }
+  if (ts.isNewExpression(node)) {
+    // `new UAParser()` / `new Konva.Group()` / `new Hono<Env>()` — the
+    // constructed value is `any` when the constructor's class comes from an
+    // unresolved import. Trace through the constructor expression.
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
   if (ts.isAsExpression(node)) {
     // `x as any` is an explicit cast — the any is intentional, not external.
     if (node.type.kind === ts.SyntaxKind.AnyKeyword) return false
@@ -629,6 +635,14 @@ function tracesAnyToExternalSource(
   }
   if (ts.isAwaitExpression(node)) {
     return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+
+  // Entry-point VariableDeclaration: when the flagged span exactly covers a
+  // `const x = expr` (the rule fires on the declarator itself), the node
+  // handed in is a VariableDeclaration, not an identifier. Apply the same
+  // logic the symbol-declaration branch below uses.
+  if (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) {
+    return variableDeclarationTracesExternal(checker, node, visited)
   }
 
   if (!ts.isIdentifier(node)) {
@@ -659,15 +673,36 @@ function tracesAnyToExternalSource(
     }
 
     if (ts.isBindingElement(decl)) {
-      // `const [a, b] = expr` / `const { x } = expr` — find the enclosing
-      // VariableDeclaration and recurse into its initializer.
+      // Destructuring binding. Find the enclosing declaration the pattern
+      // belongs to — either a `const { x } = expr` variable declaration or a
+      // destructured function/callback parameter `({ x }) => ...`.
       let walker: ts.Node = decl
-      while (walker.parent && !ts.isVariableDeclaration(walker.parent)) {
+      while (
+        walker.parent &&
+        !ts.isVariableDeclaration(walker.parent) &&
+        !ts.isParameter(walker.parent)
+      ) {
         walker = walker.parent
       }
-      const varDecl = walker.parent
-      if (varDecl && ts.isVariableDeclaration(varDecl) && varDecl.initializer) {
-        if (tracesAnyToExternalSource(checker, varDecl.initializer, visited)) {
+      const enclosing = walker.parent
+
+      if (enclosing && ts.isParameter(enclosing)) {
+        // Destructured parameter: `function Row({ envelope }: Props)`,
+        // `render={({ field }) => ...}` (react-hook-form), `match(x).with(...)`
+        // arms, etc. The binding is `any` either because the param's type
+        // annotation is a TypeReference to an unresolved import (Props →
+        // unresolved), or because the param is an untyped contextual callback
+        // of an unresolved library generic. Both are external noise once
+        // node_modules is absent. Only an explicit `: any` on the parameter
+        // itself is developer-authored.
+        if (enclosing.type && enclosing.type.kind === ts.SyntaxKind.AnyKeyword) return false
+        return true
+      }
+
+      if (enclosing && ts.isVariableDeclaration(enclosing) && enclosing.initializer) {
+        // `const { x } = expr` / `const [a] = expr` — recurse into the
+        // initializer (e.g. `const { data } = useLoaderData()`).
+        if (tracesAnyToExternalSource(checker, enclosing.initializer, visited)) {
           return true
         }
       }
@@ -675,18 +710,7 @@ function tracesAnyToExternalSource(
     }
 
     if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) {
-      if (decl.type && decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
-      if (decl.initializer) {
-        if (
-          ts.isAsExpression(decl.initializer) &&
-          decl.initializer.type.kind === ts.SyntaxKind.AnyKeyword
-        ) {
-          return false
-        }
-        if (tracesAnyToExternalSource(checker, decl.initializer, visited)) {
-          return true
-        }
-      }
+      if (variableDeclarationTracesExternal(checker, decl, visited)) return true
       // No annotation, no `as any`, initializer didn't trace external →
       // probably a locally-inferred any (e.g. `let x; x = whatever()`). Leave
       // it to the caller; default to false here.
@@ -696,6 +720,9 @@ function tracesAnyToExternalSource(
     if (ts.isParameter(decl)) {
       // Explicit `(x: any)` is the intentional pattern the rule exists for.
       if (decl.type && decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
+      // `(x: SomeType)` where SomeType is an unresolved import → x is any
+      // only because the annotation can't resolve. Suppress.
+      if (decl.type && typeReferenceIsExternal(checker, decl.type)) return true
       // Implicit-any parameters (no annotation, type inferred as `any`) are
       // overwhelmingly noise — JS files, contextual callbacks of unresolved
       // libraries, `noImplicitAny: false` configs. Treat as external so the
@@ -717,6 +744,113 @@ function tracesAnyToExternalSource(
     }
   }
 
+  return false
+}
+
+/**
+ * Decide whether a `VariableDeclaration`/`PropertyDeclaration` produces an
+ * `any` that originates externally. Checks, in order:
+ *  - explicit `: any` annotation → developer-authored, NOT external
+ *  - `: SomeUnresolvedType` annotation → external (the any is only because the
+ *    annotated type can't resolve without node_modules)
+ *  - `= x as any` initializer → developer-authored, NOT external
+ *  - initializer traces external (call to unresolved fn, `new` of unresolved
+ *    class, member of unresolved value, etc.)
+ *  - initializer is a local `() => …` / `function () {}` with no explicit `:
+ *    any` return annotation → its inferred return type is any-from-unresolved,
+ *    treat as external (covers `const x = localHelper()` where the helper is
+ *    an arrow whose body returns an unresolved-typed value)
+ */
+function variableDeclarationTracesExternal(
+  checker: ts.TypeChecker,
+  decl: ts.VariableDeclaration | ts.PropertyDeclaration,
+  visited: Set<ts.Node>,
+): boolean {
+  if (decl.type) {
+    if (decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
+    if (typeReferenceIsExternal(checker, decl.type)) return true
+  }
+  const init = decl.initializer
+  if (init) {
+    if (ts.isAsExpression(init) && init.type.kind === ts.SyntaxKind.AnyKeyword) {
+      return false
+    }
+    // `const helper = (…) => {…}` / `= function () {…}` — a local function
+    // whose inferred return type is any. Mirror the FunctionDeclaration
+    // branch: unless it carries an explicit `: any` return annotation, the
+    // any came from an unresolved value in its body. This is what makes
+    // `const x = helper()` (helper a const-arrow) trace external.
+    if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+      if (init.type && init.type.kind === ts.SyntaxKind.AnyKeyword) return false
+      return true
+    }
+    if (tracesAnyToExternalSource(checker, init, visited)) return true
+  }
+  return false
+}
+
+/**
+ * True when a type-annotation node names a type whose symbol can't be resolved
+ * to local source — i.e. it has no declarations, or its declarations live in
+ * node_modules / a `.d.ts` / behind an import. Such a type collapses to `any`
+ * when node_modules is absent, so any value annotated with it looks unsafe
+ * even though it's well-typed in the real project.
+ *
+ * Recurses one hop through a local type alias (`type Foo = TExternal['x']`) so
+ * a thin local wrapper over an external type is still recognised as external.
+ */
+function typeReferenceIsExternal(
+  checker: ts.TypeChecker,
+  typeNode: ts.TypeNode,
+  depth = 0,
+): boolean {
+  if (depth > 3) return false
+
+  // Unwrap arrays / unions / parens / type-operators to the leading reference.
+  if (ts.isArrayTypeNode(typeNode)) {
+    return typeReferenceIsExternal(checker, typeNode.elementType, depth + 1)
+  }
+  if (ts.isParenthesizedTypeNode(typeNode)) {
+    return typeReferenceIsExternal(checker, typeNode.type, depth + 1)
+  }
+  if (ts.isUnionTypeNode(typeNode) || ts.isIntersectionTypeNode(typeNode)) {
+    return typeNode.types.some((t) => typeReferenceIsExternal(checker, t, depth + 1))
+  }
+
+  if (!ts.isTypeReferenceNode(typeNode) && !ts.isExpressionWithTypeArguments(typeNode)) {
+    return false
+  }
+
+  const typeName = ts.isTypeReferenceNode(typeNode) ? typeNode.typeName : typeNode.expression
+  let symbol: ts.Symbol | undefined
+  try {
+    symbol = checker.getSymbolAtLocation(typeName)
+  } catch {
+    return false
+  }
+  if (!symbol) return false
+
+  const target = (symbol.flags & ts.SymbolFlags.Alias)
+    ? (safeGetAliasedSymbol(checker, symbol) ?? symbol)
+    : symbol
+  if (!target.declarations || target.declarations.length === 0) return true
+
+  for (const d of target.declarations) {
+    const sf = d.getSourceFile()
+    if (sf.fileName.includes('/node_modules/')) return true
+    if (sf.isDeclarationFile) return true
+    let ancestor: ts.Node | undefined = d
+    while (ancestor) {
+      if (ts.isImportDeclaration(ancestor) || ts.isImportEqualsDeclaration(ancestor)) {
+        return true
+      }
+      ancestor = ancestor.parent
+    }
+    // Local type alias that points at an external type — recurse one hop.
+    if (ts.isTypeAliasDeclaration(d) && d.type) {
+      if (typeReferenceIsExternal(checker, d.type, depth + 1)) return true
+    }
+  }
   return false
 }
 
