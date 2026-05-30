@@ -1017,14 +1017,22 @@ describe('code-quality/deterministic/no-proto', () => {
 });
 
 describe('code-quality/deterministic/no-void', () => {
-  it('detects void expression', () => {
-    const violations = check(`void someFunction();`);
+  it('detects void with an identifier operand', () => {
+    const violations = check(`const x = void someValue;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag void 0', () => {
     const violations = check(`const undef = void 0;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag fire-and-forget void call()', () => {
+    // `void someFunction()` is the standard fire-and-forget idiom for an
+    // intentionally unawaited promise — not a confusing `undefined` stand-in.
+    const violations = check(`void someFunction();`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(0);
   });
@@ -3191,10 +3199,17 @@ describe('code-quality/deterministic/default-parameter-position', () => {
 });
 
 describe('code-quality/deterministic/unnamed-regex-capture', () => {
-  it('detects unnamed capture group in regex', () => {
-    const violations = check(`const re = /(\\d+)/;`);
+  it('detects multiple unnamed capture groups in regex', () => {
+    const violations = check(`const re = /(\\d{4})-(\\d{2})-(\\d{2})/;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag a single unnamed capture group', () => {
+    // One capture is unambiguous (`m[1]`); naming adds ceremony without value.
+    const violations = check(`const re = /(\\d+)/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag non-capturing group', () => {
@@ -5132,14 +5147,27 @@ describe('code-quality/deterministic/undef-init', () => {
 });
 
 describe('code-quality/deterministic/require-unicode-regexp', () => {
-  it('detects regex without u flag', () => {
-    const violations = check(`const r = /[a-z]+/;`);
+  it('detects unicode-relevant regex without u flag', () => {
+    // `\u{...}` codepoint escape only behaves correctly under the u flag.
+    const violations = check(`const r = /\\u{1F600}/;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('detects property-escape regex without u flag', () => {
+    const violations = check(`const r = /\\p{Letter}+/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag a pure-ASCII regex (u flag is a no-op)', () => {
+    const violations = check(`const r = /[a-z]+/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
+    expect(matches).toHaveLength(0);
+  });
+
   it('does not flag regex with u flag', () => {
-    const violations = check(`const r = /[a-z]+/u;`);
+    const violations = check(`const r = /\\u{1F600}/u;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
     expect(matches).toHaveLength(0);
   });

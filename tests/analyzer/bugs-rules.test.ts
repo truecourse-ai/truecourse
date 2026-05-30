@@ -1684,10 +1684,24 @@ describe('bugs/deterministic/void-zero-argument', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects void expression', () => {
-    const violations = check(`void doSomething();`);
+  it('detects void with an identifier operand', () => {
+    const violations = check(`const x = void undefinedVar;`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-zero-argument');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag fire-and-forget void call()', () => {
+    // `void doSomething()` is the standard idiom for an intentionally
+    // unawaited promise — replacing it with `undefined` would drop the call.
+    const violations = check(`void doSomething();`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-zero-argument');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag fire-and-forget void await chain', () => {
+    const violations = check(`void getThing().then((r) => r);`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-zero-argument');
+    expect(matches).toHaveLength(0);
   });
 });
 

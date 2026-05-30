@@ -1,6 +1,26 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
+
+// `void <call()>` is the standard fire-and-forget idiom for an intentionally
+// unawaited promise (`void doAsyncThing()`), not a substitute for `undefined`.
+// Only `void <literal/identifier>` (canonically `void 0`) is the
+// replace-with-`undefined` pattern this rule targets. Walk through parens /
+// await / unary wrappers to find whether the operand bottoms out in a call.
+function operandIsCall(operand: SyntaxNode | null | undefined): boolean {
+  let cur: SyntaxNode | null | undefined = operand
+  while (cur) {
+    if (cur.type === 'call_expression' || cur.type === 'new_expression') return true
+    if (cur.type === 'parenthesized_expression' || cur.type === 'await_expression') {
+      // Descend into the wrapped expression (last named child).
+      cur = cur.namedChildren[cur.namedChildren.length - 1] ?? null
+      continue
+    }
+    return false
+  }
+  return false
+}
 
 export const voidZeroArgumentVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/void-zero-argument',
@@ -9,6 +29,10 @@ export const voidZeroArgumentVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const op = node.children.find((c) => c.text === 'void')
     if (!op) return null
+
+    // Skip fire-and-forget `void promiseCall()` — replacing it with `undefined`
+    // would drop the call entirely. Only flag literal/identifier operands.
+    if (operandIsCall(node.children[node.children.length - 1])) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
