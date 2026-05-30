@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { SpecComplianceConfig } from '@truecourse/shared';
 import { ensureRepoTruecourseDir, getRepoConfigPath } from './paths.js';
 
 export interface ProjectConfig {
@@ -8,6 +9,8 @@ export interface ProjectConfig {
   enableLlmRules?: boolean | null;
   /** Rule keys explicitly disabled for this project. Defaults are enabled. */
   disabledRules?: string[];
+  /** Spec compliance analyzer settings. Missing config uses product defaults; enabled=false opts out. */
+  specCompliance?: SpecComplianceConfig;
 }
 
 const EMPTY: ProjectConfig = {};

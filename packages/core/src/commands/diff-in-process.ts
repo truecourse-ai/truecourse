@@ -23,6 +23,11 @@ export interface DiffInProcessOptions {
   signal?: AbortSignal;
   enableLlmRulesOverride?: boolean;
   enabledCategoriesOverride?: string[];
+  specCompliance?: boolean;
+  specComplianceOnly?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  noLlm?: boolean;
   /**
    * Accepted for symmetry with `analyzeInProcess`. Diff mode always analyzes
    * the working tree as-is, so this is effectively a no-op — kept on the

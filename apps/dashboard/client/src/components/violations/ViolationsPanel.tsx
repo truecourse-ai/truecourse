@@ -1,13 +1,13 @@
 
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search, FileCheck2 } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
-export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style' | 'spec-compliance';
 export type TypeFilter = 'all' | 'deterministic' | 'llm';
 
 type ViolationsPanelProps = {
@@ -53,19 +53,28 @@ const categories: { value: CategoryFilter; label: string; icon: React.ReactNode 
   { value: 'code-quality', label: 'Code Quality', icon: <Code2 className="h-3.5 w-3.5" /> },
   { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
   { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
+  { value: 'spec-compliance', label: 'Spec Compliance', icon: <FileCheck2 className="h-3.5 w-3.5" /> },
 ];
 
 /** Derive domain from ruleKey (e.g. 'security/deterministic/foo' → 'security') */
 function getDomain(v: ViolationResponse): string {
   const key = v.ruleKey || '';
+  if (v.type === 'spec-compliance' || key.startsWith('spec-compliance/')) return 'spec-compliance';
   const slash = key.indexOf('/');
   return slash > 0 ? key.slice(0, slash) : v.type;
 }
 
 /** Derive detection type from ruleKey (e.g. 'security/deterministic/foo' → 'deterministic') */
 function getDetectionType(v: ViolationResponse): 'deterministic' | 'llm' {
+  if (v.type === 'spec-compliance') return 'deterministic';
   const key = v.ruleKey || '';
   return key.includes('/llm/') ? 'llm' : 'deterministic';
+}
+
+function getSpecStatus(v: ViolationResponse): string | null {
+  if (getDomain(v) !== 'spec-compliance') return null;
+  const parts = (v.ruleKey || '').split('/');
+  return parts[1] || null;
 }
 
 function matchesSearch(violation: ViolationResponse, search: string): boolean {
@@ -228,7 +237,7 @@ export function ViolationsPanel({
     if (!selectedPath) return violations;
     return violations.filter((violation) => {
       // Code violations: match by filePath directly
-      if (violation.type === 'code' && violation.filePath) {
+      if ((violation.type === 'code' || violation.type === 'spec-compliance') && violation.filePath) {
         if (violation.filePath.includes(selectedPath)) return true;
         if (selectedPath.includes(violation.filePath)) return true;
         const parts = violation.filePath.split('/');
@@ -336,6 +345,25 @@ export function ViolationsPanel({
   }, [diffViolationCards, hiddenRuleKeys, search]);
 
   const activeSeverityCounts = isDiffMode ? diffSeverityCounts : severityCounts;
+  const specStatusCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      satisfied: 0,
+      missing: 0,
+      partial: 0,
+      conflicting: 0,
+      ambiguous: 0,
+      unverifiable: 0,
+      unspecified: 0,
+    };
+    const source = isDiffMode
+      ? (filteredDiffCards ?? []).map((card) => card.violation)
+      : fullyFilteredViolations;
+    for (const violation of source) {
+      const status = getSpecStatus(violation);
+      if (status && status in counts) counts[status]++;
+    }
+    return counts;
+  }, [isDiffMode, filteredDiffCards, fullyFilteredViolations]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -402,6 +430,16 @@ export function ViolationsPanel({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
+          {categoryFilter === 'spec-compliance' && (
+            <div className="mx-3 mt-3 flex flex-wrap gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              {Object.entries(specStatusCounts).map(([status, count]) => (
+                <span key={status} className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                  <span className="font-medium text-foreground">{status}</span>
+                  <span>{count}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {isDiffMode && filteredDiffCards !== null ? (
             <>
               {diffResult?.isStale && (

@@ -26,6 +26,8 @@ import { buildGraph } from '../services/analysis-persistence.service.js';
 import { detectFlows } from '../services/flow.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
+import { runSpecComplianceAnalysis, type SpecComplianceArtifact } from '../services/spec-compliance.service.js';
+import { computeSpecComplianceViolationLifecycle } from '../services/spec-compliance-lifecycle.service.js';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
 import {
@@ -64,6 +66,11 @@ export interface AnalyzeCoreOptions {
   skipStash?: boolean;
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
+  specCompliance?: boolean;
+  specComplianceOnly?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  noLlm?: boolean;
   tracker?: StepTracker;
   onProgress?: (progress: { detail?: string }) => void;
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
@@ -147,8 +154,9 @@ export async function analyzeCore(
     const effectiveCategories = options.enabledCategoriesOverride?.length
       ? options.enabledCategoriesOverride
       : projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules =
-      projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
+    const effectiveLlmRules = options.specComplianceOnly
+      ? false
+      : projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
 
     // ------------------------------------------------------------
     // Stash dirty working tree so the entire pipeline (parse + LLM scan +
@@ -279,43 +287,57 @@ export async function analyzeCore(
           (v) => (branch == null || latestBaseline.analysis.branch == null || latestBaseline.analysis.branch === branch),
         )
       : [];
+    const previousSpecComplianceViolations = previousActiveViolations.filter((v) => v.type === 'spec-compliance');
+    const previousNormalViolations = previousActiveViolations.filter((v) => v.type !== 'spec-compliance');
     const previousAnalysisId = latestBaseline?.analysis.id ?? null;
 
     // ------------------------------------------------------------
     // Violation pipeline
     // ------------------------------------------------------------
-    const provider = options.provider ?? (effectiveLlmRules ? createLLMProvider() : undefined);
+    const specConfigEnabled = projectConfig.specCompliance?.enabled;
+    const specEnabled = options.specCompliance ?? specConfigEnabled ?? true;
+    const specUseLlm = !(options.noLlm ?? false)
+      && (projectConfig.specCompliance?.useLlm ?? true);
+    const provider = options.provider ?? ((effectiveLlmRules || (specEnabled && specUseLlm)) ? createLLMProvider() : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);
       provider.setRepoPath(project.path);
       if (signal) provider.setAbortSignal(signal);
     }
 
-    const pipelineResult = await runViolationPipeline({
-      repoPath: project.path,
-      analysisId,
-      now,
-      result,
-      serviceIdMap,
-      moduleIdMap,
-      methodIdMap,
-      dbIdMap,
-      previousActiveViolations,
-      changedFileSet,
-      tracker: options.tracker,
-      enabledCategories: effectiveCategories,
-      enableLlmRules: effectiveLlmRules,
-      disabledRules: projectConfig.disabledRules,
-      provider,
-      signal,
-      onLlmEstimate: options.onLlmEstimate
-        ? async (estimate) => {
-            const proceed = await options.onLlmEstimate!(estimate);
-            options.onLlmResolved?.(proceed);
-            return proceed;
-          }
-        : undefined,
-    });
+    const pipelineResult = options.specComplianceOnly
+      ? {
+          serviceDescriptions: [],
+          added: [],
+          resolved: [],
+          unchanged: [],
+          resolvedRefs: [],
+        }
+      : await runViolationPipeline({
+          repoPath: project.path,
+          analysisId,
+          now,
+          result,
+          serviceIdMap,
+          moduleIdMap,
+          methodIdMap,
+          dbIdMap,
+          previousActiveViolations: previousNormalViolations,
+          changedFileSet,
+          tracker: options.tracker,
+          enabledCategories: effectiveCategories,
+          enableLlmRules: effectiveLlmRules,
+          disabledRules: projectConfig.disabledRules,
+          provider,
+          signal,
+          onLlmEstimate: options.onLlmEstimate
+            ? async (estimate) => {
+                const proceed = await options.onLlmEstimate!(estimate);
+                options.onLlmResolved?.(proceed);
+                return proceed;
+              }
+            : undefined,
+        });
 
     // Apply LLM-generated service descriptions to the graph in-place.
     if (pipelineResult.serviceDescriptions.length > 0) {
@@ -323,6 +345,42 @@ export async function analyzeCore(
         const svc = graph.services.find((s) => s.id === desc.id);
         if (svc) svc.description = desc.description;
       }
+    }
+
+    let specComplianceArtifact: SpecComplianceArtifact | undefined;
+    if (specEnabled) {
+      options.tracker?.start('spec-compliance', 'Checking specs...');
+      options.tracker?.detail('spec-compliance', 'Discovering specs and extracting implementation facts...');
+      specComplianceArtifact = await runSpecComplianceAnalysis(project.path, {
+        enabled: true,
+        specs: options.specs,
+        showSatisfied: options.showSatisfied,
+        noLlm: options.noLlm ?? false,
+        provider,
+      });
+      const specLifecycle = computeSpecComplianceViolationLifecycle({
+        analysisId,
+        now,
+        findings: specComplianceArtifact.findings,
+        previousActiveViolations: previousSpecComplianceViolations,
+      });
+      pipelineResult.added.push(...specLifecycle.added);
+      pipelineResult.unchanged.push(...specLifecycle.unchanged);
+      pipelineResult.resolved.push(...specLifecycle.resolved);
+      pipelineResult.resolvedRefs.push(...specLifecycle.resolvedRefs);
+      options.tracker?.done(
+        'spec-compliance',
+        `${specComplianceArtifact.summary.findings} findings, ${specComplianceArtifact.summary.requirements} requirements`,
+      );
+    } else if (previousSpecComplianceViolations.length > 0) {
+      const specLifecycle = computeSpecComplianceViolationLifecycle({
+        analysisId,
+        now,
+        findings: [],
+        previousActiveViolations: previousSpecComplianceViolations,
+      });
+      pipelineResult.resolved.push(...specLifecycle.resolved);
+      pipelineResult.resolvedRefs.push(...specLifecycle.resolvedRefs);
     }
 
     // Drain LLM usage before the pipelineResult is frozen into a snapshot.
@@ -346,7 +404,9 @@ export async function analyzeCore(
       branch,
       commitHash,
       architecture: result.architecture,
-      metadata: result.metadata ?? null,
+      metadata: specComplianceArtifact
+        ? { ...(result.metadata ?? {}), specCompliance: specComplianceArtifact }
+        : result.metadata ?? null,
       graph,
       changedFiles,
       pipelineResult,
@@ -391,4 +451,3 @@ function enforceLocationInvariant(violations: ViolationRecord[]): void {
     v.lineEnd = null;
   }
 }
-

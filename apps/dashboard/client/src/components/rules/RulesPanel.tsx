@@ -1,11 +1,11 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
+import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search, FileCheck2 } from 'lucide-react';
 import { getRules, setRuleEnabled, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 
-type DomainFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+type DomainFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style' | 'spec-compliance';
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-600/20 text-red-400 border-red-600/30',
@@ -29,6 +29,7 @@ const domainColors: Record<string, string> = {
   'code-quality': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   database: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
   style: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
+  'spec-compliance': 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
 };
 
 const domainLabels: Record<string, string> = {
@@ -40,6 +41,7 @@ const domainLabels: Record<string, string> = {
   'code-quality': 'Code Quality',
   database: 'Database',
   style: 'Style',
+  'spec-compliance': 'Spec Compliance',
 };
 
 function getDomain(rule: RuleResponse): string {
@@ -58,6 +60,7 @@ const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[
   { value: 'code-quality', label: 'Code Quality', icon: <Code2 className="h-3.5 w-3.5" /> },
   { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
   { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
+  { value: 'spec-compliance', label: 'Spec Compliance', icon: <FileCheck2 className="h-3.5 w-3.5" /> },
 ];
 
 export interface RulesPanelProps {

@@ -1,0 +1,36 @@
+requirements:
+  - kind: ui
+    subject: Todo home route
+    action: render
+    object: /
+    evidenceText: The todo app home route / must exist.
+  - kind: ui
+    subject: Todo list heading
+    action: show
+    object: Todo List
+    evidenceText: The UI must show text Todo List.
+  - kind: ui
+    subject: New todo field
+    action: include
+    object: todo
+    evidenceText: The todo form must include a todo field.
+  - kind: test
+    subject: Add todo test coverage
+    action: cover
+    object: add todo
+    evidenceText: Tests must cover adding a todo item.
+  - kind: test
+    subject: Toggle todo test coverage
+    action: cover
+    object: toggle todo
+    evidenceText: Tests must cover toggling a todo item.
+  - kind: test
+    subject: Clear completed test coverage
+    action: cover
+    object: clear completed
+    evidenceText: Tests must cover clearing completed todos.
+  - kind: infra
+    subject: Package build script
+    action: define
+    object: build
+    evidenceText: The package must define build script.

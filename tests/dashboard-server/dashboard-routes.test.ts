@@ -38,6 +38,7 @@ import {
   writeAnalysis,
   appendHistory,
   writeDiff,
+  readLatest,
   clearLatestCache,
 } from '../../packages/core/src/lib/analysis-store';
 import {
@@ -412,6 +413,47 @@ describe('dashboard routes (seeded store)', () => {
       expect(res.body.changedFiles).toHaveLength(1);
     });
 
+    it('GET /api/repos/:id/spec-compliance returns the persisted artifact', async () => {
+      const latest = readLatest(fixture.repoPath)!;
+      writeLatest(fixture.repoPath, {
+        ...latest,
+        analysis: {
+          ...latest.analysis,
+          metadata: {
+            ...latest.analysis.metadata,
+            specCompliance: {
+              enabled: true,
+              config: { enabled: true },
+              manifest: { files: [] },
+              requirements: [],
+              facts: [],
+              results: [{ status: 'satisfied', severity: 'info' }],
+              visibleResults: [],
+              findings: [],
+              errors: [],
+              summary: {
+                requirements: 0,
+                facts: 0,
+                results: 1,
+                visibleResults: 0,
+                findings: 0,
+                byStatus: { satisfied: 1 },
+                bySeverity: { info: 1 },
+              },
+            },
+          },
+        },
+      });
+      clearLatestCache();
+
+      const res = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/spec-compliance?showSatisfied=true`)
+        .expect(200);
+      expect(res.body.enabled).toBe(true);
+      expect(res.body.visibleResults).toHaveLength(1);
+      expect(res.body.summary.visibleResults).toBe(1);
+    });
+
     it('DELETE /api/repos/:id/analyses/:unknown returns 404', async () => {
       await request(app)
         .delete(`/api/repos/${fixture.project.slug}/analyses/00000000-0000-0000-0000-000000000000`)
@@ -445,6 +487,33 @@ describe('dashboard routes (seeded store)', () => {
         .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body.length).toBe(2);
+    });
+
+    it('GET /api/repos/:id/violations includes spec-compliance findings', async () => {
+      const latest = readLatest(fixture.repoPath)!;
+      const specViolation: ViolationWithNames = {
+        ...seed.violations[0],
+        id: randomUUID(),
+        type: 'spec-compliance',
+        title: 'missing: Checkout',
+        content: 'Implementation evidence: No implementation evidence found.',
+        severity: 'high',
+        ruleKey: 'spec-compliance/missing/api.route.exists',
+        filePath: 'docs/spec.md',
+        lineStart: 4,
+        lineEnd: 4,
+        snippet: JSON.stringify({ specComplianceFindingId: 'finding_test' }),
+      };
+      writeLatest(fixture.repoPath, {
+        ...latest,
+        violations: [...latest.violations, specViolation],
+      });
+      clearLatestCache();
+
+      const res = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations`)
+        .expect(200);
+      expect(res.body.some((violation: { type: string }) => violation.type === 'spec-compliance')).toBe(true);
     });
 
     it('GET /api/repos/:id/violations?severity=critical filters', async () => {

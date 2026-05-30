@@ -95,6 +95,8 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
   };
 
   const isCodeViolation = violation.type === 'code';
+  const isSpecViolation = violation.type === 'spec-compliance';
+  const opensFile = (isCodeViolation || isSpecViolation) && !!violation.filePath;
 
   // Most specific target: method > module > database > service
   const locateTargetId = violation.targetMethodId || violation.targetModuleId || violation.targetDatabaseId || violation.targetServiceId;
@@ -134,7 +136,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
           </Badge>
           <div className="ml-auto flex items-center gap-1">
             {/* Locate button: open file for code violations, focus graph node for arch violations */}
-            {isCodeViolation && violation.filePath && onOpenFile ? (
+            {opensFile && onOpenFile ? (
               <Button
                 variant="outline"
                 size="xs"
@@ -209,7 +211,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
         </p>
 
         {/* Code violation: show file path + line */}
-        {isCodeViolation && violation.filePath && (
+        {opensFile && violation.filePath && (
           <p className="mt-2 truncate text-[10px] text-muted-foreground" title={`${violation.filePath}${violation.lineStart ? `:${violation.lineStart}` : ''}`}>
             File:{' '}
             <span className="font-medium text-foreground">

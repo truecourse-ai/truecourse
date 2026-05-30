@@ -11,6 +11,21 @@ export { buildDependencyGraph, findEntryPoints } from './dependency-graph.js'
 export { detectServices, type Service } from './service-detector.js'
 export { detectLayers, toLayerDetectionResults, type InternalLayerDetection } from './layer-detector.js'
 export { discoverFiles } from './file-discovery.js'
+export {
+  SPEC_PROSE_EXTRACTOR,
+  SPEC_STRUCTURED_EXTRACTOR,
+  createSpecExtractionManifest,
+  discoverSpecFiles,
+  parseMarkdownSpec,
+  parseSpecContent,
+  parseTextSpec,
+} from './spec-discovery.js'
+export {
+  SPEC_CODE_FACT_EXTRACTORS,
+  extractCodeFacts,
+  type CodeFactExtractionError,
+  type CodeFactExtractionResult,
+} from './spec-code-facts.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
 // Parser utilities

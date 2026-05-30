@@ -1,0 +1,55 @@
+requirements:
+  - kind: cli
+    subject: truecourse binary
+    action: define
+    constraints:
+      - type: cliBinary
+        value: truecourse
+    evidenceText: The package must define the truecourse CLI binary.
+  - kind: cli
+    subject: analyze command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse analyze
+    evidenceText: The CLI must define `truecourse analyze`.
+  - kind: cli
+    subject: spec compliance option
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse analyze
+      - type: cliOption
+        value: --spec-compliance
+    evidenceText: The `truecourse analyze` command must define --spec-compliance.
+  - kind: cli
+    subject: rules command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse rules
+    evidenceText: The CLI must define `truecourse rules`.
+  - kind: cli
+    subject: rules enable command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse rules enable
+      - type: cliArgument
+        value: ruleKey
+    evidenceText: The CLI must define `truecourse rules enable <ruleKey>`.
+  - kind: cli
+    subject: deploy command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse deploy
+    evidenceText: The CLI must define `truecourse deploy`.
+  - kind: cli
+    modality: must_not
+    subject: telemetry command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse telemetry
+    evidenceText: The CLI must not define `truecourse telemetry`.

@@ -20,20 +20,28 @@ export const DOMAIN_LABELS: Record<string, string> = {
 export function buildAnalysisSteps(
   enabledCategories?: string[],
   enableLlmRules?: boolean,
+  enableSpecCompliance = true,
+  enableNormalChecks = true,
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
   ];
 
 
-  if (enableLlmRules) {
+  if (enableNormalChecks && enableLlmRules) {
     steps.push({ key: 'scan', label: 'Scanning files' });
   }
 
-  const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d));
+  const activeDomains = enableNormalChecks
+    ? DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d))
+    : [];
 
   for (const domain of activeDomains) {
     steps.push({ key: domain, label: `${DOMAIN_LABELS[domain]} checks` });
+  }
+
+  if (enableSpecCompliance) {
+    steps.push({ key: 'spec-compliance', label: 'Spec compliance checks' });
   }
 
   steps.push({ key: 'persist', label: 'Saving results' });

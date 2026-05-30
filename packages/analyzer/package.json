@@ -19,6 +19,7 @@
   "dependencies": {
     "@truecourse/shared": "workspace:*",
     "ignore": "^7.0.5",
+    "js-yaml": "^4.1.1",
     "minimatch": "^10.0.3",
     "pyright": "^1.1.408",
     "smol-toml": "^1.6.1",
@@ -26,6 +27,7 @@
     "web-tree-sitter": "^0.26.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "tree-sitter-javascript": "^0.25.0",
     "tree-sitter-python": "^0.25.0",
