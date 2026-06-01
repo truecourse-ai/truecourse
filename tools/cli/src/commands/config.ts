@@ -18,8 +18,6 @@ import {
 export interface RunConfigLlmShowOptions {
   /** Override the repo root; defaults to cwd. */
   cwd?: string;
-  /** When true, emit a single JSON document instead of clack output. */
-  json?: boolean;
 }
 
 const STAGE_LABEL: Record<StageId, string> = {
@@ -47,27 +45,6 @@ export async function runConfigLlmShow(
 ): Promise<void> {
   const repoRoot = options.cwd ?? process.cwd();
   const { stages, fallbackModel } = describeStageResolutions(repoRoot);
-
-  if (options.json) {
-    process.stdout.write(
-      JSON.stringify(
-        {
-          repoRoot: path.relative(process.cwd(), repoRoot) || ".",
-          stages: stages.map((s) => ({
-            stageId: s.stageId,
-            effectiveModel: s.effectiveModel,
-            defaultModel: STAGE_DEFAULTS[s.stageId],
-            source: s.source,
-            envVar: s.envVar ?? null,
-          })),
-          fallbackModel,
-        },
-        null,
-        2,
-      ) + "\n",
-    );
-    return;
-  }
 
   p.intro("LLM model resolution");
   p.log.info(`repoRoot   ${path.relative(process.cwd(), repoRoot) || "."}`);

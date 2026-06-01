@@ -14,7 +14,7 @@
   <a href="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml"><img src="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml/badge.svg" alt="Tests" /></a>
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
   <a href="https://github.com/truecourse-ai/truecourse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/truecourse-ai/truecourse" alt="License" /></a>
-  <a href="https://discord.gg/8AYwf26A"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/TanxB63arz"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
 TrueCourse catches two classes of defect, through two independent tools — use either on its own or both together:
@@ -22,7 +22,7 @@ TrueCourse catches two classes of defect, through two independent tools — use 
 - **Code defects** (`truecourse analyze`) — from the categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
 - **Business-logic drift** (`truecourse verify`) — when the implementation no longer matches what the docs say it should do. Wrong response codes, missing entity fields, illegal state transitions, bypassed auth, silently-dropped effects, formulas that have lost an input. TrueCourse extracts a contract from your PRDs/ADRs/READMEs and checks the code against it.
 
-Both produce structured output — queryable as JSON for agent workflows, and rendered in a shared [dashboard](#dashboard-web-ui) for human review.
+Both store their results under `.truecourse/` and surface them in a shared [dashboard](#dashboard-web-ui) for human review, with plain-text CLI output an agent can read directly.
 
 <p align="center">
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
@@ -191,7 +191,7 @@ truecourse contracts generate           # Canonical spec → .tc contract artifa
 truecourse verify                       # Check code against the contracts → drifts
 ```
 
-Resolve conflicts and review drifts visually in the [dashboard](#dashboard-web-ui)'s BL Drift section, or drive every step from the CLI (`--json` on all of it for agent workflows).
+Resolve conflicts and review drifts visually in the [dashboard](#dashboard-web-ui)'s BL Drift section, or drive every step from the CLI.
 
 ## How it works
 
@@ -203,7 +203,7 @@ Auto-resolve rules cut the conflict count substantially: byte-identical content,
 
 **2. Contract extraction** — Reads `claims.json` and emits `.truecourse/contracts/*.tc` files in a hand-written DSL covering 13 artifact kinds: `operation`, `entity`, `enum`, `state-machine`, `auth-requirement`, `authorization-rule`, `error-envelope`, `pagination-contract`, `idempotency-contract`, `effect-group`, `formula`, plus `unenforceable-obligation` for prose the verifier can't structurally check. A post-extraction **repair pass** validates structural completeness and re-prompts the LLM to fix deficient artifacts (missing forbids clauses, broad role selectors, unresolved cross-references). On the bundled fixture this hits **22/22 planted bugs with 0 false positives**.
 
-**3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations and from the CLI as JSON. `truecourse verify` is its own command — not a stage of `truecourse analyze`.
+**3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations, and on the CLI through `truecourse verify`. It's its own command — not a stage of `truecourse analyze`.
 
 **4. Inference** — The mirror image of verification. `verify` asks "the spec says X — does the code do X?"; `truecourse infer` asks "the code does X — does any spec mention X?". It runs the code-side extractors *un-driven by a spec*, subtracts whatever the authored contracts already cover, and writes the remainder to `.truecourse/contracts/_inferred/` as `.tc` artifacts tagged with an `inferred-from "<code-path>" a..b` provenance line and a `confidence` level (instead of the authored `origin SOURCE "section" a..b`). It covers the full artifact spread — undocumented endpoints, entities (from ORM schema), enums, named constants, query policies, emitted events, computed formulas, architecture choices, and the cross-cutting conventions (auth, pagination, idempotency, error envelope). Confidence reflects fidelity: a value read straight from code is `high`; a synthesized convention (e.g. an assumed auth scheme) is a `low`-confidence draft to confirm. Because coverage is computed from authored contracts only, a decision drops out of `_inferred/` the moment it's documented — the directory is a shrinking backlog of "decisions your code made that your docs never recorded". Inferred contracts are descriptive, not prescriptive, so `verify` skips `_inferred/` by default.
 
@@ -240,7 +240,7 @@ truecourse spec scan                              # Read docs, extract claims, s
 truecourse spec resolve --all-defaults            # Accept the engine's recommended pick on every open conflict
 truecourse spec status                            # Summary: docs, claims, modules, pending decisions
 
-# Agent-friendly conflict surface (all support --json)
+# Conflict resolution (also available in the dashboard Spec tab)
 truecourse spec conflicts list                    # List open conflicts (add --decided / --all)
 truecourse spec conflicts show <id>               # Full detail for one conflict
 truecourse spec conflicts pick <id> <index>       # Resolve by picking a candidate
@@ -384,7 +384,7 @@ pnpm build              # Build all packages
 
 ## Community
 
-Join the [TrueCourse Discord](https://discord.gg/8AYwf26A) to ask questions, share feedback, and follow what's shipping.
+Join the [TrueCourse Discord](https://discord.gg/TanxB63arz) to ask questions, share feedback, and follow what's shipping.
 
 ## Contact
 

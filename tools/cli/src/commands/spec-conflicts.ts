@@ -1,15 +1,14 @@
 /**
  * `truecourse spec conflicts <sub>` — agent-friendly conflict surface.
  *
- *   list   [--json] [--decided] [--all]    list open conflicts
- *   show   <id> [--json]                    full detail for one
+ *   list   [--decided] [--all]              list open conflicts
+ *   show   <id>                             full detail for one
  *   pick   <id> <candidateIndex> [--note]   write a `pick` decision
  *   custom <id> --text "..."                write a `custom` decision
  *   revoke <id>                             remove a previously-saved decision
  *
- * Every read command honors `--json` for machine consumption. Write
- * commands persist to decisions.json and refresh the scan-state so a
- * subsequent `list --json` reflects the change.
+ * Write commands persist to decisions.json and refresh the scan-state so a
+ * subsequent `list` reflects the change.
  */
 
 import * as p from '@clack/prompts';
@@ -28,7 +27,6 @@ import { createStdoutStepRenderer } from '../lib/stdout-step-renderer.js';
 
 export interface RunSpecConflictsOptions {
   cwd?: string;
-  json?: boolean;
 }
 
 const repoRoot = (opts: RunSpecConflictsOptions): string => opts.cwd ?? process.cwd();
@@ -42,7 +40,7 @@ interface LoadedScan {
   decided: Array<{ conflict: Conflict; decision: unknown }>;
 }
 
-async function loadScan(root: string, json: boolean): Promise<LoadedScan> {
+async function loadScan(root: string): Promise<LoadedScan> {
   const cached = readScanState(root);
   if (cached) {
     return {
@@ -50,17 +48,7 @@ async function loadScan(root: string, json: boolean): Promise<LoadedScan> {
       decided: cached.decidedConflicts as Array<{ conflict: Conflict; decision: unknown }>,
     };
   }
-  // No cache — run a scan first. Suppress clack noise when JSON is requested.
-  if (json) {
-    const { consolidate } = await scanInProcess(root, {});
-    return {
-      open: consolidate.merge.openConflicts,
-      decided: consolidate.merge.decidedConflicts.map((d) => ({
-        conflict: d.conflict,
-        decision: d.decision,
-      })),
-    };
-  }
+  // No cache — run a scan first.
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, SCAN_STEPS.map((s) => ({ ...s })));
   try {
@@ -87,22 +75,12 @@ export async function runSpecConflictsList(
   opts: RunSpecConflictsOptions & { decided?: boolean; all?: boolean } = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  const scan = await loadScan(root, !!opts.json);
+  const scan = await loadScan(root);
   const open = scan.open.map(serializeConflict);
   const decided = scan.decided.map((d) => ({
     conflict: serializeConflict(d.conflict),
     decision: d.decision,
   }));
-
-  if (opts.json) {
-    const payload = opts.all
-      ? { openConflicts: open, decidedConflicts: decided }
-      : opts.decided
-        ? { decidedConflicts: decided }
-        : { openConflicts: open };
-    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-    return;
-  }
 
   p.intro('Conflicts');
   const which = opts.all ? 'all' : opts.decided ? 'decided' : 'open';
@@ -111,7 +89,7 @@ export async function runSpecConflictsList(
   for (const c of list) {
     p.log.message(`  • ${c.id.slice(0, 12)}…  [${c.topic}] ${c.subject}  (${c.candidates.length} candidates)`);
   }
-  p.outro('Use `truecourse spec conflicts show <id> --json` for full detail.');
+  p.outro('Use `truecourse spec conflicts show <id>` for full detail.');
 }
 
 // ---------------------------------------------------------------------------
@@ -123,23 +101,13 @@ export async function runSpecConflictsShow(
   opts: RunSpecConflictsOptions & { diff?: boolean } = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  const scan = await loadScan(root, !!opts.json);
+  const scan = await loadScan(root);
   const conflict =
     scan.open.find((c) => c.id === conflictId) ??
     scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
   if (!conflict) {
-    if (opts.json) {
-      process.stdout.write(JSON.stringify({ ok: false, error: `conflict ${conflictId} not found` }, null, 2) + '\n');
-      process.exit(1);
-    }
     p.cancel(`Conflict ${conflictId} not found.`);
     process.exit(1);
-  }
-  if (opts.json) {
-    const payload: Record<string, unknown> = { ...serializeConflict(conflict) };
-    if (opts.diff) payload.fieldDifferences = computeFieldDifferences(conflict);
-    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
-    return;
   }
   p.intro(`Conflict ${conflict.id.slice(0, 12)}… — ${conflict.subject}`);
   p.log.step(`topic: ${conflict.topic}`);
@@ -179,13 +147,12 @@ export async function runSpecConflictsPick(
   opts: RunSpecConflictsOptions & { note?: string } = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  const scan = await loadScan(root, !!opts.json);
+  const scan = await loadScan(root);
   const conflict = scan.open.find((c) => c.id === conflictId) ?? scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
-  if (!conflict) return failNotFound(conflictId, !!opts.json);
+  if (!conflict) return failNotFound(conflictId);
   if (!Number.isInteger(candidateIndex) || candidateIndex < 0 || candidateIndex >= conflict.candidates.length) {
     return fail(
       `candidateIndex ${candidateIndex} out of range (0..${conflict.candidates.length - 1})`,
-      !!opts.json,
     );
   }
   upsertDecision(root, {
@@ -194,11 +161,8 @@ export async function runSpecConflictsPick(
     candidateFingerprint: candidateFingerprint(conflict),
     note: opts.note,
   });
-  await refreshScan(root, !!opts.json);
-  emitOk(`Picked candidate ${candidateIndex} on ${conflictId.slice(0, 12)}…`, !!opts.json, {
-    conflictId,
-    resolution: { kind: 'pick', candidateIndex },
-  });
+  await refreshScan(root);
+  emitOk(`Picked candidate ${candidateIndex} on ${conflictId.slice(0, 12)}…`);
 }
 
 export async function runSpecConflictsCustom(
@@ -207,22 +171,19 @@ export async function runSpecConflictsCustom(
   opts: RunSpecConflictsOptions = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  const scan = await loadScan(root, !!opts.json);
+  const scan = await loadScan(root);
   const conflict = scan.open.find((c) => c.id === conflictId) ?? scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
-  if (!conflict) return failNotFound(conflictId, !!opts.json);
+  if (!conflict) return failNotFound(conflictId);
   if (!text || !text.trim()) {
-    return fail('--text must be a non-empty string', !!opts.json);
+    return fail('--text must be a non-empty string');
   }
   upsertDecision(root, {
     conflictId,
     resolution: { kind: 'custom', content: text },
     candidateFingerprint: candidateFingerprint(conflict),
   });
-  await refreshScan(root, !!opts.json);
-  emitOk(`Wrote custom answer for ${conflictId.slice(0, 12)}…`, !!opts.json, {
-    conflictId,
-    resolution: { kind: 'custom' },
-  });
+  await refreshScan(root);
+  emitOk(`Wrote custom answer for ${conflictId.slice(0, 12)}…`);
 }
 
 export async function runSpecConflictsRevoke(
@@ -231,8 +192,8 @@ export async function runSpecConflictsRevoke(
 ): Promise<void> {
   const root = repoRoot(opts);
   revokeDecisionInProcess(root, conflictId);
-  await refreshScan(root, !!opts.json);
-  emitOk(`Revoked decision for ${conflictId.slice(0, 12)}…`, !!opts.json, { conflictId });
+  await refreshScan(root);
+  emitOk(`Revoked decision for ${conflictId.slice(0, 12)}…`);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,35 +207,22 @@ function serializeConflict(c: Conflict): Conflict & { candidateFingerprint: stri
   };
 }
 
-async function refreshScan(root: string, json: boolean): Promise<void> {
-  // Re-merge so the next read reflects the change. Suppress UI noise
-  // when JSON mode is active.
-  if (json) {
-    await scanInProcess(root, {});
-    return;
-  }
+async function refreshScan(root: string): Promise<void> {
+  // Re-merge so the next read reflects the change.
   await scanInProcess(root, {});
 }
 
-function emitOk(msg: string, json: boolean, payload: object): void {
-  if (json) {
-    process.stdout.write(JSON.stringify({ ok: true, ...payload }, null, 2) + '\n');
-    return;
-  }
+function emitOk(msg: string): void {
   p.outro(msg);
 }
 
-function fail(msg: string, json: boolean): never {
-  if (json) {
-    process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
-    process.exit(1);
-  }
+function fail(msg: string): never {
   p.cancel(msg);
   process.exit(1);
 }
 
-function failNotFound(id: string, json: boolean): never {
-  return fail(`conflict ${id} not found`, json);
+function failNotFound(id: string): never {
+  return fail(`conflict ${id} not found`);
 }
 
 // Avoid an `import path` removal at build time when this file otherwise

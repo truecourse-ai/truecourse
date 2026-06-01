@@ -5,7 +5,7 @@
  */
 
 export const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
-export const DISCORD_URL = 'https://discord.gg/8AYwf26A';
+export const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 
 export function DiscordIcon({ className }: { className?: string }) {
   return (

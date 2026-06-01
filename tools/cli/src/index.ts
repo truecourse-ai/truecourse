@@ -244,34 +244,30 @@ const conflictsCmd = specCmd
 conflictsCmd
   .command("list")
   .description("List conflicts (open by default; --decided or --all to widen)")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .option("--decided", "Show decided conflicts instead of open")
   .option("--all", "Show both open and decided conflicts")
   .action(async (opts) => {
-    await runSpecConflictsList({ json: !!opts.json, decided: !!opts.decided, all: !!opts.all });
+    await runSpecConflictsList({ decided: !!opts.decided, all: !!opts.all });
   });
 
 conflictsCmd
   .command("show <id>")
   .description("Show full detail for one conflict")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .option(
     "--diff",
     "Include precomputed field-level diffs (paths + values) between candidates",
   )
   .action(async (id, opts) => {
-    await runSpecConflictsShow(id, { json: !!opts.json, diff: !!opts.diff });
+    await runSpecConflictsShow(id, { diff: !!opts.diff });
   });
 
 conflictsCmd
   .command("pick <id> <candidateIndex>")
   .description("Resolve a conflict by picking one of its candidates")
   .option("--note <text>", "Optional human-readable rationale")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .action(async (id, idx, opts) => {
     await runSpecConflictsPick(id, parseInt(idx, 10), {
       note: opts.note,
-      json: !!opts.json,
     });
   });
 
@@ -279,17 +275,15 @@ conflictsCmd
   .command("custom <id>")
   .description("Resolve a conflict with a free-text custom answer")
   .requiredOption("--text <text>", "The authoritative content for this subject")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .action(async (id, opts) => {
-    await runSpecConflictsCustom(id, opts.text, { json: !!opts.json });
+    await runSpecConflictsCustom(id, opts.text);
   });
 
 conflictsCmd
   .command("revoke <id>")
   .description("Remove a previously-saved decision (the conflict re-opens)")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
-  .action(async (id, opts) => {
-    await runSpecConflictsRevoke(id, { json: !!opts.json });
+  .action(async (id) => {
+    await runSpecConflictsRevoke(id);
   });
 
 // -- Chains (manual supersession) -------------------------------------------
@@ -300,9 +294,8 @@ const chainsCmd = specCmd
 chainsCmd
   .command("list")
   .description("List manual chains")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
-  .action(async (opts) => {
-    await runSpecChainsList({ json: !!opts.json });
+  .action(async () => {
+    await runSpecChainsList();
   });
 
 chainsCmd
@@ -311,13 +304,11 @@ chainsCmd
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
   .option("--note <text>", "Optional rationale")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .action(async (opts) => {
     await runSpecChainsAdd({
       older: opts.older,
       newer: opts.newer,
       note: opts.note,
-      json: !!opts.json,
     });
   });
 
@@ -326,12 +317,10 @@ chainsCmd
   .description("Remove a manual chain")
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
   .action(async (opts) => {
     await runSpecChainsRemove({
       older: opts.older,
       newer: opts.newer,
-      json: !!opts.json,
     });
   });
 
@@ -343,25 +332,22 @@ const docsCmd = specCmd
 docsCmd
   .command("skipped")
   .description("List docs the relevance filter excluded from extraction")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
-  .action(async (opts) => {
-    await runSpecDocsSkipped({ json: !!opts.json });
+  .action(async () => {
+    await runSpecDocsSkipped();
   });
 
 docsCmd
   .command("include <path>")
   .description("Force-include a skipped doc and re-scan")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
-  .action(async (docPath, opts) => {
-    await runSpecDocsInclude(docPath, { json: !!opts.json });
+  .action(async (docPath) => {
+    await runSpecDocsInclude(docPath);
   });
 
 docsCmd
   .command("uninclude <path>")
   .description("Remove a force-include override")
-  .option("--json", "Emit a JSON document on stdout for agent consumption")
-  .action(async (docPath, opts) => {
-    await runSpecDocsUninclude(docPath, { json: !!opts.json });
+  .action(async (docPath) => {
+    await runSpecDocsUninclude(docPath);
   });
 
 // Verify — compares generated TC contracts against the code.
@@ -457,9 +443,8 @@ const configLlmCmd = configCmd
 configLlmCmd
   .command("show")
   .description("Print the effective model resolution for every pipeline stage")
-  .option("--json", "Emit a single JSON document")
-  .action(async (options: { json?: boolean }) => {
-    await runConfigLlmShow({ json: !!options.json });
+  .action(async () => {
+    await runConfigLlmShow();
   });
 
 // Telemetry management

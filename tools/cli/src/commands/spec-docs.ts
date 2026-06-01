@@ -1,7 +1,7 @@
 /**
  * `truecourse spec docs <sub>` — relevance-filter overrides.
  *
- *   skipped     [--json]                  list docs the LLM filter dropped
+ *   skipped                               list docs the LLM filter dropped
  *   include     <path>                    force-include a skipped doc
  *   uninclude   <path>                    remove a force-include override
  */
@@ -16,7 +16,6 @@ import {
 
 export interface RunSpecDocsOptions {
   cwd?: string;
-  json?: boolean;
 }
 
 const repoRoot = (opts: RunSpecDocsOptions): string => opts.cwd ?? process.cwd();
@@ -27,10 +26,6 @@ export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise
   const decisions = readDecisions(root);
   const skipped = (scan?.skippedDocs ?? []) as Array<{ path: string; reason: string }>;
   const manualIncludes = decisions.manualIncludes ?? [];
-  if (opts.json) {
-    process.stdout.write(JSON.stringify({ skipped, manualIncludes }, null, 2) + '\n');
-    return;
-  }
   p.intro('Skipped docs');
   if (skipped.length === 0) p.log.step('(none)');
   for (const s of skipped) {
@@ -50,10 +45,10 @@ export async function runSpecDocsInclude(
   opts: RunSpecDocsOptions = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  if (!docPath) return fail('Missing doc path', !!opts.json);
+  if (!docPath) return fail('Missing doc path');
   addManualInclude(root, docPath);
   await scanInProcess(root, {});
-  emitOk(`Force-include ${docPath}`, !!opts.json, { path: docPath });
+  emitOk(`Force-include ${docPath}`);
 }
 
 export async function runSpecDocsUninclude(
@@ -61,25 +56,17 @@ export async function runSpecDocsUninclude(
   opts: RunSpecDocsOptions = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  if (!docPath) return fail('Missing doc path', !!opts.json);
+  if (!docPath) return fail('Missing doc path');
   removeManualInclude(root, docPath);
   await scanInProcess(root, {});
-  emitOk(`Removed force-include for ${docPath}`, !!opts.json, { path: docPath });
+  emitOk(`Removed force-include for ${docPath}`);
 }
 
-function emitOk(msg: string, json: boolean, payload: object): void {
-  if (json) {
-    process.stdout.write(JSON.stringify({ ok: true, ...payload }, null, 2) + '\n');
-    return;
-  }
+function emitOk(msg: string): void {
   p.outro(msg);
 }
 
-function fail(msg: string, json: boolean): never {
-  if (json) {
-    process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
-    process.exit(1);
-  }
+function fail(msg: string): never {
   p.cancel(msg);
   process.exit(1);
 }
