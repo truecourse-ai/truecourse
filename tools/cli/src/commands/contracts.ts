@@ -42,12 +42,17 @@ export async function runContractsGenerate(
   const extractModel = resolveModel("contract.extract", undefined, repoRoot);
   const repairModel = resolveModel("contract.repair", undefined, repoRoot);
   const fallbackModel = resolveFallbackModel(repoRoot) ?? undefined;
+  // Slice counter — `totalSlices` comes from generateContracts's onSlicesReady
+  // (fired before extraction). Increments in start order (extraction is
+  // concurrent), so it climbs to the total rather than ticking strictly 1→N.
+  let totalSlices = 0;
+  let sliceNum = 0;
   const runner = spawnRunner({
     concurrency,
     model: extractModel,
     fallbackModel,
     onSliceStart: (s) => {
-      p.log.step(`extracting  ${s.specPath} :: ${s.headingPath.join(" → ")}`);
+      p.log.step(`extracting  ${++sliceNum}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`);
     },
   });
 
@@ -58,8 +63,11 @@ export async function runContractsGenerate(
       runner,
       models: { extract: extractModel, repair: repairModel, fallback: fallbackModel },
       dryRun: !!options.diff,
+      onSlicesReady: (t) => {
+        totalSlices = t;
+      },
       onSliceCacheHit: (s) => {
-        p.log.message(`  cache hit  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
+        p.log.message(`  cache hit  ${++sliceNum}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
       },
     });
   } catch (e) {
