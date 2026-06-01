@@ -663,6 +663,40 @@ describe('code-quality/deterministic/cognitive-complexity', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not count short-circuits and ternaries inside JSX as cognitive complexity', () => {
+    // A React-style component whose only "complexity" is conditional render
+    // (`cond && <X/>`, `cond ? <A/> : <B/>`) — these are structural template
+    // patterns, not control-flow worth charging. The pre-fix heuristic
+    // counted each one and pushed many real components over the threshold.
+    const violations = check(`
+      function Panel({ a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q }: Record<string, boolean>) {
+        return (
+          <div>
+            {a && <span/>}
+            {b && <span/>}
+            {c && <span/>}
+            {d && <span/>}
+            {e && <span/>}
+            {f && <span/>}
+            {g && <span/>}
+            {h && <span/>}
+            {i ? <span/> : <em/>}
+            {j ? <span/> : <em/>}
+            {k ? <span/> : <em/>}
+            {l ? <span/> : <em/>}
+            {m ? <span/> : <em/>}
+            {n ? <span/> : <em/>}
+            {o ? <span/> : <em/>}
+            {p ? <span/> : <em/>}
+            {q ? <span/> : <em/>}
+          </div>
+        );
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 describe('code-quality/deterministic/cyclomatic-complexity', () => {
@@ -1017,14 +1051,22 @@ describe('code-quality/deterministic/no-proto', () => {
 });
 
 describe('code-quality/deterministic/no-void', () => {
-  it('detects void expression', () => {
-    const violations = check(`void someFunction();`);
+  it('detects void with an identifier operand', () => {
+    const violations = check(`const x = void someValue;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag void 0', () => {
     const violations = check(`const undef = void 0;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag fire-and-forget void call()', () => {
+    // `void someFunction()` is the standard fire-and-forget idiom for an
+    // intentionally unawaited promise — not a confusing `undefined` stand-in.
+    const violations = check(`void someFunction();`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(0);
   });
@@ -3191,10 +3233,17 @@ describe('code-quality/deterministic/default-parameter-position', () => {
 });
 
 describe('code-quality/deterministic/unnamed-regex-capture', () => {
-  it('detects unnamed capture group in regex', () => {
-    const violations = check(`const re = /(\\d+)/;`);
+  it('detects multiple unnamed capture groups in regex', () => {
+    const violations = check(`const re = /(\\d{4})-(\\d{2})-(\\d{2})/;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag a single unnamed capture group', () => {
+    // One capture is unambiguous (`m[1]`); naming adds ceremony without value.
+    const violations = check(`const re = /(\\d+)/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag non-capturing group', () => {
@@ -3373,10 +3422,22 @@ describe('code-quality/deterministic/triple-slash-reference', () => {
 });
 
 describe('code-quality/deterministic/useless-empty-export', () => {
-  it('detects empty export {}', () => {
-    const violations = check(`export {};`);
+  it('detects empty export {} alongside other exports (redundant module marker)', () => {
+    const violations = check(`
+      export const foo = 1;
+      export {};
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag a lone export {} (file needs it to be a module)', () => {
+    // Bare barrels and `declare global` polyfill files need `export {}` to
+    // be parsed as ES modules — removing it changes the semantic
+    // module/script classification.
+    const violations = check(`export {};`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag export with names', () => {
@@ -3485,10 +3546,36 @@ describe('code-quality/deterministic/regex-unicode-awareness', () => {
 // ---------------------------------------------------------------------------
 
 describe('code-quality/deterministic/negated-condition', () => {
-  it('detects negated condition with else', () => {
-    const violations = check(`if (!isReady) { fallback(); } else { proceed(); }`);
+  it('detects small negated bail with substantial else body', () => {
+    // Classic case the rule is designed for: the inversion clearly moves a
+    // small early-bail out of the way of a larger happy path.
+    const violations = check(`
+      if (!ready) {
+        log('not ready');
+      } else {
+        step1();
+        step2();
+        step3();
+        step4();
+      }
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag when both branches are substantive', () => {
+    // When both branches do real work, the negation is a deliberate semantic
+    // choice — inverting wouldn't obviously improve readability.
+    const violations = check(`
+      if (!isEmbedded) {
+        const response = await api.run();
+        result = response.data;
+      } else {
+        result = compute();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag negated condition without else', () => {
@@ -5132,14 +5219,27 @@ describe('code-quality/deterministic/undef-init', () => {
 });
 
 describe('code-quality/deterministic/require-unicode-regexp', () => {
-  it('detects regex without u flag', () => {
-    const violations = check(`const r = /[a-z]+/;`);
+  it('detects unicode-relevant regex without u flag', () => {
+    // `\u{...}` codepoint escape only behaves correctly under the u flag.
+    const violations = check(`const r = /\\u{1F600}/;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('detects property-escape regex without u flag', () => {
+    const violations = check(`const r = /\\p{Letter}+/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag a pure-ASCII regex (u flag is a no-op)', () => {
+    const violations = check(`const r = /[a-z]+/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
+    expect(matches).toHaveLength(0);
+  });
+
   it('does not flag regex with u flag', () => {
-    const violations = check(`const r = /[a-z]+/u;`);
+    const violations = check(`const r = /\\u{1F600}/u;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-unicode-regexp');
     expect(matches).toHaveLength(0);
   });
@@ -7653,10 +7753,22 @@ describe('code-quality/deterministic/complex-type-alias', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects type alias with many union members', () => {
-    const violations = check(`type Many = A | B | C | D | E | F | G;`);
+  it('detects type alias with many complex union members', () => {
+    // 7 members where each carries generics — genuine complexity, not just
+    // a flat enumeration of named subtypes.
+    const violations = check(
+      `type Many = Box<A> | Box<B> | Box<C> | Box<D> | Box<E> | Box<F> | Box<G>;`,
+    );
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag flat union of named subtypes (documentation, not complexity)', () => {
+    // `TFooMeta | TBarMeta | ...` is enumerating a discriminated-union family;
+    // each member is a single identifier, no generics.
+    const violations = check(`type Many = A | B | C | D | E | F | G;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag simple type alias', () => {

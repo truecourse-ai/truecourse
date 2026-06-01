@@ -48,9 +48,11 @@ export function getProto(obj: any) {
 
 // VIOLATION: code-quality/deterministic/no-void
 export function voidCall() {
-  return void someFunction();
+  // `void <identifier>` is the confusing stand-in for `undefined` the rule
+  // targets — NOT a fire-and-forget `void promiseCall()`, which is legitimate.
+  const value = 42;
+  return void value;
 }
-function someFunction() { return 42; }
 
 // VIOLATION: code-quality/deterministic/console-log
 export function logDebug() {

@@ -278,9 +278,12 @@ export function renderHeading(text: string, isCondensed: boolean) {
 }
 
 // VIOLATION: code-quality/deterministic/require-unicode-regexp
-export const noUnicode = /hello/;
+// Unicode property escape — only matches correctly under the `u` flag, so
+// omitting it is a real bug (not a no-op on a pure-ASCII pattern).
+export const noUnicode = /\p{Emoji}/;
 
 // VIOLATION: code-quality/deterministic/regex-complexity
+// VIOLATION: code-quality/deterministic/unnamed-regex-capture
 export const complexRegex = /(?=abc)(?!def)(group1)(group2)(group3)(group4)(group5)/;
 
 // VIOLATION: code-quality/deterministic/regex-concise
