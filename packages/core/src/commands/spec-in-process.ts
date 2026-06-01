@@ -344,6 +344,11 @@ export async function scanInProcess(
       disableLlmChainDetection: options.disableLlmChainDetection,
       skipGit: options.skipGit,
       models: resolveConsolidateModels(repoRoot),
+      onRelevanceProgress: (doneCount, total) => {
+        // Numbered progress while "Discovering docs" runs (LLM relevance
+        // filter over the discovered candidates).
+        if (total > 0) tracker?.detail('discover', `${doneCount}/${total} docs`);
+      },
       onDocStart: () => {
         if (!extractStarted) {
           tracker?.done('discover');

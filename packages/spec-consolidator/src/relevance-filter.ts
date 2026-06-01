@@ -62,6 +62,12 @@ export interface RelevanceFilterOptions {
   model?: string;
   /** Fallback model forwarded to the default spawn runner. */
   fallbackModel?: string;
+  /**
+   * Fired once per doc as it's classified, plus an initial `(0, total)` so
+   * the caller learns the total upfront. Classification is concurrent, so
+   * `done` increments in completion order, not doc order.
+   */
+  onProgress?: (done: number, total: number) => void;
 }
 
 export interface RelevanceFilterOutcome {
@@ -89,6 +95,11 @@ export async function filterByRelevance(
     spawnRelevanceRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? 4;
 
+  const total = docs.length;
+  let done = 0;
+  const markDone = (): void => opts.onProgress?.(++done, total);
+  opts.onProgress?.(0, total);
+
   const verdicts = new Map<string, RelevanceVerdict>();
   let cursor = 0;
   let active = 0;
@@ -98,6 +109,7 @@ export async function filterByRelevance(
         const doc = docs[cursor++];
         if (manualSet.has(doc.path)) {
           verdicts.set(doc.path, { path: doc.path, include: true, reason: 'manual include' });
+          markDone();
           if (cursor >= docs.length && active === 0) resolve();
           continue;
         }
@@ -115,6 +127,7 @@ export async function filterByRelevance(
             });
           })
           .finally(() => {
+            markDone();
             active--;
             if (cursor >= docs.length && active === 0) resolve();
             else launch();

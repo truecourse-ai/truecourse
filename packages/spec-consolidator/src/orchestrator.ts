@@ -160,6 +160,12 @@ export interface ConsolidateOptions {
    */
   skipClaimsWrite?: boolean;
   /** Hooks for progress UIs / logging. */
+  /**
+   * Fires during the discover phase as the LLM relevance filter classifies
+   * each candidate doc, plus an initial `(0, total)`. Lets a progress UI show
+   * "N / total docs" while "Discovering docs" runs.
+   */
+  onRelevanceProgress?: (done: number, total: number) => void;
   onDocStart?: (doc: import('./discovery.js').DocCandidate) => void;
   onDocDone?: (doc: import('./discovery.js').DocCandidate, blockCount: number, claimCount: number) => void;
   onBlockFailure?: (block: Block, error: string) => void;
@@ -233,6 +239,7 @@ export async function consolidate(
     manualIncludes: decisions.manualIncludes ?? [],
     model: models.relevance,
     fallbackModel,
+    onProgress: opts.onRelevanceProgress,
   });
   const docs = relevance.included;
   const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
