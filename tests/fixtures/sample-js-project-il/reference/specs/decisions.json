@@ -1,0 +1,27 @@
+{
+  "decisions": [
+    {
+      "id": "version-chain:orders_PRDv1->orders_PRDv2",
+      "description": "PRDv1 superseded by PRDv2. All conflicting claims resolved in favour of v2.",
+      "conflicts": [
+        "POST /api/orders: v1 says 200, v2 says 201 + Location header",
+        "GET /api/orders: v1 has no pagination, v2 introduces cursor pagination with { items, nextCursor }",
+        "Authentication: v1 uses session cookies, v2 uses Bearer JWT"
+      ],
+      "resolution": "accept-v2",
+      "sources": ["docs/PRDs/orders_PRDv1.md", "docs/PRDs/orders_PRDv2.md"]
+    },
+    {
+      "id": "auth-scheme:adr-0001-agrees-prdv2",
+      "description": "ADR 0001 confirms Bearer JWT. Auto-merged with PRDv2 auth section — no conflict.",
+      "resolution": "auto-merged",
+      "sources": ["docs/adr/0001-auth-bearer.md", "docs/PRDs/orders_PRDv2.md"]
+    },
+    {
+      "id": "error-envelope:adr-0002-agrees-prdv2",
+      "description": "ADR 0002 confirms error envelope shape. Auto-merged with PRDv2 — no conflict.",
+      "resolution": "auto-merged",
+      "sources": ["docs/adr/0002-error-envelope.md", "docs/PRDs/orders_PRDv2.md"]
+    }
+  ]
+}

@@ -62,6 +62,10 @@ export interface FileViolationInput {
   /** Denormalized names for LATEST.violations (resolved in the orchestrator). */
   targetServiceName?: string | null;
   targetModuleName?: string | null;
+  /** Source bucket — defaults to 'rule'. Contract-drift adapter sets 'contract-drift'. */
+  category?: 'rule' | 'contract-drift';
+  /** Optional finer classifier (e.g. ArtifactKind for contract drifts). */
+  subcategory?: string | null;
 }
 
 export interface FileLifecycleParams {
@@ -94,6 +98,8 @@ export function computeFileViolationLifecycle(
       const row: ViolationRecord = {
         id: randomUUID(),
         type: 'code',
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity as ViolationRecord['severity'],
@@ -132,6 +138,8 @@ export function computeFileViolationLifecycle(
     const base: ViolationRecord = {
       id: randomUUID(),
       type: 'code',
+      category: cv.category ?? prev?.category ?? 'rule',
+      subcategory: cv.subcategory ?? prev?.subcategory ?? null,
       title: cv.title,
       content: cv.content,
       severity: cv.severity as ViolationRecord['severity'],
@@ -237,6 +245,8 @@ export function computeViolationLifecycle(
       resolved.push({
         id: randomUUID(),
         type: prev.type,
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity,
@@ -267,6 +277,8 @@ export function computeViolationLifecycle(
       unchanged.push({
         id: randomUUID(),
         type: prev.type,
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity,
@@ -314,6 +326,8 @@ export function computeViolationLifecycle(
     added.push({
       id: randomUUID(),
       type: v.type,
+      category: 'rule',
+      subcategory: null,
       title: v.title,
       content: v.content,
       severity: v.severity as ViolationRecord['severity'],

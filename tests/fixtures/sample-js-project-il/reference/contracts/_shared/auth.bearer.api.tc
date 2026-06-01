@@ -1,0 +1,10 @@
+auth-requirement auth.bearer.api {
+  origin "reference/specs/shared/auth.md" "Authentication" 1..4
+  scheme Bearer
+  selector path-glob "/api/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+    body ErrorEnvelope:error.envelope.standard
+  }
+}

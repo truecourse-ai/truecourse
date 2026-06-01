@@ -90,7 +90,7 @@ function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagram
     setIsPlaying(false);
     Promise.all([
       api.getFlow(repoId, flowId, analysisId),
-      api.getViolations(repoId, undefined, analysisId),
+      api.getViolations(repoId, analysisId),
     ])
       .then(([flowData, violationData]) => {
         setFlow(flowData);

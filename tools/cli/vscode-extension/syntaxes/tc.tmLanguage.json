@@ -1,0 +1,231 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "TrueCourse IL",
+  "scopeName": "source.tc",
+  "fileTypes": ["tc"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#references" },
+    { "include": "#http-method" },
+    { "include": "#status-code" },
+    { "include": "#artifact-decl" },
+    { "include": "#section-keywords" },
+    { "include": "#response-condition" },
+    { "include": "#modifier-keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#braces" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.tc",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.tc",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.tc",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.tc",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+
+    "references": {
+      "patterns": [
+        {
+          "match": "\\b(Entity|Operation|StateMachine|Effect|EffectGroup|AuthRequirement|AuthorizationRule|ErrorEnvelope|PaginationContract|IdempotencyContract|UnenforceableObligation|Enum|Formula|PerformanceSLA)(:)([A-Za-z_][\\w\\-\\.]*)?",
+          "captures": {
+            "1": { "name": "entity.name.type.artifact.tc" },
+            "2": { "name": "punctuation.separator.reference.tc" },
+            "3": { "name": "entity.name.tag.identity.tc" }
+          }
+        },
+        {
+          "match": "\\b(Entity|Operation|StateMachine|Effect|EffectGroup|AuthRequirement|AuthorizationRule|ErrorEnvelope|PaginationContract|IdempotencyContract|UnenforceableObligation|Enum|Formula|PerformanceSLA)(:)\\s*\"([^\"]*)\"",
+          "captures": {
+            "1": { "name": "entity.name.type.artifact.tc" },
+            "2": { "name": "punctuation.separator.reference.tc" },
+            "3": { "name": "entity.name.tag.identity.tc" }
+          }
+        }
+      ]
+    },
+
+    "http-method": {
+      "patterns": [
+        {
+          "name": "constant.language.http-method.tc",
+          "match": "\\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\b"
+        }
+      ]
+    },
+
+    "status-code": {
+      "patterns": [
+        {
+          "match": "\\b(response)\\s+(\\d{3})\\b",
+          "captures": {
+            "1": { "name": "keyword.control.section.tc" },
+            "2": { "name": "constant.numeric.status-code.tc" }
+          }
+        },
+        {
+          "match": "\\b(status)\\s+(\\d{3})\\b",
+          "captures": {
+            "1": { "name": "keyword.control.tc" },
+            "2": { "name": "constant.numeric.status-code.tc" }
+          }
+        },
+        {
+          "match": "\\b\\d{1}xx\\b",
+          "name": "constant.numeric.status-class.tc"
+        }
+      ]
+    },
+
+    "artifact-decl": {
+      "patterns": [
+        {
+          "name": "keyword.declaration.artifact.tc",
+          "match": "^\\s*(operation|entity|enum|state-machine|auth-requirement|error-envelope|pagination-contract|idempotency-contract|effect-group|unenforceable-obligation|authorization-rule|formula)\\b"
+        }
+      ]
+    },
+
+    "section-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.section.tc",
+          "match": "\\b(origin|request|response|body|header|query|path-param|effect|emits|persist|state-transition|forbid|forbids|inherits|selector|applies-to|on-violation|preconditions|payload-shape|payload-constraint|emit-when|on-status|channel|known-codes|response-shape|spec-text|category|rationale|could-become-enforceable-via|transitions|states|initial|terminal|field|tags|writes|invariant-after|on-invalid|element|sort|direction|scope|representation|values|shape|error|known-codes|on-above-max|when-response-status|semantics|format|normalize|references|bound-to|required-role|scheme|predicate|expression|inputs|output|depends-on|computed-at|immutable-after-creation|derived-by|applies|except|loaded)\\b"
+        }
+      ]
+    },
+
+    "response-condition": {
+      "patterns": [
+        {
+          "match": "\\b(on)\\s+(success|validation_failure|not_found|conflict|state_precondition_violated|auth_required|auth_role_failed|idempotency_replay|rate_limited|internal_error)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.tc" },
+            "2": { "name": "constant.language.condition-kind.tc" }
+          }
+        },
+        {
+          "name": "keyword.control.tc",
+          "match": "\\b(on|to|from|now|machine|resource|when|then|else)\\b"
+        }
+      ]
+    },
+
+    "modifier-keywords": {
+      "patterns": [
+        {
+          "name": "storage.modifier.tc",
+          "match": "\\b(required|optional|immutable|mutable|unique|closed|paginated|idempotent|admin-only|admin|public|true|false|clamp|opaque|null-when-last-page|machine-identifier|human-readable|shape-depends-on-code|non-empty|server-assigned|derived|state-machine|refreshed-on-mutation|lowercase|idempotent-under|short-circuit-on-repeat|resource-missing|cursor|event-bus|string-literal|global|desc|asc|Bearer|Role)\\b"
+        },
+        {
+          "name": "keyword.operator.modifier.tc",
+          "match": "\\b(one-of|any-of|all-of|none-of|not|default|min|max|mutability|origin|constraint)\\b"
+        },
+        {
+          "name": "support.function.compound-selector.tc",
+          "match": "\\b(path-glob|path-regex|method|protocol|tag|operations|status-class|operations|payload-constraint|status-class)\\b"
+        }
+      ]
+    },
+
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.tc",
+          "match": "\\b(string|integer|number|boolean|object|array)\\b"
+        },
+        {
+          "name": "support.type.format.tc",
+          "match": "\\b(uuid|email|iso-8601)\\b"
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.range.tc",
+          "match": "\\b\\d+\\.\\.\\-?\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.tc",
+          "match": "\\-?\\b\\d+\\b"
+        }
+      ]
+    },
+
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.tc",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.range.tc",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.comparison.tc",
+          "match": "(>=|<=|==|!=|>|<)"
+        },
+        {
+          "name": "keyword.operator.assignment.tc",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.union.tc",
+          "match": "\\|"
+        },
+        {
+          "name": "punctuation.separator.colon.tc",
+          "match": ":"
+        }
+      ]
+    },
+
+    "braces": {
+      "patterns": [
+        { "name": "punctuation.section.block.begin.tc", "match": "\\{" },
+        { "name": "punctuation.section.block.end.tc",   "match": "\\}" },
+        { "name": "punctuation.section.array.begin.tc", "match": "\\[" },
+        { "name": "punctuation.section.array.end.tc",   "match": "\\]" },
+        { "name": "punctuation.separator.comma.tc",     "match": "," }
+      ]
+    },
+
+    "identifier": {
+      "patterns": [
+        {
+          "name": "variable.other.identifier.tc",
+          "match": "[A-Za-z_][\\w\\-]*(\\.[A-Za-z_][\\w\\-]*)*"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+operation GET "/api/customers/{id}" {
+  origin "reference/specs/modules/customers/endpoints.md" "GET /api/customers/:id" 22..25
+  response 200 on success {
+    body Entity:Customer
+  }
+  response 404 on not_found {
+    forbid status 200 when resource-missing
+  }
+}

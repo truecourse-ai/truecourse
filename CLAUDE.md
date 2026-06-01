@@ -39,8 +39,13 @@ Per-repo layout under `<repo>/.truecourse/`:
 - `ui-state.json` — graph positions + collapse state (gitignored)
 - `logs/` — per-repo analyze logs (gitignored)
 - `.analyze.lock` — transient, held for the duration of an analyze (gitignored)
+- `verifier/` — drift store for `truecourse verify`, mirroring the analyze store (see `packages/core/src/lib/verify-store.ts`):
+  - `verifier/runs/<iso>_<short-uuid>.json` — per-run drift snapshots (gitignored)
+  - `verifier/LATEST.json` — materialized current verify state + diff baseline (committable, same convention as the analyze `LATEST.json`)
+  - `verifier/history.json` — append-only per-run summaries (gitignored)
+  - `verifier/diff.json` — optional current-vs-baseline drift diff, overwritten each `verify --diff` run (gitignored)
 
-`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON.
+`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline).
 
 Global layout under `~/.truecourse/`:
 - `config.json` — LLM keys, provider

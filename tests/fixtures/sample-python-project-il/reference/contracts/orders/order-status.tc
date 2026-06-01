@@ -1,0 +1,6 @@
+enum OrderStatus {
+  origin "reference/specs/modules/orders/data.md" "OrderStatus" 17..17
+  values [placed, paid, shipped, delivered, cancelled]
+  trigger-subset non-terminal [placed, paid, shipped]
+  trigger-subset refundable [paid, shipped]
+}

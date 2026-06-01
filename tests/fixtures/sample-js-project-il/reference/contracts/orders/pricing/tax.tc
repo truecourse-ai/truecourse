@@ -1,0 +1,12 @@
+formula order.tax-cents {
+  origin "reference/specs/modules/orders/data.md" "Pricing" 32..38
+  output Entity:Order field taxCents
+  inputs [
+    Entity:Order.subtotalCents,
+    Entity:Order.discountCents,
+  ]
+  expression "round((subtotalCents - discountCents) * 0.08)"
+  computed-at order-creation
+  immutable-after-creation
+  depends-on Formula:order.discount-cents
+}

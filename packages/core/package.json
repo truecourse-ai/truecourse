@@ -12,6 +12,10 @@
       "types": "./dist/commands/diff-in-process.d.ts",
       "import": "./dist/commands/diff-in-process.js"
     },
+    "./commands/spec-in-process": {
+      "types": "./dist/commands/spec-in-process.d.ts",
+      "import": "./dist/commands/spec-in-process.js"
+    },
     "./progress": {
       "types": "./dist/progress.d.ts",
       "import": "./dist/progress.js"
@@ -43,6 +47,10 @@
     "./config/env": {
       "types": "./dist/config/env.d.ts",
       "import": "./dist/config/env.js"
+    },
+    "./config/llm-models": {
+      "types": "./dist/config/llm-models.d.ts",
+      "import": "./dist/config/llm-models.js"
     },
     "./lib/logger": {
       "types": "./dist/lib/logger.d.ts",
@@ -111,11 +119,15 @@
   },
   "scripts": {
     "build": "tsc",
+    "dev": "tsc --watch",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@truecourse/analyzer": "workspace:*",
+    "@truecourse/contract-extractor": "workspace:*",
+    "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",

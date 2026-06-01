@@ -1,0 +1,30 @@
+operation POST "/api/orders/{id}/pay" {
+  origin "reference/specs/modules/orders/endpoints.md" "POST /api/orders/:id/pay" 44..52
+  request {
+    path-param id: uuid
+    header idempotency-key optional
+  }
+  preconditions {
+    state-transition StateMachine:Order.status {
+      from [placed]
+      to paid
+    }
+  }
+  response 200 on success {
+    body Entity:Order
+    effect emits Effect:order.paid
+  }
+  response 404 on not_found {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code order_not_found
+    }
+  }
+  response 409 on illegal_transition {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code illegal_transition
+    }
+  }
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthorizationRule:order.owner-only
+  tags [idempotent, transition]
+}

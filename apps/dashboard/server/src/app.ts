@@ -14,6 +14,12 @@ import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
+import specRouter from './routes/spec.js';
+import contractsRouter from './routes/contracts.js';
+import verifyRouter from './routes/verify.js';
+import capabilitiesRouter from './routes/capabilities.js';
+import { enterpriseAuthGate } from './middleware/ee-auth.js';
+import { getPublicRouters, getProtectedRouters } from './ee-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,8 +30,31 @@ export interface CreateAppOptions {
 export function createApp(opts: CreateAppOptions = {}): express.Express {
   const app: express.Express = express();
 
-  app.use(cors());
+  // Reflect the request origin and allow credentials so the enterprise
+  // session cookie flows on cross-origin dev requests (client :3000 →
+  // server :3001). Same-origin in production, where this is a no-op.
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
+
+  // --- Enterprise (no-ops in community) -----------------------------
+  // Public enterprise endpoints (login / callback / logout / me) must
+  // be reachable without a session, so they mount before the gate.
+  for (const r of getPublicRouters()) app.use(r.basePath, r.router);
+
+  // Capabilities + health stay public so the client can discover the
+  // edition and liveness before authenticating.
+  app.use('/api/capabilities', capabilitiesRouter);
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // The enterprise auth gate protects everything under /api below this
+  // line (transparent pass-through in community). Static SPA assets are
+  // outside /api, so the dashboard shell still loads to drive login.
+  app.use('/api', enterpriseAuthGate);
+
+  // Protected enterprise routers (e.g. Workspace data) sit behind the gate.
+  for (const r of getProtectedRouters()) app.use(r.basePath, r.router);
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', reposRouter);
@@ -40,11 +69,10 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   app.use('/api/repos', projectResolver, databasesRouter);
   app.use('/api/repos', projectResolver, flowsRouter);
   app.use('/api/repos', projectResolver, analyticsRouter);
+  app.use('/api/repos', projectResolver, specRouter);
+  app.use('/api/repos', projectResolver, contractsRouter);
+  app.use('/api/repos', projectResolver, verifyRouter);
   app.use('/api/rules', rulesRouter);
-
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
 
   app.use(errorHandler);
 

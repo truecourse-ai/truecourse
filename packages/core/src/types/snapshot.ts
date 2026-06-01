@@ -150,16 +150,26 @@ export interface Graph {
 
 export type ViolationSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
 export type ViolationStatus = 'new' | 'unchanged' | 'resolved';
+export type ViolationCategory = 'rule' | 'contract-drift';
 
 /**
  * One stored violation. Matches the `violations` pgTable fields; nullable
  * columns become `| null` here. Target IDs reference records in the same
  * snapshot's graph. Code-violation fields (filePath, lineStart, …) are
  * only set when `type === 'code'` or architecture-from-file.
+ *
+ * `category` distinguishes rule-engine violations from contract-drift
+ * violations produced by the contract verifier; both share this storage
+ * shape so the diff layer doesn't have to know the difference.
  */
 export interface ViolationRecord {
   id: string;
   type: string;                         // ViolationType enum
+  /** Source of the violation. Defaults to 'rule' on read for snapshots
+   *  written before Phase 6 (back-compat). */
+  category: ViolationCategory;
+  /** Finer classifier — artifact kind for contract drifts, undefined otherwise. */
+  subcategory: string | null;
   title: string;
   content: string;
   severity: ViolationSeverity;

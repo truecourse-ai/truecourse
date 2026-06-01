@@ -73,6 +73,22 @@ export function buildAnalysisFilename(analysisId: string, createdAt: string): st
 }
 
 // ---------------------------------------------------------------------------
+// Back-compat patch: snapshots written before Phase 6 (Contract Framework)
+// don't carry `category` / `subcategory` on violations. Default them on read
+// so downstream code can always rely on the field being present.
+// ---------------------------------------------------------------------------
+
+function patchViolations<T extends { category?: string; subcategory?: string | null }>(
+  rows: T[] | undefined,
+): void {
+  if (!rows) return;
+  for (const v of rows) {
+    if (v.category === undefined) v.category = 'rule';
+    if (v.subcategory === undefined) v.subcategory = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // LATEST.json — mtime-keyed in-memory cache
 // ---------------------------------------------------------------------------
 
@@ -98,6 +114,7 @@ export function readLatest(repoPath: string): LatestSnapshot | null {
   const cached = latestCache.get(repoPath);
   if (cached && cached.mtime === mtime) return cached.data;
   const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as LatestSnapshot;
+  patchViolations(data.violations);
   latestCache.set(repoPath, { mtime, data });
   return data;
 }
@@ -135,7 +152,9 @@ export function writeAnalysis(repoPath: string, snapshot: AnalysisSnapshot): Wri
 export function readAnalysis(repoPath: string, filename: string): AnalysisSnapshot | null {
   const file = analysisFilePath(repoPath, filename);
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as AnalysisSnapshot;
+  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as AnalysisSnapshot;
+  patchViolations(data.violations?.added);
+  return data;
 }
 
 /** List analysis filenames, oldest first (chronological). */
@@ -195,7 +214,10 @@ export function removeFromHistory(repoPath: string, analysisId: string): void {
 export function readDiff(repoPath: string): DiffSnapshot | null {
   const file = diffPath(repoPath);
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as DiffSnapshot;
+  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as DiffSnapshot;
+  patchViolations(data.newViolations);
+  patchViolations(data.resolvedViolations);
+  return data;
 }
 
 export function writeDiff(repoPath: string, diff: DiffSnapshot): void {

@@ -1,0 +1,4 @@
+enum CustomerTier {
+  origin "reference/specs/modules/customers/data.md" "CustomerTier" 14..16
+  values [bronze, silver, gold, platinum]
+}

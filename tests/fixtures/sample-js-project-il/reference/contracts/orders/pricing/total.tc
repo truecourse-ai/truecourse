@@ -1,0 +1,16 @@
+formula order.total-cents {
+  origin "reference/specs/modules/orders/data.md" "Pricing" 32..38
+  output Entity:Order field totalCents
+  inputs [
+    Entity:Order.subtotalCents,
+    Entity:Order.discountCents,
+    Entity:Order.taxCents,
+  ]
+  expression "subtotalCents - discountCents + taxCents"
+  computed-at order-creation
+  immutable-after-creation
+  depends-on [
+    Formula:order.discount-cents,
+    Formula:order.tax-cents,
+  ]
+}

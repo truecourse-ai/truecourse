@@ -1,9 +1,45 @@
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams, Navigate } from 'react-router-dom';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
+import {
+  NavigationProvider,
+  useNavigation,
+} from '@/contexts/NavigationContext';
+import {
+  GraphViewProvider,
+  useGraphView,
+} from '@/contexts/GraphViewContext';
+import {
+  OpenTabsProvider,
+  useOpenTabs,
+} from '@/contexts/OpenTabsContext';
+import {
+  DriftViewProvider,
+  useDriftView,
+} from '@/contexts/DriftViewContext';
+import {
+  ViewModeProvider,
+  useViewMode,
+} from '@/contexts/ViewModeContext';
+import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
+import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
+import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
+import { ContractsPanel } from '@/components/drift/ContractsPanel';
+import { ContractsFile } from '@/components/drift/ContractsFile';
+import { VerifyPanel, type DriftFilterTarget } from '@/components/drift/VerifyPanel';
+import { VerifyStatsColumn, type DriftFilters } from '@/components/drift/VerifyStatsColumn';
+import { VerifyRunsPanel } from '@/components/drift/VerifyRunsPanel';
+import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
+import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
+import { useVerifyState } from '@/hooks/useVerifyState';
+import { useContractsGenerate } from '@/hooks/useContractsGenerate';
+import { useSpecStaleness } from '@/hooks/useSpecStaleness';
+import { ContractsHeaderActions } from '@/components/drift/ContractsHeaderActions';
+import { ContractsGenerateResultToaster } from '@/components/drift/ContractsGenerateResultToaster';
+import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
@@ -13,7 +49,13 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
+import { SpecPanel } from '@/components/spec/SpecPanel';
+import { SpecProvider } from '@/components/spec/SpecContext';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
+import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
 import { useGraph } from '@/hooks/useGraph';
+import { useContractsTree } from '@/hooks/useContractsTree';
+import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
@@ -24,359 +66,119 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
-import type { RepoResponse } from '@/lib/api';
-import type { DepthLevel } from '@/types/graph';
+import type { RepoResponse, DriftSeverity, VerifyState } from '@/lib/api';
 import type { Node, Edge } from '@xyflow/react';
 
-type OpenFile = {
-  path: string;
-  pinned: boolean;
-  scrollToLine?: number;
-};
+// Outer shell: mounts the navigation context (top-level section +
+// active left tab, kept in sync with the URL) so the page body and
+// every panel read/write it through `useNavigation()` instead of
+// having it prop-drilled out of one giant component.
+export default function RepoPage() {
+  return (
+    <NavigationProvider>
+      <GraphViewProvider>
+        <OpenTabsProvider>
+          <DriftViewProvider>
+            <ViewModeProvider>
+              <RepoPageInner />
+            </ViewModeProvider>
+          </DriftViewProvider>
+        </OpenTabsProvider>
+      </GraphViewProvider>
+    </NavigationProvider>
+  );
+}
 
-type OpenFlow = {
-  id: string;
-  name: string;
-  pinned: boolean;
-};
-
-type OpenDatabase = {
-  id: string;
-  name: string;
-  pinned: boolean;
-};
-
-const VALID_LEFT_TABS = new Set<LeftTab>([
-  'home',
-  'graphs',
-  'files',
-  'flows',
-  'databases',
-  'analyses',
-]);
-
-const MAIN_CONTENT_TABS = new Set<LeftTab>([
-  'home',
-  'graphs',
-  'analyses',
-]);
-
-export default function RepoGraphPage() {
+function RepoPageInner() {
   const { repoId = '' } = useParams();
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  // Section + active tab live in NavigationContext now; bound to the
+  // same local names the rest of this component already uses.
+  const {
+    section: dashboardSection,
+    leftTab,
+    setSection: setDashboardSection,
+    setLeftTab,
+  } = useNavigation();
+  // Graph depth / scope / focus + selected node live in GraphViewContext;
+  // bound to the same local names the rest of this component uses.
+  const {
+    selectedService,
+    setSelectedService,
+    depthLevel,
+    setDepthLevel,
+    scopedServiceId,
+    setScopedServiceId,
+    scopedModuleId,
+    setScopedModuleId,
+    focusRequest,
+    locateNode: handleLocateNode,
+  } = useGraphView();
+  // Diff toggle, history selection, and path highlight live in
+  // ViewModeContext; bound to the same local names used below.
+  const {
+    isDiffMode,
+    setIsDiffMode,
+    selectedAnalysisId,
+    setSelectedAnalysisId,
+    selectedPath,
+    setSelectedPath,
+  } = useViewMode();
   const [repo, setRepo] = useState<RepoResponse | null>(null);
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-
-  // Map URL terms (functions) ↔ internal terms (methods)
-  const urlToDepth: Record<string, DepthLevel> = { services: 'services', modules: 'modules', functions: 'methods' };
-  const depthToUrl: Record<DepthLevel, string> = { services: 'services', modules: 'modules', methods: 'functions' };
-  const modeFromUrl = searchParams?.get('mode') || '';
-  const initialMode = urlToDepth[modeFromUrl] || 'services';
-  const [depthLevel, setDepthLevelState] = useState<DepthLevel>(initialMode);
-
-  const [scopedServiceId, setScopedServiceIdState] = useState<string | null>(
-    () => searchParams?.get('scopeService') || null,
-  );
-  const [scopedModuleId, setScopedModuleIdState] = useState<string | null>(
-    () => searchParams?.get('scopeModule') || null,
-  );
-
-  const setScopedServiceId = useCallback((id: string | null) => {
-    setScopedServiceIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeService', id);
-    else url.searchParams.delete('scopeService');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const setScopedModuleId = useCallback((id: string | null) => {
-    setScopedModuleIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeModule', id);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const setDepthLevel = useCallback((level: DepthLevel) => {
-    setDepthLevelState(level);
-    const url = new URL(window.location.href);
-    if (level === 'services') {
-      url.searchParams.delete('mode');
-      // Services depth doesn't consume scope params — strip them from the URL
-      // but keep them in memory so returning to modules/methods restores the
-      // user's last picks.
-      url.searchParams.delete('scopeService');
-      url.searchParams.delete('scopeModule');
-    } else if (level === 'modules') {
-      url.searchParams.set('mode', 'modules');
-      // Modules depth uses `scopeService` but not `scopeModule` — keep the
-      // module id in memory for when the user returns to methods.
-      url.searchParams.delete('scopeModule');
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-    } else {
-      url.searchParams.set('mode', depthToUrl[level]);
-      // Methods depth: restore both scope params to URL from memory if present.
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-      if (scopedModuleId) url.searchParams.set('scopeModule', scopedModuleId);
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate, scopedServiceId, scopedModuleId]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
-    const tabParam = searchParams?.get('tab');
-    // Legacy URL compat: ?tab=violations now maps to the Graphs tab.
-    if (tabParam === 'violations') return 'graphs';
-    // Legacy URL compat: the Analytics tab was folded into Home.
-    if (tabParam === 'analytics') return 'home';
-    if (tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)) {
-      return tabParam as LeftTab;
-    }
-    if (searchParams?.get('flow')) return 'flows';
-    if (searchParams?.get('file')) return 'files';
-    return 'home';
-  });
-  const setLeftTab = useCallback((tab: LeftTab | null) => {
-    setLeftTabState(tab);
-    const url = new URL(window.location.href);
-    if (tab && tab !== 'home') {
-      url.searchParams.set('tab', tab);
-    } else {
-      // Home is the default landing. Strip tab-scoped params so the URL
-      // shortens to /repos/:id, but keep `view=diff` — diff mode is a
-      // page-level mode that home now renders alongside the default view.
-      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
-        url.searchParams.delete(key);
-      }
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
-  const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  // File / flow / database viewer tabs live in OpenTabsContext; bound
+  // to the same local names the rest of this component uses.
+  const {
+    openFiles,
+    activeFilePath,
+    handleOpenFile,
+    handleCloseFile,
+    openFlows,
+    activeFlowId,
+    handleOpenFlow,
+    handleCloseFlow,
+    syncFlowNames,
+    openDatabases,
+    activeDbId,
+    handleOpenDatabase,
+    handleCloseDatabase,
+    handleSelectTab,
+    showFlowView,
+    showDatabaseView,
+    handleLeftTabChange,
+  } = useOpenTabs();
 
-  // Multi-tab file viewer state — restore from URL
-  const fileFromUrl = searchParams?.get('file') || null;
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>(() =>
-    fileFromUrl ? [{ path: fileFromUrl, pinned: true }] : []
-  );
-  const [activeFilePath, setActiveFilePathState] = useState<string | null>(fileFromUrl);
-
-  const setActiveFilePath = useCallback((path: string | null) => {
-    setActiveFilePathState(path);
-    const url = new URL(window.location.href);
-    if (path) {
-      url.searchParams.set('file', path);
-    } else {
-      url.searchParams.delete('file');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const handleOpenFile = useCallback((path: string, pinned: boolean, scrollToLine?: number) => {
-    setOpenFiles((prev) => {
-      const existing = prev.find((f) => f.path === path);
-      if (existing) {
-        return prev.map((f) => f.path === path
-          ? { ...f, pinned: pinned || f.pinned, scrollToLine: scrollToLine ?? f.scrollToLine }
-          : f);
-      }
-
-      if (pinned) {
-        return [...prev, { path, pinned: true, scrollToLine }];
-      }
-
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) {
-        return prev.map((f) => !f.pinned ? { path, pinned: false, scrollToLine } : f);
-      }
-      return [...prev, { path, pinned: false, scrollToLine }];
-    });
-    setActiveFilePath(path);
-    setLeftTab('files');
-  }, []);
-
-  const handleCloseFile = useCallback((path: string) => {
-    setOpenFiles((prev) => {
-      const next = prev.filter((f) => f.path !== path);
-      return next;
-    });
-    if (activeFilePath === path) {
-      const remaining = openFiles.filter((f) => f.path !== path);
-      setActiveFilePath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
-    }
-  }, [openFiles, activeFilePath, setActiveFilePath]);
-
-  // Multi-tab flow viewer state — restore from URL
-  const flowFromUrl = searchParams?.get('flow') || null;
-  const [openFlows, setOpenFlows] = useState<OpenFlow[]>(() =>
-    flowFromUrl ? [{ id: flowFromUrl, name: 'Flow', pinned: true }] : []
-  );
-  const [activeFlowId, setActiveFlowIdState] = useState<string | null>(flowFromUrl);
-
-  const setActiveFlowId = useCallback((id: string | null) => {
-    setActiveFlowIdState(id);
-    const url = new URL(window.location.href);
-    if (id) {
-      url.searchParams.set('flow', id);
-      url.searchParams.delete('file');
-    } else {
-      url.searchParams.delete('flow');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const handleCloseFlow = useCallback((flowId: string) => {
-    setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
-    if (activeFlowId === flowId) {
-      const remaining = openFlows.filter((f) => f.id !== flowId);
-      setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
-  }, [openFlows, activeFlowId, setActiveFlowId]);
-
-  // Multi-tab database viewer state
-  const [openDatabases, setOpenDatabases] = useState<OpenDatabase[]>([]);
-  const [activeDbId, setActiveDbIdState] = useState<string | null>(null);
-
-  const setActiveDbId = useCallback((id: string | null) => {
-    setActiveDbIdState(id);
-  }, []);
-
-  // Sync React state from the URL on every location change. This covers
-  // browser Back / Forward (and deep-linked reloads) — without it, the URL
-  // changes but in-memory state stays frozen at whatever the user last set.
-  // Setters are idempotent, so running this on our own navigations is a no-op.
-  useEffect(() => {
-    const tabParam = searchParams?.get('tab') ?? null;
-    const nextTab: LeftTab =
-      tabParam === 'violations'
-        ? 'graphs'
-        : tabParam === 'analytics'
-          ? 'home'
-          : tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)
-            ? (tabParam as LeftTab)
-            : searchParams?.get('flow')
-              ? 'flows'
-              : searchParams?.get('file')
-                ? 'files'
-                : 'home';
-    setLeftTabState(nextTab);
-
-    const modeParam = searchParams?.get('mode') ?? '';
-    setDepthLevelState(urlToDepth[modeParam] ?? 'services');
-
-    setScopedServiceIdState(searchParams?.get('scopeService') ?? null);
-    setScopedModuleIdState(searchParams?.get('scopeModule') ?? null);
-    setActiveFilePathState(searchParams?.get('file') ?? null);
-    setActiveFlowIdState(searchParams?.get('flow') ?? null);
-    setIsDiffModeState(searchParams?.get('view') === 'diff');
-  }, [searchParams]);
-
-  const clearActiveDetailView = useCallback(() => {
-    setActiveFilePath(null);
-    setActiveFlowId(null);
-    setActiveDbId(null);
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
-
-  const showFileView = useCallback((path: string | null) => {
-    setActiveFilePath(path);
-    setActiveFlowId(null);
-    setActiveDbId(null);
-    if (path !== null) setLeftTab('files');
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab]);
-
-  const handleSelectTab = useCallback((path: string | null) => {
-    showFileView(path);
-  }, [showFileView]);
-
-  const showFlowView = useCallback((flowId: string | null) => {
-    setActiveFlowId(flowId);
-    setActiveFilePath(null);
-    setActiveDbId(null);
-    if (flowId !== null) setLeftTab('flows');
-  }, [setActiveFlowId, setActiveFilePath, setActiveDbId, setLeftTab]);
-
-  const showDatabaseView = useCallback((dbId: string | null) => {
-    setActiveDbId(dbId);
-    setActiveFilePath(null);
-    setActiveFlowId(null);
-    if (dbId !== null) setLeftTab('databases');
-  }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
-
-  // Home is the default + locked tab. Clicking an active rail icon (which the
-  // sidebar signals as `null`) falls back to Home instead of nulling out.
-  // When entering Files/Flows/Databases with no active item (e.g. URL params
-  // were stripped by a prior Home visit), restore the last-opened item so the
-  // detail view reopens instead of showing the empty placeholder.
-  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    const next = tab ?? 'home';
-    setLeftTab(next);
-    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
-      setActiveFlowId(openFlows[openFlows.length - 1].id);
-    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
-      setActiveFilePath(openFiles[openFiles.length - 1].path);
-    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
-      setActiveDbId(openDatabases[openDatabases.length - 1].id);
-    }
-  }, [
-    setLeftTab,
-    activeFlowId, openFlows, setActiveFlowId,
-    activeFilePath, openFiles, setActiveFilePath,
-    activeDbId, openDatabases, setActiveDbId,
-  ]);
-
-  const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
-    setOpenFlows((prev) => {
-      const existing = prev.find((f) => f.id === flowId);
-      if (existing) {
-        // Update name too — it may have been 'Flow' placeholder from a URL restore.
-        return prev.map((f) => f.id === flowId ? { ...f, name: flowName, pinned: pinned || f.pinned } : f);
-      }
-      if (pinned) {
-        return [...prev, { id: flowId, name: flowName, pinned: true }];
-      }
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) {
-        return prev.map((f) => !f.pinned ? { id: flowId, name: flowName, pinned: false } : f);
-      }
-      return [...prev, { id: flowId, name: flowName, pinned: false }];
-    });
-    showFlowView(flowId);
-  }, [showFlowView]);
-
-  const handleOpenDatabase = useCallback((dbId: string, dbName: string, pinned: boolean) => {
-    setOpenDatabases((prev) => {
-      const existing = prev.find((d) => d.id === dbId);
-      if (existing) {
-        return prev.map((d) => d.id === dbId ? { ...d, pinned: pinned || d.pinned } : d);
-      }
-      if (pinned) {
-        return [...prev, { id: dbId, name: dbName, pinned: true }];
-      }
-      const hasUnpinned = prev.find((d) => !d.pinned);
-      if (hasUnpinned) {
-        return prev.map((d) => !d.pinned ? { id: dbId, name: dbName, pinned: false } : d);
-      }
-      return [...prev, { id: dbId, name: dbName, pinned: false }];
-    });
-    showDatabaseView(dbId);
-  }, [showDatabaseView]);
-
-  const handleCloseDatabase = useCallback((dbId: string) => {
-    setOpenDatabases((prev) => prev.filter((d) => d.id !== dbId));
-    if (activeDbId === dbId) {
-      const remaining = openDatabases.filter((d) => d.id !== dbId);
-      setActiveDbId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
-  }, [openDatabases, activeDbId, setActiveDbId]);
+  // Spec / canonical / contracts / verify-drift view state lives in
+  // DriftViewContext; bound to the same local names used below.
+  const {
+    activeSpecConflictId,
+    setActiveSpecConflictId,
+    handleSelectSpecConflict,
+    activeCanonicalPath,
+    setActiveCanonicalPath,
+    openCanonicalFiles,
+    handleOpenCanonical,
+    handleCloseCanonical,
+    activeContractsPath,
+    setActiveContractsPath,
+    openContractsFiles,
+    handleOpenContracts,
+    handleCloseContracts,
+    activeDriftId,
+    setActiveDriftId,
+    openDriftTabs,
+    handleOpenDrift,
+    handleCloseDrift,
+    reconcileDriftTabs,
+  } = useDriftView();
 
   const currentBranch = repo?.defaultBranch;
   const {
     isConnected,
     analysisProgress,
+    specProgress,
     clearProgress,
+    clearSpecProgress,
     onEvent,
     llmEstimate,
     respondToLlmEstimate,
@@ -464,6 +266,171 @@ export default function RepoGraphPage() {
     useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
+  // BL Drift trees — same pattern as useGraph/useFlows. Hoisted here
+  // so the data survives tab switches and so spec:complete socket
+  // events (fired after a successful Apply) can refetch both via the
+  // listeners below.
+  const {
+    tree: contractsTree,
+    isLoading: contractsLoading,
+    error: contractsError,
+    refetch: refetchContracts,
+  } = useContractsTree(repoId);
+  const {
+    tree: canonicalTree,
+    isLoading: canonicalLoading,
+    error: canonicalError,
+    refetch: refetchCanonical,
+  } = useCanonicalSpecTree(repoId);
+  const {
+    state: verifyState,
+    diff: verifyDiff,
+    history: verifyHistory,
+    isLoading: verifyLoading,
+    isRunning: verifyRunning,
+    isDiffing: verifyDiffing,
+    error: verifyError,
+    refetch: refetchVerify,
+    run: runVerify,
+    runDiff: runVerifyDiff,
+  } = useVerifyState(repoId);
+  const {
+    generating: contractsGenerating,
+    result: contractsGenerateResult,
+    run: runContractsGenerate,
+  } = useContractsGenerate(repoId);
+  const {
+    contractsStale,
+    verifyStale,
+    refetch: refetchStaleness,
+  } = useSpecStaleness(repoId);
+  // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
+  // (URL `?view=diff`) so the toggle persists across reloads exactly like
+  // analyze. Toggling only switches the view — the diff is computed by the
+  // run button (below) while in diff mode, not on toggle.
+  // Analytics-driven drift filters (set by clicking the left charts, applied to
+  // the center list). Each toggles off when its active value is re-clicked,
+  // mirroring analyze's severity/category/path filters.
+  const [driftFilters, setDriftFilters] = useState<DriftFilters>({
+    severity: null,
+    kind: null,
+    file: null,
+  });
+  const toggleDriftSeverity = useCallback(
+    (s: string) =>
+      setDriftFilters((f) => ({ ...f, severity: f.severity === s ? null : (s as DriftSeverity) })),
+    [],
+  );
+  const toggleDriftKind = useCallback(
+    (k: string) => setDriftFilters((f) => ({ ...f, kind: f.kind === k ? null : k })),
+    [],
+  );
+  const toggleDriftFile = useCallback(
+    (file: string) => setDriftFilters((f) => ({ ...f, file: f.file === file ? null : file })),
+    [],
+  );
+  const clearDriftFilter = useCallback(
+    (target: DriftFilterTarget) => setDriftFilters((f) => ({ ...f, [target]: null })),
+    [],
+  );
+  // Resizable analytics aside for the verify view, mirroring analyze's
+  // HomePanel aside (charts on the left, list + detail to the right).
+  const [verifyPanelWidth, setVerifyPanelWidth] = useState(560);
+  const verifyDragging = useRef(false);
+  const handleVerifyResizeDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      verifyDragging.current = true;
+      const startX = e.clientX;
+      const startW = verifyPanelWidth;
+      const onMove = (ev: MouseEvent) => {
+        if (!verifyDragging.current) return;
+        const delta = ev.clientX - startX;
+        setVerifyPanelWidth(Math.min(800, Math.max(320, startW + delta)));
+      };
+      const onUp = () => {
+        verifyDragging.current = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [verifyPanelWidth],
+  );
+  // Past-run viewing, mirroring analyze's selectedAnalysisId. When set, the
+  // verify view shows that run's snapshot read-only (diff disabled).
+  const [selectedVerifyRunId, setSelectedVerifyRunId] = useState<string | null>(null);
+  const [verifyRunState, setVerifyRunState] = useState<VerifyState | null>(null);
+  useEffect(() => {
+    if (!selectedVerifyRunId || !repoId) {
+      setVerifyRunState(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getVerifyRun(repoId, selectedVerifyRunId)
+      .then((s) => {
+        if (!cancelled) setVerifyRunState(s);
+      })
+      .catch(() => {
+        if (!cancelled) setVerifyRunState(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVerifyRunId, repoId]);
+  const isViewingVerifyRun = !!selectedVerifyRunId;
+  // What the verify columns actually render: a selected past run, else LATEST.
+  const effectiveVerifyState = isViewingVerifyRun ? verifyRunState : verifyState;
+  // Diff is latest-only; a past run is always shown in normal mode.
+  const effectiveVerifyDiffMode = isDiffMode && !isViewingVerifyRun;
+  // Newest-first run list for the dropdown (history is appended oldest-first).
+  const verifyRunItems = useMemo(
+    () =>
+      [...verifyHistory.runs].reverse().map((r) => {
+        const d = new Date(r.verifiedAt);
+        return {
+          id: r.id,
+          label: Number.isNaN(d.getTime())
+            ? r.verifiedAt
+            : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        };
+      }),
+    [verifyHistory],
+  );
+  const selectedVerifyRunLabel = isViewingVerifyRun
+    ? verifyRunItems.find((r) => r.id === selectedVerifyRunId)?.label ?? null
+    : null;
+  // Runs page: open a run in the Verify tab; delete a run from history.
+  const handleViewVerifyRun = useCallback(
+    (runId: string | null) => {
+      setSelectedVerifyRunId(runId);
+      setLeftTab('verify');
+    },
+    [setLeftTab],
+  );
+  const handleDeleteVerifyRun = useCallback(
+    async (runId: string) => {
+      await api.deleteVerifyRun(repoId, runId);
+      setSelectedVerifyRunId((cur) => (cur === runId ? null : cur));
+      await refetchVerify();
+    },
+    [repoId, refetchVerify],
+  );
+  // When the underlying verify run changes (re-run / fresh load), drop
+  // any open drift tabs whose ids no longer exist so we never show a
+  // stale tab pointing at nothing, and clear filters / past-run selection.
+  // Diff mode is intentionally NOT reset here — it's URL-derived (`isDiffMode`),
+  // so the post-diff refetch no longer kicks the user back to Normal.
+  useEffect(() => {
+    reconcileDriftTabs(
+      verifyState ? new Set(verifyState.drifts.map((d) => d.id)) : null,
+    );
+    setDriftFilters({ severity: null, kind: null, file: null });
+    setSelectedVerifyRunId(null);
+  }, [verifyState, reconcileDriftTabs]);
+
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
 
@@ -520,6 +487,38 @@ export default function RepoGraphPage() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
+  // Refresh BL Drift trees after a successful Scan / Generate /
+  // Verify. The server emits `spec:complete` with one of three kinds —
+  // we fan out to the relevant hook's refetch so each tree stays in
+  // sync without polling. Scan rewrites claims.json (refetchCanonical),
+  // Generate writes contracts (refetchContracts), Verify writes the
+  // drift state (refetchVerify).
+  useEffect(() => {
+    const unsub = onEvent('spec:complete', (data) => {
+      const payload = data as
+        | { kind?: 'scan' | 'generate' | 'verify' }
+        | undefined;
+      if (payload?.kind === 'scan') {
+        refetchCanonical();
+      } else if (payload?.kind === 'generate') {
+        refetchContracts();
+      } else if (payload?.kind === 'verify') {
+        refetchVerify();
+      }
+      // Every lifecycle event can flip a staleness dot — a scan
+      // rewrites claims.json (contractsStale on), a generate clears it,
+      // a verify clears verifyStale.
+      if (
+        payload?.kind === 'scan' ||
+        payload?.kind === 'generate' ||
+        payload?.kind === 'verify'
+      ) {
+        refetchStaleness();
+      }
+    });
+    return unsub;
+  }, [onEvent, refetchCanonical, refetchContracts, refetchVerify, refetchStaleness]);
+
   // Listen for violations ready
   useEffect(() => {
     const unsub = onEvent('violations:ready', () => {
@@ -571,17 +570,6 @@ export default function RepoGraphPage() {
     }
   }, [nodes, handleOpenDatabase]);
 
-
-  const setIsDiffMode = useCallback((diff: boolean) => {
-    setIsDiffModeState(diff);
-    const url = new URL(window.location.href);
-    if (diff) {
-      url.searchParams.set('view', 'diff');
-    } else {
-      url.searchParams.delete('view');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
 
   const handleEnterDiffMode = useCallback(() => {
     setIsDiffMode(true);
@@ -845,48 +833,6 @@ export default function RepoGraphPage() {
     return <Navigate to="/" replace />;
   }
 
-  const handleLocateNode = useCallback((
-    nodeId: string,
-    requiredDepth?: string,
-    hints?: { serviceId?: string | null; moduleId?: string | null },
-  ) => {
-    const targetDepth = (requiredDepth ?? depthLevel) as DepthLevel;
-
-    // Derive next scope from hints + target depth. Hints win when provided;
-    // otherwise we preserve existing scope (e.g. a repeat Locate on the same service).
-    let nextServiceId: string | null = scopedServiceId;
-    let nextModuleId: string | null = scopedModuleId;
-    if (targetDepth === 'services') {
-      nextServiceId = null;
-      nextModuleId = null;
-    } else if (targetDepth === 'modules') {
-      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
-      nextModuleId = null;
-    } else {
-      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
-      if (hints?.moduleId !== undefined) nextModuleId = hints.moduleId ?? null;
-    }
-
-    setDepthLevelState(targetDepth);
-    setScopedServiceIdState(nextServiceId);
-    setScopedModuleIdState(nextModuleId);
-
-    const url = new URL(window.location.href);
-    if (targetDepth === 'services') url.searchParams.delete('mode');
-    else url.searchParams.set('mode', depthToUrl[targetDepth]);
-    if (nextServiceId) url.searchParams.set('scopeService', nextServiceId);
-    else url.searchParams.delete('scopeService');
-    if (nextModuleId) url.searchParams.set('scopeModule', nextModuleId);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
-
-    if (requiredDepth && requiredDepth !== depthLevel) {
-      setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
-    } else {
-      setFocusRequest({ nodeId, key: Date.now() });
-    }
-  }, [depthLevel, scopedServiceId, scopedModuleId, navigate]);
-
   const handleLocateNodeFromHome = useCallback((
     nodeId: string,
     requiredDepth?: string,
@@ -902,36 +848,70 @@ export default function RepoGraphPage() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
+  const showingSpecConflict =
+    activeSpecConflictId !== null &&
+    (leftTab === 'spec' || leftTab === 'decisions');
+  const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
+  const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
   // Update flow names when flow list loads
   useEffect(() => {
-    if (flowList.length === 0) return;
-    setOpenFlows((prev) =>
-      prev.map((f) => {
-        const match = flowList.find((fl) => fl.id === f.id);
-        return match ? { ...f, name: match.name } : f;
-      })
-    );
-  }, [flowList]);
+    syncFlowNames(flowList);
+  }, [flowList, syncFlowNames]);
 
   return (
+    <SpecProvider repoId={repoId}>
     <div className="flex h-screen flex-col">
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={isViewingHistory || repoError ? undefined : handleAnalyze}
+        onAnalyze={
+          dashboardSection !== 'analysis' || isViewingHistory || repoError || repo?.isGitRepo === false
+            ? undefined
+            : handleAnalyze
+        }
         isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
         isDiffMode={isDiffMode}
-        onEnterDiffMode={isViewingHistory ? undefined : handleEnterDiffMode}
-        onExitDiffMode={isViewingHistory ? undefined : handleExitDiffMode}
+        onEnterDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleEnterDiffMode
+        }
+        onExitDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleExitDiffMode
+        }
         analyses={analyses}
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+        dashboardSection={dashboardSection}
+        onDashboardSectionChange={setDashboardSection}
+        sectionActions={
+          leftTab === 'spec' ? (
+            <SpecHeaderActions />
+          ) : leftTab === 'contracts' ? (
+            <ContractsHeaderActions
+              isGenerating={contractsGenerating}
+              onGenerate={runContractsGenerate}
+              stale={contractsStale}
+            />
+          ) : leftTab === 'verify' ? (
+            <VerifyHeaderActions
+              isRunning={isDiffMode ? verifyDiffing : verifyRunning}
+              onRun={isDiffMode ? runVerifyDiff : runVerify}
+              stale={verifyStale}
+              diffMode={isDiffMode}
+              onToggleDiff={setIsDiffMode}
+              isGitRepo={repo?.isGitRepo !== false}
+              runItems={verifyRunItems}
+              selectedRunId={selectedVerifyRunId}
+              onSelectRun={setSelectedVerifyRunId}
+              viewingHistory={isViewingVerifyRun}
+            />
+          ) : null
+        }
       />
 
       {/* Page-level banners — span full width above both sidebar and main. */}
@@ -958,15 +938,50 @@ export default function RepoGraphPage() {
           <span>Showing working tree state (uncommitted changes)</span>
         </div>
       )}
+      {leftTab === 'verify' && isViewingVerifyRun && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <span>
+            Viewing verify run{selectedVerifyRunLabel ? ` from ${selectedVerifyRunLabel}` : ''} — not the latest
+          </span>
+          <button
+            className="underline hover:text-amber-400 transition-colors"
+            onClick={() => setSelectedVerifyRunId(null)}
+          >
+            Return to latest
+          </button>
+        </div>
+      )}
+      {repoError && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{repoError}</span>
+        </div>
+      )}
+      {!repoError && repo?.isGitRepo === false && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>This directory is not a git repository — branch switching and history are unavailable.</span>
+        </div>
+      )}
+
+      {/* Generate result surfaces as a toast (sonner's <Toaster />
+          lives at the app root). Render-less side effect — listens
+          for new results and emits toasts, no layout impact. */}
+      <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
-          home: allViolations.length,
-          flows: flowList.length,
-          databases: nodes.filter((n) => n.type === 'database').length,
-          analyses: analyses.length,
-        }}>
+        <LeftSidebar
+          section={dashboardSection}
+          activeTab={leftTab}
+          onTabChange={handleLeftTabChange}
+          badgeCounts={{
+            home: allViolations.length,
+            flows: flowList.length,
+            databases: nodes.filter((n) => n.type === 'database').length,
+            analyses: analyses.length,
+          }}
+        >
           {leftTab === 'flows' && (
             <FlowList
               flows={flowList}
@@ -1028,13 +1043,48 @@ export default function RepoGraphPage() {
               }}
             />
           )}
+          {leftTab === 'spec' && (
+            <SpecPanel
+              canonicalTree={canonicalTree}
+              canonicalLoading={canonicalLoading}
+              canonicalError={canonicalError}
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={handleSelectSpecConflict}
+              activeCanonicalPath={activeCanonicalPath}
+              onOpenCanonicalFile={handleOpenCanonical}
+            />
+          )}
+          {leftTab === 'contracts' && (
+            <ContractsPanel
+              tree={contractsTree}
+              isLoading={contractsLoading}
+              error={contractsError}
+              activePath={activeContractsPath}
+              validationIssues={
+                contractsGenerateResult &&
+                'il' in contractsGenerateResult &&
+                'validationIssues' in contractsGenerateResult.il
+                  ? contractsGenerateResult.il.validationIssues
+                  : undefined
+              }
+              onOpen={handleOpenContracts}
+            />
+          )}
+          {leftTab === 'decisions' && (
+            <DecisionsPanel
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={handleSelectSpecConflict}
+            />
+          )}
         </LeftSidebar>
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases) */}
-          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
-            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical/Contracts/Verify) */}
+          {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
+          (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
+          (leftTab === 'contracts' && openContractsFiles.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1126,8 +1176,71 @@ export default function RepoGraphPage() {
                   </div>
                 );
               })}
+              {/* Canonical spec tabs */}
+              {leftTab === 'spec' && openCanonicalFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeCanonicalPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveCanonicalPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseCanonical(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Contracts tabs */}
+              {leftTab === 'contracts' && openContractsFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeContractsPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveContractsPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseContracts(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Verify drifts use the 3-column view (no tab bar). */}
             </div>
-          )}
+          ) : null}
 
           <div className="relative flex-1 overflow-hidden">
           {/* Code viewer */}
@@ -1155,6 +1268,102 @@ export default function RepoGraphPage() {
               violations={violations}
               isTab
             />
+          ) : showingCanonicalFile && activeCanonicalPath ? (
+            <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
+          ) : showingSpecConflict && activeSpecConflictId ? (
+            <SpecConflictDetail
+              conflictId={activeSpecConflictId}
+              onClose={() => setActiveSpecConflictId(null)}
+            />
+          ) : leftTab === 'spec' ? (
+            <SpecPanePlaceholder />
+          ) : showingContractsFile && activeContractsPath ? (
+            <ContractsFile repoId={repoId} filePath={activeContractsPath} />
+          ) : leftTab === 'contracts' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <p>Select a contract file from the list to view it.</p>
+            </div>
+          ) : leftTab === 'verify' ? (
+            (() => {
+              // Verify view, mirroring analyze's HomePanel layout: a resizable
+              // analytics aside on the LEFT, then the drift list, then the
+              // selected drift's detail. `effectiveVerifyState` is a past run
+              // when one is selected, else LATEST.
+              const activeDrift =
+                (effectiveVerifyDiffMode
+                  ? [...(verifyDiff?.added ?? []), ...(verifyDiff?.resolved ?? [])]
+                  : effectiveVerifyState?.drifts ?? []
+                ).find((d) => d.id === activeDriftId) ?? null;
+              return (
+                <div className="flex h-full w-full overflow-hidden">
+                  <aside
+                    style={{ width: verifyPanelWidth }}
+                    className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-card"
+                  >
+                    <VerifyStatsColumn
+                      state={effectiveVerifyState}
+                      diff={verifyDiff}
+                      history={verifyHistory}
+                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
+                      isDiffing={verifyDiffing}
+                      filters={driftFilters}
+                      onToggleSeverity={toggleDriftSeverity}
+                      onToggleKind={toggleDriftKind}
+                      onToggleFile={toggleDriftFile}
+                    />
+                    <div
+                      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
+                      onMouseDown={handleVerifyResizeDown}
+                    />
+                  </aside>
+                  <div className="w-[380px] shrink-0 overflow-hidden border-r border-border">
+                    <VerifyPanel
+                      state={effectiveVerifyState}
+                      diff={verifyDiff}
+                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
+                      isLoading={verifyLoading}
+                      isDiffing={verifyDiffing}
+                      error={verifyError}
+                      activeDriftId={activeDriftId}
+                      filters={driftFilters}
+                      onClearFilter={clearDriftFilter}
+                      onOpenDrift={handleOpenDrift}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    {activeDrift ? (
+                      <VerifyDriftDetail
+                        drift={activeDrift}
+                        onClose={() => handleCloseDrift(activeDrift.id)}
+                        onOpenFile={(filePath, line) => {
+                          // Cross-section navigation: switch to Code Analysis
+                          // and open the file viewer at the right line.
+                          setDashboardSection('analysis');
+                          handleOpenFile(filePath, true, line);
+                        }}
+                      />
+                    ) : (
+                      <VerifyEmptyState />
+                    )}
+                  </div>
+                </div>
+              );
+            })()
+          ) : leftTab === 'runs' ? (
+            <VerifyRunsPanel
+              history={verifyHistory}
+              selectedRunId={selectedVerifyRunId}
+              onViewRun={handleViewVerifyRun}
+              onDeleteRun={handleDeleteVerifyRun}
+            />
+          ) : leftTab === 'decisions' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+              <p className="max-w-md">
+                Every conflict you've resolved in the Spec tab lives in the
+                ledger on the left. Revoke a decision to re-open its
+                conflict — your other candidates are preserved.
+              </p>
+            </div>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -1236,16 +1445,6 @@ export default function RepoGraphPage() {
                 </Button>
               </div>
             </div>
-          ) : repoError ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <AlertCircle className="h-10 w-10 text-amber-500" />
-                <Alert className="max-w-sm border-amber-500/30">
-                  <AlertTitle className="text-amber-500">Repository warning</AlertTitle>
-                  <AlertDescription className="text-amber-500/90">{repoError}</AlertDescription>
-                </Alert>
-              </div>
-            </div>
           ) : nodes.length === 0 && nodes.length === 0 &&
               !(depthLevel === 'modules' && !scopedServiceId) &&
               !(depthLevel === 'methods' && !scopedModuleId) ? (
@@ -1258,14 +1457,6 @@ export default function RepoGraphPage() {
                     Run an analysis to generate the architecture graph
                   </AlertDescription>
                 </Alert>
-                <Button
-                  onClick={() => handleAnalyze()}
-                  disabled={isAnalyzing}
-                  className="mt-2"
-                >
-                  {isAnalyzing && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isAnalyzing ? 'Analyzing...' : 'Analyze Repository'}
-                </Button>
                 {isDiffMode && diffError && (
                   <Alert className="mt-3 max-w-sm border-amber-500/30 text-amber-500">
                     <AlertCircle className="h-4 w-4" />
@@ -1534,6 +1725,10 @@ export default function RepoGraphPage() {
           )}
         </div>
       )}
+      {specProgress && (
+        <SpecProgressPopup progress={specProgress} onDismiss={clearSpecProgress} />
+      )}
     </div>
+    </SpecProvider>
   );
 }

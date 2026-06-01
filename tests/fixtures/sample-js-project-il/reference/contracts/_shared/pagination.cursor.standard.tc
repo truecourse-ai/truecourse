@@ -1,0 +1,22 @@
+pagination-contract pagination.cursor.standard {
+  origin "reference/specs/shared/endpoints.md" "Pagination" 3..12
+  scheme cursor
+  query {
+    cursor: string optional semantics opaque
+    limit: integer optional {
+      default 20
+      min 1
+      max 50
+      on-above-max clamp
+    }
+  }
+  response-shape {
+    items: array
+    nextCursor: string|null
+  }
+  forbids {
+    forbid query-param offset
+    forbid query-param page
+  }
+  selector tag paginated
+}
