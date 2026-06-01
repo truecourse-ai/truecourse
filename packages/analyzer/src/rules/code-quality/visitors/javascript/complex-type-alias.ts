@@ -1,5 +1,29 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+// `A | B | C | D` parses as a left-leaning chain of nested union_types in
+// tree-sitter-typescript, not a flat list. Flatten the chain so we can
+// classify each member directly.
+function flattenUnionMembers(node: SyntaxNode): SyntaxNode[] {
+  if (node.type !== 'union_type') return [node]
+  const out: SyntaxNode[] = []
+  for (const child of node.namedChildren) {
+    if (child.type === 'union_type') out.push(...flattenUnionMembers(child))
+    else out.push(child)
+  }
+  return out
+}
+
+const SIMPLE_UNION_MEMBER_TYPES = new Set([
+  'literal_type',
+  'string',
+  'number',
+  'type_identifier',
+  'predefined_type',
+  'null',
+  'undefined',
+])
 
 /**
  * Detects type aliases or inline types with very deep nesting (count depth of
@@ -48,15 +72,15 @@ export const complexTypeAliasVisitor: CodeRuleVisitor = {
     const depth = maxBracketDepth(typeText)
     const members = countUnionIntersectionMembers(typeText)
 
-    // Skip union types where ALL members are simple string or number literals
-    // (e.g., 'a' | 'b' | 'c' — these are enums/discriminated unions, not complex types)
+    // Skip union types whose members are all "simple": string/number/boolean
+    // literals (discriminated unions), single named type references
+    // (`TFoo | TBar | TBaz` enumerating subtypes), or predefined primitives.
+    // Long-but-flat unions of named subtypes are documentation, not
+    // complexity worth flagging.
     if (typeValue.type === 'union_type') {
-      const allLiterals = typeValue.namedChildren.every((child) => {
-        const t = child.type
-        return t === 'literal_type' || t === 'string' || t === 'number'
-          || (t === 'predefined_type' && (child.text === 'string' || child.text === 'number'))
-      })
-      if (allLiterals) return null
+      const members = flattenUnionMembers(typeValue)
+      const allSimple = members.every((m) => SIMPLE_UNION_MEMBER_TYPES.has(m.type))
+      if (allSimple) return null
     }
 
     if (depth >= DEPTH_THRESHOLD || members >= MEMBER_THRESHOLD) {

@@ -19,12 +19,47 @@ function isMutableInit(node: SyntaxNode): boolean {
   return node.type === 'object' || node.type === 'array' || node.type === 'new_expression'
 }
 
+// The "shared across requests" hazard only applies to server-side code.
+// Browser-only modules (React hooks, UI primitives, components, anything
+// marked `'use client'`) run per-tab — module-level mutable state there is
+// fine. Path tokens + the `'use client'` directive cover the typical
+// frameworks (Next.js app router, Remix, the shadcn convention).
+const CLIENT_PATH_TOKENS = [
+  '/client/',
+  '/client-only/',
+  '/hooks/',
+  '/primitives/',
+  '/components/',
+  '.client.ts',
+  '.client.tsx',
+]
+
+function isClientSideFile(filePath: string, program: SyntaxNode | null): boolean {
+  for (const tok of CLIENT_PATH_TOKENS) {
+    if (filePath.includes(tok)) return true
+  }
+  // First statement is a `'use client'` / `"use client"` directive.
+  const first = program?.namedChildren[0]
+  if (first?.type === 'expression_statement') {
+    const text = first.text.trim().replace(/;$/, '').replace(/['"`]/g, '')
+    if (text === 'use client') return true
+  }
+  return false
+}
+
 export const sharedMutableModuleStateVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/shared-mutable-module-state',
   languages: JS_LANGUAGES,
   nodeTypes: ['lexical_declaration', 'variable_declaration'],
   visit(node, filePath, sourceCode) {
     if (!isModuleLevel(node)) return null
+
+    // Skip client-side modules — module-level mutable state there isn't
+    // shared across requests, it's shared per-tab (the intended scope for
+    // React-style hook stores like shadcn's `use-toast`).
+    let program: SyntaxNode | null = node
+    while (program && program.type !== 'program') program = program.parent
+    if (isClientSideFile(filePath, program)) return null
 
     // Check if it's let or var (not const)
     const kindChild = node.children[0]

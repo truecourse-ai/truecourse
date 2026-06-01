@@ -3422,10 +3422,22 @@ describe('code-quality/deterministic/triple-slash-reference', () => {
 });
 
 describe('code-quality/deterministic/useless-empty-export', () => {
-  it('detects empty export {}', () => {
-    const violations = check(`export {};`);
+  it('detects empty export {} alongside other exports (redundant module marker)', () => {
+    const violations = check(`
+      export const foo = 1;
+      export {};
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag a lone export {} (file needs it to be a module)', () => {
+    // Bare barrels and `declare global` polyfill files need `export {}` to
+    // be parsed as ES modules — removing it changes the semantic
+    // module/script classification.
+    const violations = check(`export {};`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag export with names', () => {
@@ -7741,10 +7753,22 @@ describe('code-quality/deterministic/complex-type-alias', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects type alias with many union members', () => {
-    const violations = check(`type Many = A | B | C | D | E | F | G;`);
+  it('detects type alias with many complex union members', () => {
+    // 7 members where each carries generics — genuine complexity, not just
+    // a flat enumeration of named subtypes.
+    const violations = check(
+      `type Many = Box<A> | Box<B> | Box<C> | Box<D> | Box<E> | Box<F> | Box<G>;`,
+    );
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag flat union of named subtypes (documentation, not complexity)', () => {
+    // `TFooMeta | TBarMeta | ...` is enumerating a discriminated-union family;
+    // each member is a single identifier, no generics.
+    const violations = check(`type Many = A | B | C | D | E | F | G;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag simple type alias', () => {
