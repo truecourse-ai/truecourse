@@ -12,8 +12,9 @@ Resolved open questions:
 3. **Retention:** keep all runs (matches analyze).
 4. **diff.json** is a separate run mode (`verify --diff`), mirroring `analyze --diff`.
 5. **Dashboard:** Verify panel gained a "Diff vs baseline" view; no runs picker yet.
-`readVerifyState` reads the new LATEST with a one-release fallback to the legacy
-`.cache/verifier/verify-state.json`.
+`readVerifyState` reads the new LATEST only — **no fallback**. The pre-store
+`.cache/verifier/verify-state.json` is ignored on read and deleted on the next
+verify run.
 
 ---
 

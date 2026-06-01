@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
 import { buildAnalysisFilename } from './analysis-store.js';
+import { summarizeDrifts } from '../types/verify-snapshot.js';
 import type {
   VerifyDiff,
   VerifyHistory,
@@ -137,6 +138,58 @@ export function appendVerifyHistory(repoPath: string, entry: VerifyHistoryEntry)
   const history = readVerifyHistory(repoPath);
   history.runs.push(entry);
   atomicWriteJson(verifyHistoryPath(repoPath), history);
+}
+
+/** Build the materialized LATEST view from a full run snapshot. */
+function materializeVerifyLatest(snap: VerifyRunSnapshot, filename: string): VerifyLatest {
+  return {
+    head: filename,
+    run: {
+      id: snap.id,
+      verifiedAt: snap.verifiedAt,
+      branch: snap.branch,
+      commitHash: snap.commitHash,
+      contractsDir: snap.contractsDir,
+      codeDir: snap.codeDir,
+    },
+    artifactCount: snap.artifactCount,
+    extractedOperationCount: snap.extractedOperationCount,
+    drifts: snap.drifts,
+    resolverErrors: snap.resolverErrors,
+    unresolvedRefs: snap.unresolvedRefs,
+    summary: summarizeDrifts(snap.drifts),
+  };
+}
+
+/**
+ * Delete a single past run: its snapshot file + history entry. Returns true if
+ * a matching run was found. If the deleted run is the one LATEST was built from,
+ * LATEST (and any stale diff) are re-derived from the newest remaining run, or
+ * removed entirely when no runs remain — so the dashboard's current verify
+ * state never outlives its history. (Mirrors analyze's delete-analysis path.)
+ */
+export function deleteVerifyRun(repoPath: string, runId: string): boolean {
+  const history = readVerifyHistory(repoPath);
+  const entry = history.runs.find((r) => r.id === runId);
+  if (!entry) return false;
+  try {
+    fs.unlinkSync(verifyRunPath(repoPath, entry.filename));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  history.runs = history.runs.filter((r) => r.id !== runId);
+  atomicWriteJson(verifyHistoryPath(repoPath), history);
+
+  const latest = readVerifyLatest(repoPath);
+  if (latest && latest.head === entry.filename) {
+    // History is appended oldest-first, so the last entry is the newest.
+    const newest = history.runs[history.runs.length - 1];
+    const snap = newest ? readVerifyRun(repoPath, newest.filename) : null;
+    if (snap && newest) writeVerifyLatest(repoPath, materializeVerifyLatest(snap, newest.filename));
+    else deleteVerifyLatest(repoPath);
+    deleteVerifyDiff(repoPath); // baseline moved (or gone) — any diff is obsolete
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

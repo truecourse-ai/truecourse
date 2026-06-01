@@ -3311,3 +3311,133 @@ zero-arg `CodeContractSet` accessors; field/header-driven ones
 - `comparators-codedir.test.ts` + `comparators.test.ts` updated to drive the
   converged comparators via their facts extractors; all infer suites unchanged.
 - Full suite: 4138 passed.
+
+## Phase 39: Verify storage + diff parity with analyze `STATUS: DONE`
+
+`verify` now stores results the way `analyze` does, under
+`<repo>/.truecourse/verifier/`: per-run snapshots in `runs/<iso>_<uuid>.json`,
+a materialized `LATEST.json` baseline (committable, same convention as
+analyze's), append-only `history.json` summaries, and an overwrite-on-each-run
+`diff.json`. The store (`packages/core/src/lib/verify-store.ts`) mirrors
+`analysis-store.ts`: `atomicWriteJson`, mtime-cached `LATEST` reads, no
+fallback to the legacy single-file format (it is deleted on the next run).
+
+- **`verify --diff`** mirrors `analyze`'s diff: git-required, analyzes the
+  working tree as-is, and diffs the current code's drifts against the committed
+  `verifier/LATEST.json` baseline, reporting added / resolved / unchanged. Drifts
+  are matched by a stable obligation key (`${type}:${identity} / ${obligationKey}`)
+  so a regenerated `ContractDrift.id` or a moved line never reads as churn.
+- A normal `verify` stashes uncommitted changes with confirmation (CLI prompt /
+  dashboard socket dialog) exactly like `analyze`, reusing `resolveStashDecision`
+  and `createSocketStashConfirmHandler`.
+- Dashboard verify page redesigned to a 3-column view (analytics · drifts ·
+  detail) with a header Normal / Git-Diff toggle gated on `isGitRepo`, the
+  branch label, and click-to-open drift detail.
+
+## Phase 40: Analyze-grade verify analytics `STATUS: DONE`
+
+The verify page's left column is now an analytics pane mirroring analyze's
+aside one-for-one. To match analyze's layout exactly (and get the same working
+vertical scroll / no clipping on small screens), the `verify` tab is marked
+`noPanel` and the analytics render as a **resizable `<aside>` in the main
+content area** — the same `flex h-full flex-col overflow-hidden` shell + `flex-1
+overflow-y-auto` scroller as `HomePanel`, not inside `LeftSidebar`. The verify
+view is thus a true 3-column layout in main: analytics aside · drift list ·
+detail. Content:
+summary **badge chips** (`ResolutionMetrics`-style in Normal mode, `DiffAside`
+new/resolved/unchanged/files pills in Git-Diff mode), a **drift-trend** area
+chart, a **By Artifact Kind donut** (mirrors analyze's `TypePieChart` — center
+total, active-slice pop-out, Title-Cased slice labels), the reused
+`SeverityBarChart`, and a **Top Files** table — all computed client-side from
+`verifyState.drifts` (or the diff's `added` set). Clicking a severity bar / kind
+slice / file row sets a shared filter (lifted to `RepoPage`, toggle-off on
+re-click) that narrows the center drift list; a **"Filtered by:" chip row**
+(matching `ViolationsPanel`) shows each active filter with a per-chip clear.
+`VerifyPanel`'s old internal kind tabs were removed in favor of the chart-driven
+filters. Chart card titles are Title-Cased to match analyze ("By Artifact Kind",
+"Top Files", "Drift Trend").
+
+- **Trend** is backed by `GET /api/repos/:id/verify/history` (reads
+  `verifier/history.json`); `readVerifyHistory` re-exported through the core
+  command module, surfaced via `api.getVerifyHistory` + `useVerifyState`.
+- New client components: `drift/DriftCharts.tsx`
+  (`DriftKindChart` / `DriftTopFiles` / `DriftTrendChart`), rebuilt
+  `drift/VerifyStatsColumn.tsx`.
+- Verification: client `tsc --noEmit` clean; `tests/dashboard-server/verify-routes.test.ts`
+  covers the history route; full suite 4153 passed.
+
+## Phase 41: Verify ↔ analyze header consistency `STATUS: DONE`
+
+Consolidated the verify and analyze headers onto shared components so the two
+surfaces behave identically:
+
+- **`components/layout/BranchLabel.tsx`** — the branch shown once, with a branch
+  icon (the verify style), used by the page `Header`. Removed the duplicate
+  branch render that `VerifyHeaderActions` was emitting (it showed twice on the
+  verify tab — plain in the Header + icon in the actions).
+- **`components/layout/DiffModeToggle.tsx`** — the Normal / Git Diff segmented
+  toggle (verify's `bg-accent` style + a `HoverPopover` hint), now used by both
+  analyze (`Header`) and verify (`VerifyHeaderActions`). Analyze's old bespoke
+  toggle + `Info` tooltip were replaced.
+- **`components/layout/RunHistoryDropdown.tsx`** — the past-runs dropdown,
+  extracted from the `Header` and now used for both analyze (`analyses`) and
+  **verify runs**. Verify gained run history viewing end-to-end:
+  `GET /api/repos/:id/verify/runs/:runId` (+ `readVerifyRunState` in core,
+  `api.getVerifyRun`) returns a past run's snapshot as `VerifyState`; selecting
+  one renders it read-only (diff disabled, run/toggle hidden) with a "Viewing
+  verify run … — return to latest" banner mirroring analyze's.
+- Diff-mode empty state now matches analyze's `DiffAside`: in Git-Diff mode with
+  no diff computed, the analytics aside shows a centered `GitCompare` "Click
+  Verify to compute the diff" prompt instead of empty badges + an empty By
+  Severity chart.
+- Verification: client `tsc --noEmit` clean; `verify-routes.test.ts` extended to
+  cover `GET /verify/runs/:runId` (snapshot + 404); full suite 4155 passed.
+
+## Phase 42: BL-Drift URL state parity `STATUS: DONE`
+
+The drift section's view selections now live in the URL like the analysis
+section's, so reloads and Back/Forward restore them:
+
+- **Verify Normal / Git Diff** reuses analyze's `?view=diff` (the shared
+  `isDiffMode` from `ViewModeContext`) instead of local state — toggling appends
+  `?view=diff`; reload restores it. `?view` is cleared on *section* switches
+  (analysis ↔ drift) so diff mode doesn't bleed between the two, but persists
+  across tab changes within a section. This also fixed a bug where clicking
+  Verify in diff mode kicked back to Normal: the post-diff `spec:complete`
+  refetch was hitting the reconcile effect's `setVerifyDiffMode(false)`; diff
+  mode is now URL-derived and no longer reset on refetch.
+- **Spec / Contracts / selected drift** mirror to `?canonical=<path>` /
+  `?contract=<path>` / `?drift=<id>` in `DriftViewContext` (previously pure local
+  state), matching how `OpenTabsContext` mirrors `?file` / `?flow`. Registered in
+  `NavigationContext` (`TAB_SCOPED_PARAMS` + `resolveTab` deep-links). Drift ids
+  are stable within a run (persisted in `LATEST`) so they survive reloads; a new
+  run regenerates them and `reconcileDriftTabs` drops a now-invalid selection
+  (and the state→URL effect clears the param).
+- Verification: client `tsc --noEmit` clean; `drift-view-context.test.tsx`
+  rendered under a `BrowserRouter` + extended with URL-sync cases
+  (canonical/contract/drift write + restore-on-mount + reconcile-clears); full
+  suite 4159 passed.
+
+## Phase 43: BL-Drift "Runs" page `STATUS: DONE`
+
+A drift-section runs list, the verify analog of analyze's Analyses page. New
+`runs` tab (noPanel) in the drift section renders `drift/VerifyRunsPanel` — a
+table of every recorded verify run (newest-first) with Date, Branch, Artifacts,
+and a Drifts severity-badge column (same visual as `AnalysesPanel`). A row click
+opens that run in the Verify tab (`selectedVerifyRunId` + switch tab); each row
+has a delete action.
+
+- Backend: `DELETE /api/repos/:id/verify/runs/:runId` (+ `deleteVerifyRun` in the
+  store — removes the snapshot file + history entry, and when the deleted run is
+  the one `LATEST` was built from, re-derives `LATEST` (+ clears a stale diff)
+  from the newest remaining run, or deletes it when none remain — mirroring
+  analyze's delete path, so the Verify view never outlives its history);
+  `VerifyHistoryEntry` gained `branch` / `commitHash` (populated on each run) so
+  the table can show the branch column.
+- Client: `api.deleteVerifyRun`, `VerifyRunsPanel`, wired into `RepoPage`
+  (`handleViewVerifyRun` / `handleDeleteVerifyRun`, refetch after delete).
+- Verification: client `tsc --noEmit` clean; `verify-routes.test.ts` covers the
+  delete route (removes from history + 404); `verify-store.test.ts` covers the
+  LATEST re-derivation (delete head ⇒ rebuild from newest remaining; delete last
+  ⇒ LATEST cleared; non-head delete ⇒ untouched); navigation-registry test
+  updated for the new tab; full suite 4164 passed.

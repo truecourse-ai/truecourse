@@ -48,6 +48,8 @@ export interface VerifyLatest {
   summary: { total: number; bySeverity: DriftSeverityCounts };
 }
 
+export type ChangedFile = { path: string; status: 'new' | 'modified' | 'deleted' };
+
 /** Current-vs-baseline drift diff, at `verifier/diff.json`. */
 export interface VerifyDiff {
   id: string;
@@ -61,6 +63,8 @@ export interface VerifyDiff {
   /** Drifts in the baseline but no longer present. */
   resolved: ContractDrift[];
   unchangedCount: number;
+  /** Uncommitted working-tree changes (git status) behind this diff. */
+  changedFiles: ChangedFile[];
   summary: { added: number; resolved: number; unchanged: number };
 }
 
@@ -68,6 +72,8 @@ export interface VerifyHistoryEntry {
   id: string;
   filename: string;
   verifiedAt: string;
+  branch: string | null;
+  commitHash: string | null;
   artifactCount: number;
   driftCount: number;
   bySeverity: DriftSeverityCounts;

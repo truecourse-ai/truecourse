@@ -61,17 +61,19 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getGit } from '../lib/git.js';
+import { getGit, isGitRepo } from '../lib/git.js';
 import {
   writeVerifyRun,
   writeVerifyLatest,
   readVerifyLatest,
+  readVerifyRun,
+  readVerifyHistory as readVerifyHistoryStore,
   appendVerifyHistory,
   deleteVerifyDiff,
   writeVerifyDiff,
 } from '../lib/verify-store.js';
-export { readVerifyDiff, verifyLatestPath } from '../lib/verify-store.js';
-export type { VerifyDiff, VerifyLatest } from '../types/verify-snapshot.js';
+export { readVerifyDiff, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
+export type { VerifyDiff, VerifyLatest, VerifyHistory } from '../types/verify-snapshot.js';
 import {
   diffDrifts,
   summarizeDrifts,
@@ -688,45 +690,56 @@ export async function generateContractsInProcess(
 // verify — compare code against generated IL contracts
 // ---------------------------------------------------------------------------
 
-const VERIFY_STATE_REL = path.join('.truecourse', '.cache', 'verifier', 'verify-state.json');
+// Pre-store location, kept only so a verify run can delete it. The verifier
+// store (`verifier/LATEST.json`) is the single source of truth — there is no
+// read fallback to this path.
+const LEGACY_VERIFY_STATE_REL = path.join('.truecourse', '.cache', 'verifier', 'verify-state.json');
 
-export function verifyStatePath(repoRoot: string): string {
-  return path.join(repoRoot, VERIFY_STATE_REL);
+function legacyVerifyStatePath(repoRoot: string): string {
+  return path.join(repoRoot, LEGACY_VERIFY_STATE_REL);
 }
 
+/**
+ * Current verify state, read from the verifier store's `LATEST.json` only.
+ * Returns null when no run has been recorded — callers show a "Run verify"
+ * CTA. (No fallback to the legacy `verify-state.json`.)
+ */
 export function readVerifyState(repoRoot: string): VerifyState | null {
-  // Prefer the new verifier store's LATEST.json; map it to the VerifyState
-  // shape dashboard/CLI consumers expect.
   const latest = readVerifyLatest(repoRoot);
-  if (latest) {
-    return {
-      verifiedAt: latest.run.verifiedAt,
-      contractsDir: latest.run.contractsDir,
-      codeDir: latest.run.codeDir,
-      artifactCount: latest.artifactCount,
-      extractedOperationCount: latest.extractedOperationCount,
-      drifts: latest.drifts,
-      resolverErrors: latest.resolverErrors,
-      unresolvedRefs: latest.unresolvedRefs,
-    };
-  }
-  // Legacy fallback (one release): the pre-store `.cache/verifier/verify-state.json`.
-  const file = verifyStatePath(repoRoot);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyState;
-    if (typeof raw.verifiedAt !== 'string') return null;
-    if (!Array.isArray(raw.drifts)) return null;
-    return raw;
-  } catch {
-    return null;
-  }
+  if (!latest) return null;
+  return {
+    verifiedAt: latest.run.verifiedAt,
+    contractsDir: latest.run.contractsDir,
+    codeDir: latest.run.codeDir,
+    artifactCount: latest.artifactCount,
+    extractedOperationCount: latest.extractedOperationCount,
+    drifts: latest.drifts,
+    resolverErrors: latest.resolverErrors,
+    unresolvedRefs: latest.unresolvedRefs,
+  };
 }
 
-export function writeVerifyState(repoRoot: string, state: VerifyState): void {
-  const file = verifyStatePath(repoRoot);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + '\n');
+/**
+ * State for a specific past verify run, looked up by run id via the history
+ * index. Same `VerifyState` shape as `readVerifyState` so the dashboard's
+ * "view a past run" path reuses the live view unchanged. Null if the run
+ * (or its snapshot file) is gone.
+ */
+export function readVerifyRunState(repoRoot: string, runId: string): VerifyState | null {
+  const entry = readVerifyHistoryStore(repoRoot).runs.find((r) => r.id === runId);
+  if (!entry) return null;
+  const snap = readVerifyRun(repoRoot, entry.filename);
+  if (!snap) return null;
+  return {
+    verifiedAt: snap.verifiedAt,
+    contractsDir: snap.contractsDir,
+    codeDir: snap.codeDir,
+    artifactCount: snap.artifactCount,
+    extractedOperationCount: snap.extractedOperationCount,
+    drifts: snap.drifts,
+    resolverErrors: snap.resolverErrors,
+    unresolvedRefs: snap.unresolvedRefs,
+  };
 }
 
 export interface VerifyInProcessOptions {
@@ -742,6 +755,13 @@ export interface VerifyInProcessOptions {
    * explicitly.
    */
   codeDir?: string;
+  /**
+   * Analyze the working tree as-is instead of stashing dirty changes first.
+   * The CLI sets this from `--no-stash` (or after the user declines the stash
+   * prompt). Defaults to `false` (stash if dirty) so the baseline reflects the
+   * committed state — mirroring `analyze`. Diff mode ignores this (never stashes).
+   */
+  skipStash?: boolean;
 }
 
 /**
@@ -778,7 +798,11 @@ export async function verifyInProcess(
     // `verify()` internally: load .tc files → resolve → extract
     // code-side operations → compare. We collapse those phases into
     // one tracker call because the engine doesn't surface them yet.
-    result = await verify({ contractsDir, codeDir });
+    // Stash dirty changes first (unless opted out) so the baseline reflects
+    // the committed state — same model as a full `analyze`.
+    result = await runWithStash(repoRoot, options.skipStash ?? false, tracker, () =>
+      verify({ contractsDir, codeDir }),
+    );
   } catch (e) {
     tracker?.error('load', (e as Error).message);
     throw e;
@@ -835,11 +859,14 @@ export async function verifyInProcess(
     id: runId,
     filename,
     verifiedAt,
+    branch,
+    commitHash,
     artifactCount: result.artifactCount,
     driftCount: result.drifts.length,
     bySeverity: summary.bySeverity,
   });
   deleteVerifyDiff(repoRoot); // baseline moved — any prior diff is obsolete
+  fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft
 
   const state: VerifyState = {
     verifiedAt,
@@ -868,6 +895,69 @@ async function gitMeta(repoRoot: string): Promise<{ branch: string | null; commi
 }
 
 /**
+ * Run `fn` against the committed state by stashing the dirty working tree first
+ * and popping after — mirroring `analyze-core`'s full-mode stash. No-ops when
+ * `skipStash`, when the tree is clean, when the repo is a subdirectory of a
+ * larger repo (stashing would touch parent-repo files), or when git is
+ * unavailable.
+ */
+async function runWithStash<T>(
+  repoRoot: string,
+  skipStash: boolean,
+  tracker: StepTracker | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let didStash = false;
+  let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
+  if (!skipStash) {
+    try {
+      stashGit = await getGit(repoRoot);
+      const status = await stashGit.status();
+      if (!status.isClean()) {
+        const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
+        if (path.resolve(repoRoot) === path.resolve(gitRoot)) {
+          tracker?.detail?.('load', 'Stashing pending changes...');
+          const res = await stashGit.stash(['push', '--include-untracked', '-m', 'truecourse-verify-stash']);
+          didStash = !res.includes('No local changes');
+        }
+      }
+    } catch {
+      // Not a git repo / git unavailable — verify the current state as-is.
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    if (didStash && stashGit) {
+      tracker?.detail?.('load', 'Restoring pending changes...');
+      try {
+        await stashGit.stash(['pop']);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(`[Verify] Failed to restore stashed changes. Run "git stash pop" manually. ${(e as Error).message}`);
+      }
+    }
+  }
+}
+
+/** Uncommitted working-tree changes from `git status`; empty when not a repo. */
+async function gitChangedFiles(repoRoot: string): Promise<import('../types/verify-snapshot.js').ChangedFile[]> {
+  const out: import('../types/verify-snapshot.js').ChangedFile[] = [];
+  try {
+    const git = await getGit(repoRoot);
+    const s = await git.status();
+    for (const f of s.not_added) out.push({ path: f, status: 'new' });
+    for (const f of s.created) out.push({ path: f, status: 'new' });
+    for (const f of s.modified) out.push({ path: f, status: 'modified' });
+    for (const f of s.staged) if (!out.some((c) => c.path === f)) out.push({ path: f, status: 'modified' });
+    for (const f of s.deleted) out.push({ path: f, status: 'deleted' });
+  } catch {
+    /* not a repo */
+  }
+  return out;
+}
+
+/**
  * Diff the current working tree's drifts against the committed `LATEST.json`
  * baseline (mirrors `analyze --diff`). Drifts are matched by obligation key
  * (`driftKey`) so the comparison is stable even though `ContractDrift.id`
@@ -882,6 +972,15 @@ export async function verifyDiffInProcess(
     options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
 
+  // The diff is "what do my uncommitted changes do vs the committed baseline",
+  // so it requires a git repo (like `analyze --diff`).
+  if (!(await isGitRepo(repoRoot))) {
+    const err = new Error(
+      'Verify diff requires a git repository — the diff compares your working-tree changes against the committed baseline.',
+    );
+    tracker?.error('load', err.message);
+    throw err;
+  }
   const baseline = readVerifyLatest(repoRoot);
   if (!baseline) {
     const err = new Error(
@@ -901,6 +1000,7 @@ export async function verifyDiffInProcess(
   tracker?.start('load');
   let result: VerifyResult;
   try {
+    // Diff mode never stashes — it verifies the working tree as-is.
     result = await verify({ contractsDir, codeDir });
   } catch (e) {
     tracker?.error('load', (e as Error).message);
@@ -915,6 +1015,7 @@ export async function verifyDiffInProcess(
   const { added, resolved, unchangedCount } = diffDrifts(baseline.drifts, result.drifts);
 
   const { branch, commitHash } = await gitMeta(repoRoot);
+  const changedFiles = await gitChangedFiles(repoRoot);
   const diff: VerifyDiff = {
     id: randomUUID(),
     baseRunId: baseline.run.id,
@@ -924,6 +1025,7 @@ export async function verifyDiffInProcess(
     added,
     resolved,
     unchangedCount,
+    changedFiles,
     summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
   };
   writeVerifyDiff(repoRoot, diff);

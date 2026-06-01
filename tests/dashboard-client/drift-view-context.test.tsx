@@ -1,19 +1,22 @@
 /**
  * DriftViewContext owns the BL-Drift panes (spec conflict, canonical
  * viewer, contracts viewer, verify drift tabs) lifted from
- * RepoGraphPage. Pure local state — no router — so tests render the
- * provider directly.
+ * RepoGraphPage. The canonical/contracts viewers mirror their active path
+ * to the URL (?canonical / ?contract), so the harness renders under a
+ * BrowserRouter and resets the URL per test.
  *
  * Key behaviours pinned here:
  *   - the right pane is single-slot: selecting a conflict clears the
  *     active canonical file and vice-versa;
- *   - canonical/contracts viewers use the transient/pinned tab model;
+ *   - canonical/contracts viewers use the transient/pinned tab model and
+ *     mirror the active path to the URL;
  *   - reconcileDriftTabs prunes open drift tabs to still-valid ids
  *     (and clears everything when passed null).
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { BrowserRouter } from 'react-router-dom';
 import { DriftViewProvider, useDriftView } from '@/contexts/DriftViewContext';
 
 let api: ReturnType<typeof useDriftView>;
@@ -42,10 +45,13 @@ function Probe() {
 }
 
 function renderProvider() {
+  window.history.replaceState({}, '', '/repos/abc');
   return render(
-    <DriftViewProvider>
-      <Probe />
-    </DriftViewProvider>,
+    <BrowserRouter>
+      <DriftViewProvider>
+        <Probe />
+      </DriftViewProvider>
+    </BrowserRouter>,
   );
 }
 
@@ -120,6 +126,53 @@ describe('DriftViewContext — verify drift tabs', () => {
     act(() => api.reconcileDriftTabs(null));
     expect(screen.getByTestId('driftTabs')).toHaveTextContent('');
     expect(screen.getByTestId('drift')).toHaveTextContent('∅');
+  });
+});
+
+describe('DriftViewContext — URL sync', () => {
+  it('mirrors the open canonical / contracts file to the URL', async () => {
+    const user = userEvent.setup();
+    renderProvider();
+    await user.click(screen.getByText('open-canon-a'));
+    expect(new URLSearchParams(window.location.search).get('canonical')).toBe('spec/a.md');
+    await user.click(screen.getByText('open-contract-x'));
+    expect(new URLSearchParams(window.location.search).get('contract')).toBe('contracts/x.ts');
+  });
+
+  it('restores the active canonical file from the URL on mount', () => {
+    window.history.replaceState({}, '', '/repos/abc?canonical=spec/from-url.md');
+    render(
+      <BrowserRouter>
+        <DriftViewProvider>
+          <Probe />
+        </DriftViewProvider>
+      </BrowserRouter>,
+    );
+    expect(screen.getByTestId('canonical')).toHaveTextContent('spec/from-url.md');
+    expect(screen.getByTestId('canonTabs')).toHaveTextContent('spec/from-url.md*');
+  });
+
+  it('mirrors the selected drift to ?drift and clears it when reconciled away', async () => {
+    const user = userEvent.setup();
+    renderProvider();
+    await user.click(screen.getByText('open-d1'));
+    expect(new URLSearchParams(window.location.search).get('drift')).toBe('d1');
+    // A re-run that no longer contains d1 prunes the selection + the URL param.
+    act(() => api.reconcileDriftTabs(new Set(['d2'])));
+    expect(new URLSearchParams(window.location.search).get('drift')).toBeNull();
+  });
+
+  it('restores the selected drift from the URL on mount', () => {
+    window.history.replaceState({}, '', '/repos/abc?drift=d-from-url');
+    render(
+      <BrowserRouter>
+        <DriftViewProvider>
+          <Probe />
+        </DriftViewProvider>
+      </BrowserRouter>,
+    );
+    expect(screen.getByTestId('drift')).toHaveTextContent('d-from-url');
+    expect(screen.getByTestId('driftTabs')).toHaveTextContent('d-from-url');
   });
 });
 

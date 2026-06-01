@@ -47,7 +47,6 @@ import {
   SCAN_STEPS,
   scanInProcess,
   upsertDecision,
-  verifyStatePath,
   verifyLatestPath,
 } from '@truecourse/core/commands/spec-in-process';
 import {
@@ -294,10 +293,10 @@ router.post(
 //   contractsStale  claims.json is newer than the last generate marker
 //                   (or the marker is missing → never generated against
 //                   the current claim set)
-//   verifyStale     last generate marker is newer than verify-state.json
-//                   (or verify-state.json is missing → never verified
-//                   against current contracts). verify-state.json is its
-//                   own marker; `verifyInProcess` rewrites it on every
+//   verifyStale     last generate marker is newer than verifier/LATEST.json
+//                   (or LATEST.json is missing → never verified against
+//                   current contracts). The verifier store's LATEST.json is
+//                   its own marker; `verifyInProcess` rewrites it on every
 //                   successful run.
 // ---------------------------------------------------------------------------
 
@@ -308,10 +307,8 @@ router.get(
       const repo = resolveProjectForRequest(req.params.id as string);
       const claimsMtime = mtimeIfExists(claimsFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
-      // Prefer the new verifier store's LATEST.json; fall back to the legacy
-      // verify-state.json so staleness stays correct through the migration.
-      const verifiedMtime =
-        mtimeIfExists(verifyLatestPath(repo.path)) ?? mtimeIfExists(verifyStatePath(repo.path));
+      // Verifier store's LATEST.json is the verify marker (its own write stamp).
+      const verifiedMtime = mtimeIfExists(verifyLatestPath(repo.path));
 
       const contractsStale =
         claimsMtime !== null &&

@@ -7,20 +7,25 @@
  * so selecting a conflict and opening a canonical section are mutually
  * exclusive (each clears the other).
  *
- * Pure local state — no URL or navigation coupling — so the provider
- * just wraps state + handlers. The verify run lives outside this
- * context (useVerifyState in RepoPage); `reconcileDriftTabs` lets the
- * page prune open drift tabs whose ids no longer exist after a re-run.
+ * The canonical-spec and contracts file viewers mirror their active path
+ * to the URL (?canonical / ?contract), matching how the analysis-section
+ * viewers mirror ?file / ?flow — so a reload or deep link restores the open
+ * file. Spec conflicts and verify drift tabs stay local (drift ids are
+ * regenerated each run, so they aren't URL-stable). The verify run lives
+ * outside this context (useVerifyState in RepoPage); `reconcileDriftTabs`
+ * lets the page prune open drift tabs whose ids no longer exist after a re-run.
  */
 
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 export type ViewerTab = { path: string; pinned: boolean };
 export type DriftTab = { id: string; pinned: boolean };
@@ -62,17 +67,49 @@ export interface DriftViewContextValue {
 const DriftViewContext = createContext<DriftViewContextValue | null>(null);
 
 export function DriftViewProvider({ children }: { children: ReactNode }) {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const canonicalFromUrl = searchParams?.get('canonical') || null;
+  const contractFromUrl = searchParams?.get('contract') || null;
+
   const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(
     null,
   );
-  const [activeCanonicalPath, setActiveCanonicalPath] = useState<string | null>(
-    null,
+
+  const [activeCanonicalPath, setActiveCanonicalPathState] = useState<string | null>(
+    canonicalFromUrl,
   );
-  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<ViewerTab[]>([]);
-  const [activeContractsPath, setActiveContractsPath] = useState<string | null>(
-    null,
+  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<ViewerTab[]>(() =>
+    canonicalFromUrl ? [{ path: canonicalFromUrl, pinned: true }] : [],
   );
-  const [openContractsFiles, setOpenContractsFiles] = useState<ViewerTab[]>([]);
+  const setActiveCanonicalPath = useCallback(
+    (path: string | null) => {
+      setActiveCanonicalPathState(path);
+      const url = new URL(window.location.href);
+      if (path) url.searchParams.set('canonical', path);
+      else url.searchParams.delete('canonical');
+      navigate(url.pathname + url.search);
+    },
+    [navigate],
+  );
+
+  const [activeContractsPath, setActiveContractsPathState] = useState<string | null>(
+    contractFromUrl,
+  );
+  const [openContractsFiles, setOpenContractsFiles] = useState<ViewerTab[]>(() =>
+    contractFromUrl ? [{ path: contractFromUrl, pinned: true }] : [],
+  );
+  const setActiveContractsPath = useCallback(
+    (path: string | null) => {
+      setActiveContractsPathState(path);
+      const url = new URL(window.location.href);
+      if (path) url.searchParams.set('contract', path);
+      else url.searchParams.delete('contract');
+      navigate(url.pathname + url.search);
+    },
+    [navigate],
+  );
 
   const handleOpenContracts = useCallback((path: string, pinned: boolean) => {
     setOpenContractsFiles((prev) => {
@@ -141,8 +178,17 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
   );
 
   // --- Verify drift tabs -------------------------------------------
-  const [activeDriftId, setActiveDriftId] = useState<string | null>(null);
-  const [openDriftTabs, setOpenDriftTabs] = useState<DriftTab[]>([]);
+  // The selected drift mirrors to ?drift. Drift ids are stable within a run
+  // (persisted in LATEST) so they survive reloads; a new verify run
+  // regenerates them, and `reconcileDriftTabs` clears a now-invalid selection
+  // (which the state→URL effect below then drops from the URL). Because
+  // `reconcileDriftTabs`/`handleCloseDrift` need functional state updates, the
+  // selection syncs to the URL via an effect rather than a wrapped setter.
+  const driftFromUrl = searchParams?.get('drift') || null;
+  const [activeDriftId, setActiveDriftId] = useState<string | null>(driftFromUrl);
+  const [openDriftTabs, setOpenDriftTabs] = useState<DriftTab[]>(() =>
+    driftFromUrl ? [{ id: driftFromUrl, pinned: true }] : [],
+  );
 
   const handleOpenDrift = useCallback((id: string, pinned: boolean) => {
     setOpenDriftTabs((prev) => {
@@ -182,6 +228,25 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
     setOpenDriftTabs((prev) => prev.filter((d) => validIds.has(d.id)));
     setActiveDriftId((prev) => (prev && validIds.has(prev) ? prev : null));
   }, []);
+
+  // Mirror ?canonical / ?contract / ?drift into state on Back/Forward + deep links.
+  useEffect(() => {
+    setActiveCanonicalPathState(searchParams?.get('canonical') ?? null);
+    setActiveContractsPathState(searchParams?.get('contract') ?? null);
+    setActiveDriftId(searchParams?.get('drift') ?? null);
+  }, [searchParams]);
+
+  // Mirror the selected drift to ?drift. Guarded against re-writing an
+  // already-matching URL so it doesn't loop with the effect above or stack
+  // history entries on Back/Forward.
+  useEffect(() => {
+    const current = new URLSearchParams(window.location.search).get('drift');
+    if ((activeDriftId ?? '') === (current ?? '')) return;
+    const url = new URL(window.location.href);
+    if (activeDriftId) url.searchParams.set('drift', activeDriftId);
+    else url.searchParams.delete('drift');
+    navigate(url.pathname + url.search);
+  }, [activeDriftId, navigate]);
 
   const value = useMemo<DriftViewContextValue>(
     () => ({

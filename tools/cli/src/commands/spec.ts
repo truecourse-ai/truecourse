@@ -30,6 +30,7 @@ import {
   INFER_STEPS,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
+import { resolveStashDecision } from "./analyze.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -160,15 +161,20 @@ export interface RunVerifyOptions extends RunSpecOptions {
   codeDir?: string;
   /** Diff the working tree's drifts against the committed LATEST baseline. */
   diff?: boolean;
+  /** Stash decision: true → stash, false → no-stash, undefined → prompt. */
+  stash?: boolean;
 }
 
 export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
   if (opts.diff) return runVerifyDiff(opts);
   const root = repoRoot(opts);
+  // Like `analyze`, a full verify stashes the dirty tree (after confirmation)
+  // so the baseline reflects the committed state.
+  const { skipStash } = await resolveStashDecision({ stash: opts.stash }, root);
   p.intro("Verify");
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
   try {
-    const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir });
+    const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir, skipStash });
     renderer.dispose();
 
     p.log.step(`artifacts   ${verify.artifactCount}`);

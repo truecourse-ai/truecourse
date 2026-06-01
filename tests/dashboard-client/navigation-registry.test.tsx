@@ -52,7 +52,7 @@ describe('navigation registry — pure lookups', () => {
 
   it('tabsForSection returns section tabs (or empty)', () => {
     const tabs = tabsForSection('drift').map((t) => t.id);
-    expect(tabs).toEqual(['spec', 'contracts', 'verify', 'decisions']);
+    expect(tabs).toEqual(['spec', 'contracts', 'verify', 'runs', 'decisions']);
     expect(tabsForSection('nope')).toEqual([]);
   });
 
@@ -67,7 +67,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['spec', 'contracts', 'verify', 'decisions']) {
+    for (const t of ['spec', 'contracts', 'verify', 'runs', 'decisions']) {
       expect(ids.has(t)).toBe(true);
     }
   });

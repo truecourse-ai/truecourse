@@ -11,22 +11,54 @@
  *           code path as the CLI's `truecourse verify`.
  */
 
+import path from 'node:path';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import {
   VERIFY_STEPS,
   readVerifyState,
+  readVerifyRunState,
   verifyInProcess,
   verifyDiffInProcess,
   readVerifyDiff,
+  readVerifyHistory,
+  deleteVerifyRun,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { getGit } from '@truecourse/core/lib/git';
 import {
   createSocketSpecTracker,
+  createSocketStashConfirmHandler,
   emitSpecComplete,
   emitSpecProgress,
 } from '../socket/handlers.js';
 
 const router: Router = Router();
+
+/**
+ * Mirror of the analyze run's stash decision: clean tree / subdir-repo /
+ * non-git → 'stash' (no prompt); dirty → prompt the client via the shared
+ * `analysis:stash-confirm-*` socket dialog.
+ */
+async function resolveVerifyStashDecision(
+  repoId: string,
+  repoPath: string,
+): Promise<'stash' | 'no-stash' | 'cancel'> {
+  let modifiedCount = 0;
+  let untrackedCount = 0;
+  try {
+    const git = await getGit(repoPath);
+    const status = await git.status();
+    if (status.isClean()) return 'stash';
+    const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
+    if (path.resolve(repoPath) !== path.resolve(gitRoot)) return 'stash';
+    modifiedCount =
+      status.modified.length + status.staged.length + status.deleted.length + status.created.length;
+    untrackedCount = status.not_added.length;
+  } catch {
+    return 'stash';
+  }
+  return createSocketStashConfirmHandler(repoId)({ modifiedCount, untrackedCount });
+}
 
 router.get(
   '/:id/verify/state',
@@ -55,11 +87,21 @@ router.post(
       // Verify reuses the same Spec progress socket channel — the
       // popup component is identical to Scan/Apply, just driven by
       // VERIFY_STEPS instead of the spec-side step lists.
+      // Like a full analyze, ask to stash a dirty tree first so the baseline
+      // reflects the committed state.
+      const stashDecision = await resolveVerifyStashDecision(repoIdForCleanup, repo.path);
+      if (stashDecision === 'cancel') {
+        res.status(409).json({ error: 'Verify canceled.', canceled: true });
+        return;
+      }
       const tracker = createSocketSpecTracker(
         repoIdForCleanup,
         VERIFY_STEPS.map((s) => ({ ...s })),
       );
-      const { state } = await verifyInProcess(repo.path, { tracker });
+      const { state } = await verifyInProcess(repo.path, {
+        tracker,
+        skipStash: stashDecision === 'no-stash',
+      });
       emitSpecComplete(repoIdForCleanup, 'verify');
       res.json(state);
     } catch (e) {
@@ -70,6 +112,52 @@ router.post(
           detail: (e as Error).message,
         });
       }
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/verify/history',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      res.json(readVerifyHistory(repo.path));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/verify/runs/:runId',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const state = readVerifyRunState(repo.path, req.params.runId as string);
+      if (!state) {
+        res.status(404).json({ error: 'Verify run not found.' });
+        return;
+      }
+      res.json(state);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/verify/runs/:runId',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const deleted = deleteVerifyRun(repo.path, req.params.runId as string);
+      if (!deleted) {
+        res.status(404).json({ error: 'Verify run not found.' });
+        return;
+      }
+      res.json({ deleted: true });
+    } catch (e) {
       next(e);
     }
   },

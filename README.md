@@ -130,8 +130,9 @@ truecourse contracts list                          # List generated contracts
 truecourse contracts validate                      # Parse + resolve TC files; report unresolved refs
 
 # Verification (code against contracts) — separate command, not part of `analyze`
-truecourse verify                                   # Full run: writes verifier/runs + LATEST + history
-truecourse verify --diff                            # Diff drifts vs the committed LATEST baseline (added/resolved/unchanged)
+truecourse verify                                   # Full run: stashes dirty tree (prompts), writes verifier/runs + LATEST + history
+truecourse verify --diff                            # Git diff: working-tree drifts vs committed baseline (added/resolved/unchanged)
+truecourse verify --stash / --no-stash              # Pre-approve / skip stashing on a full run
 
 # Inference (code → inferred contracts) — reverse-engineer undocumented decisions
 truecourse infer                                   # Write inferred .tc files to contracts/_inferred/

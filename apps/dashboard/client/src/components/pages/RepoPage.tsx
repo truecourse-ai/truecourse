@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -29,7 +29,9 @@ import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
 import { ContractsPanel } from '@/components/drift/ContractsPanel';
 import { ContractsFile } from '@/components/drift/ContractsFile';
-import { VerifyPanel } from '@/components/drift/VerifyPanel';
+import { VerifyPanel, type DriftFilterTarget } from '@/components/drift/VerifyPanel';
+import { VerifyStatsColumn, type DriftFilters } from '@/components/drift/VerifyStatsColumn';
+import { VerifyRunsPanel } from '@/components/drift/VerifyRunsPanel';
 import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
 import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
 import { useVerifyState } from '@/hooks/useVerifyState';
@@ -64,7 +66,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
-import type { RepoResponse } from '@/lib/api';
+import type { RepoResponse, DriftSeverity, VerifyState } from '@/lib/api';
 import type { Node, Edge } from '@xyflow/react';
 
 // Outer shell: mounts the navigation context (top-level section +
@@ -283,6 +285,7 @@ function RepoPageInner() {
   const {
     state: verifyState,
     diff: verifyDiff,
+    history: verifyHistory,
     isLoading: verifyLoading,
     isRunning: verifyRunning,
     isDiffing: verifyDiffing,
@@ -301,13 +304,131 @@ function RepoPageInner() {
     verifyStale,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
+  // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
+  // (URL `?view=diff`) so the toggle persists across reloads exactly like
+  // analyze. Toggling only switches the view — the diff is computed by the
+  // run button (below) while in diff mode, not on toggle.
+  // Analytics-driven drift filters (set by clicking the left charts, applied to
+  // the center list). Each toggles off when its active value is re-clicked,
+  // mirroring analyze's severity/category/path filters.
+  const [driftFilters, setDriftFilters] = useState<DriftFilters>({
+    severity: null,
+    kind: null,
+    file: null,
+  });
+  const toggleDriftSeverity = useCallback(
+    (s: string) =>
+      setDriftFilters((f) => ({ ...f, severity: f.severity === s ? null : (s as DriftSeverity) })),
+    [],
+  );
+  const toggleDriftKind = useCallback(
+    (k: string) => setDriftFilters((f) => ({ ...f, kind: f.kind === k ? null : k })),
+    [],
+  );
+  const toggleDriftFile = useCallback(
+    (file: string) => setDriftFilters((f) => ({ ...f, file: f.file === file ? null : file })),
+    [],
+  );
+  const clearDriftFilter = useCallback(
+    (target: DriftFilterTarget) => setDriftFilters((f) => ({ ...f, [target]: null })),
+    [],
+  );
+  // Resizable analytics aside for the verify view, mirroring analyze's
+  // HomePanel aside (charts on the left, list + detail to the right).
+  const [verifyPanelWidth, setVerifyPanelWidth] = useState(560);
+  const verifyDragging = useRef(false);
+  const handleVerifyResizeDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      verifyDragging.current = true;
+      const startX = e.clientX;
+      const startW = verifyPanelWidth;
+      const onMove = (ev: MouseEvent) => {
+        if (!verifyDragging.current) return;
+        const delta = ev.clientX - startX;
+        setVerifyPanelWidth(Math.min(800, Math.max(320, startW + delta)));
+      };
+      const onUp = () => {
+        verifyDragging.current = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [verifyPanelWidth],
+  );
+  // Past-run viewing, mirroring analyze's selectedAnalysisId. When set, the
+  // verify view shows that run's snapshot read-only (diff disabled).
+  const [selectedVerifyRunId, setSelectedVerifyRunId] = useState<string | null>(null);
+  const [verifyRunState, setVerifyRunState] = useState<VerifyState | null>(null);
+  useEffect(() => {
+    if (!selectedVerifyRunId || !repoId) {
+      setVerifyRunState(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getVerifyRun(repoId, selectedVerifyRunId)
+      .then((s) => {
+        if (!cancelled) setVerifyRunState(s);
+      })
+      .catch(() => {
+        if (!cancelled) setVerifyRunState(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVerifyRunId, repoId]);
+  const isViewingVerifyRun = !!selectedVerifyRunId;
+  // What the verify columns actually render: a selected past run, else LATEST.
+  const effectiveVerifyState = isViewingVerifyRun ? verifyRunState : verifyState;
+  // Diff is latest-only; a past run is always shown in normal mode.
+  const effectiveVerifyDiffMode = isDiffMode && !isViewingVerifyRun;
+  // Newest-first run list for the dropdown (history is appended oldest-first).
+  const verifyRunItems = useMemo(
+    () =>
+      [...verifyHistory.runs].reverse().map((r) => {
+        const d = new Date(r.verifiedAt);
+        return {
+          id: r.id,
+          label: Number.isNaN(d.getTime())
+            ? r.verifiedAt
+            : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        };
+      }),
+    [verifyHistory],
+  );
+  const selectedVerifyRunLabel = isViewingVerifyRun
+    ? verifyRunItems.find((r) => r.id === selectedVerifyRunId)?.label ?? null
+    : null;
+  // Runs page: open a run in the Verify tab; delete a run from history.
+  const handleViewVerifyRun = useCallback(
+    (runId: string | null) => {
+      setSelectedVerifyRunId(runId);
+      setLeftTab('verify');
+    },
+    [setLeftTab],
+  );
+  const handleDeleteVerifyRun = useCallback(
+    async (runId: string) => {
+      await api.deleteVerifyRun(repoId, runId);
+      setSelectedVerifyRunId((cur) => (cur === runId ? null : cur));
+      await refetchVerify();
+    },
+    [repoId, refetchVerify],
+  );
   // When the underlying verify run changes (re-run / fresh load), drop
   // any open drift tabs whose ids no longer exist so we never show a
-  // stale tab pointing at nothing.
+  // stale tab pointing at nothing, and clear filters / past-run selection.
+  // Diff mode is intentionally NOT reset here — it's URL-derived (`isDiffMode`),
+  // so the post-diff refetch no longer kicks the user back to Normal.
   useEffect(() => {
     reconcileDriftTabs(
       verifyState ? new Set(verifyState.drifts.map((d) => d.id)) : null,
     );
+    setDriftFilters({ severity: null, kind: null, file: null });
+    setSelectedVerifyRunId(null);
   }, [verifyState, reconcileDriftTabs]);
 
   const isViewingHistory = !!selectedAnalysisId;
@@ -778,9 +899,16 @@ function RepoPageInner() {
             />
           ) : leftTab === 'verify' ? (
             <VerifyHeaderActions
-              isRunning={verifyRunning}
-              onRun={runVerify}
+              isRunning={isDiffMode ? verifyDiffing : verifyRunning}
+              onRun={isDiffMode ? runVerifyDiff : runVerify}
               stale={verifyStale}
+              diffMode={isDiffMode}
+              onToggleDiff={setIsDiffMode}
+              isGitRepo={repo?.isGitRepo !== false}
+              runItems={verifyRunItems}
+              selectedRunId={selectedVerifyRunId}
+              onSelectRun={setSelectedVerifyRunId}
+              viewingHistory={isViewingVerifyRun}
             />
           ) : null
         }
@@ -808,6 +936,19 @@ function RepoPageInner() {
       {isDiffMode && diffResult?.diffAnalysisId && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
           <span>Showing working tree state (uncommitted changes)</span>
+        </div>
+      )}
+      {leftTab === 'verify' && isViewingVerifyRun && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <span>
+            Viewing verify run{selectedVerifyRunLabel ? ` from ${selectedVerifyRunLabel}` : ''} — not the latest
+          </span>
+          <button
+            className="underline hover:text-amber-400 transition-colors"
+            onClick={() => setSelectedVerifyRunId(null)}
+          >
+            Return to latest
+          </button>
         </div>
       )}
       {repoError && (
@@ -839,13 +980,6 @@ function RepoPageInner() {
             flows: flowList.length,
             databases: nodes.filter((n) => n.type === 'database').length,
             analyses: analyses.length,
-          }}
-          tabWarnings={{
-            verify: verifyState && verifyState.unresolvedRefs.length > 0
-              ? `${verifyState.unresolvedRefs.length} unresolved reference${
-                  verifyState.unresolvedRefs.length === 1 ? '' : 's'
-                } — some artifacts the spec mentions weren't extracted into contracts. Drifts against them won't be detected.`
-              : null,
           }}
         >
           {leftTab === 'flows' && (
@@ -936,18 +1070,6 @@ function RepoPageInner() {
               onOpen={handleOpenContracts}
             />
           )}
-          {leftTab === 'verify' && (
-            <VerifyPanel
-              state={verifyState}
-              diff={verifyDiff}
-              isLoading={verifyLoading}
-              isDiffing={verifyDiffing}
-              error={verifyError}
-              activeDriftId={activeDriftId}
-              onRunDiff={runVerifyDiff}
-              onOpenDrift={handleOpenDrift}
-            />
-          )}
           {leftTab === 'decisions' && (
             <DecisionsPanel
               activeConflictId={activeSpecConflictId}
@@ -962,8 +1084,7 @@ function RepoPageInner() {
           {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
           (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
-          (leftTab === 'contracts' && openContractsFiles.length > 0) ||
-          (leftTab === 'verify' && openDriftTabs.length > 0) ? (
+          (leftTab === 'contracts' && openContractsFiles.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1117,41 +1238,7 @@ function RepoPageInner() {
                   </div>
                 );
               })}
-              {/* Drift tabs */}
-              {leftTab === 'verify' && openDriftTabs.map((t) => {
-                const drift = verifyState?.drifts.find((d) => d.id === t.id);
-                if (!drift) return null;
-                const label = drift.obligationKey || drift.id;
-                const isActive = activeDriftId === t.id;
-                const tooltip = drift.artifactRef
-                  ? `${drift.artifactRef.type}:${drift.artifactRef.identity} — ${drift.obligationKey}`
-                  : drift.obligationKey;
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => setActiveDriftId(t.id)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={tooltip}
-                  >
-                    <span className={`min-w-0 truncate max-w-[16rem] pr-0.5 ${t.pinned ? 'font-medium' : 'italic'}`}>{label}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseDrift(t.id);
-                      }}
-                      className={`shrink-0 rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
+              {/* Verify drifts use the 3-column view (no tab bar). */}
             </div>
           ) : null}
 
@@ -1198,26 +1285,77 @@ function RepoPageInner() {
             </div>
           ) : leftTab === 'verify' ? (
             (() => {
-              const activeDrift = activeDriftId
-                ? verifyState?.drifts.find((d) => d.id === activeDriftId)
-                : null;
-              if (activeDrift) {
-                return (
-                  <VerifyDriftDetail
-                    drift={activeDrift}
-                    onClose={() => handleCloseDrift(activeDrift.id)}
-                    onOpenFile={(filePath, line) => {
-                      // Cross-section navigation: drift refers to a
-                      // file → switch to Code Analysis and open the
-                      // file viewer at the right line.
-                      setDashboardSection('analysis');
-                      handleOpenFile(filePath, true, line);
-                    }}
-                  />
-                );
-              }
-              return <VerifyEmptyState />;
+              // Verify view, mirroring analyze's HomePanel layout: a resizable
+              // analytics aside on the LEFT, then the drift list, then the
+              // selected drift's detail. `effectiveVerifyState` is a past run
+              // when one is selected, else LATEST.
+              const activeDrift =
+                (effectiveVerifyDiffMode
+                  ? [...(verifyDiff?.added ?? []), ...(verifyDiff?.resolved ?? [])]
+                  : effectiveVerifyState?.drifts ?? []
+                ).find((d) => d.id === activeDriftId) ?? null;
+              return (
+                <div className="flex h-full w-full overflow-hidden">
+                  <aside
+                    style={{ width: verifyPanelWidth }}
+                    className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-card"
+                  >
+                    <VerifyStatsColumn
+                      state={effectiveVerifyState}
+                      diff={verifyDiff}
+                      history={verifyHistory}
+                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
+                      isDiffing={verifyDiffing}
+                      filters={driftFilters}
+                      onToggleSeverity={toggleDriftSeverity}
+                      onToggleKind={toggleDriftKind}
+                      onToggleFile={toggleDriftFile}
+                    />
+                    <div
+                      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
+                      onMouseDown={handleVerifyResizeDown}
+                    />
+                  </aside>
+                  <div className="w-[380px] shrink-0 overflow-hidden border-r border-border">
+                    <VerifyPanel
+                      state={effectiveVerifyState}
+                      diff={verifyDiff}
+                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
+                      isLoading={verifyLoading}
+                      isDiffing={verifyDiffing}
+                      error={verifyError}
+                      activeDriftId={activeDriftId}
+                      filters={driftFilters}
+                      onClearFilter={clearDriftFilter}
+                      onOpenDrift={handleOpenDrift}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    {activeDrift ? (
+                      <VerifyDriftDetail
+                        drift={activeDrift}
+                        onClose={() => handleCloseDrift(activeDrift.id)}
+                        onOpenFile={(filePath, line) => {
+                          // Cross-section navigation: switch to Code Analysis
+                          // and open the file viewer at the right line.
+                          setDashboardSection('analysis');
+                          handleOpenFile(filePath, true, line);
+                        }}
+                      />
+                    ) : (
+                      <VerifyEmptyState />
+                    )}
+                  </div>
+                </div>
+              );
             })()
+          ) : leftTab === 'runs' ? (
+            <VerifyRunsPanel
+              history={verifyHistory}
+              selectedRunId={selectedVerifyRunId}
+              onViewRun={handleViewVerifyRun}
+              onDeleteRun={handleDeleteVerifyRun}
+            />
           ) : leftTab === 'decisions' ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
               <p className="max-w-md">

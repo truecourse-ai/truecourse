@@ -107,7 +107,8 @@ export const SECTIONS: SectionDescriptor[] = [
     tabs: [
       { id: 'spec', label: 'Spec', icon: BookOpen },
       { id: 'contracts', label: 'Contracts', icon: FileCode2 },
-      { id: 'verify', label: 'Verify', icon: ShieldCheck },
+      { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
+      { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
       { id: 'decisions', label: 'Decisions', icon: GitMerge },
     ],
   },

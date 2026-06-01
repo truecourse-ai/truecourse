@@ -13,11 +13,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import * as api from '@/lib/api';
-import type { VerifyState, VerifyDiff } from '@/lib/api';
+import type { VerifyState, VerifyDiff, VerifyHistory } from '@/lib/api';
 
 export function useVerifyState(repoId: string | undefined) {
   const [state, setState] = useState<VerifyState | null>(null);
   const [diff, setDiff] = useState<VerifyDiff | null>(null);
+  const [history, setHistory] = useState<VerifyHistory>({ runs: [] });
   const [isLoading, setIsLoading] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isDiffing, setIsDiffing] = useState(false);
@@ -28,12 +29,14 @@ export function useVerifyState(repoId: string | undefined) {
     setIsLoading(true);
     setError(null);
     try {
-      const [s, d] = await Promise.all([
+      const [s, d, h] = await Promise.all([
         api.getVerifyState(repoId),
         api.getVerifyDiff(repoId),
+        api.getVerifyHistory(repoId),
       ]);
       setState(s);
       setDiff(d);
+      setHistory(h);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load verify state');
     } finally {
@@ -49,6 +52,7 @@ export function useVerifyState(repoId: string | undefined) {
       const s = await api.postVerifyRun(repoId);
       setState(s);
       setDiff(null); // a fresh full run moves the baseline — any diff is stale
+      api.getVerifyHistory(repoId).then(setHistory).catch(() => {}); // trend gains a point
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Verify failed';
       setError(message);
@@ -76,5 +80,5 @@ export function useVerifyState(repoId: string | undefined) {
     refetch();
   }, [refetch]);
 
-  return { state, diff, isLoading, isRunning, isDiffing, error, refetch, run, runDiff };
+  return { state, diff, history, isLoading, isRunning, isDiffing, error, refetch, run, runDiff };
 }

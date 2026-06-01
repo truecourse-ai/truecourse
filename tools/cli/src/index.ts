@@ -370,8 +370,10 @@ program
   .description("Compare code against the canonical TC contracts")
   .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
   .option("--diff", "Diff current drifts against the committed LATEST baseline")
+  .option("--stash", "Pre-approve stashing pending changes (verify committed state)")
+  .option("--no-stash", "Verify the working tree as-is without stashing")
   .action(async (options) => {
-    await runVerify({ codeDir: options.codeDir, diff: options.diff });
+    await runVerify({ codeDir: options.codeDir, diff: options.diff, stash: options.stash });
   });
 
 // Infer — reverse-engineers undocumented decisions from code into _inferred/.

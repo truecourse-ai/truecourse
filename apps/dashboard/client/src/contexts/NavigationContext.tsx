@@ -34,7 +34,7 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow'];
+const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'canonical', 'contract', 'drift'];
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
   return searchParams?.get('section') === 'drift' ? 'drift' : 'analysis';
@@ -52,6 +52,9 @@ function resolveTab(searchParams: URLSearchParams | null): LeftTab {
   if (tabParam && allTabIds().has(tabParam)) return tabParam;
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
+  if (searchParams?.get('canonical')) return 'spec';
+  if (searchParams?.get('contract')) return 'contracts';
+  if (searchParams?.get('drift')) return 'verify';
   return defaultTabForSection(resolveSection(searchParams));
 }
 
@@ -88,6 +91,9 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       if (next === 'drift') url.searchParams.set('section', 'drift');
       else url.searchParams.delete('section');
       for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
+      // Diff mode (?view=diff) is shared by analyze + verify but is
+      // section-specific in meaning, so don't carry it across sections.
+      url.searchParams.delete('view');
       if (nextTab !== 'home') url.searchParams.set('tab', nextTab);
       navigate(url.pathname + url.search);
     },

@@ -872,6 +872,8 @@ export function postVerifyRun(repoId: string): Promise<VerifyState> {
   });
 }
 
+export type ChangedFile = { path: string; status: 'new' | 'modified' | 'deleted' };
+
 export type VerifyDiff = {
   id: string;
   baseRunId: string;
@@ -881,6 +883,7 @@ export type VerifyDiff = {
   added: ContractDrift[];
   resolved: ContractDrift[];
   unchangedCount: number;
+  changedFiles: ChangedFile[];
   summary: { added: number; resolved: number; unchanged: number };
 };
 
@@ -898,6 +901,40 @@ export async function getVerifyDiff(repoId: string): Promise<VerifyDiff | null> 
 export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
   return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
     method: 'POST',
+  });
+}
+
+export type VerifyHistoryEntry = {
+  id: string;
+  filename: string;
+  verifiedAt: string;
+  branch: string | null;
+  commitHash: string | null;
+  artifactCount: number;
+  driftCount: number;
+  bySeverity: Record<DriftSeverity, number>;
+};
+export type VerifyHistory = { runs: VerifyHistoryEntry[] };
+
+/** Per-run drift summaries for the trend chart. Empty when no runs yet. */
+export async function getVerifyHistory(repoId: string): Promise<VerifyHistory> {
+  try {
+    return await fetchApi<VerifyHistory>(`/api/repos/${repoId}/verify/history`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return { runs: [] };
+    throw e;
+  }
+}
+
+/** State for a specific past verify run (for the runs dropdown). */
+export function getVerifyRun(repoId: string, runId: string): Promise<VerifyState> {
+  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/runs/${runId}`);
+}
+
+/** Delete a past verify run (snapshot + history entry). */
+export function deleteVerifyRun(repoId: string, runId: string): Promise<{ deleted: boolean }> {
+  return fetchApi<{ deleted: boolean }>(`/api/repos/${repoId}/verify/runs/${runId}`, {
+    method: 'DELETE',
   });
 }
 
