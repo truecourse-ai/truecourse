@@ -52,11 +52,16 @@ export class EmptyStatic {
 }
 
 // VIOLATION: code-quality/deterministic/negated-condition
+// Small negated bail with a substantive else body — inverting moves the
+// happy path ahead of the early-bail and reads more naturally.
 export function negated(x: number) {
   if (!x) {
     return 'falsy';
   } else {
-    return 'truthy';
+    const doubled = x * 2;
+    const squared = x * x;
+    const cubed = x * x * x;
+    return `truthy: ${doubled} ${squared} ${cubed}`;
   }
 }
 

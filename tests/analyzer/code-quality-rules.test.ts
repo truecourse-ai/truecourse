@@ -663,6 +663,40 @@ describe('code-quality/deterministic/cognitive-complexity', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not count short-circuits and ternaries inside JSX as cognitive complexity', () => {
+    // A React-style component whose only "complexity" is conditional render
+    // (`cond && <X/>`, `cond ? <A/> : <B/>`) — these are structural template
+    // patterns, not control-flow worth charging. The pre-fix heuristic
+    // counted each one and pushed many real components over the threshold.
+    const violations = check(`
+      function Panel({ a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q }: Record<string, boolean>) {
+        return (
+          <div>
+            {a && <span/>}
+            {b && <span/>}
+            {c && <span/>}
+            {d && <span/>}
+            {e && <span/>}
+            {f && <span/>}
+            {g && <span/>}
+            {h && <span/>}
+            {i ? <span/> : <em/>}
+            {j ? <span/> : <em/>}
+            {k ? <span/> : <em/>}
+            {l ? <span/> : <em/>}
+            {m ? <span/> : <em/>}
+            {n ? <span/> : <em/>}
+            {o ? <span/> : <em/>}
+            {p ? <span/> : <em/>}
+            {q ? <span/> : <em/>}
+          </div>
+        );
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 describe('code-quality/deterministic/cyclomatic-complexity', () => {
@@ -3500,10 +3534,36 @@ describe('code-quality/deterministic/regex-unicode-awareness', () => {
 // ---------------------------------------------------------------------------
 
 describe('code-quality/deterministic/negated-condition', () => {
-  it('detects negated condition with else', () => {
-    const violations = check(`if (!isReady) { fallback(); } else { proceed(); }`);
+  it('detects small negated bail with substantial else body', () => {
+    // Classic case the rule is designed for: the inversion clearly moves a
+    // small early-bail out of the way of a larger happy path.
+    const violations = check(`
+      if (!ready) {
+        log('not ready');
+      } else {
+        step1();
+        step2();
+        step3();
+        step4();
+      }
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag when both branches are substantive', () => {
+    // When both branches do real work, the negation is a deliberate semantic
+    // choice — inverting wouldn't obviously improve readability.
+    const violations = check(`
+      if (!isEmbedded) {
+        const response = await api.run();
+        result = response.data;
+      } else {
+        result = compute();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag negated condition without else', () => {

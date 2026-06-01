@@ -1,5 +1,17 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+// Count direct statements in a body. For a single-statement body (no braces),
+// the body node IS the statement. For a `statement_block`, count the
+// statement children. Other shapes (expressions, comments) count as one.
+function statementCount(body: SyntaxNode | null | undefined): number {
+  if (!body) return 0
+  if (body.type === 'statement_block') {
+    return body.namedChildren.filter((c) => c.type !== 'comment').length
+  }
+  return 1
+}
 
 export const negatedConditionVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/negated-condition',
@@ -17,6 +29,18 @@ export const negatedConditionVisitor: CodeRuleVisitor = {
 
     const elseBody = elsePart.namedChildren[0]
     if (elseBody?.type === 'if_statement') return null
+
+    // The rule's value is when inversion moves a short bail/guard branch out
+    // of the way of a substantial happy path: `if (!ready) return; else {…}`
+    // reads better as `if (ready) {…} else return;`. When both branches are
+    // substantive (and especially when the if-branch is bigger), the
+    // negation is a deliberate choice — naming the *negative* case the
+    // primary one — and inverting is no longer obviously better. Skip
+    // unless the else-body is meaningfully larger than the if-body.
+    const ifBody = node.childForFieldName('consequence')
+    const ifCount = statementCount(ifBody)
+    const elseCount = statementCount(elseBody)
+    if (elseCount < ifCount + 2) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
