@@ -68,12 +68,18 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
       p.log.message("Open conflicts:");
       for (const c of merge.openConflicts.slice(0, 10)) {
         p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
+        p.log.message(`    id: ${c.id}`);
       }
       if (merge.openConflicts.length > 10) {
-        p.log.message(`  … (+${merge.openConflicts.length - 10} more)`);
+        p.log.message(`  … (+${merge.openConflicts.length - 10} more — run \`truecourse spec conflicts list\`)`);
       }
       p.log.message("");
-      p.log.message("Resolve in the dashboard, or run `truecourse spec resolve --all-defaults`.");
+      p.log.message("Resolve them:");
+      p.log.message("  • dashboard:        truecourse dashboard            (Spec tab)");
+      p.log.message("  • per conflict:     truecourse spec conflicts show <id>");
+      p.log.message("                      truecourse spec conflicts pick <id> <candidateIndex>");
+      p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
+      p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
     }
     p.outro(merge.openConflicts.length === 0 ? "No open conflicts." : `${merge.openConflicts.length} open.`);
   } catch (e) {

@@ -87,7 +87,7 @@ export async function runSpecConflictsList(
   const list = opts.all ? [...open, ...decided.map((d) => d.conflict)] : opts.decided ? decided.map((d) => d.conflict) : open;
   p.log.step(`${list.length} ${which} conflicts`);
   for (const c of list) {
-    p.log.message(`  • ${c.id.slice(0, 12)}…  [${c.topic}] ${c.subject}  (${c.candidates.length} candidates)`);
+    p.log.message(`  • ${c.id}  [${c.topic}] ${c.subject}  (${c.candidates.length} candidates)`);
   }
   p.outro('Use `truecourse spec conflicts show <id>` for full detail.');
 }
@@ -109,7 +109,7 @@ export async function runSpecConflictsShow(
     p.cancel(`Conflict ${conflictId} not found.`);
     process.exit(1);
   }
-  p.intro(`Conflict ${conflict.id.slice(0, 12)}… — ${conflict.subject}`);
+  p.intro(`Conflict ${conflict.id} — ${conflict.subject}`);
   p.log.step(`topic: ${conflict.topic}`);
   if (conflict.explanation) p.log.message(conflict.explanation);
   p.log.step(`${conflict.candidates.length} candidates (default-pick: ${conflict.defaultPick})`);
