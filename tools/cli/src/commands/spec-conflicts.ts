@@ -89,7 +89,7 @@ export async function runSpecConflictsList(
   for (const c of list) {
     p.log.message(`  • ${c.id}  [${c.topic}] ${c.subject}  (${c.candidates.length} candidates)`);
   }
-  p.outro('Use `truecourse spec conflicts show <id>` for full detail.');
+  p.outro('`show <id>` for detail · resolve with `pick <id> <n>` or `custom <id> --text "…"`.');
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +134,10 @@ export async function runSpecConflictsShow(
       if (diffs.length > 12) p.log.message(`  … and ${diffs.length - 12} more`);
     }
   }
-  p.outro('');
+  if (!opts.diff) p.log.message('add --diff to see field-level differences.');
+  p.outro(
+    `resolve: truecourse spec conflicts pick ${conflict.id} <n>  ·  custom ${conflict.id} --text "…"`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +165,10 @@ export async function runSpecConflictsPick(
     note: opts.note,
   });
   await refreshScan(root);
-  emitOk(`Picked candidate ${candidateIndex} on ${conflictId.slice(0, 12)}…`);
+  emitOk(
+    `Picked candidate ${candidateIndex} on ${conflictId.slice(0, 12)}…`,
+    'next: resolve remaining (`truecourse spec conflicts list`) or `truecourse contracts generate`.',
+  );
 }
 
 export async function runSpecConflictsCustom(
@@ -183,7 +189,10 @@ export async function runSpecConflictsCustom(
     candidateFingerprint: candidateFingerprint(conflict),
   });
   await refreshScan(root);
-  emitOk(`Wrote custom answer for ${conflictId.slice(0, 12)}…`);
+  emitOk(
+    `Wrote custom answer for ${conflictId.slice(0, 12)}…`,
+    'next: resolve remaining (`truecourse spec conflicts list`) or `truecourse contracts generate`.',
+  );
 }
 
 export async function runSpecConflictsRevoke(
@@ -193,7 +202,10 @@ export async function runSpecConflictsRevoke(
   const root = repoRoot(opts);
   revokeDecisionInProcess(root, conflictId);
   await refreshScan(root);
-  emitOk(`Revoked decision for ${conflictId.slice(0, 12)}…`);
+  emitOk(
+    `Revoked decision for ${conflictId.slice(0, 12)}…`,
+    `re-resolve: truecourse spec conflicts pick ${conflictId} <n>  ·  custom ${conflictId} --text "…"`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +224,8 @@ async function refreshScan(root: string): Promise<void> {
   await scanInProcess(root, {});
 }
 
-function emitOk(msg: string): void {
+function emitOk(msg: string, hint?: string): void {
+  if (hint) p.log.message(hint);
   p.outro(msg);
 }
 

@@ -29,7 +29,7 @@ export async function runSpecChainsList(opts: RunSpecChainsOptions = {}): Promis
   for (const c of manual) {
     p.log.message(`  ${c.older}  →  ${c.newer}  ${c.note ? `· ${c.note}` : ''}`);
   }
-  p.outro('');
+  p.outro('manage with `truecourse spec chains add/remove`.');
 }
 
 export async function runSpecChainsAdd(
@@ -39,7 +39,10 @@ export async function runSpecChainsAdd(
   if (opts.older === opts.newer) return fail('older and newer must be different docs');
   addManualChain(root, { older: opts.older, newer: opts.newer, note: opts.note });
   await scanInProcess(root, {});
-  emitOk(`Marked ${opts.older} as superseded by ${opts.newer}`);
+  emitOk(
+    `Marked ${opts.older} as superseded by ${opts.newer}`,
+    're-run `truecourse spec scan` to apply.',
+  );
 }
 
 export async function runSpecChainsRemove(
@@ -48,10 +51,14 @@ export async function runSpecChainsRemove(
   const root = repoRoot(opts);
   removeManualChain(root, { older: opts.older, newer: opts.newer });
   await scanInProcess(root, {});
-  emitOk(`Removed chain ${opts.older} → ${opts.newer}`);
+  emitOk(
+    `Removed chain ${opts.older} → ${opts.newer}`,
+    're-run `truecourse spec scan` to apply.',
+  );
 }
 
-function emitOk(msg: string): void {
+function emitOk(msg: string, hint?: string): void {
+  if (hint) p.log.message(hint);
   p.outro(msg);
 }
 

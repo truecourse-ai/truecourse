@@ -81,7 +81,11 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
       p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
       p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
     }
-    p.outro(merge.openConflicts.length === 0 ? "No open conflicts." : `${merge.openConflicts.length} open.`);
+    p.outro(
+      merge.openConflicts.length === 0
+        ? "No open conflicts — run `truecourse contracts generate`."
+        : `${merge.openConflicts.length} open.`,
+    );
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
@@ -151,7 +155,11 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
       p.log.message("");
       summarizeConflicts("Open", merge.openConflicts);
     }
-    p.outro(merge.openConflicts.length === 0 ? "Up to date." : "Pending decisions.");
+    p.outro(
+      merge.openConflicts.length === 0
+        ? "Up to date — run `truecourse contracts generate`."
+        : "Pending decisions — see `truecourse spec conflicts list`.",
+    );
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);

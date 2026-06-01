@@ -37,7 +37,7 @@ export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise
     p.log.step(`Manual includes (${manualIncludes.length})`);
     for (const inc of manualIncludes) p.log.message(`  ${inc}`);
   }
-  p.outro('');
+  p.outro('force-include with `truecourse spec docs include <path>`.');
 }
 
 export async function runSpecDocsInclude(
@@ -48,7 +48,10 @@ export async function runSpecDocsInclude(
   if (!docPath) return fail('Missing doc path');
   addManualInclude(root, docPath);
   await scanInProcess(root, {});
-  emitOk(`Force-include ${docPath}`);
+  emitOk(
+    `Force-include ${docPath}`,
+    're-scanned — review `truecourse spec conflicts list`.',
+  );
 }
 
 export async function runSpecDocsUninclude(
@@ -59,10 +62,14 @@ export async function runSpecDocsUninclude(
   if (!docPath) return fail('Missing doc path');
   removeManualInclude(root, docPath);
   await scanInProcess(root, {});
-  emitOk(`Removed force-include for ${docPath}`);
+  emitOk(
+    `Removed force-include for ${docPath}`,
+    're-scanned — review `truecourse spec conflicts list`.',
+  );
 }
 
-function emitOk(msg: string): void {
+function emitOk(msg: string, hint?: string): void {
+  if (hint) p.log.message(hint);
   p.outro(msg);
 }
 

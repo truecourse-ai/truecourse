@@ -118,7 +118,7 @@ export async function runContractsGenerate(
   stampGeneratedMarker(repoRoot);
 
   if (result.write.written.length === 0) {
-    p.outro("Up to date — no contract files needed updating.");
+    p.outro("Up to date — run `truecourse verify`.");
     return;
   }
   p.log.success(`Wrote ${result.write.written.length} contract file${result.write.written.length === 1 ? "" : "s"}.`);
@@ -161,7 +161,7 @@ export async function runContractsList(
   }
   p.intro(`Contracts (${files.length})`);
   for (const f of files) console.log(`  ${path.relative(repoRoot, f)}`);
-  p.outro("");
+  p.outro("`truecourse contracts validate` then `truecourse verify`.");
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +209,7 @@ export async function runContractsValidate(
 
   if (issues.length === 0) {
     p.log.success(`Validated ${resolution.index.size} artifact${resolution.index.size === 1 ? "" : "s"} — no issues.`);
+    p.outro("Run `truecourse verify`.");
     return;
   }
   p.log.error(`${issues.length} issue${issues.length === 1 ? "" : "s"}:`);
