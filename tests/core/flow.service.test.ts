@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { fileURLToPath } from 'url';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
+import fs from 'node:fs';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import { runAnalysis, type AnalysisResult } from '../../packages/core/src/services/analyzer.service';
@@ -14,15 +16,34 @@ import { writeLatest } from '../../packages/core/src/lib/analysis-store';
 import type { LatestSnapshot } from '../../packages/core/src/types/snapshot';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
+const FIXTURE_SRC = resolve(__dirname, '../fixtures/sample-js-project-negative');
+
+/**
+ * Copy the fixture into a throwaway tmpdir (skipping `.truecourse/`) so this
+ * suite's `writeLatest` writes to the copy, never mutating the committed
+ * fixture — same pattern as tests/cli/analyze.test.ts.
+ */
+function copyDir(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (entry.name === '.truecourse' || entry.name === 'node_modules' || entry.name === '.git') continue;
+    const s = join(src, entry.name);
+    const d = join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
 
 describe('flow.service', () => {
   let fixture: TestFixture;
   let analysisResult: AnalysisResult;
+  let workDir: string;
 
   beforeAll(async () => {
-    fixture = await setupTestFixture(FIXTURE_PATH);
-    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, {
+    workDir = fs.mkdtempSync(join(os.tmpdir(), 'tc-flow-svc-'));
+    copyDir(FIXTURE_SRC, workDir);
+    fixture = await setupTestFixture(workDir);
+    analysisResult = await runAnalysis(workDir, undefined, () => {}, {
       skipStash: true,
       skipGit: true,
     });
@@ -30,6 +51,7 @@ describe('flow.service', () => {
 
   afterAll(async () => {
     await teardownTestFixture(fixture.project.slug);
+    fs.rmSync(workDir, { recursive: true, force: true });
   });
 
   it('detectFlows returns flows with nested steps', () => {
