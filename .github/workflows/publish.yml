@@ -22,6 +22,10 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      # OIDC trusted publishing needs a recent npm; Node 20 ships npm 10.x.
+      - name: Upgrade npm (OIDC trusted publishing)
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -49,11 +53,10 @@ jobs:
           echo "npm_tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
           echo "Publishing under npm dist-tag: $NPM_TAG"
 
+      # Auth via GitHub OIDC (Trusted Publisher configured on npm) — no token.
       - name: Publish to npm
         run: npm publish --provenance --access public --tag "${{ steps.version.outputs.npm_tag }}"
         working-directory: dist
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         run: gh release create "${{ github.ref_name }}" --generate-notes
