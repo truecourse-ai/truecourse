@@ -23,9 +23,9 @@ campaigns:
   - target_repo: documenso/documenso
     tech_stack: [typescript, nextjs, prisma]
     priority: 1
-    status: discovering
+    status: done
     baseline: { analyzed_at: "2026-05-17", target_ref: "8f6be474a9ce44f88a5d175fb3130ca7fe3bbf5f", total_violations: 57492, tp: 763, fp: 458, tp_rate: 0.62 }
-    final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    final:    { analyzed_at: "2026-06-01", target_ref: "8f6be474a9ce44f88a5d175fb3130ca7fe3bbf5f", total_violations: 5414, tp: 385, fp: 28, tp_rate: 0.93 }
     notes: []
 
   - target_repo: triggerdotdev/trigger.dev
