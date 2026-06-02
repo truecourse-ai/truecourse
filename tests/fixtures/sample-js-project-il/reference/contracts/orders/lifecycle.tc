@@ -1,0 +1,15 @@
+state-machine Order.status {
+  origin "reference/specs/modules/orders/data.md" "Order lifecycle" 19..30
+  scope {
+    entity Entity:Order
+    field status
+  }
+  states Enum:OrderStatus
+  initial [placed]
+  terminal [delivered, cancelled]
+  transitions {
+    placed -> [paid, cancelled]
+    paid -> [shipped, cancelled]
+    shipped -> delivered
+  }
+}

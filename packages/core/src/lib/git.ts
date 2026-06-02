@@ -11,6 +11,16 @@ import { simpleGit, type SimpleGit } from 'simple-git';
 import { createAppError } from './errors.js';
 
 /**
+ * Single-sourced message for the "this isn't a git repo" guard. TrueCourse
+ * requires a git repository for analyze and the spec → contracts → verify
+ * track (commit-anchored baselines, diff, stashing committed state). Reused by
+ * `getGit`, the CLI command guards, and the dashboard route guards so the copy
+ * stays identical everywhere.
+ */
+export const NOT_A_GIT_REPO_MESSAGE =
+  'The selected folder is not a git repository. Please select a folder that has been initialized with git.';
+
+/**
  * Check if a path is a git repository.
  */
 export async function isGitRepo(repoPath: string): Promise<boolean> {
@@ -29,10 +39,7 @@ export async function getGit(repoPath: string): Promise<SimpleGit> {
   const git = simpleGit(repoPath);
   const isRepo = await isGitRepo(repoPath);
   if (!isRepo) {
-    throw createAppError(
-      'The selected folder is not a git repository. Please select a folder that has been initialized with git.',
-      400,
-    );
+    throw createAppError(NOT_A_GIT_REPO_MESSAGE, 400);
   }
   return git;
 }

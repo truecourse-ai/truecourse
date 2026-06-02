@@ -1,0 +1,5 @@
+operation GET "/api/loyalty-tiers" {
+  // inferred — route handled in code but documented in no spec
+  inferred-from "app/routers/customers.py" 41..41
+  confidence high
+}

@@ -1,0 +1,8 @@
+architecture-decision package-manager.pnpm {
+  // inferred — pnpm is used in code but no ADR records this package-manager choice
+  inferred-from "pnpm-lock.yaml" 0..0
+  confidence high
+  category package-manager
+  chosen pnpm
+  reason "pnpm is used in code but no ADR records this package-manager choice"
+}

@@ -1,49 +1,60 @@
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle } from 'lucide-react';
+import { HoverPopover } from '@/components/ui/hover-popover';
+import {
+  getTab,
+  useVisibleTabsForSection,
+  type DashboardSection,
+  type LeftTab,
+} from '@/navigation/registry';
 
-export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses';
-
-const TAB_LABELS: Record<LeftTab, string> = {
-  home: 'Home',
-  graphs: 'Graphs',
-  files: 'Files',
-  flows: 'Flows',
-  databases: 'Databases',
-  analyses: 'Analyses',
-};
-
-const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
+// Backward-compatible re-exports — many callsites import these names
+// from '@/components/layout/LeftSidebar'. The registry is the source
+// of truth; this file just forwards.
+export type { DashboardSection, LeftTab };
+export {
+  tabsForSection,
+  defaultTabForSection,
+} from '@/navigation/registry';
 
 type LeftSidebarProps = {
+  section: DashboardSection;
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab | null) => void;
   children: React.ReactNode;
   defaultWidth?: number;
   minWidth?: number;
   badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
+  /**
+   * Per-tab advisory: when set, an amber warning icon is rendered on the
+   * rail button and (for the active tab) inside the panel header. The
+   * value is the tooltip text shown on hover.
+   */
+  tabWarnings?: Partial<Record<LeftTab, string | null>>;
 };
 
-const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
-  { id: 'home', icon: Home, label: 'Home' },
-  { id: 'graphs', icon: Network, label: 'Graphs' },
-  { id: 'flows', icon: Workflow, label: 'Flows' },
-  { id: 'files', icon: FolderTree, label: 'Files' },
-  { id: 'databases', icon: Database, label: 'Databases' },
-  { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
-];
-
 export function LeftSidebar({
+  section,
   activeTab,
   onTabChange,
   children,
   defaultWidth = 350,
   minWidth = 260,
   badgeCounts,
+  tabWarnings,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
   const isDragging = useRef(false);
+
+  const tabs = useVisibleTabsForSection(section);
+  // Derived from the registry so a tab's `noPanel: true` flag is the
+  // single switch for "rail icon only, no side panel" behaviour.
+  const tabsWithoutPanel = useMemo(
+    () => new Set(tabs.filter((t) => t.noPanel).map((t) => t.id)),
+    [tabs],
+  );
 
   useEffect(() => {
     const calc = () => Math.floor(window.innerWidth * 0.8);
@@ -78,7 +89,8 @@ export function LeftSidebar({
     [width, minWidth, maxWidth],
   );
 
-  const isOpen = activeTab !== null && !TABS_WITHOUT_PANEL.has(activeTab);
+  const isOpen = activeTab !== null && !tabsWithoutPanel.has(activeTab);
+  const activeTabLabel = activeTab ? getTab(activeTab)?.label ?? '' : '';
 
   return (
     <div className="flex flex-shrink-0 h-full">
@@ -141,8 +153,19 @@ export function LeftSidebar({
           {/* Panel header */}
           <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab ? TAB_LABELS[activeTab] : ''}
+              {activeTabLabel}
             </span>
+            {(() => {
+              const warning = activeTab ? tabWarnings?.[activeTab] : undefined;
+              if (!warning) return null;
+              return (
+                <HoverPopover align="start" width="wide" content={warning}>
+                  <span className="flex items-center text-amber-400">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                  </span>
+                </HoverPopover>
+              );
+            })()}
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
               if (badge == null) return null;

@@ -20,6 +20,37 @@ import {
   runRulesLlm,
   runRulesReset,
 } from "./commands/rules.js";
+import {
+  runContractsGenerate,
+  runContractsList,
+  runContractsValidate,
+} from "./commands/contracts.js";
+import {
+  runSpecScan,
+  runSpecResolve,
+  runSpecStatus,
+  runVerify,
+  runInfer,
+} from "./commands/spec.js";
+import {
+  runSpecConflictsList,
+  runSpecConflictsShow,
+  runSpecConflictsPick,
+  runSpecConflictsCustom,
+  runSpecConflictsRevoke,
+} from "./commands/spec-conflicts.js";
+import {
+  runSpecChainsList,
+  runSpecChainsAdd,
+  runSpecChainsRemove,
+} from "./commands/spec-chains.js";
+import {
+  runSpecDocsSkipped,
+  runSpecDocsInclude,
+  runSpecDocsUninclude,
+} from "./commands/spec-docs.js";
+import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
+import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -32,7 +63,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.5.12")
+  .version("0.6.0")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -152,6 +183,222 @@ program
     }
   });
 
+// Contract framework — spec → .tc extraction + validation.
+const contractsCmd = program
+  .command("contracts")
+  .description("Manage spec-driven contract artifacts");
+
+contractsCmd
+  .command("generate")
+  .description("Extract .tc artifacts from prose specs (LLM, cached)")
+  .option("--diff", "Dry run — show what would change without writing")
+  .action(async (options) => {
+    await runContractsGenerate({ diff: !!options.diff });
+  });
+
+contractsCmd
+  .command("list")
+  .description("List the .tc artifacts in this repo (kind · identity · location)")
+  .option("--inferred", "Only inferred artifacts (reverse-engineered, in _inferred/)")
+  .option("--authored", "Only authored artifacts (exclude _inferred/)")
+  .action(async (options) => {
+    await runContractsList({ inferred: !!options.inferred, authored: !!options.authored });
+  });
+
+contractsCmd
+  .command("validate")
+  .description("Parse and resolve all .tc files, report any issues")
+  .action(async () => {
+    await runContractsValidate();
+  });
+
+// Spec consolidation — docs → claims → conflicts → canonical .truecourse/specs/.
+const specCmd = program
+  .command("spec")
+  .description("Consolidate scattered docs into a canonical spec");
+
+specCmd
+  .command("scan")
+  .description("Walk docs, extract claims, surface conflicts (no writes)")
+  .action(async () => {
+    await runSpecScan();
+  });
+
+specCmd
+  .command("resolve")
+  .description("Resolve open conflicts (interactive runs in the dashboard)")
+  .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
+  .action(async (options) => {
+    await runSpecResolve({ allDefaults: !!options.allDefaults });
+  });
+
+specCmd
+  .command("status")
+  .description("Summary of docs, claims, modules, and pending decisions")
+  .action(async () => {
+    await runSpecStatus();
+  });
+
+// -- Conflicts ---------------------------------------------------------------
+const conflictsCmd = specCmd
+  .command("conflicts")
+  .description("Inspect and resolve open / decided conflicts (agent-friendly)");
+
+conflictsCmd
+  .command("list")
+  .description("List conflicts (open by default; --decided or --all to widen)")
+  .option("--decided", "Show decided conflicts instead of open")
+  .option("--all", "Show both open and decided conflicts")
+  .action(async (opts) => {
+    await runSpecConflictsList({ decided: !!opts.decided, all: !!opts.all });
+  });
+
+conflictsCmd
+  .command("show <id>")
+  .description("Show full detail for one conflict")
+  .option(
+    "--diff",
+    "Include precomputed field-level diffs (paths + values) between candidates",
+  )
+  .action(async (id, opts) => {
+    await runSpecConflictsShow(id, { diff: !!opts.diff });
+  });
+
+conflictsCmd
+  .command("pick <id> <candidateIndex>")
+  .description("Resolve a conflict by picking one of its candidates")
+  .option("--note <text>", "Optional human-readable rationale")
+  .action(async (id, idx, opts) => {
+    await runSpecConflictsPick(id, parseInt(idx, 10), {
+      note: opts.note,
+    });
+  });
+
+conflictsCmd
+  .command("custom <id>")
+  .description("Resolve a conflict with a free-text custom answer")
+  .requiredOption("--text <text>", "The authoritative content for this subject")
+  .action(async (id, opts) => {
+    await runSpecConflictsCustom(id, opts.text);
+  });
+
+conflictsCmd
+  .command("revoke <id>")
+  .description("Remove a previously-saved decision (the conflict re-opens)")
+  .action(async (id) => {
+    await runSpecConflictsRevoke(id);
+  });
+
+// -- Chains (manual supersession) -------------------------------------------
+const chainsCmd = specCmd
+  .command("chains")
+  .description("Manage manual version chains (supersession overrides)");
+
+chainsCmd
+  .command("list")
+  .description("List manual chains")
+  .action(async () => {
+    await runSpecChainsList();
+  });
+
+chainsCmd
+  .command("add")
+  .description("Mark `older` as superseded by `newer`")
+  .requiredOption("--older <path>", "Repo-relative path of the older doc")
+  .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .option("--note <text>", "Optional rationale")
+  .action(async (opts) => {
+    await runSpecChainsAdd({
+      older: opts.older,
+      newer: opts.newer,
+      note: opts.note,
+    });
+  });
+
+chainsCmd
+  .command("remove")
+  .description("Remove a manual chain")
+  .requiredOption("--older <path>", "Repo-relative path of the older doc")
+  .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .action(async (opts) => {
+    await runSpecChainsRemove({
+      older: opts.older,
+      newer: opts.newer,
+    });
+  });
+
+// -- Docs (relevance filter overrides) --------------------------------------
+const docsCmd = specCmd
+  .command("docs")
+  .description("Manage LLM relevance-filter overrides (skipped docs)");
+
+docsCmd
+  .command("skipped")
+  .description("List docs the relevance filter excluded from extraction")
+  .action(async () => {
+    await runSpecDocsSkipped();
+  });
+
+docsCmd
+  .command("include <path>")
+  .description("Force-include a skipped doc and re-scan")
+  .action(async (docPath) => {
+    await runSpecDocsInclude(docPath);
+  });
+
+docsCmd
+  .command("uninclude <path>")
+  .description("Remove a force-include override")
+  .action(async (docPath) => {
+    await runSpecDocsUninclude(docPath);
+  });
+
+// Verify — compares generated TC contracts against the code.
+program
+  .command("verify")
+  .description("Compare code against the canonical TC contracts")
+  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .option("--diff", "Diff current drifts against the committed LATEST baseline")
+  .option("--stash", "Pre-approve stashing pending changes (verify committed state)")
+  .option("--no-stash", "Verify the working tree as-is without stashing")
+  .action(async (options) => {
+    await runVerify({ codeDir: options.codeDir, diff: options.diff, stash: options.stash });
+  });
+
+// Infer — reverse-engineers undocumented decisions from code into _inferred/.
+program
+  .command("infer")
+  .description("Reverse-engineer undocumented decisions from code into inferred contracts")
+  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .option("--dry-run", "Report what would be written without touching disk")
+  .action(async (options) => {
+    await runInfer({ codeDir: options.codeDir, dryRun: options.dryRun });
+  });
+
+// Drifts — inspect the drifts from the latest verify. Reads verifier/LATEST.json
+// (no re-run); paginated + filterable like `truecourse list` for violations.
+const driftsCmd = program
+  .command("drifts")
+  .description("Inspect drifts from the latest verify");
+
+driftsCmd
+  .command("list")
+  .description("List drifts from the latest verify (paginated)")
+  .option("--limit <n>", "Number of drifts to show (default: 20)", parseInt)
+  .option("--offset <n>", "Skip first N drifts", parseInt)
+  .option("--all", "Show all drifts")
+  .option(
+    "--severity <list>",
+    "Comma-separated severities to include (critical,high,medium,low,info)",
+  )
+  .action(async (options) => {
+    await runDriftsList({
+      limit: options.all ? Infinity : (options.limit ?? 20),
+      offset: options.offset ?? 0,
+      severity: parseDriftSeverityFlag(options.severity),
+    });
+  });
+
 // Rules management — reads/writes per-repo config.json directly. No server needed.
 const rulesCmd = program
   .command("rules")
@@ -207,6 +454,24 @@ rulesCmd
   .description("Clear per-rule overrides (one rule, or all if no key given)")
   .action(async (ruleKey?: string) => {
     await runRulesReset({ ruleKey });
+  });
+
+// Per-repo configuration — today the only surface is the LLM model
+// resolution view. Writes happen via env vars or by hand-editing
+// `.truecourse/config.json#llm`.
+const configCmd = program
+  .command("config")
+  .description("Inspect per-repo TrueCourse configuration");
+
+const configLlmCmd = configCmd
+  .command("llm")
+  .description("LLM model configuration for the current repo");
+
+configLlmCmd
+  .command("show")
+  .description("Print the effective model resolution for every pipeline stage")
+  .action(async () => {
+    await runConfigLlmShow();
   });
 
 // Telemetry management

@@ -1,0 +1,8 @@
+enum NotificationChannel {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "src/services/notifications.service.ts" 4..4
+  confidence high
+  representation string-literal
+  closed
+  values [email, push, sms]
+}

@@ -1,0 +1,21 @@
+constant DiscountTiers {
+  origin "reference/specs/modules/orders/data.md" "Discount tiers" 44..48
+  type object
+  expected-value {
+    bronze: 5
+    silver: 10
+    gold: 20
+  }
+}
+
+constant MAX_RETRY {
+  origin "reference/specs/modules/orders/effects.md" "Retry budget" 5..7
+  type number
+  expected-value 3
+}
+
+constant ApiVersion {
+  origin "reference/specs/shared/endpoints.md" "API version" 18..20
+  type string
+  expected-value "v2"
+}

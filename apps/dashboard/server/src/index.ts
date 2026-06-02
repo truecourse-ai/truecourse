@@ -3,6 +3,7 @@ import path from 'node:path';
 import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
+import { loadEnterprise } from './ee-loader.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
@@ -28,12 +29,16 @@ async function main() {
     log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
   }
 
-  // 2. Setup Express app + socket.io
+  // 2. Load the enterprise plugin (no-op in community) before building
+  //    the app so its routers + auth gate are registered at mount time.
+  await loadEnterprise();
+
+  // 3. Setup Express app + socket.io
   const app = createApp();
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 3. Start listening
+  // 4. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {

@@ -74,16 +74,26 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const entry = requireRegistryEntry(req.params.id as string);
-    const git = await getGit(entry.path);
-    const branchSummary = await git.branch();
-
+    let branches: string[] = [];
+    let defaultBranch: string | undefined;
+    let isGitRepo = true;
+    try {
+      const git = await getGit(entry.path);
+      const branchSummary = await git.branch();
+      branches = branchSummary.all;
+      defaultBranch = branchSummary.current;
+    } catch (err) {
+      isGitRepo = false;
+      console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
+    }
     res.json({
       id: entry.slug,
       name: entry.name,
       path: entry.path,
       lastAnalyzed: entry.lastAnalyzed ?? null,
-      branches: branchSummary.all,
-      defaultBranch: branchSummary.current,
+      branches,
+      defaultBranch,
+      isGitRepo,
     });
   } catch (error) {
     next(error);

@@ -1,0 +1,63 @@
+{
+  "name": "@truecourse/contract-extractor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cache": {
+      "types": "./dist/cache.d.ts",
+      "import": "./dist/cache.js"
+    },
+    "./merger": {
+      "types": "./dist/merger.d.ts",
+      "import": "./dist/merger.js"
+    },
+    "./writer": {
+      "types": "./dist/writer.d.ts",
+      "import": "./dist/writer.js"
+    },
+    "./validator": {
+      "types": "./dist/validator.d.ts",
+      "import": "./dist/validator.js"
+    },
+    "./bootstrap": {
+      "types": "./dist/bootstrap.d.ts",
+      "import": "./dist/bootstrap.js"
+    },
+    "./llm-bootstrap": {
+      "types": "./dist/llm-bootstrap.d.ts",
+      "import": "./dist/llm-bootstrap.js"
+    },
+    "./corpus-diff": {
+      "types": "./dist/corpus-diff.d.ts",
+      "import": "./dist/corpus-diff.js"
+    },
+    "./specs-config": {
+      "types": "./dist/specs-config.d.ts",
+      "import": "./dist/specs-config.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/contract-verifier": "workspace:*",
+    "@truecourse/spec-consolidator": "workspace:*",
+    "js-yaml": "^4.1.0",
+    "p-limit": "^7.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.19.15",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,3 +1,4 @@
+import type { CapabilitiesResponse } from '@truecourse/shared';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -19,6 +20,9 @@ async function fetchApi<T>(
   const url = `${BASE_URL}${endpoint}`;
   const res = await fetch(url, {
     ...options,
+    // Send the enterprise session cookie (no-op in community). Required
+    // because the dashboard API sits behind the auth gate in enterprise.
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
@@ -47,6 +51,7 @@ export type RepoResponse = {
   lastAnalyzed?: string;
   branches?: string[];
   defaultBranch?: string;
+  isGitRepo?: boolean;
   latestAnalysis?: {
     id: string;
     status: string;
@@ -141,6 +146,13 @@ export type ViolationResponse = {
   lineStart?: number;
   ruleKey?: string;
 };
+
+// Capabilities — fetched once at app boot by AppProvider so any
+// component can ask `useCapability('sso')`. OSS always responds with
+// `{ edition: 'community', capabilities: [] }`.
+export function getCapabilities(): Promise<CapabilitiesResponse> {
+  return fetchApi<CapabilitiesResponse>('/api/capabilities');
+}
 
 // Repos
 export function getRepos(): Promise<RepoResponse[]> {
@@ -642,5 +654,396 @@ export function getAnalyticsResolution(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Spec Consolidation (Module 1)
+// ---------------------------------------------------------------------------
+
+export type SpecClaim = {
+  id: string;
+  topic: string;
+  subject: string;
+  content: unknown;
+  /** 'definition' = the section's primary subject; 'constraint' = narrowing rule. */
+  kind?: 'definition' | 'constraint';
+  provenance: { file: string; line: number; quote: string };
+  metadata: { docKind: string; status?: string; lastTouched: string };
+};
+
+export type SpecConflictCandidate = {
+  index: number;
+  weight: 'newest' | 'newer' | 'older' | 'oldest';
+  claim: SpecClaim;
+};
+
+export type SpecConflict = {
+  id: string;
+  topic: string;
+  subject: string;
+  module?: string;
+  candidates: SpecConflictCandidate[];
+  defaultPick: number;
+  /** Plain-English LLM-generated explanation of how candidates differ. */
+  explanation?: string;
+  /**
+   * Opus (LLM resolver) verdict for this open conflict — present only
+   * when the resolver returned medium/low confidence. High-confidence
+   * verdicts auto-applied and the conflict is in decidedConflicts.
+   */
+  resolverVerdict?: {
+    confidence: 'high' | 'medium' | 'low';
+    reasoning: string;
+    pick: number;
+  };
+  /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
+  candidateFingerprint: string;
+};
+
+export type SpecResolution =
+  | { kind: 'pick'; candidateIndex: number }
+  | { kind: 'custom'; content: string };
+
+export type SpecDecision = {
+  conflictId: string;
+  resolution: SpecResolution;
+  resolvedAt: string;
+  candidateFingerprint: string;
+  note?: string;
+};
+
+export type SpecDecisionsFile = {
+  version: 1;
+  decisions: SpecDecision[];
+};
+
+export type SpecScanResponse = {
+  /** Set on persisted state and on fresh scans. Absent on legacy responses. */
+  scannedAt?: string;
+  docsScanned: number;
+  blocksAttempted: number;
+  claimsExtracted: number;
+  resolved: number;
+  decided: number;
+  openConflicts: SpecConflict[];
+  decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
+  /**
+   * Docs the LLM relevance filter excluded from extraction. Each has a
+   * short reason. User can force-include via the include endpoint.
+   * Absent on older scan-state files; treat as [].
+   */
+  skippedDocs?: Array<{ path: string; reason: string }>;
+};
+
+export type IlValidationIssue = {
+  artifactKey: string;
+  message: string;
+  severity: 'hard' | 'soft';
+  tcSource?: string;
+};
+
+export type ContractsGenerateResponse = {
+  il:
+    | {
+        written: number;
+        validationIssues: IlValidationIssue[];
+        mergeDiagnostics: unknown[];
+      }
+    | { error: string }
+    | { skipped: string };
+};
+
+export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
+  return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
+}
+
+export type CanonicalSpecTopic = {
+  topic: string;
+  claimCount: number;
+};
+
+export type CanonicalSpecModule = {
+  name: string;
+  manifest: Record<string, unknown>;
+  topics: CanonicalSpecTopic[];
+};
+
+export type CanonicalSpecTree = {
+  hasCanonical: boolean;
+  generatedAt?: string;
+  modules: CanonicalSpecModule[];
+};
+
+export type CanonicalSpecSection = {
+  module: string;
+  topic: string;
+  manifest: Record<string, unknown>;
+  claims: SpecClaim[];
+};
+
+export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
+  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
+}
+
+export function getSpecCanonicalSection(
+  repoId: string,
+  moduleName: string,
+  topic: string,
+): Promise<CanonicalSpecSection> {
+  const params = new URLSearchParams({ module: moduleName, topic });
+  return fetchApi<CanonicalSpecSection>(
+    `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contracts (Module 2)
+// ---------------------------------------------------------------------------
+
+export type ContractsTree = {
+  hasContracts: boolean;
+  modules: Array<{
+    name: string;
+    files: Array<{ name: string; path: string }>;
+  }>;
+};
+
+export type ContractsFile = {
+  path: string;
+  content: string;
+};
+
+export function getContractsTree(repoId: string): Promise<ContractsTree> {
+  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree`);
+}
+
+export function getContractsFile(repoId: string, filePath: string): Promise<ContractsFile> {
+  return fetchApi<ContractsFile>(
+    `/api/repos/${repoId}/contracts/file?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Verify (Module 3 — code vs contracts drift detection)
+// ---------------------------------------------------------------------------
+
+export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ContractDrift = {
+  id: string;
+  artifactRef?: { type: string; identity: string } | null;
+  obligationKey: string;
+  severity: DriftSeverity;
+  message: string;
+  filePath?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+  specSide?: unknown;
+  codeSide?: unknown;
+};
+
+export type VerifyState = {
+  verifiedAt: string;
+  contractsDir: string;
+  codeDir: string;
+  artifactCount: number;
+  extractedOperationCount: number;
+  drifts: ContractDrift[];
+  resolverErrors: string[];
+  unresolvedRefs: string[];
+};
+
+/**
+ * Persisted verify state. Returns null on 404 (no run yet); other
+ * errors propagate.
+ */
+export async function getVerifyState(repoId: string): Promise<VerifyState | null> {
+  try {
+    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export function postVerifyRun(repoId: string): Promise<VerifyState> {
+  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/run`, {
+    method: 'POST',
+  });
+}
+
+export type ChangedFile = { path: string; status: 'new' | 'modified' | 'deleted' };
+
+export type VerifyDiff = {
+  id: string;
+  baseRunId: string;
+  verifiedAt: string;
+  branch: string | null;
+  commitHash: string | null;
+  added: ContractDrift[];
+  resolved: ContractDrift[];
+  unchangedCount: number;
+  changedFiles: ChangedFile[];
+  summary: { added: number; resolved: number; unchanged: number };
+};
+
+/** Read the last-computed verify diff. Null on 404 (none computed yet). */
+export async function getVerifyDiff(repoId: string): Promise<VerifyDiff | null> {
+  try {
+    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Compute + persist a fresh verify diff against the committed baseline. */
+export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
+  return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
+    method: 'POST',
+  });
+}
+
+export type VerifyHistoryEntry = {
+  id: string;
+  filename: string;
+  verifiedAt: string;
+  branch: string | null;
+  commitHash: string | null;
+  artifactCount: number;
+  driftCount: number;
+  bySeverity: Record<DriftSeverity, number>;
+};
+export type VerifyHistory = { runs: VerifyHistoryEntry[] };
+
+/** Per-run drift summaries for the trend chart. Empty when no runs yet. */
+export async function getVerifyHistory(repoId: string): Promise<VerifyHistory> {
+  try {
+    return await fetchApi<VerifyHistory>(`/api/repos/${repoId}/verify/history`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return { runs: [] };
+    throw e;
+  }
+}
+
+/** State for a specific past verify run (for the runs dropdown). */
+export function getVerifyRun(repoId: string, runId: string): Promise<VerifyState> {
+  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/runs/${runId}`);
+}
+
+/** Delete a past verify run (snapshot + history entry). */
+export function deleteVerifyRun(repoId: string, runId: string): Promise<{ deleted: boolean }> {
+  return fetchApi<{ deleted: boolean }>(`/api/repos/${repoId}/verify/runs/${runId}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Read the persisted scan-state. Returns null when the server
+ * responds 404 (no scan has been run yet) — any other error
+ * propagates so the caller can show it.
+ */
+export async function getSpecScanState(repoId: string): Promise<SpecScanResponse | null> {
+  try {
+    return await fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan-state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
+}
+
+export function deleteSpecDecision(
+  repoId: string,
+  conflictId: string,
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(
+    `/api/repos/${repoId}/spec/decisions/${encodeURIComponent(conflictId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function postSpecDecision(
+  repoId: string,
+  payload: { conflictId: string; resolution: SpecResolution; candidateFingerprint: string; note?: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecManualInclude(
+  repoId: string,
+  payload: { path: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSpecManualInclude(
+  repoId: string,
+  payload: { path: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecManualChain(
+  repoId: string,
+  payload: { older: string; newer: string; note?: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSpecManualChain(
+  repoId: string,
+  payload: { older: string; newer: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecDecisionsBatch(
+  repoId: string,
+  mode: 'all-defaults',
+): Promise<{ added: number; decisions: SpecDecisionsFile }> {
+  return fetchApi(`/api/repos/${repoId}/spec/decisions/batch`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function postContractsGenerate(
+  repoId: string,
+): Promise<ContractsGenerateResponse> {
+  return fetchApi<ContractsGenerateResponse>(
+    `/api/repos/${repoId}/contracts/generate`,
+    { method: 'POST' },
+  );
+}
+
+export type SpecStalenessResponse = {
+  contractsStale: boolean;
+  verifyStale: boolean;
+  hasClaims: boolean;
+  hasGenerated: boolean;
+  hasVerified: boolean;
+};
+
+export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
+  return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
 }
 

@@ -1,0 +1,4 @@
+enum ShippingCarrier {
+  origin "reference/specs/modules/orders/data.md" "ShippingCarrier" 50..52
+  values [ups, fedex, usps]
+}

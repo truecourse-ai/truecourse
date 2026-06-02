@@ -328,6 +328,14 @@ export async function analyzeCore(
     // Drain LLM usage before the pipelineResult is frozen into a snapshot.
     const usage = provider ? toUsageRecords(provider.flushUsage()) : [];
 
+    // Contract verification has been decoupled from `analyze`. The
+    // rule engine and the contract verifier answer different questions
+    // ("does the code violate a rule?" vs "does the code match the
+    // documented contract?"), run at different time scales, and have
+    // independent prerequisites. `truecourse verify` (or the verify
+    // stage of the dashboard's analyze flow) now owns drift detection;
+    // `analyze` is for code findings only.
+
     // Enforce the location invariant on every violation: a filePath always
     // comes with a line range, or neither. Any partial gets normalized here
     // so downstream consumers can trust the contract.

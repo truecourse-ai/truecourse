@@ -1,0 +1,18 @@
+authorization-rule order.owner-only {
+  origin "reference/specs/modules/orders/data.md" "Order ownership" 40..50
+  applies-to {
+    operations [
+      Operation:"GET /api/orders/{id}",
+      Operation:"POST /api/orders/{id}/cancel",
+    ]
+  }
+  predicate "request.auth.user_id == loaded.Order.customer_id"
+  except {
+    role admin
+  }
+  on-violation {
+    status 403
+    error-code forbidden
+    body ErrorEnvelope:error.envelope.standard
+  }
+}

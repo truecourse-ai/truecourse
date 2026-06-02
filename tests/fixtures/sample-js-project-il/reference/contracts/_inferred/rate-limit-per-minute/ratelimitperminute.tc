@@ -1,0 +1,7 @@
+constant RATE_LIMIT_PER_MINUTE {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "src/middleware/rate-limit.middleware.ts" 6..6
+  confidence high
+  type number
+  expected-value 100
+}
