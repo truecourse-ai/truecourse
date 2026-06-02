@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { dirname, resolve as resolvePath } from 'node:path'
 import type { ServiceInfo, ServiceDependencyInfo, ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
 import { getMaxParameters } from '../../language-config.js'
 import { findCycles, type EdgeMetadata } from './tarjan.js'
@@ -438,6 +439,7 @@ export function checkModuleRules(
         importedTargets.add(name)
       }
     }
+    const barrelReExportTargets = buildBarrelReExportTargets(fileAnalyses)
     // Also consider targets reached via method-level dependencies (constructor calls, etc.)
     if (methodLevelDeps) {
       for (const dep of methodLevelDeps) {
@@ -487,6 +489,12 @@ export function checkModuleRules(
       if (method.isExported && !importedTargets.has(method.name)) {
         // Skip exports from entry point files — they're consumed by the framework/runtime
         if (entryPointFiles?.has(method.filePath)) continue
+
+        // Skip exports from files re-exported by a barrel — the extractor
+        // only sees the first specifier per `export { … } from '…'` clause,
+        // so later specifiers look unimported. The barrel itself is the
+        // declared public-API surface; treat all of its targets as live.
+        if (barrelReExportTargets.has(method.filePath)) continue
 
         // Skip exports from seed/fixture directories — their consumers are
         // e2e specs and CLI seed scripts which are excluded from analysis.
@@ -545,6 +553,8 @@ export function checkModuleRules(
     for (const mod of modules) {
       if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
         if (entryPointFiles?.has(mod.filePath)) continue
+
+        if (barrelReExportTargets.has(mod.filePath)) continue
 
         if (SEED_PATH_PATTERN.test(mod.filePath)) continue
         if (REMIX_ROUTE_PATH_PATTERN.test(mod.filePath)) continue
@@ -893,6 +903,45 @@ const SEED_PATH_PATTERN = /\/(?:seed|e2e\/fixtures|app-tests\/[^/]+\/fixtures)\/
 const REMIX_ROUTE_PATH_PATTERN = /\/app\/routes\//i
 
 /**
+ * A "barrel" file is one whose role is to re-export from sibling modules:
+ * it has at least one `export ... from '…'` statement and declares no
+ * own functions or classes. The tree-sitter export extractor only
+ * captures the first specifier per `export { a, b, c } from '…'` clause,
+ * so names after the first are invisible to the import-set used by
+ * unused-export / dead-method. The fix: treat every file targeted by
+ * any barrel's re-export edge as reachable. Tests, downstream packages,
+ * and other out-of-tree consumers reach those modules through the
+ * barrel; flagging their exports as unused is a false positive.
+ */
+function buildBarrelReExportTargets(fileAnalyses: FileAnalysis[] | undefined): Set<string> {
+  const result = new Set<string>()
+  if (!fileAnalyses) return result
+  const analyzedPaths = new Set(fileAnalyses.map((fa) => fa.filePath))
+  const EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs']
+  for (const fa of fileAnalyses) {
+    const hasReExport = fa.exports.some((e) => e.source !== undefined)
+    if (!hasReExport) continue
+    if (fa.functions.length > 0 || fa.classes.length > 0) continue
+    const barrelDir = dirname(fa.filePath)
+    for (const exp of fa.exports) {
+      if (!exp.source || !exp.source.startsWith('.')) continue
+      const base = resolvePath(barrelDir, exp.source)
+      let matched = false
+      for (const ext of EXTS) {
+        const candidate = base + ext
+        if (analyzedPaths.has(candidate)) { result.add(candidate); matched = true; break }
+      }
+      if (matched) continue
+      for (const ext of EXTS) {
+        const candidate = resolvePath(base, 'index' + ext)
+        if (analyzedPaths.has(candidate)) { result.add(candidate); break }
+      }
+    }
+  }
+  return result
+}
+
+/**
  * Check deterministic method-level rules and return violations.
  */
 export function checkMethodRules(
@@ -980,6 +1029,7 @@ export function checkMethodRules(
       connectedMethods.add(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}`)
       connectedMethods.add(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}`)
     }
+    const barrelReExportTargets = buildBarrelReExportTargets(fileAnalyses)
 
     // Build set of method names referenced as event handler arguments
     // (e.g., .on('event', this.methodName), .once('close', this.handleClose))
@@ -1092,6 +1142,11 @@ export function checkMethodRules(
         // Skip methods in framework entry files — they're invoked by the framework
         // or called from JSX which isn't tracked in method-level dependencies
         if (entryPointFiles?.has(method.filePath)) continue
+
+        // Skip methods in files re-exported by a barrel — out-of-tree
+        // callers (tests, downstream packages) reach them through the
+        // public surface even when no analyzed file calls them directly.
+        if (method.isExported && barrelReExportTargets.has(method.filePath)) continue
 
         // Skip functions called directly within their own file
         if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
