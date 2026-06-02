@@ -4,6 +4,27 @@ import { TS_LANGUAGES } from './_helpers.js'
 
 const SAFE_TEMPLATE_TYPES = new Set(['string', 'number', 'bigint', 'boolean', 'null', 'undefined', 'any'])
 
+// Arrays of primitives stringify via Array.prototype.toString = join(','), so
+// `${["a","b"]}` becomes "a,b" — not "[object Object]". Only arrays whose
+// element type is non-primitive produce the cryptic "[object Object],..." output.
+function isPrimitiveArray(t: string): boolean {
+  const m = t.match(/^readonly\s+(.+)\[\]$/) ?? t.match(/^(.+)\[\]$/)
+  if (!m) return false
+  const elem = m[1].trim()
+  return SAFE_TEMPLATE_TYPES.has(elem)
+}
+
+function isSafeBranch(t: string): boolean {
+  const b = t.trim()
+  if (SAFE_TEMPLATE_TYPES.has(b)) return true
+  // String literal type: '"hello"' or single-quoted variants
+  if (/^".*"$/.test(b) || /^'.*'$/.test(b)) return true
+  // Numeric literal type (incl. negative / decimal)
+  if (/^-?\d+(\.\d+)?$/.test(b)) return true
+  if (isPrimitiveArray(b)) return true
+  return false
+}
+
 /**
  * Detect: Non-string value interpolated in template literal without useful toString.
  * Corresponds to @typescript-eslint/restrict-template-expressions.
@@ -27,10 +48,10 @@ export const restrictTemplateExpressionsVisitor: CodeRuleVisitor = {
     )
     if (!typeStr) return null
 
-    // Safe primitive types are fine in templates
-    if (SAFE_TEMPLATE_TYPES.has(typeStr)) return null
-    // Allow literal types like '"hello"' or '42'
-    if (/^".*"$/.test(typeStr) || /^\d+$/.test(typeStr)) return null
+    // Treat each branch of a union independently: if every branch stringifies
+    // to readable text (primitive, literal, or primitive-element array), the
+    // interpolation is safe even if one branch is an array.
+    if (typeStr.split(' | ').every(isSafeBranch)) return null
 
     // Objects without custom toString will produce "[object Object]"
     if (typeStr.startsWith('{') || typeStr.includes('[]') || typeStr === 'object') {

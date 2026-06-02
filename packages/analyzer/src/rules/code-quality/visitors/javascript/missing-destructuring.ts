@@ -34,11 +34,19 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
     if (propNode.text !== nameNode.text) return null
     // Skip if it's a computed property
     if (valueNode.children.some((c) => c.type === '[')) return null
+    // Skip optional-chain accesses (`obj?.prop`). Destructuring an optional
+    // intermediate (`const { prop } = obj.maybe ?? {}`) is awkward and erases
+    // the optionality cue the caller's downstream null-check relies on.
+    if (valueNode.children.some((c) => c.type === '?.' || c.type === 'optional_chain')) return null
     // Skip if it's on `this`
     if (objNode.text === 'this') return null
     // Skip when the object expression contains `as any` or `as unknown` — destructuring would lose the cast
     const objText0 = objNode.text
     if (objText0.includes('as any') || objText0.includes('as unknown')) return null
+    // Skip `process.env.X` — env-var bootstraps use per-var `|| default`
+    // fallbacks and an UPPER_SNAKE constant layout that ops engineers grep
+    // for. Destructuring `{ X } = process.env` loses both.
+    if (objText0 === 'process.env') return null
 
     const objText = objNode.text
 

@@ -81,7 +81,12 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
     if (classBody) {
       for (const member of classBody.namedChildren) {
         if (member.type === 'public_field_definition' || member.type === 'field_definition') {
-          const nameNode = member.children.find((c) => c.type === 'property_identifier')
+          // Private fields use `#name` and parse as `private_property_identifier`,
+          // not `property_identifier`. Include both so `this.#x` references can
+          // be resolved against their declaring field.
+          const nameNode = member.children.find(
+            (c) => c.type === 'property_identifier' || c.type === 'private_property_identifier',
+          )
           if (nameNode?.text !== methodName) continue
           const value = member.childForFieldName('value')
           // Arrow / function field — bound by construction.
