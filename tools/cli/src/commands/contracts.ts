@@ -43,16 +43,20 @@ export async function runContractsGenerate(
   const repairModel = resolveModel("contract.repair", undefined, repoRoot);
   const fallbackModel = resolveFallbackModel(repoRoot) ?? undefined;
   // Slice counter — `totalSlices` comes from generateContracts's onSlicesReady
-  // (fired before extraction). Increments in start order (extraction is
-  // concurrent), so it climbs to the total rather than ticking strictly 1→N.
+  // (fired before extraction). We tick on *completion* (onSliceDone), not start:
+  // extraction is concurrent, so start events all fire up-front and the counter
+  // would race to the total then sit silent through the LLM calls. Counting
+  // completions makes the count reflect real, finished work.
   let totalSlices = 0;
-  let sliceNum = 0;
+  let doneSlices = 0;
   const runner = spawnRunner({
     concurrency,
     model: extractModel,
     fallbackModel,
-    onSliceStart: (s) => {
-      p.log.step(`extracting  ${++sliceNum}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`);
+    onSliceDone: (s, ok) => {
+      p.log.step(
+        `extracted  ${++doneSlices}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}${ok ? "" : "  (failed)"}`,
+      );
     },
   });
 
@@ -67,7 +71,7 @@ export async function runContractsGenerate(
         totalSlices = t;
       },
       onSliceCacheHit: (s) => {
-        p.log.message(`  cache hit  ${++sliceNum}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
+        p.log.message(`  cache hit  ${++doneSlices}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
       },
     });
   } catch (e) {
@@ -107,6 +111,14 @@ export async function runContractsGenerate(
     p.log.warn(d.message);
   }
 
+  // List files with a cap so large generations don't flood the terminal —
+  // the count line above always reports the true total.
+  const LIST_CAP = 20;
+  const printFileList = (files: string[], marker: string): void => {
+    for (const f of files.slice(0, LIST_CAP)) console.log(`  ${marker} ${path.relative(repoRoot, f)}`);
+    if (files.length > LIST_CAP) console.log(`  … and ${files.length - LIST_CAP} more`);
+  };
+
   // Final summary.
   if (options.diff) {
     if (result.write.proposed.length === 0) {
@@ -114,7 +126,7 @@ export async function runContractsGenerate(
       return;
     }
     p.log.info(`Would write ${result.write.proposed.length} file${result.write.proposed.length === 1 ? "" : "s"}:`);
-    for (const f of result.write.proposed) console.log(`  + ${path.relative(repoRoot, f)}`);
+    printFileList(result.write.proposed, "+");
     p.outro("Run `truecourse contracts generate` to apply.");
     return;
   }
@@ -130,7 +142,7 @@ export async function runContractsGenerate(
     return;
   }
   p.log.success(`Wrote ${result.write.written.length} contract file${result.write.written.length === 1 ? "" : "s"}.`);
-  for (const f of result.write.written) console.log(`  • ${path.relative(repoRoot, f)}`);
+  printFileList(result.write.written, "•");
 
   // Install the bundled VS Code grammar for `.tc` files. We do this on
   // `contracts generate` because that's the command that actually
