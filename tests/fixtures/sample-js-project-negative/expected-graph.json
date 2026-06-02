@@ -1021,6 +1021,12 @@
       "layer": "service"
     },
     {
+      "name": "isLeading",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "isSelectedBuggy",
       "service": "utils",
       "kind": "standalone",
