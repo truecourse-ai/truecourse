@@ -1135,6 +1135,12 @@
       "layer": "service"
     },
     {
+      "name": "no-alert-browser-dialog",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "OffscreenRenderer",
       "service": "utils",
       "kind": "class",
