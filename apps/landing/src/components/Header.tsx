@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Github, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
+import { SiGithub } from 'react-icons/si';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
+const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
 
-type NavItem = { href: string; label: string; external?: boolean };
-
-const NAV: NavItem[] = [
+const NAV = [
   { href: '/#why-now', label: 'Why now' },
-  { href: '/#our-approach', label: 'Approach' },
+  { href: '/#approach', label: 'Approach' },
   { href: '/#integrations', label: 'Integrations' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];
@@ -19,6 +19,7 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
+  const onHome = pathname === '/';
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -31,69 +32,69 @@ export function Header() {
     setOpen(false);
   }, [pathname]);
 
+  // Off the home page there's no hero behind the header, so keep the blurred
+  // surface always on (mirrors the request-access prototype).
+  const showSurface = scrolled || !onHome;
+
   return (
-    <header
-      className={cn(
-        'fixed inset-x-0 top-0 z-50 transition-all duration-300',
-        scrolled
-          ? 'border-b border-border bg-background/70 backdrop-blur-xl'
-          : 'border-b border-transparent',
-      )}
-    >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+    <header className={cn('site', showSurface && 'scrolled')} id="site-header">
+      <div className="wrap nav">
         <Link
           to="/"
           onClick={(e) => {
-            // Same-page click: react-router won't re-mount, so no Layout effect fires.
-            // Prevent default and scroll explicitly. On a different page, let the
-            // Link navigate normally; Layout's pathname effect handles the scroll.
-            if (pathname === '/') {
+            if (onHome) {
               e.preventDefault();
               window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
             }
           }}
-          className="flex items-center gap-2.5"
+          className="brand"
         >
-          <img src="/logo.svg" alt="" className="h-7 w-7" />
-          <span className="text-base font-semibold tracking-tight">TrueCourse</span>
+          <span className="mark" aria-hidden />
+          TrueCourse
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="nav-links">
           {NAV.map((item) => (
-            <NavLink key={item.href} item={item} />
+            <Link key={item.href} to={item.href}>
+              {item.label}
+            </Link>
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="nav-actions">
           <a
+            className="icon-btn desktop-only"
             href={DISCORD_URL}
             target="_blank"
             rel="noreferrer"
-            className="hidden h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-[#5865F2] sm:inline-flex"
-            aria-label="Join the TrueCourse Discord"
+            aria-label="Discord"
           >
-            <DiscordIcon className="h-4 w-4" />
+            <DiscordIcon />
           </a>
           <a
-            href="https://github.com/truecourse-ai/truecourse"
+            className="icon-btn desktop-only"
+            href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="hidden h-9 items-center gap-2 rounded-md border border-border px-3 text-sm text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground sm:inline-flex"
+            aria-label="GitHub"
           >
-            <Github className="h-4 w-4" />
-            GitHub
+            <SiGithub />
           </a>
-          <Link
-            to="/request-access"
-            className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
-          >
-            Request access
-          </Link>
+          {onHome ? (
+            <Link className="btn btn-primary btn-sm" to="/request-access">
+              Request access
+            </Link>
+          ) : (
+            <Link className="btn btn-sm" to="/">
+              <span className="arr">←</span> Back
+            </Link>
+          )}
           <button
             type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border md:hidden"
+            className="icon-btn mobile-toggle"
             onClick={() => setOpen((v) => !v)}
             aria-label="Menu"
+            aria-expanded={open}
           >
             {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
@@ -101,65 +102,22 @@ export function Header() {
       </div>
 
       {open && (
-        <div className="border-t border-border bg-background/95 backdrop-blur-xl md:hidden">
-          <nav className="mx-auto flex max-w-6xl flex-col px-4 py-3 sm:px-6">
+        <div className="mobile-menu">
+          <div className="wrap row">
             {NAV.map((item) => (
-              <NavLink key={item.href} item={item} mobile onNavigate={() => setOpen(false)} />
+              <Link key={item.href} to={item.href} onClick={() => setOpen(false)}>
+                {item.label}
+              </Link>
             ))}
-            <a
-              href="https://github.com/truecourse-ai/truecourse"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            >
-              <Github className="h-4 w-4" />
-              GitHub
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+              <SiGithub /> GitHub
             </a>
-            <a
-              href={DISCORD_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            >
-              <DiscordIcon className="h-4 w-4" />
-              Discord
+            <a href={DISCORD_URL} target="_blank" rel="noreferrer">
+              <DiscordIcon /> Discord
             </a>
-          </nav>
+          </div>
         </div>
       )}
     </header>
-  );
-}
-
-function NavLink({
-  item,
-  mobile,
-  onNavigate,
-}: {
-  item: NavItem;
-  mobile?: boolean;
-  onNavigate?: () => void;
-}) {
-  const cls = cn(
-    'rounded-md text-sm transition-colors',
-    mobile
-      ? 'px-3 py-2 text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-      : 'px-3 py-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-  );
-
-  // Hash links to home page sections — let react-router handle them so the
-  // Layout's scroll-to-hash effect runs on navigation.
-  if (item.href.startsWith('/#')) {
-    return (
-      <Link to={item.href} onClick={onNavigate} className={cls}>
-        {item.label}
-      </Link>
-    );
-  }
-
-  return (
-    <Link to={item.href} onClick={onNavigate} className={cls}>
-      {item.label}
-    </Link>
   );
 }
