@@ -35,6 +35,12 @@ export const rawErrorInResponseVisitor: CodeRuleVisitor = {
     //   - fed into a pattern matcher: `match(err.message)` / `.with(err.message)`
     //   - passed to a React state setter: `setSomething(err.message ...)`
     const usagePattern = new RegExp(`\\b${errName}\\.(?:message|stack)\\b`, 'g')
+    // An `errName instanceof X` gate anywhere earlier in the catch body
+    // blesses subsequent `errName.message`/`.stack` reads, even when the
+    // gate is far above (e.g. wrapping a logger call with a large
+    // structured-fields object). Scan once for any such gate; per-usage
+    // checks only need the immediate prefix below.
+    const instanceofGated = new RegExp(`\\b${errName}\\s+instanceof\\b`).test(bodyText)
     let hasUnsafeUsage = false
     for (const usage of bodyText.matchAll(usagePattern)) {
       const idx = usage.index ?? 0
@@ -46,9 +52,8 @@ export const rawErrorInResponseVisitor: CodeRuleVisitor = {
       if (/(?:\bmatch|\.with)\s*\(\s*$/.test(before)) continue
       // React state setter call
       if (/\bset[A-Z]\w*\s*\(\s*$/.test(before)) continue
-      // Inside an instanceof-gated branch — search the recent window for
-      // an `errName instanceof X` check.
-      if (new RegExp(`\\b${errName}\\s+instanceof\\b`).test(before)) continue
+      // Inside an instanceof-gated branch
+      if (instanceofGated) continue
 
       hasUnsafeUsage = true
       break

@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isGeneratedFile } from '../../../_shared/javascript-helpers.js'
 
 // Count direct statements in a body. For a single-statement body (no braces),
 // the body node IS the statement. For a `statement_block`, count the
@@ -18,6 +19,11 @@ export const negatedConditionVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['if_statement'],
   visit(node, filePath, sourceCode) {
+    // Codegen output (parser/lexer scaffolding) writes `if (!cond)` branches
+    // that mirror the grammar's structure; the generator picks the polarity,
+    // not the author, so inverting them isn't a meaningful suggestion.
+    if (isGeneratedFile(filePath, sourceCode)) return null
+
     const condition = node.childForFieldName('condition')
     const elsePart = node.children.find((c) => c.type === 'else_clause')
     if (!condition || !elsePart) return null
