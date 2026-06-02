@@ -212,6 +212,29 @@ function isTestSupportModulePath(filePath: string): boolean {
 }
 
 /**
+ * React component files (`.tsx`/`.jsx`) commonly collect many small
+ * sub-components, format variants, and helpers in a single file — a
+ * "primitive" like `<Select>`, `<DateTime>`, `<BlankStatePanels>` ships
+ * 10–40 PascalCase exports that share state, styling, or Radix slots. The
+ * god-module count threshold treats those exports like business methods
+ * and fires. Skip when the module is in a JSX file and most of its
+ * methods are PascalCase-named (i.e. component/sub-component definitions
+ * rather than business logic).
+ */
+function isJsxComponentCollection(
+  mod: ModuleInfo,
+  methods: MethodInfo[],
+): boolean {
+  if (!/\.(?:tsx|jsx)$/i.test(mod.filePath)) return false
+  const ownMethods = methods.filter(
+    (m) => m.filePath === mod.filePath && m.moduleName === mod.name,
+  )
+  if (ownMethods.length === 0) return false
+  const pascalCase = ownMethods.filter((m) => /^[A-Z]/.test(m.name)).length
+  return pascalCase / ownMethods.length >= 0.6
+}
+
+/**
  * Check deterministic module-level rules and return violations.
  */
 export function checkModuleRules(
@@ -356,6 +379,7 @@ export function checkModuleRules(
   if (ruleKeys.has('architecture/deterministic/god-module')) {
     for (const mod of modules) {
       if (isTestSupportModulePath(mod.filePath)) continue
+      if (isJsxComponentCollection(mod, methods)) continue
       if (mod.methodCount > GOD_MODULE_THRESHOLD) {
         violations.push({
           ruleKey: 'architecture/deterministic/god-module',
