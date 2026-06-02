@@ -320,7 +320,7 @@ export async function runInfer(opts: RunInferOptions = {}): Promise<void> {
         ? "No undocumented decisions found."
         : opts.dryRun
           ? `${wrote} inferred contract${wrote === 1 ? "" : "s"} would be written to _inferred/ (dry run).`
-          : `${wrote} inferred contract${wrote === 1 ? "" : "s"} written to _inferred/.`,
+          : `${wrote} inferred contract${wrote === 1 ? "" : "s"} written to _inferred/ — review with \`truecourse contracts list --inferred\`.`,
     );
   } catch (e) {
     renderer.dispose();

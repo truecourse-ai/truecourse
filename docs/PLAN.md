@@ -3345,6 +3345,12 @@ fallback to the legacy single-file format (it is deleted on the next run).
   for violations — `--limit` / `--offset` / `--all` / `--severity critical,high`.
   `verify` caps its inline list at 20 and points here for the rest
   ("… (+N more) — run `truecourse drifts list --all`").
+- **`truecourse contracts list`** is the read surface for inferred artifacts
+  (they're contracts, so no separate `infer list`): parses + resolves every
+  `.tc` and prints `[confidence] Kind:identity location` (location = code path
+  for inferred via `inferred-from`, doc for authored). `--inferred` / `--authored`
+  filter by `ResolvedArtifact.provenance`; `infer`'s outro points at
+  `contracts list --inferred`.
 - Dashboard verify page redesigned to a 3-column view (analytics · drifts ·
   detail) with a header Normal / Git-Diff toggle gated on `isGitRepo`, the
   branch label, and click-to-open drift detail.

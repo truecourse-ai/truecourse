@@ -63,7 +63,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.6.0-next.8")
+  .version("0.6.0-next.9")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -198,9 +198,11 @@ contractsCmd
 
 contractsCmd
   .command("list")
-  .description("List the .tc artifacts in this repo")
-  .action(async () => {
-    await runContractsList();
+  .description("List the .tc artifacts in this repo (kind · identity · location)")
+  .option("--inferred", "Only inferred artifacts (reverse-engineered, in _inferred/)")
+  .option("--authored", "Only authored artifacts (exclude _inferred/)")
+  .action(async (options) => {
+    await runContractsList({ inferred: !!options.inferred, authored: !!options.authored });
   });
 
 contractsCmd

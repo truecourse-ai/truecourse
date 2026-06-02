@@ -256,7 +256,8 @@ truecourse spec docs uninclude <path>
 
 # Contract extraction (canonical spec → .tc artifacts)
 truecourse contracts generate                     # Extract / re-extract TC contract files
-truecourse contracts list                         # List generated contracts
+truecourse contracts list                         # List artifacts (kind · identity · location)
+truecourse contracts list --inferred / --authored # Only reverse-engineered (_inferred/) / only authored
 truecourse contracts validate                     # Parse + resolve TC files; report unresolved refs
 
 # Verification (code against contracts)
@@ -270,6 +271,7 @@ truecourse drifts list --offset 20 / --severity critical,high  # Page through / 
 # Inference (code → inferred contracts) — reverse-engineer undocumented decisions
 truecourse infer                                  # Write inferred .tc files to contracts/_inferred/
 truecourse infer --dry-run                        # Report what would be written, touch nothing
+truecourse contracts list --inferred              # Review what infer produced (kind · confidence · code location)
 ```
 
 ---

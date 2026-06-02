@@ -167,7 +167,7 @@ export async function runContractsGenerate(
 // ---------------------------------------------------------------------------
 
 export async function runContractsList(
-  options: { cwd?: string } = {},
+  options: { cwd?: string; inferred?: boolean; authored?: boolean } = {},
 ): Promise<void> {
   const repoRoot = options.cwd ?? process.cwd();
   const contractsDir = path.join(repoRoot, ".truecourse", "contracts");
@@ -175,23 +175,77 @@ export async function runContractsList(
     p.log.info("No contracts found. Run `truecourse contracts generate` first.");
     return;
   }
-  const files: string[] = [];
+
+  // Parse + resolve every `.tc` so we can show kind / identity / confidence /
+  // location (like `infer`'s output) and filter by provenance — not just bare
+  // file paths. Reuses the verifier's parser + resolver, same as `validate`.
+  const { parser, resolver } = await import("@truecourse/contract-verifier");
+  const fileNodes: ReturnType<typeof parser.parseFile>[] = [];
+  let parseErrors = 0;
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) visit(full);
-      else if (entry.isFile() && entry.name.endsWith(".tc")) files.push(full);
+      else if (entry.isFile() && entry.name.endsWith(".tc")) {
+        try {
+          fileNodes.push(parser.parseFile(full, fs.readFileSync(full, "utf-8")));
+        } catch {
+          parseErrors += 1;
+        }
+      }
     }
   };
   visit(contractsDir);
-  files.sort();
-  if (files.length === 0) {
-    p.log.info("No .tc files in .truecourse/contracts/.");
+
+  // `--inferred` and `--authored` are exclusive lenses; neither (or both) → all.
+  const filter = options.inferred && !options.authored
+    ? "inferred"
+    : options.authored && !options.inferred
+      ? "authored"
+      : null;
+
+  const resolution = resolver.resolve(fileNodes);
+  const artifacts = [...resolution.index.values()]
+    .filter((a) => (filter ? a.provenance === filter : true))
+    .sort((a, b) =>
+      a.ref.type === b.ref.type
+        ? a.ref.identity.localeCompare(b.ref.identity)
+        : a.ref.type.localeCompare(b.ref.type),
+    );
+
+  if (artifacts.length === 0) {
+    if (filter === "inferred") {
+      p.log.info("No inferred contracts. Run `truecourse infer` to reverse-engineer undocumented decisions.");
+    } else if (filter === "authored") {
+      p.log.info("No authored contracts. Run `truecourse contracts generate` first.");
+    } else {
+      p.log.info("No .tc files in .truecourse/contracts/.");
+    }
     return;
   }
-  p.intro(`Contracts (${files.length})`);
-  for (const f of files) console.log(`  ${path.relative(repoRoot, f)}`);
-  p.outro("`truecourse contracts validate` then `truecourse verify`.");
+
+  const scope = filter ? `${filter} ` : "";
+  p.intro(`Contracts — ${artifacts.length} ${scope}artifact${artifacts.length === 1 ? "" : "s"}`);
+  for (const a of artifacts) {
+    // Confidence is inferred-only; authored artifacts omit the prefix. Location
+    // points at the origin (code path for inferred, doc for authored), falling
+    // back to the `.tc` declaration site when no origin was recorded.
+    const conf = a.confidence ? `[${a.confidence}] ` : "";
+    const loc = a.origin
+      ? a.origin.lines[0] >= 0
+        ? `${a.origin.source}:${a.origin.lines[0]}`
+        : a.origin.source
+      : `${path.relative(repoRoot, a.declarationLoc.filePath)}:${a.declarationLoc.lineStart}`;
+    console.log(`  ${conf}${a.ref.type}:${a.ref.identity}  ${loc}`);
+  }
+  if (parseErrors > 0) {
+    p.log.warn(`${parseErrors} file${parseErrors === 1 ? "" : "s"} could not be parsed — run \`truecourse contracts validate\`.`);
+  }
+  p.outro(
+    filter
+      ? "`truecourse verify`."
+      : "Filter with `--inferred` / `--authored`. `truecourse contracts validate` then `truecourse verify`.",
+  );
 }
 
 // ---------------------------------------------------------------------------
