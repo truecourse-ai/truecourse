@@ -32,7 +32,7 @@ campaigns:
     tech_stack: [typescript, monorepo, state-machines]
     priority: 2
     status: discovering
-    baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    baseline: { analyzed_at: "2026-06-02", target_ref: "2dd9f37b4045d2a414c0a300995d068f28926d50", total_violations: 36177, tp: 850, fp: 421, tp_rate: 0.67 }
     final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
     notes: []
 
