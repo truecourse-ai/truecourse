@@ -1,0 +1,25 @@
+{
+  "name": "@truecourse/ee-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "scripts": {
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
