@@ -541,6 +541,12 @@
       "layer": "data"
     },
     {
+      "name": "registerUser",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "runLs",
       "service": "user-service",
       "kind": "standalone",
@@ -949,6 +955,12 @@
       "layer": "service"
     },
     {
+      "name": "formatTaskRunId",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "formatters",
       "service": "utils",
       "kind": "standalone",
@@ -1010,6 +1022,12 @@
     },
     {
       "name": "http-call-no-timeout-external",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isLeading",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1100,6 +1118,12 @@
     },
     {
       "name": "namespace-usage-internal-module",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "negatedConfigValue",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

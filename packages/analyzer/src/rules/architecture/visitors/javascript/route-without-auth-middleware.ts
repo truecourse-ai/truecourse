@@ -12,11 +12,12 @@ import {
  * Match by exact path or as a prefix segment (`/login`, `/login/callback`).
  */
 const PUBLIC_PATH_PATTERNS = [
-  /^\/health(?:\b|\/)/,
-  /^\/healthz(?:\b|\/)/,
-  /^\/ready(?:\b|\/)/,
-  /^\/ping(?:\b|\/)/,
-  /^\/metrics(?:\b|\/)/,
+  /^\/health(?:check|z|y)?(?:\b|\/|$)/,
+  /^\/live(?:ness|z)?(?:\b|\/|$)/,
+  /^\/ready(?:ness|z)?(?:\b|\/|$)/,
+  /^\/ping(?:\b|\/|$)/,
+  /^\/status(?:\b|\/|$)/,
+  /^\/metrics(?:\b|\/|$)/,
   /^\/login(?:\b|\/)/,
   /^\/logout(?:\b|\/)/,
   /^\/signin(?:\b|\/)/,
@@ -56,6 +57,26 @@ const API_DOCS_PATH = /(?:^|\/)(?:openapi|swagger|api-docs|swagger-ui|redoc)(?:[
 
 function isApiDocsPath(path: string): boolean {
   return API_DOCS_PATH.test(path)
+}
+
+/**
+ * Meta-framework request-handler factories that own their own auth pipeline:
+ * Remix's `createRequestHandler`, React Router's, SvelteKit/Astro adapters,
+ * Next.js's pages handler, Nest's `handle`, etc. When one of these wraps the
+ * route handler, auth lives inside the framework's loaders/actions/middleware,
+ * not on the express-level mount.
+ */
+const FRAMEWORK_REQUEST_HANDLER_NAMES = /^(?:createRequestHandler|createPagesFunctionsHandler|getRequestHandler|handle|nextHandler|toNodeHandler|nodeHandler)$/
+
+function isFrameworkRequestHandler(arg: SyntaxNode | null | undefined): boolean {
+  if (!arg) return false
+  if (arg.type !== 'call_expression') return false
+  const fn = arg.childForFieldName('function')
+  if (!fn) return false
+  let name: string | undefined
+  if (fn.type === 'identifier') name = fn.text
+  else if (fn.type === 'member_expression') name = fn.childForFieldName('property')?.text
+  return !!name && FRAMEWORK_REQUEST_HANDLER_NAMES.test(name)
 }
 
 /**
@@ -188,6 +209,15 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
       if (isPublicPath(path)) return null
       if (isUrlCredentialAuthedPath(path)) return null
       if (isApiDocsPath(path)) return null
+      // Meta-framework catch-all: `app.all("*", createRequestHandler(...))`
+      // (Remix, React Router, etc.) hands every request off to the framework
+      // runtime, which runs auth inside its own loaders/actions. The
+      // express-level route is just the mount point.
+      if (path === '*' || path === '(.*)' || path === '/*') {
+        if (isFrameworkRequestHandler(args.namedChildren[args.namedChildren.length - 1])) {
+          return null
+        }
+      }
     }
 
     // Check this specific route's middleware chain
