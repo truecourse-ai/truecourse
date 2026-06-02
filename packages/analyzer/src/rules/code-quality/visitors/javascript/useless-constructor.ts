@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isGeneratedFile } from '../../../_shared/javascript-helpers.js'
 
 export const uselessConstructorVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/useless-constructor',
@@ -8,6 +9,14 @@ export const uselessConstructorVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const nameNode = node.childForFieldName('name')
     if (nameNode?.text !== 'constructor') return null
+
+    // Generator-produced files (ANTLR parsers/lexers, Protobuf stubs,
+    // GraphQL Code Generator output) emit a constructor on every grammar
+    // rule context that just forwards `(parent, invokingState)` to
+    // `super(parent, invokingState)`. The visitor sees that as "useless",
+    // but the user can't remove it without modifying generated output —
+    // re-running the generator would put it back. Skip generated files.
+    if (isGeneratedFile(filePath, sourceCode)) return null
 
     // `private`/`protected` constructors aren't useless — they restrict
     // instantiation (e.g. singleton pattern). Removing them would expose

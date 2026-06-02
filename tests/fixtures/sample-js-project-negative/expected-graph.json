@@ -655,6 +655,12 @@
       "layer": "service"
     },
     {
+      "name": "buildApiUrl",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Builder",
       "service": "utils",
       "kind": "class",
@@ -676,6 +682,12 @@
       "name": "CaseHelpers",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "checkContact",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -925,6 +937,12 @@
       "layer": "service"
     },
     {
+      "name": "FriendlyGreeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "function-in-loop-var-binding",
       "service": "utils",
       "kind": "standalone",
@@ -943,7 +961,19 @@
       "layer": "service"
     },
     {
+      "name": "god-module-business-helpers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Greeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GreeterBase",
       "service": "utils",
       "kind": "class",
       "layer": "service"
@@ -1339,6 +1369,12 @@
       "layer": "service"
     },
     {
+      "name": "waitForFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "web-security",
       "service": "utils",
       "kind": "standalone",
@@ -1605,6 +1641,15 @@
       "targetService": "user-service",
       "importedNames": [
         "UserRepository"
+      ]
+    },
+    {
+      "source": "checkContact",
+      "sourceService": "utils",
+      "target": "validators",
+      "targetService": "utils",
+      "importedNames": [
+        "validateEmail"
       ]
     },
     {
