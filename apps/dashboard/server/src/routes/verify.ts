@@ -24,7 +24,7 @@ import {
   deleteVerifyRun,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { getGit } from '@truecourse/core/lib/git';
+import { getGit, isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   createSocketSpecTracker,
   createSocketStashConfirmHandler,
@@ -84,6 +84,10 @@ router.post(
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
       // Verify reuses the same Spec progress socket channel — the
       // popup component is identical to Scan/Apply, just driven by
       // VERIFY_STEPS instead of the spec-side step lists.

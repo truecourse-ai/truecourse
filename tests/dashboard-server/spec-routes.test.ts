@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import request from 'supertest';
 import type { Express } from 'express';
+
+/** `spec scan` requires a git repo (like analyze) — init the fixture so the route guard passes. */
+function gitInit(dir: string): void {
+  execSync('git init -q', { cwd: dir });
+  execSync('git config user.email t@t.co', { cwd: dir });
+  execSync('git config user.name test', { cwd: dir });
+  execSync('git commit -q --allow-empty -m init', { cwd: dir });
+}
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -48,6 +57,7 @@ describe('GET /api/repos/:id/spec/scan', () => {
     // candidates, returns an empty merge. We're testing the route
     // shape, not the engine; the engine has its own suite.
     fixture = await setupTestFixture();
+    gitInit(fixture.repoPath);
     app = createApp({ serveStatic: false });
   });
 
@@ -69,6 +79,27 @@ describe('GET /api/repos/:id/spec/scan', () => {
       openConflicts: [],
       decidedConflicts: [],
     });
+  });
+});
+
+describe('GET /api/repos/:id/spec/scan (not a git repo)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture(); // intentionally NOT git-initialized
+    app = createApp({ serveStatic: false });
+  });
+
+  afterEach(async () => {
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('returns 400 — the spec→verify track requires git, like analyze', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${fixture.project.slug}/spec/scan`)
+      .expect(400);
+    expect(res.body.error).toMatch(/not a git repository/i);
   });
 });
 

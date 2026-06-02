@@ -36,6 +36,7 @@ import {
   type Resolution,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addManualChain,
   addManualInclude,
@@ -85,6 +86,10 @@ router.get(
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
       const tracker = createSocketSpecTracker(repoIdForCleanup, SCAN_STEPS.map((s) => ({ ...s })));
       const { scanState } = await scanInProcess(repo.path, { tracker });
       emitSpecComplete(repoIdForCleanup, 'scan');

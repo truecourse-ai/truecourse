@@ -193,6 +193,8 @@ truecourse verify                       # Check code against the contracts → d
 
 Resolve conflicts and review drifts visually in the [dashboard](#dashboard-web-ui)'s BL Drift section, or drive every step from the CLI.
 
+> Like `analyze`, the spec → contracts → verify track requires a **git repository** — TrueCourse's baselines are commit-anchored (committable `LATEST.json`, diff vs HEAD, stashing the committed state). On a non-git folder these commands stop with a clear message and the dashboard hides their actions.
+
 ## How it works
 
 Three stages run in order, each producing artifacts the next consumes:

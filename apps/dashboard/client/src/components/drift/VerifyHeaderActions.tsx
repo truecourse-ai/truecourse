@@ -20,7 +20,7 @@ interface VerifyHeaderActionsProps {
   /** Diff vs the committed baseline (uncommitted changes). */
   diffMode: boolean;
   onToggleDiff: (diff: boolean) => void;
-  /** Diff is git-only; hide the toggle when not a git repo. */
+  /** Verify requires a git repo (like Analyze); hide the run button + diff toggle when absent. */
   isGitRepo: boolean;
   /** Past verify runs (newest-first, items[0] = latest) + selection. */
   runItems: RunHistoryItem[];
@@ -55,7 +55,7 @@ export function VerifyHeaderActions({
         />
       )}
 
-      {!viewingHistory && (
+      {isGitRepo && !viewingHistory && (
         <HoverPopover
           align="end"
           width="narrow"

@@ -877,10 +877,14 @@ function RepoPageInner() {
         backHref="/"
         isDiffMode={isDiffMode}
         onEnterDiffMode={
-          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleEnterDiffMode
+          dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
+            ? undefined
+            : handleEnterDiffMode
         }
         onExitDiffMode={
-          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleExitDiffMode
+          dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
+            ? undefined
+            : handleExitDiffMode
         }
         analyses={analyses}
         selectedAnalysisId={selectedAnalysisId}
@@ -890,12 +894,13 @@ function RepoPageInner() {
         onDashboardSectionChange={setDashboardSection}
         sectionActions={
           leftTab === 'spec' ? (
-            <SpecHeaderActions />
+            <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} />
           ) : leftTab === 'contracts' ? (
             <ContractsHeaderActions
               isGenerating={contractsGenerating}
               onGenerate={runContractsGenerate}
               stale={contractsStale}
+              isGitRepo={repo?.isGitRepo !== false}
             />
           ) : leftTab === 'verify' ? (
             <VerifyHeaderActions
@@ -960,7 +965,7 @@ function RepoPageInner() {
       {!repoError && repo?.isGitRepo === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span>This directory is not a git repository — branch switching and history are unavailable.</span>
+          <span>This directory is not a git repository — analyze, spec scan, contract generation, and verify are unavailable (TrueCourse needs git for commit-anchored baselines, diff, and history).</span>
         </div>
       )}
 

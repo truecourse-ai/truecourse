@@ -8,10 +8,19 @@ import { Loader2, Play, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useSpec } from './SpecContext';
 
-export function SpecHeaderActions() {
+interface SpecHeaderActionsProps {
+  /** Spec scan/resolve require a git repo (like Analyze); hide actions when absent. */
+  isGitRepo?: boolean;
+}
+
+export function SpecHeaderActions({ isGitRepo = true }: SpecHeaderActionsProps = {}) {
   const { scan, loading, refresh, acceptAllDefaults } = useSpec();
   const hasOpen = (scan?.openConflicts.length ?? 0) > 0;
   const disabled = !scan;
+
+  // Not a git repo → no scan/resolve, matching the hidden Analyze button. The
+  // page-level banner explains why.
+  if (!isGitRepo) return null;
 
   return (
     <>

@@ -15,14 +15,19 @@ interface ContractsHeaderActionsProps {
   /** When true, the canonical spec has moved on past the last Generate —
    *  show an amber dot to flag ungenerated changes. */
   stale?: boolean;
+  /** Generate requires a git repo (like Analyze); hide it when absent. */
+  isGitRepo?: boolean;
 }
 
 export function ContractsHeaderActions({
   isGenerating,
   onGenerate,
   stale = false,
+  isGitRepo = true,
 }: ContractsHeaderActionsProps) {
   const showDot = stale && !isGenerating;
+  // Not a git repo → no generate, matching the hidden Analyze button.
+  if (!isGitRepo) return null;
   return (
     <HoverPopover
       align="end"

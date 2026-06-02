@@ -31,6 +31,7 @@ import {
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { resolveStashDecision } from "./analyze.js";
+import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -51,6 +52,7 @@ function withTracker(stepDefs: readonly { key: string; label: string }[]) {
 export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec scan");
+  await requireGitRepo(root);
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
     const { consolidate } = await scanInProcess(root, { tracker });
@@ -112,6 +114,7 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
   }
 
   p.intro("Spec resolve — accepting all defaults");
+  await requireGitRepo(root);
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
     const { additions } = await resolveAllDefaultsInProcess(root, { tracker });
@@ -186,6 +189,7 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
   // so the baseline reflects the committed state.
   const { skipStash } = await resolveStashDecision({ stash: opts.stash }, root);
   p.intro("Verify");
+  await requireGitRepo(root);
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
   try {
     const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir, skipStash });
@@ -233,6 +237,7 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
 async function runVerifyDiff(opts: RunVerifyOptions): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Verify diff");
+  await requireGitRepo(root);
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
   try {
     const { diff } = await verifyDiffInProcess(root, { tracker, codeDir: opts.codeDir });
@@ -281,6 +286,7 @@ export interface RunInferOptions extends RunSpecOptions {
 export async function runInfer(opts: RunInferOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Infer");
+  await requireGitRepo(root);
   const { renderer, tracker } = withTracker(INFER_STEPS);
   try {
     const { infer, written, proposed } = await inferInProcess(root, {

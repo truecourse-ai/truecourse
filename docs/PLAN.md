@@ -3330,6 +3330,16 @@ fallback to the legacy single-file format (it is deleted on the next run).
 - A normal `verify` stashes uncommitted changes with confirmation (CLI prompt /
   dashboard socket dialog) exactly like `analyze`, reusing `resolveStashDecision`
   and `createSocketStashConfirmHandler`.
+- **Git required across the track, consistent with analyze.** `spec scan`,
+  `spec resolve --all-defaults`, `contracts generate`, `verify`, and `infer`
+  refuse to run outside a git repo (shared `NOT_A_GIT_REPO_MESSAGE`). Enforced
+  at the entry points — a CLI guard (`tools/cli/src/commands/git-guard.ts`,
+  called after each `p.intro`) and a 400 guard on the spec-scan / contracts-
+  generate / verify-run routes — keeping the pure in-process functions
+  (`scanInProcess`/`generateContractsInProcess`/`verifyInProcess`) git-agnostic.
+  The dashboard hides the Spec/Contracts/Verify section actions (and the analyze
+  diff toggle) when `repo.isGitRepo === false`, mirroring the hidden Analyze
+  button, with a page banner explaining why.
 - **`truecourse drifts list`** is the agent-facing read surface for drifts:
   reads `verifier/LATEST.json` (no re-run) and pages like `truecourse list` does
   for violations — `--limit` / `--offset` / `--all` / `--severity critical,high`.

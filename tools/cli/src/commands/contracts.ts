@@ -11,6 +11,7 @@ import {
 import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
 import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
 import { syncShippedTcSyntax } from "./helpers.js";
+import { requireGitRepo } from "./git-guard.js";
 
 export interface RunContractsGenerateOptions {
   /** When true, perform a dry run — write nothing, show what would change. */
@@ -25,6 +26,7 @@ export async function runContractsGenerate(
   const repoRoot = options.cwd ?? process.cwd();
 
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
+  await requireGitRepo(repoRoot);
 
   // Module 2 reads the canonical spec produced by Module 1. If
   // `.truecourse/specs/` doesn't exist, the user hasn't run the

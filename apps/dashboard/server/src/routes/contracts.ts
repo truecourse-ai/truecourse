@@ -20,6 +20,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   GENERATE_STEPS,
   generateContractsInProcess,
@@ -158,6 +159,10 @@ router.post(
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
       const tracker = createSocketSpecTracker(
         repoIdForCleanup,
         GENERATE_STEPS.map((s) => ({ ...s })),
