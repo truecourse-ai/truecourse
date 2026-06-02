@@ -589,6 +589,12 @@
       "layer": "data"
     },
     {
+      "name": "summarizeAuditLogEntries",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "TaskHandlers",
       "service": "user-service",
       "kind": "class",
