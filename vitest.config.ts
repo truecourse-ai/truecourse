@@ -17,8 +17,6 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           exclude: [
             'tests/fixtures/**',
-            'tests/.eval-repos/**',
-            'tests/.llm-sample/**',
             // Owned by the `client` project below.
             'tests/dashboard-client/**',
           ],
