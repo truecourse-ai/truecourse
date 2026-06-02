@@ -4,14 +4,15 @@ import { makeViolation } from '../../../types.js'
 import { getMethodName, ORM_WRITE_METHODS, SQL_WRITE_METHODS } from './_helpers.js'
 import { findUserInputAccess } from '../../../_shared/javascript-helpers.js'
 
-// Method names heavily overloaded by built-in JS collections - `Set.add`,
-// `Map.delete`, `Array.indexOf`-adjacent. ORM frameworks happen to use
-// the same words (`session.add(model)`), but firing on every `.add()` /
-// `.delete()` produces ~100% FPs on UI code. Require an ORM-shaped
-// receiver for these specific methods. `create` / `update` / `save` /
-// `upsert` / `destroy` stay unrestricted because they're rarely used as
-// JS collection method names.
-const AMBIGUOUS_ORM_METHODS = new Set(['add', 'delete'])
+// Method names heavily overloaded by built-in JS / Node APIs - `Set.add`,
+// `Map.delete`, `Hash.update` (crypto), `AsyncLocalStorage.run`, generic
+// task `.run()` helpers. ORM frameworks happen to use the same words,
+// but firing on every `.update()` / `.run()` produces ~100% FPs on
+// non-DB code. Require an ORM-shaped receiver for these specific
+// methods. `create` / `save` / `upsert` / `destroy` / `*Many` stay
+// unrestricted because they're rarely used as JS collection / crypto
+// / async-context method names.
+const AMBIGUOUS_ORM_METHODS = new Set(['add', 'delete', 'update', 'run'])
 const ORM_RECEIVER_NAMES = new Set([
   'session', 'db', 'conn', 'connection', 'cursor', 'engine', 'database',
   'manager', 'repo', 'repository', 'orm', 'em', 'tx', 'trx', 'knex',
@@ -21,14 +22,25 @@ const ORM_RECEIVER_NAMES = new Set([
 function hasOrmLikeReceiver(node: import('web-tree-sitter').Node): boolean {
   const fn = node.childForFieldName('function')
   if (fn?.type !== 'member_expression') return false
-  let receiver: import('web-tree-sitter').Node | null = fn.childForFieldName('object')
-  // Walk to the root identifier.
-  while (receiver?.type === 'member_expression') {
-    receiver = receiver.childForFieldName('object')
+  // Walk through the member chain (`this.prisma.user.update`,
+  // `db.users.update`, etc.) and accept if any segment — root identifier
+  // or intermediate property — names a known ORM receiver. This catches
+  // method-style receivers (`this.prisma.…`, `ctx.db.…`) where the root
+  // is `this`/`ctx`, not a bare ORM identifier.
+  let cur: import('web-tree-sitter').Node | null = fn.childForFieldName('object')
+  while (cur) {
+    if (cur.type === 'member_expression') {
+      const prop = cur.childForFieldName('property')
+      if (prop?.type === 'property_identifier' && ORM_RECEIVER_NAMES.has(prop.text.toLowerCase())) return true
+      cur = cur.childForFieldName('object')
+      continue
+    }
+    if (cur.type === 'identifier') {
+      return ORM_RECEIVER_NAMES.has(cur.text.toLowerCase())
+    }
+    return false
   }
-  if (receiver?.type !== 'identifier') return false
-  const name = receiver.text.toLowerCase()
-  return ORM_RECEIVER_NAMES.has(name)
+  return false
 }
 
 export const unvalidatedExternalDataVisitor: CodeRuleVisitor = {

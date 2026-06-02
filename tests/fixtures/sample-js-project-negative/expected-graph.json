@@ -1261,6 +1261,12 @@
       "layer": "service"
     },
     {
+      "name": "renameUser",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "required-type-annotations-bare-arrow",
       "service": "utils",
       "kind": "standalone",
