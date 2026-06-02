@@ -91,7 +91,7 @@ router.get(
         return;
       }
       const tracker = createSocketSpecTracker(repoIdForCleanup, SCAN_STEPS.map((s) => ({ ...s })));
-      const { scanState } = await scanInProcess(repo.path, { tracker });
+      const { scanState } = await scanInProcess(repo.path, { tracker, source: 'dashboard' });
       emitSpecComplete(repoIdForCleanup, 'scan');
       res.json(scanState);
     } catch (e) {

@@ -9,6 +9,7 @@ import {
   spawnRunner,
 } from "@truecourse/contract-extractor";
 import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
+import { trackEvent, bucketFileCount, bucketDuration } from "@truecourse/core/services/telemetry";
 import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
 import { syncShippedTcSyntax } from "./helpers.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -24,6 +25,7 @@ export async function runContractsGenerate(
   options: RunContractsGenerateOptions = {},
 ): Promise<void> {
   const repoRoot = options.cwd ?? process.cwd();
+  const startedAt = Date.now();
 
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
   await requireGitRepo(repoRoot);
@@ -146,6 +148,15 @@ export async function runContractsGenerate(
   // set). Keeps the dashboard's `contractsStale` dot honest when
   // generation is driven from the terminal.
   stampGeneratedMarker(repoRoot);
+
+  // CLI generate goes through the package runner directly (not the core
+  // in-process wrapper the dashboard uses), so emit the telemetry event here.
+  await trackEvent("contracts_generate", {
+    source: "cli",
+    artifactsWrittenRange: bucketFileCount(result.write.written.length),
+    validationIssues: result.validationIssues.length,
+    durationRange: bucketDuration(Date.now() - startedAt),
+  });
 
   if (result.write.written.length === 0) {
     p.outro("Up to date — run `truecourse verify`.");

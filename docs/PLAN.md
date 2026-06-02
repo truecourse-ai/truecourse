@@ -3345,6 +3345,14 @@ fallback to the legacy single-file format (it is deleted on the next run).
   for violations — `--limit` / `--offset` / `--all` / `--severity critical,high`.
   `verify` caps its inline list at 20 and points here for the rest
   ("… (+N more) — run `truecourse drifts list --all`").
+- **Telemetry covers the whole track, not just analyze.** `scanInProcess` /
+  `generateContractsInProcess` / `verifyInProcess` / `verifyDiffInProcess` /
+  `inferInProcess` each emit a `spec_scan` / `contracts_generate` / `verify`
+  (mode full|diff) / `infer` event, gated on an `options.source` ('cli' |
+  'dashboard') exactly like `analyze`. Payloads are anonymous + bucketed
+  (count ranges via `bucketFileCount`, `bucketDuration`). The CLI
+  `contracts generate` emits directly (it uses the package runner, not the core
+  wrapper). The test setup forces `TRUECOURSE_TELEMETRY=0` so suites never emit.
 - **`truecourse contracts list`** is the read surface for inferred artifacts
   (they're contracts, so no separate `infer list`): parses + resolves every
   `.tc` and prints `[confidence] Kind:identity location` (location = code path

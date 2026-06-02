@@ -82,6 +82,12 @@ import {
   type VerifyDiff,
 } from '../types/verify-snapshot.js';
 import type { StepTracker } from '../progress.js';
+import {
+  trackEvent,
+  bucketFileCount,
+  bucketDuration,
+  type TelemetrySource,
+} from '../services/telemetry.service.js';
 
 // ---------------------------------------------------------------------------
 // Step taxonomies — exported so callers can pre-build the tracker.
@@ -211,6 +217,12 @@ export interface SpecInProcessOptions {
   disableLlmChainDetection?: boolean;
   /** When true, skip git mtime resolution. */
   skipGit?: boolean;
+  /**
+   * Adapter that triggered this run (CLI vs dashboard). Auto-emitted in the
+   * telemetry payload for `spec scan` / `contracts generate`. Omit to skip
+   * telemetry (e.g. tests, internal re-scans).
+   */
+  source?: TelemetrySource;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +326,7 @@ export async function scanInProcess(
   options: SpecInProcessOptions = {},
 ): Promise<SpecScanInProcessResult> {
   const { tracker } = options;
+  const startedAt = Date.now();
   let docsSeen = 0;
   let blocksTotal = 0;
   let blocksDone = 0;
@@ -459,6 +472,17 @@ export async function scanInProcess(
   debugLog(
     `scan: buildScanState=${(tWriteStart - tBuildStart).toFixed(0)}ms writeScanState=${(perfNow() - tWriteStart).toFixed(0)}ms`,
   );
+
+  if (options.source) {
+    await trackEvent('spec_scan', {
+      source: options.source,
+      docsScannedRange: bucketFileCount(result.extract.docsScanned),
+      claimsRange: bucketFileCount(result.extract.claims.length),
+      openConflicts: result.merge.openConflicts.length,
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
   return { consolidate: result, scanState };
 }
 
@@ -624,6 +648,7 @@ export async function generateContractsInProcess(
   options: SpecInProcessOptions = {},
 ): Promise<GenerateContractsInProcessResult> {
   const { tracker } = options;
+  const startedAt = Date.now();
 
   if (!hasCanonicalSpec(repoRoot)) {
     tracker?.start('il');
@@ -682,6 +707,14 @@ export async function generateContractsInProcess(
     // the .tc corpus didn't fully land.
     if (issueCount === 0) {
       stampGeneratedMarker(repoRoot);
+    }
+    if (options.source) {
+      await trackEvent('contracts_generate', {
+        source: options.source,
+        artifactsWrittenRange: bucketFileCount(wrote),
+        validationIssues: issueCount,
+        durationRange: bucketDuration(Date.now() - startedAt),
+      });
     }
     return { il: { kind: 'extracted', result: il } };
   } catch (e) {
@@ -767,6 +800,8 @@ export interface VerifyInProcessOptions {
    * committed state — mirroring `analyze`. Diff mode ignores this (never stashes).
    */
   skipStash?: boolean;
+  /** Adapter that triggered this run; auto-emitted in the `verify` telemetry payload. */
+  source?: TelemetrySource;
 }
 
 /**
@@ -781,6 +816,7 @@ export async function verifyInProcess(
   options: VerifyInProcessOptions = {},
 ): Promise<VerifyInProcessResult> {
   const { tracker } = options;
+  const startedAt = Date.now();
   const contractsDir =
     options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
@@ -884,6 +920,17 @@ export async function verifyInProcess(
     unresolvedRefs: result.unresolvedRefs,
   };
 
+  if (options.source) {
+    await trackEvent('verify', {
+      source: options.source,
+      mode: 'full',
+      artifactCountRange: bucketFileCount(result.artifactCount),
+      operationCountRange: bucketFileCount(result.extractedOperationCount),
+      driftCountRange: bucketFileCount(result.drifts.length),
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
   return { verify: result, state };
 }
 
@@ -973,6 +1020,7 @@ export async function verifyDiffInProcess(
   options: VerifyInProcessOptions = {},
 ): Promise<VerifyDiffInProcessResult> {
   const { tracker } = options;
+  const startedAt = Date.now();
   const contractsDir =
     options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
@@ -1036,6 +1084,16 @@ export async function verifyDiffInProcess(
   writeVerifyDiff(repoRoot, diff);
   tracker?.done('compare', `+${added.length} / -${resolved.length} drift${added.length + resolved.length === 1 ? '' : 's'}`);
 
+  if (options.source) {
+    await trackEvent('verify', {
+      source: options.source,
+      mode: 'diff',
+      addedRange: bucketFileCount(added.length),
+      resolvedRange: bucketFileCount(resolved.length),
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
   return { verify: result, diff };
 }
 
@@ -1049,6 +1107,8 @@ export interface InferInProcessOptions {
   codeDir?: string;
   /** When true, don't write — just report what would be written. */
   dryRun?: boolean;
+  /** Adapter that triggered this run; auto-emitted in the `infer` telemetry payload. */
+  source?: TelemetrySource;
 }
 
 /**
@@ -1063,6 +1123,7 @@ export async function inferInProcess(
   options: InferInProcessOptions = {},
 ): Promise<InferInProcessResult> {
   const { tracker } = options;
+  const startedAt = Date.now();
   const contractsDir =
     options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
@@ -1094,6 +1155,15 @@ export async function inferInProcess(
       ? `${proposed.length} would be written`
       : `${written.length} written`,
   );
+
+  if (options.source) {
+    await trackEvent('infer', {
+      source: options.source,
+      decisionsRange: bucketFileCount(result.decisions.length),
+      dryRun: !!options.dryRun,
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
 
   return { infer: result, written, proposed };
 }

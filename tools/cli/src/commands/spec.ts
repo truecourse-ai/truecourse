@@ -55,7 +55,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    const { consolidate } = await scanInProcess(root, { tracker });
+    const { consolidate } = await scanInProcess(root, { tracker, source: "cli" });
     renderer.dispose();
     const { extract, merge } = consolidate;
     p.log.step(`docs        ${extract.docsScanned}`);
@@ -192,7 +192,7 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
   try {
-    const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir, skipStash });
+    const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir, skipStash, source: "cli" });
     renderer.dispose();
 
     p.log.step(`artifacts   ${verify.artifactCount}`);
@@ -240,7 +240,7 @@ async function runVerifyDiff(opts: RunVerifyOptions): Promise<void> {
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(VERIFY_STEPS);
   try {
-    const { diff } = await verifyDiffInProcess(root, { tracker, codeDir: opts.codeDir });
+    const { diff } = await verifyDiffInProcess(root, { tracker, codeDir: opts.codeDir, source: "cli" });
     renderer.dispose();
 
     p.log.step(`added       ${diff.summary.added}`);
@@ -293,6 +293,7 @@ export async function runInfer(opts: RunInferOptions = {}): Promise<void> {
       tracker,
       codeDir: opts.codeDir,
       dryRun: opts.dryRun,
+      source: "cli",
     });
     renderer.dispose();
 

@@ -167,7 +167,7 @@ router.post(
         repoIdForCleanup,
         GENERATE_STEPS.map((s) => ({ ...s })),
       );
-      const outcome = await generateContractsInProcess(repo.path, { tracker });
+      const outcome = await generateContractsInProcess(repo.path, { tracker, source: 'dashboard' });
 
       const response: Record<string, unknown> = {};
       if (outcome.il.kind === 'extracted') {

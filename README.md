@@ -366,7 +366,7 @@ Patterns are anchored to the file's location, so `src/generated/` matches the to
 
 ## Telemetry
 
-TrueCourse collects anonymous usage data (event type, language, file count range, OS) to improve the product. No source code, file paths, or violation details are collected. It is automatically disabled in CI environments.
+TrueCourse collects anonymous usage data to improve the product — one event per command (`analyze`, `spec_scan`, `contracts_generate`, `verify`, `infer`), each carrying only coarse, bucketed counts (file/artifact/drift/decision *ranges*, duration range), the surface (CLI vs dashboard), OS, and tool version. No source code, file paths, identities, or violation/drift details are collected. It is automatically disabled in CI environments.
 
 ```bash
 truecourse telemetry status           # Check telemetry status

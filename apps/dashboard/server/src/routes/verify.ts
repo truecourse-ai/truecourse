@@ -105,6 +105,7 @@ router.post(
       const { state } = await verifyInProcess(repo.path, {
         tracker,
         skipStash: stashDecision === 'no-stash',
+        source: 'dashboard',
       });
       emitSpecComplete(repoIdForCleanup, 'verify');
       res.json(state);
@@ -195,7 +196,7 @@ router.post(
         repoIdForCleanup,
         VERIFY_STEPS.map((s) => ({ ...s })),
       );
-      const { diff } = await verifyDiffInProcess(repo.path, { tracker });
+      const { diff } = await verifyDiffInProcess(repo.path, { tracker, source: 'dashboard' });
       emitSpecComplete(repoIdForCleanup, 'verify');
       res.json(diff);
     } catch (e) {
