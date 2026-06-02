@@ -73,6 +73,11 @@ export async function runContractsGenerate(
       onSliceCacheHit: (s) => {
         p.log.message(`  cache hit  ${++doneSlices}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
       },
+      // The repair pass runs sequential `claude` re-prompts after extraction —
+      // stream each one so the terminal isn't silent through the LLM calls.
+      onRepairProgress: (e) => {
+        p.log.step(`repairing  ${e.done}/${e.total}  ${e.message}`);
+      },
     });
   } catch (e) {
     if (e instanceof CanonicalSpecMissingError) {
@@ -106,8 +111,11 @@ export async function runContractsGenerate(
     process.exit(1);
   }
 
-  // Surface merge diagnostics (non-blocking).
+  // Surface merge diagnostics (non-blocking). Repair "re-prompting" lines were
+  // already streamed live via onRepairProgress, so skip them here to avoid
+  // printing each twice — repair failures/skips (also repair-kind) still show.
   for (const d of result.mergeDiagnostics) {
+    if (d.artifactKey === "repair" && d.message.includes("re-prompting")) continue;
     p.log.warn(d.message);
   }
 

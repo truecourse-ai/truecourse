@@ -32,6 +32,20 @@ export interface RepairIssue {
   detail: string;
 }
 
+/** Live progress for one repair re-prompt. */
+export interface RepairProgress {
+  /** Re-prompts started so far (1-based). */
+  done: number;
+  /**
+   * Total re-prompts. May grow once between the two passes: pass 2's issue
+   * set is only known after pass 1 has mutated the corpus, so the total is
+   * extended (not reset) when pass 2 begins — the counter climbs continuously.
+   */
+  total: number;
+  /** Human-readable description (e.g. `missing Enum:Foo — re-prompting "…"`). */
+  message: string;
+}
+
 export interface RepairOptions {
   bin?: string;
   /** Model passed to `claude --model`. */
@@ -39,6 +53,13 @@ export interface RepairOptions {
   /** Fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
   timeoutMs?: number;
+  /**
+   * Fired once per re-prompt, just before the `claude` call. Lets the CLI
+   * render live progress through the otherwise-silent (sequential, LLM-bound)
+   * repair pass. Additive: the full repair narrative still lands in the
+   * returned `log`.
+   */
+  onProgress?: (e: RepairProgress) => void;
 }
 
 export interface RepairOutcome {
@@ -391,16 +412,29 @@ export async function repair(
   const log: string[] = [];
   const allIssues: RepairIssue[] = [];
 
+  // Progress accounting — `total` counts re-prompt attempts (issues with a
+  // resolved slice). Pass 2 extends it once its issue set is known, so the
+  // live counter climbs continuously across both passes.
+  let done = 0;
+  let total = 0;
+
   // Pass 1 — missing artifacts
   const missing = detectMissingArtifacts(artifacts);
   allIssues.push(...missing);
-  for (const issue of missing) {
-    const slice = findSliceForMissing(issue.artifactKey, slices);
+  const missingTasks = missing.map((issue) => ({
+    issue,
+    slice: findSliceForMissing(issue.artifactKey, slices),
+  }));
+  total += missingTasks.filter((t) => t.slice).length;
+  for (const { issue, slice } of missingTasks) {
     if (!slice) {
       log.push(`repair: missing ${issue.artifactKey} — no candidate slice found, skipping.`);
       continue;
     }
-    log.push(`repair: missing ${issue.artifactKey} — re-prompting "${slice.headingPath.join(' → ')}".`);
+    done += 1;
+    const message = `missing ${issue.artifactKey} — re-prompting "${slice.headingPath.join(' → ')}"`;
+    log.push(`repair: ${message}.`);
+    opts.onProgress?.({ done, total, message });
     const fragments = await runFixOne(
       { previousArtifact: null, missingKey: issue.artifactKey, slice, issues: [issue.detail] },
       bin,
@@ -450,15 +484,23 @@ export async function repair(
   }
   allIssues.push(...incomplete);
 
-  for (const [k, issues] of grouped) {
+  const incompleteTasks = [...grouped].map(([k, issues]) => {
     const artifact = artifacts.find((a) => key(a.kind, a.identity) === k);
+    const slice = artifact ? sliceForArtifact(artifact, slices) : undefined;
+    return { k, issues, artifact, slice };
+  });
+  total += incompleteTasks.filter((t) => t.artifact && t.slice).length;
+
+  for (const { k, issues, artifact, slice } of incompleteTasks) {
     if (!artifact) continue;
-    const slice = sliceForArtifact(artifact, slices);
     if (!slice) {
       log.push(`repair: incomplete ${k} — could not locate source slice, skipping.`);
       continue;
     }
-    log.push(`repair: incomplete ${k} (${issues.length} issue${issues.length === 1 ? '' : 's'}) — re-prompting.`);
+    done += 1;
+    const message = `incomplete ${k} (${issues.length} issue${issues.length === 1 ? '' : 's'}) — re-prompting`;
+    log.push(`repair: ${message}.`);
+    opts.onProgress?.({ done, total, message });
     const fragments = await runFixOne(
       { previousArtifact: artifact, slice, issues: issues.map((i) => i.detail) },
       bin,

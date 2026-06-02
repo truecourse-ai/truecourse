@@ -34,7 +34,7 @@ import {
 import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
 import { propagateCrossCuttingTags } from './tag-propagator.js';
 import { normalizeMergedArtifacts } from './normalizer.js';
-import { repair } from './repair.js';
+import { repair, type RepairProgress } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
@@ -75,6 +75,8 @@ export interface GenerateOptions {
   onSliceCacheHit?: (slice: SpecSlice) => void;
   onSliceStart?: (slice: SpecSlice) => void;
   onSliceDone?: (slice: SpecSlice, ok: boolean) => void;
+  /** Fired once per repair re-prompt (the silent, LLM-bound post-extraction pass). */
+  onRepairProgress?: (e: RepairProgress) => void;
 }
 
 export interface SliceOutcome {
@@ -208,6 +210,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
     const repaired = await repair(merged.artifacts, slices, {
       model: models.repair,
       fallbackModel: models.fallback,
+      onProgress: opts.onRepairProgress,
     });
     merged.artifacts = repaired.artifacts;
     merged.diagnostics.push(
