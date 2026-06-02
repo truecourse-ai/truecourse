@@ -21,16 +21,19 @@ export const unsafeUnaryMinusVisitor: CodeRuleVisitor = {
     const operand = node.namedChildren[0]
     if (!operand) return null
 
+    // Span-aware query: without the end position, smallest-node lookup can
+    // land on a sub-node (e.g. the `new` keyword inside `new Date()`) whose
+    // type isn't the expression's result type.
     const typeStr = typeQuery.getTypeAtPosition(
       filePath,
       operand.startPosition.row,
       operand.startPosition.column,
+      operand.endPosition.row,
+      operand.endPosition.column,
     )
     if (!typeStr) return null
 
-    // number, bigint, any, and literal number types are fine
-    if (typeStr === 'number' || typeStr === 'bigint' || typeStr === 'any') return null
-    if (/^\d+$/.test(typeStr)) return null // literal number type like '42'
+    if (isNumericOrBigintType(typeStr)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
@@ -40,4 +43,20 @@ export const unsafeUnaryMinusVisitor: CodeRuleVisitor = {
       'Convert to a number first or remove the unary minus.',
     )
   },
+}
+
+// Numeric/bigint primitives, their literal types, and unions of those. The
+// compiler serializes literals as `1`, `-1`, `1.5`, `-9223372036854775808n`
+// etc. — accept any of those shapes (including unions like `1.5 | -1.5`).
+function isNumericOrBigintType(typeStr: string): boolean {
+  const parts = typeStr.split(/\s*\|\s*/)
+  return parts.every(isNumericOrBigintAtom)
+}
+
+function isNumericOrBigintAtom(part: string): boolean {
+  const t = part.trim()
+  if (t === 'number' || t === 'bigint' || t === 'any' || t === 'never') return true
+  if (/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(t)) return true // number literal
+  if (/^-?\d+n$/.test(t)) return true // bigint literal
+  return false
 }

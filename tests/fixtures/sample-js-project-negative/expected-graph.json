@@ -1105,6 +1105,12 @@
       "layer": "service"
     },
     {
+      "name": "negatedConfigValue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "OffscreenRenderer",
       "service": "utils",
       "kind": "class",
