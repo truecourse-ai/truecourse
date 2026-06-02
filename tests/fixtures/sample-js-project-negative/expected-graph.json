@@ -541,6 +541,12 @@
       "layer": "data"
     },
     {
+      "name": "registerUser",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "runLs",
       "service": "user-service",
       "kind": "standalone",

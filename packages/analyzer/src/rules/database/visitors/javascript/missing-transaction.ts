@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import type { TypeQueryService } from '../../../../ts-compiler.js'
 import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody, bodyHasTransactionCall, isInsideTransactionCallback } from './_helpers.js'
 
 // `destroy()` and `save()` are common method names on non-ORM objects
@@ -10,6 +11,27 @@ import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody, bodyHasTran
 // shape is the dead giveaway of a UI/PDF library cleanup and a frequent
 // FP source for this rule.
 const ZERO_ARG_AMBIGUOUS_WRITE_METHODS = new Set(['destroy', 'save'])
+
+// In-memory containers share method names with ORMs (`.delete`, `.set`).
+// When the receiver's type is one of these, the call is not a DB write.
+const IN_MEMORY_CONTAINER_TYPES = /^(?:Readonly)?(?:Map|Set|WeakMap|WeakSet)\b/
+
+function isInMemoryContainerReceiver(call: SyntaxNode, typeQuery: TypeQueryService | undefined, filePath: string): boolean {
+  if (!typeQuery) return false
+  const fn = call.childForFieldName('function')
+  if (fn?.type !== 'member_expression') return false
+  const receiver = fn.childForFieldName('object')
+  if (!receiver) return false
+  const typeStr = typeQuery.getTypeAtPosition(
+    filePath,
+    receiver.startPosition.row,
+    receiver.startPosition.column,
+    receiver.endPosition.row,
+    receiver.endPosition.column,
+  )
+  if (!typeStr) return false
+  return IN_MEMORY_CONTAINER_TYPES.test(typeStr.trim())
+}
 
 function looksLikeOrmWriteCall(call: SyntaxNode, methodName: string): boolean {
   if (!ORM_WRITE_METHODS.has(methodName)) return false
@@ -24,9 +46,11 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-transaction',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     const methodName = getMethodName(node)
     if (!looksLikeOrmWriteCall(node, methodName)) return null
+    if (isInMemoryContainerReceiver(node, typeQuery, filePath)) return null
 
     const body = getEnclosingFunctionBody(node)
     if (!body) return null
@@ -56,7 +80,7 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
         } else if (fn?.type === 'identifier') {
           mName = fn.text
         }
-        if (looksLikeOrmWriteCall(n, mName)) {
+        if (looksLikeOrmWriteCall(n, mName) && !isInMemoryContainerReceiver(n, typeQuery, filePath)) {
           writeCount++
           if (tableName) tableNames.add(tableName)
           if (n.id === node.id) {
