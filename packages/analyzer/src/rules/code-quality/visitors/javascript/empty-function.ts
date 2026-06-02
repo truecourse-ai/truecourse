@@ -21,24 +21,17 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
     }
 
     // Skip empty arrow functions used as intentional no-ops:
-    //  - inside .catch() — error suppression
-    //  - JSX attribute value — `onClick={() => {}}` placeholder for a required prop
-    //  - return value of another function — `return () => {}` no-op unsubscribe etc.
-    //  - default in `||` / `??` fallback — `cb || (() => {})` ensures a callable
+    //  - any arrow passed as a call argument (`.catch(() => {})`,
+    //    `useRef(() => {})`, `useEffect(noop, [])`) — the caller asked
+    //    for a callable and the empty body is the deliberate placeholder
+    //  - JSX attribute value — `onClick={() => {}}` placeholder
+    //  - return value of another function — `return () => {}` no-op
+    //  - default in `||` / `??` fallback — `cb || (() => {})`
     if (node.type === 'arrow_function') {
       let parent = node.parent
       // Look through parentheses, e.g. `(() => {})` in `x || (() => {})`
       while (parent?.type === 'parenthesized_expression') parent = parent.parent
-      if (parent?.type === 'arguments') {
-        const grandparent = parent.parent
-        if (grandparent?.type === 'call_expression') {
-          const gpFn = grandparent.childForFieldName('function')
-          if (gpFn?.type === 'member_expression') {
-            const gpProp = gpFn.childForFieldName('property')
-            if (gpProp?.text === 'catch') return null
-          }
-        }
-      }
+      if (parent?.type === 'arguments') return null
       if (parent?.type === 'jsx_expression' || parent?.type === 'jsx_attribute') return null
       if (parent?.type === 'return_statement') return null
       if (parent?.type === 'binary_expression') {

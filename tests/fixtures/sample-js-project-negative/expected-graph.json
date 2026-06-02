@@ -1171,6 +1171,12 @@
       "layer": "service"
     },
     {
+      "name": "Plain",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "processAbandonedQueue",
       "service": "utils",
       "kind": "standalone",
@@ -1268,6 +1274,12 @@
     },
     {
       "name": "required-type-annotations-bare-arrow",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "reservedHook",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
