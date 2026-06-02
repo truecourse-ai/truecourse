@@ -72,7 +72,7 @@ import {
   deleteVerifyDiff,
   writeVerifyDiff,
 } from '../lib/verify-store.js';
-export { readVerifyDiff, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
+export { readVerifyDiff, readVerifyLatest, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
 export type { VerifyDiff, VerifyLatest, VerifyHistory } from '../types/verify-snapshot.js';
 import {
   diffDrifts,

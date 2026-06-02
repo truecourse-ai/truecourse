@@ -3330,6 +3330,11 @@ fallback to the legacy single-file format (it is deleted on the next run).
 - A normal `verify` stashes uncommitted changes with confirmation (CLI prompt /
   dashboard socket dialog) exactly like `analyze`, reusing `resolveStashDecision`
   and `createSocketStashConfirmHandler`.
+- **`truecourse drifts list`** is the agent-facing read surface for drifts:
+  reads `verifier/LATEST.json` (no re-run) and pages like `truecourse list` does
+  for violations — `--limit` / `--offset` / `--all` / `--severity critical,high`.
+  `verify` caps its inline list at 20 and points here for the rest
+  ("… (+N more) — run `truecourse drifts list --all`").
 - Dashboard verify page redesigned to a 3-column view (analytics · drifts ·
   detail) with a header Normal / Git-Diff toggle gated on `isGitRepo`, the
   branch label, and click-to-open drift detail.

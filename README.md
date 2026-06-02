@@ -261,6 +261,9 @@ truecourse contracts validate                     # Parse + resolve TC files; re
 truecourse verify                                 # Full run: stashes dirty tree (prompts), writes verifier/runs + LATEST + history
 truecourse verify --diff                          # Git diff: working-tree drifts vs committed baseline (added/resolved/unchanged)
 truecourse verify --stash / --no-stash            # Pre-approve / skip stashing on a full run
+truecourse drifts list                            # List drifts from the latest verify (paginated; reads LATEST, no re-run)
+truecourse drifts list --all                      # Show every drift (no pagination)
+truecourse drifts list --offset 20 / --severity critical,high  # Page through / filter by severity
 
 # Inference (code → inferred contracts) — reverse-engineer undocumented decisions
 truecourse infer                                  # Write inferred .tc files to contracts/_inferred/

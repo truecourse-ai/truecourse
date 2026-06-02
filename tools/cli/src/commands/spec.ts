@@ -213,7 +213,9 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
         p.log.message(`    → ${d.message}`);
       }
       if (verify.drifts.length > 20) {
-        p.log.message(`  … (+${verify.drifts.length - 20} more)`);
+        p.log.message(
+          `  … (+${verify.drifts.length - 20} more) — run \`truecourse drifts list --all\` to see them all.`,
+        );
       }
     }
 

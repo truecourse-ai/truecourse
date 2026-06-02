@@ -49,6 +49,7 @@ import {
   runSpecDocsInclude,
   runSpecDocsUninclude,
 } from "./commands/spec-docs.js";
+import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -62,7 +63,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.6.0-next.6")
+  .version("0.6.0-next.7")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -370,6 +371,30 @@ program
   .option("--dry-run", "Report what would be written without touching disk")
   .action(async (options) => {
     await runInfer({ codeDir: options.codeDir, dryRun: options.dryRun });
+  });
+
+// Drifts — inspect the drifts from the latest verify. Reads verifier/LATEST.json
+// (no re-run); paginated + filterable like `truecourse list` for violations.
+const driftsCmd = program
+  .command("drifts")
+  .description("Inspect drifts from the latest verify");
+
+driftsCmd
+  .command("list")
+  .description("List drifts from the latest verify (paginated)")
+  .option("--limit <n>", "Number of drifts to show (default: 20)", parseInt)
+  .option("--offset <n>", "Skip first N drifts", parseInt)
+  .option("--all", "Show all drifts")
+  .option(
+    "--severity <list>",
+    "Comma-separated severities to include (critical,high,medium,low,info)",
+  )
+  .action(async (options) => {
+    await runDriftsList({
+      limit: options.all ? Infinity : (options.limit ?? 20),
+      offset: options.offset ?? 0,
+      severity: parseDriftSeverityFlag(options.severity),
+    });
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.
