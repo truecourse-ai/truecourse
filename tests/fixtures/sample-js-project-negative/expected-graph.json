@@ -649,6 +649,12 @@
       "layer": "service"
     },
     {
+      "name": "BatchProcessor",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Builder",
       "service": "utils",
       "kind": "class",
@@ -811,9 +817,27 @@
       "layer": "service"
     },
     {
+      "name": "declarations-in-global-scope-mutable",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Derived",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "describe",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describePayload",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1156,6 +1180,12 @@
       "name": "resolveDocument",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Salutation",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
