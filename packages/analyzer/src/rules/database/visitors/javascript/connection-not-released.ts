@@ -1,6 +1,34 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getMethodName, CONNECTION_ACQUIRE_METHODS, isInsideTryBody } from './_helpers.js'
+
+// Method names like `connect` / `acquire` / `getClient` collide with
+// non-database APIs (Docker networks, distributed locks, rate limiters,
+// MCP / WebSocket servers, etc.). Require the receiver name to carry a DB
+// hint so the rule only fires when there's a real connection-pool semantic.
+const DB_RECEIVER_TOKENS = new Set([
+  'db', 'database', 'pool', 'prisma', 'knex', 'sequelize', 'mongoose',
+  'mongo', 'postgres', 'pg', 'mysql', 'sqlite', 'mssql', 'oracle',
+  'drizzle', 'typeorm', 'datasource', 'conn', 'connection',
+])
+
+function receiverTokens(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_$.]+/)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase())
+}
+
+function receiverIsDbLike(fn: SyntaxNode): boolean {
+  const object = fn.childForFieldName('object')
+  if (!object) return false
+  for (const token of receiverTokens(object.text)) {
+    if (DB_RECEIVER_TOKENS.has(token)) return true
+  }
+  return false
+}
 
 export const connectionNotReleasedVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/connection-not-released',
@@ -13,6 +41,8 @@ export const connectionNotReleasedVisitor: CodeRuleVisitor = {
     // Only flag method calls on objects (pool.connect()), not standalone functions (getClient())
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'member_expression') return null
+
+    if (!receiverIsDbLike(fn)) return null
 
     // If the call is inside a try block, that's fine — assume finally releases it
     if (isInsideTryBody(node)) return null

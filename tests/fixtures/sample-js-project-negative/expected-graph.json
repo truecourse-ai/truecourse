@@ -181,6 +181,12 @@
       "layer": "api"
     },
     {
+      "name": "reportFailureHandler",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "serveTemplate",
       "service": "api-gateway",
       "kind": "standalone",
@@ -847,6 +853,12 @@
       "layer": "service"
     },
     {
+      "name": "describeOwner",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "describePayload",
       "service": "utils",
       "kind": "standalone",
@@ -920,6 +932,12 @@
     },
     {
       "name": "fireAndForget",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "firstSquareUnder",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1213,6 +1231,12 @@
       "layer": "service"
     },
     {
+      "name": "runWithoutRelease",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Salutation",
       "service": "utils",
       "kind": "class",
@@ -1286,6 +1310,12 @@
     },
     {
       "name": "summarize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "summarizeAccount",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
