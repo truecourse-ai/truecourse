@@ -649,6 +649,12 @@
       "layer": "service"
     },
     {
+      "name": "array-delete-array-receiver",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "AsyncInit",
       "service": "utils",
       "kind": "class",
