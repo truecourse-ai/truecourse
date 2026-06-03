@@ -36,8 +36,11 @@ export function Hero() {
 
       <div className="wrap hero-inner">
         <Reveal as="span" className="badge pulse">
-          <span className="spark">✦</span> Verified knowledge for AI-native engineering
-          teams <span className="arr">· preview</span>
+          <span className="spark">✦</span>
+          <span className="badge-text">
+            Verified knowledge for AI-native engineering teams{' '}
+            <span className="arr">· preview</span>
+          </span>
         </Reveal>
 
         <Reveal as="h1" delay={80}>
@@ -48,13 +51,7 @@ export function Hero() {
           Every change, checked against what your team actually decided.
         </Reveal>
 
-        <Reveal as="p" className="micro" delay={220}>
-          We compile your team&apos;s decisions into{' '}
-          <b>machine-readable contracts</b> and check every change against them —{' '}
-          <b>deterministically</b>, with no LLM in the verification loop.
-        </Reveal>
-
-        <Reveal className="cta-row" delay={300}>
+        <Reveal className="cta-row" delay={240}>
           <Link className="btn btn-primary" to="/request-access">
             Request access <span className="arr">→</span>
           </Link>
