@@ -871,6 +871,12 @@
       "layer": "service"
     },
     {
+      "name": "describeFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "describeOwner",
       "service": "utils",
       "kind": "standalone",
@@ -1165,6 +1171,12 @@
       "layer": "service"
     },
     {
+      "name": "passThroughPromise",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "pickStatusLabel",
       "service": "utils",
       "kind": "standalone",
@@ -1387,6 +1399,12 @@
       "layer": "service"
     },
     {
+      "name": "toSortedNumeric",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "totalSummaryBytes",
       "service": "utils",
       "kind": "standalone",
@@ -1474,6 +1492,18 @@
       "name": "Widget",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "wireResize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "wrapSync",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
