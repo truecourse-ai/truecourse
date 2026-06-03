@@ -16,7 +16,11 @@
 
 import * as p from "@clack/prompts";
 import path from "node:path";
-import { type Conflict } from "@truecourse/spec-consolidator";
+import {
+  summarizeExtractionFailures,
+  type Conflict,
+  type ExtractionFailureReport,
+} from "@truecourse/spec-consolidator";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   RESOLVE_STEPS,
@@ -54,44 +58,118 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.intro("Spec scan");
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(SCAN_STEPS);
-  try {
-    const { consolidate } = await scanInProcess(root, { tracker, source: "cli" });
-    renderer.dispose();
-    const { extract, merge } = consolidate;
-    p.log.step(`docs        ${extract.docsScanned}`);
-    p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
-    p.log.step(`claims      ${extract.claims.length}`);
-    p.log.step(`resolved    ${merge.resolvedClaims.length}`);
-    p.log.step(`decided     ${merge.decidedConflicts.length}`);
-    p.log.step(`open        ${merge.openConflicts.length}`);
+  // A hard failure inside the pipeline must exit non-zero — otherwise the
+  // command reports success on a scan that produced nothing. The `.catch`
+  // handler returns `never` (process.exit), so `consolidate` is always
+  // assigned past this point.
+  const { consolidate } = await scanInProcess(root, { tracker, source: "cli" }).catch(
+    (e: unknown) => {
+      renderer.dispose();
+      p.cancel(`Failed: ${(e as Error).message}`);
+      process.exit(1);
+    },
+  );
+  renderer.dispose();
+  const { extract, merge } = consolidate;
+  p.log.step(`docs        ${extract.docsScanned}`);
+  p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
+  p.log.step(`claims      ${extract.claims.length}`);
+  p.log.step(`resolved    ${merge.resolvedClaims.length}`);
+  p.log.step(`decided     ${merge.decidedConflicts.length}`);
+  p.log.step(`open        ${merge.openConflicts.length}`);
 
-    if (merge.openConflicts.length > 0) {
-      p.log.message("");
-      p.log.message("Open conflicts:");
-      for (const c of merge.openConflicts.slice(0, 10)) {
-        p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
-        p.log.message(`    id: ${c.id}`);
-      }
-      if (merge.openConflicts.length > 10) {
-        p.log.message(`  … (+${merge.openConflicts.length - 10} more — run \`truecourse spec conflicts list\`)`);
-      }
-      p.log.message("");
-      p.log.message("Resolve them:");
-      p.log.message("  • dashboard:        truecourse dashboard            (Spec tab)");
-      p.log.message("  • per conflict:     truecourse spec conflicts show <id>");
-      p.log.message("                      truecourse spec conflicts pick <id> <candidateIndex>");
-      p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
-      p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
+  // A count alone hides actionable errors (e.g. an expired `claude` login).
+  // Surface the most common distinct messages and, when the failures look
+  // like an auth problem, point the user at re-authenticating.
+  const failures = summarizeExtractionFailures(extract);
+  const outcome = decideScanOutcome({
+    blocksAttempted: extract.blocksAttempted,
+    claims: extract.claims.length,
+    openConflicts: merge.openConflicts.length,
+    failures,
+  });
+  if (failures.total > 0) {
+    p.log.message("");
+    p.log.warn(`${failures.total} block${failures.total === 1 ? "" : "s"} failed to extract:`);
+    for (const s of failures.samples) {
+      p.log.message(`  • ${oneLine(s.message)}${s.count > 1 ? `  (×${s.count})` : ""}`);
     }
-    p.outro(
-      merge.openConflicts.length === 0
-        ? "No open conflicts — run `truecourse contracts generate`."
-        : `${merge.openConflicts.length} open.`,
-    );
-  } catch (e) {
-    renderer.dispose();
-    p.cancel(`Failed: ${(e as Error).message}`);
+    if (outcome.showAuthHint) {
+      p.log.message("");
+      p.log.warn("This looks like an authentication problem with the `claude` CLI.");
+      p.log.message("  Your Claude login may have expired — run `claude` to re-authenticate (e.g. `/login`), then retry.");
+    }
   }
+
+  // Every block failing means zero claims — that's an error, not a clean
+  // repo. Bail with the failure outro and a non-zero exit before suggesting
+  // any downstream command.
+  if (outcome.exitCode !== 0) {
+    p.outro(outcome.outro);
+    process.exit(outcome.exitCode);
+  }
+
+  if (merge.openConflicts.length > 0) {
+    p.log.message("");
+    p.log.message("Open conflicts:");
+    for (const c of merge.openConflicts.slice(0, 10)) {
+      p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
+      p.log.message(`    id: ${c.id}`);
+    }
+    if (merge.openConflicts.length > 10) {
+      p.log.message(`  … (+${merge.openConflicts.length - 10} more — run \`truecourse spec conflicts list\`)`);
+    }
+    p.log.message("");
+    p.log.message("Resolve them:");
+    p.log.message("  • dashboard:        truecourse dashboard            (Spec tab)");
+    p.log.message("  • per conflict:     truecourse spec conflicts show <id>");
+    p.log.message("                      truecourse spec conflicts pick <id> <candidateIndex>");
+    p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
+    p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
+  }
+  p.outro(outcome.outro);
+}
+
+export interface ScanOutcome {
+  /** Process exit code — non-zero when the scan effectively failed. */
+  exitCode: 0 | 1;
+  /** Final outro line. */
+  outro: string;
+  /** Whether to print the re-authentication hint. */
+  showAuthHint: boolean;
+}
+
+/**
+ * Decide how a scan ends: its exit code, outro line, and whether to nudge the
+ * user to re-authenticate. Pure so the policy is unit-tested without driving
+ * clack/process.exit. Two failure-aware rules sit on top of the old
+ * open-conflicts/outro logic:
+ *   - every attempted block failed → exit 1 (a total wipeout is an error, not
+ *     a clean repo).
+ *   - zero claims (but not a wipeout) → don't suggest `contracts generate`;
+ *     there's nothing to generate yet.
+ */
+export function decideScanOutcome(input: {
+  blocksAttempted: number;
+  claims: number;
+  openConflicts: number;
+  failures: ExtractionFailureReport;
+}): ScanOutcome {
+  const { failures } = input;
+  if (failures.allFailed) {
+    return {
+      exitCode: 1,
+      outro: `Aborted — all ${input.blocksAttempted} blocks failed, no claims extracted.`,
+      showAuthHint: failures.likelyAuth,
+    };
+  }
+  const outro =
+    input.openConflicts > 0
+      ? `${input.openConflicts} open.`
+      : input.claims === 0
+        ? "No claims extracted — nothing to generate yet."
+        : "No open conflicts — run `truecourse contracts generate`.";
+  return { exitCode: 0, outro, showAuthHint: failures.likelyAuth };
 }
 
 // ---------------------------------------------------------------------------
@@ -345,4 +423,10 @@ function summarizeConflicts(label: string, conflicts: Conflict[]): void {
 
 function decisionsRelPath(root: string): string {
   return path.join(root, ".truecourse", "specs", "decisions.json");
+}
+
+/** Collapse whitespace and cap length so a multi-line stderr stays one tidy line. */
+function oneLine(s: string, max = 200): string {
+  const collapsed = s.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}…`;
 }
