@@ -1,146 +1,119 @@
-import { Github, Mail } from 'lucide-react';
+import { SiGithub } from 'react-icons/si';
 import { Link } from 'react-router-dom';
 import { DiscordIcon } from './DiscordIcon';
 
 const DISCORD_URL = 'https://discord.gg/TanxB63arz';
+const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
+
+type LinkItem = { href: string; label: string };
+
+const PRODUCT: LinkItem[] = [
+  { href: '/#why-now', label: 'Why now' },
+  { href: '/#approach', label: 'Approach' },
+  { href: '/#integrations', label: 'Integrations' },
+  { href: '/#why-us', label: 'Why us' },
+  { href: '/#enterprise', label: 'Enterprise' },
+];
+
+const RESOURCES: LinkItem[] = [
+  { href: GITHUB_URL, label: 'GitHub' },
+  { href: DISCORD_URL, label: 'Discord' },
+  { href: 'https://www.npmjs.com/package/truecourse', label: 'npm' },
+  { href: 'https://github.com/truecourse-ai/truecourse#readme', label: 'Documentation' },
+  { href: 'mailto:mushegh@truecourse.dev', label: 'Contact' },
+];
+
+const LEGAL: LinkItem[] = [
+  {
+    href: 'https://github.com/truecourse-ai/truecourse/blob/main/LICENSE',
+    label: 'License (MIT)',
+  },
+  {
+    href: 'https://github.com/truecourse-ai/truecourse/blob/main/CODE_OF_CONDUCT.md',
+    label: 'Code of conduct',
+  },
+];
 
 export function Footer() {
   return (
-    <footer className="relative overflow-hidden">
-      <div className="bg-radial-glow absolute inset-x-0 -top-32 -z-10 h-64 opacity-50" />
-      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <img src="/logo.svg" alt="" className="h-7 w-7" />
-              <span className="text-base font-semibold tracking-tight">TrueCourse</span>
-            </div>
-            <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
+    <footer className="site">
+      <div className="wrap">
+        <div className="foot-grid">
+          <div className="foot-about">
+            <Link to="/" className="brand">
+              <span className="mark" aria-hidden />
+              TrueCourse
+            </Link>
+            <p>
               The verified knowledge layer for engineering. Compile your team&apos;s
               decisions into contracts and check every commit against them.
             </p>
-            <div className="mt-5 flex items-center gap-2">
+            <div className="foot-social">
               <a
-                href="https://github.com/truecourse-ai/truecourse"
+                className="icon-btn"
+                href={GITHUB_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
                 aria-label="GitHub"
               >
-                <Github className="h-4 w-4" />
+                <SiGithub />
               </a>
               <a
+                className="icon-btn"
                 href={DISCORD_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-[#5865F2]"
                 aria-label="Discord"
               >
-                <DiscordIcon className="h-4 w-4" />
+                <DiscordIcon />
               </a>
-              <a
-                href="mailto:mushegh@truecourse.dev"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
-                aria-label="Email"
-              >
-                <Mail className="h-4 w-4" />
+              <a className="icon-btn" href="mailto:mushegh@truecourse.dev" aria-label="Email">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 5h20v14H2z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M3 6l9 7 9-7" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
               </a>
             </div>
           </div>
 
-          <Column
-            title="Product"
-            links={[
-              { href: '/#why-now', label: 'Why now' },
-              { href: '/#our-approach', label: 'Approach' },
-              { href: '/#integrations', label: 'Integrations' },
-              { href: '/#why-tests-cant-catch', label: 'Why us' },
-              { href: '/#enterprise', label: 'Enterprise' },
-              { href: '/request-access', label: 'Request access' },
-            ]}
-          />
-          <Column
-            title="Resources"
-            links={[
-              { href: 'https://github.com/truecourse-ai/truecourse', label: 'GitHub' },
-              { href: DISCORD_URL, label: 'Discord' },
-              { href: 'https://www.npmjs.com/package/truecourse', label: 'npm' },
-              {
-                href: 'https://github.com/truecourse-ai/truecourse#readme',
-                label: 'Documentation',
-              },
-              { href: 'mailto:mushegh@truecourse.dev', label: 'Contact' },
-            ]}
-          />
-          <Column
-            title="Legal"
-            links={[
-              {
-                href: 'https://github.com/truecourse-ai/truecourse/blob/main/LICENSE',
-                label: 'License (MIT)',
-              },
-              {
-                href: 'https://github.com/truecourse-ai/truecourse/blob/main/CODE_OF_CONDUCT.md',
-                label: 'Code of conduct',
-              },
-            ]}
-          />
+          <Column title="Product" links={PRODUCT} />
+          <Column title="Resources" links={RESOURCES} />
+          <Column title="Legal" links={LEGAL} />
         </div>
 
-        <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border pt-6 sm:flex-row sm:items-center">
-          <div className="text-xs text-muted-foreground">
-            <p>© {new Date().getFullYear()} TrueCourse AI, Inc.</p>
-            <p className="mt-1">
-              2261 Market Street STE 88087, San Francisco, CA 94114 US
-            </p>
-          </div>
-          <p className="text-xs text-muted-foreground sm:text-right">
-            Built with <span className="text-accent" aria-hidden>♥</span>
-            <span className="sr-only">love</span> for engineers shipping with AI.
-          </p>
+        <div className="foot-bottom">
+          <span>
+            © {new Date().getFullYear()} TrueCourse AI, Inc. · 2261 Market Street STE
+            88087, San Francisco, CA 94114
+          </span>
+          <span>
+            Built with <span className="heart">♥</span> for engineers shipping with AI.
+          </span>
         </div>
       </div>
     </footer>
   );
 }
 
-function Column({
-  title,
-  links,
-}: {
-  title: string;
-  links: { href: string; label: string }[];
-}) {
+function Column({ title, links }: { title: string; links: LinkItem[] }) {
   return (
-    <div>
-      <h4 className="text-[11px] font-medium uppercase tracking-wider text-foreground">
-        {title}
-      </h4>
-      <ul className="mt-4 space-y-2.5">
-        {links.map((l) => {
-          const className =
-            'text-sm text-muted-foreground transition-colors hover:text-foreground';
-          const isInternal = l.href.startsWith('/');
-          return (
-            <li key={l.href}>
-              {isInternal ? (
-                <Link to={l.href} className={className}>
-                  {l.label}
-                </Link>
-              ) : (
-                <a
-                  href={l.href}
-                  className={className}
-                  {...(l.href.startsWith('http')
-                    ? { target: '_blank', rel: 'noreferrer' }
-                    : {})}
-                >
-                  {l.label}
-                </a>
-              )}
-            </li>
-          );
-        })}
+    <div className="foot-col">
+      <h4>{title}</h4>
+      <ul>
+        {links.map((l) => (
+          <li key={l.href}>
+            {l.href.startsWith('/') ? (
+              <Link to={l.href}>{l.label}</Link>
+            ) : (
+              <a
+                href={l.href}
+                {...(l.href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})}
+              >
+                {l.label}
+              </a>
+            )}
+          </li>
+        ))}
       </ul>
     </div>
   );

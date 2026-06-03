@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 0 320 295">
+  <polygon points="200,30 200,190 130,190" fill="currentColor" opacity="0.88"></polygon>
+  <line x1="200" y1="20" x2="200" y2="210" stroke="currentColor" stroke-width="4" stroke-linecap="round"></line>
+  <rect x="185" y="20" width="30" height="16" rx="3" fill="currentColor"></rect>
+  <line x1="200" y1="20" x2="200" y2="12" stroke="currentColor" stroke-width="3" stroke-linecap="round"></line>
+  <path d="M 100,210 L 300,210 L 280,250 L 120,250 Z" fill="currentColor"></path>
+  <path d="M 60,260 Q 90,248 120,260 Q 150,272 180,260 Q 210,248 240,260 Q 270,272 300,260 Q 330,248 360,260" fill="none" stroke="currentColor" stroke-width="3" opacity="0.55" stroke-linecap="round"></path>
+  <path d="M 50,275 Q 80,263 110,275 Q 140,287 170,275 Q 200,263 230,275 Q 260,287 290,275 Q 320,263 350,275" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.32" stroke-linecap="round"></path>
+</svg>
