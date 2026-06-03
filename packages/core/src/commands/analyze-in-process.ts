@@ -24,6 +24,12 @@ import {
 export type { LlmEstimate };
 
 export interface AnalyzeInProcessOptions {
+  /**
+   * Where the code lives (defaults to `project.path`). The hosted edition sets
+   * this to a clone so storage keys off `project.path` (the repo identity) while
+   * the analysis reads the cloned working tree.
+   */
+  codeDir?: string;
   branch?: string | null;
   commitHash?: string | null;
   /** Skip all git commands (branch detection, commit hash, diff). */
@@ -60,7 +66,7 @@ export async function analyzeInProcess(
     `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
   );
   const core = await analyzeCore(project, { ...options, mode: 'full' });
-  const result = persistFullAnalysis(project, core, startedAt);
+  const result = await persistFullAnalysis(project, core, startedAt);
 
   if (options.source) {
     await trackEvent('analyze', {

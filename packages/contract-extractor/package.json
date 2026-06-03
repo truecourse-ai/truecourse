@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@truecourse/contract-verifier": "workspace:*",
+    "@truecourse/llm": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",

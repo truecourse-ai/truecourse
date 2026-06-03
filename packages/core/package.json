@@ -60,6 +60,26 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
+    "./lib/verify-store": {
+      "types": "./dist/lib/verify-store.d.ts",
+      "import": "./dist/lib/verify-store.js"
+    },
+    "./lib/contract-store": {
+      "types": "./dist/lib/contract-store.d.ts",
+      "import": "./dist/lib/contract-store.js"
+    },
+    "./lib/spec-store": {
+      "types": "./dist/lib/spec-store.d.ts",
+      "import": "./dist/lib/spec-store.js"
+    },
+    "./lib/repo-ref": {
+      "types": "./dist/lib/repo-ref.d.ts",
+      "import": "./dist/lib/repo-ref.js"
+    },
+    "./lib/analyze-lock": {
+      "types": "./dist/lib/analyze-lock.d.ts",
+      "import": "./dist/lib/analyze-lock.js"
+    },
     "./lib/git": {
       "types": "./dist/lib/git.d.ts",
       "import": "./dist/lib/git.js"
@@ -115,6 +135,10 @@
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",
       "import": "./dist/types/snapshot.js"
+    },
+    "./types/verify-snapshot": {
+      "types": "./dist/types/verify-snapshot.d.ts",
+      "import": "./dist/types/verify-snapshot.js"
     }
   },
   "scripts": {
@@ -126,6 +150,7 @@
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/contract-verifier": "workspace:*",
+    "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",

@@ -86,18 +86,18 @@ describe('CLI analyze pipeline (e2e)', () => {
     execSync('git add -A', { cwd: workDir, env });
     execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
 
-    project = registerProject(workDir);
+    project = await registerProject(workDir);
 
     // Disable LLM rules so the pipeline is deterministic and network-free.
     // Config takes precedence over the override inside analyze-core, so we
     // set it here to be explicit about what's exercised.
-    updateProjectConfig(workDir, { enableLlmRules: false });
+    await updateProjectConfig(workDir, { enableLlmRules: false });
 
     clearLatestCache();
   }, 30_000);
 
-  afterAll(() => {
-    if (project) unregisterProject(project.slug);
+  afterAll(async () => {
+    if (project) await unregisterProject(project.slug);
     if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
     clearLatestCache();
   });
@@ -107,7 +107,7 @@ describe('CLI analyze pipeline (e2e)', () => {
     expect(result.analysisId).toBeTruthy();
     expect(result.serviceCount).toBeGreaterThan(0);
 
-    const latest = readLatest(workDir);
+    const latest = await readLatest(workDir);
     expect(latest).not.toBeNull();
     expect(latest!.head).toBe(result.filename);
     expect(latest!.analysis.id).toBe(result.analysisId);
@@ -124,18 +124,18 @@ describe('CLI analyze pipeline (e2e)', () => {
     expect(ruleKeys.has('code-quality/deterministic/missing-return-type')).toBe(true);
 
     // Per-analysis snapshot file exists and its filename matches LATEST.head.
-    const analysisFiles = listAnalyses(workDir);
+    const analysisFiles = await listAnalyses(workDir);
     expect(analysisFiles).toHaveLength(1);
     expect(analysisFiles[0]).toBe(latest!.head);
 
     // History has exactly one entry for the run.
-    const history = readHistory(workDir);
+    const history = await readHistory(workDir);
     expect(history.analyses).toHaveLength(1);
     expect(history.analyses[0].id).toBe(result.analysisId);
     expect(history.analyses[0].counts.services).toBe(latest!.graph.services.length);
 
     // Registry `lastAnalyzed` got bumped.
-    const fresh = getProjectBySlug(project.slug);
+    const fresh = await getProjectBySlug(project.slug);
     expect(fresh?.lastAnalyzed).toBeTruthy();
   }, 120_000);
 });

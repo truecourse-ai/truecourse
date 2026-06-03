@@ -1,3 +1,14 @@
+/**
+ * Analysis snapshot store. The default is file-backed (OSS/local — unchanged
+ * model); the enterprise edition injects a Postgres/Blob-backed impl via
+ * `setAnalysisStore`. The store is keyed by `repoPath`: a filesystem path for
+ * the file impl, an opaque repo identity for the EE impl.
+ *
+ * The interface is async so a DB-backed impl is possible; the file impl wraps
+ * the synchronous `fs` calls (so OSS behaviour — incl. the LATEST mtime cache —
+ * is unchanged). Path helpers below stay file-specific and synchronous.
+ */
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
@@ -10,16 +21,12 @@ import type {
 } from '../types/snapshot.js';
 
 // ---------------------------------------------------------------------------
-// Layout
-// ---------------------------------------------------------------------------
-//
-// <repo>/.truecourse/
-//   analyses/<iso>_<short-uuid>.json   per-analysis snapshots
-//   LATEST.json                         materialized current-state view
-//   history.json                        summaries (append-only)
-//   diff.json                           active diff against LATEST (optional)
-//
-// Consumers pass `repoPath` (the repo root, not the `.truecourse` dir).
+// Layout (file impl)
+//   <repo>/.truecourse/
+//     analyses/<iso>_<short-uuid>.json   per-analysis snapshots
+//     LATEST.json                         materialized current-state view
+//     history.json                        summaries (append-only)
+//     diff.json                           active diff against LATEST (optional)
 // ---------------------------------------------------------------------------
 
 const TRUECOURSE_DIR = '.truecourse';
@@ -52,30 +59,22 @@ export function diffPath(repoPath: string): string {
   return path.join(storeDir(repoPath), DIFF_FILE);
 }
 
-// ---------------------------------------------------------------------------
-// Filename for a new analysis snapshot
-// ---------------------------------------------------------------------------
-
 /**
  * Build the filename for a new analysis snapshot. Format:
  *   `YYYY-MM-DDTHH-MM-SSZ_<8-char-uuid>.json`
- *
- * Sortable lexicographically ⇒ sortable chronologically. The 8-char suffix
- * guards against two analyses starting in the same second on the same repo
- * (vanishingly rare but costs nothing to prevent).
+ * Sortable lexicographically ⇒ sortable chronologically.
  */
 export function buildAnalysisFilename(analysisId: string, createdAt: string): string {
   const iso = createdAt
-    .replace(/[:.]/g, '-')    // "2026-04-17T14:23:45.123Z" → "2026-04-17T14-23-45-123Z"
-    .replace(/-\d{3}Z$/, 'Z'); // drop millis for the filename
+    .replace(/[:.]/g, '-')
+    .replace(/-\d{3}Z$/, 'Z');
   const shortId = analysisId.replace(/-/g, '').slice(0, 8);
   return `${iso}_${shortId}.json`;
 }
 
 // ---------------------------------------------------------------------------
-// Back-compat patch: snapshots written before Phase 6 (Contract Framework)
-// don't carry `category` / `subcategory` on violations. Default them on read
-// so downstream code can always rely on the field being present.
+// Back-compat: default `category`/`subcategory` on snapshots written before the
+// Contract Framework so downstream code can rely on the fields existing.
 // ---------------------------------------------------------------------------
 
 function patchViolations<T extends { category?: string; subcategory?: string | null }>(
@@ -89,52 +88,7 @@ function patchViolations<T extends { category?: string; subcategory?: string | n
 }
 
 // ---------------------------------------------------------------------------
-// LATEST.json — mtime-keyed in-memory cache
-// ---------------------------------------------------------------------------
-
-const latestCache = new Map<string, { mtime: number; data: LatestSnapshot }>();
-
-/**
- * Read `LATEST.json` for `repoPath`, caching by mtime. Subsequent calls only
- * do a `stat` (sub-ms) unless the file has changed — cheap enough to run on
- * every HTTP request.
- */
-export function readLatest(repoPath: string): LatestSnapshot | null {
-  const file = latestPath(repoPath);
-  let mtime: number;
-  try {
-    mtime = fs.statSync(file).mtimeMs;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      latestCache.delete(repoPath);
-      return null;
-    }
-    throw err;
-  }
-  const cached = latestCache.get(repoPath);
-  if (cached && cached.mtime === mtime) return cached.data;
-  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as LatestSnapshot;
-  patchViolations(data.violations);
-  latestCache.set(repoPath, { mtime, data });
-  return data;
-}
-
-export function writeLatest(repoPath: string, latest: LatestSnapshot): void {
-  atomicWriteJson(latestPath(repoPath), latest);
-  latestCache.delete(repoPath);             // force re-read on next access
-}
-
-export function deleteLatest(repoPath: string): void {
-  try {
-    fs.unlinkSync(latestPath(repoPath));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-  latestCache.delete(repoPath);
-}
-
-// ---------------------------------------------------------------------------
-// Per-analysis snapshots
+// Store interface
 // ---------------------------------------------------------------------------
 
 export interface WrittenAnalysis {
@@ -142,102 +96,195 @@ export interface WrittenAnalysis {
   snapshot: AnalysisSnapshot;
 }
 
-/** Write a per-analysis snapshot. Returns the filename it was stored as. */
-export function writeAnalysis(repoPath: string, snapshot: AnalysisSnapshot): WrittenAnalysis {
-  const filename = buildAnalysisFilename(snapshot.id, snapshot.createdAt);
-  atomicWriteJson(analysisFilePath(repoPath, filename), snapshot);
-  return { filename, snapshot };
+/** Pluggable analysis store. File-backed by default; EE injects Postgres/Blob. */
+export interface AnalysisStore {
+  readLatest(repoPath: string): Promise<LatestSnapshot | null>;
+  writeLatest(repoPath: string, latest: LatestSnapshot): Promise<void>;
+  deleteLatest(repoPath: string): Promise<void>;
+  writeAnalysis(repoPath: string, snapshot: AnalysisSnapshot): Promise<WrittenAnalysis>;
+  readAnalysis(repoPath: string, filename: string): Promise<AnalysisSnapshot | null>;
+  listAnalyses(repoPath: string): Promise<string[]>;
+  findAnalysisFilename(repoPath: string, analysisId: string): Promise<string | null>;
+  deleteAnalysis(repoPath: string, filename: string): Promise<void>;
+  readHistory(repoPath: string): Promise<History>;
+  appendHistory(repoPath: string, entry: HistoryEntry): Promise<void>;
+  removeFromHistory(repoPath: string, analysisId: string): Promise<void>;
+  readDiff(repoPath: string): Promise<DiffSnapshot | null>;
+  writeDiff(repoPath: string, diff: DiffSnapshot): Promise<void>;
+  deleteDiff(repoPath: string): Promise<void>;
 }
 
-export function readAnalysis(repoPath: string, filename: string): AnalysisSnapshot | null {
-  const file = analysisFilePath(repoPath, filename);
-  if (!fs.existsSync(file)) return null;
-  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as AnalysisSnapshot;
-  patchViolations(data.violations?.added);
-  return data;
-}
+// ---------------------------------------------------------------------------
+// File-backed default impl (OSS) — synchronous fs under an async surface.
+// LATEST.json is mtime-cached so repeated reads cost a stat.
+// ---------------------------------------------------------------------------
 
-/** List analysis filenames, oldest first (chronological). */
-export function listAnalyses(repoPath: string): string[] {
-  const dir = analysesDir(repoPath);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((name) => name.endsWith('.json'))
-    .sort();                              // ISO prefix makes lexical sort chronological
-}
+const latestCache = new Map<string, { mtime: number; data: LatestSnapshot }>();
 
-/** Find the filename for a given analysis id by scanning newest → oldest. */
-export function findAnalysisFilename(repoPath: string, analysisId: string): string | null {
-  for (const name of listAnalyses(repoPath).reverse()) {
-    const snap = readAnalysis(repoPath, name);
-    if (snap?.id === analysisId) return name;
+class FileAnalysisStore implements AnalysisStore {
+  async readLatest(repoPath: string): Promise<LatestSnapshot | null> {
+    const file = latestPath(repoPath);
+    let mtime: number;
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        latestCache.delete(repoPath);
+        return null;
+      }
+      throw err;
+    }
+    const cached = latestCache.get(repoPath);
+    if (cached && cached.mtime === mtime) return cached.data;
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as LatestSnapshot;
+    patchViolations(data.violations);
+    latestCache.set(repoPath, { mtime, data });
+    return data;
   }
-  return null;
-}
 
-export function deleteAnalysis(repoPath: string, filename: string): void {
-  try {
-    fs.unlinkSync(analysisFilePath(repoPath, filename));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  async writeLatest(repoPath: string, latest: LatestSnapshot): Promise<void> {
+    atomicWriteJson(latestPath(repoPath), latest);
+    latestCache.delete(repoPath);
+  }
+
+  async deleteLatest(repoPath: string): Promise<void> {
+    try {
+      fs.unlinkSync(latestPath(repoPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    latestCache.delete(repoPath);
+  }
+
+  async writeAnalysis(repoPath: string, snapshot: AnalysisSnapshot): Promise<WrittenAnalysis> {
+    const filename = buildAnalysisFilename(snapshot.id, snapshot.createdAt);
+    atomicWriteJson(analysisFilePath(repoPath, filename), snapshot);
+    return { filename, snapshot };
+  }
+
+  async readAnalysis(repoPath: string, filename: string): Promise<AnalysisSnapshot | null> {
+    const file = analysisFilePath(repoPath, filename);
+    if (!fs.existsSync(file)) return null;
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as AnalysisSnapshot;
+    patchViolations(data.violations?.added);
+    return data;
+  }
+
+  async listAnalyses(repoPath: string): Promise<string[]> {
+    const dir = analysesDir(repoPath);
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.json'))
+      .sort();
+  }
+
+  async findAnalysisFilename(repoPath: string, analysisId: string): Promise<string | null> {
+    for (const name of (await this.listAnalyses(repoPath)).reverse()) {
+      const snap = await this.readAnalysis(repoPath, name);
+      if (snap?.id === analysisId) return name;
+    }
+    return null;
+  }
+
+  async deleteAnalysis(repoPath: string, filename: string): Promise<void> {
+    try {
+      fs.unlinkSync(analysisFilePath(repoPath, filename));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+
+  async readHistory(repoPath: string): Promise<History> {
+    const file = historyPath(repoPath);
+    if (!fs.existsSync(file)) return { analyses: [] };
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as History;
+  }
+
+  async appendHistory(repoPath: string, entry: HistoryEntry): Promise<void> {
+    const history = await this.readHistory(repoPath);
+    history.analyses.push(entry);
+    atomicWriteJson(historyPath(repoPath), history);
+  }
+
+  async removeFromHistory(repoPath: string, analysisId: string): Promise<void> {
+    const history = await this.readHistory(repoPath);
+    const next = history.analyses.filter((a) => a.id !== analysisId);
+    if (next.length === history.analyses.length) return;
+    atomicWriteJson(historyPath(repoPath), { analyses: next });
+  }
+
+  async readDiff(repoPath: string): Promise<DiffSnapshot | null> {
+    const file = diffPath(repoPath);
+    if (!fs.existsSync(file)) return null;
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as DiffSnapshot;
+    patchViolations(data.newViolations);
+    patchViolations(data.resolvedViolations);
+    return data;
+  }
+
+  async writeDiff(repoPath: string, diff: DiffSnapshot): Promise<void> {
+    atomicWriteJson(diffPath(repoPath), diff);
+  }
+
+  async deleteDiff(repoPath: string): Promise<void> {
+    try {
+      fs.unlinkSync(diffPath(repoPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// history.json
+// Active store registry + public delegators (same names as before, now async).
 // ---------------------------------------------------------------------------
 
-export function readHistory(repoPath: string): History {
-  const file = historyPath(repoPath);
-  if (!fs.existsSync(file)) return { analyses: [] };
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as History;
+let active: AnalysisStore = new FileAnalysisStore();
+
+/** The active analysis store (file-backed unless EE installed a Postgres one). */
+export function getAnalysisStore(): AnalysisStore {
+  return active;
+}
+/** Install an analysis store (e.g. the enterprise Postgres/Blob impl). */
+export function setAnalysisStore(store: AnalysisStore): void {
+  active = store;
+}
+/** Restore the file-backed default (tests). */
+export function resetAnalysisStore(): void {
+  active = new FileAnalysisStore();
 }
 
-export function appendHistory(repoPath: string, entry: HistoryEntry): void {
-  const history = readHistory(repoPath);
-  history.analyses.push(entry);
-  atomicWriteJson(historyPath(repoPath), history);
-}
+export const readLatest = (repoPath: string): Promise<LatestSnapshot | null> =>
+  active.readLatest(repoPath);
+export const writeLatest = (repoPath: string, latest: LatestSnapshot): Promise<void> =>
+  active.writeLatest(repoPath, latest);
+export const deleteLatest = (repoPath: string): Promise<void> =>
+  active.deleteLatest(repoPath);
+export const writeAnalysis = (repoPath: string, snapshot: AnalysisSnapshot): Promise<WrittenAnalysis> =>
+  active.writeAnalysis(repoPath, snapshot);
+export const readAnalysis = (repoPath: string, filename: string): Promise<AnalysisSnapshot | null> =>
+  active.readAnalysis(repoPath, filename);
+export const listAnalyses = (repoPath: string): Promise<string[]> =>
+  active.listAnalyses(repoPath);
+export const findAnalysisFilename = (repoPath: string, analysisId: string): Promise<string | null> =>
+  active.findAnalysisFilename(repoPath, analysisId);
+export const deleteAnalysis = (repoPath: string, filename: string): Promise<void> =>
+  active.deleteAnalysis(repoPath, filename);
+export const readHistory = (repoPath: string): Promise<History> =>
+  active.readHistory(repoPath);
+export const appendHistory = (repoPath: string, entry: HistoryEntry): Promise<void> =>
+  active.appendHistory(repoPath, entry);
+export const removeFromHistory = (repoPath: string, analysisId: string): Promise<void> =>
+  active.removeFromHistory(repoPath, analysisId);
+export const readDiff = (repoPath: string): Promise<DiffSnapshot | null> =>
+  active.readDiff(repoPath);
+export const writeDiff = (repoPath: string, diff: DiffSnapshot): Promise<void> =>
+  active.writeDiff(repoPath, diff);
+export const deleteDiff = (repoPath: string): Promise<void> =>
+  active.deleteDiff(repoPath);
 
-export function removeFromHistory(repoPath: string, analysisId: string): void {
-  const history = readHistory(repoPath);
-  const next = history.analyses.filter((a) => a.id !== analysisId);
-  if (next.length === history.analyses.length) return;   // nothing to do
-  atomicWriteJson(historyPath(repoPath), { analyses: next });
-}
-
-// ---------------------------------------------------------------------------
-// diff.json
-// ---------------------------------------------------------------------------
-
-export function readDiff(repoPath: string): DiffSnapshot | null {
-  const file = diffPath(repoPath);
-  if (!fs.existsSync(file)) return null;
-  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as DiffSnapshot;
-  patchViolations(data.newViolations);
-  patchViolations(data.resolvedViolations);
-  return data;
-}
-
-export function writeDiff(repoPath: string, diff: DiffSnapshot): void {
-  atomicWriteJson(diffPath(repoPath), diff);
-}
-
-export function deleteDiff(repoPath: string): void {
-  try {
-    fs.unlinkSync(diffPath(repoPath));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Test-only: invalidate cache
-// ---------------------------------------------------------------------------
-
-/** Clear the LATEST.json in-memory cache for all repos. Tests call this
- *  between setUp/tearDown; production code relies on `writeLatest` invalidation. */
+/** Clear the LATEST.json in-memory cache (tests). File impl only. */
 export function clearLatestCache(): void {
   latestCache.clear();
 }

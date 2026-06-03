@@ -19,14 +19,13 @@
  * not persisted to disk — every scan regenerates it from cache.
  */
 
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { getLlmTransport } from '@truecourse/llm';
 import type { Conflict } from './types.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
-import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'conflict-resolutions.json';
 
@@ -284,64 +283,22 @@ const ConflictResolutionSchema = z.object({
 });
 
 function spawnConflictResolverRunner(
-  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictResolverRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 240_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
-  return (input: ConflictResolverInput): Promise<ConflictResolution> => {
-    const args = [
-      '-p',
-      buildResolverUserPrompt(input.conflict),
-      ...modelArgs,
-      '--output-format',
-      'json',
-      '--append-system-prompt',
-      CONFLICT_RESOLVER_SYSTEM_PROMPT,
-      '--setting-sources',
-      'project',
-    ];
-    return new Promise<ConflictResolution>((resolve, reject) => {
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error(`conflict-resolver: claude timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-      proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`conflict-resolver: claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-          return;
-        }
-        try {
-          const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
-          if (typeof text !== 'string') {
-            reject(new Error('conflict-resolver: claude returned no text'));
-            return;
-          }
-          const inner = JSON.parse(stripCodeFences(text));
-          resolve(ConflictResolutionSchema.parse(inner));
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
+  return async (input: ConflictResolverInput): Promise<ConflictResolution> => {
+    const { object } = await getLlmTransport().complete({
+      system: CONFLICT_RESOLVER_SYSTEM_PROMPT,
+      prompt: buildResolverUserPrompt(input.conflict),
+      schema: ConflictResolutionSchema,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      timeoutMs,
+      label: `conflict-resolve:${input.conflict.id}`,
+      cliArgs: ['--setting-sources', 'project'],
     });
+    return object;
   };
-}
-
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const m = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return m ? m[1] : trimmed;
 }
 
 // ---------------------------------------------------------------------------

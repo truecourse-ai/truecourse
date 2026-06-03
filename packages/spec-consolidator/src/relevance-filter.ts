@@ -19,14 +19,13 @@
  * to keep noise than silently drop a real spec doc).
  */
 
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { getLlmTransport } from '@truecourse/llm';
 import type { DocCandidate } from './discovery.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
-import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'relevance.json';
 
@@ -217,65 +216,22 @@ const RelevanceVerdictSchema = z.object({
 });
 
 function spawnRelevanceRunner(
-  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): RelevanceRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 60_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
-  return (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
-    const args = [
-      '-p',
-      buildRelevanceUserPrompt(input.doc),
-      ...modelArgs,
-      '--output-format',
-      'json',
-      '--append-system-prompt',
-      RELEVANCE_SYSTEM_PROMPT,
-      '--setting-sources',
-      'project',
-    ];
-    return new Promise<RelevanceVerdict>((resolve, reject) => {
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error(`relevance: claude timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-      proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`relevance: claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-          return;
-        }
-        try {
-          const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
-          if (typeof text !== 'string') {
-            reject(new Error('relevance: claude returned no text'));
-            return;
-          }
-          const inner = JSON.parse(stripCodeFences(text));
-          const parsed = RelevanceVerdictSchema.parse(inner);
-          resolve({ path: input.doc.path, include: parsed.include, reason: parsed.reason });
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
+  return async (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
+    const { object } = await getLlmTransport().complete({
+      system: RELEVANCE_SYSTEM_PROMPT,
+      prompt: buildRelevanceUserPrompt(input.doc),
+      schema: RelevanceVerdictSchema,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      timeoutMs,
+      label: `relevance:${input.doc.path}`,
+      cliArgs: ['--setting-sources', 'project'],
     });
+    return { path: input.doc.path, include: object.include, reason: object.reason };
   };
-}
-
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const m = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return m ? m[1] : trimmed;
 }
 
 // ---------------------------------------------------------------------------

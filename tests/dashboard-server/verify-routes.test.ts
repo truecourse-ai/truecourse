@@ -40,7 +40,7 @@ describe('GET /api/repos/:id/verify/history', () => {
   });
 
   it('returns the recorded per-run summaries in append order', async () => {
-    appendVerifyHistory(fixture.repoPath, {
+    await appendVerifyHistory(fixture.repoPath, {
       id: 'run-1',
       filename: '2026-01-01T00:00:00.000Z_run-1.json',
       verifiedAt: '2026-01-01T00:00:00.000Z',
@@ -50,7 +50,7 @@ describe('GET /api/repos/:id/verify/history', () => {
       driftCount: 5,
       bySeverity: { info: 0, low: 1, medium: 2, high: 1, critical: 1 },
     });
-    appendVerifyHistory(fixture.repoPath, {
+    await appendVerifyHistory(fixture.repoPath, {
       id: 'run-2',
       filename: '2026-01-02T00:00:00.000Z_run-2.json',
       verifiedAt: '2026-01-02T00:00:00.000Z',
@@ -86,7 +86,7 @@ describe('GET /api/repos/:id/verify/runs/:runId', () => {
   });
 
   it('returns a past run snapshot as verify state', async () => {
-    const { filename } = writeVerifyRun(fixture.repoPath, {
+    const { filename } = await writeVerifyRun(fixture.repoPath, {
       id: 'run-abc',
       verifiedAt: '2026-01-01T00:00:00.000Z',
       branch: 'main',
@@ -99,7 +99,7 @@ describe('GET /api/repos/:id/verify/runs/:runId', () => {
       resolverErrors: [],
       unresolvedRefs: ['SomeRef'],
     });
-    appendVerifyHistory(fixture.repoPath, {
+    await appendVerifyHistory(fixture.repoPath, {
       id: 'run-abc',
       filename,
       verifiedAt: '2026-01-01T00:00:00.000Z',
@@ -144,7 +144,7 @@ describe('DELETE /api/repos/:id/verify/runs/:runId', () => {
   });
 
   it('removes the run from history and 404s an unknown id', async () => {
-    const { filename } = writeVerifyRun(fixture.repoPath, {
+    const { filename } = await writeVerifyRun(fixture.repoPath, {
       id: 'run-del',
       verifiedAt: '2026-01-03T00:00:00.000Z',
       branch: 'main',
@@ -157,7 +157,7 @@ describe('DELETE /api/repos/:id/verify/runs/:runId', () => {
       resolverErrors: [],
       unresolvedRefs: [],
     });
-    appendVerifyHistory(fixture.repoPath, {
+    await appendVerifyHistory(fixture.repoPath, {
       id: 'run-del',
       filename,
       verifiedAt: '2026-01-03T00:00:00.000Z',

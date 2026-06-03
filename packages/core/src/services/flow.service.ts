@@ -236,13 +236,16 @@ function composePath(prefix: string, routePath: string): string {
 // Read-side helpers backed by LATEST.json (used by routes)
 // ---------------------------------------------------------------------------
 
-export function getFlowsFromLatest(repoPath: string): FlowRecord[] {
-  const latest = readLatest(repoPath);
+export async function getFlowsFromLatest(repoPath: string): Promise<FlowRecord[]> {
+  const latest = await readLatest(repoPath);
   return latest?.graph.flows ?? [];
 }
 
-export function getFlowFromLatest(repoPath: string, flowId: string): FlowRecord | null {
-  const latest = readLatest(repoPath);
+export async function getFlowFromLatest(
+  repoPath: string,
+  flowId: string,
+): Promise<FlowRecord | null> {
+  const latest = await readLatest(repoPath);
   return latest?.graph.flows.find((f) => f.id === flowId) ?? null;
 }
 
@@ -299,7 +302,7 @@ export function computeFlowSeverities(
 export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promise<void> {
   const { createLLMProvider } = await import('./llm/provider.js');
 
-  const latest = readLatest(repoPath);
+  const latest = await readLatest(repoPath);
   if (!latest) return;
   const flow = latest.graph.flows.find((f) => f.id === flowId);
   if (!flow) return;
@@ -330,5 +333,5 @@ export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promi
     if (step) step.dataDescription = upd.dataDescription;
   }
 
-  writeLatest(repoPath, latest);
+  await writeLatest(repoPath, latest);
 }

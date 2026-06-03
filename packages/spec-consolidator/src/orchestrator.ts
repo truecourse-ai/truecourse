@@ -818,7 +818,7 @@ function wrapBlockRunner(
     const out: BlockRunResult[] = [];
     const misses: Block[] = [];
     for (const block of blocks) {
-      const cached = readBlockCache(repoRoot, block.id);
+      const cached = await readBlockCache(repoRoot, block.id);
       if (cached) {
         out.push({ block, extraction: cached, durationMs: 0 });
         // Count cache hits as "done" so the progress bar starts from
@@ -832,7 +832,7 @@ function wrapBlockRunner(
     if (misses.length === 0) return out;
     const innerResults = await inner(misses);
     for (const r of innerResults) {
-      if (r.extraction) writeBlockCache(repoRoot, r.block.id, r.extraction);
+      if (r.extraction) await writeBlockCache(repoRoot, r.block.id, r.extraction);
       out.push(r);
     }
     return out;

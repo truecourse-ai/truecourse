@@ -22,13 +22,13 @@ const STALE_DAYS = 7;
 // Trend
 // ---------------------------------------------------------------------------
 
-export function getTrend(
+export async function getTrend(
   repoPath: string,
   branch?: string,
   limit = 20,
   upToAnalysisId?: string,
-): TrendResponse {
-  const history = readHistory(repoPath);
+): Promise<TrendResponse> {
+  const history = await readHistory(repoPath);
   const eligible = history.analyses.filter((e) => (!branch || e.branch === branch) && !isDiff(e));
 
   // When scoped to a past analysis, truncate at that entry (inclusive). Keeps
@@ -45,9 +45,9 @@ export function getTrend(
   // include violations for rules the user has since disabled. When the
   // project has any disabled rules, recompute each point against the live
   // active set (slow path — one chain walk per point).
-  const disabled = new Set<string>(readProjectConfig(repoPath).disabledRules ?? []);
+  const disabled = new Set<string>((await readProjectConfig(repoPath)).disabledRules ?? []);
 
-  const points: TrendDataPoint[] = entries.map((e) => {
+  const points: TrendDataPoint[] = await Promise.all(entries.map(async (e) => {
     if (disabled.size === 0) {
       const sev = e.counts.violations.bySeverity;
       const total = e.counts.violations.new + e.counts.violations.unchanged;
@@ -73,7 +73,7 @@ export function getTrend(
     // require resolving each ref's ruleKey through the prior chain) — minor
     // inflation in the resolved bar; the prominent total/active line is
     // correct.
-    const active = readActiveViolationsForAnalysisId(repoPath, e.id) ?? [];
+    const active = (await readActiveViolationsForAnalysisId(repoPath, e.id)) ?? [];
     const sev: Record<string, number> = {};
     for (const v of active) sev[v.severity] = (sev[v.severity] ?? 0) + 1;
 
@@ -91,7 +91,7 @@ export function getTrend(
       low: sev.low ?? 0,
       info: sev.info ?? 0,
     };
-  });
+  }));
 
   return { points };
 }
@@ -100,12 +100,12 @@ export function getTrend(
 // Breakdown — category × severity
 // ---------------------------------------------------------------------------
 
-export function getBreakdown(
+export async function getBreakdown(
   repoPath: string,
   branch?: string,
   specificAnalysisId?: string,
-): BreakdownResponse {
-  const violations = loadActiveViolations(repoPath, branch, specificAnalysisId);
+): Promise<BreakdownResponse> {
+  const violations = await loadActiveViolations(repoPath, branch, specificAnalysisId);
   const byCategory: Record<string, number> = {};
   const bySeverity: Record<string, number> = {};
   let total = 0;
@@ -124,16 +124,16 @@ export function getBreakdown(
 // Top offenders
 // ---------------------------------------------------------------------------
 
-export function getTopOffenders(
+export async function getTopOffenders(
   repoPath: string,
   branch?: string,
   specificAnalysisId?: string,
-): TopOffendersResponse {
-  const latest = readLatest(repoPath);
+): Promise<TopOffendersResponse> {
+  const latest = await readLatest(repoPath);
   const analysisId = specificAnalysisId
     ? specificAnalysisId
     : latest?.analysis.id ?? '';
-  const violations = loadActiveViolations(repoPath, branch, specificAnalysisId);
+  const violations = await loadActiveViolations(repoPath, branch, specificAnalysisId);
 
   const byService = new Map<string, { name: string; total: number; critical: number; high: number }>();
   const byModule = new Map<string, { name: string; total: number; critical: number; high: number }>();
@@ -187,12 +187,12 @@ export function getTopOffenders(
 // Resolution
 // ---------------------------------------------------------------------------
 
-export function getResolution(
+export async function getResolution(
   repoPath: string,
   branch?: string,
   upToAnalysisId?: string,
-): ResolutionResponse {
-  const files = listAnalyses(repoPath);
+): Promise<ResolutionResponse> {
+  const files = await listAnalyses(repoPath);
   const staleThresholdMs = Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000;
 
   let totalResolved = 0;
@@ -206,7 +206,7 @@ export function getResolution(
   // point-in-time's metrics.
   const firstSeenByViolationId = new Map<string, string>();
   for (const name of files) {
-    const snap = readAnalysis(repoPath, name);
+    const snap = await readAnalysis(repoPath, name);
     if (!snap) continue;
     if (branch && snap.branch !== branch) continue;
     if (isDiff({ metadata: snap.metadata })) continue;
@@ -232,8 +232,8 @@ export function getResolution(
   // Active-at-this-moment: LATEST when no selection; otherwise the
   // reconstructed active set as of the selected analysis.
   const activeSet = upToAnalysisId
-    ? readActiveViolationsForAnalysisId(repoPath, upToAnalysisId)
-    : readLatest(repoPath)?.violations.filter((v) => v.status === 'new' || v.status === 'unchanged') ?? null;
+    ? await readActiveViolationsForAnalysisId(repoPath, upToAnalysisId)
+    : (await readLatest(repoPath))?.violations.filter((v) => v.status === 'new' || v.status === 'unchanged') ?? null;
   if (activeSet) {
     for (const v of activeSet) {
       totalActive++;
@@ -262,23 +262,23 @@ function isDiff(entry: { metadata: Record<string, unknown> | null }): boolean {
   return entry.metadata?.isDiffAnalysis === true;
 }
 
-function loadActiveViolations(
+async function loadActiveViolations(
   repoPath: string,
   branch?: string,
   specificAnalysisId?: string,
-): ViolationWithNames[] {
+): Promise<ViolationWithNames[]> {
   // LATEST-mode: respect the branch filter on LATEST's branch. For historical
   // and diff ids the branch filter is implicit in the analysis itself, so
   // skip it there.
   if (!specificAnalysisId) {
-    const latest = readLatest(repoPath);
+    const latest = await readLatest(repoPath);
     if (!latest) return [];
     if (branch && latest.analysis.branch !== branch) return [];
   }
-  return readActiveViolationsForAnalysisId(repoPath, specificAnalysisId) ?? [];
+  return (await readActiveViolationsForAnalysisId(repoPath, specificAnalysisId)) ?? [];
 }
 
-export function listHistoryEntries(repoPath: string): HistoryEntry[] {
-  const h = readHistory(repoPath);
+export async function listHistoryEntries(repoPath: string): Promise<HistoryEntry[]> {
+  const h = await readHistory(repoPath);
   return [...h.analyses].reverse();
 }

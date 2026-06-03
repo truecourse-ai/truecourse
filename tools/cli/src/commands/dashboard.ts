@@ -44,10 +44,10 @@ async function waitForHealth(url: string, timeoutMs = 30_000): Promise<boolean> 
   return false;
 }
 
-function targetUrlFor(baseUrl: string): string {
+async function targetUrlFor(baseUrl: string): Promise<string> {
   const repoDir = resolveRepoDir(process.cwd());
   if (!repoDir) return baseUrl;
-  const entry = getProjectByPath(repoDir) ?? registerProject(repoDir);
+  const entry = (await getProjectByPath(repoDir)) ?? (await registerProject(repoDir));
   return `${baseUrl}/repos/${entry.slug}`;
 }
 
@@ -97,7 +97,7 @@ async function runConsoleMode(serverEntry: string): Promise<void> {
     process.exit(1);
   }
 
-  const target = targetUrlFor(url);
+  const target = await targetUrlFor(url);
   openInBrowser(target);
   p.log.success(`Dashboard open at ${target}`);
   p.log.info("Press Ctrl+C to stop the server.");
@@ -137,7 +137,7 @@ async function runServiceMode(serverEntry: string): Promise<void> {
     process.exit(1);
   }
 
-  const target = targetUrlFor(url);
+  const target = await targetUrlFor(url);
   openInBrowser(target);
   p.log.success(`Dashboard open at ${target}`);
   p.log.info("Stop the dashboard with: truecourse dashboard stop");

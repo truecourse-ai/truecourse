@@ -8,11 +8,10 @@
  * contract-extractor uses; keeps the orchestrator pure.
  */
 
-import { spawn } from 'node:child_process';
 import os from 'node:os';
 import pLimit from 'p-limit';
+import { getLlmTransport } from '@truecourse/llm';
 import type { Block } from './slicer.js';
-import { buildModelArgs } from './model-args.js';
 import {
   LlmExtractionSchema,
   SYSTEM_PROMPT,
@@ -32,7 +31,10 @@ export interface BlockRunResult {
 export type BlockRunner = (blocks: Block[]) => Promise<BlockRunResult[]>;
 
 export interface SpawnRunnerOptions {
-  /** Path to the claude binary. Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
+  /**
+   * @deprecated The binary is resolved by the CLI transport (via the
+   * `CLAUDE_CODE_BIN` env var); this field is ignored.
+   */
   bin?: string;
   /**
    * Model name passed to `claude --model`. When unset, the CLI default
@@ -66,10 +68,8 @@ export function defaultConcurrency(): number {
  * subprocess is independent — failures don't abort the batch.
  */
 export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const limit = pLimit(concurrency);
 
   return async (blocks: Block[]): Promise<BlockRunResult[]> => {
@@ -79,7 +79,7 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
           opts.onBlockStart?.(block);
           const t0 = Date.now();
           try {
-            const extraction = await runOne(bin, block, timeoutMs, modelArgs);
+            const extraction = await runOne(block, opts.model, opts.fallbackModel, timeoutMs);
             opts.onBlockDone?.(block, true);
             return { block, extraction, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -94,73 +94,26 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
 }
 
 async function runOne(
-  bin: string,
   block: Block,
+  model: string | undefined,
+  fallbackModel: string | undefined,
   timeoutMs: number,
-  modelArgs: string[],
 ): Promise<LlmExtraction> {
-  const userPrompt = buildUserPrompt({
-    filePath: block.filePath,
-    headingPath: block.headingPath,
-    startLine: block.startLine,
-    text: block.text,
+  const { object } = await getLlmTransport().complete({
+    system: SYSTEM_PROMPT,
+    prompt: buildUserPrompt({
+      filePath: block.filePath,
+      headingPath: block.headingPath,
+      startLine: block.startLine,
+      text: block.text,
+    }),
+    schema: LlmExtractionSchema,
+    model,
+    fallbackModel,
+    timeoutMs,
+    label: `consolidate:${block.id}`,
+    cliArgs: ['--setting-sources', 'project'],
   });
-  const args = [
-    '-p',
-    userPrompt,
-    ...modelArgs,
-    '--output-format',
-    'json',
-    '--append-system-prompt',
-    SYSTEM_PROMPT,
-    '--setting-sources',
-    'project',
-  ];
-
-  return new Promise<LlmExtraction>((resolve, reject) => {
-    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`claude timed out after ${timeoutMs}ms for block ${block.id}`));
-    }, timeoutMs);
-
-    proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-    proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-        return;
-      }
-      try {
-        const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-        const text = typeof envelope === 'string' ? envelope : envelope.result;
-        if (typeof text !== 'string') {
-          reject(new Error(`claude returned no text for block ${block.id}`));
-          return;
-        }
-        const inner = JSON.parse(stripCodeFences(text));
-        resolve(LlmExtractionSchema.parse(inner));
-      } catch (e) {
-        reject(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
-  });
-}
-
-/**
- * Some models wrap JSON in markdown code fences even when told not to.
- * Strip a single leading ```...``` fence (with or without lang tag).
- */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenceMatch = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fenceMatch ? fenceMatch[1] : trimmed;
+  return object;
 }
 

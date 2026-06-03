@@ -69,17 +69,17 @@ describe('flow.service', () => {
     }
   });
 
-  it('getFlowsFromLatest / getFlowFromLatest read from LATEST.json', () => {
+  it('getFlowsFromLatest / getFlowFromLatest read from LATEST.json', async () => {
     const flows = detectFlows(analysisResult);
     const snapshot = makeLatest(fixture.project.path, flows);
-    writeLatest(fixture.project.path, snapshot);
+    await writeLatest(fixture.project.path, snapshot);
 
-    const read = getFlowsFromLatest(fixture.project.path);
+    const read = await getFlowsFromLatest(fixture.project.path);
     expect(read).toEqual(flows);
 
-    const one = getFlowFromLatest(fixture.project.path, flows[0].id);
+    const one = await getFlowFromLatest(fixture.project.path, flows[0].id);
     expect(one?.id).toBe(flows[0].id);
-    expect(getFlowFromLatest(fixture.project.path, 'not-a-real-id')).toBeNull();
+    expect(await getFlowFromLatest(fixture.project.path, 'not-a-real-id')).toBeNull();
   });
 
   it('computeFlowSeverities returns empty when no violations', () => {

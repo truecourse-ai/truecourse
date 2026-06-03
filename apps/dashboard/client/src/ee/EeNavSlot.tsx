@@ -6,10 +6,10 @@
  */
 
 import { Link, useLocation } from 'react-router-dom';
-import { Building2, type LucideIcon } from 'lucide-react';
+import { Building2, Github, Cpu, type LucideIcon } from 'lucide-react';
 import { useEeModule } from '@/ee/EeModuleContext';
 
-const ICONS: Record<string, LucideIcon> = { Building2 };
+const ICONS: Record<string, LucideIcon> = { Building2, Github, Cpu };
 
 export function EeNavSlot() {
   const { navItems } = useEeModule();

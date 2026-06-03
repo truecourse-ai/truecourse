@@ -1,14 +1,12 @@
-import { type ChildProcess } from 'node:child_process';
-import spawn from 'cross-spawn';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../lib/logger.js';
 import pLimit, { type LimitFunction } from 'p-limit';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { registerChildProcess, unregisterChildProcess } from '../analysis-registry.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodType } from 'zod';
+import { getLlmTransport, type CompleteUsage } from '@truecourse/llm';
 import type { Violation } from '@truecourse/shared';
 import { config } from '../../config/index.js';
 import {
@@ -62,9 +60,9 @@ import type {
 
 interface SpawnOptions {
   timeoutMs?: number;
-  /** Extra CLI args appended after base args */
+  /** Extra CLI args forwarded to the CLI transport (ignored by API transports). */
   extraArgs?: string[];
-  /** Fires once the concurrency limiter grants a slot, before spawnCLI runs. */
+  /** Fires once the concurrency limiter grants a slot, before the call runs. */
   onStart?: () => void;
 }
 
@@ -77,18 +75,24 @@ interface CLIUsage {
   costUsd?: string;
 }
 
-export abstract class BaseCLIProvider implements LLMProvider {
-  abstract get binaryName(): string;
-  abstract get baseArgs(): string[];
-  abstract get modelFlag(): string[];
+/** Map the transport's usage shape onto this provider's CLIUsage. */
+function toCliUsage(u: CompleteUsage): CLIUsage {
+  return {
+    inputTokens: u.inputTokens,
+    outputTokens: u.outputTokens,
+    cacheReadTokens: u.cacheReadTokens ?? 0,
+    cacheWriteTokens: u.cacheWriteTokens ?? 0,
+    totalTokens: u.totalTokens,
+    costUsd: u.costUsd,
+  };
+}
 
+export abstract class BaseCLIProvider implements LLMProvider {
   private maxRetries = config.claudeCodeMaxRetries ?? 2;
   private limit: LimitFunction = pLimit(config.claudeCodeMaxConcurrency);
   private debugDir: string | null = null;
   private callCounter = 0;
   private _analysisId: string | null = null;
-  private _repoId: string | null = null;
-  private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
   private _usageRecords: UsageRecord[] = [];
 
@@ -101,15 +105,12 @@ export abstract class BaseCLIProvider implements LLMProvider {
     this._abortSignal = signal;
   }
 
-  /** Set repoId for child process tracking in the analysis registry. */
-  setRepoId(repoId: string): void {
-    this._repoId = repoId;
-  }
+  // repoId/repoPath fed the old in-process CLI spawn (registry-based
+  // cancellation + cwd for the Read tool). The transport spawns its own child
+  // and cancels via the abort signal, so these are interface-required no-ops.
+  setRepoId(_repoId: string): void {}
 
-  /** Set target repo path — used as cwd when spawning CLI so Read tool accesses the right files. */
-  setRepoPath(path: string): void {
-    this._repoPath = path;
-  }
+  setRepoPath(_path: string): void {}
 
   flushUsage(): UsageData[] {
     if (this._usageRecords.length === 0) return [];
@@ -151,177 +152,50 @@ export abstract class BaseCLIProvider implements LLMProvider {
     if (jsonSchema) writeFileSync(`${prefix}-schema.json`, jsonSchema, 'utf-8');
   }
 
-  /** Strip nesting guard env vars so subprocess doesn't detect parent Claude Code. */
-  protected getCleanEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    for (const key of Object.keys(env)) {
-      if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDE_INTERNAL')) {
-        delete env[key];
-      }
-    }
-    return env;
-  }
-
-  /** Convert a Zod schema to JSON Schema string for --json-schema flag. */
+  /** Convert a Zod schema to a JSON Schema string (used for the debug dump). */
   protected toJsonSchema(schema: ZodType): string {
     const jsonSchema = zodToJsonSchema(schema, { target: 'openApi3' });
     return JSON.stringify(jsonSchema);
   }
 
-  /** Spawn CLI subprocess, pipe prompt via stdin, collect stdout. */
-  protected spawnCLI(prompt: string, jsonSchemaStr: string, opts?: SpawnOptions & { label?: string }): Promise<string> {
-    // Check if already aborted before spawning
-    if (this._abortSignal?.aborted) {
-      return Promise.reject(new DOMException('Analysis cancelled', 'AbortError'));
-    }
-
-    const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
-    const label = opts?.label ?? 'call';
-    const args = [
-      ...this.baseArgs,
-      ...this.modelFlag,
-      '--json-schema', jsonSchemaStr,
-      ...(opts?.extraArgs ?? []),
-    ];
-
-    return new Promise((resolve, reject) => {
-      // cross-spawn handles Windows `.cmd`/`.ps1` shim resolution without
-      // shell:true, avoiding the CVE-2024-27980 spawn restriction and the
-      // DEP0190 deprecation for shell:true + args array.
-      const child: ChildProcess = spawn(this.binaryName, args, {
-        env: this.getCleanEnv(),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        ...(this._repoPath ? { cwd: this._repoPath } : {}),
-      });
-
-      // Register child process for cancellation tracking
-      if (this._repoId) {
-        registerChildProcess(this._repoId, child);
-      }
-
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-      let aborted = false;
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGTERM');
-      }, timeout);
-
-      // Listen for abort signal to kill the subprocess
-      const onAbort = () => {
-        aborted = true;
-        clearTimeout(timer);
-        if (!child.killed) child.kill('SIGTERM');
-      };
-      this._abortSignal?.addEventListener('abort', onAbort, { once: true });
-
-      child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        this._abortSignal?.removeEventListener('abort', onAbort);
-        if (this._repoId) unregisterChildProcess(this._repoId, child);
-
-        if (aborted) {
-          reject(new DOMException('Analysis cancelled', 'AbortError'));
-          return;
-        }
-        if (timedOut) {
-          reject(new Error(`[CLI] ${label} timed out after ${timeout}ms`));
-          return;
-        }
-        if (code !== 0) {
-          const detail = stderr.trim() || stdout.trim().slice(0, 500);
-          reject(new Error(`[CLI] ${this.binaryName} exited with code ${code}: ${detail}`));
-          return;
-        }
-        resolve(stdout);
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        this._abortSignal?.removeEventListener('abort', onAbort);
-        if (this._repoId) unregisterChildProcess(this._repoId, child);
-        reject(new Error(`[CLI] Failed to spawn ${this.binaryName}: ${err.message}`));
-      });
-
-      // Pipe prompt via stdin
-      child.stdin!.write(prompt);
-      child.stdin!.end();
-    });
-  }
-
-  /** Extract usage data from CLI JSON envelope if present. */
-  private extractCLIUsage(parsed: Record<string, unknown>): CLIUsage | undefined {
-    const usage = parsed.usage as Record<string, number> | undefined;
-    if (!usage) return undefined;
-    const input = usage.input_tokens ?? 0;
-    const output = usage.output_tokens ?? 0;
-    const cacheRead = usage.cache_read_input_tokens ?? 0;
-    const cacheWrite = usage.cache_creation_input_tokens ?? 0;
-    const costRaw = parsed.total_cost_usd;
-    return {
-      inputTokens: input,
-      outputTokens: output,
-      cacheReadTokens: cacheRead,
-      cacheWriteTokens: cacheWrite,
-      totalTokens: input + output,
-      costUsd: costRaw != null ? String(costRaw) : undefined,
-    };
-  }
-
   /**
-   * Parse CLI output (--output-format json + --json-schema) and validate with Zod.
-   * The response is a JSON envelope with structured_output containing validated data.
+   * Run one structured call through the active LLM transport (CLI by default,
+   * an API provider in enterprise), with retry on parse/validation failure.
+   * Concurrency, abort, debug dump, and usage accounting stay here in the base.
    */
-  protected parseAndValidate<T>(raw: string, schema: ZodType<T>): { data: T; usage?: CLIUsage } {
-    const parsed = JSON.parse(raw.trim());
-    const usage = this.extractCLIUsage(parsed);
-
-    if (parsed.is_error) {
-      throw new Error(`[CLI] Agent returned error: ${parsed.result || parsed.subtype}`);
-    }
-
-    if (parsed.structured_output) {
-      return { data: schema.parse(parsed.structured_output), usage };
-    }
-
-    // Fallback: try parsing the result field as JSON
-    if (parsed.result) {
-      const data = typeof parsed.result === 'string' ? JSON.parse(parsed.result) : parsed.result;
-      return { data: schema.parse(data), usage };
-    }
-
-    throw new Error(`[CLI] No structured_output in response (subtype: ${parsed.subtype})`);
-  }
-
-  /** Spawn CLI with retry on parse/validation failure. */
   protected async spawnAndParse<T>(
     prompt: string,
     schema: ZodType<T>,
     opts?: SpawnOptions & { label?: string },
   ): Promise<{ data: T; usage?: CLIUsage }> {
-    // Cap concurrent CLI spawns across all callers on this provider.
-    // The limit runs the inner fn only when a slot is free, so timeout
-    // timers (inside spawnCLI) can't start while the task is queued.
+    // Cap concurrent calls across all callers on this provider. The limit runs
+    // the inner fn only when a slot is free, so a queued task doesn't start its
+    // timeout while waiting.
     return this.limit(async () => {
       if (this._abortSignal?.aborted) {
         throw this._abortSignal.reason ?? new DOMException('Analysis cancelled', 'AbortError');
       }
       opts?.onStart?.();
 
-      const jsonSchemaStr = this.toJsonSchema(schema);
       const label = opts?.label ?? 'call';
       let lastError: Error | null = null;
 
       for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
         try {
-          const raw = await this.spawnCLI(prompt, jsonSchemaStr, opts);
-          this.dumpDebug(label, prompt, raw, jsonSchemaStr);
-          return this.parseAndValidate(raw, schema);
+          const { object, usage } = await getLlmTransport().complete({
+            prompt,
+            schema,
+            model: config.claudeCodeModel,
+            timeoutMs: opts?.timeoutMs ?? config.claudeCodeTimeoutMs,
+            signal: this._abortSignal ?? undefined,
+            label,
+            cliArgs: opts?.extraArgs,
+            // The violation/flow schemas are fed to the CLI via --json-schema
+            // (server-side enforcement), as this provider did pre-migration.
+            cliJsonSchema: true,
+          });
+          this.dumpDebug(label, prompt, JSON.stringify(object, null, 2), this.toJsonSchema(schema));
+          return { data: object, usage: usage ? toCliUsage(usage) : undefined };
         } catch (err) {
           lastError = err as Error;
           if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
@@ -831,22 +705,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
 // Claude Code provider
 // ---------------------------------------------------------------------------
 
-export class ClaudeCodeProvider extends BaseCLIProvider {
-  get binaryName(): string {
-    return config.claudeCodeBinary ?? 'claude';
-  }
-
-  get baseArgs(): string[] {
-    return [
-      '--print',
-      '--output-format', 'json',
-      '--dangerously-skip-permissions',
-      '--no-session-persistence',
-    ];
-  }
-
-  get modelFlag(): string[] {
-    const model = config.claudeCodeModel;
-    return model ? ['--model', model] : [];
-  }
-}
+/**
+ * The default provider. All behaviour now lives in BaseCLIProvider, which
+ * routes through the active LLM transport (the CLI by default, an API provider
+ * in enterprise) — so there's nothing CLI-specific left to override here.
+ */
+export class ClaudeCodeProvider extends BaseCLIProvider {}

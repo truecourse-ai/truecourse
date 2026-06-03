@@ -167,3 +167,89 @@ export interface WorkspaceMember {
 export interface WorkspaceMembersResponse {
   members: WorkspaceMember[]
 }
+
+// --- GitHub App (PR gate) -------------------------------------------
+
+/** A GitHub App installation visible to the current workspace. */
+export interface GithubInstallationSummary {
+  installationId: number
+  accountLogin: string
+  accountType: string
+}
+
+/** A repository connected to the PR gate. */
+export interface GithubRepoSummary {
+  repoFullName: string
+  installationId: number
+  defaultBranch: string
+  /** true = new drift fails a required Check; false = advisory only. */
+  blocking: boolean
+  enabled: boolean
+  /** Addresses emailed when the gate fails. */
+  notifyEmails: string[]
+}
+
+/** Summary of one gate run on a PR. */
+export interface GithubRunSummary {
+  id: string
+  prNumber: number
+  headSha: string
+  conclusion: 'success' | 'failure' | 'neutral'
+  addedCount: number
+  resolvedCount: number
+  createdAt: string
+}
+
+/** Everything the Connect page needs in one call. */
+export interface GithubConnectStatusResponse {
+  /** Whether the GitHub App is configured server-side. */
+  configured: boolean
+  /** URL to install the App (carries the workspace id as `state`). */
+  installUrl: string
+  installations: GithubInstallationSummary[]
+  repos: GithubRepoSummary[]
+}
+
+export interface GithubRunsResponse {
+  runs: GithubRunSummary[]
+}
+
+// --- LLM providers (Models settings) --------------------------------
+
+export type LlmProviderKind = 'anthropic' | 'openai' | 'bedrock' | 'copilot'
+
+/** Masked, secret-free view of the instance LLM provider config. */
+export interface LlmProviderConfigView {
+  provider: LlmProviderKind
+  model: string
+  fallbackModel: string | null
+  baseURL: string | null
+  region: string | null
+  accessKeyId: string | null
+  /** Whether a key is stored. The key itself is never returned. */
+  hasKey: boolean
+  /** Masked tail of the stored key, e.g. `••••1234`. */
+  keyMask: string | null
+  updatedAt: string
+}
+
+/** Response of GET /api/ee/llm/config. */
+export interface LlmConfigResponse {
+  config: LlmProviderConfigView | null
+  /** True when a provider is set via env (the in-app form still overrides it). */
+  envManaged: boolean
+  providers: LlmProviderKind[]
+}
+
+/** Body of PATCH /api/ee/llm/config. */
+export interface LlmConfigUpdate {
+  provider: LlmProviderKind
+  model: string
+  fallbackModel?: string
+  /** Omit to keep the stored key (same provider only). */
+  apiKey?: string
+  accessKeyId?: string
+  baseURL?: string
+  region?: string
+  headers?: Record<string, string>
+}

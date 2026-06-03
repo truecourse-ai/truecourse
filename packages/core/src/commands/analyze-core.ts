@@ -28,11 +28,7 @@ import { runViolationPipeline } from '../services/violation-pipeline.service.js'
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
-import {
-  AnalyzeLockError,
-  acquireAnalyzeLock,
-  releaseAnalyzeLock,
-} from '../lib/atomic-write.js';
+import { acquireAnalyzeLock, releaseAnalyzeLock } from '../lib/atomic-write.js';
 import type { Graph, LatestSnapshot, UsageRecord, ViolationRecord } from '../types/snapshot.js';
 import type { StepTracker } from '../progress.js';
 
@@ -53,6 +49,13 @@ export interface LlmEstimate {
 
 export interface AnalyzeCoreOptions {
   mode: AnalysisMode;
+  /**
+   * Where the CODE to analyze lives (git, parse, the violation pipeline, the
+   * analyze lock). Defaults to `project.path`. The hosted edition sets this to a
+   * clone so it can analyze a repo whose `project.path` is an opaque identity
+   * (e.g. `owner/repo`) that storage keys off, not a filesystem path.
+   */
+  codeDir?: string;
   branch?: string | null;
   commitHash?: string | null;
   /** Full-mode only: skip git branch/commit/diff calls entirely. Ignored in diff mode. */
@@ -97,22 +100,25 @@ export async function analyzeCore(
   project: RegistryEntry,
   options: AnalyzeCoreOptions,
 ): Promise<AnalyzeCoreResult> {
+  // Code lives at `codeDir` (the repo, or a clone in EE); storage keys off
+  // `project.path` (a path in OSS, an opaque identity in EE).
+  const codeDir = options.codeDir ?? project.path;
+
   // Single lock protects both modes. A diff while an analyze is in-flight (or
-  // vice versa) corrupts LATEST / diff.json invariants, so block both.
-  try {
-    acquireAnalyzeLock(project.path);
-  } catch (err) {
-    if (err instanceof AnalyzeLockError) throw err;
-    throw err;
-  }
+  // vice versa) corrupts LATEST / diff.json invariants, so block both. Keyed by
+  // the STORAGE identity (`project.path`) — not the code dir — so in EE two
+  // analyses of the same repo serialize even though each clones into its own
+  // temp dir (the EE impl is a `pg_advisory_lock`). If acquire throws we never
+  // entered the body below, so the lock is not held and needs no release.
+  await acquireAnalyzeLock(project.path);
 
   try {
     const { mode, signal } = options;
     const isDiff = mode === 'diff';
     const skipGit = !isDiff && !!options.skipGit;
-    const projectConfig = readProjectConfig(project.path);
+    const projectConfig = await readProjectConfig(project.path);
 
-    const latestBaseline = readLatest(project.path);
+    const latestBaseline = await readLatest(project.path);
     if (isDiff && !latestBaseline) {
       throw new Error('Run a full analysis first before checking a diff.');
     }
@@ -128,14 +134,14 @@ export async function analyzeCore(
       branch = latestBaseline!.analysis.branch ?? branch;
       if (commitHash === null) {
         try {
-          const git = await getGit(project.path);
+          const git = await getGit(codeDir);
           commitHash = (await git.revparse(['HEAD'])).trim() || null;
         } catch {
           commitHash = null;
         }
       }
     } else if (!skipGit && (branch === null || commitHash === null)) {
-      const git = await getGit(project.path);
+      const git = await getGit(codeDir);
       if (branch === null) branch = (await git.branch()).current || null;
       if (commitHash === null) commitHash = (await git.revparse(['HEAD'])).trim();
     }
@@ -159,14 +165,14 @@ export async function analyzeCore(
     let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
     if (!isDiff && !skipGit && !options.skipStash) {
       try {
-        stashGit = await getGit(project.path);
+        stashGit = await getGit(codeDir);
         const status = await stashGit.status();
         if (!status.isClean()) {
           const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
           // Skip stashing when the repo path is a subdirectory of a larger
           // repo (e.g., test fixtures inside the main repo). Stashing there
           // would touch unrelated parent-repo files.
-          const isSubdirectory = path.resolve(project.path) !== path.resolve(gitRoot);
+          const isSubdirectory = path.resolve(codeDir) !== path.resolve(gitRoot);
           if (!isSubdirectory) {
             options.tracker?.detail('parse', 'Stashing pending changes...');
             options.onProgress?.({ detail: 'Stashing pending changes to analyze committed state...' });
@@ -193,7 +199,7 @@ export async function analyzeCore(
     // ------------------------------------------------------------
     options.tracker?.start('parse', isDiff ? 'Analyzing working tree...' : 'Starting analysis...');
     const result: AnalysisResult = await runAnalysis(
-      project.path,
+      codeDir,
       branch ?? undefined,
       (progress) => {
         options.tracker?.detail('parse', progress.detail ?? 'Analyzing...');
@@ -225,7 +231,7 @@ export async function analyzeCore(
 
     if (isDiff) {
       try {
-        const git = await getGit(project.path);
+        const git = await getGit(codeDir);
         const statusResult = await git.status();
         for (const f of statusResult.not_added) changedFiles.push({ path: f, status: 'new' });
         for (const f of statusResult.created) changedFiles.push({ path: f, status: 'new' });
@@ -241,7 +247,7 @@ export async function analyzeCore(
       }
     } else if (latestBaseline?.analysis.commitHash && !skipGit) {
       try {
-        const git = await getGit(project.path);
+        const git = await getGit(codeDir);
         const diffOutput = await git.diff([latestBaseline.analysis.commitHash, 'HEAD', '--name-only']);
         const files = diffOutput.trim().split('\n').filter(Boolean);
         if (files.length > 0) changedFileSet = new Set(files);
@@ -263,7 +269,7 @@ export async function analyzeCore(
         );
         graph.flows = [];
       }
-      touchProject(project.slug);
+      await touchProject(project.slug);
     }
 
     options.tracker?.done(
@@ -287,12 +293,12 @@ export async function analyzeCore(
     const provider = options.provider ?? (effectiveLlmRules ? createLLMProvider() : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);
-      provider.setRepoPath(project.path);
+      provider.setRepoPath(codeDir);
       if (signal) provider.setAbortSignal(signal);
     }
 
     const pipelineResult = await runViolationPipeline({
-      repoPath: project.path,
+      repoPath: codeDir,
       analysisId,
       now,
       result,
@@ -377,7 +383,7 @@ export async function analyzeCore(
       }
     }
   } finally {
-    releaseAnalyzeLock(project.path);
+    await releaseAnalyzeLock(project.path);
   }
 }
 

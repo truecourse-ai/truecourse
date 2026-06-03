@@ -85,19 +85,20 @@ export function createWorkspaceRouter(
     let staleCount = 0;
     const now = Date.now();
 
-    const entries = readers.readRegistry();
-    const repos = entries.map((e) => {
+    const entries = await readers.readRegistry();
+    const repos = await Promise.all(entries.map(async (e) => {
       let v = 0;
       let d = 0;
       try {
-        const { violations } = readers.listViolations(e.path, { status: 'active' });
+        const { violations } = await readers.listViolations(e.path, { status: 'active' });
         v = violations.length;
         for (const vi of violations) severity[vi.severity] += 1;
       } catch {
         // unanalyzed / unreadable repo — counts stay 0
       }
       try {
-        d = readers.readVerifyState(e.path)?.drifts.length ?? 0;
+        const vstate = await readers.readVerifyState(e.path);
+        d = vstate?.drifts.length ?? 0;
       } catch {
         // no verify run recorded
       }
@@ -113,7 +114,7 @@ export function createWorkspaceRouter(
         violations: v,
         drift: d,
       };
-    });
+    }));
 
     // Org name from WorkOS (best-effort — repo stats still render if
     // WorkOS is briefly unavailable). Members live on the Workspace page.

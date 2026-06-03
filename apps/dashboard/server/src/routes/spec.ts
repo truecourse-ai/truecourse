@@ -31,8 +31,6 @@ import path from 'node:path';
 import {
   claimsFilePath,
   readClaims,
-  readDecisions,
-  readScanState,
   type Resolution,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
@@ -41,6 +39,8 @@ import {
   addManualChain,
   addManualInclude,
   generatedMarkerPath,
+  getDecisions,
+  getScanState,
   removeManualChain,
   removeManualInclude,
   resolveAllDefaultsInProcess,
@@ -64,10 +64,10 @@ const router: Router = Router();
 
 router.get(
   '/:id/spec/scan-state',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      const state = readScanState(repo.path);
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const state = await getScanState(repo.path);
       if (!state) {
         res.status(404).json({ error: 'No scan has been run yet.' });
         return;
@@ -84,7 +84,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     let repoIdForCleanup: string | null = null;
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
       if (!(await isGitRepo(repo.path))) {
         res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
@@ -113,10 +113,10 @@ router.get(
 
 router.get(
   '/:id/spec/decisions',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      res.json(readDecisions(repo.path));
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      res.json(await getDecisions(repo.path));
     } catch (e) {
       next(e);
     }
@@ -129,9 +129,9 @@ router.get(
 
 router.post(
   '/:id/spec/decisions',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const body = req.body as {
         conflictId?: string;
         resolution?: Resolution;
@@ -144,7 +144,7 @@ router.post(
         });
         return;
       }
-      const next = upsertDecision(repo.path, {
+      const next = await upsertDecision(repo.path, {
         conflictId: body.conflictId,
         resolution: body.resolution,
         candidateFingerprint: body.candidateFingerprint,
@@ -163,11 +163,11 @@ router.post(
 
 router.delete(
   '/:id/spec/decisions/:conflictId',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const conflictId = req.params.conflictId as string;
-      const nextFile = revokeDecisionInProcess(repo.path, conflictId);
+      const nextFile = await revokeDecisionInProcess(repo.path, conflictId);
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -182,9 +182,9 @@ router.delete(
 
 router.post(
   '/:id/spec/chains/manual',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const body = req.body as { older?: string; newer?: string; note?: string };
       if (!body.older || !body.newer) {
         res.status(400).json({ error: 'Missing older or newer doc path.' });
@@ -194,7 +194,7 @@ router.post(
         res.status(400).json({ error: 'older and newer must be different docs.' });
         return;
       }
-      const nextFile = addManualChain(repo.path, {
+      const nextFile = await addManualChain(repo.path, {
         older: body.older,
         newer: body.newer,
         note: body.note,
@@ -213,15 +213,15 @@ router.post(
 
 router.post(
   '/:id/spec/docs/include',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const body = req.body as { path?: string };
       if (!body.path) {
         res.status(400).json({ error: 'Missing doc path.' });
         return;
       }
-      const nextFile = addManualInclude(repo.path, body.path);
+      const nextFile = await addManualInclude(repo.path, body.path);
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -231,15 +231,15 @@ router.post(
 
 router.delete(
   '/:id/spec/docs/include',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const body = req.body as { path?: string };
       if (!body.path) {
         res.status(400).json({ error: 'Missing doc path.' });
         return;
       }
-      const nextFile = removeManualInclude(repo.path, body.path);
+      const nextFile = await removeManualInclude(repo.path, body.path);
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -249,15 +249,15 @@ router.delete(
 
 router.delete(
   '/:id/spec/chains/manual',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const body = req.body as { older?: string; newer?: string };
       if (!body.older || !body.newer) {
         res.status(400).json({ error: 'Missing older or newer doc path.' });
         return;
       }
-      const nextFile = removeManualChain(repo.path, { older: body.older, newer: body.newer });
+      const nextFile = await removeManualChain(repo.path, { older: body.older, newer: body.newer });
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -273,7 +273,7 @@ router.post(
   '/:id/spec/decisions/batch',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const mode = (req.body as { mode?: string } | undefined)?.mode;
       if (mode !== 'all-defaults') {
         res.status(400).json({ error: 'Only mode="all-defaults" is supported.' });
@@ -307,9 +307,9 @@ router.post(
 
 router.get(
   '/:id/spec/staleness',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const claimsMtime = mtimeIfExists(claimsFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
       // Verifier store's LATEST.json is the verify marker (its own write stamp).
@@ -359,9 +359,9 @@ function mtimeIfExists(file: string): number | null {
  */
 router.get(
   '/:id/spec/canonical/tree',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const claims = readClaims(repo.path);
       if (!claims) {
         res.json({ hasCanonical: false, modules: [] });
@@ -399,9 +399,9 @@ router.get(
 
 router.get(
   '/:id/spec/canonical/section',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       const moduleName = String(req.query.module ?? '');
       const topic = String(req.query.topic ?? '');
       if (!moduleName || !topic) {

@@ -13,10 +13,10 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
       const analysisId = req.query.analysisId as string | undefined;
 
-      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      const resolved = await resolveGraphForAnalysisId(repo.path, analysisId);
       if (!resolved) {
         res.json([]);
         return;
@@ -49,10 +49,10 @@ router.get(
     try {
       const id = req.params.id as string;
       const dbId = req.params.dbId as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
       const analysisId = req.query.analysisId as string | undefined;
 
-      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      const resolved = await resolveGraphForAnalysisId(repo.path, analysisId);
       if (!resolved) throw createAppError('Database not found', 404);
 
       const dbRow = resolved.graph.databases.find((d) => d.id === dbId);

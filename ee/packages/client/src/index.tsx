@@ -20,6 +20,16 @@ const eeClientModule: EeClientModule = {
       load: () => import('./WorkspacePage'),
       requiredCapability: 'workspace',
     },
+    {
+      path: '/integrations/github',
+      load: () => import('./GithubConnectPage'),
+      requiredCapability: 'github-gate',
+    },
+    {
+      path: '/settings/models',
+      load: () => import('./ModelsPage'),
+      requiredCapability: 'llm-config',
+    },
   ],
   navItems: [
     {
@@ -28,6 +38,20 @@ const eeClientModule: EeClientModule = {
       to: '/workspace',
       iconName: 'Building2',
       requiredCapability: 'workspace',
+    },
+    {
+      id: 'github',
+      label: 'GitHub',
+      to: '/integrations/github',
+      iconName: 'Github',
+      requiredCapability: 'github-gate',
+    },
+    {
+      id: 'models',
+      label: 'Models',
+      to: '/settings/models',
+      iconName: 'Cpu',
+      requiredCapability: 'llm-config',
     },
   ],
   // Enterprise home: the workspace dashboard replaces the OSS onboarding

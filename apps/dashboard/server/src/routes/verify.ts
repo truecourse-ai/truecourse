@@ -62,10 +62,10 @@ async function resolveVerifyStashDecision(
 
 router.get(
   '/:id/verify/state',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      const state = readVerifyState(repo.path);
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const state = await readVerifyState(repo.path);
       if (!state) {
         res.status(404).json({ error: 'No verify run has been recorded yet.' });
         return;
@@ -82,7 +82,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     let repoIdForCleanup: string | null = null;
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
       if (!(await isGitRepo(repo.path))) {
         res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
@@ -124,10 +124,10 @@ router.post(
 
 router.get(
   '/:id/verify/history',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      res.json(readVerifyHistory(repo.path));
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      res.json(await readVerifyHistory(repo.path));
     } catch (e) {
       next(e);
     }
@@ -136,10 +136,10 @@ router.get(
 
 router.get(
   '/:id/verify/runs/:runId',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      const state = readVerifyRunState(repo.path, req.params.runId as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const state = await readVerifyRunState(repo.path, req.params.runId as string);
       if (!state) {
         res.status(404).json({ error: 'Verify run not found.' });
         return;
@@ -153,10 +153,10 @@ router.get(
 
 router.delete(
   '/:id/verify/runs/:runId',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      const deleted = deleteVerifyRun(repo.path, req.params.runId as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const deleted = await deleteVerifyRun(repo.path, req.params.runId as string);
       if (!deleted) {
         res.status(404).json({ error: 'Verify run not found.' });
         return;
@@ -170,10 +170,10 @@ router.delete(
 
 router.get(
   '/:id/verify/diff',
-  (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      const diff = readVerifyDiff(repo.path);
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const diff = await readVerifyDiff(repo.path);
       if (!diff) {
         res.status(404).json({ error: 'No verify diff has been computed yet.' });
         return;
@@ -190,7 +190,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     let repoIdForCleanup: string | null = null;
     try {
-      const repo = resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
       const tracker = createSocketSpecTracker(
         repoIdForCleanup,

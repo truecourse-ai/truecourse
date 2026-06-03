@@ -47,7 +47,7 @@ export async function diffInProcess(
 ): Promise<DiffInProcessResult> {
   const startedAt = Date.now();
   const core = await analyzeCore(project, { ...options, mode: 'diff' });
-  const result = persistDiffAnalysis(project, core);
+  const result = await persistDiffAnalysis(project, core);
 
   if (options.source) {
     await trackEvent('analyze', {

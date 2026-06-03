@@ -1,40 +1,45 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
 import { ServiceViolationOutputSchema } from '../../packages/core/src/services/llm/schemas.js';
 import { config } from '../../packages/core/src/config/index.js';
+// Import the bare specifier — the SAME @truecourse/llm module instance that
+// the core provider resolves — so the transport singleton is shared.
+import {
+  setLlmTransport,
+  resetLlmTransport,
+  type LlmTransport,
+} from '@truecourse/llm';
 
 /**
- * Test subclass: bypasses real process spawning. Each spawnCLI call
- * resolves to a fixed JSON envelope after a configurable delay, while
- * tracking in-flight count so tests can assert peak concurrency.
+ * Counting transport: bypasses real process spawning. Each `complete` call
+ * resolves to a fixed result after a configurable delay, tracking in-flight
+ * count so tests can assert peak concurrency. The concurrency cap under test
+ * lives in `BaseCLIProvider.spawnAndParse`'s limiter, which wraps this call.
  */
-class CountingProvider extends BaseCLIProvider {
-  get binaryName() { return 'test-binary'; }
-  get baseArgs() { return []; }
-  get modelFlag() { return []; }
-
+class CountingTransport implements LlmTransport {
   public inFlight = 0;
   public peak = 0;
   public calls = 0;
   public delayMs = 20;
 
-  protected async spawnCLI(): Promise<string> {
+  async complete(): Promise<{ object: unknown; usage?: undefined }> {
     this.calls++;
     this.inFlight++;
     this.peak = Math.max(this.peak, this.inFlight);
     try {
       await new Promise((r) => setTimeout(r, this.delayMs));
-      return JSON.stringify({
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        structured_output: { violations: [], serviceDescriptions: [] },
-      });
+      return { object: { violations: [], serviceDescriptions: [] } };
     } finally {
       this.inFlight--;
     }
   }
 
+  async completeText(): Promise<{ text: string }> {
+    return { text: '' };
+  }
+}
+
+class TestProvider extends BaseCLIProvider {
   async runTask(onStart?: () => void) {
     return (this as unknown as {
       spawnAndParse: (
@@ -46,9 +51,21 @@ class CountingProvider extends BaseCLIProvider {
   }
 }
 
+let transport: CountingTransport;
+let provider: TestProvider;
+
+beforeEach(() => {
+  transport = new CountingTransport();
+  setLlmTransport(transport);
+  provider = new TestProvider();
+});
+
+afterEach(() => {
+  resetLlmTransport();
+});
+
 describe('BaseCLIProvider concurrency cap', () => {
   it('never exceeds config.claudeCodeMaxConcurrency across concurrent spawnAndParse calls', async () => {
-    const provider = new CountingProvider();
     const cap = config.claudeCodeMaxConcurrency;
     const total = cap * 3 + 2;
 
@@ -57,14 +74,13 @@ describe('BaseCLIProvider concurrency cap', () => {
     );
 
     expect(results).toHaveLength(total);
-    expect(provider.calls).toBe(total);
-    expect(provider.peak).toBeLessThanOrEqual(cap);
-    expect(provider.peak).toBe(cap); // saturates under load
+    expect(transport.calls).toBe(total);
+    expect(transport.peak).toBeLessThanOrEqual(cap);
+    expect(transport.peak).toBe(cap); // saturates under load
   });
 
   it('queues tasks rather than dropping them when the cap is hit', async () => {
-    const provider = new CountingProvider();
-    provider.delayMs = 50;
+    transport.delayMs = 50;
     const cap = config.claudeCodeMaxConcurrency;
     const total = cap * 2;
 
@@ -76,14 +92,13 @@ describe('BaseCLIProvider concurrency cap', () => {
 
     // With a hard cap, total runtime must be at least 2 waves.
     // Allow loose lower bound to stay robust under CI timing jitter.
-    expect(elapsed).toBeGreaterThanOrEqual(provider.delayMs * 2 * 0.75);
-    expect(provider.calls).toBe(total);
+    expect(elapsed).toBeGreaterThanOrEqual(transport.delayMs * 2 * 0.75);
+    expect(transport.calls).toBe(total);
   });
 
   it('fires onStart only after the limiter grants a slot, not at submission', async () => {
-    const provider = new CountingProvider();
     const cap = config.claudeCodeMaxConcurrency;
-    provider.delayMs = 60;
+    transport.delayMs = 60;
 
     // Fill every slot with blockers; none carry an onStart callback.
     const blockers = Array.from({ length: cap }, () => provider.runTask());
@@ -100,23 +115,22 @@ describe('BaseCLIProvider concurrency cap', () => {
     expect(queuedStarted).toBe(true);
   });
 
-  it('defers spawnCLI until a slot is acquired (timer starts after acquire)', async () => {
+  it('defers the transport call until a slot is acquired (timer starts after acquire)', async () => {
     // Core invariant: spawnAndParse must acquire the semaphore BEFORE calling
-    // spawnCLI, so a queued task's timeout timer (which lives inside spawnCLI)
-    // does not start counting while it waits.
-    const provider = new CountingProvider();
+    // the transport, so a queued task's timeout (inside the transport) does not
+    // start counting while it waits.
     const cap = config.claudeCodeMaxConcurrency;
-    provider.delayMs = 80;
+    transport.delayMs = 80;
 
     // Fill every slot.
     const blockers = Array.from({ length: cap }, () => provider.runTask());
 
-    // One more task — must be queued, not yet in spawnCLI.
+    // One more task — must be queued, not yet calling the transport.
     const queuedPromise = provider.runTask();
     await new Promise((r) => setImmediate(r));
-    expect(provider.calls).toBe(cap); // N+1'th task has NOT spawned yet
+    expect(transport.calls).toBe(cap); // N+1'th task has NOT called the transport yet
 
     await Promise.all([queuedPromise, ...blockers]);
-    expect(provider.calls).toBe(cap + 1); // ran after a slot freed up
+    expect(transport.calls).toBe(cap + 1); // ran after a slot freed up
   });
 });

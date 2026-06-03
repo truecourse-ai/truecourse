@@ -32,18 +32,18 @@ describe('slice cache', () => {
     headingLevel: 2,
   };
 
-  it('round-trips a slice cache entry', () => {
+  it('round-trips a slice cache entry', async () => {
     ensureCacheDirs(tmpRoot);
-    writeSliceEntry(tmpRoot, sampleSlice, { fragments: [] });
-    const back = readSliceEntry(tmpRoot, sampleSlice.id);
+    await writeSliceEntry(tmpRoot, sampleSlice, { fragments: [] });
+    const back = await readSliceEntry(tmpRoot, sampleSlice.id);
     expect(back).not.toBeNull();
     expect(back!.id).toBe(sampleSlice.id);
     expect(back!.headingPath).toEqual(['Auth']);
     expect(back!.result.fragments).toEqual([]);
   });
 
-  it('returns null for a missing slice id', () => {
-    expect(readSliceEntry(tmpRoot, 'nope')).toBeNull();
+  it('returns null for a missing slice id', async () => {
+    expect(await readSliceEntry(tmpRoot, 'nope')).toBeNull();
   });
 
   it('round-trips the manifest', () => {
@@ -61,10 +61,10 @@ describe('slice cache', () => {
     expect(back).toEqual(manifest);
   });
 
-  it('garbage-collects slice entries no longer referenced by the manifest', () => {
+  it('garbage-collects slice entries no longer referenced by the manifest', async () => {
     ensureCacheDirs(tmpRoot);
-    writeSliceEntry(tmpRoot, sampleSlice, { fragments: [] });
-    writeSliceEntry(
+    await writeSliceEntry(tmpRoot, sampleSlice, { fragments: [] });
+    await writeSliceEntry(
       tmpRoot,
       { ...sampleSlice, id: 'orphan' },
       { fragments: [] },
@@ -80,8 +80,8 @@ describe('slice cache', () => {
     };
     const removed = gcOrphanedSlices(tmpRoot, manifest);
     expect(removed).toBe(1);
-    expect(readSliceEntry(tmpRoot, 'orphan')).toBeNull();
-    expect(readSliceEntry(tmpRoot, sampleSlice.id)).not.toBeNull();
+    expect(await readSliceEntry(tmpRoot, 'orphan')).toBeNull();
+    expect(await readSliceEntry(tmpRoot, sampleSlice.id)).not.toBeNull();
   });
 
   it('points at the expected on-disk locations', () => {

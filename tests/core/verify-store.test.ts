@@ -101,15 +101,15 @@ describe('verifyInProcess persistence', () => {
     const { state } = await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE });
     expect(state.drifts.length).toBeGreaterThan(0);
 
-    const runs = listVerifyRuns(repo);
+    const runs = await listVerifyRuns(repo);
     expect(runs).toHaveLength(1);
 
-    const latest = readVerifyLatest(repo);
+    const latest = await readVerifyLatest(repo);
     expect(latest).not.toBeNull();
     expect(latest!.head).toBe(runs[0]);
     expect(latest!.summary.total).toBe(state.drifts.length);
 
-    const history = readVerifyHistory(repo);
+    const history = await readVerifyHistory(repo);
     expect(history.runs).toHaveLength(1);
     expect(history.runs[0].driftCount).toBe(state.drifts.length);
   });
@@ -118,20 +118,20 @@ describe('verifyInProcess persistence', () => {
     await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE });
     clearVerifyLatestCache();
     await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE });
-    expect(readVerifyHistory(repo).runs).toHaveLength(2);
-    expect(listVerifyRuns(repo)).toHaveLength(2);
+    expect((await readVerifyHistory(repo)).runs).toHaveLength(2);
+    expect(await listVerifyRuns(repo)).toHaveLength(2);
   });
 
   it('readVerifyState maps the new LATEST to the legacy shape', async () => {
     await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE });
     clearVerifyLatestCache();
-    const s = readVerifyState(repo);
+    const s = await readVerifyState(repo);
     expect(s).not.toBeNull();
     expect(Array.isArray(s!.drifts)).toBe(true);
     expect(s!.drifts.length).toBeGreaterThan(0);
   });
 
-  it('does NOT fall back to a legacy verify-state.json — the new store is the only source', () => {
+  it('does NOT fall back to a legacy verify-state.json — the new store is the only source', async () => {
     const legacy = path.join(repo, '.truecourse', '.cache', 'verifier', 'verify-state.json');
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
     fs.writeFileSync(
@@ -139,7 +139,7 @@ describe('verifyInProcess persistence', () => {
       JSON.stringify({ verifiedAt: '2026-01-01T00:00:00Z', contractsDir: '', codeDir: '', artifactCount: 0, extractedOperationCount: 0, drifts: [], resolverErrors: [], unresolvedRefs: [] }),
     );
     // No verifier/LATEST.json yet ⇒ null, despite the legacy file existing.
-    expect(readVerifyState(repo)).toBeNull();
+    expect(await readVerifyState(repo)).toBeNull();
   });
 
   it('a verify run deletes any stale legacy verify-state.json', async () => {
@@ -169,7 +169,7 @@ describe('verifyDiffInProcess', () => {
     expect(diff.summary.unchanged).toBeGreaterThan(0);
     expect(Array.isArray(diff.changedFiles)).toBe(true);
     // diff.json was written and does not disturb LATEST
-    expect(readVerifyDiff(repo)).not.toBeNull();
+    expect(await readVerifyDiff(repo)).not.toBeNull();
     expect(fs.existsSync(verifyLatestPath(repo))).toBe(true);
   });
 
@@ -183,10 +183,10 @@ describe('verifyDiffInProcess', () => {
     await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE, skipStash: true });
     clearVerifyLatestCache();
     await verifyDiffInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE });
-    expect(readVerifyDiff(repo)).not.toBeNull();
+    expect(await readVerifyDiff(repo)).not.toBeNull();
     clearVerifyLatestCache();
     await verifyInProcess(repo, { contractsDir: CONTRACTS, codeDir: CODE, skipStash: true });
-    expect(readVerifyDiff(repo)).toBeNull();
+    expect(await readVerifyDiff(repo)).toBeNull();
   });
 });
 
@@ -238,9 +238,9 @@ function snapshot(id: string, verifiedAt: string, drifts: ContractDrift[]): Veri
 }
 
 /** Record a run as a snapshot + history entry, and point LATEST at it. */
-function recordRun(repoPath: string, snap: VerifyRunSnapshot): void {
-  const { filename } = writeVerifyRun(repoPath, snap);
-  appendVerifyHistory(repoPath, {
+async function recordRun(repoPath: string, snap: VerifyRunSnapshot): Promise<void> {
+  const { filename } = await writeVerifyRun(repoPath, snap);
+  await appendVerifyHistory(repoPath, {
     id: snap.id,
     filename,
     verifiedAt: snap.verifiedAt,
@@ -250,7 +250,7 @@ function recordRun(repoPath: string, snap: VerifyRunSnapshot): void {
     driftCount: snap.drifts.length,
     bySeverity: { info: 0, low: 0, medium: 0, high: snap.drifts.length, critical: 0 },
   });
-  writeVerifyLatest(repoPath, {
+  await writeVerifyLatest(repoPath, {
     head: filename,
     run: {
       id: snap.id,
@@ -270,39 +270,39 @@ function recordRun(repoPath: string, snap: VerifyRunSnapshot): void {
 }
 
 describe('deleteVerifyRun', () => {
-  it('rebuilds LATEST from the newest remaining run when the head is deleted', () => {
-    recordRun(repo, snapshot('run-old', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
-    recordRun(repo, snapshot('run-new', '2026-01-02T00:00:00.000Z', [drift('GET /b', 'k2')]));
+  it('rebuilds LATEST from the newest remaining run when the head is deleted', async () => {
+    await recordRun(repo, snapshot('run-old', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
+    await recordRun(repo, snapshot('run-new', '2026-01-02T00:00:00.000Z', [drift('GET /b', 'k2')]));
 
     // LATEST currently points at run-new.
-    expect(readVerifyLatest(repo)?.run.id).toBe('run-new');
+    expect((await readVerifyLatest(repo))?.run.id).toBe('run-new');
 
-    expect(deleteVerifyRun(repo, 'run-new')).toBe(true);
+    expect(await deleteVerifyRun(repo, 'run-new')).toBe(true);
 
     // LATEST re-derived from run-old; history has one entry left.
-    expect(readVerifyLatest(repo)?.run.id).toBe('run-old');
-    expect(readVerifyHistory(repo).runs.map((r) => r.id)).toEqual(['run-old']);
-    expect(readVerifyState(repo)?.drifts.map((d) => d.obligationKey)).toEqual(['k1']);
+    expect((await readVerifyLatest(repo))?.run.id).toBe('run-old');
+    expect((await readVerifyHistory(repo)).runs.map((r) => r.id)).toEqual(['run-old']);
+    expect((await readVerifyState(repo))?.drifts.map((d) => d.obligationKey)).toEqual(['k1']);
   });
 
-  it('clears LATEST entirely when the last run is deleted', () => {
-    recordRun(repo, snapshot('run-only', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
-    expect(deleteVerifyRun(repo, 'run-only')).toBe(true);
+  it('clears LATEST entirely when the last run is deleted', async () => {
+    await recordRun(repo, snapshot('run-only', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
+    expect(await deleteVerifyRun(repo, 'run-only')).toBe(true);
 
-    expect(readVerifyLatest(repo)).toBeNull();
-    expect(readVerifyState(repo)).toBeNull();
-    expect(readVerifyHistory(repo).runs).toHaveLength(0);
+    expect(await readVerifyLatest(repo)).toBeNull();
+    expect(await readVerifyState(repo)).toBeNull();
+    expect((await readVerifyHistory(repo)).runs).toHaveLength(0);
   });
 
-  it('leaves LATEST untouched when a non-head run is deleted', () => {
-    recordRun(repo, snapshot('run-old', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
-    recordRun(repo, snapshot('run-new', '2026-01-02T00:00:00.000Z', [drift('GET /b', 'k2')]));
+  it('leaves LATEST untouched when a non-head run is deleted', async () => {
+    await recordRun(repo, snapshot('run-old', '2026-01-01T00:00:00.000Z', [drift('GET /a', 'k1')]));
+    await recordRun(repo, snapshot('run-new', '2026-01-02T00:00:00.000Z', [drift('GET /b', 'k2')]));
 
-    expect(deleteVerifyRun(repo, 'run-old')).toBe(true);
-    expect(readVerifyLatest(repo)?.run.id).toBe('run-new');
+    expect(await deleteVerifyRun(repo, 'run-old')).toBe(true);
+    expect((await readVerifyLatest(repo))?.run.id).toBe('run-new');
   });
 
-  it('returns false for an unknown run id', () => {
-    expect(deleteVerifyRun(repo, 'nope')).toBe(false);
+  it('returns false for an unknown run id', async () => {
+    expect(await deleteVerifyRun(repo, 'nope')).toBe(false);
   });
 });

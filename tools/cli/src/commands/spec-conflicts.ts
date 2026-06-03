@@ -158,7 +158,7 @@ export async function runSpecConflictsPick(
       `candidateIndex ${candidateIndex} out of range (0..${conflict.candidates.length - 1})`,
     );
   }
-  upsertDecision(root, {
+  await upsertDecision(root, {
     conflictId,
     resolution: { kind: 'pick', candidateIndex },
     candidateFingerprint: candidateFingerprint(conflict),
@@ -183,7 +183,7 @@ export async function runSpecConflictsCustom(
   if (!text || !text.trim()) {
     return fail('--text must be a non-empty string');
   }
-  upsertDecision(root, {
+  await upsertDecision(root, {
     conflictId,
     resolution: { kind: 'custom', content: text },
     candidateFingerprint: candidateFingerprint(conflict),
@@ -200,7 +200,7 @@ export async function runSpecConflictsRevoke(
   opts: RunSpecConflictsOptions = {},
 ): Promise<void> {
   const root = repoRoot(opts);
-  revokeDecisionInProcess(root, conflictId);
+  await revokeDecisionInProcess(root, conflictId);
   await refreshScan(root);
   emitOk(
     `Revoked decision for ${conflictId.slice(0, 12)}…`,

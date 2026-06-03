@@ -127,7 +127,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   const misses: SpecSlice[] = [];
   let hitsSinceYield = 0;
   for (const slice of slices) {
-    const cached = readSliceEntry(repoRoot, slice.id);
+    const cached = await readSliceEntry(repoRoot, slice.id);
     if (cached) {
       outcomes.push({ slice, cache: 'hit' });
       opts.onSliceCacheHit?.(slice);
@@ -152,7 +152,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
       if (!r) continue;
       outcome.run = r;
       if (r.result) {
-        writeSliceEntry(repoRoot, outcome.slice, r.result);
+        await writeSliceEntry(repoRoot, outcome.slice, r.result);
       }
     }
   }
@@ -163,7 +163,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   for (const outcome of outcomes) {
     let result;
     if (outcome.cache === 'hit') {
-      result = readSliceEntry(repoRoot, outcome.slice.id)?.result;
+      result = (await readSliceEntry(repoRoot, outcome.slice.id))?.result;
     } else {
       result = outcome.run?.result;
     }

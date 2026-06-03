@@ -18,8 +18,16 @@
   },
   "dependencies": {
     "@truecourse/core": "workspace:*",
+    "@truecourse/ee-data-store": "workspace:*",
+    "@truecourse/ee-db": "workspace:*",
+    "@truecourse/ee-github-app": "workspace:*",
+    "@truecourse/ee-llm": "workspace:*",
+    "@truecourse/ee-storage": "workspace:*",
+    "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "@workos-inc/node": "^7.0.0"
+    "@workos-inc/node": "^7.0.0",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^3.23.8"
   },
   "peerDependencies": {
     "express": "^4.21.0"

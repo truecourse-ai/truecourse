@@ -37,7 +37,7 @@ export async function runSpecChainsAdd(
 ): Promise<void> {
   const root = repoRoot(opts);
   if (opts.older === opts.newer) return fail('older and newer must be different docs');
-  addManualChain(root, { older: opts.older, newer: opts.newer, note: opts.note });
+  await addManualChain(root, { older: opts.older, newer: opts.newer, note: opts.note });
   await scanInProcess(root, {});
   emitOk(
     `Marked ${opts.older} as superseded by ${opts.newer}`,
@@ -49,7 +49,7 @@ export async function runSpecChainsRemove(
   opts: RunSpecChainsOptions & { older: string; newer: string },
 ): Promise<void> {
   const root = repoRoot(opts);
-  removeManualChain(root, { older: opts.older, newer: opts.newer });
+  await removeManualChain(root, { older: opts.older, newer: opts.newer });
   await scanInProcess(root, {});
   emitOk(
     `Removed chain ${opts.older} → ${opts.newer}`,

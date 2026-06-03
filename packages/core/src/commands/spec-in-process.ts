@@ -74,6 +74,15 @@ import {
 } from '../lib/verify-store.js';
 export { readVerifyDiff, readVerifyLatest, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
 export type { VerifyDiff, VerifyLatest, VerifyHistory } from '../types/verify-snapshot.js';
+import { repoRef } from '../lib/repo-ref.js';
+import {
+  saveContracts,
+  loadContracts,
+  contractsMaterializeInPlace,
+  type RepoRef,
+  type MaterializedDir,
+} from '../lib/contract-store.js';
+import { saveSpec, loadSpec, loadLatestSpec, specsMaterializeInPlace } from '../lib/spec-store.js';
 import {
   diffDrifts,
   summarizeDrifts,
@@ -223,6 +232,14 @@ export interface SpecInProcessOptions {
    * telemetry (e.g. tests, internal re-scans).
    */
   source?: TelemetrySource;
+  /**
+   * Explicit store identity (opaque repo handle + commit). The EE GitHub App
+   * passes this so persisted sets key off the PR head + `owner/repo`, not the
+   * ephemeral clone path. OSS omits it → derived from `repoRoot`'s HEAD.
+   */
+  ref?: RepoRef;
+  /** Override the commit SHA used to key persisted sets when `ref` is omitted. */
+  commitOverride?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +500,29 @@ export async function scanInProcess(
     });
   }
 
+  // Ingest the consolidated spec docs + scan-state into the active store when
+  // the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest
+  // (`consolidate`/`writeScanState` already wrote them in place).
+  if (options.ref) {
+    const specsDir = path.join(repoRoot, '.truecourse', 'specs');
+    const claims = readJsonOrNull(path.join(specsDir, 'claims.json'));
+    if (claims !== null) await saveSpec(options.ref, 'claims', claims);
+    const decisions = readJsonOrNull(path.join(specsDir, 'decisions.json'));
+    if (decisions !== null) await saveSpec(options.ref, 'decisions', decisions);
+    await saveSpec(options.ref, 'scanState', scanState);
+  }
+
   return { consolidate: result, scanState };
+}
+
+/** Parse a JSON file, or `null` when it is absent or unparseable. */
+function readJsonOrNull(file: string): unknown {
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -716,6 +755,13 @@ export async function generateContractsInProcess(
         durationRange: bucketDuration(Date.now() - startedAt),
       });
     }
+    // Ingest the freshly generated `.tc` tree into the active store, but only
+    // when the caller passes an explicit `ref` (the EE GitHub App, keyed by
+    // `owner/repo` + head SHA). OSS/local omits `ref` → no ingest (the IL
+    // already wrote the tree in place; the file store reads it there).
+    if (options.ref) {
+      await saveContracts(options.ref, 'contracts', path.join(repoRoot, '.truecourse', 'contracts'));
+    }
     return { il: { kind: 'extracted', result: il } };
   } catch (e) {
     tracker?.error('il', (e as Error).message);
@@ -742,8 +788,8 @@ function legacyVerifyStatePath(repoRoot: string): string {
  * Returns null when no run has been recorded — callers show a "Run verify"
  * CTA. (No fallback to the legacy `verify-state.json`.)
  */
-export function readVerifyState(repoRoot: string): VerifyState | null {
-  const latest = readVerifyLatest(repoRoot);
+export async function readVerifyState(repoRoot: string): Promise<VerifyState | null> {
+  const latest = await readVerifyLatest(repoRoot);
   if (!latest) return null;
   return {
     verifiedAt: latest.run.verifiedAt,
@@ -763,10 +809,13 @@ export function readVerifyState(repoRoot: string): VerifyState | null {
  * "view a past run" path reuses the live view unchanged. Null if the run
  * (or its snapshot file) is gone.
  */
-export function readVerifyRunState(repoRoot: string, runId: string): VerifyState | null {
-  const entry = readVerifyHistoryStore(repoRoot).runs.find((r) => r.id === runId);
+export async function readVerifyRunState(
+  repoRoot: string,
+  runId: string,
+): Promise<VerifyState | null> {
+  const entry = (await readVerifyHistoryStore(repoRoot)).runs.find((r) => r.id === runId);
   if (!entry) return null;
-  const snap = readVerifyRun(repoRoot, entry.filename);
+  const snap = await readVerifyRun(repoRoot, entry.filename);
   if (!snap) return null;
   return {
     verifiedAt: snap.verifiedAt,
@@ -802,6 +851,15 @@ export interface VerifyInProcessOptions {
   skipStash?: boolean;
   /** Adapter that triggered this run; auto-emitted in the `verify` telemetry payload. */
   source?: TelemetrySource;
+  /**
+   * Source contracts from the store under this identity instead of deriving
+   * from `repoRoot`. The EE gate sets it to verify the PR head's stored
+   * contracts (`owner/repo` + head SHA) against the cloned working tree. When
+   * omitted, derived from `repoRoot`'s HEAD; `options.contractsDir` overrides both.
+   */
+  ref?: RepoRef;
+  /** Override the commit SHA when `ref` is omitted. */
+  commitOverride?: string;
 }
 
 /**
@@ -811,24 +869,63 @@ export interface VerifyInProcessOptions {
  * tracker through three phases (load contracts, extract code-side
  * operations, compare).
  */
+/**
+ * Source the authored contract tree (`options.contractsDir` override → store)
+ * and run `fn` with the local dir + the value to record in snapshots, always
+ * cleaning up the materialization afterward. OSS: the store returns the live
+ * `<repo>/.truecourse/contracts` with a no-op cleanup (byte-identical to the old
+ * inline path). EE: a temp dir materialized from the content-addressed store,
+ * `rm -rf`'d in the `finally`; the recorded value is a logical `contracts@<sha>`
+ * descriptor, never the ephemeral temp path.
+ */
+async function withContracts<T>(
+  repoRoot: string,
+  options: VerifyInProcessOptions,
+  tracker: StepTracker | undefined,
+  fn: (contractsDir: string, recordedContractsDir: string) => Promise<T>,
+): Promise<T> {
+  const fallbackPath = path.join(repoRoot, '.truecourse', 'contracts');
+  let mat: MaterializedDir;
+  let recorded: string;
+  if (options.contractsDir) {
+    if (!fs.existsSync(options.contractsDir)) {
+      const err = new Error(
+        `Contracts directory not found at ${options.contractsDir}. Run \`truecourse contracts generate\` first.`,
+      );
+      tracker?.error('load', err.message);
+      throw err;
+    }
+    mat = { dir: options.contractsDir, cleanup: async () => {} };
+    recorded = options.contractsDir;
+  } else {
+    const ref = options.ref ?? (await repoRef(repoRoot, options.commitOverride));
+    const loaded = await loadContracts(ref, 'contracts');
+    if (!loaded) {
+      const err = new Error(
+        `Contracts directory not found at ${fallbackPath}. Run \`truecourse contracts generate\` first.`,
+      );
+      tracker?.error('load', err.message);
+      throw err;
+    }
+    mat = loaded;
+    recorded = contractsMaterializeInPlace() ? mat.dir : `contracts@${ref.commitSha}`;
+  }
+  try {
+    return await fn(mat.dir, recorded);
+  } finally {
+    await mat.cleanup();
+  }
+}
+
 export async function verifyInProcess(
   repoRoot: string,
   options: VerifyInProcessOptions = {},
 ): Promise<VerifyInProcessResult> {
   const { tracker } = options;
   const startedAt = Date.now();
-  const contractsDir =
-    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
 
-  if (!fs.existsSync(contractsDir)) {
-    const err = new Error(
-      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
-
+  return withContracts(repoRoot, options, tracker, async (contractsDir, recordedContractsDir) => {
   // The verifier doesn't expose per-phase hooks today, so we mark
   // each step done as soon as `verify()` returns. The work is
   // synchronous-feeling from the caller's POV (~hundreds of ms on
@@ -875,7 +972,7 @@ export async function verifyInProcess(
     verifiedAt,
     branch,
     commitHash,
-    contractsDir,
+    contractsDir: recordedContractsDir,
     codeDir,
     artifactCount: result.artifactCount,
     extractedOperationCount: result.extractedOperationCount,
@@ -883,11 +980,11 @@ export async function verifyInProcess(
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
   };
-  const { filename } = writeVerifyRun(repoRoot, snapshot);
+  const { filename } = await writeVerifyRun(repoRoot, snapshot);
   const summary = summarizeDrifts(result.drifts);
   const latest: VerifyLatest = {
     head: filename,
-    run: { id: runId, verifiedAt, branch, commitHash, contractsDir, codeDir },
+    run: { id: runId, verifiedAt, branch, commitHash, contractsDir: recordedContractsDir, codeDir },
     artifactCount: result.artifactCount,
     extractedOperationCount: result.extractedOperationCount,
     drifts: result.drifts,
@@ -895,8 +992,8 @@ export async function verifyInProcess(
     unresolvedRefs: result.unresolvedRefs,
     summary,
   };
-  writeVerifyLatest(repoRoot, latest);
-  appendVerifyHistory(repoRoot, {
+  await writeVerifyLatest(repoRoot, latest);
+  await appendVerifyHistory(repoRoot, {
     id: runId,
     filename,
     verifiedAt,
@@ -906,12 +1003,12 @@ export async function verifyInProcess(
     driftCount: result.drifts.length,
     bySeverity: summary.bySeverity,
   });
-  deleteVerifyDiff(repoRoot); // baseline moved — any prior diff is obsolete
+  await deleteVerifyDiff(repoRoot); // baseline moved — any prior diff is obsolete
   fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft
 
   const state: VerifyState = {
     verifiedAt,
-    contractsDir,
+    contractsDir: recordedContractsDir,
     codeDir,
     artifactCount: result.artifactCount,
     extractedOperationCount: result.extractedOperationCount,
@@ -932,6 +1029,7 @@ export async function verifyInProcess(
   }
 
   return { verify: result, state };
+  });
 }
 
 /** Best-effort current branch + commit; null when not a git repo. */
@@ -1021,8 +1119,6 @@ export async function verifyDiffInProcess(
 ): Promise<VerifyDiffInProcessResult> {
   const { tracker } = options;
   const startedAt = Date.now();
-  const contractsDir =
-    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
 
   // The diff is "what do my uncommitted changes do vs the committed baseline",
@@ -1034,7 +1130,7 @@ export async function verifyDiffInProcess(
     tracker?.error('load', err.message);
     throw err;
   }
-  const baseline = readVerifyLatest(repoRoot);
+  const baseline = await readVerifyLatest(repoRoot);
   if (!baseline) {
     const err = new Error(
       'No verify baseline found. Run `truecourse verify` first to establish LATEST.json.',
@@ -1042,14 +1138,8 @@ export async function verifyDiffInProcess(
     tracker?.error('load', err.message);
     throw err;
   }
-  if (!fs.existsSync(contractsDir)) {
-    const err = new Error(
-      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
 
+  return withContracts(repoRoot, options, tracker, async (contractsDir) => {
   tracker?.start('load');
   let result: VerifyResult;
   try {
@@ -1081,7 +1171,7 @@ export async function verifyDiffInProcess(
     changedFiles,
     summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
   };
-  writeVerifyDiff(repoRoot, diff);
+  await writeVerifyDiff(repoRoot, diff);
   tracker?.done('compare', `+${added.length} / -${resolved.length} drift${added.length + resolved.length === 1 ? '' : 's'}`);
 
   if (options.source) {
@@ -1095,6 +1185,7 @@ export async function verifyDiffInProcess(
   }
 
   return { verify: result, diff };
+  });
 }
 
 export interface InferInProcessOptions {
@@ -1109,6 +1200,10 @@ export interface InferInProcessOptions {
   dryRun?: boolean;
   /** Adapter that triggered this run; auto-emitted in the `infer` telemetry payload. */
   source?: TelemetrySource;
+  /** Explicit store identity (EE). When omitted, derived from `repoRoot`'s HEAD. */
+  ref?: RepoRef;
+  /** Override the commit SHA when `ref` is omitted. */
+  commitOverride?: string;
 }
 
 /**
@@ -1165,6 +1260,12 @@ export async function inferInProcess(
     });
   }
 
+  // Ingest the inferred `.tc` subtree into the active store as the split kind,
+  // when the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest.
+  if (!options.dryRun && options.ref) {
+    await saveContracts(options.ref, 'contracts_inferred', path.join(contractsDir, '_inferred'));
+  }
+
   return { infer: result, written, proposed };
 }
 
@@ -1182,12 +1283,59 @@ function autodetectCodeDir(repoRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Decisions + scan-state, routed through the SpecStore seam.
+//
+// OSS: the on-disk files via the IL (byte-identical). EE: Postgres `spec_sets`.
+// Decisions are the user's accumulated resolutions — a single per-repo "current"
+// document, not a per-commit snapshot. The dashboard read/edit routes use these.
+// ---------------------------------------------------------------------------
+
+const EMPTY_DECISIONS: DecisionsFile = {
+  version: 1,
+  decisions: [],
+  manualChains: [],
+  manualIncludes: [],
+};
+/** Sentinel commit for the per-repo "current" decisions document in EE. */
+const DECISIONS_REF = '_repo';
+
+async function loadDecisions(repoKey: string): Promise<DecisionsFile> {
+  if (specsMaterializeInPlace()) return readDecisions(repoKey);
+  return (
+    (await loadSpec<DecisionsFile>({ repoKey, commitSha: DECISIONS_REF }, 'decisions')) ??
+    EMPTY_DECISIONS
+  );
+}
+
+async function storeDecisions(repoKey: string, next: DecisionsFile): Promise<void> {
+  if (specsMaterializeInPlace()) {
+    writeDecisions(repoKey, next);
+    return;
+  }
+  await saveSpec({ repoKey, commitSha: DECISIONS_REF }, 'decisions', next);
+}
+
+/** The repo's current decisions (dashboard read) — file in OSS, Postgres in EE. */
+export function getDecisions(repoKey: string): Promise<DecisionsFile> {
+  return loadDecisions(repoKey);
+}
+
+/** The repo's current scan-state (dashboard read), or null. Fails closed on a
+ *  malformed/truncated payload (matching the IL `readScanState`). */
+export async function getScanState(repoKey: string): Promise<ScanState | null> {
+  const raw = await loadLatestSpec<ScanState>(repoKey, 'scanState');
+  if (!raw || typeof raw.scannedAt !== 'string') return null;
+  if (!Array.isArray(raw.openConflicts) || !Array.isArray(raw.decidedConflicts)) return null;
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
 // Decisions-file mutations
 //
-// Pure read-modify-write helpers around decisions.json. The dashboard
-// server routes and the CLI both call these so the two surfaces agree
-// on update semantics. None of these refresh the scan-state — callers
-// who need a re-merge (CLI write commands) run scanInProcess afterwards.
+// Pure read-modify-write helpers around decisions. The dashboard server routes
+// and the CLI both call these so the two surfaces agree on update semantics.
+// None of these refresh the scan-state — callers who need a re-merge (CLI write
+// commands) run scanInProcess afterwards.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1195,7 +1343,7 @@ function autodetectCodeDir(repoRoot: string): string {
  * the same conflictId. `manualChains` and `manualIncludes` are
  * preserved untouched.
  */
-export function upsertDecision(
+export async function upsertDecision(
   repoRoot: string,
   input: {
     conflictId: string;
@@ -1203,8 +1351,8 @@ export function upsertDecision(
     candidateFingerprint: string;
     note?: string;
   },
-): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
   const filtered = existing.decisions.filter((d) => d.conflictId !== input.conflictId);
   const decision: Decision = {
     conflictId: input.conflictId,
@@ -1219,7 +1367,7 @@ export function upsertDecision(
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
@@ -1227,8 +1375,8 @@ export function upsertDecision(
  * Revoke a per-conflict decision. Idempotent — when the decision is
  * already absent, returns the current state unchanged.
  */
-export function revokeDecision(repoRoot: string, conflictId: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+export async function revokeDecision(repoRoot: string, conflictId: string): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
   const filtered = existing.decisions.filter((d) => d.conflictId !== conflictId);
   if (filtered.length === existing.decisions.length) return existing;
   const next: DecisionsFile = {
@@ -1237,7 +1385,7 @@ export function revokeDecision(repoRoot: string, conflictId: string): DecisionsF
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
@@ -1246,14 +1394,14 @@ export function revokeDecision(repoRoot: string, conflictId: string): DecisionsF
  * (older, newer) pair already exists, it's replaced (markedAt + note
  * refreshed). Self-pairs (`older === newer`) are rejected.
  */
-export function addManualChain(
+export async function addManualChain(
   repoRoot: string,
   input: { older: string; newer: string; note?: string },
-): DecisionsFile {
+): Promise<DecisionsFile> {
   if (input.older === input.newer) {
     throw new Error('addManualChain: older and newer must be different docs');
   }
-  const existing = readDecisions(repoRoot);
+  const existing = await loadDecisions(repoRoot);
   const dedup = (existing.manualChains ?? []).filter(
     (c) => !(c.older === input.older && c.newer === input.newer),
   );
@@ -1269,18 +1417,18 @@ export function addManualChain(
     manualChains: [...dedup, chain],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Remove a manual chain by (older, newer). Idempotent.
  */
-export function removeManualChain(
+export async function removeManualChain(
   repoRoot: string,
   input: { older: string; newer: string },
-): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
   const filtered = (existing.manualChains ?? []).filter(
     (c) => !(c.older === input.older && c.newer === input.newer),
   );
@@ -1290,15 +1438,15 @@ export function removeManualChain(
     manualChains: filtered,
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Force-include a doc the relevance filter skipped. Idempotent.
  */
-export function addManualInclude(repoRoot: string, docPath: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+export async function addManualInclude(repoRoot: string, docPath: string): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
   const current = existing.manualIncludes ?? [];
   if (current.includes(docPath)) return existing;
   const next: DecisionsFile = {
@@ -1307,15 +1455,18 @@ export function addManualInclude(repoRoot: string, docPath: string): DecisionsFi
     manualChains: existing.manualChains ?? [],
     manualIncludes: [...current, docPath],
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Remove a force-include override. Idempotent.
  */
-export function removeManualInclude(repoRoot: string, docPath: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+export async function removeManualInclude(
+  repoRoot: string,
+  docPath: string,
+): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
   const filtered = (existing.manualIncludes ?? []).filter((p) => p !== docPath);
   const next: DecisionsFile = {
     version: 1,
@@ -1323,6 +1474,6 @@ export function removeManualInclude(repoRoot: string, docPath: string): Decision
     manualChains: existing.manualChains ?? [],
     manualIncludes: filtered,
   };
-  writeDecisions(repoRoot, next);
+  await storeDecisions(repoRoot, next);
   return next;
 }

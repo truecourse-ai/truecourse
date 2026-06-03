@@ -10,17 +10,20 @@
  */
 
 import os from 'node:os';
-import { spawn } from 'node:child_process';
 import pLimit from 'p-limit';
+import { getLlmTransport } from '@truecourse/llm';
 import type { ExtractionResult, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
 import { buildUserPrompt, SYSTEM_PROMPT } from './prompt.js';
-import { buildModelArgs } from './model-args.js';
 
 export interface ClaudeRunnerOptions {
-  /** Override the binary; defaults to `claude` (resolved via PATH). */
+  /**
+   * @deprecated The binary is resolved by the CLI transport (via the
+   * `CLAUDE_CODE_BIN` env var); this field is ignored. Kept for call-site
+   * compatibility.
+   */
   bin?: string;
-  /** Model name passed to `claude --model`. Resolved per-stage by the caller. */
+  /** Model name passed through to the transport. Resolved per-stage by the caller. */
   model?: string;
   /** Fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
@@ -56,15 +59,14 @@ export function defaultConcurrency(): number {
 }
 
 /**
- * Build a runner that spawns `claude -p` for each slice. Each subprocess
- * is independent — failures don't abort the batch; the orchestrator
- * decides whether to surface or retry.
+ * Build a runner that issues one structured LLM call per slice through the
+ * active transport (CLI locally, an API provider in enterprise). Each call is
+ * independent — failures don't abort the batch; the orchestrator decides
+ * whether to surface or retry.
  */
 export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 600_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const limit = pLimit(concurrency);
 
   return async (slices: SpecSlice[]): Promise<SliceRunResult[]> => {
@@ -74,7 +76,7 @@ export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
           opts.onSliceStart?.(slice);
           const t0 = Date.now();
           try {
-            const result = await runOne(bin, slice, timeoutMs, modelArgs);
+            const result = await runOne(slice, opts.model, opts.fallbackModel, timeoutMs);
             opts.onSliceDone?.(slice, true);
             return { slice, result, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -89,69 +91,21 @@ export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
 }
 
 async function runOne(
-  bin: string,
   slice: SpecSlice,
+  model: string | undefined,
+  fallbackModel: string | undefined,
   timeoutMs: number,
-  modelArgs: string[],
 ): Promise<ExtractionResult> {
-  const userPrompt = buildUserPrompt(slice);
-  const args = [
-    '-p',
-    userPrompt,
-    ...modelArgs,
-    '--output-format',
-    'json',
-    '--append-system-prompt',
-    SYSTEM_PROMPT,
-    '--setting-sources',
-    'project',
-  ];
-
-  return new Promise<ExtractionResult>((resolve, reject) => {
-    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`claude timed out after ${timeoutMs}ms for slice ${slice.id}`));
-    }, timeoutMs);
-
-    proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-    proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-        return;
-      }
-      try {
-        // Claude Code's --output-format json wraps the model's response in
-        // an envelope. The actual model text lives at .result on stdout.
-        const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-        const text = typeof envelope === 'string' ? envelope : envelope.result;
-        if (typeof text !== 'string') {
-          reject(new Error(`claude returned no text for slice ${slice.id}`));
-          return;
-        }
-        const inner = JSON.parse(stripCodeFences(text));
-        resolve(ExtractionResultSchema.parse(inner));
-      } catch (e) {
-        reject(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
+  const { object } = await getLlmTransport().complete({
+    system: SYSTEM_PROMPT,
+    prompt: buildUserPrompt(slice),
+    schema: ExtractionResultSchema,
+    model,
+    fallbackModel,
+    timeoutMs,
+    label: `extract:${slice.id}`,
+    // Preserve the extractor's project-scoped settings on the CLI transport.
+    cliArgs: ['--setting-sources', 'project'],
   });
-}
-
-/**
- * Some models wrap JSON in markdown code fences even when told not to.
- * Strip a single leading ```...``` fence (with or without lang tag).
- */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenceMatch = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fenceMatch ? fenceMatch[1] : trimmed;
+  return object;
 }
