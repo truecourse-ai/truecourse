@@ -77,6 +77,68 @@ function isIteratorProtocolAwait(awaitNode: SyntaxNode): boolean {
   return prop?.text === 'read' || prop?.text === 'next'
 }
 
+// Sleep / delay primitives are time-passing — the await *is* the loop's
+// pacing mechanism (retry backoff, polling interval, rate-limit gap).
+// Parallelising them is nonsensical: N concurrent sleeps just waste the
+// same wall-clock time without doing any extra work.
+const SLEEP_LIKE_CALL_NAMES = new Set([
+  'sleep', 'delay', 'wait', 'pause',
+  'setTimeout', 'setImmediate', 'setInterval',
+])
+function isSleepLikeAwait(awaitNode: SyntaxNode): boolean {
+  const call = awaitNode.namedChildren[0]
+  if (!call || call.type !== 'call_expression') return false
+  const fn = call.childForFieldName('function')
+  if (!fn) return false
+  let name: string | undefined
+  if (fn.type === 'identifier') name = fn.text
+  else if (fn.type === 'member_expression') {
+    const prop = fn.childForFieldName('property')
+    name = prop?.text
+  }
+  return name !== undefined && SLEEP_LIKE_CALL_NAMES.has(name)
+}
+
+// Cursor-based pagination: `do { ... cursor = result.next; } while (cursor)`.
+// Each iteration's input depends on the previous response's cursor token —
+// the API contract makes the calls sequential. Detect by: do-while whose
+// condition references an identifier that is reassigned inside the body.
+function isCursorPaginationLoop(loopNode: SyntaxNode): boolean {
+  if (loopNode.type !== 'do_statement') return false
+  const condition =
+    loopNode.childForFieldName('condition') ?? loopNode.childForFieldName('test')
+  if (!condition) return false
+  const condIdents = new Set<string>()
+  collectIdentifiers(condition, condIdents)
+  if (condIdents.size === 0) return false
+  const body = loopNode.childForFieldName('body')
+  if (!body) return false
+  return bodyReassignsAny(body, condIdents)
+}
+
+function collectIdentifiers(node: SyntaxNode, out: Set<string>): void {
+  if (node.type === 'identifier') {
+    out.add(node.text)
+    return
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const ch = node.child(i)
+    if (ch) collectIdentifiers(ch, out)
+  }
+}
+
+function bodyReassignsAny(node: SyntaxNode, names: Set<string>): boolean {
+  if (node.type === 'assignment_expression') {
+    const left = node.childForFieldName('left')
+    if (left?.type === 'identifier' && names.has(left.text)) return true
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const ch = node.child(i)
+    if (ch && bodyReassignsAny(ch, names)) return true
+  }
+  return false
+}
+
 // True if the awaited result is bound to a `const`/`let` declarator and an
 // `if (… <binding> …) { return | break | throw }` appears later in the same
 // loop body. This is a "search until found" loop where parallelisation
@@ -164,6 +226,8 @@ export const awaitInLoopVisitor: CodeRuleVisitor = {
         if (isSerialChainWalk(current)) return null
         if (isInsideTransactionCallback(current)) return null
         if (isIteratorProtocolAwait(node)) return null
+        if (isSleepLikeAwait(node)) return null
+        if (isCursorPaginationLoop(current)) return null
         if (isAwaitUsedInEarlyExit(node, current)) return null
         // Make sure we're in the loop body (not the initializer/condition of a for loop)
         // and not inside a nested async function

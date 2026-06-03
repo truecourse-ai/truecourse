@@ -4,15 +4,61 @@ import { makeViolation } from '../../../types.js'
 
 // `A | B | C | D` parses as a left-leaning chain of nested union_types in
 // tree-sitter-typescript, not a flat list. Flatten the chain so we can
-// classify each member directly.
+// classify each member directly. Skip `comment` and `ERROR` nodes —
+// per-member trailing comments and leading-`|` artefacts otherwise leak
+// into the member list and defeat the simple-union check.
+const NON_MEMBER_NODE_TYPES = new Set(['comment', 'ERROR', 'MISSING'])
 function flattenUnionMembers(node: SyntaxNode): SyntaxNode[] {
   if (node.type !== 'union_type') return [node]
   const out: SyntaxNode[] = []
   for (const child of node.namedChildren) {
+    if (NON_MEMBER_NODE_TYPES.has(child.type)) continue
     if (child.type === 'union_type') out.push(...flattenUnionMembers(child))
     else out.push(child)
   }
   return out
+}
+
+// Idiomatic utility-type chains like
+// `NonNullable<Awaited<ReturnType<typeof method>>>` or
+// `Prettify<NonNullable<Awaited<ReturnType<...>>>>` are the canonical
+// way to derive a result type from an async method. They're read as a
+// single unit, not parsed structurally, so the bracket-depth heuristic
+// over-flags them.
+const UTILITY_TYPE_NAMES = new Set([
+  'Awaited', 'ReturnType', 'Parameters', 'ConstructorParameters',
+  'InstanceType', 'NonNullable', 'Required', 'Partial', 'Readonly',
+  'Pick', 'Omit', 'Exclude', 'Extract',
+  'Prettify', 'Simplify', 'Expand', 'DeepReadonly', 'DeepPartial',
+])
+function isUtilityTypeChain(node: SyntaxNode): boolean {
+  let cur: SyntaxNode | null = node
+  // Walk a generic-type chain: each level must be `<UtilityName><...>`
+  // and its single type argument is the next link. Bottoms out in a
+  // simple `typeof X`, `type_identifier`, or member/index lookup.
+  while (cur) {
+    if (cur.type !== 'generic_type') return false
+    const name = cur.childForFieldName('name') ?? cur.namedChildren[0]
+    if (!name || name.type !== 'type_identifier') return false
+    if (!UTILITY_TYPE_NAMES.has(name.text)) return false
+    const args: SyntaxNode | null = cur.childForFieldName('type_arguments') ?? cur.namedChildren[1] ?? null
+    if (!args) return false
+    const typeArgs: SyntaxNode[] = args.namedChildren.filter((c: SyntaxNode) => !NON_MEMBER_NODE_TYPES.has(c.type))
+    if (typeArgs.length !== 1) return false
+    const inner: SyntaxNode = typeArgs[0]!
+    if (inner.type === 'generic_type') {
+      cur = inner
+      continue
+    }
+    // Leaf: must be a simple reference, not a nested complex type.
+    return (
+      inner.type === 'type_identifier' ||
+      inner.type === 'predefined_type' ||
+      inner.type === 'type_query' ||
+      inner.type === 'literal_type'
+    )
+  }
+  return false
 }
 
 const SIMPLE_UNION_MEMBER_TYPES = new Set([
@@ -82,6 +128,9 @@ export const complexTypeAliasVisitor: CodeRuleVisitor = {
       const allSimple = members.every((m) => SIMPLE_UNION_MEMBER_TYPES.has(m.type))
       if (allSimple) return null
     }
+
+    // Skip idiomatic utility-type chains regardless of nesting depth.
+    if (typeValue.type === 'generic_type' && isUtilityTypeChain(typeValue)) return null
 
     if (depth >= DEPTH_THRESHOLD || members >= MEMBER_THRESHOLD) {
       const reason = depth >= DEPTH_THRESHOLD

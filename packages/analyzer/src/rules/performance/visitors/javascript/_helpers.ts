@@ -174,6 +174,21 @@ export function isLikelyServerComponent(filePath: string, sourceCode: string): b
 }
 
 /**
+ * Heuristic: is the file a React Email template?
+ *
+ * Templates built on `@react-email/components` (or sibling
+ * `@react-email/*` block packages) are rendered to HTML server-side
+ * before sending, not mounted in a browser. Inline object/function
+ * allocations in JSX props have no re-render cost — the template runs
+ * once per email and is discarded.
+ *
+ * Detection: any `import ... from '@react-email/...'` in the source.
+ */
+export function isReactEmailTemplate(sourceCode: string): boolean {
+  return /from\s+['"]@react-email\//.test(sourceCode)
+}
+
+/**
  * Heuristic: is the file a one-off script (CLI, seed, build tool) rather
  * than long-running server code? "In handler" performance rules don't
  * apply to scripts that run once and exit.
