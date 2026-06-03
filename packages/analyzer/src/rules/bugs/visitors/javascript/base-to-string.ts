@@ -23,10 +23,16 @@ export const baseToStringVisitor: CodeRuleVisitor = {
     const obj = fn.childForFieldName('object')
     if (!obj) return null
 
+    // Pass the full span of `obj` so the type query resolves to the whole
+    // expression (e.g. `parsed.value`), not just the leading identifier
+    // (`parsed`) — otherwise the rule reads the parent object's type and
+    // mis-flags `parsed.value.toString()` when only `value` is the object.
     const typeStr = typeQuery.getTypeAtPosition(
       filePath,
       obj.startPosition.row,
       obj.startPosition.column,
+      obj.endPosition.row,
+      obj.endPosition.column,
     )
     if (!typeStr) return null
 

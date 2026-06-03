@@ -22,6 +22,16 @@ function operandIsCall(operand: SyntaxNode | null | undefined): boolean {
   return false
 }
 
+// `void <identifier>;` / `void <obj.member>;` as its own statement is the
+// "mark as used" idiom — an explicit reference that pins a side-effect-only
+// import or silences unused-variable warnings. The value is never consumed,
+// so there's nothing to replace with `undefined`.
+function isMarkAsUsedStatement(node: SyntaxNode, operand: SyntaxNode | null | undefined): boolean {
+  if (!operand) return false
+  if (operand.type !== 'identifier' && operand.type !== 'member_expression') return false
+  return node.parent?.type === 'expression_statement'
+}
+
 export const voidZeroArgumentVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/void-zero-argument',
   languages: JS_LANGUAGES,
@@ -32,7 +42,10 @@ export const voidZeroArgumentVisitor: CodeRuleVisitor = {
 
     // Skip fire-and-forget `void promiseCall()` — replacing it with `undefined`
     // would drop the call entirely. Only flag literal/identifier operands.
-    if (operandIsCall(node.children[node.children.length - 1])) return null
+    const operand = node.children[node.children.length - 1]
+    if (operandIsCall(operand)) return null
+    // Skip the "mark as used" statement idiom: `void engine;`.
+    if (isMarkAsUsedStatement(node, operand)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

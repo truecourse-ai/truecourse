@@ -121,6 +121,12 @@
       "layer": "service"
     },
     {
+      "name": "loadProfiles",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "loadUserPyramid",
       "service": "api-gateway",
       "kind": "standalone",
@@ -134,6 +140,18 @@
     },
     {
       "name": "logImplicitGlobalEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logPayload",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "maybeIndex",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "service"
@@ -1522,6 +1540,12 @@
       "name": "BillingDashboard",
       "service": "web",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClientCard",
+      "service": "web",
+      "kind": "standalone",
       "layer": "service"
     },
     {
