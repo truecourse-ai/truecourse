@@ -1,18 +1,18 @@
 /**
- * Per-block extraction runner. Spawns one `claude -p` subprocess per
- * block, parses Claude Code's JSON envelope, validates the inner
- * payload against `LlmExtractionSchema`, and returns a typed result.
+ * Per-block extraction runner. For each block it builds a system + user
+ * prompt and hands it to an `LlmTransport` (cli = spawn `claude -p`, agent =
+ * filesystem mailbox), then validates the response against
+ * `LlmExtractionSchema`.
  *
- * The runner is injected — tests pass a stub that returns canned
- * outputs without touching the subprocess at all. Same pattern the
- * contract-extractor uses; keeps the orchestrator pure.
+ * The runner is injected — tests pass a stub that returns canned outputs
+ * without touching the transport at all. Concurrency lives here (p-limit);
+ * the transport is a single-request function.
  */
 
-import { spawn } from 'node:child_process';
 import os from 'node:os';
 import pLimit from 'p-limit';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Block } from './slicer.js';
-import { buildModelArgs } from './model-args.js';
 import {
   LlmExtractionSchema,
   SYSTEM_PROMPT,
@@ -24,7 +24,7 @@ export interface BlockRunResult {
   block: Block;
   /** Parsed extraction on success. */
   extraction?: LlmExtraction;
-  /** Error message on failure (subprocess exit, parse, schema fail). */
+  /** Error message on failure (transport error, parse, schema fail). */
   error?: string;
   durationMs: number;
 }
@@ -32,7 +32,12 @@ export interface BlockRunResult {
 export type BlockRunner = (blocks: Block[]) => Promise<BlockRunResult[]>;
 
 export interface SpawnRunnerOptions {
-  /** Path to the claude binary. Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
+  /**
+   * LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). The
+   * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
+   */
+  transport?: LlmTransport;
+  /** Path to the claude binary (cli transport only). Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
   bin?: string;
   /**
    * Model name passed to `claude --model`. When unset, the CLI default
@@ -42,13 +47,13 @@ export interface SpawnRunnerOptions {
   model?: string;
   /** Optional fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
-  /** Concurrent subprocesses. Defaults to min(cpus, 4). */
+  /** Concurrent requests. Defaults to min(cpus, 4). */
   concurrency?: number;
-  /** Per-call timeout. Defaults to 240000ms (matches contract-extractor's bumped timeout). */
+  /** Per-call timeout. Defaults to 240000ms. */
   timeoutMs?: number;
-  /** Hook fired before each subprocess spawn — useful for progress UIs. */
+  /** Hook fired before each request — useful for progress UIs. */
   onBlockStart?: (block: Block) => void;
-  /** Hook fired after each subprocess completes (success or failure). */
+  /** Hook fired after each request completes (success or failure). */
   onBlockDone?: (block: Block, ok: boolean) => void;
 }
 
@@ -62,14 +67,13 @@ export function defaultConcurrency(): number {
 }
 
 /**
- * Build a runner that spawns `claude -p` for each block. Each
- * subprocess is independent — failures don't abort the batch.
+ * Build a runner that calls the transport once per block. Each request is
+ * independent — failures don't abort the batch.
  */
 export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const limit = pLimit(concurrency);
 
   return async (blocks: Block[]): Promise<BlockRunResult[]> => {
@@ -79,7 +83,7 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
           opts.onBlockStart?.(block);
           const t0 = Date.now();
           try {
-            const extraction = await runOne(bin, block, timeoutMs, modelArgs);
+            const extraction = await runOne(transport, block, timeoutMs, opts.model, opts.fallbackModel);
             opts.onBlockDone?.(block, true);
             return { block, extraction, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -94,10 +98,11 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
 }
 
 async function runOne(
-  bin: string,
+  transport: LlmTransport,
   block: Block,
   timeoutMs: number,
-  modelArgs: string[],
+  model?: string,
+  fallbackModel?: string,
 ): Promise<LlmExtraction> {
   const userPrompt = buildUserPrompt({
     filePath: block.filePath,
@@ -105,62 +110,16 @@ async function runOne(
     startLine: block.startLine,
     text: block.text,
   });
-  const args = [
-    '-p',
-    userPrompt,
-    ...modelArgs,
-    '--output-format',
-    'json',
-    '--append-system-prompt',
-    SYSTEM_PROMPT,
-    '--setting-sources',
-    'project',
-  ];
-
-  return new Promise<LlmExtraction>((resolve, reject) => {
-    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
-      reject(new Error(`claude timed out after ${timeoutMs}ms for block ${block.id}`));
-    }, timeoutMs);
-
-    proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-    proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-        return;
-      }
-      try {
-        const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-        const text = typeof envelope === 'string' ? envelope : envelope.result;
-        if (typeof text !== 'string') {
-          reject(new Error(`claude returned no text for block ${block.id}`));
-          return;
-        }
-        const inner = JSON.parse(stripCodeFences(text));
-        resolve(LlmExtractionSchema.parse(inner));
-      } catch (e) {
-        reject(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
+  const raw = await transport({
+    id: `spec.claimExtract:${block.id}`,
+    stage: 'spec.claimExtract',
+    model,
+    fallbackModel,
+    system: SYSTEM_PROMPT,
+    user: userPrompt,
+    responseFormat: 'json',
+    timeoutMs,
   });
+  const inner = JSON.parse(stripCodeFences(raw));
+  return LlmExtractionSchema.parse(inner);
 }
-
-/**
- * Some models wrap JSON in markdown code fences even when told not to.
- * Strip a single leading ```...``` fence (with or without lang tag).
- */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenceMatch = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fenceMatch ? fenceMatch[1] : trimmed;
-}
-

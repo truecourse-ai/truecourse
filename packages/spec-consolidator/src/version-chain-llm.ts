@@ -18,15 +18,14 @@
  * — re-running a scan with unchanged docs costs zero LLM calls.
  */
 
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
-import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'chain-detection.json';
 
@@ -38,6 +37,11 @@ export interface ChainDetectionInput {
 }
 
 export interface ChainRunnerOptions {
+  /**
+   * LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). The
+   * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
+   */
+  transport?: LlmTransport;
   bin?: string;
   /** Model passed to `claude --model`. Resolved by CLI/dashboard via core. */
   model?: string;
@@ -57,6 +61,8 @@ export type ChainRunner = (
 export interface DetectChainsOptions {
   /** Override the runner. Defaults to spawning the Claude CLI. */
   runner?: ChainRunner;
+  /** LLM transport for the auto-created runner (defaults to cli). */
+  transport?: LlmTransport;
   /** When false, skip the LLM call entirely. Useful for tests. */
   enabled?: boolean;
   /** Model name forwarded to the default spawn runner. */
@@ -116,7 +122,7 @@ export async function detectVersionChainsViaLlm(
   if (cached) return materializeChains(cached, docs);
 
   const runner =
-    opts.runner ?? spawnChainRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    opts.runner ?? spawnChainRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   let result: DetectedChainOutput;
   try {
     result = await runner(inputs);
@@ -187,62 +193,23 @@ export function buildChainDetectionUserPrompt(inputs: ChainDetectionInput[]): st
 // ---------------------------------------------------------------------------
 
 function spawnChainRunner(opts: ChainRunnerOptions = {}): ChainRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 120_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return async (inputs) => {
-    const args = [
-      '-p',
-      buildChainDetectionUserPrompt(inputs),
-      ...modelArgs,
-      '--output-format',
-      'json',
-      '--append-system-prompt',
-      CHAIN_DETECTION_SYSTEM_PROMPT,
-      '--setting-sources',
-      'project',
-    ];
-    return new Promise<DetectedChainOutput>((resolve, reject) => {
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error(`chain-detection: claude timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-      proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`chain-detection: claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-          return;
-        }
-        try {
-          const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
-          if (typeof text !== 'string') {
-            reject(new Error('chain-detection: claude returned no text'));
-            return;
-          }
-          const inner = JSON.parse(stripCodeFences(text));
-          resolve(DetectedChainOutputSchema.parse(inner));
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
+    // No single natural id for a batched call over all docs — omit `id` and
+    // let the transport hash the content.
+    const raw = await transport({
+      stage: 'spec.chainDetect',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: CHAIN_DETECTION_SYSTEM_PROMPT,
+      user: buildChainDetectionUserPrompt(inputs),
+      responseFormat: 'json',
+      timeoutMs,
     });
+    const inner = JSON.parse(stripCodeFences(raw));
+    return DetectedChainOutputSchema.parse(inner);
   };
-}
-
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenceMatch = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fenceMatch ? fenceMatch[1] : trimmed;
 }
 
 // ---------------------------------------------------------------------------

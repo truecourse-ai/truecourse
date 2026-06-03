@@ -10,6 +10,7 @@ import { registerChildProcess, unregisterChildProcess } from '../analysis-regist
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodType } from 'zod';
 import type { Violation } from '@truecourse/shared';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { config } from '../../config/index.js';
 import {
   getPrompt,
@@ -91,6 +92,12 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
   private _usageRecords: UsageRecord[] = [];
+  /**
+   * When set, LLM calls go through this transport (the agent file-mailbox)
+   * instead of spawning the CLI. Lets `analyze` run LLM rules headless — no
+   * `claude` binary, no API key (see @truecourse/shared/llm).
+   */
+  protected transport?: LlmTransport;
 
   setAnalysisId(id: string): void {
     this._analysisId = id;
@@ -133,7 +140,8 @@ export abstract class BaseCLIProvider implements LLMProvider {
     });
   }
 
-  constructor() {
+  constructor(transport?: LlmTransport) {
+    this.transport = transport;
     if (process.env.TRUECOURSE_CLI_DEBUG) {
       this.debugDir = join(tmpdir(), 'truecourse-cli-debug');
       mkdirSync(this.debugDir, { recursive: true });
@@ -177,6 +185,23 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
     const label = opts?.label ?? 'call';
+
+    // Agent transport: hand the prompt + schema to the mailbox instead of
+    // spawning the CLI. The answer is the raw JSON the model produced; wrap it
+    // as a `{ result }` envelope so `parseAndValidate` extracts + Zod-validates
+    // it exactly as it does for the CLI's `result` field.
+    if (this.transport) {
+      return this.transport({
+        stage: `analyze.${label}`,
+        user: prompt,
+        system: '',
+        schema: jsonSchemaStr,
+        responseFormat: 'json',
+        model: this.modelFlag[1],
+        timeoutMs: timeout,
+      }).then((text) => JSON.stringify({ result: text }));
+    }
+
     const args = [
       ...this.baseArgs,
       ...this.modelFlag,

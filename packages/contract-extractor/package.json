@@ -53,7 +53,8 @@
     "@truecourse/spec-consolidator": "workspace:*",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "@truecourse/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
