@@ -35,23 +35,15 @@ export function Hero() {
       </svg>
 
       <div className="wrap hero-inner">
-        <Reveal as="span" className="badge pulse">
-          <span className="spark">✦</span>
-          <span className="badge-text">
-            Verified knowledge for AI-native engineering teams{' '}
-            <span className="arr">· preview</span>
-          </span>
-        </Reveal>
-
-        <Reveal as="h1" delay={80}>
+        <Reveal as="h1">
           AI ships your code. We keep it <span className="hl">on course.</span>
         </Reveal>
 
-        <Reveal as="p" className="sub" delay={160}>
+        <Reveal as="p" className="sub" delay={80}>
           Every change, checked against what your team actually decided.
         </Reveal>
 
-        <Reveal className="cta-row" delay={240}>
+        <Reveal className="cta-row" delay={160}>
           <Link className="btn btn-primary" to="/request-access">
             Request access <span className="arr">→</span>
           </Link>

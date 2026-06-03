@@ -382,26 +382,6 @@ header.site.scrolled {
   z-index: 1;
   max-width: 900px;
 }
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.02em;
-  color: var(--fg-dim);
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  padding: 7px 16px;
-  background: var(--bg-elev);
-}
-.badge .spark {
-  color: var(--accent);
-}
-.badge .arr {
-  color: var(--muted);
-  white-space: nowrap;
-}
 .hero h1 {
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1035,22 +1015,6 @@ footer.site {
   transform: none;
 }
 
-/* badge pulse ring */
-@keyframes pulse-ring {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 oklch(0.83 0.16 152 / 0);
-  }
-  50% {
-    box-shadow:
-      0 0 0 5px oklch(0.83 0.16 152 / 0.14),
-      0 0 22px 0 oklch(0.83 0.16 152 / 0.22);
-  }
-}
-.badge.pulse {
-  animation: pulse-ring 3.4s ease-in-out infinite;
-}
-
 /* hero baseline draw-in */
 @keyframes draw-line {
   to {
@@ -1111,7 +1075,6 @@ footer.site {
     transform: none !important;
     transition: none !important;
   }
-  .badge.pulse,
   .callout .ico {
     animation: none !important;
   }
