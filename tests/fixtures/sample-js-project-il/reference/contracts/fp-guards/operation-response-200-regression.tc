@@ -1,0 +1,5 @@
+operation GET "/catalog/items/broken" {
+  origin "reference/specs/modules/catalog/items.md" "GET /catalog/items/broken" 1..5
+  response 200 on success {
+  }
+}
