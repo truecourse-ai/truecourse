@@ -57,28 +57,54 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 ### 4. Generate contracts via the agent transport
 
-Run the three LLM stages with `--llm-transport agent`, driving the prompt I/O yourself:
+Run the three LLM stages with `--llm-transport agent`. Each stage runs **in the background** and
+hands you its prompts through a filesystem mailbox at `--io /tmp/llm-io`; you answer them by hand
+until the stage process exits.
 
-- Start a stage in the background with an I/O dir, e.g.:
-  ```
-  cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs spec scan --llm-transport agent --io /tmp/llm-io &
-  ```
-- **Answer loop** (while the tool process is alive): poll `/tmp/llm-io/req/` for request files
-  with no matching `/tmp/llm-io/res/<id>.json` answer. For each, read `{system, user, schema}`,
-  produce JSON that **strictly satisfies `schema`**, and write it to `/tmp/llm-io/res/<id>.json`.
-  Answer batches in parallel; keep going until the tool exits (it writes the stage's output and
-  finishes).
-- Repeat for the remaining stages, in order:
-  ```
-  node $TRUECOURSE_DIR/dist/cli.mjs spec resolve --all-defaults --llm-transport agent --io /tmp/llm-io
-  node $TRUECOURSE_DIR/dist/cli.mjs contracts generate --llm-transport agent --io /tmp/llm-io
-  node $TRUECOURSE_DIR/dist/cli.mjs contracts validate   # deterministic, no LLM
-  ```
-  (`spec resolve --all-defaults` re-runs the scan internally, so most prompts are **cache hits** —
-  expect few or no new request files; just wait for the process to exit. `contracts validate` is
-  deterministic — no prompts.)
-- Produce only schema-valid answers; do not invent fields. If a stage errors, capture the tail
-  for the PR/issue and stop (don't pin partial contracts).
+**The mailbox protocol** (this is exactly what the `agent` transport reads/writes — match it
+precisely):
+
+- The tool writes each prompt to **`/tmp/llm-io/requests/<id>.json`** — a JSON object with fields
+  `{ id, stage, model, fallbackModel, responseFormat, schema, system, user }`.
+- You answer by writing **`/tmp/llm-io/responses/<id>.json`** — **same filename** — with body
+  **`{ "text": "<your answer>" }`**. `text` **must be a JSON string**.
+  - When `responseFormat` is `"json"` (the default), the tool does `JSON.parse(text)` after
+    stripping any code fence — so `text` must be the **schema-satisfying JSON serialized as a
+    string** (e.g. `{"text": "{\"claims\": [ … ]}"}`), **not** a nested JSON object. Satisfy the
+    request's `schema` exactly; invent no fields.
+  - When `responseFormat` is `"text"`, `text` is free-form.
+  - To surface an unrecoverable answer failure, write `{ "error": "<reason>" }` instead — the tool
+    will abort that stage.
+- The tool polls every 200ms and times out a single unanswered request after 10 min, so keep the
+  loop running continuously until the **process exits**.
+
+**The answer loop** (run for each stage):
+
+```
+mkdir -p /tmp/llm-io/requests /tmp/llm-io/responses
+cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs spec scan --llm-transport agent --io /tmp/llm-io &
+```
+
+While that background process is alive: poll `/tmp/llm-io/requests/` for any `<id>.json` that has
+no matching `/tmp/llm-io/responses/<id>.json`. For each, read `{system, user, schema,
+responseFormat}`, produce the answer, and write `/tmp/llm-io/responses/<id>.json` as
+`{"text": "…"}`. Answer batches in parallel. Keep going until the process exits (it writes the
+stage's output and finishes).
+
+Repeat the same background-run + answer-loop for the remaining stages, **in order**:
+
+```
+node $TRUECOURSE_DIR/dist/cli.mjs spec resolve --all-defaults --llm-transport agent --io /tmp/llm-io &
+node $TRUECOURSE_DIR/dist/cli.mjs contracts generate --llm-transport agent --io /tmp/llm-io &
+node $TRUECOURSE_DIR/dist/cli.mjs contracts validate   # deterministic, no LLM, foreground
+```
+
+(`spec resolve --all-defaults` re-runs the scan internally, so most prompts are **cache hits** —
+expect few or no new request files; just keep the loop ready and wait for the process to exit.
+`contracts validate` is deterministic — no prompts, runs in the foreground.)
+
+If a stage errors (non-zero exit), capture the tail for the PR/issue and stop — don't pin partial
+contracts.
 
 ### 5. Commit specs + contracts onto the storage branch
 
