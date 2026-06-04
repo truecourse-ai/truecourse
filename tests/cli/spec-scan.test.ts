@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideScanOutcome } from '../../tools/cli/src/commands/spec';
+import { decideScanOutcome, describeClaudePreflightFailure } from '../../tools/cli/src/commands/spec';
 import type { ExtractionFailureReport } from '@truecourse/spec-consolidator';
 
 /**
@@ -81,5 +81,39 @@ describe('decideScanOutcome', () => {
     });
     expect(outcome.exitCode).toBe(0);
     expect(outcome.showAuthHint).toBe(true);
+  });
+});
+
+/**
+ * The up-front `claude` CLI preflight (before "Discovering docs") maps each
+ * failure reason to an actionable headline + next step. Pure mapping, pinned
+ * here without spawning or driving clack.
+ */
+describe('describeClaudePreflightFailure', () => {
+  it('points at installation when the binary is missing', () => {
+    const m = describeClaudePreflightFailure({ ok: false, reason: 'not-found' });
+    expect(m.title).toContain('PATH');
+    expect(m.hint).toContain('CLAUDE_CODE_BIN');
+  });
+
+  it('points at re-login when unauthenticated', () => {
+    const m = describeClaudePreflightFailure({ ok: false, reason: 'unauthenticated' });
+    expect(m.title.toLowerCase()).toContain('logged in');
+    expect(m.hint).toContain('/login');
+  });
+
+  it('surfaces the detail for a generic error', () => {
+    const m = describeClaudePreflightFailure({
+      ok: false,
+      reason: 'error',
+      detail: 'error: unknown flag --frobnicate',
+    });
+    expect(m.hint).toContain('unknown flag --frobnicate');
+  });
+
+  it('handles a generic error with no detail', () => {
+    const m = describeClaudePreflightFailure({ ok: false, reason: 'error' });
+    expect(m.title).toContain('failed a test call');
+    expect(m.hint).toContain('retry');
   });
 });
