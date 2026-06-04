@@ -1,1 +1,4 @@
 .truecourse/
+
+# Generated eval reports (regen output, not ground truth) — see reference/SKILL_REGEN_AND_EVAL.md
+reference/EVAL-REPORT-*.md
