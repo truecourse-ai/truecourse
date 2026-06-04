@@ -52,11 +52,12 @@ campaigns:
       - docs/docs/rfcs
     priority: 1
     status: discovering
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    baseline: { verified_at: "2026-06-04", target_ref: "b2ba15617de4c8ada9099789f7c774bb32328970", total_drifts: 38, tp: 0, fp: 29, info: 9, fp_rate: 1.00 }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes:
       - "Validation run found 44 drift items, ~0 genuine: 20 Operation implementation.missing FPs (relative-path plugin routes mounted under a prefix; extractor doesn't reconstruct the mount), 13 NamedConstant ACTIONS value-mismatch FPs (bare-name collision, no module scoping), 11 no-code-counterpart info notes. PublicationFilter enum verified cleanly (true negative). Strong first FP corpus: operation mount-prefix + named-constant module-scoping."
       - "Default branch is develop, not main — pin target_ref off develop."
+      - "Discovery run (2026-06-04): 38 drifts, 29 FP, 0 TP, 9 info. FP kinds: operation/implementation-missing (16 FPs — mount-prefix not reconstructed; 5 contract-quality for routes outside packages/core), operation/response-status (1 FP — route matched in test mock), auth-requirement/unprotected (2 FPs — same test-mock root cause), named-constant/no-code-counterpart (10 FPs — ACTIONS.* dotted-path object props + preview.STRAPI_* window globals). Info: enum/extra-value PublicationFilter (contract missed published-with-draft), enum/no-code-counterpart ReleaseStatus (case mismatch), maxPendingReleases (inline literal, not named constant)."
 
   # ---- Python — best validated Python drift fit (fit 78, strong) ----
   - target_repo: feast-dev/feast
