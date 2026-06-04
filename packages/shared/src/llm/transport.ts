@@ -1,0 +1,221 @@
+/**
+ * LLM transport — the single seam through which every LLM-powered runner
+ * (spec-consolidator's block/conflict/relevance/chain runners,
+ * contract-extractor's slice runner + repair pass) reaches the model.
+ *
+ * A transport is a single-request function `(req) => Promise<rawText>`: it
+ * takes a system + user prompt and returns the model's raw assistant text.
+ * The caller does its own fence-stripping + JSON.parse + Zod validation, so
+ * the transport is content-agnostic. Concurrency stays in each runner (its
+ * existing p-limit), so a single-request transport composes naturally.
+ *
+ * Two backends:
+ *   - `cliTransport` — spawns `claude -p …` (the default; same behavior the
+ *     runners had inline). Needs the `claude` binary on PATH.
+ *   - `agentTransport` — a filesystem mailbox: writes each prompt to
+ *     `<io>/requests/<id>.json` and waits for `<io>/responses/<id>.json`. An
+ *     orchestrating agent that is *already an LLM* (a Claude Code routine)
+ *     answers the prompts, so contracts can be generated with no `claude`
+ *     subprocess and no API key.
+ */
+
+import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+export interface LlmRequest {
+  /** Stable id (the runner's natural id, e.g. `spec.claimExtract:<block.id>`).
+   *  Falls back to a content hash when absent. */
+  id?: string;
+  /** Pipeline stage, e.g. `spec.claimExtract` / `contract.extract` — informational. */
+  stage?: string;
+  /** Primary model (cli passes `--model`; agent treats it as a hint). */
+  model?: string;
+  /** Fallback model (cli passes `--fallback-model`). */
+  fallbackModel?: string;
+  system: string;
+  user: string;
+  /** What the answer should be: a JSON object the caller will parse, or free text.
+   *  A hint for the agent answerer; the cli path ignores it. Defaults to 'json'. */
+  responseFormat?: 'json' | 'text';
+  /** Optional JSON-schema string the JSON answer must satisfy (agent hint). */
+  schema?: string;
+  /** Per-call timeout in ms. */
+  timeoutMs?: number;
+}
+
+/** Returns the model's raw assistant text. The caller strips fences + parses. */
+export type LlmTransport = (req: LlmRequest) => Promise<string>;
+
+/**
+ * Strip a single leading ```...``` fence (some models wrap JSON in fences even
+ * when told not to). Shared so every runner strips identically.
+ */
+export function stripCodeFences(text: string): string {
+  const trimmed = text.trim();
+  const fence = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fence ? fence[1] : trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// cli backend — spawn `claude -p`
+// ---------------------------------------------------------------------------
+
+export interface CliTransportOptions {
+  /** Binary; defaults to `CLAUDE_CODE_BIN` env or `claude`. */
+  bin?: string;
+}
+
+export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
+  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  return (req) =>
+    new Promise<string>((resolve, reject) => {
+      const modelArgs: string[] = [];
+      if (req.model) modelArgs.push('--model', req.model);
+      if (req.fallbackModel) modelArgs.push('--fallback-model', req.fallbackModel);
+      const args = [
+        '-p',
+        req.user,
+        ...modelArgs,
+        '--output-format',
+        'json',
+        '--append-system-prompt',
+        req.system,
+        '--setting-sources',
+        'project',
+      ];
+      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
+      const timer = req.timeoutMs
+        ? setTimeout(() => {
+            proc.kill('SIGKILL');
+            reject(new Error(`claude timed out after ${req.timeoutMs}ms`));
+          }, req.timeoutMs)
+        : null;
+      proc.stdout.on('data', (b: Buffer) => out.push(b));
+      proc.stderr.on('data', (b: Buffer) => err.push(b));
+      proc.on('error', (e) => {
+        if (timer) clearTimeout(timer);
+        reject(e);
+      });
+      proc.on('close', (code) => {
+        if (timer) clearTimeout(timer);
+        if (code !== 0) {
+          reject(new Error(`claude exited ${code}: ${Buffer.concat(err).toString('utf-8')}`));
+          return;
+        }
+        try {
+          const envelope = JSON.parse(Buffer.concat(out).toString('utf-8'));
+          const text = typeof envelope === 'string' ? envelope : envelope.result;
+          if (typeof text !== 'string') {
+            reject(new Error('claude returned no text'));
+            return;
+          }
+          resolve(text);
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error(String(e)));
+        }
+      });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// agent backend — filesystem mailbox
+// ---------------------------------------------------------------------------
+
+export interface AgentTransportOptions {
+  /** Poll interval in ms (default 200). */
+  pollMs?: number;
+  /** Timeout used when a request omits `timeoutMs` (default 600000). */
+  defaultTimeoutMs?: number;
+}
+
+/**
+ * Mailbox protocol under `ioDir`:
+ *   requests/<id>.json   { id, stage, model, fallbackModel, responseFormat, schema, system, user }
+ *   responses/<id>.json  { text } | { error }
+ * Both files are written atomically (write-tmp + rename) so neither side reads
+ * a partial file. Each concurrent transport call owns one id; the runner's own
+ * concurrency drives how many requests are in flight.
+ */
+export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}): LlmTransport {
+  const reqDir = path.join(ioDir, 'requests');
+  const resDir = path.join(ioDir, 'responses');
+  fs.mkdirSync(reqDir, { recursive: true });
+  fs.mkdirSync(resDir, { recursive: true });
+  const pollMs = opts.pollMs ?? 200;
+  const defaultTimeout = opts.defaultTimeoutMs ?? 600_000;
+
+  return async (req) => {
+    const id = sanitizeId(req.id ?? deriveId(req));
+    const reqPath = path.join(reqDir, `${id}.json`);
+    const resPath = path.join(resDir, `${id}.json`);
+
+    // Resume-friendly: if an answer is already present (e.g. a re-run after a
+    // crash), consume it without re-writing the request.
+    if (!fs.existsSync(resPath)) {
+      atomicWrite(
+        reqPath,
+        JSON.stringify(
+          {
+            id,
+            stage: req.stage,
+            model: req.model,
+            fallbackModel: req.fallbackModel,
+            responseFormat: req.responseFormat ?? 'json',
+            schema: req.schema,
+            system: req.system,
+            user: req.user,
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
+    const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout);
+    for (;;) {
+      if (fs.existsSync(resPath)) {
+        let parsed: { text?: string; error?: string };
+        try {
+          parsed = JSON.parse(fs.readFileSync(resPath, 'utf-8'));
+        } catch {
+          // partial write — retry
+          await sleep(pollMs);
+          continue;
+        }
+        if (parsed.error) throw new Error(`agent answer error for ${id}: ${parsed.error}`);
+        if (typeof parsed.text === 'string') return parsed.text;
+        throw new Error(`agent answer for ${id} missing "text"`);
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`agent transport timed out (${id}) waiting for ${resPath}`);
+      }
+      await sleep(pollMs);
+    }
+  };
+}
+
+function deriveId(req: LlmRequest): string {
+  return createHash('sha256')
+    .update(`${req.stage ?? ''}\0${req.system}\0${req.user}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
+/** Keep request/response filenames portable: only word chars, dot, and dash. */
+function sanitizeId(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 200);
+}
+
+function atomicWrite(filePath: string, data: string): void {
+  const tmp = `${filePath}.tmp-${randomUUID()}`;
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, filePath);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}

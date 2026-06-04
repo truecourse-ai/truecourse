@@ -323,7 +323,31 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 ## Prerequisites
 
 - Node.js >= 20
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH. Deterministic rules run without it; LLM-powered rules and the Spec → Verify pipeline need it.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH — optional. The default `cli` transport spawns it for LLM-powered work; deterministic rules and the `agent` transport (below) don't need it.
+
+## LLM transport (`--llm-transport`)
+
+Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Verify pipeline (`spec scan`, `spec resolve`, `contracts generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
+
+| Mode | How it reaches the model | Needs |
+|---|---|---|
+| **`cli`** *(default)* | spawns `claude -p …` per call | the `claude` binary on PATH, signed in. No API key. |
+| **`agent`** | a **filesystem mailbox** under `--io <dir>` | nothing — no `claude` binary, no API key |
+
+In **`agent`** mode the tool doesn't call the model itself: for each prompt it writes `requests/<id>.json` (`{ stage, system, user, schema, … }`) into the `--io` directory and waits for a matching `responses/<id>.json` (`{ text }`). An **orchestrating agent that is itself an LLM** — e.g. a [Claude Code routine](https://code.claude.com/docs/en/routines) — watches that directory and answers each prompt. This lets contract generation and `analyze`'s LLM rules run **inside a headless cloud session with no `claude` binary and no API key**.
+
+```bash
+# default: spawn the claude CLI
+truecourse analyze --llm
+truecourse contracts generate
+
+# agent transport: the tool parks prompts in ./io and an external agent answers them
+truecourse analyze --llm --llm-transport agent --io ./io
+truecourse spec scan          --llm-transport agent --io ./io
+truecourse contracts generate --llm-transport agent --io ./io
+```
+
+Accepted by: `analyze`, `spec scan`, `spec resolve`, `contracts generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
 
 ## Configuration
 

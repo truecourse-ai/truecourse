@@ -35,6 +35,10 @@ import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
   cwd?: string;
+  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (filesystem mailbox under `io`). */
+  llm?: "cli" | "agent";
+  /** I/O dir for the `agent` transport's request/response mailbox. */
+  io?: string;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
@@ -55,7 +59,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    const { consolidate } = await scanInProcess(root, { tracker, source: "cli" });
+    const { consolidate } = await scanInProcess(root, { tracker, source: "cli", llm: opts.llm, io: opts.io });
     renderer.dispose();
     const { extract, merge } = consolidate;
     p.log.step(`docs        ${extract.docsScanned}`);
@@ -117,7 +121,7 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
   await requireGitRepo(root);
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
-    const { additions } = await resolveAllDefaultsInProcess(root, { tracker });
+    const { additions } = await resolveAllDefaultsInProcess(root, { tracker, llm: opts.llm, io: opts.io });
     renderer.dispose();
     p.log.step(`accepted    ${additions} default${additions === 1 ? "" : "s"}`);
     p.log.step(`written     ${path.relative(root, decisionsRelPath(root))}`);
@@ -141,7 +145,7 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   p.intro("Spec status");
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    const { consolidate } = await scanInProcess(root, { tracker });
+    const { consolidate } = await scanInProcess(root, { tracker, llm: opts.llm, io: opts.io });
     renderer.dispose();
     const { extract, merge, skippedDocs } = consolidate;
     const rows: Array<[string, string]> = [
