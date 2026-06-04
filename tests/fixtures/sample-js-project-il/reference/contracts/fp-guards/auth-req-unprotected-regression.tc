@@ -1,0 +1,8 @@
+operation GET "/internal/legacy/{id}" {
+  origin "reference/specs/modules/legacy/endpoints.md" "GET /internal/legacy/{id}" 1..5
+  response 200 on success {
+    body {
+      id: string
+    }
+  }
+}

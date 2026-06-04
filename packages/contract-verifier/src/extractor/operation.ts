@@ -66,6 +66,12 @@ export interface ExtractedOperation {
    */
   handlerBody?: SyntaxNode;
   handlerSource?: string;
+  /**
+   * True when the route declares `config.auth: false` (Strapi/plugin-style
+   * explicit opt-out). The auth-requirement comparator skips these routes
+   * because they are intentionally unauthenticated.
+   */
+  authExempt?: boolean;
 }
 
 export interface HandlerObservations {
@@ -511,14 +517,17 @@ function describeResCall(call: SyntaxNode, source: string): ResEvent | null {
  *   `new Response(body, init?)` — Fetch API. Default status 200; if
  *   the second arg is an object literal with `status: <number>`, that
  *   wins.
+ *   `new HttpResponse(body, init?)` — MSW (Mock Service Worker), which
+ *   extends the Fetch API Response with the same constructor signature.
  *
- * Used by Astro, SvelteKit, Cloudflare Workers, and Next.js App Router
- * handlers that return a `Response` directly. Bun and Deno's HTTP
- * surface use the same constructor.
+ * Used by Astro, SvelteKit, Cloudflare Workers, Next.js App Router, and
+ * MSW handlers that return a Response directly.
  */
+const WEB_RESPONSE_CTORS = new Set(['Response', 'HttpResponse']);
+
 function describeWebResponseNew(node: SyntaxNode, source: string): ResEvent | null {
   const ctor = node.childForFieldName('constructor');
-  if (!ctor || ctor.type !== 'identifier' || sliceText(ctor, source) !== 'Response') return null;
+  if (!ctor || ctor.type !== 'identifier' || !WEB_RESPONSE_CTORS.has(sliceText(ctor, source))) return null;
   const args = node.childForFieldName('arguments');
   const status = readStatusFromInit(args?.namedChild(1) ?? null, source) ?? '200';
   const bodyArg = args?.namedChild(0) ?? undefined;
@@ -532,9 +541,12 @@ function describeWebResponseNew(node: SyntaxNode, source: string): ResEvent | nu
 }
 
 /**
- * Recognise the static `Response.json(body, init?)` and
- * `NextResponse.json(body, init?)` factories. Same shape as
- * `new Response(...)` — default 200, status overridable via init.
+ * Recognise the static `Response.json(body, init?)`,
+ * `NextResponse.json(body, init?)`, and `HttpResponse.json(body, init?)`
+ * factories. Same shape as `new Response(...)` — default 200, status
+ * overridable via init. `HttpResponse` is used by MSW (Mock Service Worker)
+ * and behaves identically to the Fetch API `Response` with respect to the
+ * default 200 status.
  */
 function describeWebResponseCall(call: SyntaxNode, source: string): ResEvent | null {
   const fn = call.childForFieldName('function');
@@ -545,7 +557,7 @@ function describeWebResponseCall(call: SyntaxNode, source: string): ResEvent | n
   if (sliceText(prop, source) !== 'json') return null;
   if (obj.type !== 'identifier') return null;
   const objName = sliceText(obj, source);
-  if (objName !== 'Response' && objName !== 'NextResponse') return null;
+  if (objName !== 'Response' && objName !== 'NextResponse' && objName !== 'HttpResponse') return null;
 
   const args = call.childForFieldName('arguments');
   const status = readStatusFromInit(args?.namedChild(1) ?? null, source) ?? '200';
@@ -752,4 +764,175 @@ function readStringLiteral(node: SyntaxNode, source: string): string | null {
     return source.slice(fragment.startIndex, fragment.endIndex);
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Plugin-style route extraction
+//
+// Some frameworks (Strapi, Keystone, and similar plugin architectures)
+// declare routes as static data objects exported from per-plugin route files
+// rather than imperative `router.method()` calls. Two shapes are handled:
+//
+//   1. `export default [{ method: 'POST', path: '/login' }, ...]`
+//      — plain array of route descriptors
+//
+//   2. `export default { type: 'admin', routes: [{ method: 'GET', path: '/:id' }] }`
+//      — plugin-style wrapper object with a `routes` array
+//
+// The mount prefix is inferred from the file path using the pattern:
+//   `/<plugin-name>/server(/src)?/routes/`
+// yielding `/<plugin-name>` as the prefix (e.g. `/admin`, `/content-releases`).
+// ---------------------------------------------------------------------------
+
+const PLUGIN_ROUTE_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD']);
+
+interface PluginRouteDescriptor {
+  method: string;
+  path: string;
+  line: number;
+  authExempt?: boolean;
+}
+
+/**
+ * Infer the HTTP mount prefix from the file path for plugin-style route files.
+ * Matches `/<plugin>/server(/src)?/routes/` and returns `/<plugin>`.
+ */
+function inferPluginMountPrefix(filePath: string): string | null {
+  const normalized = filePath.replace(/\\/g, '/');
+  const m = normalized.match(/\/([^/]+)\/server(?:\/src)?\/routes\//);
+  if (!m) return null;
+  return '/' + m[1];
+}
+
+function joinPluginPath(prefix: string, routePath: string): string {
+  if (!routePath) return prefix || '/';
+  const a = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  const b = routePath.startsWith('/') ? routePath : '/' + routePath;
+  return a + b;
+}
+
+function tryReadPluginRouteDescriptor(
+  obj: SyntaxNode,
+  source: string,
+): PluginRouteDescriptor | null {
+  let method: string | null = null;
+  let routePath: string | null = null;
+  let authExempt = false;
+  for (const child of obj.namedChildren) {
+    if (child.type !== 'pair') continue;
+    const key = child.childForFieldName('key');
+    const val = child.childForFieldName('value');
+    if (!key || !val) continue;
+    const keyName = key.text.replace(/^['"]|['"]$/g, '');
+    if (keyName === 'method') {
+      const v = readStringLiteral(val, source);
+      if (v && PLUGIN_ROUTE_METHODS.has(v.toUpperCase())) method = v.toUpperCase();
+    } else if (keyName === 'path') {
+      const v = readStringLiteral(val, source);
+      if (v !== null && v.startsWith('/')) routePath = v;
+    } else if (keyName === 'config' && val.type === 'object') {
+      // Detect auth configuration in plugin-style route `config` block.
+      for (const cfgChild of val.namedChildren) {
+        if (cfgChild.type !== 'pair') continue;
+        const cfgKey = cfgChild.childForFieldName('key');
+        const cfgVal = cfgChild.childForFieldName('value');
+        if (!cfgKey || !cfgVal) continue;
+        const cfgKeyName = cfgKey.text.replace(/^['"]|['"]$/g, '');
+        if (cfgKeyName === 'auth' && cfgVal.type === 'false') {
+          // `config: { auth: false }` — explicit public opt-out.
+          authExempt = true;
+        } else if (cfgKeyName === 'policies' && cfgVal.type === 'array' && cfgVal.namedChildCount > 0) {
+          // `config: { policies: [...] }` — route goes through access-control policies.
+          // The auth-requirement comparator's file-level middleware check doesn't apply here.
+          authExempt = true;
+        }
+      }
+    }
+  }
+  if (!method || routePath === null) return null;
+  return { method, path: routePath, line: obj.startPosition.row + 1, authExempt };
+}
+
+function collectPluginRouteDescriptors(node: SyntaxNode, source: string): PluginRouteDescriptor[] {
+  const out: PluginRouteDescriptor[] = [];
+
+  // Pattern 1: array of route objects at top level
+  if (node.type === 'array') {
+    for (const el of node.namedChildren) {
+      if (el.type === 'object') {
+        const desc = tryReadPluginRouteDescriptor(el, source);
+        if (desc) out.push(desc);
+      }
+    }
+    return out;
+  }
+
+  // Pattern 2: object with a `routes` property containing the array
+  if (node.type === 'object') {
+    for (const child of node.namedChildren) {
+      if (child.type !== 'pair') continue;
+      const key = child.childForFieldName('key');
+      const val = child.childForFieldName('value');
+      if (!key || !val) continue;
+      const keyName = key.text.replace(/^['"]|['"]$/g, '');
+      if (keyName === 'routes' && val.type === 'array') {
+        for (const el of val.namedChildren) {
+          if (el.type === 'object') {
+            const desc = tryReadPluginRouteDescriptor(el, source);
+            if (desc) out.push(desc);
+          }
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Extract routes from plugin-style route file exports. Handles both the
+ * plain-array form (`export default [{ method, path }]`) and the wrapped
+ * form (`export default { type: '...', routes: [...] }`). The mount prefix
+ * is inferred from the file path; files outside the `<plugin>/server(/src)?/routes/`
+ * pattern are skipped.
+ */
+export function extractPluginStyleRoutesFromFile(
+  filePath: string,
+  source: string,
+  tree: Tree,
+): ExtractedOperation[] {
+  const prefix = inferPluginMountPrefix(filePath);
+  if (!prefix) return [];
+
+  const out: ExtractedOperation[] = [];
+
+  const visit = (node: SyntaxNode): void => {
+    if (node.type === 'export_statement') {
+      const value = node.childForFieldName('value');
+      if (value) {
+        const descriptors = collectPluginRouteDescriptors(value, source);
+        for (const { method, path: routePath, line, authExempt } of descriptors) {
+          const fullPath = joinPluginPath(prefix, routePath);
+          out.push({
+            identity: `${method} ${fullPath}`,
+            contract: {
+              protocol: 'http',
+              method,
+              path: fullPath,
+              tags: [],
+              responses: [],
+            },
+            filePath,
+            declarationLine: line,
+            observed: { queryParams: [], numericClamps: [], hasClampCall: false },
+            ...(authExempt ? { authExempt: true } : {}),
+          });
+        }
+      }
+    }
+    for (const child of node.namedChildren) visit(child);
+  };
+  visit(tree.rootNode);
+
+  return out;
 }

@@ -1,0 +1,3 @@
+operation GET "/catalog/{id}" {
+  origin "reference/specs/modules/catalog/endpoints.md" "GET /catalog/{id}" 1..5
+}

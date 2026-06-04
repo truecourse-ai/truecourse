@@ -72,7 +72,7 @@ describe('Contract Operation lifter', () => {
   it('every Operation in the corpus has a lifted contract', () => {
     const r = loadAll();
     const ops = [...r.index.values()].filter((a) => a.ref.type === 'Operation');
-    expect(ops.length).toBe(10);
+    expect(ops.length).toBe(17);
     for (const op of ops) {
       expect(op.contract, `Operation:${op.ref.identity} missing contract`).toBeDefined();
     }

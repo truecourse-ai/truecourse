@@ -79,12 +79,20 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
     // The extractor must follow the call into `transitionEndpoint` and
     // attribute its responses back to the route — otherwise we'd emit
     // false-positive `implementation.missing` drifts for each.
+    //
+    // Intentional regression cases (marked with // IL-DRIFT: in fixture code)
+    // are excluded from the FP check — they are covered by the marker-set test.
+    const intentional = new Set(
+      parseIlDriftMarkers(path.join(FIXTURE_ROOT, 'code/src')),
+    );
     const result = await verify({
       contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
-    const missing = result.drifts.filter((d) => d.obligationKey === 'implementation.missing');
-    expect(missing).toEqual([]);
+    const unexpectedMissing = result.drifts.filter(
+      (d) => d.obligationKey === 'implementation.missing' && !intentional.has(driftKey(d)),
+    );
+    expect(unexpectedMissing).toEqual([]);
   });
 });
 
