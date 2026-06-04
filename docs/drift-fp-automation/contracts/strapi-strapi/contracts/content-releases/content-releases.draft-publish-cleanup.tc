@@ -1,0 +1,11 @@
+effect-group content-releases.draft-publish-cleanup {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Migrations / deleteActionsOnDisableDraftAndPublish" 241..244
+  status shipped
+  channel lifecycle
+  effect release-actions.delete-on-draft-publish-disabled {
+    emit-when {
+      description "Draft and Publish disabled on a Content Type"
+    }
+    payload-constraint { action: "remove all release actions related to entries of that content type" }
+  }
+}

@@ -1,0 +1,12 @@
+entity strapi_sessions {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "SessionManager" 13..40
+  status shipped
+  field userId: string
+  field sessionId: string
+  field deviceId: string
+  field origin: string
+  field expiresAt: timestamp
+  field absoluteExpiresAt: timestamp
+  field status: string
+  field type: string
+}

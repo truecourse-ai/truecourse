@@ -1,0 +1,12 @@
+operation POST "/admin/logout" {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Admin authentication" 43..90
+  status shipped
+  request {
+    auth required
+    body {
+      deviceId: string optional
+    }
+  }
+  response 200 on success {
+  }
+}

@@ -53,10 +53,13 @@ console.log('Cleaning dist/...');
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 
-// 1. Build shared + analyzer + core
+// 1. Build shared + analyzer + new packages + core
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
+run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/analyzer build');
+run('pnpm --filter @truecourse/contract-verifier build');
+run('pnpm --filter @truecourse/contract-extractor build');
 run('pnpm --filter @truecourse/core build');
 
 // 2. Build dashboard client (static export)

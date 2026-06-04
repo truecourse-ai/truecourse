@@ -1,0 +1,6 @@
+auth-requirement auth.bearer.sessions {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "SessionManager" 13..40
+  status shipped
+  scheme Bearer
+  selector path-glob "/**"
+}

@@ -1,0 +1,11 @@
+effect-group content-releases.content-type-cleanup {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Migrations / deleteActionsOnDeleteContentType" 245..248
+  status shipped
+  channel lifecycle
+  effect release-actions.delete-on-content-type-deletion {
+    emit-when {
+      description "Content Type deleted"
+    }
+    payload-constraint { action: "delete all release actions containing entries from that content type" }
+  }
+}

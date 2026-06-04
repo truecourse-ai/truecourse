@@ -1,0 +1,19 @@
+effect-group release.scheduling {
+  origin "docs/docs/docs/01-core/content-releases/03-scheduling.md" "How it works" 15..18
+  status shipped
+  channel cron-scheduler
+  effect release.schedule.created {
+    emit-when {
+      operation Operation:"POST /content-releases/"
+      on-status 2xx
+    }
+    payload-constraint { action: "schedule publish via node-schedule" }
+  }
+  effect release.schedule.updated {
+    emit-when {
+      operation Operation:"PUT /content-releases/:id"
+      on-status 2xx
+    }
+    payload-constraint { action: "schedule publish via node-schedule" }
+  }
+}

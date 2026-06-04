@@ -1,0 +1,11 @@
+operation POST "/admin/access-token" {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Admin authentication" 43..90
+  status shipped
+  response 200 on success {
+    body {
+      data {
+        token: string
+      }
+    }
+  }
+}

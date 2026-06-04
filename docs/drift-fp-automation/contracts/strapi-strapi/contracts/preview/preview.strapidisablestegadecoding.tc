@@ -1,0 +1,5 @@
+constant preview.STRAPI_DISABLE_STEGA_DECODING {
+  origin "docs/docs/docs/01-core/content-manager/06-preview.md" "Frontend configuration" 82..92
+  status shipped
+  type boolean
+}

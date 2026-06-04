@@ -1,0 +1,6 @@
+*.md
+!docs/docs/docs/01-core/authentication/**
+!docs/docs/docs/01-core/content-manager/**
+!docs/docs/docs/01-core/content-releases/**
+!docs/docs/docs/01-core/permissions/**
+!docs/docs/rfcs/**

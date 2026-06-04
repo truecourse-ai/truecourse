@@ -1,0 +1,7 @@
+entity strapi_release_actions {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Content-types / Release Action" 27..38
+  status shipped
+  field contentType: string
+  field locale: string
+  field entryDocumentId: string
+}

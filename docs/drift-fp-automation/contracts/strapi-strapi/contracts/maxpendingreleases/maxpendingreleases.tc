@@ -1,0 +1,6 @@
+constant maxPendingReleases {
+  origin "docs/docs/docs/01-core/content-releases/02-frontend/00-intro.md" "License limits" 14..17
+  status shipped
+  type number
+  expected-value 3
+}

@@ -1,0 +1,6 @@
+constant ACTIONS.create {
+  origin "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md" "Actions Supported" 14..30
+  status shipped
+  type string
+  expected-value "plugin::content-manager.explorer.create"
+}

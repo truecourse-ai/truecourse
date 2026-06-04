@@ -1,0 +1,5 @@
+enum ReleaseStatus {
+  origin "docs/docs/docs/01-core/content-releases/00-intro.md" "Release's status" 26..40
+  status shipped
+  values [Ready, Blocked, Empty, Failed, Done]
+}

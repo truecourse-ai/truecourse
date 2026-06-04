@@ -1,0 +1,14 @@
+operation POST "/content-releases/:releaseId/actions" {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Routes / Release Action" 112..156
+  status shipped
+  request {
+    body {
+      type: string
+      contentType: string
+      locale: string optional
+      entryDocumentId: string optional
+    }
+  }
+  response 200 on success {
+  }
+}

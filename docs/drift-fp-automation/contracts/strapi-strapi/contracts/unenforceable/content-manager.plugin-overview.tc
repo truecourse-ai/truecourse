@@ -1,0 +1,5 @@
+unenforceable-obligation content-manager.plugin-overview {
+  origin "docs/docs/docs/01-core/content-manager/00-intro.md" "What is the Content Manager?" 9..12
+  status shipped
+  reason "The Content Manager is described as a plugin within @strapi/admin — this is an architectural/organizational fact, not a verifiable endpoint or entity contract."
+}

@@ -1,0 +1,11 @@
+entity ListFieldLayout {
+  origin "docs/docs/docs/01-core/content-manager/02-layouts.md" "How are they made? / ListView" 103..140
+  status shipped
+  field attribute: string
+  field label: string
+  field name: string
+  field cellFormatter: string
+  field mainField: string
+  field searchable: boolean
+  field sortable: boolean
+}

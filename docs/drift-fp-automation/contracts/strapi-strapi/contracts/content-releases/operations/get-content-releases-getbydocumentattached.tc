@@ -1,0 +1,14 @@
+operation GET "/content-releases/getByDocumentAttached" {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Routes / Release" 41..110
+  status shipped
+  request {
+    query {
+      contentTypeUid: string
+      locale: string optional
+      documentId: string optional
+      hasEntryAttached: boolean optional
+    }
+  }
+  response 200 on success {
+  }
+}

@@ -1,0 +1,14 @@
+operation POST "/api/auth/refresh" {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Content API (users-permissions)" 92..110
+  status shipped
+  request {
+    body {
+      refreshToken: string
+    }
+  }
+  response 200 on success {
+    body {
+      jwt: string
+    }
+  }
+}

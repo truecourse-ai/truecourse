@@ -1,0 +1,13 @@
+entity DocumentRBACContextValue {
+  origin "docs/docs/docs/01-core/content-manager/03-RBAC.md" "DocumentRBAC Component" 33..70
+  status shipped
+  field canCreate: boolean
+  field canCreateFields: string
+  field canDelete: boolean
+  field canPublish: boolean
+  field canRead: boolean
+  field canReadFields: string
+  field canUpdate: boolean
+  field canUpdateFields: string
+  field isLoading: boolean
+}

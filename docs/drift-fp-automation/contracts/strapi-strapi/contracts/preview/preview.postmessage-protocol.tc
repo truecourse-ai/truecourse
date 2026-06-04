@@ -1,0 +1,20 @@
+effect-group preview.postmessage-protocol {
+  origin "docs/docs/docs/01-core/content-manager/06-preview.md" "Communication protocol" 52..80
+  status shipped
+  channel postMessage
+  effect preview.ready {
+    emit-when {
+      description "preview iframe initialized"
+    }
+  }
+  effect preview.script-sent {
+    emit-when {
+      description "admin panel sends strapiScript to iframe after previewReady"
+    }
+  }
+  effect preview.update {
+    emit-when {
+      description "content saved in admin panel; admin sends strapiUpdate to iframe"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+error-envelope error.publicationFilter.invalid {
+  origin "docs/docs/rfcs/02-publication-filter-query-modes.md" "Validation and compatibility" 112..125
+  status shipped
+  applies-to status-class [4xx]
+  known-codes [400]
+}

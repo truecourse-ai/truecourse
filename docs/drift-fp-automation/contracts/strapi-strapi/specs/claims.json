@@ -1,0 +1,2323 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-04T03:11:08.782Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "docs/docs/docs/01-core/content-manager/00-intro.md",
+        "docs/docs/docs/01-core/content-manager/01-documents.md",
+        "docs/docs/docs/01-core/content-manager/02-layouts.md",
+        "docs/docs/docs/01-core/content-manager/03-RBAC.md",
+        "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "docs/docs/docs/01-core/content-releases/00-intro.md",
+        "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "docs/docs/docs/01-core/content-releases/02-frontend/00-intro.md",
+        "docs/docs/docs/01-core/content-releases/03-scheduling.md",
+        "docs/docs/docs/01-core/permissions/00-intro.md",
+        "docs/docs/docs/01-core/permissions/01-engine.md",
+        "docs/docs/rfcs/01-custom-fields.md",
+        "docs/docs/rfcs/02-publication-filter-query-modes.md"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    {
+      "name": "admin",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "docs/docs/rfcs/01-custom-fields.md"
+      ],
+      "scope": {
+        "paths": [
+          "/admin/**"
+        ]
+      },
+      "description": "admin module — POST /admin/access-token, POST /admin/login, POST /admin/logout, POST /admin/register, and 3 more."
+    },
+    {
+      "name": "auth",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md"
+      ],
+      "scope": {
+        "paths": [
+          "/api/auth/**"
+        ]
+      },
+      "description": "auth module — POST /api/auth/change-password, POST /api/auth/logout, POST /api/auth/refresh, and 1 more."
+    },
+    {
+      "name": "content-releases",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/docs/01-core/content-manager/01-documents.md",
+        "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "docs/docs/docs/01-core/permissions/00-intro.md",
+        "docs/docs/docs/01-core/permissions/01-engine.md"
+      ],
+      "scope": {
+        "paths": [
+          "/content-releases/**"
+        ]
+      },
+      "description": "content-releases module — DELETE /content-releases/:id, and 9 more."
+    }
+  ],
+  "claims": [
+    {
+      "id": "2770389b43c87df6b2c54e1a015482b2b6d4ff391db4dde61041251566cb2eb2",
+      "topic": "auth",
+      "subject": "@strapi/permissions API",
+      "content": {
+        "summary": "engine.new({providers}) creates the permission engine. domain.permission.create({action, subject, conditions, properties}) defines permissions. permissionEngine.generateAbility(permissions) generates CASL ability. Conditions registered via providers.condition.register({name, handler})."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 83,
+        "quote": "## Integration Example\n\n```typescript\nimport { engine, domain } from '@strapi/permissions';\n\n// 1. Define Providers\nconst providers = {\n  action: providerFactory(),\n  condition: providerFactory(),\n};\n\n// 2. Register Custom Conditions\nproviders.condition.register({\n  name: 'isOwner',\n  handler: (ctx) => ctx.user.id === ctx.resource.ownerId,\n});\n\n// 3. Create Engine\nconst permissionEngine = engine.new({ providers });\n\n// 4. Define Permissions\nconst permissions = [\n  domain.permission.create({\n    action: 'read',\n    subject: 'article',\n    conditions: ['isPublished'],\n  }),\n  domain.permission.create({\n    action: 'update',\n    subject: 'article',\n    conditions: ['isOwner'],\n    properties: {\n      fields: ['title', 'content'],\n    },\n  }),\n];\n\n// 5. Generate Ability\nconst ability = await permissionEngine.generateAbility(permissions);\n\n… (+13 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6280efc27bf1527d312c6615377f51d1ba552061c38889f0b53a5e7baa67cc39",
+      "topic": "auth",
+      "subject": "Permission Checker / can/cannot API",
+      "content": {
+        "summary": "can.<action>() returns true if user has permission. cannot.<action>() returns true if user lacks permission. Actions: create, read, update, delete, publish, unpublish, discard."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 46,
+        "quote": "### Checking Permissions\n\n#### `can.<action>()`\n\nDetermines if the user **has** permission to perform a specific action.\n\n```ts\nif (permissionChecker.can.create()) {\n  console.log('User can create content');\n}\n```\n\n#### `cannot.<action>()`\n\nDetermines if the user **does not** have permission to perform a specific action.\n\n```ts\nif (permissionChecker.cannot.delete()) {\n  throw new errors.ForbiddenError('User is not allowed to delete content');\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2b429d1583fb4f894678db6604b06b22cdefae39186fad8ea91fa1036319ed6c",
+      "topic": "auth",
+      "subject": "Permission Checker / sanitization methods",
+      "content": {
+        "summary": "sanitizeOutput(data, {action}), sanitizeQuery(query, {action}), sanitizeInput(action, data, entity), sanitizeCreateInput(data), sanitizeUpdateInput(entity)(data) — all remove unauthorized fields based on permissions."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 68,
+        "quote": "### Sanitization Methods\n\n#### `sanitizeOutput(data, { action })`\n\nCleans output data based on permissions.\n\n```ts\nconst sanitizedData = permissionChecker.sanitizeOutput(entity);\n```\n\n#### `sanitizeQuery(query, { action })`\n\nCleans a query before execution.\n\n```ts\nconst safeQuery = permissionChecker.sanitizeQuery({ page: '1', pageSize: '10' });\n```\n\n#### `sanitizeInput(action, data, entity)`\n\nCleans input data before saving.\n\n```ts\nconst sanitizedInput = permissionChecker.sanitizeInput('create', inputData);\n```\n\n#### `sanitizeCreateInput(data)`\n\nShortcut for sanitizing create input.\n\n```ts\nconst sanitizedCreateData = permissionChecker.sanitizeCreateInput(inputData);\n```\n\n#### `sanitizeUpdateInput(entity) => (data)`\n\nShortcut for sanitizing update input.\n\n```ts\nconst sanitizedUpdateData = permissionChecker.sanitizeUpdateInput(existingEntity)(inputData);\n… (+2 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "3624cfcecd95b516b0474d926927dac2a0ed3233cbcddd29564d1642d3d11b61",
+      "topic": "auth",
+      "subject": "Permission Checker / sanitizedQuery API",
+      "content": {
+        "summary": "sanitizedQuery.<action>(query) modifies queries to enforce permissions automatically. Returns query constrained to what the user can access."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 128,
+        "quote": "### Query Enforcement\n\n#### `sanitizedQuery.<action>(query)`\n\nModifies queries to enforce permissions automatically.\n\n```ts\nconst securedQuery = permissionChecker.sanitizedQuery.read({ sort: 'createdAt:desc' });\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0f2600e000d785c75c2fd5ed51915304e4f5fc5a610cb660e2fb4cc8c0ca0d0e",
+      "topic": "auth",
+      "subject": "Permission Checker service / capabilities",
+      "content": {
+        "summary": "Permission Checking, Sanitization (remove unauthorized fields from input/output), Validation (ensure queries comply with permission rules), Query Enforcement (modify queries to include permission constraints automatically)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 7,
+        "quote": "## Features\n\n- **Permission Checking**: Verify whether a user has the necessary permissions for a specific action.\n- **Sanitization**: Remove unauthorized fields from input and output data.\n- **Validation**: Ensure that queries and input data comply with permission rules.\n- **Query Enforcement**: Modify queries to include permission constraints automatically.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "38fd0c56f7e899bb987a7c2f6ff992eda37c95676e821df0529e51c335d68ff1",
+      "topic": "auth",
+      "subject": "SessionManager auth scheme",
+      "content": {
+        "scheme": "Bearer JWT",
+        "scope": "global"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 13,
+        "quote": "## SessionManager\n\nCore provides a `SessionManager` that issues:\n\n- Short‑lived access tokens (JWT, used in `Authorization: Bearer <token>`)\n- Refresh/session tokens (JWT, stored/handled differently per origin)\n\nPer-origin configuration is defined at bootstrap time with:\n\n- `jwtSecret`\n- `accessTokenLifespan` (seconds)\n- `maxRefreshTokenLifespan`, `idleRefreshTokenLifespan` (seconds)\n- `maxSessionLifespan`, `idleSessionLifespan` (seconds)\n\nEach origin stores session rows in `admin::session` (hidden content-type) using the table/collection `strapi_sessions`, containing `userId`, `sessionId`, `deviceId`, `origin`, `expiresAt`, `absoluteExpiresAt`, `status`, `type`.\n\n### Public API (per origin)\n\n- `generateRefreshToken(userId, deviceId?, { type?: 'refresh' | 'session' })`\n- `rotateRefreshToken(refreshToken)`\n- `generateAccessToken(refreshToken)`\n- `validateAccessToken(token)`\n- `invalidateRefreshToken(userId, deviceId?)`\n- `isSessionActive(sessionId)`\n\nLocations:\n\n- Core service: `packages/core/core/src/services/session-manager.ts`\n- Types: `packages/core/types/src/modules/session-manager.ts`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "auth",
+      "source": "extracted"
+    },
+    {
+      "id": "08e4c6cf2d72a059058ce7f8709c586f779df4e99c7080832e96102f04930a91",
+      "topic": "auth",
+      "subject": "admin auth scheme",
+      "content": {
+        "scheme": "Bearer JWT",
+        "scope": "/admin/**"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 43,
+        "quote": "[docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md:43] ## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)\n---\n[docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md:132] ## Notes\n\n- Access tokens are always used in the `Authorization` header as `Bearer <token>`.\n- Admin refresh tokens are stored in an httpOnly cookie and are not exposed to JavaScript.\n- Device-bound sessions allow targeted logout by `deviceId`.\n",
+        "additionalSources": [
+          {
+            "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+            "line": 132,
+            "quote": "## Notes\n\n- Access tokens are always used in the `Authorization` header as `Bearer <token>`.\n- Admin refresh tokens are stored in an httpOnly cookie and are not exposed to JavaScript.\n- Device-bound sessions allow targeted logout by `deviceId`.\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "f8d68901b46e2c9686660e00314e1d73ff38f84eba93900087f6a7b04f949214",
+      "topic": "auth",
+      "subject": "content-manager ACTIONS",
+      "content": {
+        "scheme": "RBAC",
+        "scope": "global"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 14,
+        "quote": "## Actions Supported\n\nThe service defines the following actions:\n\n```ts\nconst ACTIONS = {\n  read: 'plugin::content-manager.explorer.read',\n  create: 'plugin::content-manager.explorer.create',\n  update: 'plugin::content-manager.explorer.update',\n  delete: 'plugin::content-manager.explorer.delete',\n  publish: 'plugin::content-manager.explorer.publish',\n  unpublish: 'plugin::content-manager.explorer.publish',\n  discard: 'plugin::content-manager.explorer.update',\n} as const;\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "75fc2d4cd02dc183eb5aa9278803b36eef4d2a17abc7a9e85f33bf17b6c59824",
+      "topic": "auth",
+      "subject": "permissions ability generation flow",
+      "content": {
+        "summary": "Ability generation: for each permission runs hooks in order (before-format::validate → format → after-format::validate → before-evaluate → resolve conditions → before-register). Forbidden conditions cause permission skip."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/01-engine.md",
+        "line": 44,
+        "quote": "## Ability Generation Diagram\n\n```mermaid\nsequenceDiagram\n  participant User\n  participant Engine\n  participant Hooks\n  participant Providers\n  participant Ability Builder\n  User ->> Engine: Generate Ability\n  loop permissions\n    Engine ->> Hooks: before-format::validate.permission\n    Hooks -->> Engine: Validation Result\n    Engine ->> Hooks: format.permission\n    Hooks -->> Engine: Formatted Permission\n    Engine ->> Hooks: after-format::validate.permission\n    Hooks -->> Engine: Validation Result\n    Engine ->> Hooks: before-evaluate.permission\n    alt permission has conditions\n      Engine ->> Providers: Resolve conditions\n      Providers -->> Engine: Resolved conditions\n      loop conditions\n        alt forbidden\n          note over Engine: skip permission\n        end\n      end\n    end\n    Engine ->> Hooks: before-register.permission\n    Engine ->> Ability Builder: Register permission in Ability\n  end\n  Engine -->> User: Ability\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4fb9f738579211c0cfbcd729660169ce89f9b72df6ab9772ef611625e51e9a1c",
+      "topic": "auth",
+      "subject": "permissions conditional logic",
+      "content": {
+        "summary": "Complex permission rules that consider resource state or user data conditions. Example: validate resource ownership by checking if the requesting user is the owner."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 68,
+        "quote": "### Conditional Logic\n\nImplementation of complex permission rules that consider different conditions, enabling nuanced access control tailored\nto resource state or user data.\n\n_Example Use Case_: Validate resource ownership by checking if the requesting user is the owner of a specific resource.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "05bc264cb61f681ff25f2e0a23045bae77ee6fe0c09aa29e2b847625c20a2e7f",
+      "topic": "auth",
+      "subject": "permissions dynamic evaluation",
+      "content": {
+        "summary": "Runtime permission checking at request time, ensuring alignment with the most current context and data (e.g., API endpoint access control with user roles and data states)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 54,
+        "quote": "### Dynamic Evaluation\n\nRuntime permission checking at the time of the request, ensuring that permissions align with the most current context\nand data.\n\n_Example Use Case_: API endpoint access control, where user roles and data states impact access decisions dynamically.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bd7112574d41bb787d5dfecf06b03ed16116094b1d32608d8873ce3db385b8e4",
+      "topic": "auth",
+      "subject": "permissions hook system",
+      "content": {
+        "summary": "Modular mechanism to inject custom behaviors during permission validation. Enables audit logging, additional validation, and extensibility at various stages."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 75,
+        "quote": "### Hook System\n\nA modular mechanism to inject custom behaviors during various stages of the permission validation process, offering\nextensibility and adaptability.\n\n_Example Use Case_: Implement audit logging for permission evaluations or perform additional data validation before\ngranting access.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ffc621ba2f6bf93c2e91cce4532833490dfe22552507cf64e07473dc9ef5bfd8",
+      "topic": "auth",
+      "subject": "permissions parametrized actions",
+      "content": {
+        "summary": "Actions support context-specific parameters for fine-grained control. Example: 'publish?postId=123' restricts operation to a specific resource."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 61,
+        "quote": "### Parametrized Actions\n\nActions that leverage context-specific parameters to enable fine-grained control, allowing flexibility in defining\npermissions.\n\n_Example Use Case_: `publish?postId=123`, restricting operation to a specific post identified by its ID.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "0370c2c70e8507fd3d1c1fb84b96c550fe7e735288507ccb42024c63e764b0aa",
+      "topic": "auth",
+      "subject": "users-permissions jwtManagement",
+      "content": {
+        "scheme": "Bearer JWT",
+        "scope": "global"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 92,
+        "quote": "## Content API (users-permissions)\n\nThe users-permissions (UP) plugin supports two modes, controlled by `plugin::users-permissions.jwtManagement`:\n\n- `legacy-support` (default): issues long‑lived `jwt` configured by `plugin::users-permissions.jwt`.\n- `refresh`: uses `SessionManager` to issue short‑lived access tokens (`jwt`) and separate `refreshToken`.\n\nWhen `jwtManagement` is `refresh`:\n\n- Login/Register/Provider callback responses include `{ jwt, refreshToken }`.\n- New endpoints:\n  - `POST /api/auth/refresh` — body `{ refreshToken }`, returns `{ jwt }` and rotates the refresh token\n  - `POST /api/auth/logout` — revokes sessions for the authenticated user; optional `{ deviceId }` in body to revoke only one device\n\nConfiguration keys:\n\n- `plugin::users-permissions.jwtManagement`: `'legacy-support' | 'refresh'`\n- `plugin::users-permissions.sessions.accessTokenLifespan`\n- `plugin::users-permissions.sessions.maxRefreshTokenLifespan`\n- `plugin::users-permissions.sessions.idleRefreshTokenLifespan`\n  - `plugin::users-permissions.sessions.maxSessionLifespan`\n  - `plugin::users-permissions.sessions.idleSessionLifespan`\n\nKey files:\n\n- Plugin bootstrap/config: `packages/plugins/users-permissions/server/bootstrap/index.js`, `packages/plugins/users-permissions/server/config.js`\n- Controller: `packages/plugins/users-permissions/server/controllers/auth.js`\n- Routes: `packages/plugins/users-permissions/server/routes/content-api/auth.js`\n- JWT service: `packages/plugins/users-permissions/server/services/jwt.js`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "8c3bb42587cf085f18eb79467e593d2088f36fbd28725a0e9c65e7337eff0dd6",
+      "topic": "data",
+      "subject": "Blocks / schema",
+      "content": {
+        "fields": {
+          "blockNodes": "root-level elements: paragraphs, images, headings, lists, code blocks",
+          "inlineNodes": "children of block nodes: text nodes, links",
+          "textLeaves": "children of inline nodes, must include {type: 'text'}"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "line": 16,
+        "quote": "### Slate-based schema\n\nThe blocks editor schema is based on Slate.js, which allows us to design our own custom schema structure. We chose Slate in part because its JSON format remains human-readable. This was a key element to ensure the data could be rendered in any frontend where official or third-party libraries may not be available.\n\nOur Blocks schema is made of the following elements:\n\n- Block nodes: they're at the root of the document JSON: Paragraphs, images, headings, lists, code blocks...\n- Inline nodes: they're children of block nodes, and can have children. Inline nodes include text nodes, and links.\n- Text leaves: they're children of inline nodes, and contain the actual text content. One specificity of our design compared to most Slate implementations is that they must have a `\"type\": \"text\"` entry in addition to the standard `text` property.\n- Modifiers: they're variations of text nodes that can be applied to text content. They include bold, italic, underline, and strikethrough. They can be combined.\n\nWith these elements combined, here's what the content for a sample Blocks attribute looks like:\n\n```json\n[\n  {\n    \"type\": \"heading\",\n    \"children\": [\n      {\n        \"type\": \"text\",\n        \"text\": \"I am a heading\"\n      }\n    ],\n    \"level\": 1\n  },\n  {\n    \"type\": \"paragraph\",\n    \"children\": [\n      {\n        \"type\": \"text\",\n        \"text\": \"Nice content here. Isn't it? Some of it can be \"\n      },\n      {\n        \"type\": \"text\",\n        \"text\": \"bold\",\n        \"bold\": true\n      },\n      {\n        \"type\": \"text\",\n        \"text\": \", \"\n… (+74 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a6d9a90fd7419ba7f9a46b24df81b8bc3a9dd28862ef839036d3c2778449f0dc",
+      "topic": "data",
+      "subject": "Blocks editor block registration",
+      "content": {
+        "summary": "Each block is registered as an object with consistent shape. Multiple variations can exist per type (e.g., Heading 1 and Heading 2 are separate registrations sharing 'heading' type)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "line": 152,
+        "quote": "### Block registration\n\nA block is registered in the editor as an object of always the same shape. For a single \"type\", there can be several variations, all of which will have their own object. For example, Heading 1 and Heading 2 both have `heading` type, but are displayed separately in the editor, and therefore are registered separately.\n\n| Property                                                                     | Description                                                                                                                                                                                                                                                                         |\n| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| **renderElement**<br />`(props: RenderElementProps) => JSX.Element`          | Displays the block inside `BlocksContent`. Make sure to spread `attributes` on the root (that's how Slate makes it editable), and to render `children` so that inline nodes and text leaves can be rendered.                                                                        |\n| **icon**<br />`React.ComponentType`                                          | A visual cue to identify the block. Use icons from the design system.                                                                                                                                                                                                               |\n| **label**<br />`MessageDescriptor`                                           | A translation object to display what the block is called.                                                                                                                                                                                                                           |\n| **isInBlocksSelector**<br />`boolean`                                        | Whether the block should appear in the blocks selector dropdown. In almost all cases, this is `true`. The main exception is list items, as they are hidden under their list parent.                                                                                                 |\n| **dragHandleTopMargin**<br />`CSSProperties['marginTop']`                    | Adjusts the vertical alignment of the grip icon used to reorder nodes.                                                                                                                                                                                                              |\n| **matchNode**<br />`(node: BlocksNode) => boolean`                           | Returns a boolean that indicates whether a node is of the given block type.                                                                                                                                                                                                         |\n| **handleConvert**<br />`(editor: Editor) => void`                            | Customizes the logic run when transforming the currently selected node into the given node type. It generally involves setting the `type` property and clearing unwanted properties. The `baseHandleConvert` util manages just that.                                                |\n| **handleEnterKey**<br />`(editor: Editor) => void`                           | Customizes the logic ran when the user presses enter. By default, it creates a paragraph under the current node and selects it. For blocks that may have multi-line content, such as code blocks, a common pattern is to replicate this behavior when the user presses enter twice. |\n| **handleBackspaceKey**<br />`(editor: Editor, event: KeyboardEvent) => void` | Customizes the logic ran when the user presses backspace. Useful for blocks that need special behavior when deleting content at the start of a block.                                                                                                                               |\n| **handleTab**<br />`(editor: Editor) => void`                                | Customizes the logic ran when the user presses tab. Useful for blocks like lists that support indentation.                                                                                                                                                                          |\n| **snippets**<br />`string[]`                                                 | Strings that can trigger a transformation into the given block after pressing space.                                                                                                                                                                                                |\n\n```tsx\nconst headingBlocks = {\n  'heading-one': {\n    renderElement: (props) => <H1 {...props.attributes}>{props.children}</H1>,\n    icon: HeadingOne,\n    label: {\n      id: 'components.Blocks.blocks.heading1',\n      defaultMessage: 'Heading 1',\n    },\n    matchNode: (node) => node.type === 'heading' && node.level === 1,\n    isInBlocksSelector: true,\n    handleConvert: (editor) => baseHandleConvert(editor, { type: 'heading', level: 1 }),\n    snippets: ['#'],\n    dragHandleTopMargin: '14px',\n  },\n};\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1a48d1c661b33b09b230913d3ce45f411f2ec95df199ea115767d3010fa75e51",
+      "topic": "data",
+      "subject": "Blocks editor modifier registration",
+      "content": {
+        "fields": {
+          "renderLeaf": "(children: JSX.Element | string) => JSX.Element",
+          "icon": "React.ComponentType"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "line": 188,
+        "quote": "### Modifier registration\n\nA modifier is registered in the editor as an object with a consistent shape.\n\n| Property                                                               | Description                                                                                                                                    |\n| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |\n| **renderLeaf**<br />`(children: JSX.Element \\| string) => JSX.Element` | Displays the modified text inside `BlocksContent`. This wraps the children in the appropriate styled component (e.g., `<BoldText>` for bold).  |\n| **icon**<br />`React.ComponentType`                                    | A visual cue to identify the modifier. Use icons from the design system.                                                                       |\n| **label**<br />`MessageDescriptor`                                     | A translation object to display what the modifier is called.                                                                                   |\n| **isValidEventKey**<br />`(event: KeyboardEvent) => boolean`           | Returns a boolean that indicates whether a keyboard event should trigger this modifier. Used for keyboard shortcuts (e.g., `Ctrl+B` for bold). |\n| **checkIsActive**<br />`(editor: Editor) => boolean`                   | Returns a boolean that indicates whether the modifier is currently active on the selection.                                                    |\n| **handleToggle**<br />`(editor: Editor) => void`                       | Customizes the logic ran when toggling the modifier on or off.                                                                                 |\n\n```tsx\nconst modifiers = {\n  bold: {\n    renderLeaf: (children) => <BoldText>{children}</BoldText>,\n    icon: Bold,\n    label: {\n      id: 'components.Blocks.modifiers.bold',\n      defaultMessage: 'Bold',\n    },\n    isValidEventKey: (event) => event.key === 'b',\n    checkIsActive: (editor) => Boolean(Editor.marks(editor)?.bold),\n    handleToggle: (editor) => {\n      if (Editor.marks(editor)?.bold) {\n        Editor.removeMark(editor, 'bold');\n      } else {\n        Editor.addMark(editor, 'bold', true);\n      }\n    },\n  },\n};\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7869c104d3b9ff4a61d2e7e7d8359f9bdc1ddea3d4d6f915571b96ce0fcfd3d4",
+      "topic": "data",
+      "subject": "Blocks field data format",
+      "content": {
+        "fields": {
+          "format": "JSON (not markdown string)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "line": 12,
+        "quote": "### Why JSON\n\nWhile the markdown editor stores content as a string, Blocks stores it as a JSON object. Since Strapi is headless, we want a format that makes it easy to map content across different platforms and offer a good experience for non-web use cases too. In the case of React frontends, JSON also means we don't need to rely on `dangerouslySetInnerHTML` to render the formatted content.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "45e655ca2b87d6c6822f68afe48ace2dd2ed74e2e93ba392de9dc9b062e1865e",
+      "topic": "data",
+      "subject": "Document / fetching",
+      "content": {
+        "fields": {
+          "model": "content-type uid (e.g. api::article.article)",
+          "kind": "single-type | collection-type",
+          "id": "string",
+          "locale": "string (optional dimension)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/01-documents.md",
+        "line": 15,
+        "quote": "## Getting Documents\n\nWe get documents via the [`useDocument`](./hooks/use-document.mdx) hook, which requires us to understand which \"model\" we want – the model is basically which content-type e.g. `api::article.article`, the \"kind\" of content-type e.g. `single-type` or `collection-type` and the specific `id` of said document. Using these three parameters we can fetch any document, without passing specific parameters e.g. `locale` we get a default version defined by the user's application. However, all dimensions should be queryable to narrow down the point on the document matrix to a specific entry e.g. `published & 'en-GB'`.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6b2898f75ff48168a9a01154e4819c797ed79c38c796dbf8241720f73357ba76",
+      "topic": "data",
+      "subject": "DocumentRBACContextValue / fields",
+      "content": {
+        "fields": {
+          "canCreate": "boolean (optional)",
+          "canCreateFields": "string[]",
+          "canDelete": "boolean (optional)",
+          "canPublish": "boolean (optional)",
+          "canRead": "boolean (optional)",
+          "canReadFields": "string[]",
+          "canUpdate": "boolean (optional)",
+          "canUpdateFields": "string[]",
+          "canUserAction": "function(fieldName, fieldsUserCanAction, fieldType) => boolean",
+          "isLoading": "boolean"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/03-RBAC.md",
+        "line": 33,
+        "quote": "## DocumentRBAC Component\n\nThe `DocumentRBAC` component wraps the ListView & EditView pages providing\n\n- if a user can `create/read/update/delete/publish` a document at all\n- the list of fields for each action\n- a utility function to check if a user `canAction`\n\n```ts\ninterface DocumentRBACContextValue {\n  canCreate?: boolean;\n  canCreateFields: string[];\n  canDelete?: boolean;\n  canPublish?: boolean;\n  canRead?: boolean;\n  canReadFields: string[];\n  canUpdate?: boolean;\n  canUpdateFields: string[];\n  canUserAction: (\n    fieldName: string,\n    fieldsUserCanAction: string[],\n    fieldType: Attribute.Kind\n  ) => boolean;\n  isLoading: boolean;\n}\n```\n\n:::note\nBecause the `useRBAC` hook fetches data from the API to check against `conditions` of a permission, we optionally have the `isLoading` returned incase a component needs to await this.\n:::\n\nUsing all this information, we can disabled & hide fields in the application based on the user's permissions.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c1e70812aef91c87ccf5bc7dbdf1a514df0db49007c0c70dd2967281cc3777ff",
+      "topic": "data",
+      "subject": "EditFieldLayout / fields",
+      "content": {
+        "fields": {
+          "disabled": "boolean (optional)",
+          "hint": "string (optional)",
+          "label": "string",
+          "name": "string",
+          "placeholder": "string (optional)",
+          "required": "boolean (optional)",
+          "mainField": "string (optional)",
+          "size": "number",
+          "unique": "boolean (optional)",
+          "visible": "boolean (optional)",
+          "attribute": "Attribute.Any",
+          "type": "Attribute.Kind"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/02-layouts.md",
+        "line": 39,
+        "quote": "### EditView\n\nThe very base level interface for the EditView layout is an `EditFieldLayout` which is primarily derived from the `InputProps` of our Form Components:\n\n```ts\ninterface InputProps {\n  disabled?: boolean;\n  hint?: string;\n  label: string;\n  name: string;\n  placeholder?: string;\n  required?: boolean;\n  type: Exclude<\n    Attribute.Kind,\n    'media' | 'blocks' | 'richtext' | 'uid' | 'dynamiczone' | 'component' | 'relation'\n  >;\n}\n\ninterface EditFieldSharedProps extends Omit<InputProps, 'type'> {\n  mainField?: string;\n  size: number;\n  unique?: boolean;\n  visible?: boolean;\n}\n\n/**\n * Map over all the types in Attribute Types and use that to create a union of new types where the attribute type\n * is under the property attribute and the type is under the property type.\n */\ntype EditFieldLayout = {\n  [K in Attribute.Kind]: EditFieldSharedProps & {\n    attribute: Extract<Attribute.Any, { type: K }>;\n    type: K;\n  };\n}[Attribute.Kind];\n```\n\nThe excluded `type` values are unique to the content-manager and as such aren't expected to be rendered as universal form inputs. This data-structure is passed to the `InputRenderer` component to render any form input (previously known as `GenericInputs` from the helper-plugin). Notice how these inputs don't receive their `value`, `onChange` or `error` prop. These are extracted from the `Form` using `useField(name)`:\n\n```ts\n… (+24 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "954ca23ac6917d609fb602f368d397f5f6fb6f02d14a189aabe466d0069c8cc8",
+      "topic": "data",
+      "subject": "EditLayout / fields",
+      "content": {
+        "fields": {
+          "layout": "Array<Array<EditFieldLayout[]>>",
+          "components": "Record<string, EditLayout>",
+          "metadatas": "object",
+          "settings": "object"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/02-layouts.md",
+        "line": 13,
+        "quote": "## What is a layout?\n\nA layout is simply a data-structure we iterate over to understand how to render the views. For both List & Edit view their structures have explicitly been designed to be similar:\n\n```ts\ninterface ListLayout {\n  layout: ListFieldLayout[];\n  components?: never;\n  metadatas: object;\n  settings: object;\n}\n\ninterface EditLayout {\n  layout: Array<Array<EditFieldLayout[]>>;\n  components: Record<string, Omit<EditLayout, 'metadatas' | 'components'>>;\n  metadatas: object;\n  settings: object;\n}\n```\n\nThe above types have been simplified for the purpose of explanation, but you can see from the `components` property of the `EditLayout` that it's essentially the same as its parent, just a nested and organised per component. This consistency allows us to easily iterate over the layouts and render the views using the same components for the general layout & component layouts.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b337d339169591cb26b83325f066ad727dc0971a00864e04fe895692d3b65038",
+      "topic": "data",
+      "subject": "ListFieldLayout / fields",
+      "content": {
+        "fields": {
+          "attribute": "Attribute.Any | {type: 'custom'}",
+          "cellFormatter": "function (optional, for custom cell rendering)",
+          "label": "string | MessageDescriptor",
+          "mainField": "string (optional, for relation display)",
+          "name": "string",
+          "searchable": "boolean (optional)",
+          "sortable": "boolean (optional)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/02-layouts.md",
+        "line": 103,
+        "quote": "### ListView\n\nBecause the list view is essentailly a giant table, its data-structure is considerably simpler than the edit view:\n\n```ts\ninterface ListFieldLayout {\n  /**\n   * The attribute data from the content-type's schema for the field\n   */\n  attribute: Attribute.Any | { type: 'custom' }; // custom attributes are expected to use `cellFormatter`.\n  /**\n   * Typically used by plugins to render a custom cell\n   */\n  cellFormatter?: (\n    data: { [key: string]: unknown },\n    header: Omit<ListFieldLayout, 'cellFormatter'>\n  ) => React.ReactNode;\n  label: string | MessageDescriptor;\n  /**\n   * the name of the attribute we use to display the actual name e.g. relations\n   * are just ids, so we use the mainField to display something meaninginful by\n   * looking at the target's schema\n   */\n  mainField?: string;\n  name: string;\n  searchable?: boolean;\n  sortable?: boolean;\n}\n```\n\nThe `cellFormatter` property is paramount to plugin developers being able to inject their own columns, because we, most likely, will not have the components necessary to render the data the plugin provides. This is why they receive the data for the entire row & the header that they injected via the `'Admin/CM/pages/ListView/inject-column-in-table'` hook.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "40758be9556744fd0ac1d5e30063c44ae9d5ab0cb3fa46f77e63795acc390e4a",
+      "topic": "data",
+      "subject": "ListLayout / fields",
+      "content": {
+        "fields": {
+          "layout": "ListFieldLayout[]",
+          "metadatas": "object",
+          "settings": "object"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/02-layouts.md",
+        "line": 13,
+        "quote": "## What is a layout?\n\nA layout is simply a data-structure we iterate over to understand how to render the views. For both List & Edit view their structures have explicitly been designed to be similar:\n\n```ts\ninterface ListLayout {\n  layout: ListFieldLayout[];\n  components?: never;\n  metadatas: object;\n  settings: object;\n}\n\ninterface EditLayout {\n  layout: Array<Array<EditFieldLayout[]>>;\n  components: Record<string, Omit<EditLayout, 'metadatas' | 'components'>>;\n  metadatas: object;\n  settings: object;\n}\n```\n\nThe above types have been simplified for the purpose of explanation, but you can see from the `components` property of the `EditLayout` that it's essentially the same as its parent, just a nested and organised per component. This consistency allows us to easily iterate over the layouts and render the views using the same components for the general layout & component layouts.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8b540978d751fbadd3fa28b6d7f37a00ddc125a01bfe9dd8c47c17fdecb562fc",
+      "topic": "data",
+      "subject": "Permission / fields",
+      "content": {
+        "fields": {
+          "action": "Action",
+          "subject": "Subject",
+          "conditions": "Conditions",
+          "properties": "Properties",
+          "actionParameters": "ActionParameters",
+          "domain": "Domain (namespace)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 40,
+        "quote": "### Domain\n\n```mermaid\ngraph TB\n  N([Domain]):::namespace --> A([Permission]):::permission\n  A --> B([Action]):::action\n  A --> C([Subject]):::subject\n  A --> D([Conditions]):::conditions\n  A --> E([Properties]):::properties\n  A --> F([ActionParameters]):::actionParameters\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ec5ab68e5dbd62cb8ec1cfc6e58e24787736c71e3692a997950b4f6608276194",
+      "topic": "data",
+      "subject": "Permission Checker / validation methods",
+      "content": {
+        "fields": {
+          "validateQuery": "validateQuery(query, {action}) - ensures query is valid based on permissions",
+          "validateInput": "validateInput(action, data, entity) - ensures input is valid before saving"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 110,
+        "quote": "### Validation Methods\n\n#### `validateQuery(query, { action })`\n\nEnsures a query is valid based on permissions.\n\n```ts\nconst validatedQuery = permissionChecker.validateQuery({ page: '1', pageSize: '10' });\n```\n\n#### `validateInput(action, data, entity)`\n\nEnsures input data is valid before saving.\n\n```ts\npermissionChecker.validateInput('update', inputData, existingEntity);\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9fa587efd51cc2b2ec479fa864b38589da116d1fa696c219c0b907d590d0ddd0",
+      "topic": "data",
+      "subject": "Permission Checker exported service",
+      "content": {
+        "fields": {
+          "create": "factory: createPermissionChecker(strapi)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 138,
+        "quote": "## Exported Service\n\n```ts\nexport default ({ strapi }: { strapi: Core.Strapi }) => ({\n  create: createPermissionChecker(strapi),\n});\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f343df53237ce1f9956d1b094abe4feeb9f97c25b85c6611ea0cc903e8ff4378",
+      "topic": "data",
+      "subject": "Permission Checker instantiation",
+      "content": {
+        "fields": {
+          "userAbility": "user's ability object from ctx.state.userAbility",
+          "model": "content type model UID"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 32,
+        "quote": "### Instantiating the Permission Checker\n\nTo use the permission checker, retrieve it from the **content-manager** plugin:\n\n```ts\nconst permissionChecker = strapi\n  .plugin('content-manager')\n  .service('permission-checker')\n  .create({ userAbility, model });\n```\n\n- `userAbility`: The user's ability object containing their permissions. Accessed on the request context object: `ctx.state.userAbility`\n- `model`: The content type model for which permissions are checked.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c3f8feedb0a4140a1b76113ae99a7957cb32030b46dc0b86dc458e95233e0035",
+      "topic": "data",
+      "subject": "Release / status",
+      "content": {
+        "fields": {
+          "status": "Ready | Blocked | Empty | Failed | Done"
+        },
+        "validation": {
+          "Ready": "fully prepared for publishing, no invalid entries",
+          "Blocked": "at least one invalid entry preventing publishing",
+          "Empty": "no entries, cannot be published",
+          "Failed": "publishing attempt encountered an error with no changes since",
+          "Done": "successfully published without errors"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/00-intro.md",
+        "line": 26,
+        "quote": "### Release's status\n\nReleases are assigned one of five statuses:\n\n- **Ready**: Indicates that the release is fully prepared for publishing, with no invalid entries present.\n- **Blocked**: Release has at least one invalid entry preventing publishing.\n- **Empty**: Release contains no entries and cannot be published.\n- **Failed**: Indicates that the publishing attempt for the release has encountered an error with no changes since then.\n- **Done**: Confirms that the release has been successfully published without encountering any errors.\n\nThese statuses are dynamically updated based on actions such as creation, addition/removal of entries, updates, and publishing attempts. They provide a concise overview of release readiness and validity, ensuring smooth operations and data integrity.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "dc0db19cabfb79e21e6e1c085cce6dde82f492bf6e2f41cee9477f56e1e1d117",
+      "topic": "data",
+      "subject": "Release / status update rules",
+      "content": {
+        "summary": "Status is stored in the Release content type (not computed on demand). Triggers: create→Empty; add entry→Ready or Blocked; remove entry→Ready, Blocked, or Empty; publish attempt failure→Failed; successful publish→Done."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 209,
+        "quote": "### Release status update triggers:\n\nConsidering that retrieving the status of all entries in a release is a heavy operation, we don't fetch it every time a user wants to access a release. Instead, we store the status in a field within the Release Content Type, and we only update it when an action that changes the status is triggered. These actions include:\n\n#### Creating a release:\n\nWhen creating a release, its status is automatically set to \"Empty\" as there are no entries initially.\n\n#### Adding an entry to a release:\n\nUpon adding an entry to a release, its status is recalculated to either \"Ready\" or \"Blocked\" based on the validity of the added entry.\n\n#### Removing an entry from a release:\n\nAfter removing an entry from a release, the status is recalculated to determine if the release is now \"Ready\", \"Blocked\", or \"Empty\".\n\n#### Updating a release:\n\nWhenever a release is updated, its status is recalculated based on the validity of the actions performed during the update.\n\n#### Publishing a release:\n\nDuring the publishing process, if successful, the status changes to \"Done\"; otherwise, it changes to \"Failed\".\n\n#### Listening to events on entries:\n\nWhen an entry is updated or deleted, the status of all releases containing that entry is recalculated to reflect any changes in validity.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9da27e034815450620170cedff51af80a2965df865dd369ce13d60322dced59f",
+      "topic": "data",
+      "subject": "content-manager ACTIONS / fields",
+      "content": {
+        "fields": {
+          "read": "plugin::content-manager.explorer.read",
+          "create": "plugin::content-manager.explorer.create",
+          "update": "plugin::content-manager.explorer.update",
+          "delete": "plugin::content-manager.explorer.delete",
+          "publish": "plugin::content-manager.explorer.publish",
+          "unpublish": "plugin::content-manager.explorer.publish",
+          "discard": "plugin::content-manager.explorer.update"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 14,
+        "quote": "## Actions Supported\n\nThe service defines the following actions:\n\n```ts\nconst ACTIONS = {\n  read: 'plugin::content-manager.explorer.read',\n  create: 'plugin::content-manager.explorer.create',\n  update: 'plugin::content-manager.explorer.update',\n  delete: 'plugin::content-manager.explorer.delete',\n  publish: 'plugin::content-manager.explorer.publish',\n  unpublish: 'plugin::content-manager.explorer.publish',\n  discard: 'plugin::content-manager.explorer.update',\n} as const;\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "3859168ba8dc2f15669cbe138e066b381c348ea24be87f0eb510f172f90446b5",
+      "topic": "data",
+      "subject": "content-releases license limits",
+      "content": {
+        "fields": {
+          "maxPendingReleases": "3 (default if not specified by license)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/02-frontend/00-intro.md",
+        "line": 14,
+        "quote": "### License limits\n\nMost licenses have feature-based usage limits configured through Chargebee. These limits are exposed to the frontend through [`useLicenseLimits`](/docs/core/admin/ee/hooks/use-license-limits).\nIf the license doesn't specify the number of maximum pending releases a hard-coded default is used: max. 3 pending releases.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "aed9820bffac296ab55f57f1cef472daded033ee4a72bdd089628e4de65ce8c2",
+      "topic": "data",
+      "subject": "content-releases scheduling / multi-instance locking",
+      "content": {
+        "summary": "Release publish uses SQL SELECT FOR UPDATE transaction lock. Multiple instances with the same cronjob will queue on the lock; only the first succeeds. Others see validation failure (release already published) and skip."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/03-scheduling.md",
+        "line": 31,
+        "quote": "### Starting a strapi instance\n\nThe problem is starting a new Strapi instance, because we retrieve all scheduled releases and ensure that cronjobs are created for each one. Consequently, multiple Strapi instances might end up with the same cronjob for a release publish. To address this, we implement the following logic:\n\n<img\n  src=\"/img/content-manager/content-releases/scheduling-publish.png\"\n  alt=\"a diagram overview explaining the publish release flow\"\n/>\n\nWe set up a transaction that locks the release being published using SQL forUpdate. This means that any other processes attempting to access the release row will be put on hold until the first one finishes executing.\n\nIf the validation of the release entries is successful, the publish action proceeds smoothly. In this scenario, we update the releasedAt column of the release with the current date and release the row lock. Subsequently, any incoming processes attempting to access the release would simply encounter an error because the release has already been published.\n\nOn the other hand, if the publish process fails, we update the release's status to \"failed\". When the status is marked as failed, any subsequent attempts to publish will fail silently. The \"failed\" status only changes when a user makes alterations to the release.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a2ef09c07b107d990e27a3bb6d146fd0b00697aaebcf02dcce4cc0722fb0bba7",
+      "topic": "data",
+      "subject": "content-releases scheduling / single-server cronjob",
+      "content": {
+        "summary": "When a release is created/updated with a schedule via a specific server instance, only that instance holds the associated cronjob — no duplication across other running instances."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/03-scheduling.md",
+        "line": 27,
+        "quote": "### Release scheduled on runtime\n\nIf you have 3 Strapi instances running concurrently, and you distribute traffic among them using any method, there is not a big problem. This is because the server responsible for handling one request to create/update a release and add a schedule will be the only server with the associated cronjob. Then, there's no duplication, and potential race condition problems are avoided.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cea925864c7141d6b5e188d4be2af70b3726158f6afa2a5d5c90aa216544be55",
+      "topic": "data",
+      "subject": "content-releases scheduling / timezone handling",
+      "content": {
+        "summary": "Scheduled date stores the chosen timezone explicitly (not UTC). All users see the same time+timezone regardless of their system timezone. Default is the scheduling user's system timezone."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/03-scheduling.md",
+        "line": 19,
+        "quote": "## Timezones\n\nWhen selecting a scheduled date, you have the option to choose a specific timezone; by default, your system timezone is selected. This measure is taken to prevent any potential confusion when selecting the publication time for a release. Consequently, if a user sets a schedule for 16:00 using the \"Europe/Paris\" timezone (UTC+01:00), another user accessing the same release will see the same time (16:00 (UTC+01:00)), regardless of their system's timezone.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c54b29d300e6adf61a97688010cbe0968cea3d5353b9c4dccef2e000ee4f9874",
+      "topic": "data",
+      "subject": "content-releases scheduling feature",
+      "content": {
+        "summary": "Scheduling is under development. Enable via future flag contentReleasesScheduling."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 197,
+        "quote": "### Scheduling\n\n:::caution\nScheduling is still under development, but you can try it **at your own risk** with future flags. The future flag to enable scheduling is `contentReleasesScheduling`.\n:::\n\nExposes methods to schedule release date for releases.\n\n```\npackages/core/content-releases/server/src/services/scheduling.ts\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "status": "deferred",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "efdbcfa20c0a316537f62cb941c4813f55239c71f83490ea2048f549b565f17f",
+      "topic": "data",
+      "subject": "custom fields / admin registration",
+      "content": {
+        "summary": "A custom field saved on a content-type converts its type to 'type: customField' before save in the formatAttributes/cleanData function."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/01-custom-fields.md",
+        "line": 26,
+        "quote": "### Admin\n\nTo register a custom field to the admin panel, see [documentation](https://docs.strapi.io/developer-docs/latest/development/custom-fields.html#registering-a-custom-field-in-the-admin-panel).\n\nA custom field being saved on a content-type or component will have it’s underlying data type converted from the underlying data type to `type: customField` just before save in the [formatAttributes function](https://github.com/strapi/strapi/blob/33debd57010667a3fc5dfa343a673206cfb956e1/packages/core/content-type-builder/admin/src/components/DataManagerProvider/utils/cleanData.js#L97-L100) of the `cleanData` util\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "8047b616bea20dd56d34bba9c1c5e1484662a7e7f6a47f77697140e6254ff2d2",
+      "topic": "data",
+      "subject": "custom fields / constraints",
+      "content": {
+        "summary": "Custom fields cannot: create custom database types, import custom input components in Content-type Builder extensions, or use relation/component/dynamic-zone/media types."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/01-custom-fields.md",
+        "line": 41,
+        "quote": "## Tradeoffs\n\n- We do not yet offer the ability to create a custom database type in Strapi.\n- When extending a custom field’s base and advanced forms in the Content-type Builder, it is not yet possible to import custom input components.\n- We do not allow custom fields to use the relation, component, dynamic zone and media types.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "34e0507f632339c004e64e3048e92aee797802222d112968044caeeb2ffb38f4",
+      "topic": "data",
+      "subject": "custom fields / packaging",
+      "content": {
+        "summary": "Custom fields can be registered in a Strapi application or plugin. They can only be shared through plugins published on npm."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/01-custom-fields.md",
+        "line": 32,
+        "quote": "### Packaging\n\nA custom field can be registered in either a Strapi application or Strapi plugin. However, they can only be shared through plugins by publishing the package on npm.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "30e792065a26847c2c0f49c5d621976e89be0e663daf98cf192b3f7eb916edef",
+      "topic": "data",
+      "subject": "custom fields / server registration",
+      "content": {
+        "summary": "Custom fields registered during server register lifecycle. The 'type: customField' in schema.json is converted to the underlying Strapi data type by convertCustomFieldType during app register lifecycle."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/01-custom-fields.md",
+        "line": 18,
+        "quote": "### Server\n\nTo register a custom field on the server, see [documentation](https://docs.strapi.io/developer-docs/latest/development/custom-fields.html#registering-a-custom-field-on-the-server).\n\nThe custom field will be added to Strapi during the server [register lifecycle](https://docs.strapi.io/developer-docs/latest/developer-resources/plugin-api-reference/server.html#register).\n\nThe `type: customField` saved on the schema.json for a content-type or component is converted to the underlying Strapi data type by calling the [convertCustomFieldType function](https://github.com/strapi/strapi/blob/a8f807d27ebc9c8b9b335e885154a06c60a896ae/packages/core/strapi/lib/Strapi.js#L395) as soon as the app starts during the `register` lifecycle, right after all custom fields have been loaded.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b6d06c657ab136d9affaac302f09e8b3ea8a7794f319f064bf5faeb6793316c0",
+      "topic": "data",
+      "subject": "hasPublishedVersion (deprecated)",
+      "content": {
+        "summary": "Legacy boolean hasPublishedVersion is deprecated. false → never-published-document, true → has-published-version-document. Normalized to publicationFilter internally.",
+        "status": "deprecated"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 127,
+        "quote": "### Deprecated `hasPublishedVersion`\n\nThe legacy boolean `hasPublishedVersion` (`true` / `false`, or string `\"true\"` / `\"false\"`) is **deprecated** in favor of `publicationFilter`. Implementations resolve it to:\n\n- `false` → `never-published-document`\n- `true` → `has-published-version-document`\n\nso that a single code path (`publicationFilter` translation) handles both the new parameter and backward compatibility. Invalid values yield the same validation errors as before.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "status": "deprecated",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6f613e98e1b164244132d19c01838cd195309770bf2e4bf96ba51361cd42aef3",
+      "topic": "data",
+      "subject": "permissions engine / ability builder factory",
+      "content": {
+        "summary": "Factory creating an ability instance from multiple permissions. Must implement the CustomAbilityBuilder interface."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/01-engine.md",
+        "line": 137,
+        "quote": "### Ability Builder Factory\n\nA factory that is used to create an ability instance out of multiple permissions.\n\nIt must implement the `CustomAbilityBuilder` interface.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b4569a87bebf97a53e8871e55fb73003375677373c58dc020293e692620bb483",
+      "topic": "data",
+      "subject": "permissions engine / action provider",
+      "content": {
+        "summary": "Provider instance containing all available actions usable in permissions when generating abilities."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/01-engine.md",
+        "line": 127,
+        "quote": "### Action Provider\n\nA provider instance that contains all available actions that can be used in permissions when generating abilities.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "3361474107e91d20499ae21b62bf3ba8e3cff887cb7a2c1a5c9b5d84b843ad03",
+      "topic": "data",
+      "subject": "permissions engine / condition provider",
+      "content": {
+        "summary": "Provider instance mapping condition names to their definitions. Used to resolve conditions during ability creation."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/01-engine.md",
+        "line": 131,
+        "quote": "### Condition Provider\n\nA provider instance mapping the conditions' name to their definitions.\n\nUsed to resolve conditions by name when evaluating and registering a permission during the ability creation process.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "31e94391e5deef0f3337794b68e894d3e01b30ee4a6db4838d1ad11531cd0f27",
+      "topic": "data",
+      "subject": "permissions engine hooks",
+      "content": {
+        "fields": {
+          "before-format::validate.permission": "Pre-formatting: Initial validation",
+          "format.permission": "Formatting: Transform permission",
+          "after-format::validate.permission": "Post-formatting: Validate formatted permission",
+          "before-evaluate.permission": "Pre-evaluation: Transform the permission after formatting and validation",
+          "before-register.permission": "Pre-registration: Final modifications after evaluation"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/01-engine.md",
+        "line": 79,
+        "quote": "### Available Hooks\n\n| Hook Name                          | Phase            | Purpose                                                      |\n| ---------------------------------- | ---------------- | ------------------------------------------------------------ |\n| before-format::validate.permission | Pre-formatting   | Initial validation                                           |\n| format.permission                  | Formatting       | Transform permission                                         |\n| after-format::validate.permission  | Post-formatting  | Validate formatted permission                                |\n| before-evaluate.permission         | Pre-evaluation   | Transform the permission after formatting and validation     |\n| before-register.permission         | Pre-registration | Final modifications after evaluation but before registration |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6480b98d92c38097fece1c74eef05085bf95513de1fe2cc9694c6a9971cfaa04",
+      "topic": "data",
+      "subject": "preview frontend configuration / globals",
+      "content": {
+        "fields": {
+          "window.STRAPI_DISABLE_STEGA_DECODING": "boolean - disable field detection; requires manual data-strapi-source attributes",
+          "window.STRAPI_HIGHLIGHT_HOVER_COLOR": "string - customize hover highlight color",
+          "window.STRAPI_HIGHLIGHT_ACTIVE_COLOR": "string - customize active highlight color"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 82,
+        "quote": "### Frontend configuration\n\nUsers can configure the preview behavior from their frontend via `window` globals, without modifying Strapi:\n\n- `window.STRAPI_DISABLE_STEGA_DECODING` - disable field detection entirely. When true, users need to write the `data-strapi-source` attribute manually for fields to be editable\n- `window.STRAPI_HIGHLIGHT_HOVER_COLOR` - customize hover highlight color\n- `window.STRAPI_HIGHLIGHT_ACTIVE_COLOR` - customize active highlight color\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8b52913cb19f38beaceece78229fd31330d321aa0c2f0f7e5dbd7091787b7b7f",
+      "topic": "data",
+      "subject": "preview script / self-contained constraint",
+      "content": {
+        "summary": "The preview script is stringified and sent to the iframe as: `(${previewScript.toString()})(${JSON.stringify(config)})`. It cannot import dependencies or reference external variables. Only @vercel/stega is loaded dynamically from CDN."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 20,
+        "quote": "### Self-contained constraint\n\nThe preview script (`packages/core/content-manager/admin/src/preview/utils/previewScript.ts`) is stringified before being sent to the iframe:\n\n```ts\nconst script = `(${previewScript.toString()})(${JSON.stringify(config)})`;\n```\n\nBecause of this, it **cannot import dependencies or reference external variables**. All logic must be self-contained. The only external code (`@vercel/stega` for decoding) is loaded dynamically from a CDN at runtime.\n\nThis is why the file has an unusual structure with many functions defined inline.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f8c51f452dbb6773649ec83e9824f20f854dca471ca0d8296d623281a8095854",
+      "topic": "data",
+      "subject": "preview stega encoding / limitations",
+      "content": {
+        "summary": "Stega only encodes strings. Blocks fields (JSON) do not support visual editing. Numbers and booleans are not encoded. Fields inside components and dynamic zones work (path includes indices). Media string properties (url, name, alternativeText) are encoded when traversed."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 43,
+        "quote": "### Stega limitations\n\nStega can only encode strings. This means:\n\n- **Blocks fields don't support visual editing** — their content is a JSON object, not a string. Supporting them would require a custom implementation.\n- **Numbers and booleans aren't encoded** — we can't modify their type in the response.\n- **Fields inside components and dynamic zones work** — we encode individual string fields within them, not the parent object. The path includes indices (e.g., `components.2.title`) to identify the exact field.\n- **Media fields work partially** — the string properties inside media objects (like `url`, `name`, `alternativeText`) get encoded when traversed.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "08264881bfcf47c4759c29c21728632bd69707c23d3e98be6dee4882668e20a6",
+      "topic": "data",
+      "subject": "preview stega metadata format",
+      "content": {
+        "fields": {
+          "format": "URL search params embedded via Unicode zero-width chars",
+          "params": "path, type, documentId, locale, model"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 32,
+        "quote": "### Field identification with stega\n\nWe use [stega encoding](https://github.com/vercel/stega) to identify which Strapi field each piece of text comes from. Stega embeds invisible metadata into text content using Unicode zero-width characters that are imperceptible to users but can be decoded programmatically.\n\n1. The Document Service encodes field metadata into text values (invisible to users)\n2. The frontend renders the content normally\n3. The preview script decodes the metadata and attaches `data-strapi-source` attributes to DOM elements\n4. Highlights are drawn over elements with source attributes\n\nThe metadata uses URL search params format, because it makes it easy to encode and decode multiple pieces of information into a single string: `path=title&type=string&documentId=abc123&locale=en&model=api::page.page`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "efa6962b59fa0e02c6f39a948b55e24e05383507b26ba45fccbac77affb092c3",
+      "topic": "data",
+      "subject": "publicationFilter / future variants",
+      "content": {
+        "summary": "Planned future orthogonal options: time-window variants (e.g. 'stale' modified content), locale completeness variants (published in locale A but missing locale B)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 144,
+        "quote": "### Future options (orthogonal)\n\n- Time-window variants (for example, “stale” modified content).\n- Locale completeness variants (for example, published in locale A but missing locale B).\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "status": "planned",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0a1a3c937f6688a7168b3095fefa009842fc48a9649ac35eac43ba5a6b48511a",
+      "topic": "data",
+      "subject": "publicationFilter / implementation",
+      "content": {
+        "summary": "Implementation: extend validators (return 400 for unknown values), resolve status defaults unchanged, translate publicationFilter to derived constraints using correlated subqueries or joins on (documentId, locale). Normalize deprecated hasPublishedVersion to document-scoped filters."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 136,
+        "quote": "### Implementation outline\n\n1. Extend allowlists and validators to accept `publicationFilter` (and validate unknown values with HTTP 400 / GraphQL input rules as appropriate).\n2. Resolve status defaults as today (no changes to REST/document service defaulting).\n3. Translate `publicationFilter` into derived constraints before final query execution (prefer correlated subqueries or joins on `(documentId, locale)` for localized types; document-scoped modes use document-level predicates).\n4. Reuse patterns where possible; for localized types, avoid document-only existence checks when pair-scoped cohort semantics are required.\n5. Normalize deprecated `hasPublishedVersion` to document-scoped `publicationFilter` modes so one implementation path applies all cohorts.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "524dac5c96a0c6471f7336a8d751789825a7fa76d3ebd4bcadea37db9b1d9010",
+      "topic": "data",
+      "subject": "publicationFilter / query translation",
+      "content": {
+        "summary": "Public query params normalize to binary status plus derived constraints. Implementations use (documentId, locale)-aware predicates for localized types to ensure pair-scoped cohorts."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 86,
+        "quote": "### Query translation contract\n\nPublic query params normalize to binary status plus derived constraints. Implementations use **`(documentId, locale)`-aware** predicates for localized content types so cohorts like `never-published` and `has-published-version` are **pair-scoped**, not merely document-scoped.\n\n| Public query                                                 | Internal normalized behavior (conceptual)                                                                                |\n| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |\n| `status=draft`                                               | `status='draft'`                                                                                                         |\n| `status=published`                                           | `status='published'`                                                                                                     |\n| `status=draft&publicationFilter=never-published`             | Draft rows for pairs with **no** published row for the same `(documentId, locale)`                                       |\n| `status=published&publicationFilter=never-published`         | Intersection of “published row” with “pair has no published version”—**empty** in consistent data (degenerate but valid) |\n| `status=draft&publicationFilter=has-published-version`       | Draft rows for pairs where a published row **also** exists for the same `(documentId, locale)`                           |\n| `status=published&publicationFilter=has-published-version`   | Published rows for pairs where a draft row **also** exists (excludes published-only orphans for that pair)               |\n| `status=draft&publicationFilter=modified`                    | Draft rows for pairs where `draft.updatedAt > published.updatedAt`                                                       |\n| `status=published&publicationFilter=modified`                | Published rows for pairs where `draft.updatedAt > published.updatedAt`                                                   |\n| `status=draft&publicationFilter=unmodified`                  | Draft rows for pairs where `draft.updatedAt <= published.updatedAt`                                                      |\n| `status=published&publicationFilter=unmodified`              | Published rows for pairs where `draft.updatedAt <= published.updatedAt`                                                  |\n| `…&publicationFilter=never-published-document`               | Same intent as `never-published`, scoped to **document** (see semantics above)                                           |\n| `…&publicationFilter=has-published-version-document`         | Same intent as `has-published-version`, scoped to **document**                                                           |\n| `status=published&publicationFilter=published-without-draft` | Published rows whose pair has **no** draft row                                                                           |\n| `status=published&publicationFilter=published-with-draft`    | Published rows whose pair **has** a draft row                                                                            |\n\nIf `status` is omitted:\n\n- REST resolves default `status='published'` first.\n- Direct document service resolves default `status='draft'` first.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cce0e8f979c417774cc5d5cc5fb546e594d0f78c19cf2f6a68189e13f6f557e3",
+      "topic": "data",
+      "subject": "publicationFilter / semantics",
+      "content": {
+        "fields": {
+          "never-published": "(documentId, locale) pair where no row exists with non-null publishedAt",
+          "has-published-version": "(documentId, locale) pair where both draft and published rows exist",
+          "resolution": "publicationFilter selects cohort; status (draft|published) chooses which physical row slice to return"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 53,
+        "quote": "### Semantics\n\n`publicationFilter` selects a derived cohort of `(documentId, locale)` pairs (for localized types). For types without locale, read “pair” as `documentId` only.\n\nThe resolved `status` then chooses which **physical row** slice to return (`draft` = `publishedAt` null, `published` = `publishedAt` non-null) from that cohort.\nThe same `publicationFilter` can therefore be used with either status where meaningful.\n\n- `never-published`: for this `(documentId, locale)`, **no** row exists with a non-null `publishedAt` (only draft-only or absent published version for that pair).\n- `has-published-version`: for this `(documentId, locale)`, **both** a draft row and a published row exist (each slice has a row). This excludes “orphan” published-only rows (published row with no draft peer for the same pair), which can arise from legacy data or manual DB edits—not normal D&P invariants.\n- `modified`: among pairs that have both slices, the draft row is strictly newer than the published row (`draft.updatedAt > published.updatedAt`).\n- `unmodified`: among pairs that have both slices, the draft row is not newer (`draft.updatedAt <= published.updatedAt`).\n\nDocument-scoped modes apply the same _ideas_ as `never-published` / `has-published-version`, but existence checks are evaluated at **document** granularity (any locale), not per pair. Use these when the caller cares whether a _document_ has ever been published anywhere, not per-locale publication.\n\nPublished-slice diagnostics inspect the **published** row and correlate with the presence or absence of a **draft** row for the same pair (`published-without-draft` / `published-with-draft`). They replace the earlier sketch names `no-draft-version` / `has-draft-version`.\n\nSome combinations are naturally degenerate (for example, the selected status slice is empty for the chosen cohort).\nDegenerate combinations should return empty results, not validation errors.\n\nWhen `status` is omitted, status is first resolved from current defaults, then `publicationFilter` rules are applied.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "579b0c2ffbc054ba1fe1ed7932777e22cb174104595d62c5f1248ebf8507facf",
+      "topic": "data",
+      "subject": "publicationFilter / values",
+      "content": {
+        "fields": {
+          "pair-scoped": [
+            "never-published",
+            "has-published-version",
+            "modified",
+            "unmodified"
+          ],
+          "document-scoped": [
+            "never-published-document",
+            "has-published-version-document"
+          ],
+          "published-slice-diagnostics": [
+            "published-without-draft"
+          ],
+          "graphql-enum": "PublicationFilter (NEVER_PUBLISHED=never-published, etc.)",
+          "format": "kebab-case for REST and document service"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 29,
+        "quote": "### API shape\n\n- Keep `status` unchanged (`draft`, `published`).\n- Add optional `publicationFilter` with the following string values (REST and document service use kebab-case; GraphQL exposes the same cohorts as the `PublicationFilter` enum, e.g. `NEVER_PUBLISHED` → `never-published`).\n\n**Pair-scoped** (cohorts are defined per `(documentId, locale)`):\n\n- `never-published`\n- `has-published-version`\n- `modified`\n- `unmodified`\n\n**Document-scoped** (cohorts aggregate across locales for the same `documentId`):\n\n- `never-published-document`\n- `has-published-version-document`\n\n**Published-slice diagnostics** (only meaningful with `status=published`; degenerate with `status=draft`):\n\n- `published-without-draft` — published row for a pair with **no** draft sibling\n- `published-with-draft` — published row for a pair that **has** a draft sibling\n\nIf `publicationFilter` is omitted, behavior is unchanged.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d89679abac78bb3b1e65cde8e46b889eff71341b51cc7f98d1fe588e4f3e1f80",
+      "topic": "data",
+      "subject": "publicationFilter query parameter",
+      "content": {
+        "summary": "Optional publicationFilter query parameter for document service, REST API, and GraphQL. Non-breaking: existing status=draft|published behavior unchanged, response payloads unchanged, persistence model unchanged. Core REST API default status=published; document service default status=draft."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 12,
+        "quote": "## Summary\n\nThis RFC specifies an optional `publicationFilter` query parameter for the document service, REST API, and GraphQL.\nThe goal is to expose derived publication queries without changing the existing `status` contract (`draft`, `published`) or existing default behavior.\n\nThe change is intentionally non-breaking:\n\n- Existing query behavior for `status=draft|published` remains unchanged.\n- Existing response payloads remain unchanged.\n- Existing persistence model remains unchanged (all publication states are derived, not stored as a status column).\n- Existing defaulting behavior remains unchanged:\n  - Core REST API default status is `published`.\n  - Direct document service default status is `draft`.\n- The older `hasPublishedVersion` boolean query parameter remains accepted for compatibility; it is implemented by mapping to the document-scoped modes `never-published-document` / `has-published-version-document` (see [Deprecated `hasPublishedVersion`](#deprecated-haspublishedversion)).\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f94d0a5ac7f6eb2b2236f22a004eb529e396430c4b6e1d6e450e7a164e7f5c49",
+      "topic": "data",
+      "subject": "strapi_release_actions / fields",
+      "content": {
+        "fields": {
+          "table": "strapi_release_actions",
+          "contentType": "string - UID of the content type",
+          "locale": "string (optional)",
+          "entryDocumentId": "string - document ID (not entry ID, which changes)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 27,
+        "quote": "### Release Action\n\nTh `Release Action` content type is associated with any entry from any content-type that has draft and publish enabled. It is responsible for storing the action to perform for an associated entry. It is saved in the database as `strapi_release_actions`. In v4, we used built-in polymorphic relations, but for v5, we stored `contentType`, `locale`, and `entryDocumentId` in the Release Action schema to create a \"manual\" relationship between actions and entries. This approach allows us to link a release action to a document ID instead of a specific entry ID, as the entry ID may change over time and is not reliable.\n\nThe schema can be found in:\n\n```\npackages/core/content-releases/server/src/content-types/release-action/schema.ts\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "4a62747bced89fe55ca50197d242924363b570dbf06d8e2a870ae7cd42d9a2ef",
+      "topic": "data",
+      "subject": "strapi_releases / fields",
+      "content": {
+        "fields": {
+          "table": "strapi_releases",
+          "description": "stores all information about a release and its associated Release Actions"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 19,
+        "quote": "### Release\n\nThe `Release` content type stores all the information about a release and its associated Release Actions. It is saved in the database as `strapi_releases`. The schema can be found in:\n\n```\npackages/core/content-releases/server/src/content-types/release/schema.ts\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "31e3773252a437816f7ce36ee615f2b9ae7a52a904984aaa4a30a4ecf4615a8a",
+      "topic": "data",
+      "subject": "strapi_sessions / fields",
+      "content": {
+        "fields": {
+          "userId": "reference",
+          "sessionId": "string",
+          "deviceId": "string",
+          "origin": "string",
+          "expiresAt": "timestamp",
+          "absoluteExpiresAt": "timestamp",
+          "status": "string",
+          "type": "string"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 22,
+        "quote": "## SessionManager\n\nCore provides a `SessionManager` that issues:\n\n- Short‑lived access tokens (JWT, used in `Authorization: Bearer <token>`)\n- Refresh/session tokens (JWT, stored/handled differently per origin)\n\nPer-origin configuration is defined at bootstrap time with:\n\n- `jwtSecret`\n- `accessTokenLifespan` (seconds)\n- `maxRefreshTokenLifespan`, `idleRefreshTokenLifespan` (seconds)\n- `maxSessionLifespan`, `idleSessionLifespan` (seconds)\n\nEach origin stores session rows in `admin::session` (hidden content-type) using the table/collection `strapi_sessions`, containing `userId`, `sessionId`, `deviceId`, `origin`, `expiresAt`, `absoluteExpiresAt`, `status`, `type`.\n\n### Public API (per origin)\n\n- `generateRefreshToken(userId, deviceId?, { type?: 'refresh' | 'session' })`\n- `rotateRefreshToken(refreshToken)`\n- `generateAccessToken(refreshToken)`\n- `validateAccessToken(token)`\n- `invalidateRefreshToken(userId, deviceId?)`\n- `isSessionActive(sessionId)`\n\nLocations:\n\n- Core service: `packages/core/core/src/services/session-manager.ts`\n- Types: `packages/core/types/src/modules/session-manager.ts`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7f72eeb0baff22f08a499e0e44b18adc814f96c2dd2dd0ac7ddb9aa25d7904d0",
+      "topic": "effects",
+      "subject": "content-releases scheduling mechanism",
+      "content": {
+        "name": "release scheduling",
+        "trigger": "create or update release with scheduled date",
+        "payload": {
+          "action": "generate node-schedule cronjob for scheduled publish date"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/03-scheduling.md",
+        "line": 15,
+        "quote": "## How it works\n\nEverytime you create or update a release and add a scheduled date, the server responsible for handling this request will generate a new cronjob (utilizing node-schedule) for the selected date to publish the release.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7ab6c57342be35e7c09cec0bfba36f2d654f4a51b4f8bff92bf9cdf164561378",
+      "topic": "effects",
+      "subject": "deleteActionsOnDeleteContentType migration",
+      "content": {
+        "name": "deleteActionsOnDeleteContentType",
+        "trigger": "Content Type deleted",
+        "payload": {
+          "action": "delete all release actions containing entries from that content type"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 245,
+        "quote": "### `deleteActionsOnDeleteContentType`\n\nWhen a Content Type is deleted, delete all actions containing entries from that Content Type.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "fea65c8485c0eb6081912f886813576311422bd57ea3d77dc45f55e7983dce4b",
+      "topic": "effects",
+      "subject": "deleteActionsOnDisableDraftAndPublish migration",
+      "content": {
+        "name": "deleteActionsOnDisableDraftAndPublish",
+        "trigger": "user disables Draft and Publish on a Content Type",
+        "payload": {
+          "action": "remove all release actions related to entries of that content type"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 241,
+        "quote": "### `deleteActionsOnDisableDraftAndPublish`\n\nWhen a user disables Draft and Publish in one Content Type we make sure to remove all the release actions related to entries of that content type to avoid errors.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "f942aa03af95e752605be3598567f001b6d13f8c89d14f5ccac42d62ec22e29b",
+      "topic": "effects",
+      "subject": "preview postMessage protocol",
+      "content": {
+        "name": "preview iframe communication",
+        "trigger": "admin panel ↔ preview iframe via postMessage",
+        "payload": {
+          "public_events": [
+            "previewReady (iframe→admin)",
+            "strapiScript (admin→iframe)",
+            "strapiUpdate (admin→iframe)"
+          ],
+          "internal_events": [
+            "strapiFieldFocus",
+            "strapiFieldChange",
+            "strapiFieldBlur",
+            "strapiFieldSingleClickHint",
+            "strapiFieldFocusIntent"
+          ]
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 52,
+        "quote": "### Communication protocol\n\nThe admin panel and preview iframe communicate via `postMessage`.\n\n```mermaid\nsequenceDiagram\n    participant Admin\n    participant Iframe as Preview Iframe\n\n    Note over Admin,Iframe: Initialization (public events)\n    Iframe->>Admin: previewReady\n    Admin->>Iframe: strapiScript\n\n    Note over Admin,Iframe: User edits in admin panel (internal events)\n    Admin->>Iframe: strapiFieldFocus\n    Admin->>Iframe: strapiFieldChange\n    Admin->>Iframe: strapiFieldBlur\n\n    Note over Admin,Iframe: User clicks in preview (internal events)\n    Iframe->>Admin: strapiFieldSingleClickHint\n    Iframe->>Admin: strapiFieldFocusIntent (double-click)\n\n    Note over Admin,Iframe: Content saved (public event)\n    Admin->>Iframe: strapiUpdate\n```\n\nPublic events (`previewReady`, `strapiScript`, `strapiUpdate`) are documented to users—changing them is a breaking change.\n\nInternal events (for field focus/blur/change synchronization) are defined in `packages/core/content-manager/admin/src/preview/utils/constants.ts` and can be changed freely since we control both ends.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "fa8246e66b5feb8b5299ef3dd165946126e1e9a974bb30c7d4589071578a71a3",
+      "topic": "effects",
+      "subject": "release-action entry deletion lifecycle",
+      "content": {
+        "name": "entry.delete",
+        "trigger": "entry deleted",
+        "payload": {
+          "action": "delete all release actions containing that entry"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 249,
+        "quote": "## Subscribing to Lifecycles Events\n\nWhen an entry is deleted delete all actions containing that entry.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "ac59b45659e186e6d9e48db4833aa0cfa9690cc3f7d408f1e2529b48e3ffcff7",
+      "topic": "endpoints",
+      "subject": "DELETE /content-releases/:id",
+      "content": {
+        "method": "DELETE",
+        "path": "/content-releases/:id"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 92,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "fceb484869de8c24551bbc2a0729704ff1a4d5d240e49c5a3828d98dcd53a4c9",
+      "topic": "endpoints",
+      "subject": "DELETE /content-releases/:releaseId/actions/:actionId",
+      "content": {
+        "method": "DELETE",
+        "path": "/content-releases/:releaseId/actions/:actionId"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 152,
+        "quote": "### Release Action\n\n**Create a release action**\n\n- method: `POST`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n\n  ```ts\n  {\n    type: 'publish' | 'unpublish',\n    contentType: string;\n    locale?: string;\n    entryDocumentId?: string;\n  }\n  ```\n\n**Get release actions from a release**\n\n- method: `GET`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Update a release action**\n\n- method: `PUT`\n- endpoint: `/content-releases/:releaseId/actions/:actionId`\n- body:\n  ```ts\n  {\n    type: 'publish' | 'unpublish';\n  }\n  ```\n\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "1fd41dbbebdda8b8e95ad22d087e775d95c4fbd089e44ba43931c9f8cd9516a6",
+      "topic": "endpoints",
+      "subject": "GET /api/:collection",
+      "content": {
+        "method": "GET",
+        "path": "/api/:collection",
+        "queryParams": [
+          "status",
+          "publicationFilter"
+        ],
+        "responses": {
+          "200": {}
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 149,
+        "quote": "## Example\n\nRequest examples:\n\n```http\nGET /api/articles?status=draft&publicationFilter=never-published\n```\n\nReturns draft rows from the never-published cohort.\n\n```http\nGET /api/articles?publicationFilter=modified\n```\n\nWith `status` omitted, REST resolves `status=published` by default, then applies `modified`.\n\n```ts\nawait strapi.documents('api::article.article').findMany({ publicationFilter: 'modified' });\n```\n\nWith `status` omitted, direct document service resolves `status=draft` first, then validates and applies `publicationFilter`.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a5b0860e05f0422e6a022f65adf0cd7ecd5caf93aaed786c20f85cd4f57f13cd",
+      "topic": "endpoints",
+      "subject": "GET /content-releases/",
+      "content": {
+        "method": "GET",
+        "path": "/content-releases/",
+        "queryParams": [
+          "page",
+          "pageSize"
+        ],
+        "pagination": "offset"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 41,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "d7552b1cfab2c40a585a11f866d4b812f51868ab2138a4a623ce6a2304bbdf9a",
+      "topic": "endpoints",
+      "subject": "GET /content-releases/:id",
+      "content": {
+        "method": "GET",
+        "path": "/content-releases/:id"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 68,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "416ce588ee6cb3c73188574b5e1151d546f8aa2db59b9bb4255673eb0568200e",
+      "topic": "endpoints",
+      "subject": "GET /content-releases/:releaseId/actions",
+      "content": {
+        "method": "GET",
+        "path": "/content-releases/:releaseId/actions",
+        "queryParams": [
+          "page",
+          "pageSize"
+        ],
+        "pagination": "offset"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 126,
+        "quote": "### Release Action\n\n**Create a release action**\n\n- method: `POST`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n\n  ```ts\n  {\n    type: 'publish' | 'unpublish',\n    contentType: string;\n    locale?: string;\n    entryDocumentId?: string;\n  }\n  ```\n\n**Get release actions from a release**\n\n- method: `GET`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Update a release action**\n\n- method: `PUT`\n- endpoint: `/content-releases/:releaseId/actions/:actionId`\n- body:\n  ```ts\n  {\n    type: 'publish' | 'unpublish';\n  }\n  ```\n\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "293dd2b0281b887db2de0aa00d7458dc762ae8209729c781757491464c1af8ea",
+      "topic": "endpoints",
+      "subject": "GET /content-releases/getByDocumentAttached",
+      "content": {
+        "method": "GET",
+        "path": "/content-releases/getByDocumentAttached",
+        "queryParams": [
+          "contentTypeUid",
+          "locale",
+          "documentId",
+          "hasEntryAttached"
+        ]
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 54,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "3a1741f7ac39230d435a8732a0b24b28016ddc1bd8cd0ab548bdaad06014fe7d",
+      "topic": "endpoints",
+      "subject": "POST /admin/access-token",
+      "content": {
+        "method": "POST",
+        "path": "/admin/access-token",
+        "responses": {
+          "200": {
+            "data": {
+              "token": "string"
+            }
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 56,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "f2d7e06d916b04251bad6157286c16d8226f56d8da9f5ea9f9b932a5ddf221f4",
+      "topic": "endpoints",
+      "subject": "POST /admin/login",
+      "content": {
+        "method": "POST",
+        "path": "/admin/login",
+        "request": {
+          "deviceId": "uuid",
+          "rememberMe": "boolean"
+        },
+        "responses": {
+          "200": {
+            "data": {
+              "token": "string"
+            }
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 53,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "a0ca671a43a25c71be418eea19fb2e576eeca9f44f1b846512f35b72dee45526",
+      "topic": "endpoints",
+      "subject": "POST /admin/logout",
+      "content": {
+        "method": "POST",
+        "path": "/admin/logout",
+        "request": {
+          "deviceId": "string"
+        },
+        "auth": "required",
+        "responses": {
+          "200": {}
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 57,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "6cff9f2f463de4a2bc9f98a55fb7865a292386fda307df2ba26327bef9fc2504",
+      "topic": "endpoints",
+      "subject": "POST /admin/register",
+      "content": {
+        "method": "POST",
+        "path": "/admin/register",
+        "responses": {
+          "200": {
+            "data": {
+              "token": "string"
+            }
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 54,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "debefa3767fe0579c432c278a52b7b675ebc40d15f2461c925611837d565a9a7",
+      "topic": "endpoints",
+      "subject": "POST /admin/register-admin",
+      "content": {
+        "method": "POST",
+        "path": "/admin/register-admin",
+        "responses": {
+          "200": {
+            "data": {
+              "token": "string"
+            }
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 54,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "8fb422719bc51b116fc438c02df6c6b63c4a8b0cb17e6b20d8109793e3590c07",
+      "topic": "endpoints",
+      "subject": "POST /admin/reset-password",
+      "content": {
+        "method": "POST",
+        "path": "/admin/reset-password",
+        "responses": {
+          "200": {
+            "data": {
+              "token": "string"
+            }
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 55,
+        "quote": "## Admin authentication\n\nAdmin defines an origin `admin` with config under `admin.auth.sessions.*`.\n\n- Login/Register/Reset password create a refresh/session token and set an httpOnly cookie `strapi_admin_refresh`.\n- The response includes the short‑lived access token in `data.token`.\n- Clients use `Authorization: Bearer <access token>` for subsequent admin requests.\n\nEndpoints (admin server):\n\n- `POST /admin/login`\n- `POST /admin/register` and `POST /admin/register-admin`\n- `POST /admin/reset-password`\n- `POST /admin/access-token` — rotates the refresh cookie and returns `{ data: { token } }`\n- `POST /admin/logout` — clears cookie and revokes refresh tokens; body may include `{ deviceId }` to revoke a single device\n\nOptional request fields on login/register:\n\n- `deviceId` (UUID). When provided, enables device-scoped revocation.\n- `rememberMe` (boolean). When true, uses the long-lived refresh family and sets a persistent cookie; otherwise uses session family (session cookie).\n\nConfiguration:\n\n- `admin.auth.secret` — JWT secret for symmetric algorithms (HS256, HS384, HS512)\n- `admin.auth.sessions.options.algorithm` — JWT algorithm (default: 'HS256')\n- `admin.auth.sessions.options.privateKey` — Private key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.publicKey` — Public key for asymmetric algorithms (RS256, RS512, ES256, etc.)\n- `admin.auth.sessions.options.*` — Any other JWT options (issuer, audience, subject, etc.)\n- `admin.auth.sessions.accessTokenLifespan` (default 1800)\n- `admin.auth.sessions.maxRefreshTokenLifespan` (default 30 days)\n- `admin.auth.sessions.idleRefreshTokenLifespan` (default 14 days)\n- `admin.auth.sessions.maxSessionLifespan` (default 1 day)\n- `admin.auth.sessions.idleSessionLifespan` (default 2 hours)\n\n**Deprecated:**\n\n- `admin.auth.options.*` — Use `admin.auth.sessions.options.*` instead\n- Cookie options (applied to `strapi_admin_refresh`):\n  - `admin.auth.cookie.domain` (or `admin.auth.domain`)\n  - `admin.auth.cookie.path` (default `/admin`)\n… (+9 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "fa95dc879038268cb47ab91f2b2a74ba14187c812fdb8e4edc8098890e79a148",
+      "topic": "endpoints",
+      "subject": "POST /api/auth/change-password",
+      "content": {
+        "method": "POST",
+        "path": "/api/auth/change-password",
+        "auth": "required",
+        "responses": {
+          "200": {
+            "refreshToken": "string"
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 133,
+        "quote": "## Session Revocation on Credential Changes\n\nFor security, **password changes and resets automatically invalidate all active refresh/session tokens** across all devices:\n\n- **Admin**: When an admin user changes their password via `PUT /admin/users/me` (with `currentPassword` and `password`), all admin sessions are revoked, including the current session. The user must re-authenticate.\n- **Admin**: When an admin resets their password via `POST /admin/reset-password`, all existing admin sessions are revoked before issuing a new session.\n- **Content API (refresh mode)**: When a user changes their password via `POST /api/auth/change-password` or resets it via `POST /api/auth/reset-password`, all users-permissions sessions are revoked. A new refresh token is issued for the current request.\n\nThis behavior ensures that compromised refresh tokens cannot be used after a password change, mitigating persistent session hijacking attacks.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "auth",
+      "source": "extracted"
+    },
+    {
+      "id": "61eaac29cbc67668aa4ec6edbdf09ede141c54c69fdfa27036f5072f7efebc9c",
+      "topic": "endpoints",
+      "subject": "POST /api/auth/logout",
+      "content": {
+        "method": "POST",
+        "path": "/api/auth/logout",
+        "request": {
+          "deviceId": "string"
+        },
+        "auth": "required",
+        "responses": {
+          "200": {}
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 102,
+        "quote": "## Content API (users-permissions)\n\nThe users-permissions (UP) plugin supports two modes, controlled by `plugin::users-permissions.jwtManagement`:\n\n- `legacy-support` (default): issues long‑lived `jwt` configured by `plugin::users-permissions.jwt`.\n- `refresh`: uses `SessionManager` to issue short‑lived access tokens (`jwt`) and separate `refreshToken`.\n\nWhen `jwtManagement` is `refresh`:\n\n- Login/Register/Provider callback responses include `{ jwt, refreshToken }`.\n- New endpoints:\n  - `POST /api/auth/refresh` — body `{ refreshToken }`, returns `{ jwt }` and rotates the refresh token\n  - `POST /api/auth/logout` — revokes sessions for the authenticated user; optional `{ deviceId }` in body to revoke only one device\n\nConfiguration keys:\n\n- `plugin::users-permissions.jwtManagement`: `'legacy-support' | 'refresh'`\n- `plugin::users-permissions.sessions.accessTokenLifespan`\n- `plugin::users-permissions.sessions.maxRefreshTokenLifespan`\n- `plugin::users-permissions.sessions.idleRefreshTokenLifespan`\n  - `plugin::users-permissions.sessions.maxSessionLifespan`\n  - `plugin::users-permissions.sessions.idleSessionLifespan`\n\nKey files:\n\n- Plugin bootstrap/config: `packages/plugins/users-permissions/server/bootstrap/index.js`, `packages/plugins/users-permissions/server/config.js`\n- Controller: `packages/plugins/users-permissions/server/controllers/auth.js`\n- Routes: `packages/plugins/users-permissions/server/routes/content-api/auth.js`\n- JWT service: `packages/plugins/users-permissions/server/services/jwt.js`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "auth",
+      "source": "extracted"
+    },
+    {
+      "id": "4efb472a8b35841398851a13fe2c04825c1559b2505ec58b619f4714c7049b27",
+      "topic": "endpoints",
+      "subject": "POST /api/auth/refresh",
+      "content": {
+        "method": "POST",
+        "path": "/api/auth/refresh",
+        "request": {
+          "refreshToken": "string"
+        },
+        "responses": {
+          "200": {
+            "jwt": "string"
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 101,
+        "quote": "## Content API (users-permissions)\n\nThe users-permissions (UP) plugin supports two modes, controlled by `plugin::users-permissions.jwtManagement`:\n\n- `legacy-support` (default): issues long‑lived `jwt` configured by `plugin::users-permissions.jwt`.\n- `refresh`: uses `SessionManager` to issue short‑lived access tokens (`jwt`) and separate `refreshToken`.\n\nWhen `jwtManagement` is `refresh`:\n\n- Login/Register/Provider callback responses include `{ jwt, refreshToken }`.\n- New endpoints:\n  - `POST /api/auth/refresh` — body `{ refreshToken }`, returns `{ jwt }` and rotates the refresh token\n  - `POST /api/auth/logout` — revokes sessions for the authenticated user; optional `{ deviceId }` in body to revoke only one device\n\nConfiguration keys:\n\n- `plugin::users-permissions.jwtManagement`: `'legacy-support' | 'refresh'`\n- `plugin::users-permissions.sessions.accessTokenLifespan`\n- `plugin::users-permissions.sessions.maxRefreshTokenLifespan`\n- `plugin::users-permissions.sessions.idleRefreshTokenLifespan`\n  - `plugin::users-permissions.sessions.maxSessionLifespan`\n  - `plugin::users-permissions.sessions.idleSessionLifespan`\n\nKey files:\n\n- Plugin bootstrap/config: `packages/plugins/users-permissions/server/bootstrap/index.js`, `packages/plugins/users-permissions/server/config.js`\n- Controller: `packages/plugins/users-permissions/server/controllers/auth.js`\n- Routes: `packages/plugins/users-permissions/server/routes/content-api/auth.js`\n- JWT service: `packages/plugins/users-permissions/server/services/jwt.js`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "auth",
+      "source": "extracted"
+    },
+    {
+      "id": "129efda5fec754658c0fa453c1561312c9409abbbd5391349ea0581ea3c8f778",
+      "topic": "endpoints",
+      "subject": "POST /api/auth/reset-password",
+      "content": {
+        "method": "POST",
+        "path": "/api/auth/reset-password",
+        "responses": {
+          "200": {
+            "refreshToken": "string"
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 134,
+        "quote": "## Session Revocation on Credential Changes\n\nFor security, **password changes and resets automatically invalidate all active refresh/session tokens** across all devices:\n\n- **Admin**: When an admin user changes their password via `PUT /admin/users/me` (with `currentPassword` and `password`), all admin sessions are revoked, including the current session. The user must re-authenticate.\n- **Admin**: When an admin resets their password via `POST /admin/reset-password`, all existing admin sessions are revoked before issuing a new session.\n- **Content API (refresh mode)**: When a user changes their password via `POST /api/auth/change-password` or resets it via `POST /api/auth/reset-password`, all users-permissions sessions are revoked. A new refresh token is issued for the current request.\n\nThis behavior ensures that compromised refresh tokens cannot be used after a password change, mitigating persistent session hijacking attacks.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "auth",
+      "source": "extracted"
+    },
+    {
+      "id": "7528f25510ffba62b8e1581ab05a2206ebce80384cfa237ba991e388201b5950",
+      "topic": "endpoints",
+      "subject": "POST /content-releases/",
+      "content": {
+        "method": "POST",
+        "path": "/content-releases/",
+        "request": {
+          "name": "string"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 73,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "7796eae8b62e0205cea46511583726bcf3530392cb39514a1b6a4bf7070cc1e2",
+      "topic": "endpoints",
+      "subject": "POST /content-releases/:releaseId/actions",
+      "content": {
+        "method": "POST",
+        "path": "/content-releases/:releaseId/actions",
+        "request": {
+          "type": "publish | unpublish",
+          "contentType": "string",
+          "locale": "string (optional)",
+          "entryDocumentId": "string (optional)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 112,
+        "quote": "### Release Action\n\n**Create a release action**\n\n- method: `POST`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n\n  ```ts\n  {\n    type: 'publish' | 'unpublish',\n    contentType: string;\n    locale?: string;\n    entryDocumentId?: string;\n  }\n  ```\n\n**Get release actions from a release**\n\n- method: `GET`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Update a release action**\n\n- method: `PUT`\n- endpoint: `/content-releases/:releaseId/actions/:actionId`\n- body:\n  ```ts\n  {\n    type: 'publish' | 'unpublish';\n  }\n  ```\n\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "87582391a9eecd1d61df1e6013d5c69864f2891564fd5945c186f3312ccb86ff",
+      "topic": "endpoints",
+      "subject": "PUT /admin/users/me",
+      "content": {
+        "method": "PUT",
+        "path": "/admin/users/me",
+        "auth": "required",
+        "responses": {
+          "200": {}
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md",
+        "line": 122,
+        "quote": "## Session Revocation on Credential Changes\n\nFor security, **password changes and resets automatically invalidate all active refresh/session tokens** across all devices:\n\n- **Admin**: When an admin user changes their password via `PUT /admin/users/me` (with `currentPassword` and `password`), all admin sessions are revoked, including the current session. The user must re-authenticate.\n- **Admin**: When an admin resets their password via `POST /admin/reset-password`, all existing admin sessions are revoked before issuing a new session.\n- **Content API (refresh mode)**: When a user changes their password via `POST /api/auth/change-password` or resets it via `POST /api/auth/reset-password`, all users-permissions sessions are revoked. A new refresh token is issued for the current request.\n\nThis behavior ensures that compromised refresh tokens cannot be used after a password change, mitigating persistent session hijacking attacks.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "admin",
+      "source": "extracted"
+    },
+    {
+      "id": "fe1bcfbf6a7d434380466ff96ce25c1ba9ce6b66ae7b1787db80c26f4db1363c",
+      "topic": "endpoints",
+      "subject": "PUT /content-releases/:id",
+      "content": {
+        "method": "PUT",
+        "path": "/content-releases/:id",
+        "request": {
+          "name": "string"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 82,
+        "quote": "### Release\n\nRelease routes can be found in:\n\n```\npackages/core/content-releases/server/src/routes/release.ts\n```\n\n**Get all releases**:\n\n- method: `GET`\n- endpoint: `/content-releases/`\n- params:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Get all releases with/without an entry**:\n\n- method: `GET`\n- endpoint: `/content-releases/getByDocumentAttached`\n- params:\n  ```ts\n  {\n    contentTypeUid: string;\n    locale?: string;\n    documentId?: string;\n    hasEntryAttached?: boolean;\n  }\n  ```\n\n**Get a single release**\n\n- method: `GET`\n- endpoint: `/content-releases/:id`\n\n**Create a release**:\n… (+31 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "c5eade46a9503b443728fc15f22ace8e7efbfdaa6016c3135b00a676126f1eca",
+      "topic": "endpoints",
+      "subject": "PUT /content-releases/:releaseId/actions/:actionId",
+      "content": {
+        "method": "PUT",
+        "path": "/content-releases/:releaseId/actions/:actionId",
+        "request": {
+          "type": "publish | unpublish"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/01-backend.md",
+        "line": 140,
+        "quote": "### Release Action\n\n**Create a release action**\n\n- method: `POST`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n\n  ```ts\n  {\n    type: 'publish' | 'unpublish',\n    contentType: string;\n    locale?: string;\n    entryDocumentId?: string;\n  }\n  ```\n\n**Get release actions from a release**\n\n- method: `GET`\n- endpoint: `/content-releases/:releaseId/actions`\n- body:\n  ```ts\n  {\n    page: number;\n    pageSize: number;\n  }\n  ```\n\n**Update a release action**\n\n- method: `PUT`\n- endpoint: `/content-releases/:releaseId/actions/:actionId`\n- body:\n  ```ts\n  {\n    type: 'publish' | 'unpublish';\n  }\n  ```\n\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "47e20f9a87110af810450361a47b4f71f3393cd2780ca91c801b3bce1f46e112",
+      "topic": "endpoints",
+      "subject": "publicationFilter / validation",
+      "content": {
+        "summary": "publicationFilter accepted with both status=draft and status=published. Some combinations degenerate (e.g., status=published&publicationFilter=never-published → empty result). Invalid parameter values return 400."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 112,
+        "quote": "### Validation and compatibility\n\nValidation happens after status resolution (explicit or defaulted):\n\n- `publicationFilter` values are accepted with both `status=draft` and `status=published`.\n- Some combinations are valid but degenerate by nature:\n  - `status=published&publicationFilter=never-published` normally resolves to an empty result set.\n- Invalid parameter values (unknown `publicationFilter`, malformed params) return 400.\n\nCompatibility:\n\n- GraphQL exposes optional `publicationFilter` via the `PublicationFilter` enum; internal values match REST (`never-published`, …). Deprecated `hasPublishedVersion` is still accepted and normalized to document-scoped `publicationFilter` values for queries and relation resolution.\n\nMutation semantics (`create`, `update`, `publish`, `unpublish`) do not change.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1e6b6bfbbd87d45489e0752076bcbd9b56f920be3288ec9d7f089cee6bc71e88",
+      "topic": "errors",
+      "subject": "publicationFilter invalid parameter",
+      "content": {
+        "envelope": {},
+        "codes": {
+          "unknown publicationFilter or malformed params": 400
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/02-publication-filter-query-modes.md",
+        "line": 120,
+        "quote": "### Validation and compatibility\n\nValidation happens after status resolution (explicit or defaulted):\n\n- `publicationFilter` values are accepted with both `status=draft` and `status=published`.\n- Some combinations are valid but degenerate by nature:\n  - `status=published&publicationFilter=never-published` normally resolves to an empty result set.\n- Invalid parameter values (unknown `publicationFilter`, malformed params) return 400.\n\nCompatibility:\n\n- GraphQL exposes optional `publicationFilter` via the `PublicationFilter` enum; internal values match REST (`never-published`, …). Deprecated `hasPublishedVersion` is still accepted and normalized to document-scoped `publicationFilter` values for queries and relation resolution.\n\nMutation semantics (`create`, `update`, `publish`, `unpublish`) do not change.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b27c98337640e585c7fe0ac80b8c40dbd9481b3d0ee8464d6a89297eedfb011d",
+      "topic": "overview",
+      "subject": "@strapi/permissions package",
+      "content": {
+        "summary": "Permission management system built on CASL's ability system. Extends basic permission model with parametrized actions, conditional evaluation, and hook system. Backbone for RBAC, users-permissions, and API tokens."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 12,
+        "quote": "## Introduction\n\nThe `@strapi/permissions` package is a sophisticated permission management system designed to provide flexible, granular\ncontrol over access rights in Strapi systems.\n\nBuilt on top of CASL's ability system, it extends the basic permission model with advanced features like parametrized\nactions, conditional evaluation, and a hook system for custom behaviors.\n\nIt serves as the backbone for building advanced implementations in Strapi, enabling developers to design customized\npermission systems tailored to specific Strapi business objectives and application demands like RBAC, users and permissions, or API tokens.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4af643ff88378bc45581f1ef3d8b382bf5f0efe50adf8bbab2c1e7c2946df1da",
+      "topic": "overview",
+      "subject": "Blocks editor components",
+      "content": {
+        "summary": "BlocksInput wraps the editor with label and error handling. BlocksEditor is the root Slate editor with state context. BlocksToolbar provides formatting and block insertion buttons. BlocksContent is the WYSIWYG editor."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/05-blocks.md",
+        "line": 130,
+        "quote": "## Components structure\n\n<img\n  src=\"/img/content-manager/blocks/components-structure.png\"\n  alt=\"a diagram showing how the blocks input is split into components\"\n/>\n\nAs shown in the diagram, the Blocks input is split into several components:\n\n- `BlocksInput` is the input ready to be used in the content manager edit view. Besides the editor, it is responsible for rendering the label, label actions (like the i18n icon), as well as error and hint messages.\n- `BlocksEditor` is the root of the Slate editor. It provides the context for all the stateful parts of the editor.\n- `BlocksToolbar` is the toolbar that appears above the editor. It provides buttons for formatting the text, as well as a button to insert a new block.\n- `BlocksContent` is the WYSIWYG editor that allows users to write and view their formatted content.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f6607d457368c8d59a39f56be54e4736128d614ac03c9d1eadba73fba125adb2",
+      "topic": "overview",
+      "subject": "Content Manager plugin",
+      "content": {
+        "summary": "The content-manager is a plugin within @strapi/admin that allows users to create, update, and delete content. It provides public APIs to manipulate forms and tables, and universal hooks for plugin integration."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/00-intro.md",
+        "line": 9,
+        "quote": "## What is the Content Manager?\n\nThe content-manager is a plugin that allows users to write / update & delete their content, it's currently held within the `@strapi/admin` package, but from V5 will be removed back to its own plugin. At its very basic form, the CM is just a table & a few forms. There are a few public APIs to manipulate these forms & tables as well as some universal hooks exported for user's to additionally interact with within their own plugins outside of the CM plugin & within.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cbbb471a0944e2a0e6d207c4571ab5904650d060e61fd77c568807928126bb08",
+      "topic": "overview",
+      "subject": "Document actions",
+      "content": {
+        "summary": "Universal document actions: create, update, delete. Collection-types can also be cloned. Documents with draft & publish can additionally be published and unpublished. Exposed via useDocumentActions hook; plugins can add actions via APIs."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/01-documents.md",
+        "line": 19,
+        "quote": "## Interacting with Documents\n\nThere are universal actions that can be performed on documents, these are:\n\n- `create` – creates a new document\n- `update` – updates an existing document\n- `delete` – deletes an existing document\n\nDocuments that are `collection-types` additionally can be cloned. If a document has draft & published enabled then we can additionally publish & unpublish the document. All of this functionality is exposed via the [`useDocumentActions`](./hooks/use-document-actions.mdx) hook. Additional actions can be added by plugins via APIs.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "content-releases",
+      "source": "extracted"
+    },
+    {
+      "id": "d38385c62fe3f5e3384c4dd378e3e49b9a3a406bb902056e0308253dc137e375",
+      "topic": "overview",
+      "subject": "Permission Checker service",
+      "content": {
+        "summary": "A service that enforces access control policies by verifying user permissions for actions on content entities. Provides methods to check, sanitize, and validate user actions based on permissions."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md",
+        "line": 3,
+        "quote": "## Overview\n\nThe **Permission Checker** is a service in Strapi that helps enforce access control policies by verifying user permissions for various actions on content entities. It provides methods to check, sanitize, and validate user actions based on their permissions.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7dff9066ec7016fa10a5a15673dbe5b9e0a1a64968e05d891c5f5dc093f8e08a",
+      "topic": "overview",
+      "subject": "content-releases plugin",
+      "content": {
+        "summary": "Content Releases is built as a plugin (not in the EE folder), located at packages/core/content-releases."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-releases/00-intro.md",
+        "line": 11,
+        "quote": "### Architecture\n\nAs opposed to other EE features built in the [EE folder](docs/docs/01-core/admin/01-ee/00-intro.md), Releases is built as a plugin. The plugin can be found in:\n\n```\npackages/core/content-releases\n```\n\n```mdx-code-block\nimport DocCardList from '@theme/DocCardList';\nimport { useCurrentSidebarCategory } from '@docusaurus/theme-common';\n\n<DocCardList items={useCurrentSidebarCategory().items} />\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7ebd4b0aaf5fb31b1b83daa327c47dfa027b1b3435302fcdbecafa96a3faa129",
+      "topic": "overview",
+      "subject": "custom fields",
+      "content": {
+        "summary": "Custom fields provide a way to replace the inputs of existing Strapi types to improve the content editing experience."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/rfcs/01-custom-fields.md",
+        "line": 10,
+        "quote": "## Summary\n\nCustom fields provide a way to replace the inputs of existing Strapi types to improve the content editing experience.\n"
+      },
+      "metadata": {
+        "docKind": "rfc",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9ebb5a25698927ea769fbded5b1fff0dc9f66d548efd9bfd0ad00a4b78779e6e",
+      "topic": "overview",
+      "subject": "permissions engine architecture",
+      "content": {
+        "summary": "Permission Engine receives from Action Provider and Condition Provider, drives a Hook System (lifecycle hooks: validation, formatting, evaluation) and an Ability Generator (CASL integration)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/permissions/00-intro.md",
+        "line": 25,
+        "quote": "### Engine\n\n```mermaid\ngraph TB\n  B[/Action Provider/]:::provider --> A([Permission Engine]):::engine\n  C[/Condition Provider/]:::provider --> A\n  A --> D{{Hook System}}:::hookSystem\n  A --> E([Ability Generator]):::generator\n  D --> H([Lifecycle Hooks]):::lifecycle\n  E --> I([CASL Integration]):::integration\n  H --> N([Permission Validation]):::hook\n  H --> O([Permission Formatting]):::hook\n  H --> P([Permission Evaluation]):::hook\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ee4e6ee9162cbccfa9f6b985649876bd664e6dbb9623bb35e74055acda876cd0",
+      "topic": "overview",
+      "subject": "preview script delivery mechanism",
+      "content": {
+        "summary": "Preview script is defined inside Strapi and sent to the frontend via postMessage (not an installable SDK), keeping it in sync with the CMS version and framework-agnostic."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/docs/01-core/content-manager/06-preview.md",
+        "line": 10,
+        "quote": "## Why not an SDK\n\nVisual editing requires running some of our code on the user's frontend to detect fields and draw highlights. The obvious approach would be an SDK package users install in their project. We intentionally avoided this.\n\nAn SDK would require ongoing maintenance and create version mismatch risks between the SDK and Strapi. It would also tie us to specific frameworks or require multiple framework-specific packages.\n\nInstead, the preview script is defined inside Strapi and sent to the frontend via `postMessage`. The frontend just needs a small snippet to receive and execute it. This keeps the script always in sync with the CMS version, works with any framework, and requires no package installation.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-03T17:47:37+02:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    }
+  ]
+}

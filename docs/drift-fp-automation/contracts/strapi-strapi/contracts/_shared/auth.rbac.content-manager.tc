@@ -1,0 +1,6 @@
+auth-requirement auth.rbac.content-manager {
+  origin "docs/docs/docs/01-core/content-manager/services/00-permission-checker.md" "Actions Supported" 14..30
+  status shipped
+  scheme RBAC
+  selector path-glob "/**"
+}

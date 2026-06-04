@@ -1,0 +1,5 @@
+enum PublicationFilter {
+  origin "docs/docs/rfcs/02-publication-filter-query-modes.md" "API shape" 29..52
+  status shipped
+  values [never-published, has-published-version, modified, unmodified, never-published-document, has-published-version-document, published-without-draft]
+}

@@ -1,0 +1,5 @@
+unenforceable-obligation document.actions-overview {
+  origin "docs/docs/docs/01-core/content-manager/01-documents.md" "Interacting with Documents" 19..30
+  status shipped
+  reason "Universal document actions (create, update, delete, clone, publish, unpublish) are described as frontend hook capabilities, not as verifiable API contracts."
+}

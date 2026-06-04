@@ -1,0 +1,4 @@
+operation DELETE "/content-releases/:id" {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Routes / Release" 41..110
+  status shipped
+}

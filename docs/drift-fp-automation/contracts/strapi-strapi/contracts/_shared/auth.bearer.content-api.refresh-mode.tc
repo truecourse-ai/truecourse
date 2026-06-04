@@ -1,0 +1,6 @@
+auth-requirement auth.bearer.content-api.refresh-mode {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Content API (users-permissions)" 92..131
+  status shipped
+  scheme Bearer
+  selector path-glob "/api/**"
+}

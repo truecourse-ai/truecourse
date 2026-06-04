@@ -1,0 +1,5 @@
+entity strapi_releases {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Content-types / Release" 19..26
+  status shipped
+  field status: Enum:ReleaseStatus
+}

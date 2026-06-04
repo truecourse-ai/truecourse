@@ -1,0 +1,9 @@
+operation PUT "/admin/users/me" {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Session Revocation on Credential Changes" 122..135
+  status shipped
+  request {
+    auth required
+  }
+  response 200 on success {
+  }
+}

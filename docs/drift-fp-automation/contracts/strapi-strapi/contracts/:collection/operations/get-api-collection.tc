@@ -1,0 +1,12 @@
+operation GET "/api/:collection" {
+  origin "docs/docs/rfcs/02-publication-filter-query-modes.md" "Example" 149..170
+  status shipped
+  request {
+    query {
+      status: string optional
+      publicationFilter: string optional
+    }
+  }
+  response 200 on success {
+  }
+}

@@ -1,0 +1,16 @@
+entity EditFieldLayout {
+  origin "docs/docs/docs/01-core/content-manager/02-layouts.md" "How are they made? / EditView" 39..102
+  status shipped
+  field disabled: boolean
+  field hint: string
+  field label: string
+  field name: string
+  field placeholder: string
+  field required: boolean
+  field mainField: string
+  field size: number
+  field unique: boolean
+  field visible: boolean
+  field attribute: string
+  field type: string
+}

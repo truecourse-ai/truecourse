@@ -1,0 +1,11 @@
+operation PUT "/content-releases/:releaseId/actions/:actionId" {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Routes / Release Action" 112..156
+  status shipped
+  request {
+    body {
+      type: string
+    }
+  }
+  response 200 on success {
+  }
+}

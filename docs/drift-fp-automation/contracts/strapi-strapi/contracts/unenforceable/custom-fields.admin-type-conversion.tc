@@ -1,0 +1,5 @@
+unenforceable-obligation custom-fields.admin-type-conversion {
+  origin "docs/docs/rfcs/01-custom-fields.md" "Admin" 26..30
+  status shipped
+  reason "A custom field saved on a content-type converts its type to 'type: customField' before save in the formatAttributes/cleanData function — internal implementation detail, not structurally verifiable as an endpoint or entity contract."
+}

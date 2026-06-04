@@ -1,0 +1,11 @@
+effect-group content-releases.entry-cleanup {
+  origin "docs/docs/docs/01-core/content-releases/01-backend.md" "Subscribing to Lifecycles Events" 249..252
+  status shipped
+  channel lifecycle
+  effect release-actions.delete-on-entry-deletion {
+    emit-when {
+      description "entry deleted"
+    }
+    payload-constraint { action: "delete all release actions containing that entry" }
+  }
+}

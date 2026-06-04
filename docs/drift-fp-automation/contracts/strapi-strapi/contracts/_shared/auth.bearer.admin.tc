@@ -1,0 +1,9 @@
+auth-requirement auth.bearer.admin {
+  origin "docs/docs/docs/01-core/authentication/00-sessions-and-jwt.md" "Admin authentication" 43..90
+  status shipped
+  scheme Bearer
+  selector path-glob "/admin/**"
+  on-violation {
+    status 401
+  }
+}
