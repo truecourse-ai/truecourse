@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
-import { extractOperationsFromFile, type ExtractedOperation } from './operation.js';
+import { extractOperationsFromFile, extractPluginStyleRoutesFromFile, type ExtractedOperation } from './operation.js';
 import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
 import { eachParsedSource } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
@@ -61,6 +61,14 @@ export type { ExtractedOperation } from './operation.js';
 
 const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
 
+function isTestFile(filePath: string): boolean {
+  const parts = filePath.replace(/\\/g, '/').split('/');
+  const fileName = parts[parts.length - 1];
+  if (/\.(test|spec)\.(t|j)sx?$/.test(fileName)) return true;
+  if (parts.includes('__tests__')) return true;
+  return false;
+}
+
 /**
  * Walk a directory recursively, parse each TS/JS file, and run the
  * Operation extractor over it. After the per-file pass, build a
@@ -88,12 +96,14 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
       if (!entry.isFile()) continue;
       const ext = path.extname(entry.name);
       if (!TS_EXT.has(ext)) continue;
+      if (isTestFile(full)) continue;
       const source = fs.readFileSync(full, 'utf-8');
       const lang =
         ext === '.ts' || ext === '.tsx' ? (ext === '.tsx' ? 'tsx' : 'typescript') : 'javascript';
       try {
         const tree = parseFile(full, source, lang);
         rawOps.push(...extractOperationsFromFile(full, source, tree));
+        rawOps.push(...extractPluginStyleRoutesFromFile(full, source, tree));
         fileAnalyses.push(analyzeRouterFile(full, source, tree));
       } catch {
         // Parse failures are silent — the verifier flags them via a

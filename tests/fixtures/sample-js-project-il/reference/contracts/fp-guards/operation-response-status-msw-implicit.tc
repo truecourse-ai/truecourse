@@ -1,0 +1,9 @@
+operation GET "/v1/widgets/{id}" {
+  origin "reference/specs/modules/widgets/endpoints.md" "GET /v1/widgets/{id}" 1..5
+  response 200 on success {
+    body {
+      id: string
+      name: string
+    }
+  }
+}
