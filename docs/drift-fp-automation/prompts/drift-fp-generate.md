@@ -107,6 +107,12 @@ Run the three LLM stages with `--llm-transport agent`, driving the prompt I/O yo
 
 ### 6. Open the storage PR (never merged)
 
+- **Verify your branch before pushing.** Run `git rev-parse --abbrev-ref HEAD` and confirm it is
+  exactly `claude/drift-fp-store/<owner>-<repo>`. If it isn't (e.g. you're still on the routine's
+  default `claude/<random>` branch), STOP. Recreate the correct branch from `origin/main`,
+  cherry-pick or re-stage the commit from step 5, delete the wrong branch, then push. Pushing from
+  the wrong branch produces a PR whose head doesn't match the `drift-fp-discover` trigger filter
+  (`Head Branch starts-with claude/drift-fp-store/`), and the chain stalls before discover fires.
 - Open a PR with head `claude/drift-fp-store/<owner>-<repo>`, base `main`.
 - Title `chore(drift-fp): contracts store for <owner>/<repo> @ <short-sha>`.
 - **Label `drift-fp-store`** — opening this PR (a `pull_request.opened` event) is what fires

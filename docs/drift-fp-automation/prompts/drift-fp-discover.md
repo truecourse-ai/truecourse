@@ -40,12 +40,22 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
 
 ### 2. Mark the campaign `discovering`
 
-- On a new branch `claude/drift-fp-discover/<owner>-<repo>`, set the campaign's
-  `status: discovering` in `campaigns.yaml`.
+- **Create the discovery branch FIRST**, before editing `campaigns.yaml`. The routine starts the
+  session on a default randomly-named branch (e.g. `claude/<adjective-noun-XXXX>`); pushing from
+  that branch will **not** match the discovery PR trigger filter, and the chain stalls. Run:
+  ```
+  git fetch origin main && \
+    git checkout -b claude/drift-fp-discover/<owner>-<repo> origin/main
+  ```
+  All commits this step makes go on this branch.
+- Set the campaign's `status: discovering` in `campaigns.yaml` and commit on that branch.
 - Open a PR titled `chore(drift-fp): start discovery for <owner>/<repo>`. Body explains you're
   starting a drift discovery run. End the body with `cc @mushgev`.
 - **Apply label `drift-fp-discover` to this PR** — this is what fires `drift-fp-next-fix` when
   the PR merges. Without it, the chain doesn't start.
+- **Verify your branch before pushing.** Run `git rev-parse --abbrev-ref HEAD` and confirm it is
+  exactly `claude/drift-fp-discover/<owner>-<repo>`. If it isn't, STOP, recreate the correct branch
+  from `origin/main`, cherry-pick the commit, delete the wrong branch, then push.
 - Do **not** wait for merge. Continue with verify + issue filing; keep pushing commits to this PR.
 
 ### 3. Build truecourse from local source
