@@ -37,7 +37,19 @@ export interface NamedConstantCompareInput {
 export function compareNamedConstant(input: NamedConstantCompareInput): ContractDrift[] {
   const { ref, contract, codeConstants } = input;
   const target = normalizeName(ref.identity);
-  const matches = codeConstants.filter((c) => normalizeName(c.name) === target);
+  let matches = codeConstants.filter((c) => normalizeName(c.name) === target);
+
+  // For namespaced spec identities (e.g. "widget.EMBED_THEME"), fall back to
+  // matching the last segment ("EMBED_THEME") against window-global constants
+  // only. This covers browser globals declared as window.X in code but named
+  // with a namespace prefix in the spec.
+  if (matches.length === 0 && ref.identity.includes('.')) {
+    const lastPart = ref.identity.split('.').pop()!;
+    const lastTarget = normalizeName(lastPart);
+    matches = codeConstants.filter(
+      (c) => c.shape === 'window-global' && normalizeName(c.name) === lastTarget,
+    );
+  }
 
   if (matches.length === 0) {
     return [{
@@ -49,10 +61,16 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
       filePath: ref.identity,
       lineStart: 0,
       lineEnd: 0,
-      message: `Spec declares constant \`${ref.identity}\` (expected ${formatValue(contract.expectedValue)}), but no code-side constant matches by name.`,
+      message: `Spec declares constant \`${ref.identity}\` but no code-side constant matches by name.`,
       specSide: `expected: ${formatValue(contract.expectedValue)}`,
       codeSide: '<no match>',
     }];
+  }
+
+  // A contract without an explicit expected-value (undefined) only asserts
+  // presence; skip value comparison entirely.
+  if (contract.expectedValue === undefined) {
+    return [];
   }
 
   const drifts: ContractDrift[] = [];

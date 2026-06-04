@@ -9,7 +9,8 @@ import type { SourceLocation } from '../../types/index.js';
 export type ConstantShape =
   | 'const-literal'   // const X = <literal>
   | 'object-property' // const X = { key: <literal>, ... }  — one record per property
-  | 'default-arg';    // function f(name = <literal>)
+  | 'default-arg'     // function f(name = <literal>)
+  | 'window-global';  // window.X access — value is undefined; matched by last-segment fallback
 
 export interface ExtractedConstant {
   name: string;

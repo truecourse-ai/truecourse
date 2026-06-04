@@ -23,21 +23,38 @@ export function extractConstantsFromFile(
   tree: Tree,
 ): ExtractedConstant[] {
   const out: ExtractedConstant[] = [];
+  // Track window globals by name so each unique access is emitted once.
+  const seenWindowGlobals = new Set<string>();
   walk(tree.rootNode, (node) => {
     // 1. const/let declarator with literal initializer
     if (node.type === 'variable_declarator') {
       const result = extractDeclarator(node, filePath, source);
       out.push(...result);
-      // Don't recurse into a declarator we processed — its children
-      // are the same object/literal we already consumed.
       return true;
     }
-    // 3. default function params (arrow + regular + method)
+    // 2. default function params (arrow + regular + method)
     if (node.type === 'required_parameter' || node.type === 'optional_parameter' ||
         node.type === 'assignment_pattern') {
       const result = extractDefaultArg(node, filePath, source);
       if (result) out.push(result);
       return true;
+    }
+    // 3. window.X member-expression accesses (browser window globals)
+    if (node.type === 'member_expression') {
+      const objNode = node.childForFieldName('object');
+      const propNode = node.childForFieldName('property');
+      if (objNode?.text === 'window' && propNode?.type === 'property_identifier') {
+        const propName = propNode.text;
+        if (!seenWindowGlobals.has(propName)) {
+          seenWindowGlobals.add(propName);
+          out.push({
+            name: propName,
+            value: undefined,
+            shape: 'window-global',
+            source: mkLoc(node, filePath),
+          });
+        }
+      }
     }
     return true;
   });
@@ -88,6 +105,14 @@ function extractDeclarator(
       if (v === UNPARSEABLE) continue;
       out.push({
         name: k,
+        value: v,
+        shape: 'object-property',
+        source: mkLoc(kNode, filePath),
+      });
+      // Also emit the dotted form "OuterName.key" so specs that name
+      // a constant as "Obj.prop" can match via normal name normalization.
+      out.push({
+        name: `${name}.${k}`,
         value: v,
         shape: 'object-property',
         source: mkLoc(kNode, filePath),
