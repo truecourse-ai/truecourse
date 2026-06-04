@@ -11,6 +11,7 @@
 
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import pLimit from 'p-limit';
 import type { ExtractionResult, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
@@ -61,7 +62,7 @@ export function defaultConcurrency(): number {
  * decides whether to surface or retry.
  */
 export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 600_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);

@@ -9,6 +9,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import os from 'node:os';
 import pLimit from 'p-limit';
 import type { Block } from './slicer.js';
@@ -32,7 +33,7 @@ export interface BlockRunResult {
 export type BlockRunner = (blocks: Block[]) => Promise<BlockRunResult[]>;
 
 export interface SpawnRunnerOptions {
-  /** Path to the claude binary. Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
+  /** Path to the claude binary. Defaults to `resolveClaudeBinary()`. */
   bin?: string;
   /**
    * Model name passed to `claude --model`. When unset, the CLI default
@@ -66,7 +67,7 @@ export function defaultConcurrency(): number {
  * subprocess is independent — failures don't abort the batch.
  */
 export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);

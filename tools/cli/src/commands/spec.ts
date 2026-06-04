@@ -34,7 +34,7 @@ import {
   INFER_STEPS,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
-import { checkClaudeAuth, type ClaudeAuthResult } from "@truecourse/core/lib/cli-binary";
+import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { resolveStashDecision } from "./analyze.js";
 import { requireGitRepo } from "./git-guard.js";
 
@@ -181,62 +181,6 @@ export function decideScanOutcome(input: {
 }
 
 // ---------------------------------------------------------------------------
-// claude CLI preflight
-// ---------------------------------------------------------------------------
-
-/**
- * Probe the `claude` CLI before the scan fans out hundreds of extraction
- * subprocesses, and exit non-zero with an actionable message if it isn't ready.
- * Returns normally when the CLI is installed and its login works.
- *
- * Set `TRUECOURSE_SKIP_CLAUDE_CHECK=1` to skip the probe (CI where auth is known
- * good, or to avoid the tiny round-trip call).
- */
-async function preflightClaudeOrExit(): Promise<void> {
-  if (process.env.TRUECOURSE_SKIP_CLAUDE_CHECK) return;
-  const s = p.spinner();
-  s.start("Checking the `claude` CLI is logged in");
-  const result = await checkClaudeAuth();
-  if (result.ok) {
-    s.stop("`claude` CLI ready");
-    return;
-  }
-  s.stop("`claude` CLI not ready");
-  const { title, hint } = describeClaudePreflightFailure(result);
-  p.log.error(title);
-  p.log.message(hint);
-  p.cancel("Aborted before scanning — fix the `claude` CLI and retry.");
-  process.exit(1);
-}
-
-/**
- * Map a failed `claude` preflight to a headline + actionable next step. Pure so
- * the wording is unit-tested without spawning or driving clack.
- */
-export function describeClaudePreflightFailure(
-  result: Extract<ClaudeAuthResult, { ok: false }>,
-): { title: string; hint: string } {
-  switch (result.reason) {
-    case "not-found":
-      return {
-        title: "The `claude` CLI isn't installed or isn't on your PATH.",
-        hint: "Install Claude Code (https://docs.anthropic.com/en/docs/claude-code), or set CLAUDE_CODE_BIN to its name/path, then retry.",
-      };
-    case "unauthenticated":
-      return {
-        title: "The `claude` CLI isn't logged in — your Claude login may have expired.",
-        hint: "Run `claude` and authenticate (e.g. `/login`), then retry.",
-      };
-    case "error":
-    default:
-      return {
-        title: "The `claude` CLI failed a test call.",
-        hint: `${result.detail ? `${oneLine(result.detail)}\n  ` : ""}Confirm \`claude\` works on its own, then retry.`,
-      };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // resolve --all-defaults  (CLI batch op; dashboard is primary review per Q8)
 // ---------------------------------------------------------------------------
 
@@ -257,6 +201,7 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
 
   p.intro("Spec resolve — accepting all defaults");
   await requireGitRepo(root);
+  await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
     const { additions } = await resolveAllDefaultsInProcess(root, { tracker });

@@ -19,33 +19,36 @@ describe('isCliBinaryAvailable', () => {
   });
 });
 
-// Pure classification of the `claude` login probe's outcome — the part that
-// decides whether a failing test call is an expired login vs some other error,
-// tested without spawning a real subprocess.
+// Pure packaging of the `claude` login probe's outcome. We deliberately do NOT
+// classify *why* a call failed — a non-zero exit carries claude's raw output
+// through verbatim so the caller shows exactly what the CLI said.
 describe('classifyClaudeProbe', () => {
   it('treats a clean exit as logged in', () => {
     expect(classifyClaudeProbe(0, '')).toEqual({ ok: true });
-    expect(classifyClaudeProbe(0, 'some noise on stderr')).toEqual({ ok: true });
+    expect(classifyClaudeProbe(0, 'some noise')).toEqual({ ok: true });
   });
 
-  it('treats a non-zero exit with empty stderr as an auth problem', () => {
-    // The real-world expired-login case: `claude exited 1` with nothing on
-    // stderr. The message-pattern heuristic alone would miss it.
-    expect(classifyClaudeProbe(1, '')).toEqual({ ok: false, reason: 'unauthenticated', detail: undefined });
-    expect(classifyClaudeProbe(1, '   \n  ')).toEqual({ ok: false, reason: 'unauthenticated', detail: undefined });
-  });
-
-  it('classifies an auth-looking stderr as unauthenticated and keeps the detail', () => {
+  it('carries the raw output through verbatim on a non-zero exit', () => {
     const r = classifyClaudeProbe(1, 'Error: 401 Unauthorized — please run /login');
     expect(r).toEqual({
       ok: false,
-      reason: 'unauthenticated',
-      detail: 'Error: 401 Unauthorized — please run /login',
+      reason: 'failed',
+      code: 1,
+      output: 'Error: 401 Unauthorized — please run /login',
     });
   });
 
-  it('surfaces a non-auth error verbatim instead of masking it as login', () => {
-    const r = classifyClaudeProbe(2, 'error: unknown flag --frobnicate');
-    expect(r).toEqual({ ok: false, reason: 'error', detail: 'error: unknown flag --frobnicate' });
+  it('does not guess a cause — any failure is just "failed" with its output', () => {
+    expect(classifyClaudeProbe(2, 'error: unknown flag --frobnicate')).toEqual({
+      ok: false,
+      reason: 'failed',
+      code: 2,
+      output: 'error: unknown flag --frobnicate',
+    });
+  });
+
+  it('trims surrounding whitespace and preserves the exit code (incl. null)', () => {
+    expect(classifyClaudeProbe(1, '   \n  ')).toEqual({ ok: false, reason: 'failed', code: 1, output: '' });
+    expect(classifyClaudeProbe(null, '  boom  ')).toEqual({ ok: false, reason: 'failed', code: null, output: 'boom' });
   });
 });

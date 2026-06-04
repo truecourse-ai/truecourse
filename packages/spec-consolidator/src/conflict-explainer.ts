@@ -14,6 +14,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -292,7 +293,7 @@ function truncateJson(value: unknown, max = 1500): string {
 function spawnConflictExplainerRunner(
   opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictExplainerRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   const timeoutMs = opts.timeoutMs ?? 90_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return (input: ConflictExplainerInput): Promise<string> => {

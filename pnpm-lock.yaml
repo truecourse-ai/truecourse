@@ -366,6 +366,9 @@ importers:
       '@truecourse/contract-verifier':
         specifier: workspace:*
         version: link:../contract-verifier
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@truecourse/spec-consolidator':
         specifier: workspace:*
         version: link:../spec-consolidator

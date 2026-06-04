@@ -7,23 +7,11 @@ import { registerProject, type RegistryEntry } from "@truecourse/core/config/reg
 import { readProjectConfig } from "@truecourse/core/config/project-config";
 import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
-import { isCliBinaryAvailable } from "@truecourse/core/lib/cli-binary";
-import { config } from "@truecourse/core/config";
+import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
-
-function ensureClaudeCli(): void {
-  const binary = config.claudeCodeBinary;
-  if (isCliBinaryAvailable(binary)) return;
-  p.log.error(
-    `Claude Code CLI not found (tried \`${binary}\`). TrueCourse requires the Claude Code binary to run analysis.\n` +
-      "Install it from https://docs.anthropic.com/en/docs/claude-code, " +
-      "or set CLAUDE_CODE_BINARY to its name or absolute path if it's installed elsewhere.",
-  );
-  process.exit(1);
-}
 
 function resolveOrInitProject(): RegistryEntry {
   const repoDir = resolveRepoDir(process.cwd()) ?? process.cwd();
@@ -227,7 +215,6 @@ export async function resolveStashDecision(
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   p.intro("Analyzing repository");
-  ensureClaudeCli();
   showFirstRunNotice();
 
   const project = resolveOrInitProject();
@@ -250,6 +237,10 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   const enabledCategories = config.enabledCategories ?? undefined;
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;
+
+  // `claude` is only invoked when LLM rules run, so only probe it then —
+  // `--no-llm` analysis (tree-sitter only) needs no Claude login.
+  if (enableLlmRules) await preflightClaudeOrExit();
 
   // Resolve stash decision before any analyzer work — keeps the prompt out
   // of the shared core service (which the dashboard server also calls).
@@ -335,7 +326,6 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const { renderDiffResultsSummary } = await import("./helpers.js");
 
   p.intro("Running diff check");
-  ensureClaudeCli();
   showFirstRunNotice();
 
   const project = resolveOrInitProject();
@@ -352,6 +342,9 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const enabledCategories = config.enabledCategories ?? undefined;
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;
+
+  // `claude` is only invoked when LLM rules run, so only probe it then.
+  if (enableLlmRules) await preflightClaudeOrExit();
 
   // Diff is by definition working-tree analysis — it never stashes, so
   // --stash / --no-stash are accepted (for symmetry with `analyze`) but the

@@ -20,6 +20,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
@@ -406,7 +407,7 @@ export async function repair(
   slices: SpecSlice[],
   opts: RepairOptions = {},
 ): Promise<RepairOutcome> {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   const timeoutMs = opts.timeoutMs ?? 600_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const log: string[] = [];

@@ -20,6 +20,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -316,7 +317,7 @@ const ChainRecheckResultSchema = z.object({
 function spawnChainRecheckRunner(
   opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ChainRecheckRunner {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return (input: ChainRecheckRunnerInput): Promise<ChainRecheckResult> => {

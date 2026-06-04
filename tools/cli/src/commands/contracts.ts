@@ -13,6 +13,7 @@ import { trackEvent, bucketFileCount, bucketDuration } from "@truecourse/core/se
 import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
 import { syncShippedTcSyntax } from "./helpers.js";
 import { requireGitRepo } from "./git-guard.js";
+import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 
 export interface RunContractsGenerateOptions {
   /** When true, perform a dry run — write nothing, show what would change. */
@@ -40,6 +41,11 @@ export async function runContractsGenerate(
     p.outro("Aborted.");
     process.exit(1);
   }
+
+  // Extraction fans out one `claude` subprocess per spec slice, so a broken or
+  // expired CLI would fail every slice and the user would only learn that at the
+  // end. Probe once up front and bail with the CLI's own error if it isn't ready.
+  await preflightClaudeOrExit();
 
   // Run the extraction pipeline against the canonical spec.
   const concurrency = defaultConcurrency();
