@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict, DocKind } from './types.js';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
@@ -88,6 +88,12 @@ export type ChainRecheckRunner = (
 export interface ChainRecheckOptions {
   /** Override the runner. Defaults to spawning the Claude CLI. */
   runner?: ChainRecheckRunner;
+  /**
+   * LLM transport for the default runner. Defaults to `cliTransport()`
+   * (spawns `claude -p`). The CLI/dashboard pass `agentTransport(io)` for
+   * headless/routine runs.
+   */
+  transport?: LlmTransport;
   /** When false, skip the LLM calls entirely. Useful for tests. */
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 2). */
@@ -194,7 +200,11 @@ export async function runChainRecheck(
 
   const runner =
     opts.runner ??
-    spawnChainRecheckRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnChainRecheckRunner({
+      transport: opts.transport,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+    });
   const confirmedChains: VersionChain[] = [];
 
   for (const pair of pairs) {
@@ -313,21 +323,29 @@ const ChainRecheckResultSchema = z.object({
 });
 
 function spawnChainRecheckRunner(
-  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: {
+    transport?: LlmTransport;
+    bin?: string;
+    timeoutMs?: number;
+    model?: string;
+    fallbackModel?: string;
+  } = {},
 ): ChainRecheckRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 180_000;
   return async (input: ChainRecheckRunnerInput): Promise<ChainRecheckResult> => {
-    const { object } = await getLlmTransport().complete({
-      system: CHAIN_RECHECK_SYSTEM_PROMPT,
-      prompt: buildChainRecheckUserPrompt(input),
-      schema: ChainRecheckResultSchema,
+    const raw = await transport({
+      id: `spec.chainRecheck:${input.pair.conflictId}`,
+      stage: 'spec.chainRecheck',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
+      system: CHAIN_RECHECK_SYSTEM_PROMPT,
+      user: buildChainRecheckUserPrompt(input),
+      responseFormat: 'json',
       timeoutMs,
-      label: `chain-recheck:${input.pair.conflictId}`,
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return object;
+    const inner = JSON.parse(stripCodeFences(raw));
+    return ChainRecheckResultSchema.parse(inner);
   };
 }
 

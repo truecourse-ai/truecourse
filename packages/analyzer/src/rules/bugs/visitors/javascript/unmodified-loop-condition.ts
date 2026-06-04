@@ -24,6 +24,14 @@ export const unmodifiedLoopConditionVisitor: CodeRuleVisitor = {
     const right = inner.childForFieldName('right')
     if (!left || !right) return null
 
+    // Bail out when the condition contains a call_expression (e.g.
+    // `while (Date.now() - start < delayMs)`, `while (queue.length() > 0)`).
+    // Function calls in the condition are implicitly time-varying — by
+    // symmetry with the body's `call_expression` short-circuit below, we
+    // treat them as legitimate "moving" state. Without this, busy-wait
+    // helpers and queue-drain loops trip the rule.
+    if (containsCallExpression(left) || containsCallExpression(right)) return null
+
     // Collect identifiers from the condition
     const condVars: string[] = []
     if (left.type === 'identifier') condVars.push(left.text)
@@ -54,6 +62,15 @@ export const unmodifiedLoopConditionVisitor: CodeRuleVisitor = {
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child && isModified(child)) return true
+      }
+      return false
+    }
+
+    function containsCallExpression(n: SyntaxNode): boolean {
+      if (n.type === 'call_expression') return true
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && containsCallExpression(child)) return true
       }
       return false
     }

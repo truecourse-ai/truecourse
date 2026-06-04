@@ -121,6 +121,12 @@
       "layer": "service"
     },
     {
+      "name": "loadProfiles",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "loadUserPyramid",
       "service": "api-gateway",
       "kind": "standalone",
@@ -134,6 +140,18 @@
     },
     {
       "name": "logImplicitGlobalEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logPayload",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "maybeIndex",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "service"
@@ -176,6 +194,12 @@
     },
     {
       "name": "reliability",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "reportFailureHandler",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "api"
@@ -535,6 +559,12 @@
       "layer": "data"
     },
     {
+      "name": "registerUser",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "runLs",
       "service": "user-service",
       "kind": "standalone",
@@ -575,6 +605,12 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "summarizeAuditLogEntries",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "TaskHandlers",
@@ -631,6 +667,12 @@
       "layer": "service"
     },
     {
+      "name": "array-delete-array-receiver",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "AsyncInit",
       "service": "utils",
       "kind": "class",
@@ -646,6 +688,18 @@
       "name": "BaseHandler",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BatchProcessor",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "buildApiUrl",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -670,6 +724,12 @@
       "name": "CaseHelpers",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "checkContact",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -811,9 +871,39 @@
       "layer": "service"
     },
     {
+      "name": "declarations-in-global-scope-mutable",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Derived",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "describe",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeOwner",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describePayload",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -889,7 +979,19 @@
       "layer": "service"
     },
     {
+      "name": "firstSquareUnder",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "firstStringOver",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "formatTaskRunId",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -898,6 +1000,12 @@
       "name": "formatters",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "FriendlyGreeter",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -919,7 +1027,19 @@
       "layer": "service"
     },
     {
+      "name": "god-module-business-helpers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Greeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GreeterBase",
       "service": "utils",
       "kind": "class",
       "layer": "service"
@@ -938,6 +1058,12 @@
     },
     {
       "name": "http-call-no-timeout-external",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isLeading",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1033,6 +1159,18 @@
       "layer": "service"
     },
     {
+      "name": "negatedConfigValue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "no-alert-browser-dialog",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "OffscreenRenderer",
       "service": "utils",
       "kind": "class",
@@ -1051,9 +1189,21 @@
       "layer": "service"
     },
     {
+      "name": "passThroughPromise",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "pickStatusLabel",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Plain",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1147,7 +1297,19 @@
       "layer": "service"
     },
     {
+      "name": "renameUser",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "required-type-annotations-bare-arrow",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "reservedHook",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1156,6 +1318,18 @@
       "name": "resolveDocument",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "runWithoutRelease",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Salutation",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1231,7 +1405,19 @@
       "layer": "service"
     },
     {
+      "name": "summarizeAccount",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "todoHandler",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "toSortedNumeric",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1309,6 +1495,12 @@
       "layer": "service"
     },
     {
+      "name": "waitForFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "web-security",
       "service": "utils",
       "kind": "standalone",
@@ -1318,6 +1510,18 @@
       "name": "Widget",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "wireResize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "wrapSync",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1336,6 +1540,12 @@
       "name": "BillingDashboard",
       "service": "web",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClientCard",
+      "service": "web",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1575,6 +1785,15 @@
       "targetService": "user-service",
       "importedNames": [
         "UserRepository"
+      ]
+    },
+    {
+      "source": "checkContact",
+      "sourceService": "utils",
+      "target": "validators",
+      "targetService": "utils",
+      "importedNames": [
+        "validateEmail"
       ]
     },
     {

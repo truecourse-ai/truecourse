@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
 
@@ -47,6 +47,8 @@ export type RelevanceRunner = (input: RelevanceRunnerInput) => Promise<Relevance
 export interface RelevanceFilterOptions {
   /** Override the runner. Tests pass a stub. */
   runner?: RelevanceRunner;
+  /** LLM transport for the auto-created runner (defaults to cli). */
+  transport?: LlmTransport;
   /** When false, skip the LLM call entirely; every doc stays included. */
   enabled?: boolean;
   /**
@@ -91,7 +93,7 @@ export async function filterByRelevance(
   const manualSet = new Set(opts.manualIncludes ?? []);
   const runner =
     opts.runner ??
-    spawnRelevanceRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnRelevanceRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? 4;
 
   const total = docs.length;
@@ -216,21 +218,31 @@ const RelevanceVerdictSchema = z.object({
 });
 
 function spawnRelevanceRunner(
-  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: {
+    /** LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). */
+    transport?: LlmTransport;
+    bin?: string;
+    timeoutMs?: number;
+    model?: string;
+    fallbackModel?: string;
+  } = {},
 ): RelevanceRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 60_000;
   return async (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
-    const { object } = await getLlmTransport().complete({
-      system: RELEVANCE_SYSTEM_PROMPT,
-      prompt: buildRelevanceUserPrompt(input.doc),
-      schema: RelevanceVerdictSchema,
+    const raw = await transport({
+      id: `spec.relevance:${input.doc.path}`,
+      stage: 'spec.relevance',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
+      system: RELEVANCE_SYSTEM_PROMPT,
+      user: buildRelevanceUserPrompt(input.doc),
+      responseFormat: 'json',
       timeoutMs,
-      label: `relevance:${input.doc.path}`,
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return { path: input.doc.path, include: object.include, reason: object.reason };
+    const inner = JSON.parse(stripCodeFences(raw));
+    const parsed = RelevanceVerdictSchema.parse(inner);
+    return { path: input.doc.path, include: parsed.include, reason: parsed.reason };
   };
 }
 

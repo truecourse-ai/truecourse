@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
@@ -38,11 +38,12 @@ export interface ChainDetectionInput {
 
 export interface ChainRunnerOptions {
   /**
-   * @deprecated The binary is resolved by the CLI transport (via the
-   * `CLAUDE_CODE_BIN` env var); this field is ignored.
+   * LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). The
+   * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
    */
+  transport?: LlmTransport;
   bin?: string;
-  /** Model passed through to the transport. Resolved by CLI/dashboard via core. */
+  /** Model passed to `claude --model`. Resolved by CLI/dashboard via core. */
   model?: string;
   /** Fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
@@ -60,6 +61,8 @@ export type ChainRunner = (
 export interface DetectChainsOptions {
   /** Override the runner. Defaults to spawning the Claude CLI. */
   runner?: ChainRunner;
+  /** LLM transport for the auto-created runner (defaults to cli). */
+  transport?: LlmTransport;
   /** When false, skip the LLM call entirely. Useful for tests. */
   enabled?: boolean;
   /** Model name forwarded to the default spawn runner. */
@@ -119,7 +122,7 @@ export async function detectVersionChainsViaLlm(
   if (cached) return materializeChains(cached, docs);
 
   const runner =
-    opts.runner ?? spawnChainRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    opts.runner ?? spawnChainRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   let result: DetectedChainOutput;
   try {
     result = await runner(inputs);
@@ -190,19 +193,22 @@ export function buildChainDetectionUserPrompt(inputs: ChainDetectionInput[]): st
 // ---------------------------------------------------------------------------
 
 function spawnChainRunner(opts: ChainRunnerOptions = {}): ChainRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 120_000;
   return async (inputs) => {
-    const { object } = await getLlmTransport().complete({
-      system: CHAIN_DETECTION_SYSTEM_PROMPT,
-      prompt: buildChainDetectionUserPrompt(inputs),
-      schema: DetectedChainOutputSchema,
+    // No single natural id for a batched call over all docs — omit `id` and
+    // let the transport hash the content.
+    const raw = await transport({
+      stage: 'spec.chainDetect',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
+      system: CHAIN_DETECTION_SYSTEM_PROMPT,
+      user: buildChainDetectionUserPrompt(inputs),
+      responseFormat: 'json',
       timeoutMs,
-      label: 'chain-detection',
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return object;
+    const inner = JSON.parse(stripCodeFences(raw));
+    return DetectedChainOutputSchema.parse(inner);
   };
 }
 

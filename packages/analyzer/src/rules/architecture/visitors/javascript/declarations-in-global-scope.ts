@@ -1,6 +1,15 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// Test files cache fixture handles (Vitest project setup, Jest globalSetup,
+// Playwright workers, etc.) at module scope as the intended per-worker
+// singleton pattern. There's no concurrent request flow, so the
+// "shared mutable global" hazard doesn't apply.
+// Require a real parent segment before `/test/` so synthetic test paths like
+// `/test/file.ts` used in our own unit tests don't get exempted.
+const TEST_FILE_PATTERN =
+  /\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|[^/]\/test\//
+
 export const declarationsInGlobalScopeVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/declarations-in-global-scope',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -8,6 +17,9 @@ export const declarationsInGlobalScopeVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // Only flag if directly under program (global scope)
     if (node.parent?.type !== 'program') return null
+
+    // Skip test files — module-level state is the framework-prescribed pattern.
+    if (filePath && TEST_FILE_PATTERN.test(filePath)) return null
 
     // Skip: const exports, imports, type declarations
     const text = node.text

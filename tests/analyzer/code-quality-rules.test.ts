@@ -1216,14 +1216,34 @@ async def compute_total(items):
 });
 
 describe('code-quality/deterministic/no-return-await', () => {
-  it('detects return await in async function', () => {
+  it('detects return await on a bare promise variable', () => {
+    const violations = check(`
+      async function passThrough(p: Promise<number>) {
+        return await p;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects return await on Promise.resolve', () => {
+    const violations = check(`
+      async function wrap() {
+        return await Promise.resolve(42);
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag return await on a call/method invocation (preferred for stack traces)', () => {
     const violations = check(`
       async function fetchData() {
         return await fetch("/api");
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag return without await', () => {
@@ -1239,9 +1259,9 @@ describe('code-quality/deterministic/no-return-await', () => {
 
   it('does not flag return await inside try block', () => {
     const violations = check(`
-      async function fetchData() {
+      async function passThrough(p: Promise<number>) {
         try {
-          return await fetch("/api");
+          return await p;
         } catch (e) {
           return null;
         }

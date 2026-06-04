@@ -134,6 +134,24 @@ declare module '@react-email/render' {
   export function render(node: unknown): Promise<string>;
 }
 
+declare module '@react-email/components' {
+  import type { ReactNode, CSSProperties } from 'react';
+  type EmailBlockProps = {
+    children?: ReactNode;
+    style?: CSSProperties;
+    [key: string]: unknown;
+  };
+  export const Html: (props: EmailBlockProps) => JSX.Element;
+  export const Head: (props: EmailBlockProps) => JSX.Element;
+  export const Body: (props: EmailBlockProps) => JSX.Element;
+  export const Container: (props: EmailBlockProps) => JSX.Element;
+  export const Text: (props: EmailBlockProps) => JSX.Element;
+  export const Section: (props: EmailBlockProps) => JSX.Element;
+  export const Heading: (props: EmailBlockProps) => JSX.Element;
+  export const Preview: (props: EmailBlockProps) => JSX.Element;
+  export const Link: (props: EmailBlockProps & { href?: string; target?: string }) => JSX.Element;
+}
+
 declare module 'big-math-toolkit-fake' {
   export function sum(values: ReadonlyArray<number>): number;
   export function mean(values: ReadonlyArray<number>): number;

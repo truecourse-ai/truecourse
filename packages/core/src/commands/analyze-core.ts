@@ -26,6 +26,7 @@ import { buildGraph } from '../services/analysis-persistence.service.js';
 import { detectFlows } from '../services/flow.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
+import { getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
 import { acquireAnalyzeLock, releaseAnalyzeLock } from '../lib/atomic-write.js';
@@ -72,6 +73,12 @@ export interface AnalyzeCoreOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;
   provider?: LLMProvider;
+  /**
+   * LLM transport for the auto-created provider. Defaults to spawning the
+   * `claude` CLI; pass an agent transport to run LLM rules headless. Ignored
+   * when an explicit `provider` is supplied (tests inject one that way).
+   */
+  transport?: LlmTransport;
   signal?: AbortSignal;
 }
 
@@ -290,7 +297,11 @@ export async function analyzeCore(
     // ------------------------------------------------------------
     // Violation pipeline
     // ------------------------------------------------------------
-    const provider = options.provider ?? (effectiveLlmRules ? createLLMProvider() : undefined);
+    const provider =
+      options.provider ??
+      (effectiveLlmRules
+        ? createLLMProvider(options.transport ?? getDefaultTransport())
+        : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);
       provider.setRepoPath(codeDir);

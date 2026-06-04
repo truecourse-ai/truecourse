@@ -11,7 +11,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { EeServerRegistry } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import { setLlmTransport } from '@truecourse/llm';
+import { setDefaultTransport } from '@truecourse/shared/llm';
 import type { EeDb } from '@truecourse/ee-db';
 import {
   createAiSdkTransport,
@@ -98,11 +98,16 @@ function buildCandidate(
 /** Validate the config with a tiny live call before persisting it. */
 async function testConfig(cfg: ProviderConfig): Promise<void> {
   const transport = createAiSdkTransport(cfg);
-  await transport.complete({
-    prompt: 'Reply with {"ok": true}.',
-    schema: z.object({ ok: z.boolean() }),
+  const text = await transport({
+    system: 'You are a configuration probe.',
+    user: 'Reply with exactly {"ok": true}.',
+    responseFormat: 'json',
     timeoutMs: 30_000,
   });
+  // A non-empty completion confirms the credentials + model resolve and respond.
+  if (typeof text !== 'string' || text.trim() === '') {
+    throw new Error('provider returned an empty response');
+  }
 }
 
 function createLlmRouter(store: LlmConfigStore, envManaged: boolean): Router {
@@ -143,7 +148,7 @@ function createLlmRouter(store: LlmConfigStore, envManaged: boolean): Router {
 
     await store.save(input);
     // Make the new provider live immediately for this process.
-    setLlmTransport(createAiSdkTransport(candidate));
+    setDefaultTransport(createAiSdkTransport(candidate));
     log.info(`[ee-llm] provider updated → ${candidate.provider} (${candidate.model})`);
     res.json({ config: await store.getView() });
   });
@@ -189,7 +194,7 @@ export async function registerLlmProviders(
     });
     const active = stored ?? envCfg;
     if (active) {
-      setLlmTransport(createAiSdkTransport(active));
+      setDefaultTransport(createAiSdkTransport(active));
       log.info(`[ee-llm] installed ${active.provider} transport`);
     } else {
       log.info(
@@ -201,7 +206,7 @@ export async function registerLlmProviders(
   }
 
   if (envCfg) {
-    setLlmTransport(createAiSdkTransport(envCfg));
+    setDefaultTransport(createAiSdkTransport(envCfg));
     log.info(
       `[ee-llm] installed ${envCfg.provider} transport from env (set DATABASE_URL + TRUECOURSE_SECRET_KEY to manage providers in-app)`,
     );

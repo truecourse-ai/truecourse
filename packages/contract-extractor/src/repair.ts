@@ -19,7 +19,7 @@
  * structural element the comparator requires", it doesn't belong here.
  */
 
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
@@ -47,11 +47,12 @@ export interface RepairProgress {
 
 export interface RepairOptions {
   /**
-   * @deprecated The binary is resolved by the CLI transport (via the
-   * `CLAUDE_CODE_BIN` env var); this field is ignored.
+   * LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). The
+   * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
    */
+  transport?: LlmTransport;
   bin?: string;
-  /** Model passed through to the transport. */
+  /** Model passed to `claude --model`. */
   model?: string;
   /** Fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
@@ -324,9 +325,10 @@ interface FixRequest {
 
 async function runFixOne(
   req: FixRequest,
-  model: string | undefined,
-  fallbackModel: string | undefined,
+  transport: LlmTransport,
   timeoutMs: number,
+  model?: string,
+  fallbackModel?: string,
 ): Promise<Fragment[] | null> {
   const userPrompt = buildFixUserPrompt(req);
   // Prepend the main extraction system prompt so the repair pass has
@@ -335,20 +337,24 @@ async function runFixOne(
   // headings, wrong casing (`AuthRequirement` vs `auth-requirement`),
   // or comment characters, all of which fail downstream parsing.
   const repairSystemPrompt = `${SYSTEM_PROMPT}\n\n${FIX_SYSTEM_PROMPT}`;
+  const id = req.previousArtifact
+    ? `${req.previousArtifact.kind}:${req.previousArtifact.identity}`
+    : (req.missingKey ?? 'unknown');
   try {
-    const { object } = await getLlmTransport().complete({
-      system: repairSystemPrompt,
-      prompt: userPrompt,
-      schema: ExtractionResultSchema,
+    const raw = await transport({
+      id: `contract.repair:${id}`,
+      stage: 'contract.repair',
       model,
       fallbackModel,
+      system: repairSystemPrompt,
+      user: userPrompt,
+      responseFormat: 'json',
       timeoutMs,
-      label: 'repair',
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return object.fragments;
+    const inner = JSON.parse(stripCodeFences(raw));
+    const parsed = ExtractionResultSchema.parse(inner);
+    return parsed.fragments;
   } catch {
-    // Repair is best-effort: a failed re-prompt leaves the artifact as-is.
     return null;
   }
 }
@@ -381,6 +387,7 @@ export async function repair(
   slices: SpecSlice[],
   opts: RepairOptions = {},
 ): Promise<RepairOutcome> {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 600_000;
   const log: string[] = [];
   const allIssues: RepairIssue[] = [];
@@ -410,9 +417,10 @@ export async function repair(
     opts.onProgress?.({ done, total, message });
     const fragments = await runFixOne(
       { previousArtifact: null, missingKey: issue.artifactKey, slice, issues: [issue.detail] },
+      transport,
+      timeoutMs,
       opts.model,
       opts.fallbackModel,
-      timeoutMs,
     );
     if (!fragments) {
       log.push(`repair: re-prompt failed for ${issue.artifactKey}.`);
@@ -476,9 +484,10 @@ export async function repair(
     opts.onProgress?.({ done, total, message });
     const fragments = await runFixOne(
       { previousArtifact: artifact, slice, issues: issues.map((i) => i.detail) },
+      transport,
+      timeoutMs,
       opts.model,
       opts.fallbackModel,
-      timeoutMs,
     );
     if (!fragments || fragments.length === 0) {
       log.push(`repair: re-prompt failed for ${k}.`);

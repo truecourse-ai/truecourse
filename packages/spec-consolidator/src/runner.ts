@@ -1,16 +1,17 @@
 /**
- * Per-block extraction runner. Spawns one `claude -p` subprocess per
- * block, parses Claude Code's JSON envelope, validates the inner
- * payload against `LlmExtractionSchema`, and returns a typed result.
+ * Per-block extraction runner. For each block it builds a system + user
+ * prompt and hands it to an `LlmTransport` (cli = spawn `claude -p`, agent =
+ * filesystem mailbox), then validates the response against
+ * `LlmExtractionSchema`.
  *
- * The runner is injected — tests pass a stub that returns canned
- * outputs without touching the subprocess at all. Same pattern the
- * contract-extractor uses; keeps the orchestrator pure.
+ * The runner is injected — tests pass a stub that returns canned outputs
+ * without touching the transport at all. Concurrency lives here (p-limit);
+ * the transport is a single-request function.
  */
 
 import os from 'node:os';
 import pLimit from 'p-limit';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Block } from './slicer.js';
 import {
   LlmExtractionSchema,
@@ -23,7 +24,7 @@ export interface BlockRunResult {
   block: Block;
   /** Parsed extraction on success. */
   extraction?: LlmExtraction;
-  /** Error message on failure (subprocess exit, parse, schema fail). */
+  /** Error message on failure (transport error, parse, schema fail). */
   error?: string;
   durationMs: number;
 }
@@ -32,9 +33,11 @@ export type BlockRunner = (blocks: Block[]) => Promise<BlockRunResult[]>;
 
 export interface SpawnRunnerOptions {
   /**
-   * @deprecated The binary is resolved by the CLI transport (via the
-   * `CLAUDE_CODE_BIN` env var); this field is ignored.
+   * LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). The
+   * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
    */
+  transport?: LlmTransport;
+  /** Path to the claude binary (cli transport only). Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
   bin?: string;
   /**
    * Model name passed to `claude --model`. When unset, the CLI default
@@ -44,13 +47,13 @@ export interface SpawnRunnerOptions {
   model?: string;
   /** Optional fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
-  /** Concurrent subprocesses. Defaults to min(cpus, 4). */
+  /** Concurrent requests. Defaults to min(cpus, 4). */
   concurrency?: number;
-  /** Per-call timeout. Defaults to 240000ms (matches contract-extractor's bumped timeout). */
+  /** Per-call timeout. Defaults to 240000ms. */
   timeoutMs?: number;
-  /** Hook fired before each subprocess spawn — useful for progress UIs. */
+  /** Hook fired before each request — useful for progress UIs. */
   onBlockStart?: (block: Block) => void;
-  /** Hook fired after each subprocess completes (success or failure). */
+  /** Hook fired after each request completes (success or failure). */
   onBlockDone?: (block: Block, ok: boolean) => void;
 }
 
@@ -64,10 +67,11 @@ export function defaultConcurrency(): number {
 }
 
 /**
- * Build a runner that spawns `claude -p` for each block. Each
- * subprocess is independent — failures don't abort the batch.
+ * Build a runner that calls the transport once per block. Each request is
+ * independent — failures don't abort the batch.
  */
 export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
   const limit = pLimit(concurrency);
@@ -79,7 +83,7 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
           opts.onBlockStart?.(block);
           const t0 = Date.now();
           try {
-            const extraction = await runOne(block, opts.model, opts.fallbackModel, timeoutMs);
+            const extraction = await runOne(transport, block, timeoutMs, opts.model, opts.fallbackModel);
             opts.onBlockDone?.(block, true);
             return { block, extraction, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -94,26 +98,28 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
 }
 
 async function runOne(
+  transport: LlmTransport,
   block: Block,
-  model: string | undefined,
-  fallbackModel: string | undefined,
   timeoutMs: number,
+  model?: string,
+  fallbackModel?: string,
 ): Promise<LlmExtraction> {
-  const { object } = await getLlmTransport().complete({
-    system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt({
-      filePath: block.filePath,
-      headingPath: block.headingPath,
-      startLine: block.startLine,
-      text: block.text,
-    }),
-    schema: LlmExtractionSchema,
+  const userPrompt = buildUserPrompt({
+    filePath: block.filePath,
+    headingPath: block.headingPath,
+    startLine: block.startLine,
+    text: block.text,
+  });
+  const raw = await transport({
+    id: `spec.claimExtract:${block.id}`,
+    stage: 'spec.claimExtract',
     model,
     fallbackModel,
+    system: SYSTEM_PROMPT,
+    user: userPrompt,
+    responseFormat: 'json',
     timeoutMs,
-    label: `consolidate:${block.id}`,
-    cliArgs: ['--setting-sources', 'project'],
   });
-  return object;
+  const inner = JSON.parse(stripCodeFences(raw));
+  return LlmExtractionSchema.parse(inner);
 }
-

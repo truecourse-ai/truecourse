@@ -1,12 +1,17 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
+import { isGeneratedFile } from '../../../_shared/javascript-helpers.js'
 
 export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/unused-private-member',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['class_declaration', 'class'],
   visit(node, filePath, sourceCode) {
+    // Skip ANTLR / codegen output — the unused-looking private members are
+    // generator scaffolding, not author-written code.
+    if (isGeneratedFile(filePath, sourceCode)) return null
+
     const body = node.namedChildren.find((c) => c.type === 'class_body')
     if (!body) return null
 

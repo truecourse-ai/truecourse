@@ -1,6 +1,19 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// Zod / valibot / yup / class-validator chain methods that take an env-var
+// argument as the fallback or transform input. Reading `process.env.X` here
+// is the validation entry point, not an unguarded access.
+const SCHEMA_DEFAULTING_METHODS = new Set([
+  'default',
+  'catch',
+  'fallback',
+  'transform',
+  'preprocess',
+  'parse',
+  'pipe',
+])
+
 export const missingEnvValidationVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-env-validation',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -38,6 +51,18 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
         const op = ancestor.childForFieldName('operator')?.text
           ?? ancestor.child(0)?.text
         if (op === '!') return null
+      }
+      // Schema-builder method calls like `z.string().default(process.env.X)`,
+      // `.catch(process.env.X)`, `.optional()`-then-`.default(process.env.X)`
+      // are the validation — zod (and similar) consume the env var via the
+      // schema and surface a typed, validated value. The default arg is the
+      // fallback when the env var is undefined, not an unguarded read.
+      if (t === 'call_expression') {
+        const fn = ancestor.childForFieldName('function')
+        const callee = fn?.type === 'member_expression'
+          ? fn.childForFieldName('property')?.text
+          : undefined
+        if (callee && SCHEMA_DEFAULTING_METHODS.has(callee)) return null
       }
       ancestor = ancestor.parent
       depth++

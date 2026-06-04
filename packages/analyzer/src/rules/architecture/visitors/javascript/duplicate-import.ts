@@ -31,6 +31,22 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
         const currentIsSideEffectOnly = isSideEffectOnly(imp)
         if (prevIsSideEffectOnly !== currentIsSideEffectOnly) continue
 
+        // Skip when one import is a namespace import (`import * as X from 'm'`)
+        // and the other is a named import (`import { a } from 'm'`). The
+        // only legal combined forms are `default + named` and
+        // `default + namespace`; `namespace + named` is not valid ES module
+        // syntax, so the suggested merge isn't actionable.
+        const prevHasNamespace = hasNamespaceImport(prevImp)
+        const currentHasNamespace = hasNamespaceImport(imp)
+        const prevHasNamed = hasNamedImports(prevImp)
+        const currentHasNamed = hasNamedImports(imp)
+        if (
+          (prevHasNamespace && currentHasNamed && !currentHasNamespace) ||
+          (currentHasNamespace && prevHasNamed && !prevHasNamespace)
+        ) {
+          continue
+        }
+
         return makeViolation(
           this.ruleKey, imp, filePath, 'low',
           'Duplicate import',
@@ -54,5 +70,17 @@ function isSideEffectOnly(imp: SyntaxNode): boolean {
     if (child.type === 'import_clause') return false
   }
   return true
+}
+
+function hasNamespaceImport(imp: SyntaxNode): boolean {
+  const clause = imp.namedChildren.find((c) => c.type === 'import_clause')
+  if (!clause) return false
+  return clause.namedChildren.some((c) => c.type === 'namespace_import')
+}
+
+function hasNamedImports(imp: SyntaxNode): boolean {
+  const clause = imp.namedChildren.find((c) => c.type === 'import_clause')
+  if (!clause) return false
+  return clause.namedChildren.some((c) => c.type === 'named_imports')
 }
 

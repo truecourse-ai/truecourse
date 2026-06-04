@@ -1,15 +1,12 @@
-export type {
-  LlmTransport,
-  CompleteRequest,
-  CompleteResult,
-  CompleteTextRequest,
-  CompleteTextResult,
-  CompleteUsage,
-  Inferred,
-} from './transport.js';
-export { cliTransport, parseEnvelope } from './cli-transport.js';
-export { getLlmTransport, setLlmTransport, resetLlmTransport } from './registry.js';
-export { buildModelArgs } from './model-args.js';
+/**
+ * `@truecourse/llm` — the pluggable LLM-stage cache seam. The LLM transport
+ * itself now lives in `@truecourse/shared/llm` (cli + agent backends); this
+ * package is just the content-addressed cache the IL runners use to skip
+ * re-running the model for unchanged inputs. The file-backed default keeps the
+ * OSS `.truecourse/.cache/` layout; the enterprise edition injects a Postgres
+ * `KvCacheStore` via `setKvCacheStore`.
+ */
+
 export {
   type KvCacheStore,
   getKvCacheStore,

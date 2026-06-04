@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
 
@@ -34,6 +34,12 @@ export type ConflictExplainerRunner = (
 export interface ConflictExplainerOptions {
   /** Override the runner. Tests pass a stub. */
   runner?: ConflictExplainerRunner;
+  /**
+   * LLM transport forwarded to the default runner. Defaults to `cliTransport()`
+   * (spawns `claude -p`). The CLI/dashboard pass `agentTransport(io)` for
+   * headless/routine runs.
+   */
+  transport?: LlmTransport;
   /** When false, skip the LLM calls entirely. */
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 4). */
@@ -70,7 +76,11 @@ export async function explainConflicts(
   if (conflicts.length === 0) return;
   const runner =
     opts.runner ??
-    spawnConflictExplainerRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnConflictExplainerRunner({
+      transport: opts.transport,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+    });
   const concurrency = opts.concurrency ?? 4;
   opts.onStart?.(conflicts.length);
 
@@ -289,23 +299,25 @@ function truncateJson(value: unknown, max = 1500): string {
 }
 
 function spawnConflictExplainerRunner(
-  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictExplainerRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 90_000;
   return async (input: ConflictExplainerInput): Promise<string> => {
     const chain = isChainConflict(input.conflict);
-    const { text } = await getLlmTransport().completeText({
-      system: chain ? CHAIN_EXPLAINER_SYSTEM_PROMPT : CONFLICT_EXPLAINER_SYSTEM_PROMPT,
-      prompt: chain
-        ? buildChainExplainerUserPrompt(input.conflict)
-        : buildExplainerUserPrompt(input.conflict),
+    const raw = await transport({
+      id: `spec.conflictExplain:${input.conflict.id}`,
+      stage: 'spec.conflictExplain',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
+      system: chain ? CHAIN_EXPLAINER_SYSTEM_PROMPT : CONFLICT_EXPLAINER_SYSTEM_PROMPT,
+      user: chain
+        ? buildChainExplainerUserPrompt(input.conflict)
+        : buildExplainerUserPrompt(input.conflict),
+      responseFormat: 'text',
       timeoutMs,
-      label: `conflict-explain:${input.conflict.id}`,
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return text;
+    return raw;
   };
 }
 

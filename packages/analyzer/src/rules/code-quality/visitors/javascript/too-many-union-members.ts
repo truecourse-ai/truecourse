@@ -20,12 +20,18 @@ export const tooManyUnionMembersVisitor: CodeRuleVisitor = {
       ancestor = ancestor.parent
     }
 
+    // Per-member trailing comments (`'a' // ...`) and leading-`|`
+    // artefacts show up as named children of `union_type` but aren't
+    // members. Don't let them inflate the count.
+    const NON_MEMBER_NODE_TYPES = new Set(['comment', 'ERROR', 'MISSING'])
     function countMembers(n: SyntaxNode): number {
       if (n.type !== 'union_type') return 1
       let total = 0
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i)
-        if (child) total += countMembers(child)
+        if (!child) continue
+        if (NON_MEMBER_NODE_TYPES.has(child.type)) continue
+        total += countMembers(child)
       }
       return total
     }

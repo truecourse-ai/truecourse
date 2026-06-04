@@ -1,53 +1,57 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
 import { ServiceViolationOutputSchema } from '../../packages/core/src/services/llm/schemas.js';
 import { config } from '../../packages/core/src/config/index.js';
-// Import the bare specifier — the SAME @truecourse/llm module instance that
-// the core provider resolves — so the transport singleton is shared.
-import {
-  setLlmTransport,
-  resetLlmTransport,
-  type LlmTransport,
-} from '@truecourse/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 
 /**
- * Counting transport: bypasses real process spawning. Each `complete` call
- * resolves to a fixed result after a configurable delay, tracking in-flight
- * count so tests can assert peak concurrency. The concurrency cap under test
- * lives in `BaseCLIProvider.spawnAndParse`'s limiter, which wraps this call.
+ * Counting transport: a fake `LlmTransport` (no real `claude` spawn). Each call
+ * resolves to a fixed JSON string after a configurable delay, tracking in-flight
+ * count so tests can assert peak concurrency. The cap under test lives in
+ * `BaseCLIProvider.spawnAndParse`'s limiter, which wraps `spawnCLI` — and
+ * `spawnCLI` routes through the injected transport instead of spawning.
  */
-class CountingTransport implements LlmTransport {
+class CountingTransport {
   public inFlight = 0;
   public peak = 0;
   public calls = 0;
   public delayMs = 20;
 
-  async complete(): Promise<{ object: unknown; usage?: undefined }> {
+  // spawnCLI wraps the returned text as `{ result: <text> }`, so return the
+  // INNER violations JSON the parser will extract + Zod-validate.
+  readonly fn: LlmTransport = async () => {
     this.calls++;
     this.inFlight++;
     this.peak = Math.max(this.peak, this.inFlight);
     try {
       await new Promise((r) => setTimeout(r, this.delayMs));
-      return { object: { violations: [], serviceDescriptions: [] } };
+      return JSON.stringify({ violations: [], serviceDescriptions: [] });
     } finally {
       this.inFlight--;
     }
-  }
-
-  async completeText(): Promise<{ text: string }> {
-    return { text: '' };
-  }
+  };
 }
 
 class TestProvider extends BaseCLIProvider {
+  get binaryName() {
+    return 'claude';
+  }
+  get baseArgs() {
+    return ['-p', '--output-format', 'json'];
+  }
+  get modelFlag() {
+    return ['--model', 'test-model'];
+  }
   async runTask(onStart?: () => void) {
-    return (this as unknown as {
-      spawnAndParse: (
-        p: string,
-        s: typeof ServiceViolationOutputSchema,
-        opts?: { onStart?: () => void },
-      ) => Promise<unknown>;
-    }).spawnAndParse('prompt', ServiceViolationOutputSchema, { onStart });
+    return (
+      this as unknown as {
+        spawnAndParse: (
+          p: string,
+          s: typeof ServiceViolationOutputSchema,
+          opts?: { onStart?: () => void },
+        ) => Promise<unknown>;
+      }
+    ).spawnAndParse('prompt', ServiceViolationOutputSchema, { onStart });
   }
 }
 
@@ -56,12 +60,7 @@ let provider: TestProvider;
 
 beforeEach(() => {
   transport = new CountingTransport();
-  setLlmTransport(transport);
-  provider = new TestProvider();
-});
-
-afterEach(() => {
-  resetLlmTransport();
+  provider = new TestProvider(transport.fn); // inject the fake transport
 });
 
 describe('BaseCLIProvider concurrency cap', () => {
@@ -104,7 +103,9 @@ describe('BaseCLIProvider concurrency cap', () => {
     const blockers = Array.from({ length: cap }, () => provider.runTask());
 
     let queuedStarted = false;
-    const queued = provider.runTask(() => { queuedStarted = true; });
+    const queued = provider.runTask(() => {
+      queuedStarted = true;
+    });
 
     // Immediately after submission the onStart for the queued task
     // must NOT have fired — it's still waiting behind the blockers.

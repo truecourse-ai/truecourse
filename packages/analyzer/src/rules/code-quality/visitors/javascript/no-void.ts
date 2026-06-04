@@ -18,6 +18,17 @@ function operandIsCall(operand: SyntaxNode | null | undefined): boolean {
   return false
 }
 
+// `void <identifier>` / `void <member.access>` as its own statement is the
+// "mark as used" idiom: an explicit reference to a binding kept alive for
+// its side-effect import or to silence unused-variable warnings (e.g.
+// `void engine;` after `import { engine } from "./engine"`). It is never
+// a stand-in for `undefined` because the value isn't consumed.
+function isMarkAsUsedStatement(node: SyntaxNode, operand: SyntaxNode | null | undefined): boolean {
+  if (!operand) return false
+  if (operand.type !== 'identifier' && operand.type !== 'member_expression') return false
+  return node.parent?.type === 'expression_statement'
+}
+
 export const noVoidVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/no-void',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -30,6 +41,8 @@ export const noVoidVisitor: CodeRuleVisitor = {
 
     // Skip the fire-and-forget `void promiseCall()` idiom.
     if (operandIsCall(operand)) return null
+    // Skip the "mark as used" idiom: `void engine;` as a statement.
+    if (isMarkAsUsedStatement(node, operand)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

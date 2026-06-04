@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { getLlmTransport } from '@truecourse/llm';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
 
@@ -46,6 +46,11 @@ export type ConflictResolverRunner = (
 export interface ConflictResolverOptions {
   /** Override the runner. Tests pass a stub. */
   runner?: ConflictResolverRunner;
+  /**
+   * LLM transport forwarded to the default spawn runner. Defaults to
+   * `cliTransport()` (spawns `claude -p`).
+   */
+  transport?: LlmTransport;
   /** When false, skip the LLM call entirely. */
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 2 — these are Opus, slower). */
@@ -87,7 +92,11 @@ export async function resolveConflicts(
   if (opts.enabled === false || conflicts.length === 0) return [];
   const runner =
     opts.runner ??
-    spawnConflictResolverRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnConflictResolverRunner({
+      transport: opts.transport,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+    });
   const concurrency = opts.concurrency ?? 2;
   opts.onStart?.(conflicts.length);
   const tBatchStart = perfNow();
@@ -283,21 +292,23 @@ const ConflictResolutionSchema = z.object({
 });
 
 function spawnConflictResolverRunner(
-  opts: { timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictResolverRunner {
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 240_000;
   return async (input: ConflictResolverInput): Promise<ConflictResolution> => {
-    const { object } = await getLlmTransport().complete({
-      system: CONFLICT_RESOLVER_SYSTEM_PROMPT,
-      prompt: buildResolverUserPrompt(input.conflict),
-      schema: ConflictResolutionSchema,
+    const raw = await transport({
+      id: `spec.conflictResolve:${input.conflict.id}`,
+      stage: 'spec.conflictResolve',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
+      system: CONFLICT_RESOLVER_SYSTEM_PROMPT,
+      user: buildResolverUserPrompt(input.conflict),
+      responseFormat: 'json',
       timeoutMs,
-      label: `conflict-resolve:${input.conflict.id}`,
-      cliArgs: ['--setting-sources', 'project'],
     });
-    return object;
+    const inner = JSON.parse(stripCodeFences(raw));
+    return ConflictResolutionSchema.parse(inner);
   };
 }
 

@@ -40,6 +40,7 @@ import {
   type GenerateResult,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+import { agentTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 
 // Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
 function perfNow(): number {
@@ -240,11 +241,36 @@ export interface SpecInProcessOptions {
   ref?: RepoRef;
   /** Override the commit SHA used to key persisted sets when `ref` is omitted. */
   commitOverride?: string;
+  /**
+   * LLM transport mode. `cli` (default) spawns `claude -p`; `agent` uses a
+   * filesystem mailbox under `io` so an orchestrating agent answers the
+   * prompts (no `claude` binary, no API key). `agent` requires `io`.
+   */
+  llm?: 'cli' | 'agent';
+  /** I/O dir for the agent transport's request/response mailbox. */
+  io?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build the LLM transport for a run. `agent` → a filesystem-mailbox transport
+ * under `options.io` (required). `cli` (default) → the process-installed default
+ * transport when present (the EE edition installs an API-backed transport at
+ * boot so hosted runs need no `claude` binary), else `undefined` so each runner
+ * falls back to its built-in cli transport — preserving OSS behavior exactly.
+ */
+function resolveTransport(options: SpecInProcessOptions): LlmTransport | undefined {
+  if (options.llm === 'agent') {
+    if (!options.io) {
+      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
+    }
+    return agentTransport(options.io);
+  }
+  return getDefaultTransport();
+}
 
 /**
  * Marker file stamped after a successful `contracts generate` run. The
@@ -373,6 +399,7 @@ export async function scanInProcess(
       chainRunner: options.chainRunner,
       disableLlmChainDetection: options.disableLlmChainDetection,
       skipGit: options.skipGit,
+      transport: resolveTransport(options),
       models: resolveConsolidateModels(repoRoot),
       onRelevanceProgress: (doneCount, total) => {
         // Numbered progress while "Discovering docs" runs (LLM relevance
@@ -559,6 +586,7 @@ export async function resolveAllDefaultsInProcess(
     chainRunner: options.chainRunner,
     disableLlmChainDetection: options.disableLlmChainDetection,
     skipGit: options.skipGit,
+    transport: resolveTransport(options),
     models: resolveConsolidateModels(repoRoot),
   };
 
@@ -706,9 +734,12 @@ export async function generateContractsInProcess(
 
   try {
     const extractModels = resolveExtractModels(repoRoot);
+    const transport = resolveTransport(options);
     const il = await generateContracts({
       repoRoot,
+      transport,
       runner: spawnExtractorRunner({
+        transport,
         concurrency: defaultExtractorConcurrency(),
         model: extractModels.extract,
         fallbackModel: extractModels.fallback,

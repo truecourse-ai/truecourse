@@ -19,6 +19,11 @@ export const nestedTemplateLiteralVisitor: CodeRuleVisitor = {
         return null
       }
     }
+    // Multi-line outer templates are typically banners, CSS-in-JS, SQL, or
+    // generated reports. The readability concern targets dense one-liners
+    // where the nested template visually disappears; a multi-line builder
+    // already reads vertically so an inline nested branch is fine.
+    if (node.startPosition.row !== node.endPosition.row) return null
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i)
       if (child?.type === 'template_substitution') {

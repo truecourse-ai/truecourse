@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { Sparkles } from 'lucide-react';
 import { AccessForm } from '@/components/AccessForm';
+import { Reveal } from '@/components/Reveal';
 
 export default function RequestAccessPage() {
   useEffect(() => {
@@ -12,28 +12,50 @@ export default function RequestAccessPage() {
   }, []);
 
   return (
-    <section className="relative isolate flex min-h-screen items-start justify-center overflow-hidden px-4 pt-32 pb-16 sm:px-6">
-      <div className="bg-radial-glow absolute inset-0 -z-10" />
-      <div className="bg-grid absolute inset-0 -z-10" />
+    <section className="access-wrap">
+      <div className="hero-glow" />
+      <svg
+        className="hero-baseline"
+        viewBox="0 0 1440 220"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <line
+          className="bline"
+          x1="0"
+          y1="150"
+          x2="1440"
+          y2="150"
+          style={{ stroke: 'var(--accent)' }}
+          strokeWidth="1.5"
+          opacity="0.5"
+        />
+        <path
+          className="bdrift"
+          d="M0 150 C 760 150, 920 150, 1440 210"
+          fill="none"
+          style={{ stroke: 'var(--warn)' }}
+          strokeWidth="1.5"
+          strokeDasharray="2 9"
+          opacity="0.55"
+        />
+      </svg>
 
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent backdrop-blur-md">
-            <Sparkles className="h-3 w-3" />
-            Closed beta
-          </div>
-          <h1 className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl">
-            Request early access
-          </h1>
-          <p className="mt-3 text-base leading-relaxed text-muted-foreground">
-            We&apos;re onboarding teams in waves. Drop your details and we&apos;ll be in touch
-            when the next batch opens.
+      <div className="access-card-wrap">
+        <Reveal className="access-head">
+          <span className="beta-badge">
+            <span className="spark">✦</span> Closed beta
+          </span>
+          <h1>Request early access</h1>
+          <p>
+            We&apos;re onboarding teams in waves. Drop your details and we&apos;ll be in
+            touch when the next batch opens.
           </p>
-        </div>
+        </Reveal>
 
-        <div className="glow-border surface rounded-2xl border border-border p-6 shadow-2xl shadow-black/40">
+        <Reveal className="form-card" delay={100}>
           <AccessForm />
-        </div>
+        </Reveal>
       </div>
     </section>
   );

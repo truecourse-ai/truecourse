@@ -40,7 +40,11 @@ export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
     if (!leftType || !rightType) return null
 
     // Relational operators coerce to number. Objects, arrays, booleans are problematic.
-    const nonComparableTypes = new Set(['boolean', 'object', 'void', 'undefined', 'null', 'never'])
+    // `never` is excluded: when the analyzer can't resolve an upstream type
+    // (Prisma payload generics, helpers behind missing node_modules,
+    // exhaustively-narrowed unions), TS serialises the operand as `never` —
+    // a type-information artifact, not a real coercion bug.
+    const nonComparableTypes = new Set(['boolean', 'object', 'void', 'undefined', 'null'])
 
     if (nonComparableTypes.has(leftType) || nonComparableTypes.has(rightType)) {
       const badType = nonComparableTypes.has(leftType) ? leftType : rightType

@@ -21,9 +21,8 @@
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/openai": "^3.0.0",
     "@ai-sdk/openai-compatible": "^2.0.0",
-    "@truecourse/llm": "workspace:*",
-    "ai": "^6.0.0",
-    "zod": "^3.23.8"
+    "@truecourse/shared": "workspace:*",
+    "ai": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

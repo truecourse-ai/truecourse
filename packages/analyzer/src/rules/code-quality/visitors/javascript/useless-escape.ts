@@ -1,11 +1,17 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isGeneratedFile } from '../../../_shared/javascript-helpers.js'
 
 export const uselessEscapeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/useless-escape',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['string'],
   visit(node, filePath, sourceCode) {
+    // Codegen output (ANTLR parsers, protoc, generated lexers, etc.) often
+    // serializes binary blobs as string literals with `\'` etc. that are
+    // intentional inside the generator's encoding scheme. Don't flag.
+    if (isGeneratedFile(filePath, sourceCode)) return null
+
     const text = node.text
     const quoteChar = text[0]
     if (quoteChar !== '"' && quoteChar !== "'") return null

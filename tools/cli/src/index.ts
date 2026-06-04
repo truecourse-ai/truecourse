@@ -63,7 +63,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.6.0")
+  .version("0.6.1")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -136,6 +136,8 @@ program
   // undefined (falls through to config / interactive prompt).
   .option("--llm", "Run LLM-powered rules (pre-approves the cost estimate)")
   .option("--no-llm", "Skip LLM-powered rules for this run")
+  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .option("--stash", "Pre-approve stashing pending changes before analysis")
   .option("--no-stash", "Analyze the working tree as-is without stashing")
   .option("--install-skills", "Install Claude Code skills without prompting")
@@ -144,10 +146,11 @@ program
     const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
     const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
     const installSkills = resolveInstallSkills(options);
+    const common = { llm, stash, installSkills, llmTransport: options.llmTransport, io: options.io };
     if (options.diff) {
-      await runAnalyzeDiff({ llm, stash, installSkills });
+      await runAnalyzeDiff(common);
     } else {
-      await runAnalyze({ llm, stash, installSkills });
+      await runAnalyze(common);
     }
   });
 
@@ -192,8 +195,10 @@ contractsCmd
   .command("generate")
   .description("Extract .tc artifacts from prose specs (LLM, cached)")
   .option("--diff", "Dry run — show what would change without writing")
+  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runContractsGenerate({ diff: !!options.diff });
+    await runContractsGenerate({ diff: !!options.diff, llm: options.llmTransport, io: options.io });
   });
 
 contractsCmd
@@ -220,16 +225,20 @@ const specCmd = program
 specCmd
   .command("scan")
   .description("Walk docs, extract claims, surface conflicts (no writes)")
-  .action(async () => {
-    await runSpecScan();
+  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
+  .action(async (options) => {
+    await runSpecScan({ llm: options.llmTransport, io: options.io });
   });
 
 specCmd
   .command("resolve")
   .description("Resolve open conflicts (interactive runs in the dashboard)")
   .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
+  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
+  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runSpecResolve({ allDefaults: !!options.allDefaults });
+    await runSpecResolve({ allDefaults: !!options.allDefaults, llm: options.llmTransport, io: options.io });
   });
 
 specCmd
