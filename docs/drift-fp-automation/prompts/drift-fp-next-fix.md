@@ -239,7 +239,17 @@ If step 1/2 throws, still write the section with `unavailable: <concrete reason>
       ```
       (or `unavailable: <reason>` if measurement failed).
     - End with `cc @mushgev`.
-  - Labels: `drift-fp-fix` (fires the next routine invocation on merge).
+  - **Open the PR with `--label drift-fp-fix` in the same `gh pr create` call.**
+    `drift-fp-next-fix` (the next iteration of this routine) triggers on this PR's merge filtered
+    by `Labels is-one-of drift-fp-fix`. If the PR is merged without the label, the trigger
+    doesn't fire and the inner loop stalls (this is what happened on PR #483: the label was
+    never applied, the PR was merged label-less, and the next batch had to be kicked manually).
+    Do **not** specify the label as a follow-up `gh pr edit --add-label` step — sessions have
+    silently dropped that second call.
+  - **Verify the label landed.** Right after `gh pr create` returns, check
+    `gh pr view <number> --json labels --jq '.labels[].name'`. If `drift-fp-fix` isn't in the
+    output, post a one-line failure note on the most recent fixed issue (`cc @mushgev`) and stop
+    — do **not** attempt a follow-up `--add-label` to recover. Surface to a human.
   - For each fixed issue: comment the PR URL, then remove `drift-fp-in-progress` (merge
     auto-closes via `Closes #N`).
 - End the session.
