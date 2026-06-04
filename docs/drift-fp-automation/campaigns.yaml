@@ -1,0 +1,86 @@
+# Drift-FP campaigns — source of truth for which repos we run the drift verifier
+# against, in what order, and the results.
+#
+# Owned by the drift-fp-automation routines. Humans add/reorder entries; routine
+# sessions update `status`, `baseline`, `final`, and `notes`. Always read the
+# latest from `main`. The CONTRACTS themselves are NOT stored here — they live on
+# per-campaign storage branches `claude/drift-fp-store/<owner>-<repo>` (generated
+# once by drift-fp-generate, deleted at close). See README "Generating & storing
+# contracts".
+#
+# Status values (no `in_progress` — a campaign stays `discovering` from issue
+# filing through the whole fix loop until it closes):
+#   pending      — not yet started. drift-fp-generate picks the first `pending`
+#                  campaign whose storage branch doesn't exist yet (branch
+#                  existence, not a yaml flag, is the "already generated" signal).
+#   discovering  — drift-fp-discover has run / the fix loop is in progress
+#                  (set by the discovery PR that merges to main).
+#   done         — drift-fp-next-fix verified NO false-positive drifts remain
+#                  (fp == 0); campaign-close PR merged; vX.Y.Z tagged; storage
+#                  branch deleted.
+#   skipped      — manually deprioritized; note explains why
+#
+# Convergence is driven toward fp == 0 (not "tp_rate >= 0.90" — these targets
+# have ~0 genuine drift, so tp≈0 and a TP-rate gate is meaningless). The close
+# gate is "no false-positive drift-kinds remain". See README "TP/FP rubric".
+#
+# Per-campaign fields:
+#   target_repo      — owner/repo
+#   tech_stack       — informational
+#   code_dir         — passed to `verify --code-dir` (relative to repo root; "." = root).
+#                      Authoritative copy lives in the storage branch's meta.yaml.
+#   doc_scope        — the .md dirs the `.truecourseignore` keeps (drift-fp-generate uses this)
+#   priority         — pick order
+#   baseline/final   — drift snapshots: { verified_at, target_ref, total_drifts, tp, fp, info, fp_rate }
+#                      target_ref MUST equal the storage branch's meta.yaml target_ref.
+#
+# Each campaign also writes its open issues with label
+# `drift-fp-target:<owner>-<repo>` so a session can find them without crawling this file.
+# Targets are vetted empirically (clone + `infer --dry-run` probe of spec↔code
+# overlap) before seeding — see README "Selecting targets".
+
+campaigns:
+  # ---- JS/TS — strongest validated drift fit (fit 88, strong) ----
+  - target_repo: strapi/strapi
+    tech_stack: [typescript, monorepo, knex]
+    code_dir: packages/core
+    doc_scope:
+      - docs/docs/docs/01-core/authentication
+      - docs/docs/docs/01-core/content-manager
+      - docs/docs/docs/01-core/content-releases
+      - docs/docs/docs/01-core/permissions
+      - docs/docs/rfcs
+    priority: 1
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes:
+      - "Validation run found 44 drift items, ~0 genuine: 20 Operation implementation.missing FPs (relative-path plugin routes mounted under a prefix; extractor doesn't reconstruct the mount), 13 NamedConstant ACTIONS value-mismatch FPs (bare-name collision, no module scoping), 11 no-code-counterpart info notes. PublicationFilter enum verified cleanly (true negative). Strong first FP corpus: operation mount-prefix + named-constant module-scoping."
+      - "Default branch is develop, not main — pin target_ref off develop."
+
+  # ---- Python — best validated Python drift fit (fit 78, strong) ----
+  - target_repo: feast-dev/feast
+    tech_stack: [python, feature-store]
+    code_dir: "."
+    doc_scope: []        # fill before generating (keep the behavioral docs/ .md; drop the 93 .rst)
+    priority: 2
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe histogram: NamedConstant 189, Operation 71, Enum 20, Formula 6, Pagination present. Has 93 .rst (invisible to the tool) alongside .md."]
+
+  # ---- JS/TS — secondary validated fit (fit 42, 'maybe') ----
+  - target_repo: directus/directus
+    tech_stack: [typescript, knex]
+    code_dir: "."
+    doc_scope: []        # narrow: Directus's behavioral .md is sparse (api/src/ai/tools/*/prompt.md); fill before generating
+    priority: 3
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Narrow but real overlap: Flows TriggerType/accountability/status enums in prompt.md ↔ code enums. Docs mostly live in a separate repo, so spec surface is thin."]
+
+  # ---- Add more campaigns below once validated (probe via `infer --dry-run`) ----
+  # Bar: concrete .md specs in REAL (non-dot) folders that OVERLAP liftable app
+  # code (Prisma entities / TS|Zod|str-Enum enums / Express|FastAPI routes /
+  # Knex|Prisma queries / named constants). See README "Selecting targets".
