@@ -1,0 +1,6 @@
+architecture-decision arch.regression.data-store-chosen-absent {
+  origin "docs/adr/ADR-001-data-store.md" "Decision" 10..15
+  category data-store
+  chosen dynamodb
+  reason "Serverless NoSQL required for the feature-store backend"
+}
