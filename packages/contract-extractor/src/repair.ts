@@ -170,7 +170,7 @@ function rulesFor(a: MergedArtifact): string[] {
 
   if (a.kind === 'auth-requirement') {
     if (!/\bon-violation\s*\{/.test(src)) {
-      out.push('missing `on-violation { status ... error-code ... body ErrorEnvelope:... }`.');
+      out.push('missing `on-violation { status ... error-code ... }` (add `body ErrorEnvelope:error.envelope.standard` only when that envelope is defined in the corpus).');
     }
     if (/\brequired-role\b/.test(src)) {
       const hasBroadGlob = /selector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src);

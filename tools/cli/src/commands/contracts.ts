@@ -111,12 +111,48 @@ export async function runContractsGenerate(
     }
   }
 
-  // Surface validation issues — these block the write.
-  if (result.validationIssues.length > 0) {
-    p.log.error(`Validation gate failed (${result.validationIssues.length} issue${result.validationIssues.length === 1 ? "" : "s"}):`);
-    for (const issue of result.validationIssues) {
-      console.log(`  ${issue.artifactKey}: ${issue.message}`);
+  // Surface validation issues by severity. The orchestrator already
+  // honors this split: it writes every artifact that resolved, dropping
+  // only the ones with HARD issues (parse errors, duplicate identities).
+  // SOFT issues (an unresolved cross-reference — e.g. two slices coined
+  // different identities for the same artifact, or a reference to an
+  // artifact the spec never defined) do NOT block the write and must NOT
+  // be reported as a fatal gate failure. We abort only when the run
+  // genuinely produced nothing.
+  const hardIssues = result.validationIssues.filter((i) => i.severity === "hard");
+  const softIssues = result.validationIssues.filter((i) => i.severity === "soft");
+
+  // Soft issues → warnings. The resolver reports every occurrence of an
+  // unresolved ref separately, so collapse identical lines and show the
+  // count instead of repeating the same message.
+  if (softIssues.length > 0) {
+    const counts = new Map<string, number>();
+    for (const issue of softIssues) {
+      const line = `${issue.artifactKey}: ${issue.message}`;
+      counts.set(line, (counts.get(line) ?? 0) + 1);
     }
+    p.log.warn(
+      `${counts.size} unresolved cross-reference${counts.size === 1 ? "" : "s"} (non-blocking — the referenced artifact wasn't generated; \`truecourse verify\` will flag any real drift):`,
+    );
+    for (const [line, n] of counts) console.log(`  ${line}${n > 1 ? `  (×${n})` : ""}`);
+  }
+
+  // Hard issues → errors. These artifacts were dropped, but the rest
+  // still reached disk, so this is not necessarily a failed run.
+  if (hardIssues.length > 0) {
+    p.log.error(
+      `${hardIssues.length} artifact${hardIssues.length === 1 ? " was" : "s were"} dropped (invalid \`.tc\` — parse error or duplicate identity):`,
+    );
+    for (const issue of hardIssues) console.log(`  ${issue.artifactKey}: ${issue.message}`);
+  }
+
+  // Abort ONLY when the run produced nothing at all despite having issues
+  // — e.g. duplicate identities that corrupt the whole corpus. A normal
+  // run measures output by `write.written`; a dry run by `write.proposed`.
+  // (A clean "nothing to write because everything is up to date" run has
+  // no issues and falls through to the up-to-date summary below.)
+  const produced = options.diff ? result.write.proposed.length : result.write.written.length;
+  if (produced === 0 && result.validationIssues.length > 0) {
     p.outro("No contracts were written. Edit the spec or re-run after fixing.");
     process.exit(1);
   }
