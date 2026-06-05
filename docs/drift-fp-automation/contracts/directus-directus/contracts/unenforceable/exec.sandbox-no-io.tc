@@ -1,0 +1,6 @@
+unenforceable-obligation exec.sandbox-no-io {
+  origin "api/src/ai/tools/operations/prompt.md" "Operation Examples" 158..240
+  spec-text "exec: custom JS/TS sandboxed (no file/network access)"
+  category security
+  rationale "sandbox enforcement is a runtime property; no structural encoding for file/network access restrictions"
+}

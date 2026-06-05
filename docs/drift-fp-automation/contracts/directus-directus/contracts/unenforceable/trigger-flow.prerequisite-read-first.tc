@@ -1,0 +1,6 @@
+unenforceable-obligation trigger-flow.prerequisite-read-first {
+  origin "api/src/ai/tools/trigger-flow/prompt.md" "Key Concepts" 6..20
+  spec-text "Prerequisite: ALWAYS read the flow first using flows tool to get the full definition before triggering"
+  category workflow-ordering
+  rationale "client-side prerequisite sequence; not verifiable from trigger handler code in isolation"
+}

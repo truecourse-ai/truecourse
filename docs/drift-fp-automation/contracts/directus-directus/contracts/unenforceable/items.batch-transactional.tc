@@ -1,0 +1,6 @@
+unenforceable-obligation items.batch-transactional {
+  origin "api/src/ai/tools/items/prompt.md" "Performance & Safety" 284..295
+  spec-text "Batch operations are transactional - all succeed or all fail"
+  category consistency
+  rationale "transaction boundary enforcement is a runtime/database property, not statically verifiable"
+}

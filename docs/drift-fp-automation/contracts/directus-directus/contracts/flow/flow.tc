@@ -1,0 +1,16 @@
+entity Flow {
+  origin "api/src/ai/tools/flows/prompt.md" "Flow Data Structure" 19..52
+  field name: string {
+    required
+  }
+  field trigger: Enum:FlowTrigger {
+    required
+  }
+  field status: Enum:FlowStatus
+  field accountability: Enum:FlowAccountability
+  field icon: string
+  field color: string
+  field description: string
+  field options: object
+  field operation: uuid
+}

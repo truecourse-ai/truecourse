@@ -1,0 +1,6 @@
+unenforceable-obligation flows.admin-required {
+  origin "api/src/ai/tools/flows/prompt.md" "Important Notes" 503..510
+  spec-text "Admin Required: This tool requires admin permissions"
+  category authorization
+  rationale "slice does not enumerate specific routes that require admin role; role-based auth-requirement cannot be emitted without an explicit operations selector"
+}

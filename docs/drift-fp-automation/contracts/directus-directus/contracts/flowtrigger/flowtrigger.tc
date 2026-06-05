@@ -1,0 +1,4 @@
+enum FlowTrigger {
+  origin "api/src/ai/tools/flows/prompt.md" "Flow Data Structure" 19..52
+  values [event, webhook, schedule, operation, manual]
+}

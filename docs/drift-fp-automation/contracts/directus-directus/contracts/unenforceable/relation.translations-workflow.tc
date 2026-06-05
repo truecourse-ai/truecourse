@@ -1,0 +1,6 @@
+unenforceable-obligation relation.translations-workflow {
+  origin "api/src/ai/tools/relations/prompt.md" "Translations" 301..340
+  spec-text "Translations use a special M2M relationship with a languages collection. Workflow: ensure languages collection exists, create translations junction with UUID primary key, add translations alias field with special: [translations] and interface: translations, configure junction fields and relations following M2M pattern with languages collection."
+  category workflow-ordering
+  rationale "multi-step relational setup procedure; verifiable only by full schema inspection, not single-file static analysis"
+}

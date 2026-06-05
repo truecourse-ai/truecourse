@@ -1,0 +1,2 @@
+*.md
+!api/src/ai/tools/**

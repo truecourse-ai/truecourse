@@ -1,0 +1,4 @@
+enum CollectionStatus {
+  origin "api/src/ai/tools/collections/prompt.md" "Complete System Fields Template" 99..140
+  values [published, draft, archived]
+}

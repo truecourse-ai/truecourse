@@ -1,0 +1,6 @@
+unenforceable-obligation flow.chaining-return-key {
+  origin "api/src/ai/tools/flows/prompt.md" "Flow Chaining" 302..360
+  spec-text "Flows can be chained: a child flow uses trigger type 'operation' with a return key, and a parent flow uses a trigger operation with the child flow UUID and payload. Child results are accessed via the trigger operation key."
+  category workflow-ordering
+  rationale "flow chaining pattern is an orchestration convention across multiple flow objects; not structurally verifiable in a single code path"
+}

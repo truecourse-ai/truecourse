@@ -1,0 +1,6 @@
+unenforceable-obligation items.rbac-respected {
+  origin "api/src/ai/tools/items/prompt.md" "Restrictions" 315..320
+  spec-text "Respects user permissions/RBAC"
+  category authorization
+  rationale "no specific operations or role predicates enumerated; RBAC enforcement is ambient middleware, not structurally encodable from this slice"
+}

@@ -1,0 +1,2205 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-05T21:13:59.563Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "api/src/ai/tools/collections/prompt.md",
+        "api/src/ai/tools/fields/prompt.md",
+        "api/src/ai/tools/files/prompt.md",
+        "api/src/ai/tools/flows/prompt.md",
+        "api/src/ai/tools/folders/prompt.md",
+        "api/src/ai/tools/items/prompt.md",
+        "api/src/ai/tools/operations/prompt.md",
+        "api/src/ai/tools/relations/prompt.md",
+        "api/src/ai/tools/schema/prompt.md",
+        "api/src/ai/tools/trigger-flow/prompt.md"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    }
+  ],
+  "claims": [
+    {
+      "id": "4c910fff110d76c9abf9e2660caa05562473ee07ac7f9f4075216208640bc43e",
+      "topic": "auth",
+      "subject": "Flows tool auth",
+      "content": {
+        "scheme": "admin",
+        "scope": "global"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 503,
+        "quote": "## Important Notes\n\n- **Admin Required**: This tool requires admin permissions\n- **Data Format**: Pass `data` as native objects, NOT stringified JSON\n- **Flow Execution**: Flows with `operations` array will include their operations\n- **Webhook URL**: After creating webhook trigger, URL is `/flows/trigger/<flow-id>`\n- **Event Blocking**: Filter events pause transaction until flow completes\n- **Logs**: Flow executions are logged (check `accountability` setting)\n</important_notes>\n\n<common_mistakes>"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4467758deb7fd5630b053589615cb2e331d456e7152ed013ae38027a16021154",
+      "topic": "auth",
+      "subject": "Items tool auth",
+      "content": {
+        "scheme": "RBAC",
+        "scope": "global"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 315,
+        "quote": "## Restrictions\n\n- Cannot operate on `directus_*` collections\n- Respects user permissions/RBAC\n- Delete operations may be environment-disabled\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e61dc844c5e94ba38f6208674f19afecd24204aa6b4a47006a079200b7bc5bb2",
+      "topic": "data",
+      "subject": "Collection / creation fields",
+      "content": {
+        "fields": {
+          "id": "uuid",
+          "title": "string"
+        },
+        "validation": {
+          "id": "primary key, uuid, hidden, readonly",
+          "title": "required, not nullable"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/collections/prompt.md",
+        "line": 65,
+        "quote": "### Basic Collection Example\n\n```json\n{\n\t\"action\": \"create\",\n\t\"data\": {\n\t\t\"collection\": \"articles\",\n\t\t\"fields\": [\n\t\t\t{\n\t\t\t\t\"field\": \"id\",\n\t\t\t\t\"type\": \"uuid\",\n\t\t\t\t\"meta\": { \"special\": [\"uuid\"], \"hidden\": true, \"readonly\": true, \"interface\": \"input\" },\n\t\t\t\t\"schema\": { \"is_primary_key\": true, \"length\": 36, \"has_auto_increment\": false }\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"field\": \"title\",\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"meta\": { \"interface\": \"input\", \"required\": true },\n\t\t\t\t\"schema\": { \"is_nullable\": false }\n\t\t\t}\n\t\t],\n\t\t\"schema\": {}, // Always send empty object for new collection unless creating a folder collection\n\t\t\"meta\": {\n\t\t\t\"singleton\": false,\n\t\t\t\"display_template\": \"{{title}}\"\n\t\t}\n\t}\n}\n```\n\n</creating_collections>\n\n<system_fields>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bd44f1ae779d2c28c4820d9af2f69756750e73b802cb951e3af7a93936c53a83",
+      "topic": "data",
+      "subject": "Collection / meta fields",
+      "content": {
+        "fields": {
+          "collection": "string",
+          "icon": "string",
+          "note": "string",
+          "color": "hex string",
+          "singleton": "boolean",
+          "hidden": "boolean",
+          "accountability": "\"all\" | \"activity\" | null",
+          "sort_field": "string",
+          "archive_app_filter": "boolean",
+          "archive_field": "string",
+          "archive_value": "string",
+          "unarchive_value": "string",
+          "display_template": "string",
+          "versioning": "boolean",
+          "sort": "integer",
+          "group": "string | null",
+          "collapse": "\"open\" | \"closed\"",
+          "preview_url": "string",
+          "translations": "array"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/collections/prompt.md",
+        "line": 12,
+        "quote": "### Collection Structure\n\n```json\n{\n\t\"collection\": \"products\",\n\t\"meta\": {\n\t\t\"collection\": \"ai_prompts\",\n\t\t\"icon\": \"inventory_2\", // Any Material Symbols icons\n\t\t\"note\": \"Main product catalog with inventory tracking\" // Helpful 1 sentence description\n\t\t\"color\": \"#6366F1\", // Color shown in content module sidebar\n\t\t\"singleton\": false, // Single-item collections (settings, globals)\n\t\t\"hidden\": false, // Hide from navigation\n\t\t\"accountability\": \"all\", // Track who activity and revisions (`\"all\"`, `\"activity\"`, `null`)\n\t\t\"sort_field\": \"sort\", // Default sorting field (auto-creates if needed)\n\t\t\"archive_app_filter\": true, // Enable soft delete in the app\n\t\t\"archive_field\": \"status\", // Field used for archiving (status, deleted_at, etc.)\n\t\t\"archive_value\": \"archived\", // Value that marks items as archived\n\t\t\"unarchive_value\": \"published\", // Value that marks items as active\n\t\t\"display_template\": \"{{name}} - ${{price}}\",\n\t\t\"versioning\": false, // Enable content versioning for this collection\n\t\t\"sort\": 2, // Sort order for this collection\n\t\t\"group\": null, // Parent collection (use to group and nest collections in data model)\n\t\t\"collapse\": \"open\" // Default collection to expanded or collapsed if child collections\n\t\t\"preview_url\": \"https://store.example.com/products/{{slug}}\", // Live preview URL to view items within collection - supports using template variables\n\t\t\"translations\": [\n\t\t\t{\n\t\t\t\t\"language\": \"en-US\",\n\t\t\t\t\"translation\": \"Products\",\n\t\t\t\t\"singular\": \"product\",\n\t\t\t\t\"plural\": \"products\"\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"language\": \"es-ES\",\n\t\t\t\t\"translation\": \"Productos\",\n\t\t\t\t\"singular\": \"producto\",\n\t\t\t\t\"plural\": \"productos\"\n\t\t\t}\n\t\t],\n\t}\n}\n… (+13 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a3ede8ec43037ba8a63e6e1a05037af06ca1425311906163c13f47b6dbad761f",
+      "topic": "data",
+      "subject": "Collection / system fields",
+      "content": {
+        "fields": {
+          "id": "uuid (primary key)",
+          "status": "string (published|draft|archived, default: draft)",
+          "sort": "integer",
+          "user_created": "uuid (special: user-created)",
+          "date_created": "timestamp (special: date-created)",
+          "user_updated": "uuid (special: user-updated)",
+          "date_updated": "timestamp (special: date-updated)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/collections/prompt.md",
+        "line": 99,
+        "quote": "### Complete System Fields Template\n\nFor content collections (blogs, products, pages), include these optional system fields for full CMS functionality:\n\n```json\n{\n\t\"action\": \"create\",\n\t\"data\": {\n\t\t\"collection\": \"articles\",\n\t\t\"fields\": [\n\t\t\t{\n\t\t\t\t\"field\": \"id\",\n\t\t\t\t\"type\": \"uuid\",\n\t\t\t\t\"meta\": {\n\t\t\t\t\t\"hidden\": true,\n\t\t\t\t\t\"readonly\": true,\n\t\t\t\t\t\"interface\": \"input\",\n\t\t\t\t\t\"special\": [\"uuid\"]\n\t\t\t\t},\n\t\t\t\t\"schema\": {\n\t\t\t\t\t\"is_primary_key\": true,\n\t\t\t\t\t\"length\": 36,\n\t\t\t\t\t\"has_auto_increment\": false\n\t\t\t\t}\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"field\": \"status\",\n\t\t\t\t\"type\": \"string\",\n\t\t\t\t\"meta\": {\n\t\t\t\t\t\"width\": \"full\",\n\t\t\t\t\t\"options\": {\n\t\t\t\t\t\t// You might choose to customize these options based on the users request\n\t\t\t\t\t\t\"choices\": [\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\"text\": \"$t:published\",\n\t\t\t\t\t\t\t\t\"value\": \"published\",\n\t\t\t\t\t\t\t\t\"color\": \"var(--theme--primary)\"\n\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\"text\": \"$t:draft\",\n… (+199 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "82f91c02e26870afdaf77e5e8f02cda9bb26a4d0547f03dd5cec869eaee53366",
+      "topic": "data",
+      "subject": "Field / UUID primary key",
+      "content": {
+        "fields": {
+          "field": "id",
+          "type": "uuid",
+          "meta.hidden": true,
+          "meta.readonly": true,
+          "meta.interface": "input",
+          "meta.special": [
+            "uuid"
+          ],
+          "schema.is_primary_key": true,
+          "schema.length": 36,
+          "schema.has_auto_increment": false
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 293,
+        "quote": "### Translations Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"translations\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"translations\",\n\t\t\"special\": [\"translations\"],\n\t\t\"interface\": \"translations\",\n\t\t\"options\": {\n\t\t\t\"userLanguage\": true,\n\t\t\t\"defaultOpenSplitView\": true\n\t\t},\n\t\t\"display\": \"translations\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{title}}\", // Field to display from the translated collection (ie post title)\n\t\t\t\"languageField\": \"name\" // Name of the language field from the languages collection\n\t\t},\n\t\t\"sort\": 22,\n\t\t\"width\": \"full\"\n\t}\n}\n```\n\n**Note**: Alias fields don't need a schema object since they're virtual. </relationship_fields>\n\n<primary_keys> **🎯 ALWAYS use UUID as primary keys for new collections unless integers or manually entered strings ares\nspecifically requested by the user.**\n\n**UUID Primary Key Template:**\n\n```json\n{\n\t\"field\": \"id\",\n\t\"type\": \"uuid\",\n\t\"meta\": { \"hidden\": true, \"readonly\": true, \"interface\": \"input\", \"special\": [\"uuid\"] },\n… (+7 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b16255948b2183747ae5a01091992a4c8fb2532bb1a855e25957b62bb0eb970c",
+      "topic": "data",
+      "subject": "Field / conditions",
+      "content": {
+        "fields": {
+          "conditions": "array of condition objects",
+          "conditions[].name": "string — description of the condition",
+          "conditions[].rule": "object — filter rules using Directus filter syntax (_null, _eq, _neq, _in, _and, _or)",
+          "conditions[].hidden": "boolean — dynamically hide field",
+          "conditions[].readonly": "boolean — dynamically make readonly",
+          "conditions[].required": "boolean — dynamically make required"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 344,
+        "quote": "### Conditions\n\nDynamically control field behavior based on other field values:\n\n```json\n{\n\t\"conditions\": [\n\t\t{\n\t\t\t\"name\": \"Hide If Author Is Null\",\n\t\t\t\"rule\": {\n\t\t\t\t\"_and\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"author\": {\n\t\t\t\t\t\t\t\"_null\": true\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t},\n\t\t\t\"hidden\": true\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Required If Published\",\n\t\t\t\"rule\": {\n\t\t\t\t\"status\": {\n\t\t\t\t\t\"_eq\": \"published\"\n\t\t\t\t}\n\t\t\t},\n\t\t\t\"required\": true\n\t\t}\n\t]\n}\n```\n\n**Condition Properties**:\n\n- `name`: Description of the condition\n- `rule`: Filter rules using Directus filter syntax\n- Can set: `hidden`, `readonly`, `required`, or interface-specific options\n\n**Common Rules**:\n… (+7 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ce141650584363de82001879626e9e90cfccc81b58c0a2413213467c6423e466",
+      "topic": "data",
+      "subject": "Field / file type",
+      "content": {
+        "fields": {
+          "type": "uuid",
+          "schema.data_type": "uuid",
+          "schema.foreign_key_table": "directus_files",
+          "meta.special": [
+            "file"
+          ],
+          "meta.interface": "file-image"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 209,
+        "quote": "### File Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"featured_image\",\n\t\"type\": \"uuid\",\n\t\"schema\": {\n\t\t\"name\": \"featured_image\",\n\t\t\"table\": \"posts\",\n\t\t\"data_type\": \"uuid\",\n\t\t\"is_nullable\": true,\n\t\t\"foreign_key_schema\": \"public\",\n\t\t\"foreign_key_table\": \"directus_files\",\n\t\t\"foreign_key_column\": \"id\"\n\t},\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"featured_image\",\n\t\t\"special\": [\"file\"],\n\t\t\"interface\": \"file-image\",\n\t\t\"options\": {\n\t\t\t\"folder\": \"post-images\"\n\t\t},\n\t\t\"display\": \"image\",\n\t\t\"display_options\": null,\n\t\t\"sort\": 1,\n\t\t\"width\": \"half\",\n\t\t\"required\": false,\n\t\t\"group\": \"media\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "19efbb25cf3f9925efc6423a489cabfbfa8539194614e020016c78453e7ccc64",
+      "topic": "data",
+      "subject": "Field / files alias",
+      "content": {
+        "fields": {
+          "type": "alias",
+          "schema": "null (virtual field)",
+          "meta.special": [
+            "files"
+          ],
+          "meta.interface": "files",
+          "meta.options": "null",
+          "meta.display": "related-values",
+          "meta.display_options": "null"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 243,
+        "quote": "### Files Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"gallery\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"gallery\",\n\t\t\"special\": [\"files\"],\n\t\t\"interface\": \"files\",\n\t\t\"options\": null,\n\t\t\"display\": \"related-values\",\n\t\t\"display_options\": null,\n\t\t\"sort\": 4,\n\t\t\"width\": \"full\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f6d810b950bd2e448949636474aa864e45f4eb84c76848aa81e46e27aa30b20c",
+      "topic": "data",
+      "subject": "Field / layout properties",
+      "content": {
+        "fields": {
+          "width": "\"half\" (380px max) | \"full\" (760px max, default) | \"fill\" (no limit)",
+          "sort": "integer — field order in forms",
+          "group": "string — group related fields into collapsible sections (must be used with alias group fields)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 322,
+        "quote": "### Layout\n\n- **width**: `\"half\"` (380px max), `\"full\"` (760px max, default), `\"fill\"` (no limit)\n- **sort**: Field order in forms\n- **group**: Group related fields into collapsible sections (must be used with `alias` group fields)\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c30b8b9654d8ca7cd469e1930aa57c8ca4192b30325a49eb9b0c666a940a2a8d",
+      "topic": "data",
+      "subject": "Field / m2a type",
+      "content": {
+        "fields": {
+          "type": "alias",
+          "schema": "null",
+          "meta.special": [
+            "m2a"
+          ],
+          "meta.interface": "list-m2a"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 185,
+        "quote": "### M2A Field Example\n\n```json\n{\n\t\"collection\": \"pages\",\n\t\"field\": \"blocks\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"pages\",\n\t\t\"field\": \"blocks\",\n\t\t\"special\": [\"m2a\"],\n\t\t\"interface\": \"list-m2a\",\n\t\t\"options\": {},\n\t\t\"display\": \"related-values\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{collection}}\"\n\t\t},\n\t\t\"sort\": 8,\n\t\t\"width\": \"full\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "28dc4859bf8e013e50300694a128c417788d0016c2a21ddbd17bf59e798820fc",
+      "topic": "data",
+      "subject": "Field / m2m type",
+      "content": {
+        "fields": {
+          "type": "alias",
+          "schema": "null",
+          "meta.special": [
+            "m2m"
+          ],
+          "meta.interface": "list-m2m"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 159,
+        "quote": "### M2M Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"categories\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"categories\",\n\t\t\"special\": [\"m2m\"],\n\t\t\"interface\": \"list-m2m\",\n\t\t\"options\": {\n\t\t\t\"template\": \"{{categories_id.name}} ({{categories_id.slug}})\"\n\t\t},\n\t\t\"display\": \"related-values\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{categories_id.name}} ({{categories_id.slug}})\"\n\t\t},\n\t\t\"sort\": 9,\n\t\t\"width\": \"full\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "55fdb98048c6f1dd95764436b17bd658cf0f3d1e9026dbd07c327375051becde",
+      "topic": "data",
+      "subject": "Field / m2o type",
+      "content": {
+        "fields": {
+          "field": "string",
+          "type": "uuid",
+          "schema.data_type": "uuid",
+          "schema.is_nullable": "boolean",
+          "schema.foreign_key_schema": "string",
+          "schema.foreign_key_table": "string",
+          "schema.foreign_key_column": "string",
+          "meta.special": [
+            "m2o"
+          ],
+          "meta.interface": "select-dropdown-m2o"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 97,
+        "quote": "### M2O Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"author\",\n\t\"type\": \"uuid\",\n\t\"schema\": {\n\t\t\"name\": \"author\",\n\t\t\"table\": \"posts\",\n\t\t\"data_type\": \"uuid\",\n\t\t\"is_nullable\": true,\n\t\t\"foreign_key_schema\": \"public\",\n\t\t\"foreign_key_table\": \"team\",\n\t\t\"foreign_key_column\": \"id\"\n\t},\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"author\",\n\t\t\"special\": [\"m2o\"],\n\t\t\"interface\": \"select-dropdown-m2o\",\n\t\t\"options\": {\n\t\t\t\"template\": \"{{image.$thumbnail}} {{name}}\"\n\t\t},\n\t\t\"display\": \"related-values\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{image.$thumbnail}} {{name}}\"\n\t\t},\n\t\t\"sort\": 15,\n\t\t\"width\": \"half\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8a960298033d9714a33c85a4f242a5eda7182027b169e64c0a1b757e29b45e36",
+      "topic": "data",
+      "subject": "Field / meta properties",
+      "content": {
+        "fields": {
+          "required": "boolean — must have value",
+          "readonly": "boolean — cannot edit after creation",
+          "hidden": "boolean — hidden from UI (still in API)",
+          "validation": "custom validation rules",
+          "validation_message": "string — custom error messages",
+          "note": "string — context for non-obvious fields"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 335,
+        "quote": "### Meta Properties\n\n- **required**: Must have value\n- **readonly**: Cannot edit after creation\n- **hidden**: Hidden from UI (still in API)\n- **validation**: Custom validation rules\n- **validation_message**: Custom error messages\n- **note**: Context for non-obvious fields\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9253d82da159f23760feea04df19aab08a66497ab17f369000d6822765d3f454",
+      "topic": "data",
+      "subject": "Field / o2m type",
+      "content": {
+        "fields": {
+          "type": "alias",
+          "schema": "null",
+          "meta.special": [
+            "o2m"
+          ],
+          "meta.interface": "list-o2m"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 131,
+        "quote": "### O2M Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"comments\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"comments\",\n\t\t\"special\": [\"o2m\"],\n\t\t\"interface\": \"list-o2m\",\n\t\t\"options\": {\n\t\t\t\"template\": \"{{author}} - {{content}} ({{status}})\"\n\t\t},\n\t\t\"display\": \"related-values\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{author}} - {{content}} ({{status}})\"\n\t\t},\n\t\t\"sort\": 10,\n\t\t\"width\": \"full\",\n\t\t\"required\": false,\n\t\t\"group\": null\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ffa4cf13b115f0ecd11f388d93b586bea25810505a7f87e3cdcdc288967452ac",
+      "topic": "data",
+      "subject": "Field / schema properties",
+      "content": {
+        "fields": {
+          "default_value": "any — default for new items",
+          "is_nullable": "boolean — can be null",
+          "is_unique": "boolean — must be unique",
+          "length": "integer — max length for strings"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 328,
+        "quote": "### Schema Properties\n\n- **default_value**: Default for new items\n- **is_nullable**: Can be null\n- **is_unique**: Must be unique\n- **length**: Max length for strings\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "587035b38909d0a0d01513d173745b53b63ef122bc05fed3a6ac68218c8c807f",
+      "topic": "data",
+      "subject": "Field / special values",
+      "content": {
+        "fields": {
+          "special": "array of special behavior flags: uuid (auto-generate UUID), user-created (track creating user), date-created (track creation time), user-updated (track last editor), date-updated (track last edit time), cast-json (cast JSON strings to objects)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 391,
+        "quote": "### Special Fields\n\n- `special: [\"uuid\"]`: Auto-generate UUID\n- `special: [\"user-created\"]`: Track creating user\n- `special: [\"date-created\"]`: Track creation time\n- `special: [\"user-updated\"]`: Track last editor\n- `special: [\"date-updated\"]`: Track last edit time\n- `special: [\"cast-json\"]`: Cast JSON strings to objects </field_configuration>\n\n<translations>\nField names can (and should be) translated for editors using the app.\nCheck for `languages` collection first, then add field translations based on which languages are stored in DB. IF not 99% sure, confirm with user first.\n\n```json\n\"translations\": [\n  {\"language\": \"en-US\", \"translation\": \"Title\"},\n  {\"language\": \"es-ES\", \"translation\": \"Título\"}\n]\n```\n\n</translations>\n\n<display_templates> Display templates can be customized used to enhance the UX for editors.\n\n```json\n\"display\": \"related-values\",\n\"display_options\": {\n  \"template\": \"{{first_name}} {{last_name}}\"\n}\n```\n\n**Display types**: `raw`, `formatted-value`, `labels`, `datetime`, `user`, `file`, `related-values` </display_templates>\n\n<complete_example>\n\n#### Complete Field Example with Advanced Features\n\nThis shows a real field configuration with validation, conditions, and all metadata (as returned from a read operation):\n\n```json\n… (+87 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "fbb68b46ec8ac53ef3d0a59a7a6895c40021cf5ce9039269434c8c718526261b",
+      "topic": "data",
+      "subject": "Field / translations alias",
+      "content": {
+        "fields": {
+          "type": "alias",
+          "schema": "null (virtual field)",
+          "meta.special": [
+            "translations"
+          ],
+          "meta.interface": "translations",
+          "meta.display": "translations",
+          "meta.options.userLanguage": "boolean",
+          "meta.options.defaultOpenSplitView": "boolean",
+          "meta.display_options.template": "string — field to display from translated collection",
+          "meta.display_options.languageField": "string — name of language field from languages collection"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 265,
+        "quote": "### Translations Field Example\n\n```json\n{\n\t\"collection\": \"posts\",\n\t\"field\": \"translations\",\n\t\"type\": \"alias\",\n\t\"schema\": null,\n\t\"meta\": {\n\t\t\"collection\": \"posts\",\n\t\t\"field\": \"translations\",\n\t\t\"special\": [\"translations\"],\n\t\t\"interface\": \"translations\",\n\t\t\"options\": {\n\t\t\t\"userLanguage\": true,\n\t\t\t\"defaultOpenSplitView\": true\n\t\t},\n\t\t\"display\": \"translations\",\n\t\t\"display_options\": {\n\t\t\t\"template\": \"{{title}}\", // Field to display from the translated collection (ie post title)\n\t\t\t\"languageField\": \"name\" // Name of the language field from the languages collection\n\t\t},\n\t\t\"sort\": 22,\n\t\t\"width\": \"full\"\n\t}\n}\n```\n\n**Note**: Alias fields don't need a schema object since they're virtual. </relationship_fields>\n\n<primary_keys> **🎯 ALWAYS use UUID as primary keys for new collections unless integers or manually entered strings ares\nspecifically requested by the user.**\n\n**UUID Primary Key Template:**\n\n```json\n{\n\t\"field\": \"id\",\n\t\"type\": \"uuid\",\n\t\"meta\": { \"hidden\": true, \"readonly\": true, \"interface\": \"input\", \"special\": [\"uuid\"] },\n… (+7 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "df7c311db3fe506f31191fe6a928a11f35dc3bc930910bdfea1ed1631474729d",
+      "topic": "data",
+      "subject": "File / actions",
+      "content": {
+        "fields": {
+          "action": "read | update | delete | import"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 3,
+        "quote": "## Actions\n\n- **`read`**: List/query metadata or get specific items by ID\n- **`update`**: Modify existing metadata\n- **`delete`**: Remove files by keys\n- **`import`**: Import a file from a URL and create or update its file data\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cf9470908ee99fb6aa509cd4e5e8615f2ac9402a68fe041ab79e3be575b6d300",
+      "topic": "data",
+      "subject": "File / focal point fields",
+      "content": {
+        "fields": {
+          "focal_point_x": "integer, pixels from left edge of original image",
+          "focal_point_y": "integer, pixels from top-left corner of original image"
+        },
+        "validation": {
+          "focal_point_x": "ensures cropped images keep subject visible",
+          "focal_point_y": "ensures cropped images keep subject visible"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 140,
+        "quote": "### Asset Organization & Cleanup\n\nTransform generic files into well-organized, searchable assets:\n\n1. **Find files needing metadata:**\n\n```json\n{\n\t\"action\": \"read\",\n\t\"query\": {\n\t\t\"fields\": [\"id\", \"filename_disk\", \"title\", \"description\"],\n\t\t\"filter\": { \"description\": { \"_null\": true } }\n\t}\n}\n```\n\n2. **Analyze with vision (use `assets` tool for base64):** Get image content for AI analysis\n\n3. **Update with descriptive metadata:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"keys\": [\"image-uuid\"],\n\t\"data\": {\n\t\t\"title\": \"Red leather handbag product photo\",\n\t\t\"description\": \"Professional e-commerce photo with white background\",\n\t\t\"tags\": [\"handbag\", \"leather\", \"red\", \"product-photo\", \"accessories\"],\n\t\t\"focal_point_x\": 512,\n\t\t\"focal_point_y\": 300 // Focal points ensure that when images are cropped for different aspect ratios (thumbnails, hero images, etc.), the important subject remains visible. Coordinates are in pixels from the top-left corner of the original image.\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "54fe3ad2702dda395a28dc136004de5fc90fafac0b17c6015ef97225e79d1b4e",
+      "topic": "data",
+      "subject": "File / import action",
+      "content": {
+        "fields": {
+          "action": "import",
+          "data": "array of import objects",
+          "data[].url": "string — URL to import file from",
+          "data[].file.title": "string",
+          "data[].file.description": "string",
+          "data[].file.tags": "array of strings",
+          "data[].file.folder": "uuid"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 34,
+        "quote": "### Import a File via URL\n\n```json\n{\n\t\"action\": \"import\",\n\t\"data\": [\n\t\t{\n\t\t\t\"url\": \"file-url\",\n\t\t\t\"file\": {\n\t\t\t\t\"title\": \"New Title\",\n\t\t\t\t\"description\": \"Updated description\",\n\t\t\t\t\"tags\": [\"tag1\", \"tag2\", \"category\"],\n\t\t\t\t\"folder\": \"folder-uuid\"\n\t\t\t}\n\t\t}\n\t]\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6d8f6976677dfd271718a9ac744f22b7213ad82cb718c6f1f4cdf7f24418af86",
+      "topic": "data",
+      "subject": "File / metadata fields",
+      "content": {
+        "fields": {
+          "id": "unique identifier",
+          "storage": "storage adapter used",
+          "filename_disk": "actual filename on disk",
+          "filename_download": "suggested download filename",
+          "title": "display title",
+          "type": "MIME type",
+          "folder": "parent folder ID",
+          "uploaded_by": "user who uploaded",
+          "uploaded_on": "upload timestamp",
+          "modified_by": "last modifier",
+          "modified_on": "last modification time",
+          "filesize": "size in bytes",
+          "width": "image width in pixels",
+          "height": "image height in pixels",
+          "duration": "length for video/audio",
+          "description": "file description",
+          "location": "geo-location data",
+          "tags": "array of tag strings",
+          "metadata": "additional metadata object",
+          "focal_point_x": "horizontal focal point in pixels from left edge",
+          "focal_point_y": "vertical focal point in pixels from top edge"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 99,
+        "quote": "## File Metadata Fields\n\n- `id`: Unique identifier\n- `storage`: Storage adapter used\n- `filename_disk`: Actual filename on disk\n- `filename_download`: Suggested download filename\n- `title`: Display title\n- `type`: MIME type (e.g., \"image/jpeg\", \"application/pdf\")\n- `folder`: Parent folder ID\n- `uploaded_by`: User who uploaded\n- `uploaded_on`: Upload timestamp\n- `modified_by`: Last modifier\n- `modified_on`: Last modification time\n- `filesize`: Size in bytes\n- `width`/`height`: Dimensions for images (in pixels)\n- `duration`: Length for video/audio\n- `description`: File description\n- `location`: Geo-location data\n- `tags`: Array of tag strings (e.g., [\"product\", \"red\", \"handbag\"])\n- `metadata`: Additional metadata object\n- `focal_point_x`: Horizontal focal point (in pixels from left edge)\n- `focal_point_y`: Vertical focal point (in pixels from top edge)\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "568e3be4e0db8e23f824aa788094c73ad2e491449befd07dd879dd262cf5f0fc",
+      "topic": "data",
+      "subject": "File / query filter operators",
+      "content": {
+        "fields": {
+          "query.filter._and": "array of filter conditions combined with AND",
+          "query.filter.type._icontains": "case-insensitive contains for MIME type",
+          "query.filter.folder._eq": "exact match for folder UUID",
+          "query.filter.filesize._lt": "less than for file size in bytes",
+          "query.filter.uploaded_on._gte": "greater than or equal for upload date, supports $NOW(-7 days) syntax"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 82,
+        "quote": "### Common Filters\n\n```json\n{\n\t\"query\": {\n\t\t\"filter\": {\n\t\t\t\"_and\": [\n\t\t\t\t{ \"type\": { \"_icontains\": \"/png\" } }, // PNG files only\n\t\t\t\t{ \"folder\": { \"_eq\": \"folder-uuid\" } }, // Specific folder\n\t\t\t\t{ \"filesize\": { \"_lt\": 5000000 } }, // Under 5MB\n\t\t\t\t{ \"uploaded_on\": { \"_gte\": \"$NOW(-7 days)\" } } // Within last week\n\t\t\t]\n\t\t}\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "762c00f19375bc18fb1ead3217af50edbca5e19a36d5b371542550aae45724f5",
+      "topic": "data",
+      "subject": "File / read query",
+      "content": {
+        "fields": {
+          "action": "read",
+          "query.fields": "array of field names to return (e.g. id, title, type, filesize, width, height)",
+          "query.filter": "Directus filter object",
+          "query.limit": "integer"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 12,
+        "quote": "### Reading File Metadata\n\n```json\n{\n\t\"action\": \"read\",\n\t\"query\": {\n\t\t\"fields\": [\"id\", \"title\", \"type\", \"filesize\", \"width\", \"height\"],\n\t\t\"filter\": { \"type\": { \"_starts_with\": \"image/\" } },\n\t\t\"limit\": 10\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a9ec8a9fd9ed8342556de2320c2ef599c01afeaca088c60eb58fa216ab9923c0",
+      "topic": "data",
+      "subject": "File / read single",
+      "content": {
+        "fields": {
+          "action": "read",
+          "keys": "array of file UUIDs"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 25,
+        "quote": "### Get Single File Metadata\n\n```json\n{\n\t\"action\": \"read\",\n\t\"keys\": [\"file-uuid-here\"]\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0d0d206d4655eb39f2ebe438d42e7bbd46c3b385208ce966502636d68c50b3f8",
+      "topic": "data",
+      "subject": "File / update operation",
+      "content": {
+        "fields": {
+          "action": "update",
+          "keys": "array of file UUIDs (single file update)",
+          "data": {
+            "title": "string",
+            "description": "string",
+            "tags": "array of strings",
+            "folder": "folder UUID"
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 53,
+        "quote": "### Update File Metadata\n\n**Single file:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"keys\": [\"file-uuid\"],\n\t\"data\": {\n\t\t\"title\": \"New Title\",\n\t\t\"description\": \"Updated description\",\n\t\t\"tags\": [\"tag1\", \"tag2\", \"category\"],\n\t\t\"folder\": \"folder-uuid\"\n\t}\n}\n```\n\n**Batch update:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"data\": [\n\t\t{ \"id\": \"file-uuid-1\", \"title\": \"New Title 1\" },\n\t\t{ \"id\": \"file-uuid-2\", \"title\": \"New Title 2\" }\n\t]\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "48a9d8098770765f63f9fed7c16a7a17953bfb435fd548fd57d80ba703b57032",
+      "topic": "data",
+      "subject": "File / validation rules",
+      "content": {
+        "validation": {
+          "keys": "must be array, e.g. [\"item\"] not \"item\"",
+          "tags": "must be array, e.g. [\"item\"] not \"item\"",
+          "data": "must be passed as native objects, not stringified JSON"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/files/prompt.md",
+        "line": 174,
+        "quote": "## Key Points\n\n- **ALWAYS pass data as native objects**, NOT stringified JSON\n- **Metadata only**: This tool manages file metadata, not file content or uploads\n- **Permissions**: Respects Directus access control\n- **Arrays required**: `keys` and `tags` must be arrays: `[\"item\"]` not `\"item\"`\n- **Performance**: Large files handled automatically but may impact performance\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d4b2caaca5fd7abce44353106fe0a5d0d8f1375f7d964a2a6c14caf8799a7676",
+      "topic": "data",
+      "subject": "Flow / core fields",
+      "content": {
+        "fields": {
+          "name": "string (required)",
+          "trigger": "event|webhook|schedule|operation|manual (required)",
+          "status": "active|inactive (default: active)",
+          "accountability": "all|activity|null (default: all)",
+          "icon": "icon identifier (optional)",
+          "color": "hex color code (optional)",
+          "description": "flow description (optional)",
+          "options": "trigger-specific configuration object (optional)",
+          "operation": "UUID of first operation (optional, set after creating operations)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 19,
+        "quote": "## Flow Data Structure\n\nAll flows share these core fields for creation:\n\n- `name` (required) - Flow display name\n- `trigger` (required) - Trigger type: `event`, `webhook`, `schedule`, `operation`, `manual`\n- `status` - `active` or `inactive` (default: `active`)\n- `accountability` - `all`, `activity`, or `null` (default: `all`)\n- `icon` - Icon identifier (optional)\n- `color` - Hex color code (optional)\n- `description` - Flow description (optional)\n- `options` - Trigger-specific configuration object (optional)\n- `operation` - UUID of first operation (optional, set after creating operations) </core_fields>\n\n<crud_actions>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "60f4e715ae19b34ac378fee74c1d51d415f7012404cef0ec36e1bb171e54108a",
+      "topic": "data",
+      "subject": "Flow / create action",
+      "content": {
+        "fields": {
+          "action": "create",
+          "data.name": "string (required)",
+          "data.trigger": "event|webhook|schedule|operation|manual (required)",
+          "data.icon": "string (optional)",
+          "data.color": "hex color string (optional)",
+          "data.description": "string (optional)",
+          "data.status": "active|inactive",
+          "data.accountability": "all|activity|null",
+          "data.options": "trigger-specific configuration object"
+        },
+        "validation": {
+          "options": "must be inside the data object (inside the flow object), not at the top-level action object",
+          "data": "must be passed as native objects not stringified JSON",
+          "name": "required for creation",
+          "trigger": "required for creation"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 52,
+        "quote": "[line 52] ### `create` - Create New Flow\n\n**Required**: `name`, `trigger`\n\n```json\n{\n\t\"action\": \"create\",\n\t\"data\": {\n\t\t\"name\": \"Send email when new post is published\",\n\t\t\"icon\": \"bolt\", // Optional icon\n\t\t\"color\": \"#FFA439\", // Optional hex color\n\t\t\"description\": \"checks if new post is published and emails admin\",\n\t\t\"status\": \"active\", // active|inactive\n\t\t\"accountability\": \"all\", // all|activity|null\n\t\t\"trigger\": \"event\", // event|webhook|schedule|operation|manual\n\t\t\"options\": {\n\t\t\t// Trigger-specific configuration\n\t\t\t\"type\": \"action\",\n\t\t\t\"scope\": [\"items.create\"],\n\t\t\t\"collections\": [\"posts\"]\n\t\t}\n\t}\n}\n```\n\n---\n[line 514] ## Common Mistakes to Avoid\n\n1. **DO NOT** create operations here - use the `operations` tool\n2. **DO NOT** trigger flows here - use the `trigger-flow` tool\n3. **DO NOT** pass stringified JSON in data parameter\n4. **DO NOT** forget required fields: `name` and `trigger` for creation\n5. **DO NOT** put options outside of data - it goes inside the flow object:\n   ```json\n   // ✅ CORRECT\n   {\n     \"action\": \"create\",\n     \"data\": {\n       \"name\": \"My Flow\",\n       \"trigger\": \"event\",\n       \"options\": { \"type\": \"action\" }\n     }\n   }\n\n   // ❌ WRONG\n   {\n     \"action\": \"create\",\n     \"data\": { \"name\": \"My Flow\", \"trigger\": \"event\" },\n     \"options\": { \"type\": \"action\" }\n   }\n   ```\n</common_mistakes>\n````\n",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/flows/prompt.md",
+            "line": 514,
+            "quote": "## Common Mistakes to Avoid\n\n1. **DO NOT** create operations here - use the `operations` tool\n2. **DO NOT** trigger flows here - use the `trigger-flow` tool\n3. **DO NOT** pass stringified JSON in data parameter\n4. **DO NOT** forget required fields: `name` and `trigger` for creation\n5. **DO NOT** put options outside of data - it goes inside the flow object:\n   ```json\n   // ✅ CORRECT\n   {\n     \"action\": \"create\",\n     \"data\": {\n       \"name\": \"My Flow\",\n       \"trigger\": \"event\",\n       \"options\": { \"type\": \"action\" }\n     }\n   }\n\n   // ❌ WRONG\n   {\n     \"action\": \"create\",\n     \"data\": { \"name\": \"My Flow\", \"trigger\": \"event\" },\n     \"options\": { \"type\": \"action\" }\n   }\n   ```\n</common_mistakes>\n````\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "05579d2c49772f3df2de46eff50809b52edea63afeb2840a265f176360d26c70",
+      "topic": "data",
+      "subject": "Flow / data chain access",
+      "content": {
+        "fields": {
+          "$trigger.payload": "trigger data",
+          "$accountability.user": "user context",
+          "$env.VARIABLE_NAME": "environment variables",
+          "operation_key": "result from specific operation (recommended)",
+          "operation_key.field": "specific field from operation result",
+          "$last": "previous operation result (avoid — breaks when operations are reordered)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 363,
+        "quote": "## Data Chain Access\n\nOperations can access data using `{{ variable }}` syntax:\n\n- `{{ $trigger.payload }}` - Trigger data\n- `{{ $accountability.user }}` - User context\n- `{{ $env.VARIABLE_NAME }}` - Environment variables\n- `{{ operation_key }}` - Result from specific operation (recommended)\n- `{{ operation_key.field }}` - Specific field from operation result\n- `{{ $last }}` - Previous operation result (⚠️ avoid - breaks when reordered)\n\n**Always use operation keys** for reliable flows. If you reorder operations, `$last` will reference a different\noperation. </data_chain_warning>\n\n<real_world_examples>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0cca7e0dffc198ac43a08cf04349b4c58bcd3c30822cf4552bb3ed9d2f306367",
+      "topic": "data",
+      "subject": "Flow / event trigger options",
+      "content": {
+        "fields": {
+          "trigger": "event",
+          "options.type": "filter (blocking) | action (non-blocking)",
+          "options.scope": "array of event scopes: items.create|items.update|items.delete|auth.login",
+          "options.collections": "array of collection names",
+          "options.return": "for filter type only: <operationKey>|$all|$last (avoid $last)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 105,
+        "quote": "### Event Hook Trigger\n\nResponds to data changes and system events\n\n```json\n{\n\t\"trigger\": \"event\",\n\t\"options\": {\n\t\t\"type\": \"filter\", // filter (blocking) | action (non-blocking)\n\t\t\"scope\": [\"items.create\", \"items.update\"],\n\t\t\"collections\": [\"orders\", \"products\"],\n\t\t\"return\": \"process_data\" // For filter only: <operationKey>|$all|$last (avoid $last)\n\t}\n}\n```\n\n**Common Scopes**:\n\n- `items.create`, `items.update`, `items.delete` - Data operations\n- `auth.login` - User authentication\n- **Note**: Multiple scopes trigger flow for ANY matching event\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "162b3ab3a61570a822b6de202159a60fa1c8571a4dff1255abf97998c9bdd076",
+      "topic": "data",
+      "subject": "Flow / manual trigger options",
+      "content": {
+        "fields": {
+          "trigger": "manual",
+          "options.collections": "array of collection names",
+          "options.location": "item|collection|both",
+          "options.requireSelection": "boolean (default true — requires item selection)",
+          "options.requireConfirmation": "boolean",
+          "options.confirmationDescription": "string",
+          "options.async": "boolean — run in background",
+          "options.fields": "array of field definitions with field, type, name, meta properties"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 158,
+        "quote": "### Manual Trigger\n\nUI button that users click to start flows\n\n```json\n{\n\t\"trigger\": \"manual\",\n\t\"options\": {\n\t\t\"collections\": [\"posts\", \"products\"],\n\t\t\"location\": \"item\", // item|collection|both\n\t\t\"requireSelection\": false, // Default true - requires item selection\n\t\t\"requireConfirmation\": true,\n\t\t\"confirmationDescription\": \"AI Ghostwriter\",\n\t\t\"async\": true, // Run in background\n\t\t\"fields\": [\n\t\t\t{\n\t\t\t\t\"field\": \"prompt\",\n\t\t\t\t\"type\": \"text\",\n\t\t\t\t\"name\": \"Prompt\",\n\t\t\t\t\"meta\": {\n\t\t\t\t\t\"interface\": \"input-multiline\",\n\t\t\t\t\t\"note\": \"Describe what you want to create.\",\n\t\t\t\t\t\"width\": \"full\",\n\t\t\t\t\t\"required\": true\n\t\t\t\t}\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"field\": \"voice\",\n\t\t\t\t\"type\": \"json\",\n\t\t\t\t\"name\": \"Tone Of Voice\",\n\t\t\t\t\"meta\": {\n\t\t\t\t\t\"interface\": \"tags\",\n\t\t\t\t\t\"options\": {\n\t\t\t\t\t\t\"presets\": [\"friendly\", \"professional\", \"casual\"]\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"field\": \"colors\",\n\t\t\t\t\"type\": \"json\",\n… (+28 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a88584bc2a93abd99ea3bd5c4be77a2f8b746bbe9065363a5e46fa5b3aeedbbd",
+      "topic": "data",
+      "subject": "Flow / operation trigger options",
+      "content": {
+        "fields": {
+          "trigger": "operation",
+          "options.return": "data to return to calling flow: <operationKey>|$all|$last (avoid $last)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 226,
+        "quote": "### Operation Trigger (Another Flow)\n\n```json\n{\n\t\"trigger\": \"operation\",\n\t\"options\": {\n\t\t\"return\": \"final_result\" // Data to return to calling flow: <operationKey>|$all|$last (avoid $last)\n\t}\n}\n```\n\n</trigger_types>\n\n<operations_integration>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "23e80fbe3efee1482cd44f752085e331effab1d3bcd5b58af24bc9dee7ad5cd1",
+      "topic": "data",
+      "subject": "Flow / schedule trigger options",
+      "content": {
+        "fields": {
+          "trigger": "schedule",
+          "options.cron": "CRON expression in format: second minute hour day month weekday"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 141,
+        "quote": "### Schedule Trigger (CRON)\n\n```json\n{\n\t\"trigger\": \"schedule\",\n\t\"options\": {\n\t\t\"cron\": \"0 */15 * * * *\" // Every 15 minutes\n\t}\n}\n```\n\n**CRON Format**: `second minute hour day month weekday` **Examples**:\n\n- `\"0 0 9 * * *\"` - Daily at 9 AM\n- `\"0 30 * * * *\"` - Every 30 minutes (note: runs at :30 of each hour)\n- `\"0 */15 * * * *\"` - Every 15 minutes\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "514925222d06aa248314fdddeb3fb91d54679dc55bcca78d4f48fde03905a291",
+      "topic": "data",
+      "subject": "Flow / webhook trigger options",
+      "content": {
+        "fields": {
+          "webhookUrl": "after creating webhook trigger, URL is /flows/trigger/<flow-id>",
+          "trigger": "webhook",
+          "options.method": "GET|POST",
+          "options.async": "boolean — true = immediate response, false = wait for completion",
+          "options.return": "response body: <operationKey>|$all|$last (avoid $last)",
+          "options.cache": "boolean — cache GET responses"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 503,
+        "quote": "[line 503] ## Important Notes\n\n- **Admin Required**: This tool requires admin permissions\n- **Data Format**: Pass `data` as native objects, NOT stringified JSON\n- **Flow Execution**: Flows with `operations` array will include their operations\n- **Webhook URL**: After creating webhook trigger, URL is `/flows/trigger/<flow-id>`\n- **Event Blocking**: Filter events pause transaction until flow completes\n- **Logs**: Flow executions are logged (check `accountability` setting)\n</important_notes>\n\n<common_mistakes>\n---\n[line 127] ### Webhook Trigger\n\n```json\n{\n\t\"trigger\": \"webhook\",\n\t\"options\": {\n\t\t\"method\": \"POST\", // GET|POST\n\t\t\"async\": false, // true = immediate response, false = wait for completion\n\t\t\"return\": \"transform_result\", // Response body: <operationKey>|$all|$last (avoid $last)\n\t\t\"cache\": false // Cache GET responses\n\t}\n}\n```\n",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/flows/prompt.md",
+            "line": 127,
+            "quote": "### Webhook Trigger\n\n```json\n{\n\t\"trigger\": \"webhook\",\n\t\"options\": {\n\t\t\"method\": \"POST\", // GET|POST\n\t\t\"async\": false, // true = immediate response, false = wait for completion\n\t\t\"return\": \"transform_result\", // Response body: <operationKey>|$all|$last (avoid $last)\n\t\t\"cache\": false // Cache GET responses\n\t}\n}\n```\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5ef796989939f9df9d659f1852bd81ea57229e2e3804e9049f3e471db000ba41",
+      "topic": "data",
+      "subject": "Folder / create action",
+      "content": {
+        "fields": {
+          "action": "create",
+          "data.name": "string (folder name)",
+          "data.parent": "parent folder UUID"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/folders/prompt.md",
+        "line": 10,
+        "quote": "## Common Operations\n\n### Create Folder\n\n```json\n{\n\t\"action\": \"create\",\n\t\"data\": {\n\t\t\"name\": \"Product Images\",\n\t\t\"parent\": \"parent-folder-uuid\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7e2a0a608e762694701f85ca9a00b3e468ec1d761adee5b0374c91f29a9e04b8",
+      "topic": "data",
+      "subject": "Folder / validation rules",
+      "content": {
+        "validation": {
+          "keys": "must be array even for single items",
+          "tags": "must be array e.g. [\"tag1\", \"tag2\"] not \"tag1, tag2\""
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/folders/prompt.md",
+        "line": 31,
+        "quote": "## Mistakes to Avoid\n\n1. **Remember** that `keys` expects an array even for single items\n2. **Tags must be arrays**: Use `[\"tag1\", \"tag2\"]` not `\"tag1, tag2\"`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "78bfde08ff0137d92204fe3de7ef19c521c2fee42c9c53c55e223a4bde7021e6",
+      "topic": "data",
+      "subject": "Folder entity",
+      "content": {
+        "fields": {
+          "storage": "folders are virtual — not mirrored with the storage adaptor, only stored in the database"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/folders/prompt.md",
+        "line": 24,
+        "quote": "## Important Notes\n\n- **Folders are virtual**: Folders are not mirrored with the storage adaptor, only stored in the database.\n- **Permissions**: Respects Directus access control - only accessible files are returned. If you don't see something\n  that the user says you should have access to, it could be a permissions issue.\n- **Folder Hierarchy**: Deleting a folder requires it to be empty or will cascade based on settings\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9a12039d47e7551e9bf8e2e2a57edea8634c9be98bc1f455c2102ea15be534c5",
+      "topic": "data",
+      "subject": "Items / M2A relation",
+      "content": {
+        "fields": {
+          "M2A_field": "array of objects each with collection (string: target collection name) and item (object: item data or existing id)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 220,
+        "quote": "### Many-to-Any (M2A)\n\n```json\n{\n\t\"sections\": [\n\t\t{ \"collection\": \"headings\", \"item\": { \"text\": \"Title\", \"level\": 1 } },\n\t\t{ \"collection\": \"paragraphs\", \"item\": { \"content\": \"Body text\" } }\n\t]\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6e5d284555c508ddad5a55b2934b60eafe70041d095e782ad5e41e1099467256",
+      "topic": "data",
+      "subject": "Items / M2O relation",
+      "content": {
+        "fields": {
+          "nested_create": "pass object to create nested related item",
+          "link_existing": "pass UUID string to link existing item",
+          "remove": "pass null to remove relation"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 194,
+        "quote": "### Many-to-One (M2O)\n\n```json\n// Create with nested author\n{\"title\": \"Article\", \"author\": {\"name\": \"New Author\"}}\n// Link existing author\n{\"title\": \"Article\", \"author\": \"existing-uuid\"}\n// Remove relation\n{\"author\": null}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e920175a749c26f53c2e8ef301b90a3c47b9819d0d3fa2c0aad71100d7d48b97",
+      "topic": "data",
+      "subject": "Items / O2M relation",
+      "content": {
+        "fields": {
+          "link_existing": "pass array of primary keys to link existing items",
+          "create_update_delete": "pass object with create (array of new items), update (array with id), delete (array of ids) sub-keys"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 205,
+        "quote": "### One-to-Many (O2M)\n\n```json\n// Link to existing comments\n{\"comments\": [1, 5, 9]}\n// Create/update/delete operations\n{\n  \"comments\": {\n    \"create\": [{\"text\": \"New comment\"}],\n    \"update\": [{\"id\": 5, \"text\": \"Updated\"}],\n    \"delete\": [1, 9]\n  }\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4f37f3bdd8f891c30a46950e1706ee6ecbc19d28eff1ac7e7d94f252ef71ee41",
+      "topic": "data",
+      "subject": "Items / batch operations",
+      "content": {
+        "fields": {
+          "transactional": "batch operations are transactional — all succeed or all fail",
+          "primary_keys": "primary keys returned from create/update for chaining",
+          "validation": "validation errors thrown before database operations"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 284,
+        "quote": "### Performance & Safety\n\n- **Use `fields`** to minimize payload size\n- **Apply `limit`** for large result sets (default: no limit)\n- **Batch operations** are transactional - all succeed or all fail\n- **Primary keys returned** from create/update operations for chaining\n- **Validation errors** are thrown before database operations\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c36c5a71d6d6c1a1e693021db4b86928d7043b7a09b36653d074a4de2a418d22",
+      "topic": "data",
+      "subject": "Items / create action",
+      "content": {
+        "validation": {
+          "required_fields": "must include all required fields per collection schema",
+          "field_types": "validate field types match schema definitions",
+          "singleton": "check collection.singleton: true for singleton collections",
+          "relations": "verify relation targets exist before linking; or create new items by nesting",
+          "schema": "must fully understand collection schema before creating items"
+        },
+        "fields": {
+          "action": "create",
+          "collection": "collection name",
+          "data": "array of item objects; supports nested relation creation (object creates nested), mix of existing IDs and new objects for M2M"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 263,
+        "quote": "[line 263] ### Before Creating Items\n\n1. **Check required fields** in schema\n2. **Validate field types** match schema definitions\n3. **Check for singleton collections** (`collection.singleton: true`)\n4. **Verify relation targets exist** before linking. You can also create new relation items by nesting\n\n---\n[line 52] ### Creating Items\n\n- ALWAYS make sure you fully understand the collection's schema before trying to create items.\n\n**✅ GOOD - Single with Relations:**\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{\n\t\t\t\"title\": \"New Post\",\n\t\t\t\"author\": { \"name\": \"John Doe\", \"email\": \"john@example.com\" }, // Creates nested\n\t\t\t\"categories\": [1, 2, { \"name\": \"New Category\" }], // Mix existing + new\n\t\t\t\"status\": \"draft\"\n\t\t}\n\t]\n}\n```\n\n**✅ GOOD - Batch Create:**\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{ \"title\": \"Post 1\", \"author_id\": 1 },\n\t\t{ \"title\": \"Post 2\", \"author_id\": 2 }\n\t]\n}\n```\n\n**❌ BAD - Missing Required Fields:**\n\n```json\n// Don't create without checking schema first\n{ \"title\": \"Post\" } // Missing required fields like status\n```\n… (+1 more lines)",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/items/prompt.md",
+            "line": 52,
+            "quote": "### Creating Items\n\n- ALWAYS make sure you fully understand the collection's schema before trying to create items.\n\n**✅ GOOD - Single with Relations:**\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{\n\t\t\t\"title\": \"New Post\",\n\t\t\t\"author\": { \"name\": \"John Doe\", \"email\": \"john@example.com\" }, // Creates nested\n\t\t\t\"categories\": [1, 2, { \"name\": \"New Category\" }], // Mix existing + new\n\t\t\t\"status\": \"draft\"\n\t\t}\n\t]\n}\n```\n\n**✅ GOOD - Batch Create:**\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{ \"title\": \"Post 1\", \"author_id\": 1 },\n\t\t{ \"title\": \"Post 2\", \"author_id\": 2 }\n\t]\n}\n```\n\n**❌ BAD - Missing Required Fields:**\n\n```json\n// Don't create without checking schema first\n{ \"title\": \"Post\" } // Missing required fields like status\n```\n… (+1 more lines)"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9a809ae1d303d2d72afc9012d400ea4f0ab857baa9289d160674c173bc8c44f9",
+      "topic": "data",
+      "subject": "Items / deep queries",
+      "content": {
+        "fields": {
+          "deep": "object keyed by relation field name; supports _filter, _sort, _limit per relation"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 33,
+        "quote": "### Deep Queries (Nested Relations)\n\n```json\n{\n\t\"fields\": [\"title\", \"comments.text\", \"comments.author.name\"],\n\t\"deep\": {\n\t\t\"comments\": {\n\t\t\t\"_filter\": { \"status\": { \"_eq\": \"approved\" } },\n\t\t\t\"_sort\": [\"-date_created\"],\n\t\t\t\"_limit\": 5\n\t\t}\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "041ede8e8436bb951b33a82778b74f8b48749b9491b1f732f351eb666ee7f83b",
+      "topic": "data",
+      "subject": "Items / delete action",
+      "content": {
+        "validation": {
+          "keys": "always require explicit keys — never delete by query alone",
+          "confirmation": "must always get written confirmation from user before deleting",
+          "cascade": "validate cascade behavior for relationships before deleting",
+          "soft_delete": "consider soft delete if collection has status field"
+        },
+        "fields": {
+          "action": "delete",
+          "collection": "collection name",
+          "keys": "array of primary key UUIDs (required)"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 292,
+        "quote": "[line 292] ### Error Patterns to Avoid\n\n- Creating without checking required fields through `scehma(keys: [\"collection\"])`\n- Updating without keys or with invalid primary keys\n- Deleting system collections (directus\\_\\*)\n- Assuming field names without schema verification\n- Missing foreign key references in relations\n- Exceeding mutation limits in batch operations\n\n---\n[line 146] ### Deleting Items\n\n- ALWAYS get written confirmation with the user before deleting any items.\n\n**✅ GOOD - Delete by Keys:**\n\n```json\n{\n\t\"action\": \"delete\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\", \"uuid-2\"]\n}\n```\n\n**❌ BAD - Delete All (Dangerous):**\n\n```json\n// Never delete without keys - use query to get keys first\n{\n\t\"action\": \"delete\",\n\t\"collection\": \"posts\" // Will fail - keys required\n}\n```\n\n---\n[line 277] ### Before Deleting Items\n\n1. **Always require explicit keys** - never delete by query alone\n2. **Check for related data** that might be affected\n3. **Validate cascade behavior** for relationships\n4. **Consider soft delete** if collection has status field\n",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/items/prompt.md",
+            "line": 146,
+            "quote": "### Deleting Items\n\n- ALWAYS get written confirmation with the user before deleting any items.\n\n**✅ GOOD - Delete by Keys:**\n\n```json\n{\n\t\"action\": \"delete\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\", \"uuid-2\"]\n}\n```\n\n**❌ BAD - Delete All (Dangerous):**\n\n```json\n// Never delete without keys - use query to get keys first\n{\n\t\"action\": \"delete\",\n\t\"collection\": \"posts\" // Will fail - keys required\n}\n```\n"
+          },
+          {
+            "file": "api/src/ai/tools/items/prompt.md",
+            "line": 277,
+            "quote": "### Before Deleting Items\n\n1. **Always require explicit keys** - never delete by query alone\n2. **Check for related data** that might be affected\n3. **Validate cascade behavior** for relationships\n4. **Consider soft delete** if collection has status field\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a6a9f779716d830ad43de0c0daf2683049563f309fb37689e1fbe68120c584f3",
+      "topic": "data",
+      "subject": "Items / field selection",
+      "content": {
+        "fields": {
+          "fields": "array of field selectors; supports dot notation for relations (e.g. author.name), wildcard (categories.*), and M2A relations (sections.item:headings.title)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 12,
+        "quote": "### Field Selection (Always Use)\n\n```json\n{ \"fields\": [\"title\", \"status\", \"author.name\", \"categories.*\"] }\n```\n\nFor M2A relations: `\"sections.item:headings.title\", \"sections.item:paragraphs.body\"`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bddaed00b321197b6bb9f975bba5385d049a8d2eecfdd0efecf8c7d7506b463a",
+      "topic": "data",
+      "subject": "Items / filter operators",
+      "content": {
+        "fields": {
+          "core": "_eq, _neq, _in, _nin, _null, _nnull, _lt, _lte, _gt, _gte, _between, _contains, _icontains, _starts_with, _ends_with, _empty, _nempty",
+          "relations": "_some, _none (O2M only)",
+          "logic": "_and, _or"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 20,
+        "quote": "### Filtering Operators\n\nCore: `_eq`, `_neq`, `_in`, `_nin`, `_null`, `_nnull`, `_lt`, `_lte`, `_gt`, `_gte`, `_between`, `_contains`,\n`_icontains`, `_starts_with`, `_ends_with`, `_empty`, `_nempty` Relations: `_some`, `_none` (O2M only) Logic: `_and`,\n`_or`\n\n```json\n{\"status\": {\"_eq\": \"published\"}}\n{\"title\": {\"_icontains\": \"keyword\"}}\n{\"categories\": {\"_some\": {\"name\": {\"_eq\": \"News\"}}}}\n{\"_or\": [{\"status\": {\"_eq\": \"published\"}}, {\"featured\": {\"_eq\": true}}]}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "89289dce555cf130c24ea53543f232542d815531a231318f8b69501e365a84e6",
+      "topic": "data",
+      "subject": "Items / query functions",
+      "content": {
+        "fields": {
+          "date_functions": "year(field), month(field), day(field), hour(field) — usable in filter",
+          "aggregate_functions": "count, sum, avg, min, max",
+          "groupBy": "array of field names to group by"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 306,
+        "quote": "## Functions & Aggregation\n\nDate: `year(field)`, `month(field)`, `day(field)`, `hour(field)` Aggregate: `count`, `sum`, `avg`, `min`, `max`\n\n```json\n{\"filter\": {\"year(date_created)\": {\"_eq\": 2024}}}\n{\"aggregate\": {\"count\": [\"*\"], \"sum\": [\"price\"]}, \"groupBy\": [\"category\"]}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1c8d25ee5869f7d1bd8ac0a48967bee135f0251d38aa2fc1dd8d08eafbc6b8db",
+      "topic": "data",
+      "subject": "Items / schema-first pattern",
+      "content": {
+        "validation": {
+          "schema": "always call schema() first to discover collections; examine specific schemas with schema(keys: [\"collection\"]) for field details; never guess field names — always use exact names from schema"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 256,
+        "quote": "### Schema-First Pattern (Critical)\n\n1. **Always call `schema()` first** to discover collections\n2. **Examine specific schemas**: `schema(keys: [\"collection\"])` for field details based on users query\n3. **Follow relation chains**: Check `relation.related_collections` in field definitions when it's relevant to your task\n4. **IMPORTANT: Never guess field names** - Always use exact names from schema. If you're not 100% sure, ask the user\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "121490be357b424592078969098283980909576f2e79cea7746d112a042bac4e",
+      "topic": "data",
+      "subject": "Items / singleton collections",
+      "content": {
+        "fields": {
+          "read": "singleton read uses action=read with collection name and query; no keys needed",
+          "update": "singleton update uses action=update with collection name and data; no keys needed",
+          "regular_collections": "require keys for update/delete; return arrays",
+          "singleton_collections": "no keys needed; return single objects; auto-upsert behavior"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 170,
+        "quote": "[line 170] ### Singleton Collections\n\n**✅ GOOD - Singleton Read:**\n\n```json\n{\n\t\"action\": \"read\",\n\t\"collection\": \"settings\", // Singleton collection\n\t\"query\": { \"fields\": [\"site_name\", \"logo\"] }\n}\n```\n\n**✅ GOOD - Singleton Update:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"settings\",\n\t\"data\": { \"site_name\": \"New Name\" } // No keys needed for singleton\n}\n```\n\n---\n[line 301] ### Singleton vs Regular Collections\n\n**Regular Collections**: Require keys for update/delete, return arrays **Singleton Collections**: No keys needed, return\nsingle objects, auto-upsert behavior\n",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/items/prompt.md",
+            "line": 301,
+            "quote": "### Singleton vs Regular Collections\n\n**Regular Collections**: Require keys for update/delete, return arrays **Singleton Collections**: No keys needed, return\nsingle objects, auto-upsert behavior\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "06b94fccaf3605b2a2b022b62e74f5abcfb24e19e4761ca405b104b33341d69c",
+      "topic": "data",
+      "subject": "Items / translations relation",
+      "content": {
+        "fields": {
+          "translations": "array of translation objects with languages_code and translated fields",
+          "translations.languages_code": "BCP 47 language code e.g. en-US, fr-FR"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 231,
+        "quote": "### Translations\n\n```json\n// Create with multiple languages\n{\n  \"title\": \"Main Title\",\n  \"translations\": [\n    {\"languages_code\": \"en-US\", \"title\": \"English Title\", \"content\": \"English content\"},\n    {\"languages_code\": \"fr-FR\", \"title\": \"Titre Français\", \"content\": \"Contenu français\"}\n  ]\n}\n\n// Read specific language\n{\n  \"fields\": [\"title\", \"translations.title\", \"translations.content\"],\n  \"deep\": {\n    \"translations\": {\n      \"_filter\": {\"languages_code\": {\"_eq\": \"fr-FR\"}}\n    }\n  }\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "10e9d93dc4fb6572c97aa9c569752cb6e2c75185ba12d55620e3d53049a7ef50",
+      "topic": "data",
+      "subject": "Items / update action",
+      "content": {
+        "validation": {
+          "bulk_same_data": "use keys parameter for bulk updates with same data",
+          "batch_different_data": "use data array for batch updates with different data per item; include primary key in each data object",
+          "field_permissions": "some fields may be read-only",
+          "keys": "must specify which items to update; update without keys will fail",
+          "relational_update": "data.relationField supports create (array), update (array with id), delete (array of ids) sub-keys"
+        },
+        "fields": {
+          "action": "update",
+          "collection": "collection name",
+          "keys": "array of primary key UUIDs (required for same-data batch update)",
+          "data": "partial data object, or array of objects each with id for different-data batch update"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 270,
+        "quote": "[line 270] ### Before Updating Items\n\n1. **Use keys parameter** for bulk updates with same data\n2. **Use data array** for batch updates with different data per item\n3. **Include primary key in data** when using batch update\n4. **Check field permissions** - some fields may be read-only\n\n---\n[line 93] ### Updating Items\n\n**✅ GOOD - Update with Keys:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\", \"uuid-2\"],\n\t\"data\": { \"status\": \"published\" }\n}\n```\n\n**✅ GOOD - Batch Update (Different Data):**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{ \"id\": \"uuid-1\", \"title\": \"Updated Title 1\" },\n\t\t{ \"id\": \"uuid-2\", \"title\": \"Updated Title 2\" }\n\t]\n}\n```\n\n**✅ GOOD - Relational Updates:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\"],\n\t\"data\": {\n\t\t\"categories\": {\n\t\t\t\"create\": [{ \"name\": \"New Category\" }],\n\t\t\t\"update\": [{ \"id\": 3, \"name\": \"Renamed\" }],\n\t\t\t\"delete\": [5]\n\t\t}\n\t}\n… (+13 more lines)",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/items/prompt.md",
+            "line": 93,
+            "quote": "### Updating Items\n\n**✅ GOOD - Update with Keys:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\", \"uuid-2\"],\n\t\"data\": { \"status\": \"published\" }\n}\n```\n\n**✅ GOOD - Batch Update (Different Data):**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"data\": [\n\t\t{ \"id\": \"uuid-1\", \"title\": \"Updated Title 1\" },\n\t\t{ \"id\": \"uuid-2\", \"title\": \"Updated Title 2\" }\n\t]\n}\n```\n\n**✅ GOOD - Relational Updates:**\n\n```json\n{\n\t\"action\": \"update\",\n\t\"collection\": \"posts\",\n\t\"keys\": [\"uuid-1\"],\n\t\"data\": {\n\t\t\"categories\": {\n\t\t\t\"create\": [{ \"name\": \"New Category\" }],\n\t\t\t\"update\": [{ \"id\": 3, \"name\": \"Renamed\" }],\n\t\t\t\"delete\": [5]\n\t\t}\n\t}\n… (+13 more lines)"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bbc27b2c0eb025fa94faa69ee0781f67f1bd80533011e78616bf59d69cf79646",
+      "topic": "data",
+      "subject": "Operation / UUID vs key distinction",
+      "content": {
+        "fields": {
+          "UUID": "system identifier (e.g. abc-123-def-456); used in resolve, reject, flow, and operation key field in CRUD; auto-generated on creation; required for connecting operations",
+          "key": "human-readable name (e.g. send_email, check_status); defined by user on creation; used in data chain variables {{ operation_key }} to access results"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/operations/prompt.md",
+        "line": 13,
+        "quote": "## UUID vs Keys - Critical Distinction\n\n**UUIDs** (System identifiers): `\"abc-123-def-456\"`\n\n- Use in: `resolve`, `reject`, `flow`, operation `key` field in CRUD\n- Generated automatically when operations are created\n- Required for connecting operations\n\n**Keys** (Human-readable names): `\"send_email\"`, `\"check_status\"`\n\n- Use in: Data chain variables `{{ operation_key }}`\n- You define these when creating operations\n- Used to access operation results in subsequent operations </uuid_vs_keys>\n\n<critical_syntax>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a36b816547aef916993097b525725baf8d3b4303b99d525dce6ffbd68112c78f",
+      "topic": "data",
+      "subject": "Operation / create action",
+      "content": {
+        "fields": {
+          "action": "create",
+          "data.flow": "flow UUID (required)",
+          "data.key": "unique key for this operation (required)",
+          "data.type": "operation type (required)",
+          "data.name": "display name (optional)",
+          "data.position_x": "grid X position (required); use 19, 37, 55, 73...",
+          "data.position_y": "grid Y position (required); use 1, 19, 37...",
+          "data.options": "type-specific configuration object (optional, default: {})",
+          "data.resolve": "UUID of next operation on success (required; null initially)",
+          "data.reject": "UUID of next operation on failure (required; null initially)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/operations/prompt.md",
+        "line": 99,
+        "quote": "### `create` - Add Operation to Flow\n\n```json\n{\n\t\"action\": \"create\",\n\t\"data\": {\n\t\t\"flow\": \"flow-uuid\", // Required: Flow this operation belongs to\n\t\t\"key\": \"notify_user\", // Required: Unique key for this operation\n\t\t\"type\": \"notification\", // Required: Operation type\n\t\t\"name\": \"Send Notification\", // Optional: Display name\n\t\t\"position_x\": 19, // Required: Grid X position (use 19, 37, 55, 73...)\n\t\t\"position_y\": 1, // Required: Grid Y position (use 1, 19, 37...)\n\t\t\"options\": {\n\t\t\t// Optional: Type-specific configuration (default: {})\n\t\t\t// Configuration based on operation type\n\t\t},\n\t\t\"resolve\": null, // Required: UUID of next operation on success (null initially)\n\t\t\"reject\": null // Required: UUID of next operation on failure (null initially)\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "775bea76cf73bd8e25619429b211feb8afc82adc2e46001d36250befdeb5b6a4",
+      "topic": "data",
+      "subject": "Operation / grid positioning",
+      "content": {
+        "fields": {
+          "grid": "14x14 units",
+          "position_x": "never 0; use values 19, 37, 55, 73... (spacing every 18 units)",
+          "position_y": "start at 1; use values 1, 19, 37...",
+          "linear_pattern": "(19,1) → (37,1) → (55,1)",
+          "branching_pattern": "success at (37,1), error at (37,19)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/operations/prompt.md",
+        "line": 158,
+        "quote": "## Grid Positioning\n\n**Rules:** 14x14 units, spacing every 18 units (example 19/37/55/73). Never (0,0). Start `position_y: 1`.\n\n**Patterns:** Linear (19,1)→(37,1)→(55,1). Branching: success (37,1), error (37,19). </positioning_system>\n\n<operation_examples> **condition** - Evaluates filter rules\n\n```json\n{ \"type\": \"condition\", \"options\": { \"filter\": { \"$trigger\": { \"payload\": { \"status\": { \"_eq\": \"published\" } } } } } }\n// Multiple: {\"_and\": [{\"status\": {\"_eq\": \"published\"}}, {\"featured\": {\"_eq\": true}}]}\n```\n\n**item-create/read/update/delete** - CRUD operations\n\n```json\n{\"type\": \"item-create\", \"options\": {\"collection\": \"notifications\", \"permissions\": \"$trigger\", \"payload\": {\"title\": \"{{ $trigger.payload.title }}\"}}}\n{\"type\": \"item-read\", \"options\": {\"collection\": \"products\", \"query\": {\"filter\": {\"status\": {\"_eq\": \"active\"}}}}}\n{\"type\": \"item-update\", \"options\": {\"collection\": \"orders\", \"key\": \"{{ $trigger.payload.id }}\", \"payload\": {\"status\": \"processed\"}}}\n{\"type\": \"item-delete\", \"options\": {\"collection\": \"temp_data\", \"key\": [\"{{ read_items[0].id }}\"]}}\n```\n\n**exec** - Custom JavaScript/TypeScript (sandboxed, no file/network access)\n\n```json\n{\n\t\"type\": \"exec\",\n\t\"options\": {\n\t\t\"code\": \"module.exports = async function(data) {\\n  const result = data.$trigger.payload.value * 2;\\n  return { result, processed: true };\\n}\"\n\t}\n}\n```\n\n**mail** - Send email (markdown/wysiwyg/template)\n\n```json\n{\n\t\"type\": \"mail\",\n\t\"options\": {\n\t\t\"to\": [\"user@example.com\"],\n… (+103 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "ceb9753b244937e54ffcc9bd0691fc0e3cf8d88e5592f92d2727d43270eb4e3b",
+      "topic": "data",
+      "subject": "Operation / syntax rules",
+      "content": {
+        "validation": {
+          "condition_filters": "use nested objects for filters (e.g. {\"$trigger\": {\"payload\": {\"status\": {\"_eq\": \"published\"}}}}) — never dot notation",
+          "request_headers": "array of objects [{\"header\": \"Authorization\", \"value\": \"Bearer token\"}] — not simple key-value objects",
+          "request_body": "stringified JSON string — not native objects",
+          "data_chain": "use operation key variables {{ operation_key }} — avoid $last (breaks when reordered)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/operations/prompt.md",
+        "line": 29,
+        "quote": "## Critical Syntax Rules - MEMORIZE THESE\n\n**Condition Filters**: Use nested objects, NEVER dot notation\n\n- ❌ `\"$trigger.payload.status\"`\n- ✅ `{\"$trigger\": {\"payload\": {\"status\": {\"_eq\": \"published\"}}}}`\n\n**Request Headers**: Array of objects, NOT simple objects\n\n- ❌ `{\"Authorization\": \"Bearer token\"}`\n- ✅ `[{\"header\": \"Authorization\", \"value\": \"Bearer token\"}]`\n\n**Request Body**: Stringified JSON, NOT native objects\n\n- ❌ `\"body\": {\"data\": \"value\"}`\n- ✅ `\"body\": \"{\\\"data\\\": \\\"value\\\"}\"`\n\n**Data Chain Variables**: Use operation keys, avoid `$last`\n\n- ❌ `{{ $last }}` (breaks when reordered)\n- ✅ `{{ operation_key }}` (reliable) </critical_syntax>\n\n<required_fields>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9343b1283eb5c723a71afdbf91b504e15e0c300fd990abc5cdb6305a2f9faaf9",
+      "topic": "data",
+      "subject": "Operation / type options",
+      "content": {
+        "fields": {
+          "condition": "evaluates filter rules; options.filter uses nested object format with $trigger, payload etc.",
+          "item-create": "options: collection, permissions, payload",
+          "item-read": "options: collection, query (with filter)",
+          "item-update": "options: collection, key, payload",
+          "item-delete": "options: collection, key (array)",
+          "exec": "custom JS/TS sandboxed (no file/network access); options.code is module.exports async function",
+          "mail": "options: to (array), subject, body; supports template type with template name and data",
+          "notification": "options: recipient (array), subject, message"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/operations/prompt.md",
+        "line": 158,
+        "quote": "## Grid Positioning\n\n**Rules:** 14x14 units, spacing every 18 units (example 19/37/55/73). Never (0,0). Start `position_y: 1`.\n\n**Patterns:** Linear (19,1)→(37,1)→(55,1). Branching: success (37,1), error (37,19). </positioning_system>\n\n<operation_examples> **condition** - Evaluates filter rules\n\n```json\n{ \"type\": \"condition\", \"options\": { \"filter\": { \"$trigger\": { \"payload\": { \"status\": { \"_eq\": \"published\" } } } } } }\n// Multiple: {\"_and\": [{\"status\": {\"_eq\": \"published\"}}, {\"featured\": {\"_eq\": true}}]}\n```\n\n**item-create/read/update/delete** - CRUD operations\n\n```json\n{\"type\": \"item-create\", \"options\": {\"collection\": \"notifications\", \"permissions\": \"$trigger\", \"payload\": {\"title\": \"{{ $trigger.payload.title }}\"}}}\n{\"type\": \"item-read\", \"options\": {\"collection\": \"products\", \"query\": {\"filter\": {\"status\": {\"_eq\": \"active\"}}}}}\n{\"type\": \"item-update\", \"options\": {\"collection\": \"orders\", \"key\": \"{{ $trigger.payload.id }}\", \"payload\": {\"status\": \"processed\"}}}\n{\"type\": \"item-delete\", \"options\": {\"collection\": \"temp_data\", \"key\": [\"{{ read_items[0].id }}\"]}}\n```\n\n**exec** - Custom JavaScript/TypeScript (sandboxed, no file/network access)\n\n```json\n{\n\t\"type\": \"exec\",\n\t\"options\": {\n\t\t\"code\": \"module.exports = async function(data) {\\n  const result = data.$trigger.payload.value * 2;\\n  return { result, processed: true };\\n}\"\n\t}\n}\n```\n\n**mail** - Send email (markdown/wysiwyg/template)\n\n```json\n{\n\t\"type\": \"mail\",\n\t\"options\": {\n\t\t\"to\": [\"user@example.com\"],\n… (+103 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "832f654453db33e6224c1fe1bfcd97765e2f13efbffd9d6eca3a2a2da6fbaf02",
+      "topic": "data",
+      "subject": "Relation / M2A create",
+      "content": {
+        "fields": {
+          "item_relation.action": "create",
+          "item_relation.collection": "junction collection",
+          "item_relation.field": "item field name",
+          "item_relation.data.related_collection": "null (polymorphic)",
+          "item_relation.data.meta.one_allowed_collections": "array of allowed target collection names",
+          "item_relation.data.meta.one_collection_field": "field storing the collection name",
+          "item_relation.data.meta.junction_field": "the other FK field in junction",
+          "page_relation.data.schema.on_delete": "CASCADE",
+          "page_relation.data.meta.one_field": "alias field name on the one-side",
+          "page_relation.data.meta.sort_field": "sort field name"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 164,
+        "quote": "### M2A (Many-to-Any)\n\nItems can relate to items from multiple different collections.\n\n**Example**: Page blocks (hero, text, gallery)\n\n**Complete M2A Workflow**:\n\n1. **Create block collections** → Use `collections` tool to create each block type (e.g., `block_hero`, `block_text`,\n   `block_gallery`) with UUID primary keys and specific fields\n\n2. **Create junction collection** → Use `collections` tool to create `page_blocks` junction (hidden collection with UUID\n   primary key)\n\n3. **Add M2A field** → Use `fields` tool with `type: \"alias\"`, `special: [\"m2a\"]`, and `interface: \"list-m2a\"`\n\n4. **Add junction fields** → Use `fields` tool to add `page` (UUID), `item` (string), `collection` (string), and `sort`\n   (integer) fields to junction\n\n5. **Create relations** (use `relations` tool):\n\n```json\n// Item relation (polymorphic)\n{\n  \"action\": \"create\",\n  \"collection\": \"page_blocks\",\n  \"field\": \"item\",\n  \"data\": {\n    \"collection\": \"page_blocks\",\n    \"field\": \"item\",\n    \"related_collection\": null,\n    \"meta\": {\n      \"one_allowed_collections\": [\"block_hero\", \"block_text\", \"block_gallery\"],\n      \"one_collection_field\": \"collection\",\n      \"junction_field\": \"page_id\"\n    }\n  }\n}\n\n// Page relation\n… (+22 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "acedb54acc4b959d6efe37c696b980634519a3391da154652afccecd89f19106",
+      "topic": "data",
+      "subject": "Relation / M2M create",
+      "content": {
+        "fields": {
+          "junction_collection": "must be created first with UUID primary key",
+          "first_relation.collection": "junction collection",
+          "first_relation.field": "FK to first collection",
+          "first_relation.data.related_collection": "first collection",
+          "first_relation.data.meta.one_field": "alias field name on first collection",
+          "first_relation.data.meta.junction_field": "FK to second collection in junction",
+          "first_relation.data.meta.sort_field": "optional sort field",
+          "first_relation.data.schema.on_delete": "CASCADE",
+          "second_relation.collection": "junction collection",
+          "second_relation.field": "FK to second collection",
+          "second_relation.data.related_collection": "second collection",
+          "second_relation.data.meta.one_field": "alias field name on second collection",
+          "second_relation.data.meta.junction_field": "FK to first collection in junction",
+          "second_relation.data.schema.on_delete": "CASCADE"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 105,
+        "quote": "### M2M (Many-to-Many)\n\nItems in both collections can relate to multiple items in the other.\n\n**Example**: Articles ↔ Tags\n\n**Complete M2M Workflow**:\n\n1. **Create junction collection** → Use `collections` tool to create `article_tags` with UUID primary key\n\n2. **Add alias fields** to both collections → Use `fields` tool with `type: \"alias\"`, `special: [\"m2m\"]`, and\n   `interface: \"list-m2m\"` (see `fields` tool `<relationship_fields>` M2M example)\n\n3. **Add junction fields** → Use `fields` tool to add `article_id` (UUID), `tag_id` (UUID), and optional `sort`\n   (integer) fields to junction collection\n\n4. **Create bidirectional relations** (use `relations` tool with CASCADE):\n\n```json\n// First relation\n{\n  \"action\": \"create\",\n  \"collection\": \"article_tags\",\n  \"field\": \"article_id\",\n  \"data\": {\n    \"collection\": \"article_tags\",\n    \"field\": \"article_id\",\n    \"related_collection\": \"articles\",\n    \"meta\": {\n      \"one_field\": \"tags\",\n      \"junction_field\": \"tag_id\",\n      \"sort_field\": \"sort\"\n    },\n    \"schema\": {\"on_delete\": \"CASCADE\"}\n  }\n}\n\n// Second relation\n{\n  \"action\": \"create\",\n… (+19 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "700d58f93179c4f44fd6cc5e262dcc2643555a6049647ccead86c333410ce2a0",
+      "topic": "data",
+      "subject": "Relation / M2O create",
+      "content": {
+        "fields": {
+          "action": "create",
+          "collection": "the many-side collection",
+          "field": "field name for the relation",
+          "data.collection": "the many-side collection",
+          "data.field": "field name",
+          "data.related_collection": "the one-side collection",
+          "data.schema.on_delete": "referential action e.g. SET NULL"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 37,
+        "quote": "### M2O (Many-to-One)\n\nMultiple items in one collection relate to one item in another.\n\n**Example**: Many articles → one author\n\n**Complete M2O Workflow**:\n\n1. **Add M2O field** to the \"many\" collection → Use `fields` tool with `type: \"uuid\"` and\n   `interface: \"select-dropdown-m2o\"` (see `fields` tool `<relationship_fields>` M2O example)\n\n2. **Create relation** (use `relations` tool):\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"articles\",\n\t\"field\": \"author\",\n\t\"data\": {\n\t\t\"collection\": \"articles\",\n\t\t\"field\": \"author\",\n\t\t\"related_collection\": \"directus_users\",\n\t\t\"schema\": { \"on_delete\": \"SET NULL\" }\n\t}\n}\n```\n\n</m2o_workflow>\n\n<o2m_workflow>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "75aacac7091b9ee70d01723ceb39513308d59ead56f6991aee33b3b62bf3c69e",
+      "topic": "data",
+      "subject": "Relation / O2M create",
+      "content": {
+        "fields": {
+          "action": "create",
+          "collection": "the many-side collection",
+          "field": "FK field name",
+          "data.collection": "many-side collection",
+          "data.field": "FK field name",
+          "data.related_collection": "the one-side collection",
+          "data.meta.one_field": "alias field name on the one-side",
+          "data.meta.sort_field": "sort field (null if unsorted)",
+          "data.schema.on_delete": "referential action e.g. SET NULL"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 68,
+        "quote": "### O2M (One-to-Many)\n\nOne item in a collection relates to many items in another collection.\n\n**Example**: One author → many articles\n\n**Complete O2M Workflow**:\n\n1. **Add O2M field** to the \"one\" collection → Use `fields` tool with `type: \"alias\"`, `special: [\"o2m\"]`, and\n   `interface: \"list-o2m\"`\n\n2. **Create relation** connecting to existing M2O field (use `relations` tool):\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"articles\",\n\t\"field\": \"author\",\n\t\"data\": {\n\t\t\"collection\": \"articles\",\n\t\t\"field\": \"author\",\n\t\t\"related_collection\": \"authors\",\n\t\t\"meta\": {\n\t\t\t\"one_field\": \"articles\",\n\t\t\t\"sort_field\": null\n\t\t},\n\t\t\"schema\": {\n\t\t\t\"on_delete\": \"SET NULL\"\n\t\t}\n\t}\n}\n```\n\n</o2m_workflow>\n\n<m2m_workflow>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "85488cfa7273974f97cef8119a67602d470c8370307096a71e5bc8c787f8c059",
+      "topic": "data",
+      "subject": "Relation / file relation",
+      "content": {
+        "fields": {
+          "single_file_M2O.related_collection": "directus_files",
+          "single_file_M2O.schema.on_delete": "SET NULL",
+          "multiple_files_M2M.junction_article_relation.meta.one_field": "alias field name on main collection",
+          "multiple_files_M2M.junction_article_relation.meta.junction_field": "directus_files_id",
+          "multiple_files_M2M.junction_article_relation.schema.on_delete": "CASCADE",
+          "multiple_files_M2M.junction_file_relation.related_collection": "directus_files",
+          "multiple_files_M2M.junction_file_relation.schema.on_delete": "CASCADE"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 226,
+        "quote": "### File/Files Relationships\n\n**Single File (M2O)**:\n\n1. **Add file field** → Use `fields` tool with `type: \"uuid\"`, `special: [\"file\"]`, and `interface: \"file\"`\n\n2. **Create relation** (use `relations` tool):\n\n```json\n{\n\t\"action\": \"create\",\n\t\"collection\": \"articles\",\n\t\"field\": \"cover_image\",\n\t\"data\": {\n\t\t\"collection\": \"articles\",\n\t\t\"field\": \"cover_image\",\n\t\t\"related_collection\": \"directus_files\",\n\t\t\"schema\": { \"on_delete\": \"SET NULL\" }\n\t}\n}\n```\n\n**Multiple Files (M2M)**:\n\n**Complete Files Workflow**:\n\n1. **Create junction collection** → Use `collections` tool to create junction with UUID primary key\n\n2. **Add files field** to main collection → Use `fields` tool with `type: \"alias\"`, `special: [\"files\"]`, and\n   `interface: \"files\"` (see `fields` tool `<relationship_fields>` Files example)\n\n3. **Add junction fields** → Use `fields` tool to add hidden `article_id` and `directus_files_id` (both UUID) fields to\n   junction\n\n4. **Create relations** (use `relations` tool):\n\n```json\n// Article relation\n{\n  \"action\": \"create\",\n… (+35 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b675e3331119b3bfd7243546c1a48ac1932ab3f8a1c129d070f2c83217cd300c",
+      "topic": "data",
+      "subject": "Relation / meta options",
+      "content": {
+        "fields": {
+          "one_field": "field name in related collection (for O2M side)",
+          "junction_field": "opposite field in junction table",
+          "sort_field": "enable manual sorting (typically an integer field)",
+          "one_deselect_action": "nullify | delete",
+          "one_allowed_collections": "array of collection names for M2A",
+          "one_collection_field": "field that stores collection name in M2A"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 333,
+        "quote": "### Meta Options\n\n- `one_field`: Field name in related collection (for O2M side)\n- `junction_field`: Opposite field in junction table\n- `sort_field`: Enable manual sorting (typically an integer field)\n- `one_deselect_action`: `nullify` or `delete`\n- `one_allowed_collections`: Array of collection names for M2A\n- `one_collection_field`: Field that stores collection name in M2A </relation_settings>\n\n<common_patterns>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "28dee3e284aa9929ea57361a518e5706e568658ba786dcb39944f79452a9ab0e",
+      "topic": "data",
+      "subject": "Relation / naming conventions",
+      "content": {
+        "fields": {
+          "junction_collections": "singular_plural format e.g. product_categories",
+          "junction_fields": "singular form of related collection e.g. product_id, category_id",
+          "alias_fields": "plural form for many relations e.g. tags, categories",
+          "M2O_fields": "singular form e.g. author, brand"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 373,
+        "quote": "## Naming Conventions\n\n- Junction collections: `{singular}_{plural}` (e.g., `product_categories`)\n- Junction fields: Singular form of related collection (e.g., `product_id`, `category_id`)\n- Alias fields: Plural form for many relations (e.g., `tags`, `categories`)\n- M2O fields: Singular form (e.g., `author`, `brand`) </naming_conventions>\n\n<related_tools>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "653aa0030618c88c13b021d9cd483a28cdea81df8c3771076d78ee5f512b474a",
+      "topic": "data",
+      "subject": "Relation / schema options",
+      "content": {
+        "fields": {
+          "on_delete": "CASCADE (default for M2M) | SET NULL (default for M2O) | NO ACTION | RESTRICT | SET DEFAULT",
+          "on_update": "same options as on_delete"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 321,
+        "quote": "### Schema Options\n\n- `on_delete`:\n  - `CASCADE` (default for M2M) - Delete related items\n  - `SET NULL` (default for M2O) - Set field to null\n  - `NO ACTION` - Prevent deletion\n  - `RESTRICT` - Prevent if related items exist\n  - `SET DEFAULT` - Set to default value\n\n- `on_update`:\n  - Same options as `on_delete`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9ea65772d13175a452c83e3ed91313f59d811b6014037a52dadf657429059043",
+      "topic": "data",
+      "subject": "Schema / detailed mode response",
+      "content": {
+        "fields": {
+          "keys": "array of collection names to examine",
+          "response": "object keyed by collection name; each field has type, primary_key, readonly, required, interface (with type and choices), relation (with type: m2o|o2m|m2m|m2a and related_collections); JSON fields with repeaters/lists include nested fields structure recursively"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/schema/prompt.md",
+        "line": 47,
+        "quote": "### Detailed Mode\n\n**Usage**: Specify collections to examine\n\n```json\n{ \"keys\": [\"products\", \"categories\", \"users\"] }\n```\n\n**Returns**: Object of collections with field and relation details\n\n- Field definitions (type, validation, defaults)\n- Relationship mappings (foreign keys, junction tables)\n- Interface configurations and display options\n- Field metadata and constraints\n- **Nested field structures** for JSON fields with repeaters/lists (includes recursive nesting)\n\n**Sample Response**:\n\n```json\n{\n\t\"posts\": {\n\t\t\"id\": {\n\t\t\t\"type\": \"uuid\",\n\t\t\t\"primary_key\": true,\n\t\t\t\"readonly\": true\n\t\t},\n\t\t\"title\": {\n\t\t\t\"type\": \"string\",\n\t\t\t\"required\": true\n\t\t},\n\t\t\"status\": {\n\t\t\t\"type\": \"string\",\n\t\t\t\"interface\": {\n\t\t\t\t\"type\": \"select-dropdown\",\n\t\t\t\t\"choices\": [\"draft\", \"published\", \"archived\"]\n\t\t\t}\n\t\t},\n\t\t\"category\": {\n\t\t\t\"type\": \"uuid\",\n\t\t\t\"relation\": {\n… (+38 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a73fc027259e3b356e2de0e1b33b98ab53797b07b9725360aedbc13d9dd75f20",
+      "topic": "data",
+      "subject": "Schema / discovery mode response",
+      "content": {
+        "fields": {
+          "collections": "alphabetically sorted array of real collection names (database tables)",
+          "collection_folders": "alphabetically sorted array of folder names (UI-only grouping, not real tables)",
+          "notes": "object of descriptions for collections and folders where available"
+        },
+        "validation": {
+          "namespace": "folders share same namespace as collections; check folders array before creating collections to avoid naming conflicts"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/schema/prompt.md",
+        "line": 11,
+        "quote": "### Discovery Mode (Default)\n\n**Usage**: Call without parameters or with empty `keys` array\n\n```json\n{}\n```\n\n**Returns**: Lightweight schema overview\n\n- `collections`: Alphabetically sorted array of real collection names (database tables)\n- `collection_folders`: Alphabetically sorted array of folder names (UI-only, not real tables). Distinct from file\n  folders. They are used for grouping different collections together in the UI.\n- `notes`: Descriptions for both collections and folders (where available)\n\n**Important**: Folders share the same namespace as collections. Before creating a new collection, check the `folders`\narray to avoid naming conflicts (e.g., can't create a 'website' collection if a 'website' folder exists).\n\n**Sample Response**:\n\n```json\n{\n\t\"collections\": [\"categories\", \"contacts\", \"organizations\", \"pages\", \"posts\", \"products\"],\n\t\"collection_folders\": [\"content\", \"marketing\", \"website\"],\n\t\"notes\": {\n\t\t\"contacts\": \"People at the organizations you work with\",\n\t\t\"organizations\": \"Your clients and customers\",\n\t\t\"pages\": \"Static pages with page builder blocks\",\n\t\t\"posts\": \"Blog posts and articles\",\n\t\t\"content\": \"Content management folder\"\n\t}\n}\n```\n\n**Use case**: Initial exploration, getting oriented with available data structures\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f06b9a96762032be8dbca8e2ed8a259d16c3a34fc67b4348435061d5e0c37094",
+      "topic": "data",
+      "subject": "Trigger-flow / data access in triggered flow",
+      "content": {
+        "fields": {
+          "$trigger.body": "the data parameter sent",
+          "$trigger.query": "the query parameter sent",
+          "$trigger.headers": "the headers parameter sent",
+          "$trigger.collection": "the collection context",
+          "$trigger.keys": "the selected item IDs",
+          "$accountability": "user/permission context"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 174,
+        "quote": "## 📊 Data Access in Triggered Flow\n\nThe triggered flow receives:\n\n- `$trigger.body` - The `data` parameter you send\n- `$trigger.query` - The `query` parameter\n- `$trigger.headers` - The `headers` parameter\n- `$trigger.collection` - The collection context\n- `$trigger.keys` - The selected item IDs\n- `$accountability` - User/permission context\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e4e2718502d0bd83889f4a1bf70d519674851dd000352f7b7e74d3be463e10bf",
+      "topic": "data",
+      "subject": "Trigger-flow / manual flow with selection",
+      "content": {
+        "fields": {
+          "keys": "required when requireSelection is true or undefined; array of item IDs",
+          "data": "must include values for required fields defined in flow options.fields"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 30,
+        "quote": "### Manual Flow with Selection\n\nFor flows with `requireSelection: true` or undefined:\n\n```json\n{\n\t\"flowDefinition\": {\n\t\t\"id\": \"abc-123\",\n\t\t\"trigger\": \"manual\",\n\t\t\"options\": {\n\t\t\t\"collections\": [\"products\", \"orders\"],\n\t\t\t\"requireSelection\": true,\n\t\t\t\"fields\": [\n\t\t\t\t{\n\t\t\t\t\t\"field\": \"reason\",\n\t\t\t\t\t\"name\": \"Reason\",\n\t\t\t\t\t\"meta\": { \"required\": true }\n\t\t\t\t}\n\t\t\t]\n\t\t}\n\t},\n\t\"flowId\": \"abc-123\",\n\t\"collection\": \"products\",\n\t\"keys\": [\"prod-1\", \"prod-2\"], // REQUIRED\n\t\"data\": {\n\t\t\"reason\": \"Bulk update\" // Required field\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0b74d17e5e4a4877df51369b1eea817917190f57cc4efe182ba16a0ea1130812",
+      "topic": "data",
+      "subject": "Trigger-flow / manual flow without selection",
+      "content": {
+        "fields": {
+          "keys": "optional (empty array allowed) when flow requireSelection is false"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 60,
+        "quote": "### Manual Flow without Selection\n\nFor flows with `requireSelection: false`:\n\n```json\n{\n\t\"flowDefinition\": {\n\t\t\"id\": \"xyz-456\",\n\t\t\"trigger\": \"manual\",\n\t\t\"options\": {\n\t\t\t\"collections\": [\"reports\"],\n\t\t\t\"requireSelection\": false\n\t\t}\n\t},\n\t\"flowId\": \"xyz-456\",\n\t\"collection\": \"reports\",\n\t\"keys\": [], // Optional when requireSelection: false\n\t\"data\": {\n\t\t\"type\": \"monthly\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "72f2319188cb8af3303fada9feaf3ecf03b28717b524a2bd05ac7404b2301276",
+      "topic": "data",
+      "subject": "Trigger-flow / request parameters",
+      "content": {
+        "validation": {
+          "flow_definition": "must always read the flow definition before triggering",
+          "flow_id_match": "definition ID must match flowId parameter",
+          "collection_support": "collection must be in flow's collections array",
+          "selection_required": "keys required when requireSelection !== false",
+          "required_fields": "all required fields must be present in data",
+          "data": "must be native objects not stringified JSON",
+          "requireSelection": "must be checked explicitly — do not assume its value"
+        },
+        "fields": {
+          "collection_wildcard": "'*' in collections means any collection is accepted",
+          "for_each": "if an array is passed, the flow runs once per array item",
+          "response": "flow can return data via its trigger's return option",
+          "flowDefinition": "full flow object from flows.read (required)",
+          "flowId": "flow UUID to trigger (required)",
+          "collection": "collection context name (required)",
+          "keys": "array of item IDs (required if flow needs selection)",
+          "method": "GET or POST (default: GET)",
+          "data": "optional payload data object",
+          "query": "optional query parameters object",
+          "headers": "optional headers object"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 108,
+        "quote": "[line 108] ## 🔄 Validation Rules\n\nThe tool validates:\n\n1. **Flow Definition**: Must provide complete flow object\n2. **Flow ID Match**: Definition ID must match flowId parameter\n3. **Collection Support**: Collection must be in flow's collections array\n4. **Selection Required**: Keys required when `requireSelection !== false`\n5. **Required Fields**: All required fields must be present in data\n\n---\n[line 185] ## ⚠️ Important Notes\n\n- **Read First**: ALWAYS read the flow definition before triggering\n- **Collection Wildcard**: `\"*\"` in collections means any collection is accepted\n- **Required Fields**: Check `options.fields` for required inputs\n- **For-Each**: If you pass an array, flow runs once per array item\n- **Response**: Flow can return data via its trigger's `return` option\n- **Permissions**: Respects flow's `accountability` setting\n\n---\n[line 13] ## Required Parameters\n\n```json\n{\n\t\"flowDefinition\": {}, // FULL flow object from flows.read\n\t\"flowId\": \"uuid\", // Flow ID to trigger\n\t\"collection\": \"name\", // Collection context\n\t\"keys\": [\"id1\"], // Item IDs (required if flow needs selection)\n\t\"method\": \"POST\", // GET or POST (default: GET)\n\t\"data\": {}, // Optional payload data\n\t\"query\": {}, // Optional query parameters\n\t\"headers\": {} // Optional headers\n}\n```\n\n---\n[line 194] ## 🚨 Common Mistakes to Avoid\n\n1. **Don't** trigger without reading flow definition first\n2. **Don't** omit keys when flow requires selection\n3. **Don't** ignore required fields in flow configuration\n4. **Don't** use wrong collection not in flow's collections list\n5. **Don't** assume `requireSelection` - check explicitly\n6. **Don't** pass stringified JSON - use native objects\n",
+        "additionalSources": [
+          {
+            "file": "api/src/ai/tools/trigger-flow/prompt.md",
+            "line": 185,
+            "quote": "## ⚠️ Important Notes\n\n- **Read First**: ALWAYS read the flow definition before triggering\n- **Collection Wildcard**: `\"*\"` in collections means any collection is accepted\n- **Required Fields**: Check `options.fields` for required inputs\n- **For-Each**: If you pass an array, flow runs once per array item\n- **Response**: Flow can return data via its trigger's `return` option\n- **Permissions**: Respects flow's `accountability` setting\n"
+          },
+          {
+            "file": "api/src/ai/tools/trigger-flow/prompt.md",
+            "line": 13,
+            "quote": "## Required Parameters\n\n```json\n{\n\t\"flowDefinition\": {}, // FULL flow object from flows.read\n\t\"flowId\": \"uuid\", // Flow ID to trigger\n\t\"collection\": \"name\", // Collection context\n\t\"keys\": [\"id1\"], // Item IDs (required if flow needs selection)\n\t\"method\": \"POST\", // GET or POST (default: GET)\n\t\"data\": {}, // Optional payload data\n\t\"query\": {}, // Optional query parameters\n\t\"headers\": {} // Optional headers\n}\n```\n"
+          },
+          {
+            "file": "api/src/ai/tools/trigger-flow/prompt.md",
+            "line": 194,
+            "quote": "## 🚨 Common Mistakes to Avoid\n\n1. **Don't** trigger without reading flow definition first\n2. **Don't** omit keys when flow requires selection\n3. **Don't** ignore required fields in flow configuration\n4. **Don't** use wrong collection not in flow's collections list\n5. **Don't** assume `requireSelection` - check explicitly\n6. **Don't** pass stringified JSON - use native objects\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2aabb0c9031a356f0cbf2965813dcaaaf5163b673d629b5e52772f040c4f12c3",
+      "topic": "data",
+      "subject": "Trigger-flow / webhook or operation flows",
+      "content": {
+        "fields": {
+          "method": "POST",
+          "data": "custom payload object",
+          "headers": "custom headers object",
+          "collection": "any collection"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 83,
+        "quote": "### Webhook/Operation Flows\n\nFlows with webhook or operation triggers:\n\n```json\n{\n\t\"flowDefinition\": {\n\t\t\"id\": \"webhook-flow\",\n\t\t\"trigger\": \"webhook\",\n\t\t\"options\": {\n\t\t\t\"collections\": [\"*\"] // or specific collections\n\t\t}\n\t},\n\t\"flowId\": \"webhook-flow\",\n\t\"collection\": \"any_collection\",\n\t\"method\": \"POST\",\n\t\"data\": {\n\t\t\"custom\": \"payload\"\n\t},\n\t\"headers\": {\n\t\t\"X-Custom-Header\": \"value\"\n\t}\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "872c05669013956c89f53dec59d9a44667b26885c453927d4b44bc3618af1c24",
+      "topic": "overview",
+      "subject": "Flow / operation workflow order",
+      "content": {
+        "summary": "Critical workflow order: (1) Create flow first using flows tool, (2) Create all operations with null resolve/reject initially using operations tool, (3) Link operations together using UUIDs from step 2, (4) Update flow to set first operation as entry point. Operations must exist before they can be referenced; UUIDs are only available after creation."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 241,
+        "quote": "## Working with Operations\n\n**Use the `operations` tool for complete details on:**\n\n- Creating and linking operations\n- 14x14 grid positioning system\n- Data chain variable syntax\n- Operation-specific configuration\n\n**Critical Workflow - Follow This Order:**\n\n1. Create flow first (using `flows` tool)\n2. Create all operations with null resolve/reject initially (using `operations` tool)\n3. Link operations together using UUIDs from step 2\n4. Update flow to set first operation as entry point\n\n**Why This Order:** Operations must exist before they can be referenced. UUIDs only available after creation.\n\n**Complete Example:**\n\n```json\n// Step 1: Create flow\n{\"action\": \"create\", \"data\": {\n  \"name\": \"Email on Post Published\",\n  \"trigger\": \"event\",\n  \"options\": {\"type\": \"action\", \"scope\": [\"items.create\"], \"collections\": [\"posts\"]}\n}}\n// Returns: {\"id\": \"flow-uuid-123\"}\n\n// Step 2: Create operations with null connections\n{\"action\": \"create\", \"data\": {\n  \"flow\": \"flow-uuid-123\", \"key\": \"check_status\", \"type\": \"condition\",\n  \"position_x\": 19, \"position_y\": 1,\n  \"options\": {\"filter\": {\"$trigger\": {\"payload\": {\"status\": {\"_eq\": \"published\"}}}}},\n  \"resolve\": null, \"reject\": null\n}}\n// Returns: {\"id\": \"condition-uuid-456\"}\n\n{\"action\": \"create\", \"data\": {\n  \"flow\": \"flow-uuid-123\", \"key\": \"send_email\", \"type\": \"mail\",\n… (+21 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "52a2588a47ff39655b6c6e6409a7ac05723270291f16fd83e7a03522b00336bb",
+      "topic": "overview",
+      "subject": "Flow chaining",
+      "content": {
+        "summary": "Flows can be chained: a child flow uses trigger type 'operation' with a return key, and a parent flow uses a trigger operation with the child flow UUID and payload. Child results are accessed via the trigger operation key. Best practice: name utilities with 'Utils ->' prefix, keep each utility focused on single responsibility."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 302,
+        "quote": "## 🔗 Flow Chaining\n\n**When to Chain**: Reusable utilities, complex multi-step workflows, conditional branching\n\n**How to Chain**:\n\n1. Child flow: `\"trigger\": \"operation\"`, `\"return\": \"final_key\"` or `\"$last\"`\n2. Parent flow: Use `trigger` operation with child flow UUID and payload\n3. Access child results: `{{ trigger_operation_key }}`\n\n**Common Utility Patterns**:\n\n```json\n// Utils → Get Globals (called by multiple flows)\n{\n  \"name\": \"Utils → Get Globals\",\n  \"trigger\": \"operation\",\n  \"options\": { \"return\": \"$last\" }\n}\n\n// Utils → Send Email (reusable email sender)\n{\n  \"name\": \"Utils → Send Email\",\n  \"trigger\": \"operation\",\n  \"options\": { \"return\": \"$last\" }\n}\n\n// Main flow calls utility\n{\n  \"type\": \"trigger\",\n  \"key\": \"globals\",\n  \"options\": {\n    \"flow\": \"utils-globals-uuid\"\n  }\n}\n// Access: {{ globals.openai_api_key }}\n```\n\n**Multi-Chain Example** (Form Notifications):\n\n… (+21 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e15395a1cbb04140b9f74fa3b45e8270a07df0ad7439571790ee857adac527b9",
+      "topic": "overview",
+      "subject": "Flow entity",
+      "content": {
+        "summary": "A Flow consists of one trigger plus operations plus a data chain. Each flow has exactly ONE trigger that starts execution. Operations execute sequentially, passing data through the chain. The data chain accumulates results from each step."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/flows/prompt.md",
+        "line": 6,
+        "quote": "## Key Concepts\n\n**Flow** = Trigger + Operations + Data Chain\n\n- Each flow has ONE trigger that starts execution\n- Operations execute sequentially, passing data through the chain\n- Data chain accumulates results from each step\n\nAfter creating a flow, use the `operations` tool to add individual operations with detailed operation syntax,\npositioning, and data chain usage. </flow_concepts>\n\n<core_fields>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "acdc7f4487e5293ff12b49cb9320d0bca962d2667617815cccf2e4db8a39cc4f",
+      "topic": "overview",
+      "subject": "Folders tool",
+      "content": {
+        "summary": "The folders tool supports four actions: create (add new folder records), read (list/query metadata or get specific items by ID), update (modify existing metadata such as title, description, tags, folder), and delete (remove folders by keys)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/folders/prompt.md",
+        "line": 3,
+        "quote": "## Available Actions\n\n- `create`: Add new folders records\n- `read`: List/query metadata or get specific items by ID\n- `update`: Modify existing metadata (title, description, tags, folder)\n- `delete`: Remove folders by keys\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5063b85b8f54e9cece66bf90d0e64efab19de244a19e231249f372c736bca069",
+      "topic": "overview",
+      "subject": "Items tool",
+      "content": {
+        "summary": "The items tool supports four actions: read (query items with filtering/pagination/field selection), create (add items with nested relations), update (modify items with partial data), and delete (remove items by primary keys)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 3,
+        "quote": "## Actions\n\n- `read`: Query items with filtering/pagination/field selection\n- `create`: Add items with nested relations\n- `update`: Modify items with partial data\n- `delete`: Remove items by primary keys\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "54142025445542f2e92d0a52617d69734392054fd297135f569de1f82766c6d1",
+      "topic": "overview",
+      "subject": "Relation / translations",
+      "content": {
+        "summary": "Translations use a special M2M relationship with a languages collection. Workflow: (1) ensure languages collection exists, (2) create translations junction with UUID primary key, (3) add translations alias field with special: [translations] and interface: translations, (4) configure junction fields and relations following M2M pattern with languages collection."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/relations/prompt.md",
+        "line": 301,
+        "quote": "### Translations\n\nSpecial M2M relationship with `languages` collection.\n\n**Complete Translations Workflow**:\n\n1. **Ensure languages collection exists** (use `schema` tool to check)\n\n2. **Create translations junction** → Use `collections` tool to create junction with UUID primary key\n\n3. **Add translations field** → Use `fields` tool with `type: \"alias\"`, `special: [\"translations\"]`, and\n   `interface: \"translations\"` (see `fields` tool `<relationship_fields>` Translations example)\n\n4. **Configure junction fields and relations** → Follow M2M pattern with languages collection </translations_workflow>\n   </relationship_types>\n\n<relation_settings>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "64f6ded00e9572b8325b5d586158f9b5071df9055dffbaf364962cbb1bfac913",
+      "topic": "overview",
+      "subject": "Trigger-flow tool",
+      "content": {
+        "summary": "The trigger-flow tool requires reading the flow first using the flows tool to get the full definition. Manual flows (trigger: manual) are designed to be triggered via UI or this tool. Any flow can be triggered, receiving data in $trigger.body. The tool validates collection support, required fields, and selection requirements."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/trigger-flow/prompt.md",
+        "line": 6,
+        "quote": "## 🔑 Key Concepts\n\n- **Prerequisite**: ALWAYS read the flow first using `flows` tool to get the full definition\n- **Manual Flows**: Flows with `trigger: \"manual\"` are designed to be triggered via UI or this tool\n- **Flow Chaining**: Any flow can be triggered, receiving data in `$trigger.body`\n- **Validation**: Tool validates collection support, required fields, and selection requirements\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5e3cfcaf58c8aa5567457ac95f0a65df1fd2874e0d62d2d24895af163ca9d219",
+      "topic": "overview",
+      "subject": "fields tool related tools",
+      "content": {
+        "summary": "The fields tool is related to: collections (create containers for fields) and relations (connect fields between collections)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/fields/prompt.md",
+        "line": 518,
+        "quote": "## Related Tools\n\n- `collections`: Create containers for fields\n- `relations`: Connect fields between collections </related_tools>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "04d7f1d8218a592a3f5a0e8dfc044f24f7f9122d9c1c3c20ccb3359db7dd99b4",
+      "topic": "forbidden",
+      "subject": "directus_*",
+      "content": {
+        "category": "file-glob",
+        "pattern": "directus_*",
+        "reason": "the items tool cannot operate on directus_* system collections"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "api/src/ai/tools/items/prompt.md",
+        "line": 315,
+        "quote": "## Restrictions\n\n- Cannot operate on `directus_*` collections\n- Respects user permissions/RBAC\n- Delete operations may be environment-disabled\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-05T16:40:10-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    }
+  ]
+}

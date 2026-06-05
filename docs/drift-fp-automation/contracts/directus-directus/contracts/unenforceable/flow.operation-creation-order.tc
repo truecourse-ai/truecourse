@@ -1,0 +1,6 @@
+unenforceable-obligation flow.operation-creation-order {
+  origin "api/src/ai/tools/flows/prompt.md" "Working with Operations" 241..300
+  spec-text "Critical workflow order: (1) Create flow first, (2) Create all operations with null resolve/reject initially, (3) Link operations together using UUIDs from step 2, (4) Update flow to set first operation as entry point. Operations must exist before they can be referenced; UUIDs are only available after creation."
+  category workflow-ordering
+  rationale "multi-step creation order is a client-side procedure; not statically verifiable from server-side code"
+}

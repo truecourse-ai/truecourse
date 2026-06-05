@@ -1,0 +1,5 @@
+constant WebhookTriggerUrlPattern {
+  origin "api/src/ai/tools/flows/prompt.md" "Important Notes" 503..510
+  type string
+  expected-value "/flows/trigger/{id}"
+}

@@ -1,0 +1,6 @@
+forbidden-artifact file-glob.directus {
+  origin "api/src/ai/tools/items/prompt.md" "Restrictions" 315..320
+  category file-glob
+  pattern "directus_*"
+  reason "the items tool cannot operate on directus_* system collections"
+}

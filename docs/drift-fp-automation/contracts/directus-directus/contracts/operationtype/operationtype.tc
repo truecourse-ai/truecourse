@@ -1,0 +1,4 @@
+enum OperationType {
+  origin "api/src/ai/tools/operations/prompt.md" "Operation Examples" 158..240
+  values [condition, item-create, item-read, item-update, item-delete, exec, mail, notification]
+}
