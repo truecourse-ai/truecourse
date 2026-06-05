@@ -1,6 +1,6 @@
 target_repo: strapi/strapi
 target_ref: b2ba15617de4c8ada9099789f7c774bb32328970
-code_dir: packages/core
+code_dir: "."
 generated_at: "2026-06-04"
 tool_version: 0.6.1
 llm: agent
