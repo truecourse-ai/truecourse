@@ -55,9 +55,10 @@ generate picks a different, still-`pending` campaign.
 - Find the `<owner>/<repo>` for the campaign that just closed: read the merged campaign-close PR's
   head branch (`claude/drift-fp-campaign-close/<owner>-<repo>`) or `campaigns.yaml` (the entry just
   flipped to `status: done`).
-- **Close the open storage PR** on head `claude/drift-fp-store/<owner>-<repo>`, label
-  `drift-fp-store`, via the GitHub API (the proxy doesn't block PR-state changes). The contracts
-  were campaign-scaffolding and the campaign is done.
+- **Close the open storage PR** on head `claude/drift-fp-store/<owner>-<repo>` via the GitHub
+  API (the proxy doesn't block PR-state changes). The branch prefix is unique to this campaign,
+  so the head-ref alone identifies the PR — no label lookup needed. The contracts were
+  campaign-scaffolding and the campaign is done.
 - **Do not delete the storage branch.** The proxy denies `git push origin --delete claude/*`
   with HTTP 403, so this would always fail. Leaving the branch is harmless — it's not in
   drift-fp-generate's way (that routine only generates for `pending` campaigns, and this one is

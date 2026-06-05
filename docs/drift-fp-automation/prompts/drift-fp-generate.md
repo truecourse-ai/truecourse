@@ -139,38 +139,34 @@ contracts.
   cherry-pick or re-stage the commit from step 5, delete the wrong branch, then push. Pushing from
   the wrong branch produces a PR whose head doesn't match the `drift-fp-discover` trigger filter
   (`Head Branch starts-with claude/drift-fp-store/`), and the chain stalls before discover fires.
-- **Open the PR with the `drift-fp-store` label applied atomically — in a single command.** The
-  `drift-fp-discover` routine triggers on `pull_request.opened` filtered by
-  `Labels is-one-of drift-fp-store`. GitHub fires `pull_request.opened` once, at the moment the
-  PR is created, with the labels present **at that moment**. If you `gh pr create` first and
-  `gh pr edit --add-label` second, the `opened` event carries no labels, the trigger never
-  matches, and discover never fires — the chain stalls. So use one command:
+- **Open the PR — no label required.** The `drift-fp-discover` routine triggers on
+  `pull_request.opened` filtered **only on head-branch prefix** (`Head Branch starts-with
+  claude/drift-fp-store/`). The branch prefix is uniquely owned by this routine, so it's
+  sufficient on its own; no label is needed for the trigger to fire. Use whatever PR-creation
+  tool your session has — `gh pr create` if `gh` is on PATH, otherwise the GitHub MCP
+  `create_pull_request` tool. Either works.
 
   ```bash
+  # Example with gh if available:
   gh pr create \
     --base main \
     --head claude/drift-fp-store/<owner>-<repo> \
-    --label drift-fp-store \
     --title 'chore(drift-fp): contracts store for <owner>/<repo> @ <short-sha>' \
     --body-file /tmp/storage-pr-body.md
   ```
 
   Write the body to a file first (next bullet) so you don't have to escape multi-line markdown
-  inline. Do **not** add the label as a separate step.
-- **PR body** (write to `/tmp/storage-pr-body.md` before the `gh pr create` call): a clear
-  "⚠️ DO NOT MERGE — storage branch for the <owner>/<repo> drift campaign; deleted automatically
+  inline.
+- **PR body** (write to `/tmp/storage-pr-body.md` before the create call): a clear
+  "⚠️ DO NOT MERGE — storage branch for the <owner>/<repo> drift campaign; closed automatically
   at campaign close" banner, plus target_ref, doc_scope, artifact counts from `contracts list`
   (e.g. "98 .tc: 21 operation, 3 enum, 21 named-constant, …"), and any `contracts validate`
   warnings. End with `cc @mushgev`.
 - **This PR is never merged**; it's pure storage + the discover trigger.
-  `drift-fp-campaign-close` closes it + deletes the branch when the campaign finishes.
-- **Verify the label landed.** After `gh pr create` returns, immediately
-  `gh pr view <number> --json labels --jq '.labels[].name'`. If `drift-fp-store` isn't in the
-  output, the label-on-creation failed silently (rare — but if it does, the trigger won't fire).
-  In that case post a one-line failure note (`cc @mushgev`) and stop so a human can recover —
-  do **not** attempt a second `--add-label` call to recover, because the `pull_request.opened`
-  event has already fired without the label and the trigger has already missed it.
-- Stop. Opening the labeled PR fires `drift-fp-discover`.
+  `drift-fp-campaign-close` closes it when the campaign finishes (the branch is intentionally
+  left in place — proxy denies branch deletes, and a closed campaign's branch doesn't block
+  anything).
+- Stop. Opening the PR fires `drift-fp-discover`.
 
 ## Hard constraints
 

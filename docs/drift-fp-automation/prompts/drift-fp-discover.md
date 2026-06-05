@@ -17,8 +17,10 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
 
 - `truecourse-ai/truecourse` is cloned at the default branch.
 - Fires when a **storage PR is opened** (`pull_request.opened`, head-branch starts-with
-  `claude/drift-fp-store/`, label `drift-fp-store`) — so the campaign's contracts now exist on that
-  branch. Derive `<owner>-<repo>` from the head branch name; no human review of the contracts.
+  `claude/drift-fp-store/`) — so the campaign's contracts now exist on that branch. The
+  head-branch prefix is uniquely owned by `drift-fp-generate`, so no label is required for the
+  trigger to fire. Derive `<owner>-<repo>` from the head branch name; no human review of the
+  contracts.
 
 ## Step-by-step
 
@@ -50,9 +52,9 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
   All commits this step makes go on this branch.
 - Set the campaign's `status: discovering` in `campaigns.yaml` and commit on that branch.
 - Open a PR titled `chore(drift-fp): start discovery for <owner>/<repo>`. Body explains you're
-  starting a drift discovery run. End the body with `cc @mushgev`.
-- **Apply label `drift-fp-discover` to this PR** — this is what fires `drift-fp-next-fix` when
-  the PR merges. Without it, the chain doesn't start.
+  starting a drift discovery run. End the body with `cc @mushgev`. **No label is required** —
+  `drift-fp-next-fix` triggers on the merge of any PR whose head branch starts with
+  `claude/drift-fp-discover/`, which is uniquely owned by this routine.
 - **Verify your branch before pushing.** Run `git rev-parse --abbrev-ref HEAD` and confirm it is
   exactly `claude/drift-fp-discover/<owner>-<repo>`. If it isn't, STOP, recreate the correct branch
   from `origin/main`, cherry-pick the commit, delete the wrong branch, then push.

@@ -239,17 +239,10 @@ If step 1/2 throws, still write the section with `unavailable: <concrete reason>
       ```
       (or `unavailable: <reason>` if measurement failed).
     - End with `cc @mushgev`.
-  - **Open the PR with `--label drift-fp-fix` in the same `gh pr create` call.**
-    `drift-fp-next-fix` (the next iteration of this routine) triggers on this PR's merge filtered
-    by `Labels is-one-of drift-fp-fix`. If the PR is merged without the label, the trigger
-    doesn't fire and the inner loop stalls (this is what happened on PR #483: the label was
-    never applied, the PR was merged label-less, and the next batch had to be kicked manually).
-    Do **not** specify the label as a follow-up `gh pr edit --add-label` step — sessions have
-    silently dropped that second call.
-  - **Verify the label landed.** Right after `gh pr create` returns, check
-    `gh pr view <number> --json labels --jq '.labels[].name'`. If `drift-fp-fix` isn't in the
-    output, post a one-line failure note on the most recent fixed issue (`cc @mushgev`) and stop
-    — do **not** attempt a follow-up `--add-label` to recover. Surface to a human.
+  - **Open the PR — no label required.** `drift-fp-next-fix` (the next iteration of this routine)
+    triggers on the merge of any PR whose head branch starts with `claude/drift-fp-fix/`, which
+    is uniquely owned by this routine. Use whatever PR-creation tool the session has —
+    `gh pr create` if `gh` is on PATH, otherwise the GitHub MCP `create_pull_request` tool.
   - For each fixed issue: comment the PR URL, then remove `drift-fp-in-progress` (merge
     auto-closes via `Closes #N`).
 - End the session.
@@ -288,11 +281,14 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
      `apps/dashboard/server/package.json`, and the `.version("X.Y.Z")` in `tools/cli/src/index.ts`.
    - **No** fixture/comparator changes.
    - Title `chore(drift-fp): close <owner>/<repo> campaign, bump to vX.Y.Z`.
-   - Labels `drift-fp-campaign-complete`. Body: merged drift-fp-fix PRs (search label
-     `drift-fp-target:<owner>-<repo>`, state merged), baseline→final `fp` (e.g. `fp: 33 → 0`),
-     new version, note that `fp == 0` was measured against `node dist/cli.mjs` on the pinned
-     contracts. End `cc @mushgev`.
-   - End. Merge fires `drift-fp-campaign-close` (tags) + `drift-fp-generate` (next campaign).
+   - **No label required.** `drift-fp-campaign-close` + `drift-fp-generate` both trigger on the
+     merge of any PR whose head branch starts with `claude/drift-fp-campaign-close/`, which is
+     uniquely owned by this routine.
+   - Body: merged drift-fp-fix PRs (search label `drift-fp-target:<owner>-<repo>`, state
+     merged), baseline→final `fp` (e.g. `fp: 33 → 0`), new version, note that `fp == 0` was
+     measured against `node dist/cli.mjs` on the pinned contracts. End `cc @mushgev`.
+   - End. Merge fires `drift-fp-campaign-close` (closes storage PR, notifies for tag push) +
+     `drift-fp-generate` (next campaign).
 6. **If `fp > 0`** — leave `status: discovering`, no close PR. File new issues, **dedupe
    first**: for each drift-kind still showing FPs, skip if an open `drift-fp-fix` issue
    (any label, including `drift-fp-blocked`) already exists; else file one (discovery shape).
