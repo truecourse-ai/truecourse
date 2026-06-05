@@ -66,7 +66,7 @@ campaigns:
     code_dir: "."
     doc_scope: []        # fill before generating (keep the behavioral docs/ .md; drop the 93 .rst)
     priority: 2
-    status: pending
+    status: discovering
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes: ["Probe histogram: NamedConstant 189, Operation 71, Enum 20, Formula 6, Pagination present. Has 93 .rst (invisible to the tool) alongside .md."]
