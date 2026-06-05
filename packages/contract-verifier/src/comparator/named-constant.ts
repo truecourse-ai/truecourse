@@ -39,16 +39,29 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
   const target = normalizeName(ref.identity);
   let matches = codeConstants.filter((c) => normalizeName(c.name) === target);
 
-  // For namespaced spec identities (e.g. "widget.EMBED_THEME"), fall back to
-  // matching the last segment ("EMBED_THEME") against window-global constants
-  // only. This covers browser globals declared as window.X in code but named
-  // with a namespace prefix in the spec.
+  // For namespaced spec identities (e.g. "auth.type.kubernetes"), fall back to
+  // matching the last segment ("kubernetes") against window-global constants
+  // and flat const-literal constants. This covers browser globals (window.X)
+  // and Python/TS flat SCREAMING_SNAKE names paired with hierarchical spec
+  // identities (e.g. KUBERNETES = "kubernetes" ↔ auth.type.kubernetes).
+  //
+  // For const-literal shapes the match also requires value equality when the
+  // spec carries an expectedValue — this avoids spurious value-mismatch drifts
+  // from unrelated constants that happen to share a last-segment name.
   if (matches.length === 0 && ref.identity.includes('.')) {
     const lastPart = ref.identity.split('.').pop()!;
     const lastTarget = normalizeName(lastPart);
-    matches = codeConstants.filter(
-      (c) => c.shape === 'window-global' && normalizeName(c.name) === lastTarget,
-    );
+    matches = codeConstants.filter((c) => {
+      if (normalizeName(c.name) !== lastTarget) return false;
+      if (c.shape === 'window-global') return true;
+      if (c.shape === 'const-literal') {
+        return (
+          contract.expectedValue === undefined ||
+          deepEqual(contract.expectedValue, c.value, /*allowExtraCodeKeys*/ true)
+        );
+      }
+      return false;
+    });
   }
 
   if (matches.length === 0) {
