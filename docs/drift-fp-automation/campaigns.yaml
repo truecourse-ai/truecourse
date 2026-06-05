@@ -64,7 +64,11 @@ campaigns:
   - target_repo: feast-dev/feast
     tech_stack: [python, feature-store]
     code_dir: "."
-    doc_scope: []        # fill before generating (keep the behavioral docs/ .md; drop the 93 .rst)
+    doc_scope:
+      - docs/getting-started/concepts
+      - docs/getting-started/components
+      - docs/reference
+      - docs/specs
     priority: 2
     status: pending
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
