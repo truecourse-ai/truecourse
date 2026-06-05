@@ -1,0 +1,7 @@
+constant API_KEY {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/named-constant-no-code-counterpart-last-segment-const-literal.py" 12..12
+  confidence high
+  type string
+  expected-value "api_key"
+}

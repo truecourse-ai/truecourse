@@ -1,0 +1,5 @@
+constant provider.auth.type.api_key {
+  origin "reference/specs/providers.md" "Connection type tokens" 1..20
+  type string
+  expected-value "api_key"
+}
