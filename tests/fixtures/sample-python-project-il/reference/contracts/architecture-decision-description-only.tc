@@ -1,0 +1,4 @@
+architecture-decision arch.fp-guard.description-only {
+  origin "docs/adr/ADR-001-data-store.md" "System overview" 1..5
+  decision "The system is composed of a registry, an offline store, an online store, and a feature server"
+}
