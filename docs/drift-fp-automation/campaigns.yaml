@@ -43,7 +43,7 @@ campaigns:
   # ---- JS/TS — strongest validated drift fit (fit 88, strong) ----
   - target_repo: strapi/strapi
     tech_stack: [typescript, monorepo, knex]
-    code_dir: packages/core
+    code_dir: "."
     doc_scope:
       - docs/docs/docs/01-core/authentication
       - docs/docs/docs/01-core/content-manager
