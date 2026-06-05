@@ -1,0 +1,4 @@
+unenforceable-obligation features.features {
+  origin "docs/reference/online-stores/mongodb.md" "Features" 7..27
+  reason "Narrative overview — Features"
+}

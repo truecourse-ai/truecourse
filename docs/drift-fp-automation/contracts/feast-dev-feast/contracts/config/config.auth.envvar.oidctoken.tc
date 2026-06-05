@@ -1,0 +1,5 @@
+constant config.auth.env_var.oidc_token {
+  origin "docs/getting-started/components/authz_manager.md" "Client-Side Configuration" 88..140
+  type string
+  expected-value "FEAST_OIDC_TOKEN"
+}

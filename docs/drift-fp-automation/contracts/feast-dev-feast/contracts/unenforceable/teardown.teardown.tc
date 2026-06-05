@@ -1,0 +1,4 @@
+unenforceable-obligation teardown.teardown {
+  origin "docs/reference/feast-cli-commands.md" "Teardown" 486..506
+  reason "Narrative overview — Teardown"
+}

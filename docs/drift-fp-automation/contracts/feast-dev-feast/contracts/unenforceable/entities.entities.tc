@@ -1,0 +1,4 @@
+unenforceable-obligation entities.entities {
+  origin "docs/reference/feast-cli-commands.md" "Entities" 187..207
+  reason "Narrative overview — Entities"
+}

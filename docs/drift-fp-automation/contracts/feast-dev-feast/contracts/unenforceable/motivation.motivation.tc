@@ -1,0 +1,4 @@
+unenforceable-obligation motivation.motivation {
+  origin "docs/reference/type-system.md" "Motivation" 3..23
+  reason "Narrative overview — Motivation"
+}

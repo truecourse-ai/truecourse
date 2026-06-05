@@ -1,0 +1,4 @@
+unenforceable-obligation summary.summary {
+  origin "docs/getting-started/concepts/tiling.md" "Summary" 288..308
+  reason "Narrative overview — Summary"
+}

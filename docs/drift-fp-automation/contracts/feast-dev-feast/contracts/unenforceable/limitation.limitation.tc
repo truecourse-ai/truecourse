@@ -1,0 +1,4 @@
+unenforceable-obligation limitation.limitation {
+  origin "docs/reference/offline-stores/snowflake.md" "Limitation" 38..58
+  reason "Narrative overview — Limitation"
+}

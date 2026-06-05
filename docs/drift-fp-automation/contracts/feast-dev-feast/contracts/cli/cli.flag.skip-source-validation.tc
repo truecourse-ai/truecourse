@@ -1,0 +1,5 @@
+constant cli.flag.skip-source-validation {
+  origin "docs/reference/feast-cli-commands.md" "Apply" 48..80
+  type string
+  expected-value "--skip-source-validation"
+}

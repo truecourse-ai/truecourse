@@ -1,0 +1,5 @@
+constant config.remote_offline_store.port.default {
+  origin "docs/reference/offline-stores/remote-offline-store.md" "How to configure the client" 1..50
+  type integer
+  expected-value 8815
+}

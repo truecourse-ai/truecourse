@@ -1,0 +1,4 @@
+unenforceable-obligation contributing.contributing {
+  origin "docs/reference/alpha-static-artifacts.md" "Contributing" 305..325
+  reason "Narrative overview — Contributing"
+}

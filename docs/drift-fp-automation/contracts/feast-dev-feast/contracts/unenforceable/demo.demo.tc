@@ -1,0 +1,4 @@
+unenforceable-obligation demo.demo {
+  origin "docs/reference/feature-servers/go-feature-server.md" "Demo" 49..69
+  reason "Narrative overview — Demo"
+}

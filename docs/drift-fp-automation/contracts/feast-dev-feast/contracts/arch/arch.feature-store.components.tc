@@ -1,0 +1,4 @@
+architecture-decision arch.feature-store.components {
+  origin "docs/getting-started/components/overview.md" "Components" 1..30
+  decision "Feast consists of Registry, Offline Store, Online Store, Feature Server, and Compute Engine components"
+}

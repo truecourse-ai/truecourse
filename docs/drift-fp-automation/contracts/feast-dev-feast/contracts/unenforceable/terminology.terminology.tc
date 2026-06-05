@@ -1,0 +1,4 @@
+unenforceable-obligation terminology.terminology {
+  origin "docs/specs/offline_store_format.md" "Terminology" 15..35
+  reason "Narrative overview — Terminology"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation reference.reference {
+  origin "docs/reference/feature-servers/go-feature-server.md" "Reference" 52..72
+  reason "Narrative overview — Reference"
+}

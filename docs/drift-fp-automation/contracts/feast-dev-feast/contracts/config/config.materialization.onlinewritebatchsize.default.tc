@@ -1,0 +1,5 @@
+constant config.materialization.online_write_batch_size.default {
+  origin "docs/reference/feature-repository/feature-store-yaml.md" "materialization configuration / online_write_batch_size" 52..90
+  type integer
+  expected-value null
+}

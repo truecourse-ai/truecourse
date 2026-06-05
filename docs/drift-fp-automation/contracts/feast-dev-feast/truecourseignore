@@ -1,0 +1,5 @@
+*.md
+!docs/getting-started/concepts/**
+!docs/getting-started/components/**
+!docs/reference/**
+!docs/specs/**

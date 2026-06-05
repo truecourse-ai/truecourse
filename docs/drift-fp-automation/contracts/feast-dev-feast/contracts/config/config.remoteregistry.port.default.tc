@@ -1,0 +1,5 @@
+constant config.remote_registry.port.default {
+  origin "docs/reference/registries/remote.md" "How to configure the client" 1..50
+  type integer
+  expected-value 6570
+}

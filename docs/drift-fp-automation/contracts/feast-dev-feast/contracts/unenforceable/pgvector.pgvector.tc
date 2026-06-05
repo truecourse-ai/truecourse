@@ -1,0 +1,4 @@
+unenforceable-obligation pgvector.pgvector {
+  origin "docs/reference/online-stores/postgres.md" "PGVector" 65..85
+  reason "Narrative overview — PGVector"
+}

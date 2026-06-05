@@ -1,0 +1,4 @@
+unenforceable-obligation indexing.indexing {
+  origin "docs/reference/online-stores/elasticsearch.md" "Indexing" 77..97
+  reason "Narrative overview — Indexing"
+}

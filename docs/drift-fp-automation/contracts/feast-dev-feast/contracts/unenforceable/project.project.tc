@@ -1,0 +1,4 @@
+unenforceable-obligation project.project {
+  origin "docs/getting-started/concepts/project.md" "Project" 1..21
+  reason "Narrative overview — Project"
+}

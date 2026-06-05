@@ -1,0 +1,4 @@
+unenforceable-obligation disclaimer.disclaimer {
+  origin "docs/reference/offline-stores/athena.md" "Disclaimer" 8..28
+  reason "Narrative overview — Disclaimer"
+}

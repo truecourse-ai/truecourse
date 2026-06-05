@@ -1,0 +1,5 @@
+constant auth.type.kubernetes {
+  origin "docs/getting-started/components/authz_manager.md" "Kubernetes RBAC Authorization" 141..160
+  type string
+  expected-value "kubernetes"
+}

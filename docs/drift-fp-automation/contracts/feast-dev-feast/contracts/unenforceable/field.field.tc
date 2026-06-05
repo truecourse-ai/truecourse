@@ -1,0 +1,4 @@
+unenforceable-obligation field.field {
+  origin "docs/getting-started/concepts/feature-view.md" "Field" 143..163
+  reason "Narrative overview — Field"
+}

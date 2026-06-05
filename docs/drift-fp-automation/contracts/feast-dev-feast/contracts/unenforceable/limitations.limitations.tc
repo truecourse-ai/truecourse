@@ -1,0 +1,4 @@
+unenforceable-obligation limitations.limitations {
+  origin "docs/reference/offline-stores/ray.md" "Limitations" 599..619
+  reason "Narrative overview — Limitations"
+}

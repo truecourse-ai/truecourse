@@ -1,0 +1,4 @@
+unenforceable-obligation options.options {
+  origin "docs/reference/feature-repository/feature-store-yaml.md" "Options" 18..38
+  reason "Narrative overview — Options"
+}

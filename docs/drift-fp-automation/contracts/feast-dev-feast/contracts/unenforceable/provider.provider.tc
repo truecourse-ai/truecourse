@@ -1,0 +1,4 @@
+unenforceable-obligation provider.provider {
+  origin "docs/getting-started/components/provider.md" "Provider" 1..21
+  reason "Narrative overview — Provider"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation overview.feast.purpose {
+  origin "docs/getting-started/concepts/overview.md" "Overview" 1..30
+  reason "Feast is a feature store for managing and serving ML features — overall system purpose, not structurally verifiable"
+}

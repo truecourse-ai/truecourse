@@ -1,0 +1,4 @@
+unenforceable-obligation permissions.permissions {
+  origin "docs/reference/online-stores/dynamodb.md" "Permissions" 66..86
+  reason "Narrative overview — Permissions"
+}

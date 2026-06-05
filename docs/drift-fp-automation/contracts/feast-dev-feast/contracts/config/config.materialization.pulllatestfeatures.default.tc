@@ -1,0 +1,5 @@
+constant config.materialization.pull_latest_features.default {
+  origin "docs/reference/feature-repository/feature-store-yaml.md" "materialization configuration / pull_latest_features" 91..130
+  type boolean
+  expected-value false
+}

@@ -1,0 +1,5 @@
+constant cli.command.serve_registry {
+  origin "docs/reference/feature-servers/registry-server.md" "CLI" 981..1011
+  type string
+  expected-value "feast serve_registry"
+}

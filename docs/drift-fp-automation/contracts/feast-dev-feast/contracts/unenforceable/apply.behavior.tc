@@ -1,0 +1,4 @@
+unenforceable-obligation apply.behavior {
+  origin "docs/reference/feast-cli-commands.md" "Apply" 48..80
+  reason "feast apply scans Python files for Feast objects, validates them, syncs metadata to registry, and creates feature store infrastructure — behavior depends on provider configuration"
+}

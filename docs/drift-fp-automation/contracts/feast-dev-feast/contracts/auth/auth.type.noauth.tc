@@ -1,0 +1,5 @@
+constant auth.type.no_auth {
+  origin "docs/getting-started/components/authz_manager.md" "No Authorization" 30..38
+  type string
+  expected-value "no_auth"
+}

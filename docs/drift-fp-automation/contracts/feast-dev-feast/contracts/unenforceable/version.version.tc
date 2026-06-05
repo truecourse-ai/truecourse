@@ -1,0 +1,4 @@
+unenforceable-obligation version.version {
+  origin "docs/reference/feast-cli-commands.md" "Version" 494..514
+  reason "Narrative overview — Version"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation architecture.overview.0 {
+  origin "docs/reference/offline-stores/ray.md" "Architecture" 70..100
+  reason "Overview narrative — Architecture"
+}

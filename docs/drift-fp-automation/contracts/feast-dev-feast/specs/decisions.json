@@ -1,0 +1,340 @@
+{
+  "version": 1,
+  "decisions": [
+    {
+      "conflictId": "d8b39cf0bf3aa75cbc5d756b74767104589055191ae0852d33ca1cff78621184",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "b4b53851cbfec61dbb340446a687cabd1c8a0a9fac042def1e685e3c5c4e4938"
+    },
+    {
+      "conflictId": "bf2fde7a4a52932a6e450b856f28df4ed79ca8dad856c0f15cf68e1eb25e68de",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 38
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "ec23666e214eb4bcd8502042e4b69a80b4a5a13e2915fb82cf4d252908f27640"
+    },
+    {
+      "conflictId": "020f8283a2cd0ffb496b7602d6917174eccd90ed3ef24a4f629ff5a9c40fd128",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 3
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "b692357af572dce183fb509ef838c61378c6c059419dc978994277adc2ef6eb5"
+    },
+    {
+      "conflictId": "62ccc637c9a742c3291be177f10ad2a65add724e45ef1af51e6a7f86bc571f95",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "15bb9b2956df295bd45d71888ecfc5109cc7102fc6d9136378ea88577b365842"
+    },
+    {
+      "conflictId": "848782908d7b23e0bc1ed52eb316f2b7217ba8ed14ac4bb1bd9f97a7a00bf8eb",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "0f7d07ab19c122fd7b98037fb9d83e5839428d7c6128ab18414ae7041cc182bd"
+    },
+    {
+      "conflictId": "3e2846a8db442766b6f4bb59445e4ab3015f604d73acb61fda96837a1c6de7ef",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "e3f4868f7cd9692d2579b54effa5de66830f54a117c498a6f0dab8658c69c22b"
+    },
+    {
+      "conflictId": "f1d3b013a30f62a6ee0253a945b146c6f84527c4dc991480a826138c307e39c9",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 4
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "35d79dbe9741ac2c1a4241579f9078425f83657753576cd1f68abd5f8e8668fd"
+    },
+    {
+      "conflictId": "fcfddedcac3983621c17894d010ee30fb2f24dabb517d7fd082f0420e85c201d",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "1c2f0a0872157e8efd9281562539d0db332975ae991466c73d7eb65f31c7d636"
+    },
+    {
+      "conflictId": "c1af643b7b85ae01e0d3bc3ba7313b1254e15040042b700d50123dcf2d5656fd",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "d0df72656ff7da6d5e4b656cf5b2f826f24d5c3366847e1e938f6bfedc902400"
+    },
+    {
+      "conflictId": "7944611c5ae44637e4fedc0541ff07ca0430c06d51aa5cdf93c42f352d783061",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "8ff4648f2f9c4915d03c54ea2894a75813ee2351a2dc0c648a65eca58617bb85"
+    },
+    {
+      "conflictId": "90cb52625e4ec2b0b71e9c04c50258c519f34c75bd7c92b573788b7ae82df6ca",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "63cdab6d10cf7f08c883a155f37c262cdf4a2575858f586cadef29a371d05bc8"
+    },
+    {
+      "conflictId": "591c5713a4bd48b1fd215a1cd0896860a9188f8fc11d614828b351f5f0d45779",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "d85ee74f9678a8865836f7b3b8c148e597ea011b2c9a0756daf5f2943929c0c0"
+    },
+    {
+      "conflictId": "5e65369f5d8218d584205910a14c38c3cb2eeb7158de41bf2f3e70ad4f81199c",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 65
+      },
+      "resolvedAt": "2026-06-05T02:49:42.685Z",
+      "candidateFingerprint": "43691cf3662cdc5c3ad6769d0ac6b2c05339c0d37508186ccf3283ba8b9845d3"
+    },
+    {
+      "conflictId": "46bb2afb9095e0e3059d5d9485f499d6307b5f16177a8d57152cbc71bc6aca74",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 14
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "ca204d5428317a4664da72fc737a8c98bc0f9ba99208f0244e7541ade011a2ea"
+    },
+    {
+      "conflictId": "3bda15b81e6bcc4fb381b9b76a86ca593ada979bce9d0f340b3ccc8c4d86a902",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "192029cea5f12ea98ad576137394505bac682793471ca1fc0fee79ccf5308d56"
+    },
+    {
+      "conflictId": "ddab32341c5e92d9ff59b13db3c6c72ba01433b4ab7ad0a2689020d91a058504",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 0
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "ae83c0eeb07bdbfe1e156f4fd7bf053aad1d1c634fb8b2b9fae0219fc1bb49be"
+    },
+    {
+      "conflictId": "dfc2dd459fe036abf962d7409b3a032c7cbc6953321acdb0d7c8bd512c904683",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 11
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "71e12b78c24304e486df2b717decaf80cccdef6f916222627c9420159aaad21e"
+    },
+    {
+      "conflictId": "47bf4bd3b93b0a10bb68935ac64a8644045bdf12cbda33e7eebad9125e59ea63",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "82b780b30d0d461f5eff4cd7c4b4139227670979dfebd69652aee41572a6de5f"
+    },
+    {
+      "conflictId": "254c24a3ecbf37960bc34f84b40ebc2ed6ef0b3d0f879572acf57e68e1f1768a",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "f65ed23bd4644d9d5ab70ae1f1cdcfdc15cb12cb738a51ef02677a450fe2c253"
+    },
+    {
+      "conflictId": "c4be87e33d5862d7c9312a5cd65572158dce17893126fade04e57f324d7f7f46",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 39
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "94eb29e736042bdf132d718f4462a800a03d103ed8911e725da7bdbc0d5ab948"
+    },
+    {
+      "conflictId": "5dd28038b68e1f81814e68c9996192ee5f23096fde6fc243924712b4a1e94b10",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 32
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "da98ee856751b04e480322dd6c2e107e64453f3a3899216d3d01812991ca0dc8"
+    },
+    {
+      "conflictId": "e51da24d01ad51395ead267b26ec2c110fc0da2b335c4f2705b4004d79947fb0",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "7e06fdb87910cad60d71b7d03dee48047c5e3fa8ee0b4e1a3242f82e7d275e85"
+    },
+    {
+      "conflictId": "4e25acc35d407bcbcd91511c3ec361eed7fcf4524462ca38ea96332af7303d87",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "af18642eeb6c7620d0567704b47ff354b6ea132cea167a7d9b30b17dd45256b7"
+    },
+    {
+      "conflictId": "a49ea5fb1ec236bd80c26ba009eddba314d7eda4ef60ac8097fc4c785796255c",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "5a1f6fb957113ea134faeb98fcb2d7d47af0a781cd24eb759b8515cc3d907cd5"
+    },
+    {
+      "conflictId": "919554194c94b45ff4e9341475ea5cb2112a162049f98c1e1e5ce2ecb6d8acad",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "088f17ba220bfc30652e41c99f7ef28fca717dae72824486e9ad9b6b1ab617ec"
+    },
+    {
+      "conflictId": "7eb28a628064eaad8feaa5c70bc88fc5519e764afcdc22e97a165aa3dc4c1232",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "0e0c37ac700b8eec499181f15ea03c37e0408be28469ed17c521fce4c046240f"
+    },
+    {
+      "conflictId": "b97a0493ad0eebd28896b2ae1ae02212d577689ad71e33c4551b7ddefa303e00",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "70317d98879828dc1ed93e68bfb8f9cb2cd0ea69710498d01852aa08d2ffa43a"
+    },
+    {
+      "conflictId": "2bf9852e5ae4d9cafccdc90104e6de0ba342f50e9846ef72f9afd8f3de2a231c",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "e104171d8254d3cd7f2f571cf69fe77357c4c9a6c330904f94419ddfe0b65571"
+    },
+    {
+      "conflictId": "df6069d72d25332b37663f146b604bc1a99f64b213a3c966408fda299c987422",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 26
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "473d10eca052fd2e851cbbdb1b0e945918881e22b2718928cf1fb8722f1e3bed"
+    },
+    {
+      "conflictId": "4a4104c280b0dfd4e06c8ed72baefa4456ed67479fcc68121a5746214106b408",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "424bfb203b940141d45ec7160545412345666b94cc66bc79d74823bde5e332aa"
+    },
+    {
+      "conflictId": "155093404929d1f92decc4eb4b1ed80db6ecf27cc58857cff192d5aac02b7448",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "8cb2d6adc5c5d9da60948741b8cb9e8ca0fbde4db8601bd0e7e1352ebaba1c41"
+    },
+    {
+      "conflictId": "6c8368d7c8b9a883fd5d13ac2a3f56f42ad50971bed4298eb690fced50666195",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 0
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "b067c0ae3729f1cfc8703076a1cccf0b059b431ca46ef0bf5a5d7da9380ae8c1"
+    },
+    {
+      "conflictId": "e446e9ed4e289aadee84a70ff964ce9cef7c70758b9d0f16e11d6e2dee8af5a7",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "c2cd5c0edc82af5aebe97d5f6447e9e4aaa76a2ea45187eb329831b16a133b94"
+    },
+    {
+      "conflictId": "58692095a270437e6626f3dd1b09bfc83deffda0a8fdf012470e8a40af72b3b4",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 2
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "f28e9331cb3ee17cbd80de82489c589a8d62cebb5da187f89bbf1bff33061d2a"
+    },
+    {
+      "conflictId": "80cbeaa969f0f2fff3558bc746d57f7a7688342d46cbe46d705491c24f6863a2",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "6b255e1b36e05de20976e0941dee1173d70db7cc492d3f2ca077d0b65ebf50e0"
+    },
+    {
+      "conflictId": "e6199935eb1800c0ea114b919641a89f909485e106d38e2f65e820ccc78a3b3f",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 11
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "fc1c045e8f7e9aebc33eaa55c52d9c46ad6e4ac849662178f0848e43263ac0e2"
+    },
+    {
+      "conflictId": "513bf820014bfe8f2fd88cf9413f5303eef4513a52d135ab48a878f3c19731c2",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 3
+      },
+      "resolvedAt": "2026-06-05T02:49:42.686Z",
+      "candidateFingerprint": "2ea6fb01c5c0f39f036597c71261a36d785d90468b13f3a072449337eb99c6ca"
+    }
+  ],
+  "manualChains": [],
+  "manualIncludes": []
+}

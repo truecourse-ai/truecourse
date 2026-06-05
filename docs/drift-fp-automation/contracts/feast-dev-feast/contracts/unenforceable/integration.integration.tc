@@ -1,0 +1,4 @@
+unenforceable-obligation integration.integration {
+  origin "docs/reference/alpha-vector-database.md" "Integration" 7..27
+  reason "Narrative overview — Integration"
+}

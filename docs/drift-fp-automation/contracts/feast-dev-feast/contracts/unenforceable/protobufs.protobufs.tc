@@ -1,0 +1,4 @@
+unenforceable-obligation protobufs.protobufs {
+  origin "docs/reference/codebase-structure.md" "Protobufs" 123..143
+  reason "Narrative overview — Protobufs"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation example.example {
+  origin "docs/reference/beta-on-demand-feature-view.md" "Example" 108..128
+  reason "Narrative overview — Example"
+}

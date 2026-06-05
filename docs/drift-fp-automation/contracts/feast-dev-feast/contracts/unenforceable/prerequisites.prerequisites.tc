@@ -1,0 +1,4 @@
+unenforceable-obligation prerequisites.prerequisites {
+  origin "docs/reference/denormalized.md" "Prerequisites" 7..27
+  reason "Narrative overview — Prerequisites"
+}

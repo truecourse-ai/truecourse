@@ -1,0 +1,4 @@
+architecture-decision arch.permissions.enforcement-boundary {
+  origin "docs/getting-started/concepts/permission.md" "Permission" 1..30
+  decision "Permission authorization enforcement is performed only when requests are executed through Feast Python servers (online feature server REST, offline feature server Arrow Flight, registry server gRPC); no enforcement for local provider"
+}

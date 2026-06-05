@@ -1,0 +1,5 @@
+constant auth.type.oidc {
+  origin "docs/getting-started/components/authz_manager.md" "OIDC Authorization" 39..60
+  type string
+  expected-value "oidc"
+}

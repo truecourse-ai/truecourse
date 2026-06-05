@@ -1,0 +1,11 @@
+target_repo: feast-dev/feast
+target_ref: 276b6df562e16fefba7efb493736ff32046d4a76
+code_dir: "."
+generated_at: "2026-06-05"
+tool_version: "0.6.2"
+llm: agent
+doc_scope:
+  - docs/getting-started/concepts
+  - docs/getting-started/components
+  - docs/reference
+  - docs/specs

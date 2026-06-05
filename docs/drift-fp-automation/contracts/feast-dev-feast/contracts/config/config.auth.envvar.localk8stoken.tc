@@ -1,0 +1,5 @@
+constant config.auth.env_var.local_k8s_token {
+  origin "docs/getting-started/components/authz_manager.md" "Kubernetes RBAC Authorization" 141..180
+  type string
+  expected-value "LOCAL_K8S_TOKEN"
+}

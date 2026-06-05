@@ -1,0 +1,4 @@
+unenforceable-obligation usage.usage {
+  origin "docs/reference/openlineage.md" "Usage" 64..84
+  reason "Narrative overview — Usage"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation installation.installation {
+  origin "docs/reference/openlineage.md" "Installation" 14..34
+  reason "Narrative overview — Installation"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation delete.delete {
+  origin "docs/reference/feast-cli-commands.md" "Delete" 112..132
+  reason "Narrative overview — Delete"
+}

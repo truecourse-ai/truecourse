@@ -1,0 +1,4 @@
+unenforceable-obligation init.init {
+  origin "docs/reference/feast-cli-commands.md" "Init" 233..253
+  reason "Narrative overview — Init"
+}

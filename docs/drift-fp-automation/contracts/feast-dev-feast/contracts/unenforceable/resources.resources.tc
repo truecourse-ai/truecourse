@@ -1,0 +1,4 @@
+unenforceable-obligation resources.resources {
+  origin "docs/reference/online-stores/scylladb.md" "Resources" 90..110
+  reason "Narrative overview — Resources"
+}

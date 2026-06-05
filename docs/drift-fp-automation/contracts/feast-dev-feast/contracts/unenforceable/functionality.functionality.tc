@@ -1,0 +1,4 @@
+unenforceable-obligation functionality.functionality {
+  origin "docs/reference/data-sources/overview.md" "Functionality" 3..23
+  reason "Narrative overview — Functionality"
+}

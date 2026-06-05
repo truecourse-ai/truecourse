@@ -1,0 +1,4 @@
+unenforceable-obligation description.description {
+  origin "docs/reference/data-sources/mongodb.md" "Description" 3..23
+  reason "Narrative overview — Description"
+}

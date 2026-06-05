@@ -1,0 +1,4 @@
+unenforceable-obligation configuration.overview.0 {
+  origin "docs/reference/alpha-feature-view-versioning.md" "Configuration" 40..70
+  reason "Overview narrative — Configuration"
+}

@@ -1,0 +1,4 @@
+unenforceable-obligation examples.examples {
+  origin "docs/reference/data-sources/mongodb.md" "Examples" 7..27
+  reason "Narrative overview — Examples"
+}

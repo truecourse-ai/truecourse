@@ -1,0 +1,6 @@
+auth-requirement auth.oidc.bearer {
+  origin "docs/getting-started/components/authz_manager.md" "OIDC Authorization" 39..117
+  status shipped
+  scheme Bearer
+  selector path-glob "/**"
+}
