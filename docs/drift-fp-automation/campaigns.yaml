@@ -51,13 +51,14 @@ campaigns:
       - docs/docs/docs/01-core/permissions
       - docs/docs/rfcs
     priority: 1
-    status: discovering
+    status: done
     baseline: { verified_at: "2026-06-04", target_ref: "b2ba15617de4c8ada9099789f7c774bb32328970", total_drifts: 38, tp: 0, fp: 29, info: 9, fp_rate: 1.00 }
-    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: "2026-06-05", target_ref: "b2ba15617de4c8ada9099789f7c774bb32328970", total_drifts: 18, tp: 0, fp: 5, info: 13, fp_rate: 1.00 }
     notes:
       - "Validation run found 44 drift items, ~0 genuine: 20 Operation implementation.missing FPs (relative-path plugin routes mounted under a prefix; extractor doesn't reconstruct the mount), 13 NamedConstant ACTIONS value-mismatch FPs (bare-name collision, no module scoping), 11 no-code-counterpart info notes. PublicationFilter enum verified cleanly (true negative). Strong first FP corpus: operation mount-prefix + named-constant module-scoping."
       - "Default branch is develop, not main — pin target_ref off develop."
       - "Discovery run (2026-06-04): 38 drifts, 29 FP, 0 TP, 9 info. FP kinds: operation/implementation-missing (16 FPs — mount-prefix not reconstructed; 5 contract-quality for routes outside packages/core), operation/response-status (1 FP — route matched in test mock), auth-requirement/unprotected (2 FPs — same test-mock root cause), named-constant/no-code-counterpart (10 FPs — ACTIONS.* dotted-path object props + preview.STRAPI_* window globals). Info: enum/extra-value PublicationFilter (contract missed published-with-draft), enum/no-code-counterpart ReleaseStatus (case mismatch), maxPendingReleases (inline literal, not named constant)."
+      - "Closed manually at fp=5 (not the routine's fp==0 gate). Iterations through the fix loop drove total_drifts 38→18 and fp 29→5 via FP-GUARD coverage in the comparator + named-constant extractor; the remaining 5 are all operation/implementation-missing on plugin content-api routes that strapi mounts under `/api/` (4 auth routes: GET/POST /api/auth/* under packages/core/admin/server/src/routes/content-api/authentication.ts, plus 1 runtime-generated `/api/content-manager/:collection` route). The plugin-mount extractor only reconstructs `/<plugin>` prefixes from `<plugin>/server/routes/` paths; strapi's content-api convention (`/api/` prefix, `routes/content-api/*` subdirs) and runtime-built routes are not lifted. Fixing this generically (mount-tolerant matching: method + path suffix + signature fingerprint) is queued — revisit after feast/directus campaigns reveal what conventions are worth handling. These 5 are documented limitations, not engine regressions."
 
   # ---- Python — best validated Python drift fit (fit 78, strong) ----
   - target_repo: feast-dev/feast
