@@ -6,6 +6,11 @@
 // intentional and the verifier must report it.
 //
 // IL-DRIFT: Enum:PipelineStage / enum.PipelineStage.no-code-counterpart
+//
+// DataSyncStrategy is declared in the spec; the pipeline service expresses
+// merge/replace behaviour via boolean flags rather than a named enum, so
+// no code counterpart exists for the spec-side strategy values.
+// IL-DRIFT: Enum:DataSyncStrategy / enum.DataSyncStrategy.no-code-counterpart
 
 // FP-GUARD: enum/no-code-counterpart — must NOT drift
 // A module-scoped 2-value type alias (`RunState`) that matches the
