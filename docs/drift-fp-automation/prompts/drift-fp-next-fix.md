@@ -129,15 +129,37 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   - If the route/symbol needs a mount/registration to reproduce (e.g. a plugin route array
     mounted under a prefix), include that wiring in the fixture so the *shape* matches the
     upstream cause.
+- **Fixtures must look like real application code, not test scaffolding.** The IL fixture
+  project is a fake e-commerce/catalog app (`handlers/`, `services/`, `controllers/`,
+  `repos/`, `middleware/`, `plugins/`, `processors/`, `events/`, `routes/`). New code-side
+  fixture material slots into that layout. **Four hard rules**:
+  1. **No new top-level subdirs under `code/src/` (or `code/app/`).** No `fp-guards/`, no
+     `regressions/`, no per-drift-kind folders. Files live alongside the existing domain
+     dirs.
+  2. **Files are domain-named, not test-named.** `task-handler.ts`, `sync-pipeline.service.ts`,
+     `processors/email/index.ts` — yes. `enum-flow-status-regression.ts`,
+     `operation-implementation-missing-mounted-relative.ts` — no. The reader of the fixture
+     should be able to scan the layout and see a plausible application, not a catalog of test
+     cases.
+  3. **No code-side files that are 100% comments.** A regression case where the spec-side
+     symbol intentionally has no code counterpart (`*.no-code-counterpart`) does NOT get its
+     own empty file. Put its `// IL-DRIFT:` marker as a single contextual comment inside an
+     existing or new natural file, with a short sentence that narrates the absence in domain
+     terms (e.g. "plugin lifecycle events are dispatched by the plugin host, not declared
+     here — IL-DRIFT: …").
+  4. **Prefer extending an existing fixture file** that already represents the relevant
+     domain. Only create a new file when no existing one fits (and when you do create one,
+     it gets a domain name and lives at the language's existing layout — see rule 1+2).
 - Add the matching **contract** under
   `tests/fixtures/sample-{js,python}-project-il/reference/contracts/` — a minimal valid `.tc`
   mirroring an existing fixture contract of that kind (so it parses/resolves with no new
   unresolved refs). Its `origin` may reference a fixture spec path or a synthetic location.
 - **Anonymization (committed to a public repo):** filenames, paths, identifiers, and comments
   must not name the upstream OSS owner/repo, its source filenames, or upstream-themed
-  identifiers. Filename `<drift-kind-slug>-<pattern-shape>.{ts,py,tc}` (e.g.
-  `operation-implementation-missing-mounted-relative.ts`). Linking the OSS URL in the PR body is
-  fine. Remember the paths as `fp_guard_paths`.
+  identifiers. (Anonymization is independent of the domain-naming rule above — the file is
+  still domain-named, just not after the OSS source's domain. `task-handler.ts` and
+  `sync-pipeline.service.ts` are fine; `directus-flow-trigger.ts` is not.) Linking the OSS URL
+  in the PR body is fine. Remember the paths as `fp_guard_paths`.
 
 ### 6. Add a true-drift regression case
 
@@ -146,6 +168,11 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   `code/app/` for Python) with `// IL-DRIFT: <drift-key>` on the offending line (the key the
   verifier should emit), plus its matching `.tc` contract under
   `sample-{js,python}-project-il/reference/contracts/`.
+- **Same four hard rules as step 5** — no new subdirs, domain-named files, no comment-only
+  files, prefer extending existing files. The regression case is the most common reason a
+  routine reaches for a comment-only file (because there's no code-side content); resist
+  that. The IL-DRIFT marker attaches to a contextual narrative comment inside a natural file,
+  not to its own dedicated stub.
 - Same anonymization rules. Remember the paths as `regression_paths`.
 - This guards against over-correcting: after your fix the verifier must STILL fire here.
 
