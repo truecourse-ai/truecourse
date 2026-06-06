@@ -100,7 +100,7 @@ campaigns:
       - docs/rich-text           # 11 — rich-text editor features + node types
       - docs/custom-components   # 8 — extension points + lifecycle hooks
     priority: 4
-    status: pending
+    status: discovering
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes: ["Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."]
