@@ -49,6 +49,43 @@ function withTracker(stepDefs: readonly { key: string; label: string }[]) {
   return { renderer, tracker };
 }
 
+type ScanExtractSummary = {
+  blocksAttempted: number;
+  failures: Array<{ block: { filePath: string; headingPath: string[] }; error: string }>;
+  claims: unknown[];
+};
+
+export function totalExtractionFailure(extract: ScanExtractSummary): boolean {
+  return extract.blocksAttempted > 0
+    && extract.claims.length === 0
+    && extract.failures.length === extract.blocksAttempted;
+}
+
+export function scanSuccessOutro(claimCount: number, openConflictCount: number): string {
+  if (openConflictCount > 0) return `${openConflictCount} open.`;
+  if (claimCount === 0) return "No claims extracted.";
+  return "No open conflicts — run `truecourse contracts generate`.";
+}
+
+export function representativeExtractionFailures(
+  failures: ScanExtractSummary['failures'],
+  limit = 3,
+): string[] {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+
+  for (const failure of failures) {
+    const location = `${failure.block.filePath} :: ${failure.block.headingPath.join(" → ")}`;
+    const line = `${location}\n    → ${failure.error}`;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    lines.push(line);
+    if (lines.length >= limit) break;
+  }
+
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // scan
 // ---------------------------------------------------------------------------
@@ -69,6 +106,20 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     p.log.step(`decided     ${merge.decidedConflicts.length}`);
     p.log.step(`open        ${merge.openConflicts.length}`);
 
+    if (totalExtractionFailure(extract)) {
+      p.log.error(
+        `All ${extract.blocksAttempted} block extraction${extract.blocksAttempted === 1 ? "" : "s"} failed; no claims were produced.`,
+      );
+      for (const line of representativeExtractionFailures(extract.failures)) {
+        console.log(`  ${line}`);
+      }
+      if (extract.failures.length > 3) {
+        console.log(`  … and ${extract.failures.length - 3} more failure${extract.failures.length - 3 === 1 ? "" : "s"}`);
+      }
+      p.outro("Aborted. Fix extraction before generating contracts.");
+      process.exit(1);
+    }
+
     if (merge.openConflicts.length > 0) {
       p.log.message("");
       p.log.message("Open conflicts:");
@@ -87,11 +138,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
       p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
       p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
     }
-    p.outro(
-      merge.openConflicts.length === 0
-        ? "No open conflicts — run `truecourse contracts generate`."
-        : `${merge.openConflicts.length} open.`,
-    );
+    p.outro(scanSuccessOutro(extract.claims.length, merge.openConflicts.length));
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
