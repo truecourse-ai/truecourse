@@ -63,10 +63,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
     });
   } else {
     for (const m of nameMatches) {
-      const specSet = new Set(contract.values);
-      const codeSet = new Set(m.values);
-      const missing = contract.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const specNorm = new Map(contract.values.map((v) => [normalizeValue(v), v]));
+      const codeNorm = new Map(m.values.map((v) => [normalizeValue(v), v]));
+      const missing = contract.values.filter((v) => !codeNorm.has(normalizeValue(v)));
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
         drifts.push(mkValueDrift(ref, 'missing-value', v, m, contract.values));
       }
@@ -96,10 +96,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       continue;
     }
     for (const m of subsetMatches) {
-      const specSet = new Set(subset.values);
-      const codeSet = new Set(m.values);
-      const missing = subset.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const specNorm = new Map(subset.values.map((v) => [normalizeValue(v), v]));
+      const codeNorm = new Map(m.values.map((v) => [normalizeValue(v), v]));
+      const missing = subset.values.filter((v) => !codeNorm.has(normalizeValue(v)));
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
         drifts.push(mkSubsetDrift(ref, subset.name, 'missing-value', v, m, subset.values));
       }
@@ -196,9 +196,14 @@ function matchByName(
   return out;
 }
 
+/** Strip non-alphanumeric separators and lowercase so SET_NULL ≡ SET NULL ≡ set-null. */
+function normalizeValue(v: string): string {
+  return v.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
 function valueSetOverlap(a: string[], b: string[]): number {
-  const aSet = new Set(a);
-  const bSet = new Set(b);
+  const aSet = new Set(a.map(normalizeValue));
+  const bSet = new Set(b.map(normalizeValue));
   const intersection = [...aSet].filter((v) => bSet.has(v)).length;
   const union = new Set([...aSet, ...bSet]).size;
   return union === 0 ? 0 : intersection / union;
