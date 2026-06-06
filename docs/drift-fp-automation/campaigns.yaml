@@ -86,6 +86,77 @@ campaigns:
     final:    { verified_at: "2026-06-06", target_ref: "2f4e667c81119c565d6ac1529510560835f59908", total_drifts: 6, tp: 1, fp: 0, info: 5, fp_rate: 0, tp_rate: 1.0 }
     notes: ["Narrow but real overlap: Flows TriggerType/accountability/status enums in prompt.md ↔ code enums. Docs mostly live in a separate repo, so spec surface is thin.", "doc_scope filled 2026-06-05: 13 api/src/ai/tools/*/prompt.md files (~3K lines) cover the AI tool surface; biggest is flows/prompt.md (540 lines) which contains the trigger/status/accountability enums called out in the campaign hint.", "First discovery run (2026-06-05, contracts on now-deleted claude/drift-fp-store/directus-directus): 6 drifts, 3 FP, 1 TP, 2 info. Discovery filed #516 (enum/extra-value × 7) which the next-fix routine triaged as a bad-contract artifact: the OperationType contract captured 8 of 15 spec-documented values, dropping json-web-token/log/request/sleep/throw-error/transform/trigger. Campaign was stuck (#517) until the under-extraction was root-caused.", "Reset to pending 2026-06-06: PR #518 fixed the spec-scan completeness rule that caused the OperationType under-extraction; storage branch deleted to force regeneration with the fixed prompt. Issues #516 #517 superseded by this regeneration and closed."]
 
+  # ---- Round 2 — 5 candidates probed 2026-06-06 (clone + .md tree inspection); all confirmed to ship behavioral specs in-repo. ----
+  # See round 1 closes (strapi/feast/directus) for the campaign template; pick order follows priority below.
+
+  # ---- TS monorepo — payloadcms (CMS, same shape family as strapi) ----
+  - target_repo: payloadcms/payload
+    tech_stack: [typescript, monorepo]
+    code_dir: "."
+    doc_scope:
+      - docs/fields              # 23 .md/.mdx — field types, validation, options
+      - docs/admin               # 9 — admin UI behavior, access control surface
+      - docs/plugins             # 13 — plugin contracts (e.g. cloud-storage, search)
+      - docs/rich-text           # 11 — rich-text editor features + node types
+      - docs/custom-components   # 8 — extension points + lifecycle hooks
+    priority: 4
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."]
+
+  # ---- Python — prefect (orchestration, state-machine-heavy enums) ----
+  - target_repo: PrefectHQ/prefect
+    tech_stack: [python, orchestration]
+    code_dir: "."
+    doc_scope:
+      - docs/v3/concepts         # 26 — behavioral concepts: flow runs, deployments, schedules
+      - docs/v3/advanced         # 29 — advanced behavior: retries, caching, transactions
+      - docs/v3/api-ref/rest-api # REST API operation reference (server/flow-runs, server/deployments, …)
+    priority: 5
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 406 auto-generated Python API ref docs under docs/v3/api-ref/python (excluded from doc_scope — they shadow the source code and would be redundant). The behavioral specs live under docs/v3/concepts (26 files) and docs/v3/advanced (29 files); the REST API under docs/v3/api-ref/rest-api/server/ is genuinely behavioral. Tests Python state-enum lifting (flow-run STATES are heavily enumerated) beyond what feast surfaced."]
+
+  # ---- Python monorepo — dagster (data orchestration, asset/op model) ----
+  - target_repo: dagster-io/dagster
+    tech_stack: [python, monorepo, orchestration]
+    code_dir: "."
+    doc_scope:
+      - docs/docs/guides/build       # asset materialization, op patterns, external resources
+      - docs/docs/deployment         # 19 — deployment behavior (kubernetes, dagster-plus)
+      - docs/docs/integrations/libraries  # 36 — integration adapters (aws/gcp/snowflake/dbt/…)
+    priority: 6
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: rich in-repo docs at docs/docs/guides/build/assets (12), build/external-resources (11), deployment/dagster-plus/management (12), integrations/libraries/aws (12). Python monorepo (python_modules/dagster/, python_modules/libraries/*); narrow code_dir if generate runs hot, but start with `.` like the other monorepos."]
+
+  # ---- TS framework — redwoodjs/redwood (full-stack TS framework, auth/graphql/deploy docs) ----
+  - target_repo: redwoodjs/redwood
+    tech_stack: [typescript, framework]
+    code_dir: "."
+    doc_scope:
+      - docs/docs                # 44 top-level + subdirs (skip versioned_docs/* — versioned snapshots, redundant)
+    priority: 7
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 121 .md/.mdx under docs/docs/ (current version). Strong behavioral surface in how-to (20), deploy (9), auth (9), graphql (5), tutorial/chapter1 (6). Note: versioned_docs/version-{8.2…8.8} are frozen snapshots of the same docs/docs/ content; doc_scope excludes them to avoid 8x duplication of every claim."]
+
+  # ---- TS infra — sst/sst (serverless deployment, infra-as-code) ----
+  - target_repo: sst/sst
+    tech_stack: [typescript, infrastructure]
+    code_dir: "."
+    doc_scope:
+      - www/src/content/docs/docs   # 25 top-level + start/aws (21) — behavioral docs via Astro Starlight
+    priority: 8
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 46+ behavioral .md/.mdx under www/src/content/docs/docs/. Different domain than the other 4: infra-as-code, lots of named-constant surface (region names, runtime versions, config defaults) and operation-like resource definitions. Should stress NamedConstant comparator on infra-domain naming conventions."]
+
   # ---- Add more campaigns below once validated (probe via `infer --dry-run`) ----
   # Bar: concrete .md specs in REAL (non-dot) folders that OVERLAP liftable app
   # code (Prisma entities / TS|Zod|str-Enum enums / Express|FastAPI routes /
