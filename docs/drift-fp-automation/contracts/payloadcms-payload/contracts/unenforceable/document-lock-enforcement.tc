@@ -1,0 +1,6 @@
+unenforceable-obligation document-lock-enforcement {
+  origin "docs/admin/locked-documents.mdx" "Impact on APIs" 1..48
+  spec-text "Document locking affects both the Local and REST APIs, ensuring that if a document is locked, concurrent users will not be able to perform updates or deletes on that document."
+  category data-integrity
+  rationale "no structural encoding for lock enforcement across update/delete operations; depends on overrideLock runtime param"
+}

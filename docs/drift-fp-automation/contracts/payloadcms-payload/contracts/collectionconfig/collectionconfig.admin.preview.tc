@@ -1,0 +1,7 @@
+entity CollectionConfig.admin.preview {
+  origin "docs/admin/preview.mdx" "Options" 1..85
+  field doc: object
+  field options.locale: string
+  field options.req: object
+  field options.token: string
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation preview-route.implementation {
+  origin "docs/admin/preview.mdx" "Next.js" 1..75
+  spec-text "Create a /preview API route in your Next.js app that: (1) verifies previewSecret matches PREVIEW_SECRET env var, (2) authenticates user via payload.auth, (3) enables Next.js draft mode, (4) redirects to path param. Return 403 on auth failure, 404 if path param missing, 500 if path does not start with /."
+  category integration
+  rationale "This is a user-implemented Next.js route, not a payloadcms endpoint; cannot be structurally verified against payloadcms source code"
+}

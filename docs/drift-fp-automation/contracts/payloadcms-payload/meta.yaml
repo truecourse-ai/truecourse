@@ -1,0 +1,12 @@
+target_repo: payloadcms/payload
+target_ref: a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd
+code_dir: "."
+generated_at: "2026-06-06T00:00:00Z"
+tool_version: 0.6.4
+llm: agent
+doc_scope:
+  - docs/fields
+  - docs/admin
+  - docs/plugins
+  - docs/rich-text
+  - docs/custom-components

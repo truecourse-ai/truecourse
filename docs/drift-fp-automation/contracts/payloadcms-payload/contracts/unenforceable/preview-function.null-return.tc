@@ -1,0 +1,6 @@
+unenforceable-obligation preview-function.null-return {
+  origin "docs/admin/preview.mdx" "Conditional Preview URLs" 1..85
+  spec-text "Returning null from the admin.preview function hides the preview button for that document."
+  category ui-behavior
+  rationale "No structural encoding for runtime conditional rendering based on function return value"
+}

@@ -1,0 +1,5 @@
+constant widget.maxWidth.default {
+  origin "docs/custom-components/dashboard.mdx" "Widget Configuration" 1..3062
+  type string
+  expected-value "full"
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation preferences.api-access {
+  origin "docs/admin/preferences.mdx" "APIs" 1..40
+  spec-text "Preferences are available to both GraphQL and REST APIs."
+  category integration
+  rationale "no structural encoding for API-to-preference storage binding"
+}

@@ -1,0 +1,5 @@
+constant widget.minWidth.default {
+  origin "docs/custom-components/dashboard.mdx" "Widget Configuration" 1..3062
+  type string
+  expected-value "x-small"
+}

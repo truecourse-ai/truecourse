@@ -1,0 +1,9 @@
+auth-requirement auth.admin-panel {
+  origin "docs/admin/overview.mdx" "The Admin User Collection" 1..95
+  scheme Bearer
+  selector path-glob "/admin/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

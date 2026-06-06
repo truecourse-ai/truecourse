@@ -1,0 +1,4 @@
+enum WidgetWidth {
+  origin "docs/custom-components/dashboard.mdx" "Widget Configuration" 1..3062
+  values [x-small, small, medium, large, x-large, full]
+}

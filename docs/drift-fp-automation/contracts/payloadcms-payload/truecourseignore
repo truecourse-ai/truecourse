@@ -1,0 +1,7 @@
+*.md
+*.mdx
+!docs/fields/**
+!docs/admin/**
+!docs/plugins/**
+!docs/rich-text/**
+!docs/custom-components/**

@@ -1,0 +1,6 @@
+unenforceable-obligation admin-panel.i18n {
+  origin "docs/admin/overview.mdx" "I18n" 1..288
+  spec-text "The Payload Admin Panel is translated in over 30 languages. Languages are automatically detected based on the user's browser. If no language detected or not supported, English is used. Users can select language from account page."
+  category i18n
+  rationale "no structural encoding for UI language behavior"
+}

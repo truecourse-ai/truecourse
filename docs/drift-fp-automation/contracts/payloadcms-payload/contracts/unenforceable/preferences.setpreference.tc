@@ -1,0 +1,6 @@
+unenforceable-obligation preferences.setPreference {
+  origin "docs/admin/preferences.mdx" "setPreference" 1..64
+  spec-text "setPreference is an async method that sets a user preference by key and value, returning void."
+  category api-contract
+  rationale "Local API method call - not an HTTP operation verifiable by the tool"
+}

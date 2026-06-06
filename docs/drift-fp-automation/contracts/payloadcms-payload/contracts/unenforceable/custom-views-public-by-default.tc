@@ -1,0 +1,6 @@
+unenforceable-obligation custom-views-public-by-default {
+  origin "docs/custom-components/custom-views.mdx" "Securing Custom Views" 1..95
+  spec-text "All Custom Views are public by default. It's up to you to secure your custom views."
+  category security
+  rationale "no structural encoding for per-view auth enforcement; developer must implement checks inside each view component"
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation preferences.getPreference {
+  origin "docs/admin/preferences.mdx" "getPreference" 1..64
+  spec-text "getPreference is an async method that retrieves a user preference by key, returning a promise containing the preference value."
+  category api-contract
+  rationale "Local API method call - not an HTTP operation verifiable by the tool"
+}

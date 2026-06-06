@@ -1,0 +1,2107 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-06T22:41:26.274Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/admin/accessibility.mdx",
+        "docs/admin/admin-panel-location.mdx",
+        "docs/admin/customizing-css.mdx",
+        "docs/admin/locked-documents.mdx",
+        "docs/admin/metadata.mdx",
+        "docs/admin/overview.mdx",
+        "docs/admin/react-hooks.mdx",
+        "docs/custom-components/custom-views.mdx",
+        "docs/custom-components/dashboard.mdx",
+        "docs/custom-components/document-views.mdx",
+        "docs/custom-components/edit-view.mdx"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    {
+      "name": "preferences",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/admin/preferences.mdx",
+        "docs/admin/react-hooks.mdx"
+      ],
+      "scope": {
+        "paths": [
+          "preferences/**"
+        ]
+      },
+      "description": "preferences module — GET preferences/getPreference, POST preferences/setPreference."
+    },
+    {
+      "name": "preview",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/admin/preview.mdx"
+      ],
+      "scope": {
+        "paths": [
+          "/preview/**"
+        ]
+      },
+      "description": "preview module — GET /preview."
+    }
+  ],
+  "claims": [
+    {
+      "id": "4913e27d85b84dfc9862eb4839db8d74681bd39633347e10431d08aa95606118",
+      "topic": "auth",
+      "subject": "Admin Panel access restriction",
+      "content": {
+        "scheme": "auth-enabled Collection",
+        "scope": "/admin",
+        "except": []
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 129,
+        "quote": "### The Admin User Collection\n\nTo specify which Collection to allow to login to the Admin Panel, pass the `admin.user` key equal to the slug of any auth-enabled Collection:\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    user: 'admins', // highlight-line\n  },\n})\n```\n\n<Banner type=\"warning\">\n  **Important:**\n\nThe Admin Panel can only be used by a single auth-enabled Collection. To enable authentication for a Collection, simply set `auth: true` in the Collection's configuration. See [Authentication](../authentication/overview) for more information.\n\n</Banner>\n\nBy default, if you have not specified a Collection, Payload will automatically provide a `User` Collection with access to the Admin Panel. You can customize or override the fields and settings of the default `User` Collection by adding your own Collection with `slug: 'users'`. Doing this will force Payload to use your provided `User` Collection instead of its default version.\n\nYou can use whatever Collection you'd like to access the Admin Panel as long as the Collection supports [Authentication](/docs/authentication/overview). It doesn't need to be called `users`. For example, you may wish to have two Collections that both support authentication:\n\n- `admins` - meant to have a higher level of permissions to manage your data and access the Admin Panel\n- `customers` - meant for end users of your app that should not be allowed to log into the Admin Panel\n\nTo do this, specify `admin: { user: 'admins' }` in your config. This will provide access to the Admin Panel to only `admins`. Any users authenticated as `customers` will be prevented from accessing the Admin Panel. See [Access Control](/docs/access-control/overview) for full details.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "891f4be662e12e58bc06f117d87bdfc3bca8c98baf1e7d03016deda007789d0f",
+      "topic": "auth",
+      "subject": "Draft preview access control",
+      "content": {
+        "scheme": "previewSecret query param + payload.auth JWT verification",
+        "scope": "/preview"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preview.mdx",
+        "line": 70,
+        "quote": "### Next.js\n\nIf you're using Next.js, you can do the following code to enter [Draft Mode](https://nextjs.org/docs/app/building-your-application/configuring/draft-mode).\n\n#### Step 1: Format the Preview URL\n\nFirst, format your `admin.preview` function to point to a custom endpoint that you'll open on your front-end. This URL should include a few key query search params:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Pages: CollectionConfig = {\n  slug: 'pages',\n  admin: {\n    preview: ({ slug }) => {\n      const encodedParams = new URLSearchParams({\n        slug,\n        collection: 'pages',\n        path: `/${slug}`,\n        previewSecret: process.env.PREVIEW_SECRET || '',\n      })\n\n      return `/preview?${encodedParams.toString()}` // highlight-line\n    },\n  },\n  fields: [\n    {\n      name: 'slug',\n      type: 'text',\n    },\n  ],\n}\n```\n\n#### Step 2: Create the Preview Route\n\nThen, create an API route that verifies the preview secret, authenticates the user, and enters draft mode:\n\n`/app/preview/route.ts`\n\n… (+123 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-04-17T10:33:08-04:00"
+      },
+      "module": "preview",
+      "source": "extracted"
+    },
+    {
+      "id": "908111a0b7fc6930edd9d60cd52c8a0806f5094e0df0939ad882994282535dd6",
+      "topic": "auth",
+      "subject": "custom admin views / access control",
+      "content": {
+        "scheme": "custom",
+        "scope": "global",
+        "except": []
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 209,
+        "quote": "### Securing Custom Views\n\nAll Custom Views are public by default. It's up to you to secure your custom views. If your view requires a user to be logged in or to have certain access rights, you should handle that within your view component yourself.\n\nHere is how you might secure a Custom View:\n\n```tsx\nimport type { AdminViewServerProps } from 'payload'\n\nimport { Gutter } from '@payloadcms/ui'\nimport React from 'react'\n\nexport function MyCustomView({ initPageResult }: AdminViewServerProps) {\n  const {\n    req: { user },\n  } = initPageResult\n\n  if (!user) {\n    return <p>You must be logged in to view this page.</p>\n  }\n\n  return (\n    <Gutter>\n      <h1>Custom Default Root View</h1>\n      <p>This view uses the Default Template.</p>\n    </Gutter>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7b7806f5aaf934a4a27ba59dc3f3a9cf201532b5cf5c141890ca83f75497e469",
+      "topic": "data",
+      "subject": "Admin Panel CSS / CSS library",
+      "content": {
+        "fields": {
+          "naming_convention": "BEM (Block Element Modifier) — used for all Admin UI CSS to allow easy override targeting",
+          "CSS_variables_breakpoints": "overridable via @payloadcms/ui SCSS — breakpoint variables",
+          "CSS_variables_colors": "overridable — includes base color shades, success/warning/error shades, theme-specific colors (background, input background, text color), elevation colors",
+          "CSS_variables_sizing": "overridable — includes horizontal gutter, transition speeds, font sizes",
+          "dark_mode": "automatically overrides --theme-elevation colors and inverts success/warning/error shades; updates base theme variables like --theme-bg, --theme-text"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/customizing-css.mdx",
+        "line": 60,
+        "quote": "## CSS Library\n\nTo make it as easy as possible for you to override default styles, Payload uses [BEM naming conventions](http://getbem.com/) for all CSS within the Admin UI. If you provide your own CSS, you can override any built-in styles easily, including targeting nested components and their various component states.\n\nYou can also override Payload's built-in [CSS Variables](https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties). These variables are widely consumed by the Admin Panel, so modifying them has a significant impact on the look and feel of the Admin UI.\n\nThe following variables are defined and can be overridden:\n\n- [Breakpoints](https://github.com/payloadcms/payload/blob/main/packages/ui/src/scss/queries.scss)\n- [Colors](https://github.com/payloadcms/payload/blob/main/packages/ui/src/scss/colors.scss)\n  - Base color shades (white to black by default)\n  - Success / warning / error color shades\n  - Theme-specific colors (background, input background, text color, etc.)\n  - Elevation colors (used to determine how \"bright\" something should be when compared to the background)\n- [Sizing](https://github.com/payloadcms/payload/blob/main/packages/ui/src/scss/app.scss)\n  - Horizontal gutter\n  - Transition speeds\n  - Font sizes\n  - Etc.\n\nFor an up-to-date, comprehensive list of all available variables, please refer to the [Source Code](https://github.com/payloadcms/payload/blob/main/packages/ui/src/scss).\n\n<Banner type=\"warning\">\n  **Warning:** If you're overriding colors or theme elevations, make sure to\n  consider how [your changes will affect dark mode](#dark-mode).\n</Banner>\n\n#### Dark Mode\n\nColors are designed to automatically adapt to theme of the [Admin Panel](./overview). By default, Payload automatically overrides all `--theme-elevation` colors and inverts all success / warning / error shades to suit dark mode. We also update some base theme variables like `--theme-bg`, `--theme-text`, etc.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-21T09:04:11-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "74b1944ce83c5a8b2cdba6cd4287471529112365732f8be4506a1ef538719df7",
+      "topic": "data",
+      "subject": "Admin Panel CSS / SCSS utilities",
+      "content": {
+        "fields": {
+          "@payloadcms/ui/scss": "package export that provides Payload SCSS variables and utilities for reuse in custom stylesheets via @import '~@payloadcms/ui/scss'"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/customizing-css.mdx",
+        "line": 52,
+        "quote": "## Re-using Payload SCSS variables and utilities\n\nYou can re-use Payload's SCSS variables and utilities in your own stylesheets by importing it from the UI package.\n\n```scss\n@import '~@payloadcms/ui/scss';\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-21T09:04:11-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "3ae4f9dedc99c51be472537c8049516f34ae9e04c5023e65ee9eda759d455265",
+      "topic": "data",
+      "subject": "Admin Panel CSS / global stylesheet",
+      "content": {
+        "fields": {
+          "custom.scss": "root global stylesheet loaded into the Admin Panel root — used to inject custom selectors or styles",
+          "@layer payload-default": "all Payload CSS is encapsulated here — custom CSS outside any layer has highest possible specificity",
+          "@layer payload": "provided layer to ensure custom styles are applied after Payload styles"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/customizing-css.mdx",
+        "line": 17,
+        "quote": "## Global CSS\n\nGlobal CSS refers to the CSS that is applied to the entire [Admin Panel](./overview). This is where you can have a significant impact to the look and feel of the Admin UI through just a few lines of code.\n\nYou can add your own global CSS through the root `custom.scss` file of your app. This file is loaded into the root of the Admin Panel and can be used to inject custom selectors or styles however needed.\n\nHere is an example of how you might target the Dashboard View and change the background color:\n\n```scss\n.dashboard {\n  background-color: red; // highlight-line\n}\n```\n\n<Banner type=\"warning\">\n  **Note:** If you are building [Custom\n  Components](../custom-components/overview), it is best to import your own\n  stylesheets directly into your components, rather than using the global\n  stylesheet. You can continue to use the [CSS library](#css-library) as needed.\n</Banner>\n\n### Specificity rules\n\nAll Payload CSS is encapsulated inside CSS layers under `@layer payload-default`. Any custom css will now have the highest possible specificity.\n\nWe have also provided a layer `@layer payload` if you want to use layers and ensure that your styles are applied after payload.\n\nTo override existing styles in a way that the previous rules of specificity would be respected you can use the default layer like so\n\n```css\n@layer payload-default {\n  // my styles within the Payload specificity\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-21T09:04:11-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "988accf12229bedb939ecf49f918b36bd580f2a8d49a503bb080b61f93d5b766",
+      "topic": "data",
+      "subject": "Admin custom views / new view config",
+      "content": {
+        "fields": {
+          "Component": "string (import path) — required — React component to render for this view",
+          "path": "string — required — URL path for the view; must start with /; cascading match by default unless exact is set"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 67,
+        "quote": "### Adding New Views\n\nTo add a _new_ view to the [Admin Panel](../admin/overview), simply add your own key to the `views` object. This is true for all view scopes.\n\nNew views require at least the `Component` and `path` properties:\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    components: {\n      views: {\n        // highlight-start\n        myCustomView: {\n          Component: '/path/to/MyCustomView#MyCustomViewComponent',\n          path: '/my-custom-view',\n        },\n        // highlight-end\n      },\n    },\n  },\n})\n```\n\n<Banner type=\"warning\">\n  **Note:** Routes are cascading, so unless explicitly given the `exact`\n  property, they will match on URLs that simply _start_ with the route's path.\n  This is helpful when creating catch-all routes in your application.\n  Alternatively, define your nested route _before_ your parent route.\n</Banner>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9a60f70bf40a97454f3c7ae79fb40c0721a9aa964fcdccd549a70f13d9f0b07d",
+      "topic": "data",
+      "subject": "Admin custom views / view config properties",
+      "content": {
+        "fields": {
+          "Component": "string (import path) — required — component rendered when user navigates to this route",
+          "path": "string or string[] — required — valid URL path(s) per path-to-regexp; must start with /",
+          "exact": "boolean — when true, only matches if path matches exactly",
+          "strict": "boolean — when true, trailing slash in path only matches trailing slash in pathname",
+          "sensitive": "boolean — when true, match is case sensitive",
+          "meta": "object — page metadata overrides for this view"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 22,
+        "quote": "### Replacing Views\n\nTo customize views, use the `admin.components.views` property in your [Payload Config](../configuration/overview). This is an object with keys for each view you want to customize. Each key corresponds to the view you want to customize.\n\nThe exact list of available keys depends on the scope of the view you are customizing, depending on whether it's a [Root View](#root-views), [Collection View](#collection-views), or [Global View](#global-views). Regardless of the scope, the principles are the same.\n\nHere is an example of how to swap out a built-in view:\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    components: {\n      views: {\n        // highlight-start\n        dashboard: {\n          Component: '/path/to/MyCustomDashboard',\n        },\n        // highlight-end\n      },\n    },\n  },\n})\n```\n\n<Banner type=\"success\">\n  **Note:** The dashboard is a special case, where in addition to replacing the\n  default view, [you can add widgets modularly](../custom-components/dashboard).\n</Banner>\n\nFor more granular control, pass a configuration object instead. Payload exposes the following properties for each view:\n\n| Property       | Description                                                                                                                                                                         |\n| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `Component` \\* | Pass in the component path that should be rendered when a user navigates to this route.                                                                                             |\n| `path` \\*      | Any valid URL path or array of paths that [`path-to-regexp`](https://www.npmjs.com/package/path-to-regex) understands. Must begin with a forward slash (`/`).                       |\n| `exact`        | Boolean. When true, will only match if the path matches the `usePathname()` exactly.                                                                                                |\n| `strict`       | When true, a path that has a trailing slash will only match a `location.pathname` with a trailing slash. This has no effect when there are additional URL segments in the pathname. |\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "dda05e72d5b8c9fab7fb32e19dcbc7c7353c4c01f0f0b40077f27433da0bc73a",
+      "topic": "data",
+      "subject": "Collection Config / admin.components.views",
+      "content": {
+        "fields": {
+          "edit": "object — The Edit View for a single Collection Document, comprised of various nested Document Views",
+          "list": "object — The List View showing all Documents for the Collection",
+          "[key: string]": "object — Any other key adds a completely new Collection View"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 278,
+        "quote": "## Collection Views\n\nCollection Views are views that are scoped under the `/collections` route, such as the Collection List and Document Edit views.\n\nTo [swap out](#replacing-views) Collection Views with your own, or to [create entirely new ones](#adding-new-views), use the `admin.components.views` property of your [Collection Config](../configuration/collections):\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const MyCollectionConfig: CollectionConfig = {\n  // ...\n  admin: {\n    components: {\n      views: {\n        // highlight-start\n        edit: {\n          default: {\n            Component: '/path/to/MyCustomCollectionView',\n          },\n        },\n        // highlight-end\n        // Other options include:\n        // - list\n        // - [key: string]\n        // See below for more details\n      },\n    },\n  },\n}\n```\n\n<Banner type=\"success\">\n  **Reminder:** The `edit` key is comprised of various nested views, known as\n  Document Views, that relate to the same Collection Document. [More\n  details](./document-views).\n</Banner>\n\nThe following options are available:\n\n| Property | Description                                                                                                                                     |\n… (+7 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4adbdbdda58c6c0cf5a7f5ddd56da09ab7e81dfd4393b32053d119616089b8dc",
+      "topic": "data",
+      "subject": "Collection Config / admin.meta",
+      "content": {
+        "fields": {
+          "admin.meta.title": "string — title applied to all views within the collection in Admin Panel",
+          "admin.meta.description": "string — description applied to all views within the collection in Admin Panel"
+        },
+        "validation": {
+          "admin.meta": "has same options as Root Metadata config — overridden per-view if view defines its own metadata"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 172,
+        "quote": "## Collection Metadata\n\nCollection Metadata is the metadata that is applied to all pages within any given Collection within the Admin Panel. This metadata is used to customize the title and description of all views within any given Collection, unless overridden by the view itself.\n\nTo customize Collection Metadata, use the `admin.meta` key within your Collection Config:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const MyCollection: CollectionConfig = {\n  // ...\n  admin: {\n    // highlight-start\n    meta: {\n      // highlight-end\n      title: 'My Collection',\n      description: 'The best collection in the world',\n    },\n  },\n}\n```\n\nThe Collection Meta config has the same options as the [Root Metadata](#root-metadata) config.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "0ce60d364505539ddf860429b63be7a86b3ee89f95220bd5c9b8382ff74a49b3",
+      "topic": "data",
+      "subject": "Collection Config / admin.preview",
+      "content": {
+        "fields": {
+          "admin.preview": "function(doc) => string | null — return null to conditionally hide the preview button",
+          "admin.preview.doc": "object — document data including unsaved changes",
+          "admin.preview.options.locale": "string — current locale of the document",
+          "admin.preview.options.req": "PayloadRequest — the Payload request object",
+          "admin.preview.options.token": "string — JWT token of the currently authenticated user"
+        },
+        "validation": {
+          "return null": "returning null from admin.preview hides the preview button for that document"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preview.mdx",
+        "line": 39,
+        "quote": "[line 39] ## Options\n\nThe `preview` function resolves to a string that points to your front-end application with additional URL parameters. This can be an absolute URL or a relative path, and can run async if needed.\n\nThe following arguments are provided to the `preview` function:\n\n| Path          | Description                                                                                |\n| ------------- | ------------------------------------------------------------------------------------------ |\n| **`doc`**     | The data of the Document being edited. This includes changes that have not yet been saved. |\n| **`options`** | An object with additional properties.                                                      |\n\nThe `options` object contains the following properties:\n\n| Path         | Description                                        |\n| ------------ | -------------------------------------------------- |\n| **`locale`** | The current locale of the Document being edited.   |\n| **`req`**    | The Payload Request object.                        |\n| **`token`**  | The JWT token of the currently authenticated user. |\n\nIf your application requires a fully qualified URL, such as within deploying to Vercel Preview Deployments, you can use the `req` property to build this URL:\n\n```ts\npreview: (doc, { req }) => `${req.protocol}//${req.host}/${doc.slug}` // highlight-line\n```\n\n---\n[line 233] ### Conditional Preview URLs\n\nYou can also conditionally enable or disable the preview button based on the document's data. This is useful for scenarios where you only want to show the preview button when certain criteria are met.\n\nTo do this, simply return `null` from the `preview` function when you want to hide the preview button:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Pages: CollectionConfig = {\n  slug: 'pages',\n  admin: {\n    preview: (doc) => {\n      return doc?.enabled ? `http://localhost:3000/${doc.slug}` : null\n    },\n  },\n  fields: [\n    {\n      name: 'slug',\n      type: 'text',\n    },\n    {\n      name: 'enabled',\n      type: 'checkbox',\n    },\n  ],\n}\n```\n",
+        "additionalSources": [
+          {
+            "file": "docs/admin/preview.mdx",
+            "line": 233,
+            "quote": "### Conditional Preview URLs\n\nYou can also conditionally enable or disable the preview button based on the document's data. This is useful for scenarios where you only want to show the preview button when certain criteria are met.\n\nTo do this, simply return `null` from the `preview` function when you want to hide the preview button:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Pages: CollectionConfig = {\n  slug: 'pages',\n  admin: {\n    preview: (doc) => {\n      return doc?.enabled ? `http://localhost:3000/${doc.slug}` : null\n    },\n  },\n  fields: [\n    {\n      name: 'slug',\n      type: 'text',\n    },\n    {\n      name: 'enabled',\n      type: 'checkbox',\n    },\n  ],\n}\n```\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-04-17T10:33:08-04:00"
+      },
+      "module": "preview",
+      "source": "extracted"
+    },
+    {
+      "id": "fef6bf03a66e61fb32ab476ee8c90019a6faf8aeb02dbbc0b01bb398e8622418",
+      "topic": "data",
+      "subject": "Collection Config / lockDocuments",
+      "content": {
+        "fields": {
+          "lockDocuments": "boolean | object — enables/disables document locking; default enabled. Set to object to configure, false to disable.",
+          "lockDocuments.duration": "number (seconds) — how long a document remains locked without user interaction; default 300 seconds (5 minutes)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/locked-documents.mdx",
+        "line": 29,
+        "quote": "### Config Options\n\nThe `lockDocuments` property exists on both the Collection Config and the Global Config. Document locking is enabled by default, but you can customize the lock duration or turn off the feature for any collection or global.\n\nHere's an example configuration for document locking:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Posts: CollectionConfig = {\n  slug: 'posts',\n  fields: [\n    {\n      name: 'title',\n      type: 'text',\n    },\n    // other fields...\n  ],\n  lockDocuments: {\n    duration: 600, // Duration in seconds\n  },\n}\n```\n\n#### Locking Options\n\n| Option              | Description                                                                                                                                                                    |\n| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |\n| **`lockDocuments`** | Enables or disables document locking for the collection or global. By default, document locking is enabled. Set to an object to configure, or set to false to disable locking. |\n| **`duration`**      | Specifies the duration (in seconds) for how long a document remains locked without user interaction. The default is 300 seconds (5 minutes).                                   |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-04-07T14:06:03-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d68cbc5367ac5ef4dd10c721c0fbb628d68849fe6c2216eba6dbcba5c431c111",
+      "topic": "data",
+      "subject": "Dashboard / built-in widgets",
+      "content": {
+        "fields": {
+          "collections": "built-in widget — displays collection and global cards; automatically included in dashboard if no defaultLayout is defined"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 176,
+        "quote": "### Built-in Widgets\n\nPayload includes a built-in `collections` widget that displays collection and global cards.\n\nIf you don't define a `defaultLayout`, the collections widget will be automatically included in your dashboard.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "88cd1fe0ab4e39dddec497ccf261b06861a7abbd01f621f7a74230ec19e5da4c",
+      "topic": "data",
+      "subject": "Dashboard Widget Config / WidgetWidth",
+      "content": {
+        "fields": {
+          "slug": "string* — unique identifier for the widget",
+          "Component": "string* — path to the widget component (supports # syntax for named exports)",
+          "fields": "Field[] — optional widget-specific form fields shown in the edit drawer",
+          "minWidth": "WidgetWidth — minimum width (default: 'x-small')",
+          "maxWidth": "WidgetWidth — maximum width (default: 'full')",
+          "WidgetWidth values": "'x-small' | 'small' | 'medium' | 'large' | 'x-large' | 'full'"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 60,
+        "quote": "### Widget Configuration\n\n| Property       | Type          | Description                                                          |\n| -------------- | ------------- | -------------------------------------------------------------------- |\n| `slug` \\*      | `string`      | Unique identifier for the widget                                     |\n| `Component` \\* | `string`      | Path to the widget component (supports `#` syntax for named exports) |\n| `fields`       | `Field[]`     | Optional widget-specific form fields shown in the edit drawer        |\n| `minWidth`     | `WidgetWidth` | Minimum width the widget can be resized to (default: `'x-small'`)    |\n| `maxWidth`     | `WidgetWidth` | Maximum width the widget can be resized to (default: `'full'`)       |\n\n**WidgetWidth Values:** `'x-small' | 'small' | 'medium' | 'large' | 'x-large' | 'full'`.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "145e5d0719892c88f69c297fdf1c5ffd37c5cd2b104f1ca0927fb51b9dcf35fb",
+      "topic": "data",
+      "subject": "Document View / tab config",
+      "content": {
+        "fields": {
+          "label": "string — label to display in the tab",
+          "href": "string — URL to navigate to when clicked; defaults to the tab's path",
+          "order": "string — order in which the tab appears in navigation; can be set on default and custom tabs",
+          "Component": "string — path to custom tab component (server or client)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/document-views.mdx",
+        "line": 94,
+        "quote": "## Document Tabs\n\nEach Document View can be given a tab for navigation, if desired. Tabs are highly configurable, from as simple as changing the label to swapping out the entire component, they can be modified in any way.\n\nTo add or customize tabs in the Document View, use the `views.edit.[key].tab` property in your [Collection Config](../configuration/collections) or [Global Config](../configuration/globals):\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const MyCollection: CollectionConfig = {\n  slug: 'my-collection',\n  admin: {\n    components: {\n      views: {\n        edit: {\n          myCustomView: {\n            Component: '/path/to/MyCustomView',\n            path: '/my-custom-tab',\n            // highlight-start\n            tab: {\n              Component: '/path/to/MyCustomTabComponent',\n            },\n            // highlight-end\n          },\n          anotherCustomView: {\n            Component: '/path/to/AnotherCustomView',\n            path: '/another-custom-view',\n            // highlight-start\n            tab: {\n              label: 'Another Custom View',\n              href: '/another-custom-view',\n              order: '100',\n            },\n            // highlight-end\n          },\n        },\n      },\n    },\n  },\n}\n… (+50 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bfb89016469e1c8eb2121a46f397eae7b741c1a5115b58092e4e72e18d3bfed9",
+      "topic": "data",
+      "subject": "Document locking / overrideLock option",
+      "content": {
+        "fields": {
+          "overrideLock": "boolean — when false, enforces document locks preventing update/delete if another user holds the lock; when true (default), document locks are ignored"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/locked-documents.mdx",
+        "line": 60,
+        "quote": "### Impact on APIs\n\nDocument locking affects both the Local and REST APIs, ensuring that if a document is locked, concurrent users will not be able to perform updates or deletes on that document (including globals). If a user attempts to update or delete a locked document, they will receive an error.\n\nOnce the document is unlocked or the lock duration has expired, other users can proceed with updates or deletes as normal.\n\n#### Overriding Locks\n\nFor operations like `update` and `delete`, Payload includes an `overrideLock` option. This boolean flag, when set to `false`, enforces document locks, ensuring that the operation will not proceed if another user currently holds the lock.\n\nBy default, `overrideLock` is set to `true`, which means that document locks are ignored, and the operation will proceed even if the document is locked. To enforce locks and prevent updates or deletes on locked documents, set `overrideLock: false`.\n\n```ts\nconst result = await payload.update({\n  collection: 'posts',\n  id: '123',\n  data: {\n    title: 'New title',\n  },\n  overrideLock: false, // Enforces the document lock, preventing updates if the document is locked\n})\n```\n\nThis option is particularly useful in scenarios where administrative privileges or specific workflows require you to override the lock and ensure the operation is completed.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-04-07T14:06:03-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6c23452329eee207b8dcbd96bb034e53f1b4b5c9f6e44737886d004185ab984e",
+      "topic": "data",
+      "subject": "Global Config / admin.components.views",
+      "content": {
+        "fields": {
+          "edit": "object — The Edit View for the global, comprised of various nested Document Views",
+          "[key: string]": "object — Any other key adds a completely new Global View"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 325,
+        "quote": "## Global Views\n\nGlobal Views are views that are scoped under the `/globals` route, such as the Edit View.\n\nTo [swap out](#replacing-views) Global Views with your own or [create entirely new ones](#adding-new-views), use the `admin.components.views` property in your [Global Config](../configuration/globals):\n\n```ts\nimport type { SanitizedGlobalConfig } from 'payload'\n\nexport const MyGlobalConfig: SanitizedGlobalConfig = {\n  // ...\n  admin: {\n    components: {\n      views: {\n        // highlight-start\n        edit: {\n          default: {\n            Component: '/path/to/MyCustomGlobalView',\n          },\n        },\n        // highlight-end\n        // Other options include:\n        // - [key: string]\n        // See below for more details\n      },\n    },\n  },\n}\n```\n\n<Banner type=\"success\">\n  **Reminder:** The `edit` key is comprised of various nested views, known as\n  Document Views, that relate to the same Global Document. [More\n  details](./document-views).\n</Banner>\n\nThe following options are available:\n\n| Property | Description                                                                                                                             |\n| -------- | --------------------------------------------------------------------------------------------------------------------------------------- |\n… (+5 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "389a44793a06b57366a5286b34890b3cf42edde831e88387eb7a79b6d37b7006",
+      "topic": "data",
+      "subject": "Global Config / admin.meta",
+      "content": {
+        "fields": {
+          "admin.meta.title": "string — title applied to all views within the global in Admin Panel",
+          "admin.meta.description": "string — description applied to all views within the global in Admin Panel"
+        },
+        "validation": {
+          "admin.meta": "has same options as Root Metadata config — overridden per-view if view defines its own metadata"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 196,
+        "quote": "## Global Metadata\n\nGlobal Metadata is the metadata that is applied to all pages within any given Global within the Admin Panel. This metadata is used to customize the title and description of all views within any given Global, unless overridden by the view itself.\n\nTo customize Global Metadata, use the `admin.meta` key within your Global Config:\n\n```ts\nimport { GlobalConfig } from 'payload'\n\nexport const MyGlobal: GlobalConfig = {\n  // ...\n  admin: {\n    // highlight-start\n    meta: {\n      // highlight-end\n      title: 'My Global',\n      description: 'The best admin panel in the world',\n    },\n  },\n}\n```\n\nThe Global Meta config has the same options as the [Root Metadata](#root-metadata) config.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "28a349a95c1f1a35e36610c82966fa2a342f28cd11c3bf583d9326c8c950b4bb",
+      "topic": "data",
+      "subject": "Payload (payload)/ folder files / auto-generation rules",
+      "content": {
+        "validation": {
+          "layout.tsx RootLayout usage": "MUST NOT be edited — required for Payload",
+          "layout.tsx serverFunction pattern": "MUST NOT be edited — required for Payload to work",
+          "layout.tsx importMap prop to RootLayout": "MUST NOT be edited — required for Payload"
+        },
+        "fields": {
+          "layout.tsx": "not auto-generated, safe to edit, never regenerated — created once during setup",
+          "admin/importMap.js": "auto-generated, do NOT edit, regenerated on startup/HMR/manual command — configure via admin.importMap instead",
+          "admin/[[...segments]]/page.tsx": "not auto-generated, rarely needs editing, never regenerated",
+          "admin/[[...segments]]/not-found.tsx": "not auto-generated, rarely needs editing, never regenerated",
+          "api/[...slug]/route.ts": "not auto-generated, rarely needs editing, never regenerated",
+          "custom.scss": "not auto-generated, safe to edit, never regenerated — intended for custom styles"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 227,
+        "quote": "[line 227] ## Editing layout.tsx Safely\n\nWhen you move the Payload folder, you'll need to update the import path in `layout.tsx`:\n\n```tsx\n// app/admin/content/(payload)/layout.tsx\nimport { importMap } from './admin/importMap.js' // Update this path as needed\n```\n\n**What you can safely edit:**\n\n- Import map path (required when moving folders)\n- Custom imports for additional functionality\n- Custom SCSS imports\n- Server function logic (advanced use cases)\n\n**What you should NOT edit:**\n\n- The core `RootLayout` usage (required for Payload)\n- The `serverFunction` pattern (required for Payload to work)\n- The import map prop to `RootLayout`\n\n---\n[line 203] ## Understanding Auto-Generated Files\n\nNot all files in the `(payload)` folder are auto-generated. Here's what you need to know:\n\n| File                                  | Auto-Generated? | Safe to Edit? | When Regenerated?            | Notes                                                        |\n| ------------------------------------- | --------------- | ------------- | ---------------------------- | ------------------------------------------------------------ |\n| `layout.tsx`                          | No              | Yes           | Never                        | Created once during setup. Safe to modify import paths.      |\n| `admin/importMap.js`                  | Yes             | No            | Startup, HMR, manual command | Always regenerated. Configure via `admin.importMap` instead. |\n| `admin/[[...segments]]/page.tsx`      | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `admin/[[...segments]]/not-found.tsx` | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `api/[...slug]/route.ts`              | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `custom.scss`                         | No              | Yes           | Never                        | Intended for your custom styles.                             |\n\n### About the \"DO NOT MODIFY\" Warning\n\nYou may see this warning in `layout.tsx`:\n\n```ts\n/* THIS FILE WAS GENERATED AUTOMATICALLY BY PAYLOAD. */\n/* DO NOT MODIFY IT BECAUSE IT COULD BE REWRITTEN AT ANY TIME. */\n```\n\n**This warning is misleading.** The file was generated during initial project setup by `create-payload-app`, but it is **never regenerated** by Payload. It is completely safe to modify this file, especially when customizing your folder structure.\n",
+        "additionalSources": [
+          {
+            "file": "docs/admin/admin-panel-location.mdx",
+            "line": 203,
+            "quote": "## Understanding Auto-Generated Files\n\nNot all files in the `(payload)` folder are auto-generated. Here's what you need to know:\n\n| File                                  | Auto-Generated? | Safe to Edit? | When Regenerated?            | Notes                                                        |\n| ------------------------------------- | --------------- | ------------- | ---------------------------- | ------------------------------------------------------------ |\n| `layout.tsx`                          | No              | Yes           | Never                        | Created once during setup. Safe to modify import paths.      |\n| `admin/importMap.js`                  | Yes             | No            | Startup, HMR, manual command | Always regenerated. Configure via `admin.importMap` instead. |\n| `admin/[[...segments]]/page.tsx`      | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `admin/[[...segments]]/not-found.tsx` | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `api/[...slug]/route.ts`              | No              | Rarely needed | Never                        | Part of template. Usually no need to edit.                   |\n| `custom.scss`                         | No              | Yes           | Never                        | Intended for your custom styles.                             |\n\n### About the \"DO NOT MODIFY\" Warning\n\nYou may see this warning in `layout.tsx`:\n\n```ts\n/* THIS FILE WAS GENERATED AUTOMATICALLY BY PAYLOAD. */\n/* DO NOT MODIFY IT BECAUSE IT COULD BE REWRITTEN AT ANY TIME. */\n```\n\n**This warning is misleading.** The file was generated during initial project setup by `create-payload-app`, but it is **never regenerated** by Payload. It is completely safe to modify this file, especially when customizing your folder structure.\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cbc1e180cc81c6c1fba1b9e8427fceaa6620c54ac5eb9dbd321325aeca87e30e",
+      "topic": "data",
+      "subject": "Payload Config / admin.dashboard.defaultLayout",
+      "content": {
+        "fields": {
+          "defaultLayout": "function({ req }) => WidgetInstance[] — customize initial layout based on user role or other factors; only used for first-time visitors or after layout reset"
+        },
+        "validation": {
+          "WidgetInstance.widgetSlug": "string* — slug of the widget to display",
+          "WidgetInstance.data": "object — optional widget-specific data passed to widgetData",
+          "WidgetInstance.width": "WidgetWidth — initial width (default: minWidth); constrained by widget minWidth and maxWidth"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 101,
+        "quote": "### Default Layout\n\nControl the initial dashboard layout with the `defaultLayout` property:\n\n```ts\nexport default buildConfig({\n  admin: {\n    dashboard: {\n      defaultLayout: ({ req }) => {\n        // Customize layout based on user role or other factors\n        const isAdmin = req.user?.roles?.includes('admin')\n\n        return [\n          { widgetSlug: 'collections', width: 'full' },\n          {\n            widgetSlug: 'sales-summary',\n            data: {\n              timeframe: 'monthly',\n              title: 'Revenue Overview',\n            },\n            width: isAdmin ? 'medium' : 'small',\n          },\n          { widgetSlug: 'user-stats', width: isAdmin ? 'medium' : 'full' },\n          { widgetSlug: 'revenue-chart', width: 'full' },\n        ]\n      },\n      widgets: [\n        // ... widget definitions\n      ],\n    },\n  },\n})\n```\n\nThe `defaultLayout` function receives the request object and should return an array of `WidgetInstance` objects.\n\nIf your widget has `fields`, you can type `widgetData` with generated widget types:\n\n```tsx\nimport type { WidgetServerProps } from 'payload'\n… (+35 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1bce80820eabf129e824c20ef96a061249907ae541b58a9455fe881fa5a359d2",
+      "topic": "data",
+      "subject": "Payload Config / admin.dashboard.widgets",
+      "content": {
+        "fields": {
+          "slug": "string — unique identifier for the widget",
+          "Component": "string — path to widget component (supports # syntax for named exports)",
+          "fields": "Field[] — optional widget-specific form fields shown in the edit drawer",
+          "minWidth": "WidgetWidth — minimum width the widget can be resized to",
+          "maxWidth": "WidgetWidth — maximum width the widget can be resized to"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 28,
+        "quote": "### Defining Widgets\n\nDefine widgets in your Payload config using the `admin.dashboard.widgets` property:\n\n```ts\nimport { buildConfig } from 'payload'\n\nexport default buildConfig({\n  admin: {\n    dashboard: {\n      widgets: [\n        {\n          slug: 'sales-summary',\n          Component: './components/SalesSummary.tsx#default',\n          fields: [\n            { name: 'title', type: 'text' },\n            {\n              name: 'timeframe',\n              type: 'select',\n              options: ['daily', 'weekly', 'monthly', 'yearly'],\n            },\n            { name: 'showTrend', type: 'checkbox' },\n          ],\n          minWidth: 'small',\n          maxWidth: 'medium',\n        },\n      ],\n    },\n  },\n})\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a3d443a5e07c6f0a736b27555d346e38126e45833d818ef414bbcc682aa275ca",
+      "topic": "data",
+      "subject": "Payload Config / admin.meta.icons",
+      "content": {
+        "fields": {
+          "admin.meta.icons": "array of icon objects — specifies <link> tags for Admin Panel icons",
+          "icons[].rel": "string — relationship type (e.g. 'icon' for favicon, 'apple-touch-icon' for Apple devices, 'mask-icon' for Safari)",
+          "icons[].type": "string — MIME type of icon (e.g. 'image/png')",
+          "icons[].url": "string — URL of the icon"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 66,
+        "quote": "### Icons\n\nThe Icons Config corresponds to the `<link>` tags that are used to specify icons for the Admin Panel. The `icons` key is an array of objects, each of which represents an individual icon. Icons are differentiated from one another by their `rel` attribute, which specifies the relationship between the document and the icon.\n\nThe most common icon type is the favicon, which is displayed in the browser tab. This is specified by the `rel` attribute `icon`. Other common icon types include `apple-touch-icon`, which is used by Apple devices when the Admin Panel is saved to the home screen, and `mask-icon`, which is used by Safari to mask the Admin Panel icon.\n\nTo customize icons, use the `admin.meta.icons` property in your Payload Config:\n\n```ts\n{\n  // ...\n  admin: {\n    meta: {\n      // highlight-start\n      icons: [\n      // highlight-end\n        {\n          rel: 'icon',\n          type: 'image/png',\n          url: '/favicon.png',\n        },\n        {\n          rel: 'apple-touch-icon',\n          type: 'image/png',\n          url: '/apple-touch-icon.png',\n        },\n      ],\n    },\n  },\n}\n```\n\nFor a full list of all available Icon options, see the [Next.js documentation](https://nextjs.org/docs/app/api-reference/functions/generate-metadata#icons).\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c0216eca4e5c28fde1d1fe6b83d8e9d2e6dec2d545a7b66c318c6b1708e9ae0d",
+      "topic": "data",
+      "subject": "Payload Config / admin.meta.openGraph",
+      "content": {
+        "fields": {
+          "admin.meta.openGraph.description": "string — OG description",
+          "admin.meta.openGraph.images": "array of objects with url (string), width (number), height (number)",
+          "admin.meta.openGraph.siteName": "string — OG site name",
+          "admin.meta.openGraph.title": "string — OG title"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 100,
+        "quote": "### Open Graph\n\nOpen Graph metadata is a set of tags that are used to control how URLs are displayed when shared on social media platforms. Open Graph metadata is automatically generated by Payload, but can be customized at the Root level.\n\nTo customize Open Graph metadata, use the `admin.meta.openGraph` property in your Payload Config:\n\n```ts\n{\n  // ...\n  admin: {\n    meta: {\n      // highlight-start\n      openGraph: {\n      // highlight-end\n        description: 'The best admin panel in the world',\n        images: [\n          {\n            url: 'https://example.com/image.jpg',\n            width: 800,\n            height: 600,\n          },\n        ],\n        siteName: 'Payload',\n        title: 'My Admin Panel',\n      },\n    },\n  },\n}\n```\n\nFor a full list of all available Open Graph options, see the [Next.js documentation](https://nextjs.org/docs/app/api-reference/functions/generate-metadata#opengraph).\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f9cb8b473de7f361f6cfa8390a2dec1c06f722e6ce0385a615c5f394dd092c75",
+      "topic": "data",
+      "subject": "Payload Config / admin.meta.robots",
+      "content": {
+        "fields": {
+          "admin.meta.robots": "string — controls robots meta tag in Admin Panel <head>; default prevents search engine indexing"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 132,
+        "quote": "### Robots\n\nSetting the `robots` property will allow you to control the `robots` meta tag that is rendered within the `<head>` of the Admin Panel. This can be used to control how search engines index pages and displays them in search results.\n\nBy default, the Admin Panel is set to prevent search engines from indexing pages within the Admin Panel.\n\nTo customize the Robots Config, use the `admin.meta.robots` property in your Payload Config:\n\n```ts\n{\n  // ...\n  admin: {\n    meta: {\n      // highlight-start\n      robots: 'noindex, nofollow',\n      // highlight-end\n    },\n  },\n}\n```\n\nFor a full list of all available Robots options, see the [Next.js documentation](https://nextjs.org/docs/app/api-reference/functions/generate-metadata#robots).\n\n##### Prevent Crawling\n\nWhile setting meta tags via `admin.meta.robots` can prevent search engines from _indexing_ web pages, it does not prevent them from being _crawled_.\n\nTo prevent your pages from being crawled altogether, add a `robots.txt` file to your root directory.\n\n```text\nUser-agent: *\nDisallow: /admin/\n```\n\n<Banner type=\"info\">\n  **Note:** If you've customized the path to your Admin Panel via\n  `config.routes`, be sure to update the `Disallow` directive to match your\n  custom path.\n</Banner>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "00a813e0bd3453a12c86c44cb324c62ce8f885197eddae127bc98eb80b6533e7",
+      "topic": "data",
+      "subject": "Payload Config / admin.routes",
+      "content": {
+        "fields": {
+          "admin.routes.account": "string — default '/account' — user account page",
+          "admin.routes.createFirstUser": "string — default '/create-first-user' — create first user page",
+          "admin.routes.forgot": "string — default '/forgot' — password reset request page",
+          "admin.routes.inactivity": "string — default '/logout-inactivity' — redirect target after inactivity",
+          "admin.routes.login": "string — default '/login' — login page",
+          "admin.routes.logout": "string — default '/logout' — logout page",
+          "admin.routes.reset": "string — default '/reset' — password reset page",
+          "admin.routes.unauthorized": "string — default '/unauthorized' — unauthorized page"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 252,
+        "quote": "### Admin-level Routes\n\nAdmin-level routes are those behind the `/admin` path. These are the routes that are part of the Admin Panel itself, such as the user's account page, the login page, etc.\n\nTo customize admin-level routes, use the `admin.routes` property in your [Payload Config](../configuration/overview):\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    routes: {\n      account: '/my-account', // highlight-line\n    },\n  },\n})\n```\n\nThe following options are available:\n\n| Option            | Default route        | Description                               |\n| ----------------- | -------------------- | ----------------------------------------- |\n| `account`         | `/account`           | The user's account page.                  |\n| `createFirstUser` | `/create-first-user` | The page to create the first user.        |\n| `forgot`          | `/forgot`            | The password reset page.                  |\n| `inactivity`      | `/logout-inactivity` | The page to redirect to after inactivity. |\n| `login`           | `/login`             | The login page.                           |\n| `logout`          | `/logout`            | The logout page.                          |\n| `reset`           | `/reset`             | The password reset page.                  |\n| `unauthorized`    | `/unauthorized`      | The unauthorized page.                    |\n\n<Banner type=\"success\">\n  **Note:** You can also swap out entire _views_ out for your own, using the\n  `admin.views` property of the Payload Config. See [Custom\n  Views](../custom-components/custom-views) for more information.\n</Banner>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5c35db68980b84ba61fc93d53de6a72e9ec18fa5636cb40882a1d45ecd5e99cb",
+      "topic": "data",
+      "subject": "Payload Config / admin.timezones",
+      "content": {
+        "fields": {
+          "admin.timezones.defaultTimezone": "string — IANA timezone value (e.g. 'Europe/Amsterdam')",
+          "admin.timezones.supportedTimezones": "array | function({defaultTimezones}) — supports function form to extend the default timezone list rather than replacing it"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 380,
+        "quote": "[line 380] ### Using a UTC timezone\n\nIn some situations you may want the displayed date and time to match exactly what's being stored in the database where we always store values in UTC. You can do this by adding UTC as a valid timezone option.\nUsing a UTC timezone means that an editor inputing for example '1pm' will always see '1pm' and the stored value will be '13:00:00Z'.\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    timezones: {\n      supportedTimezones: [\n        {\n          label: 'UTC',\n          value: 'UTC',\n        },\n        // ...other timezones\n      ],\n      defaultTimezone: 'UTC',\n    },\n  },\n})\n```\n\n---\n[line 348] ### Extending supported timezones\n\nFor `supportedTimezones` we also support using a function that is given the defaultTimezones list. This allows you to easily extend the default list of timezones rather than replacing it completely.\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    timezones: {\n      supportedTimezones: ({ defaultTimezones }) => [\n        ...defaultTimezones, // list provided by Payload\n        {\n          label: 'Europe/Dublin',\n          value: 'Europe/Dublin',\n        },\n        {\n          label: 'Europe/Amsterdam',\n          value: 'Europe/Amsterdam',\n        },\n        {\n          label: 'Europe/Bucharest',\n          value: 'Europe/Bucharest',\n        },\n      ],\n      defaultTimezone: 'Europe/Amsterdam',\n    },\n  },\n})\n```\n",
+        "additionalSources": [
+          {
+            "file": "docs/admin/overview.mdx",
+            "line": 348,
+            "quote": "### Extending supported timezones\n\nFor `supportedTimezones` we also support using a function that is given the defaultTimezones list. This allows you to easily extend the default list of timezones rather than replacing it completely.\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    timezones: {\n      supportedTimezones: ({ defaultTimezones }) => [\n        ...defaultTimezones, // list provided by Payload\n        {\n          label: 'Europe/Dublin',\n          value: 'Europe/Dublin',\n        },\n        {\n          label: 'Europe/Amsterdam',\n          value: 'Europe/Amsterdam',\n        },\n        {\n          label: 'Europe/Bucharest',\n          value: 'Europe/Bucharest',\n        },\n      ],\n      defaultTimezone: 'Europe/Amsterdam',\n    },\n  },\n})\n```\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bf6f8b43a4c1b5963cacc3387ce3e4e13c8a6da932dd163ba547fd01519c9cf9",
+      "topic": "data",
+      "subject": "Payload Config / admin.toast",
+      "content": {
+        "fields": {
+          "admin.toast.duration": "number (milliseconds) — how long a toast is displayed; default 4000",
+          "admin.toast.expand": "boolean — if true, expands message stack so all messages show simultaneously; default false",
+          "admin.toast.limit": "number — maximum toasts visible at once; default 5",
+          "admin.toast.position": "string — position of toast on screen; default 'bottom-right'"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 405,
+        "quote": "## Toast\n\nThe `admin.toast` configuration allows you to customize the handling of toast messages within the Admin Panel, such as increasing the duration they are displayed and limiting the number of visible toasts at once.\n\n<Banner type=\"info\">\n  **Note:** The Admin Panel currently uses the\n  [Sonner](https://sonner.emilkowal.ski) library for toast notifications.\n</Banner>\n\nThe following options are available for the `admin.toast` configuration:\n\n| Option     | Description                                                                                                      | Default        |\n| ---------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |\n| `duration` | The length of time (in milliseconds) that a toast message is displayed.                                          | `4000`         |\n| `expand`   | If `true`, will expand the message stack so that all messages are shown simultaneously without user interaction. | `false`        |\n| `limit`    | The maximum number of toasts that can be visible on the screen at once.                                          | `5`            |\n| `position` | The position of the toast on the screen.                                                                         | `bottom-right` |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c7bf38a5bcc47e93accffa5630d034afda8ee18a5108d9b8f8a8563c0a415d9f",
+      "topic": "data",
+      "subject": "Payload Config / admin.user",
+      "content": {
+        "fields": {
+          "admin.user": "string — slug of the auth-enabled Collection allowed to log into the Admin Panel; defaults to 'users' (auto-provided User Collection if not specified)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 129,
+        "quote": "### The Admin User Collection\n\nTo specify which Collection to allow to login to the Admin Panel, pass the `admin.user` key equal to the slug of any auth-enabled Collection:\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    user: 'admins', // highlight-line\n  },\n})\n```\n\n<Banner type=\"warning\">\n  **Important:**\n\nThe Admin Panel can only be used by a single auth-enabled Collection. To enable authentication for a Collection, simply set `auth: true` in the Collection's configuration. See [Authentication](../authentication/overview) for more information.\n\n</Banner>\n\nBy default, if you have not specified a Collection, Payload will automatically provide a `User` Collection with access to the Admin Panel. You can customize or override the fields and settings of the default `User` Collection by adding your own Collection with `slug: 'users'`. Doing this will force Payload to use your provided `User` Collection instead of its default version.\n\nYou can use whatever Collection you'd like to access the Admin Panel as long as the Collection supports [Authentication](/docs/authentication/overview). It doesn't need to be called `users`. For example, you may wish to have two Collections that both support authentication:\n\n- `admins` - meant to have a higher level of permissions to manage your data and access the Admin Panel\n- `customers` - meant for end users of your app that should not be allowed to log into the Admin Panel\n\nTo do this, specify `admin: { user: 'admins' }` in your config. This will provide access to the Admin Panel to only `admins`. Any users authenticated as `customers` will be prevented from accessing the Admin Panel. See [Access Control](/docs/access-control/overview) for full details.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6493cd418c65e258ff630c9a455f5f08810ef0abc0deaf25fc6435f0511569e1",
+      "topic": "data",
+      "subject": "Payload Config / routes",
+      "content": {
+        "fields": {
+          "routes.admin": "string — default '/admin' — Admin Panel base path",
+          "routes.api": "string — default '/api' — REST API base path",
+          "routes.graphQL": "string — default '/graphql' — GraphQL API base path",
+          "routes.graphQLPlayground": "string — default '/graphql-playground' — GraphQL Playground path"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 173,
+        "quote": "### Root-level Routes\n\nRoot-level routes are those that are not behind the `/admin` path, such as the [REST API](../rest-api/overview) and [GraphQL API](../graphql/overview), or the root path of the Admin Panel itself.\n\nTo customize root-level routes, use the `routes` property in your [Payload Config](../configuration/overview):\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  routes: {\n    admin: '/custom-admin-route', // highlight-line\n  },\n})\n```\n\nThe following options are available:\n\n| Option              | Default route         | Description                                       |\n| ------------------- | --------------------- | ------------------------------------------------- |\n| `admin`             | `/admin`              | The Admin Panel itself.                           |\n| `api`               | `/api`                | The [REST API](../rest-api/overview) base path.   |\n| `graphQL`           | `/graphql`            | The [GraphQL API](../graphql/overview) base path. |\n| `graphQLPlayground` | `/graphql-playground` | The GraphQL Playground.                           |\n\n<Banner type=\"warning\">\n  **Important:** Changing Root-level Routes also requires a change to [Project\n  Structure](#project-structure) to match the new route. [More\n  details](#customizing-root-level-routes).\n</Banner>\n\n<Banner type=\"success\">\n  **Tip:** You can easily add _new_ routes to the Admin Panel through [Custom\n  Endpoints](../rest-api/overview#custom-endpoints) and [Custom\n  Views](../custom-components/custom-views).\n</Banner>\n\n#### Customizing Root-level Routes\n\n… (+39 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "65f37d5755a18a6c0120d9fce347783901605e3c40041cf48579cb9505c16b72",
+      "topic": "data",
+      "subject": "Payload Config / routes and importMap",
+      "content": {
+        "validation": {
+          "admin.importMap.importMapFile": "must be an absolute path, not relative",
+          "component paths in config": "must be relative to admin.importMap.baseDir"
+        },
+        "fields": {
+          "routes.admin": "string — URL prefix for admin panel",
+          "routes.api": "string — URL prefix for REST API",
+          "routes.graphQL": "string — URL prefix for GraphQL endpoint",
+          "routes.graphQLPlayground": "string — URL prefix for GraphQL playground",
+          "admin.importMap.baseDir": "string — absolute path to the (payload) folder",
+          "admin.importMap.importMapFile": "string — absolute path to the importMap.js file"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 290,
+        "quote": "[line 290] ### Import map not found error\n\nIf you see an error about the import map not being found:\n\n1. Verify `admin.importMap.importMapFile` points to the correct location\n2. Run `pnpm payload generate:importmap` manually\n3. Check that the path is absolute, not relative\n\n---\n[line 90] ## Scenario 2: Moving the Entire Payload Folder (Admin Panel and API)\n\nTo move both the Payload Admin Panel and API under a custom path, you move the entire `(payload)` folder. This example places everything under `/admin/content`.\n\n<Banner type=\"info\">\n  Because the `admin/` subfolder inside `(payload)` is a Next.js route segment,\n  moving `(payload)` to `app/admin/content/(payload)` results in the admin panel\n  being served at `/admin/content/admin`, not `/admin/content`. Keep this in\n  mind when choosing your target path and setting `routes.admin`.\n</Banner>\n\n**1. Update your Payload Config with all routes and import map settings:**\n\n```ts\nimport { buildConfig } from 'payload'\nimport path from 'path'\nimport { fileURLToPath } from 'url'\n\nconst filename = fileURLToPath(import.meta.url)\nconst dirname = path.dirname(filename)\n\nexport default buildConfig({\n  // ...\n  routes: {\n    admin: '/admin/content/admin',\n    api: '/admin/content/api',\n    graphQL: '/admin/content/api/graphql',\n    graphQLPlayground: '/admin/content/api/graphql-playground',\n  },\n  admin: {\n    importMap: {\n      baseDir: path.resolve(dirname, './src/app/admin/content/(payload)'),\n      importMapFile: path.resolve(\n        dirname,\n        './src/app/admin/content/(payload)/admin/importMap.js',\n      ),\n    },\n  },\n})\n```\n… (+30 more lines)\n---\n[line 314] ### Components not loading\n\nIf custom components aren't loading:\n\n1. Verify `admin.importMap.baseDir` is correct\n2. Regenerate the import map: `pnpm payload generate:importmap`\n3. Check component paths in your config are relative to `baseDir`\n",
+        "additionalSources": [
+          {
+            "file": "docs/admin/admin-panel-location.mdx",
+            "line": 90,
+            "quote": "## Scenario 2: Moving the Entire Payload Folder (Admin Panel and API)\n\nTo move both the Payload Admin Panel and API under a custom path, you move the entire `(payload)` folder. This example places everything under `/admin/content`.\n\n<Banner type=\"info\">\n  Because the `admin/` subfolder inside `(payload)` is a Next.js route segment,\n  moving `(payload)` to `app/admin/content/(payload)` results in the admin panel\n  being served at `/admin/content/admin`, not `/admin/content`. Keep this in\n  mind when choosing your target path and setting `routes.admin`.\n</Banner>\n\n**1. Update your Payload Config with all routes and import map settings:**\n\n```ts\nimport { buildConfig } from 'payload'\nimport path from 'path'\nimport { fileURLToPath } from 'url'\n\nconst filename = fileURLToPath(import.meta.url)\nconst dirname = path.dirname(filename)\n\nexport default buildConfig({\n  // ...\n  routes: {\n    admin: '/admin/content/admin',\n    api: '/admin/content/api',\n    graphQL: '/admin/content/api/graphql',\n    graphQLPlayground: '/admin/content/api/graphql-playground',\n  },\n  admin: {\n    importMap: {\n      baseDir: path.resolve(dirname, './src/app/admin/content/(payload)'),\n      importMapFile: path.resolve(\n        dirname,\n        './src/app/admin/content/(payload)/admin/importMap.js',\n      ),\n    },\n  },\n})\n```\n… (+30 more lines)"
+          },
+          {
+            "file": "docs/admin/admin-panel-location.mdx",
+            "line": 314,
+            "quote": "### Components not loading\n\nIf custom components aren't loading:\n\n1. Verify `admin.importMap.baseDir` is correct\n2. Regenerate the import map: `pnpm payload generate:importmap`\n3. Check component paths in your config are relative to `baseDir`\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f4d7a58d90cdf3d35c64f0a6efa9d51f4937794a17d0b78677ca23da8cdf63eb",
+      "topic": "data",
+      "subject": "Payload Config / routes.admin",
+      "content": {
+        "fields": {
+          "routes.admin": "string path — changes the URL prefix of the admin panel (e.g. '/dashboard' instead of '/admin')"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 43,
+        "quote": "## Scenario 1: Simple Route Change\n\nTo change the admin route from `/admin` to `/dashboard`:\n\n**1. Update your Payload Config:**\n\n```ts\nimport { buildConfig } from 'payload'\n\nexport default buildConfig({\n  // ...\n  routes: {\n    admin: '/dashboard', // Changed from '/admin'\n  },\n})\n```\n\n**2. Move the folder:**\n\n```bash\n# Move the admin folder\nmv app/(payload)/admin app/(payload)/dashboard\n```\n\n**3. Update the import path in `layout.tsx`:**\n\nEdit `app/(payload)/layout.tsx` and update the import map reference to match the new folder name:\n\n```ts\n// Before\nimport { importMap } from './admin/importMap.js'\n\n// After\nimport { importMap } from './dashboard/importMap.js'\n```\n\n<Banner type=\"info\">\n  Your IDE may auto-update this import when you move the folder, but it may not.\n  To catch any stale references to the old path, run a build or type-check\n  (`pnpm build` or `pnpm tsc --noEmit`) and fix any import errors until it\n… (+7 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d029fe3c2bbf119fc4066ec8c4a8e27dcf05e8cabda2ba34a353ad88b3f05b3c",
+      "topic": "data",
+      "subject": "View Config / meta",
+      "content": {
+        "fields": {
+          "meta.title": "string — title for the specific view, overrides Collection/Global/Root level metadata",
+          "meta.description": "string — description for the specific view, overrides Collection/Global/Root level metadata"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/metadata.mdx",
+        "line": 220,
+        "quote": "## View Metadata\n\nView Metadata is the metadata that is applied to specific [Views](../custom-components/custom-views) within the Admin Panel. This metadata is used to customize the title and description of a specific view, overriding any metadata set at the [Root](#root-metadata), [Collection](#collection-metadata), or [Global](#global-metadata) level.\n\nTo customize View Metadata, use the `meta` key within your View Config:\n\n```ts\n{\n  // ...\n  admin: {\n    views: {\n      dashboard: {\n        // highlight-start\n        meta: {\n        // highlight-end\n          title: 'My Dashboard',\n          description: 'The best dashboard in the world',\n        }\n      },\n    },\n  },\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "76ed88e96672ac1bf7c736a289acfc88a535529ee2f4ea5999ddac6316716d36",
+      "topic": "data",
+      "subject": "WidgetServerProps",
+      "content": {
+        "fields": {
+          "req": "PayloadRequest — the request object including req.payload for server-side data fetching",
+          "widgetData": "object (optional, typed by generated widget types when fields are defined) — widget-specific data"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 72,
+        "quote": "### Creating a Widget Component\n\nWidgets are React Server Components that receive `WidgetServerProps`:\n\n```tsx\nimport type { WidgetServerProps } from 'payload'\n\nexport default async function UserStatsWidget({ req }: WidgetServerProps) {\n  const { payload } = req\n\n  // Fetch data server-side\n  const userCount = await payload.count({ collection: 'users' })\n\n  return (\n    <div className=\"card\">\n      <h3>Total Users</h3>\n      <p style={{ fontSize: '32px', fontWeight: 'bold' }}>\n        {userCount.totalDocs}\n      </p>\n    </div>\n  )\n}\n```\n\nFor visual consistency with the Payload UI, we recommend:\n\n1. Using the `card` class for your root element, unless you don't want it to have a background color.\n2. Using our theme variables for backgrounds and text colors. For example, use `var(--theme-elevation-0)` for backgrounds and `var(--theme-text)` for text colors.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a13424d2ff4f255505f59dd3edb7dea9460e00b36fe52d1aa14e5e862f57d4c9",
+      "topic": "data",
+      "subject": "admin custom root views / templates",
+      "content": {
+        "fields": {
+          "DefaultTemplate": "Component from @payloadcms/ui/rsc — provides the basic admin panel layout and navigation for custom root views"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 171,
+        "quote": "### View Templates\n\nYour Custom Root Views can optionally use one of the templates that Payload provides. The most common of these is the Default Template which provides the basic layout and navigation.\n\nHere is an example of how to use the Default Template in your Custom View:\n\n```tsx\nimport type { AdminViewServerProps } from 'payload'\n\nimport { Gutter } from '@payloadcms/ui'\nimport { DefaultTemplate } from '@payloadcms/ui/rsc'\nimport React from 'react'\n\nexport function MyCustomView({\n  initPageResult,\n  params,\n  searchParams,\n}: AdminViewServerProps) {\n  return (\n    <DefaultTemplate\n      i18n={initPageResult.req.i18n}\n      locale={initPageResult.locale}\n      params={params}\n      payload={initPageResult.req.payload}\n      permissions={initPageResult.permissions}\n      searchParams={searchParams}\n      user={initPageResult.req.user || undefined}\n      visibleEntities={initPageResult.visibleEntities}\n    >\n      <Gutter>\n        <h1>Custom Default Root View</h1>\n        <p>This view uses the Default Template.</p>\n      </Gutter>\n    </DefaultTemplate>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d858069964306c98c6b8e67b3e41a0736265e7d3db6ddefb9f7e60661134408e",
+      "topic": "data",
+      "subject": "admin custom views / default props",
+      "content": {
+        "fields": {
+          "initPageResult": "object — contains req, payload, permissions, and other request context",
+          "clientConfig": "ClientConfig — the Client Config object"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 125,
+        "quote": "### Default Props\n\nYour Custom Views will be provided with the following props:\n\n| Prop             | Description                                                                                                                        |\n| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |\n| `initPageResult` | An object containing `req`, `payload`, `permissions`, etc.                                                                         |\n| `clientConfig`   | The Client Config object. [More details](./overview#accessing-the-payload-config).                                                 |\n| `importMap`      | The import map object.                                                                                                             |\n| `params`         | An object containing the [Dynamic Route Parameters](https://nextjs.org/docs/app/building-your-application/routing/dynamic-routes). |\n| `searchParams`   | An object containing the [Search Parameters](https://developer.mozilla.org/docs/Learn/Common_questions/What_is_a_URL#parameters).  |\n| `doc`            | The document being edited. Only available in Document Views. [More details](./document-views).                                     |\n| `i18n`           | The [i18n](../configuration/i18n) object.                                                                                          |\n| `payload`        | The [Payload](../local-api/overview) class.                                                                                        |\n\n<Banner type=\"warning\">\n  **Note:** The props above apply to **Root Views** and any view added at the\n  root level. Collection List Views and Collection/Global Edit Views receive a\n  different set of props specific to their context. See [List View\n  Props](./list-view#props) and [Document Views](./document-views) for their\n  respective prop references.\n</Banner>\n\nHere is an example of a Custom View component:\n\n```tsx\nimport type { AdminViewServerProps } from 'payload'\n\nimport { Gutter } from '@payloadcms/ui'\nimport React from 'react'\n\nexport function MyCustomView(props: AdminViewServerProps) {\n  return (\n    <Gutter>\n      <h1>Custom Default Root View</h1>\n      <p>This view uses the Default Template.</p>\n    </Gutter>\n  )\n}\n```\n… (+6 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5d07532b3f897a38fe99d0bf8c56065c1512850f1df5d049060f93d19bb26199",
+      "topic": "data",
+      "subject": "admin root views / configuration",
+      "content": {
+        "fields": {
+          "scope": "Scoped under /admin route; examples include dashboard and account views",
+          "config path": "admin.components.views at root of Payload Config"
+        },
+        "validation": {
+          "keys": "Use reserved keys (e.g. dashboard) to replace built-in views or custom keys to add new views"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 239,
+        "quote": "## Root Views\n\nRoot Views are the main views of the [Admin Panel](../admin/overview). These are views that are scoped directly under the `/admin` route, such as the Dashboard or Account views.\n\nTo [swap out](#replacing-views) Root Views with your own, or to [create entirely new ones](#adding-new-views), use the `admin.components.views` property at the root of your [Payload Config](../configuration/overview):\n\n```ts\nimport { buildConfig } from 'payload'\n\nconst config = buildConfig({\n  // ...\n  admin: {\n    components: {\n      views: {\n        // highlight-start\n        dashboard: {\n          Component: '/path/to/Dashboard',\n        },\n        // highlight-end\n        // Other options include:\n        // - account\n        // - [key: string]\n        // See below for more details\n      },\n    },\n  },\n})\n```\n\n_For details on how to build Custom Views, including all available props, see [Building Custom Views](#building-custom-views)._\n\nThe following options are available:\n\n| Property    | Description                                                                                     |\n| ----------- | ----------------------------------------------------------------------------------------------- |\n| `account`   | The Account view is used to show the currently logged in user's Account page.                   |\n| `dashboard` | The main landing page of the Admin Panel.                                                       |\n| `[key]`     | Any other key can be used to add a completely new Root View. [More details](#adding-new-views). |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "034bc2e197075cfdddc415d99492c63f3bcd3b0c1615342bf238b341cd823b66",
+      "topic": "data",
+      "subject": "admin.components.edit.SaveButton",
+      "content": {
+        "fields": {
+          "config path (collections)": "admin.components.edit.SaveButton in CollectionConfig",
+          "config path (globals)": "admin.components.edit.SaveButton in GlobalConfig",
+          "server props type": "SaveButtonServerProps",
+          "client props type": "SaveButtonClientProps"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/edit-view.mdx",
+        "line": 150,
+        "quote": "### SaveButton\n\nThe `SaveButton` component allows you to render a custom Save Button in the Edit View.\n\n#### Configuration Path\n\n- **Collections:** `admin.components.edit.SaveButton`\n- **Globals:** `admin.components.edit.SaveButton`\n\n#### Example for Collections\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Posts: CollectionConfig = {\n  slug: 'posts',\n  admin: {\n    components: {\n      edit: {\n        // highlight-start\n        SaveButton: '/path/to/CustomSaveButton',\n        // highlight-end\n      },\n    },\n  },\n}\n```\n\n#### Example for Globals\n\n```ts\nimport type { GlobalConfig } from 'payload'\n\nexport const Header: GlobalConfig = {\n  slug: 'header',\n  admin: {\n    components: {\n      edit: {\n        // highlight-start\n        SaveButton: '/path/to/CustomSaveButton',\n… (+34 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-06T01:26:35-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "12fdac66030daf22bd9729ab2cb1da638dfbf04bcd2e7f4579870ebf213e3946",
+      "topic": "data",
+      "subject": "admin/importMap.js / regeneration behavior",
+      "content": {
+        "fields": {
+          "regenerated_on_startup": "true — every time dev server or production build starts",
+          "regenerated_on_HMR": "true — when component files are saved in development",
+          "regenerated_on_manual_command": "true — when running pnpm payload generate:importmap",
+          "regenerated_at_runtime": "false — never regenerated after production build completes",
+          "manual_edit": "forbidden — configure component paths in Payload config instead",
+          "build_command": "payload build — generates import map and TypeScript types, then runs next build"
+        },
+        "validation": {
+          "direct_edit": "forbidden — file will be overwritten on next startup or HMR; configure via Payload config instead"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 249,
+        "quote": "## Import Map Regeneration\n\nThe `importMap.js` file is automatically regenerated in these scenarios:\n\n- **Application startup** - Every time you start your dev server or production build\n- **Hot Module Replacement (HMR)** - When you save changes to component files in development\n- **Manual generation** - When you run `pnpm payload generate:importmap`\n\nThe import map is **never regenerated** during:\n\n- Normal runtime (only at startup)\n- After the production build completes\n\n<Banner type=\"warning\">\n  **Important:** Never manually edit the `importMap.js` file. Configure\n  component paths in your Payload config and let Payload regenerate the import\n  map automatically.\n</Banner>\n\n### Generating the Import Map on build\n\nRunning `payload build` generates the Import Map (and your TypeScript types) and\nthen runs `next build`. Because the Import Map is statically imported at compile\ntime, generating it _before_ `next build` ensures your production build always\nbundles an up-to-date Import Map.\n\nThe Payload templates seed this for you:\n\n```json\n{\n  \"scripts\": {\n    \"build\": \"payload build\"\n  }\n}\n```\n\n`payload build` forwards any extra arguments to `next build` (e.g. `payload build --turbopack`).\nPass `--no-types` to skip type generation (`payload build --no-types`).\n",
+        "additionalSources": [
+          {
+            "file": "docs/admin/overview.mdx",
+            "line": 437,
+            "quote": "### What happens if I edit the import map file directly?\n\nDon't do this - it will be overwritten on the next startup or HMR. Instead, configure component paths in your Payload config and let Payload regenerate the import map automatically.\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "54aae8fb098eef690bed524caa75bbcac30be746f23ad3a8b1df838b46cd25b7",
+      "topic": "data",
+      "subject": "collection admin.components.edit / options",
+      "content": {
+        "fields": {
+          "beforeDocumentControls": "components injected before Save/Publish buttons",
+          "editMenuItems": "components injected within the 3-dot menu dropdown in the document control bar",
+          "SaveButton": "component — custom save button",
+          "SaveDraftButton": "component — custom save as draft button",
+          "PublishButton": "component — custom publish button",
+          "UnpublishButton": "component — custom unpublish button",
+          "PreviewButton": "component — custom preview button",
+          "Status": "component — represents the status of the current document",
+          "Upload": "component — file upload component"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/edit-view.mdx",
+        "line": 81,
+        "quote": "#### Collections\n\nTo override Edit View components for a Collection, use the `admin.components.edit` property in your [Collection Config](../configuration/collections):\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const MyCollection: CollectionConfig = {\n  // ...\n  admin: {\n    components: {\n      // highlight-start\n      edit: {\n        // ...\n      },\n      // highlight-end\n    },\n  },\n}\n```\n\nThe following options are available:\n\n| Path                     | Description                                                                                                                  |\n| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |\n| `beforeDocumentControls` | Inject custom components before the Save / Publish buttons. [More details](#beforedocumentcontrols).                         |\n| `editMenuItems`          | Inject custom components within the 3-dot menu dropdown located in the document control bar. [More details](#editmenuitems). |\n| `SaveButton`             | A button that saves the current document. [More details](#savebutton).                                                       |\n| `SaveDraftButton`        | A button that saves the current document as a draft. [More details](#savedraftbutton).                                       |\n| `PublishButton`          | A button that publishes the current document. [More details](#publishbutton).                                                |\n| `UnpublishButton`        | A button that unpublishes the current document. [More details](#unpublishbutton).                                            |\n| `PreviewButton`          | A button that previews the current document. [More details](#previewbutton).                                                 |\n| `Status`                 | A component that represents the status of the current document. [More details](#status).                                     |\n| `Upload`                 | A file upload component. [More details](#upload).                                                                            |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-06T01:26:35-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1c4a3dbc3888983fd9957d169a52dd7fe6094bb38cd75f1a5b7a19bdb84573f4",
+      "topic": "data",
+      "subject": "custom edit view / client component props",
+      "content": {
+        "fields": {
+          "props type": "DocumentViewClientProps — type for client component custom edit view props"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/edit-view.mdx",
+        "line": 57,
+        "quote": "#### Client Component\n\n```tsx\n'use client'\nimport React from 'react'\nimport type { DocumentViewClientProps } from 'payload'\n\nexport function MyCustomClientEditView(props: DocumentViewClientProps) {\n  return <div>This is a custom Edit View (Client)</div>\n}\n```\n\n_For details on how to build Custom Views, including all available props, see [Building Custom Views](./custom-views#building-custom-views)._\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-06T01:26:35-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8e75254f1f13082df8b16aa0bd02e5382b5c23ff01a93d25c4affeef0d711c5b",
+      "topic": "data",
+      "subject": "custom edit view / server component props",
+      "content": {
+        "fields": {
+          "props type": "DocumentViewServerProps — type for server component custom edit view props"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/edit-view.mdx",
+        "line": 46,
+        "quote": "#### Server Component\n\n```tsx\nimport React from 'react'\nimport type { DocumentViewServerProps } from 'payload'\n\nexport function MyCustomServerEditView(props: DocumentViewServerProps) {\n  return <div>This is a custom Edit View (Server)</div>\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-06T01:26:35-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "90c490eeaf64df81c7683275f2e964d4c97c5914c56a9c1b1db794c5e9a167a1",
+      "topic": "data",
+      "subject": "document root view / configuration",
+      "content": {
+        "fields": {
+          "config path": "admin.components.views.edit.root in Collection or Global Config",
+          "Component": "string — path to custom root component that takes over the entire document view layout"
+        },
+        "validation": {
+          "scope": "Setting views.edit.root replaces the entire Document View including title, Document Tabs, Edit View, API View, and all nested views. Developer is responsible for rendering all controls."
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/document-views.mdx",
+        "line": 59,
+        "quote": "### Document Root\n\nThe Document Root is mounted on the top-level route for a Document. Setting this property will completely take over the entire Document View layout, including the title, [Document Tabs](#document-tabs), _and all other nested Document Views_ including the [Edit View](./edit-view), API View, etc.\n\nWhen setting a Document Root, you are responsible for rendering all necessary components and controls, as no document controls or tabs would be rendered. To replace only the Edit View precisely, use the `edit.default` key instead.\n\nTo override the Document Root, use the `views.edit.root` property in your [Collection Config](../configuration/collections) or [Global Config](../configuration/globals):\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const MyCollection: CollectionConfig = {\n  slug: 'my-collection',\n  admin: {\n    components: {\n      views: {\n        edit: {\n          // highlight-start\n          root: {\n            Component: '/path/to/MyCustomRootComponent', // highlight-line\n          },\n          // highlight-end\n        },\n      },\n    },\n  },\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "83c9870969e77a87f885d1e1e6269bbc0ee71eea2e5eb4eff39e956cef4cbd8e",
+      "topic": "data",
+      "subject": "global admin.components.edit / options",
+      "content": {
+        "fields": {
+          "beforeDocumentControls": "components injected before Save/Publish buttons",
+          "editMenuItems": "components injected within the 3-dot menu dropdown in the document control bar",
+          "SaveButton": "component — custom save button",
+          "SaveDraftButton": "component — custom save as draft button",
+          "PublishButton": "component — custom publish button",
+          "UnpublishButton": "component — custom unpublish button",
+          "PreviewButton": "component — custom preview button",
+          "Status": "component — represents the status of the global"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/edit-view.mdx",
+        "line": 116,
+        "quote": "#### Globals\n\nTo override Edit View components for Globals, use the `admin.components.edit` property in your [Global Config](../configuration/globals):\n\n```ts\nimport type { GlobalConfig } from 'payload'\n\nexport const MyGlobal: GlobalConfig = {\n  // ...\n  admin: {\n    components: {\n      // highlight-start\n      edit: {\n        // ...\n      },\n      // highlight-end\n    },\n  },\n}\n```\n\nThe following options are available:\n\n| Path                     | Description                                                                                                                  |\n| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |\n| `beforeDocumentControls` | Inject custom components before the Save / Publish buttons. [More details](#beforedocumentcontrols).                         |\n| `editMenuItems`          | Inject custom components within the 3-dot menu dropdown located in the document control bar. [More details](#editmenuitems). |\n| `SaveButton`             | A button that saves the current document. [More details](#savebutton).                                                       |\n| `SaveDraftButton`        | A button that saves the current document as a draft. [More details](#savedraftbutton).                                       |\n| `PublishButton`          | A button that publishes the current document. [More details](#publishbutton).                                                |\n| `UnpublishButton`        | A button that unpublishes the current document. [More details](#unpublishbutton).                                            |\n| `PreviewButton`          | A button that previews the current document. [More details](#previewbutton).                                                 |\n| `Status`                 | A component that represents the status of the global. [More details](#status).                                               |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-06T01:26:35-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "eb8f40a93d50f278be50bb32a3a5f4f33a2aa1688a52de8f2bd567bf5b177dd6",
+      "topic": "data",
+      "subject": "payload-preferences Collection / fields",
+      "content": {
+        "fields": {
+          "id": "unique ID for each preference",
+          "key": "unique string key identifying the preference",
+          "user.value": "ID of the user storing the preference",
+          "user.relationTo": "slug of the Collection the user is logged in as",
+          "value": "any data shape — the preference value",
+          "createdAt": "ISO timestamp — when the preference was created",
+          "updatedAt": "ISO timestamp — last time the preference was updated"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preferences.mdx",
+        "line": 35,
+        "quote": "## Database\n\nPayload automatically creates an internally used `payload-preferences` Collection that stores user preferences. Each document in the `payload-preferences` Collection contains the following shape:\n\n| Key               | Value                                                             |\n| ----------------- | ----------------------------------------------------------------- |\n| `id`              | A unique ID for each preference stored.                           |\n| `key`             | A unique `key` that corresponds to the preference.                |\n| `user.value`      | The ID of the `user` that is storing its preference.              |\n| `user.relationTo` | The `slug` of the Collection that the `user` is logged in as.     |\n| `value`           | The value of the preference. Can be any data shape that you need. |\n| `createdAt`       | A timestamp of when the preference was created.                   |\n| `updatedAt`       | A timestamp set to the last time the preference was updated.      |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-14T17:13:08+00:00"
+      },
+      "module": "preferences",
+      "source": "extracted"
+    },
+    {
+      "id": "cf6c93e1d57efbff7cd280398e7f59c83d91cff034946624629508cee3329881",
+      "topic": "data",
+      "subject": "useAllFormFields hook / dispatchFields actions",
+      "content": {
+        "fields": {
+          "ADD_ROW": "adds a row of data (useful for array/block fields)",
+          "DUPLICATE_ROW": "duplicates a row of data (useful for array/block fields)",
+          "MODIFY_CONDITION": "updates a field's conditional logic result (true/false)",
+          "MOVE_ROW": "moves a row of data (useful for array/block fields)",
+          "REMOVE": "removes a field from form state",
+          "REMOVE_ROW": "removes a row of data from form state (useful for array/block fields)",
+          "REPLACE_STATE": "completely replaces form state",
+          "UPDATE": "updates any property of a specific field's state"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 164,
+        "quote": "## useAllFormFields\n\n**To retrieve more than one field**, you can use the `useAllFormFields` hook. Unlike the `useFormFields` hook, this hook does not accept a \"selector\", and it always returns an array with type of `[fields: Fields, dispatch: React.Dispatch<Action>]]`.\n\n<Banner type=\"warning\">\n  **Warning:** Your component will re-render when _any_ field changes, so use\n  this hook only if you absolutely need to.\n</Banner>\n\nYou can do lots of powerful stuff by retrieving the full form state, like using built-in helper functions to reduce field state to values only, or to retrieve sibling data by path.\n\n```tsx\n'use client'\nimport { useAllFormFields } from '@payloadcms/ui'\nimport { reduceFieldsToValues, getSiblingData } from 'payload/shared'\n\nconst ExampleComponent: React.FC = () => {\n  // the `fields` const will be equal to all fields' state,\n  // and the `dispatchFields` method is usable to send field state up to the form\n  const [fields, dispatchFields] = useAllFormFields();\n\n  // Pass in fields, and indicate if you'd like to \"unflatten\" field data.\n  // The result below will reflect the data stored in the form at the given time\n  const formData = reduceFieldsToValues(fields, true);\n\n  // Pass in field state and a path,\n  // and you will be sent all sibling data of the path that you've specified\n  const siblingData = getSiblingData(fields, 'someFieldName');\n\n  return (\n    // return some JSX here if necessary\n  )\n};\n```\n\n#### Updating other fields' values\n\nIf you are building a Custom Component, then you should use `setValue` which is returned from the `useField` hook to programmatically set your field's value. But if you're looking to update _another_ field's value, you can use `dispatchFields` returned from `useAllFormFields`.\n\nYou can send the following actions to the `dispatchFields` function.\n… (+14 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "3933982662bda192f3da7126345cbcaa28490dd111682bab6198c120bcafa503",
+      "topic": "data",
+      "subject": "useAuth hook / return type",
+      "content": {
+        "fields": {
+          "user": "User — the currently logged in user",
+          "logOut": "function — logs out the current user",
+          "refreshCookie": "function — silently refreshes the user's auth token",
+          "setToken": "function(token) — sets the user's token, decodes it, and resets user/token in memory",
+          "token": "string — the logged-in user's JWT token",
+          "refreshPermissions": "function — loads new permissions (useful after permission-affecting content changes)",
+          "permissions": "Permissions — the current user's permissions"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 951,
+        "quote": "## useAuth\n\nUseful to retrieve info about the currently logged in user as well as methods for interacting with it. It sends back an object with the following properties:\n\n| Property                 | Description                                                                             |\n| ------------------------ | --------------------------------------------------------------------------------------- |\n| **`user`**               | The currently logged in user                                                            |\n| **`logOut`**             | A method to log out the currently logged in user                                        |\n| **`refreshCookie`**      | A method to trigger the silent refreshing of a user's auth token                        |\n| **`setToken`**           | Set the token of the user, to be decoded and used to reset the user and token in memory |\n| **`token`**              | The logged in user's token (useful for creating preview links, etc.)                    |\n| **`refreshPermissions`** | Load new permissions (useful when content that affects permissions has been changed)    |\n| **`permissions`**        | The permissions of the current user                                                     |\n\n```tsx\n'use client'\nimport { useAuth } from '@payloadcms/ui'\nimport type { User } from '../payload-types.ts'\n\nconst Greeting: React.FC = () => {\n  // highlight-start\n  const { user } = useAuth<User>()\n  // highlight-end\n\n  return <span>Hi, {user.email}!</span>\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a488725f4a58d06cc440f6935bc8d51d0e9bf03e3174b2fb2ea0e9ed9af4273b",
+      "topic": "data",
+      "subject": "useCollapsible hook",
+      "content": {
+        "fields": {
+          "isCollapsed": "boolean — true if collapsible is open, false if collapsed",
+          "isVisible": "boolean — if nested, true if no parent collapsible is closed",
+          "toggle": "function — toggles state of nearest collapsible",
+          "isWithinCollapsible": "boolean — true when within another collapsible"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 741,
+        "quote": "## useCollapsible\n\nThe `useCollapsible` hook allows you to control parent collapsibles:\n\n| Property                  | Description                                                                                                   |\n| ------------------------- | ------------------------------------------------------------------------------------------------------------- |\n| **`isCollapsed`**         | State of the collapsible. `true` if open, `false` if collapsed.                                               |\n| **`isVisible`**           | If nested, determine if the nearest collapsible is visible. `true` if no parent is closed, `false` otherwise. |\n| **`toggle`**              | Toggles the state of the nearest collapsible.                                                                 |\n| **`isWithinCollapsible`** | Determine when you are within another collapsible.                                                            |\n\n**Example:**\n\n```tsx\n'use client'\nimport React from 'react'\n\nimport { useCollapsible } from '@payloadcms/ui'\n\nconst CustomComponent: React.FC = () => {\n  const { isCollapsed, toggle } = useCollapsible()\n\n  return (\n    <div>\n      <p className=\"field-type\">I am {isCollapsed ? 'closed' : 'open'}</p>\n      <button onClick={toggle} type=\"button\">\n        Toggle\n      </button>\n    </div>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "77845a1e636500dbb2624b33f318cc454383b76f62597d70ddf28f0006e065fa",
+      "topic": "data",
+      "subject": "useConfig hook / return type",
+      "content": {
+        "fields": {
+          "config": "SanitizedConfig — the full Payload Client Config object",
+          "getEntityConfig": "function({collectionSlug?, globalSlug?}) — efficiently retrieves a specific collection or global config by slug"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 979,
+        "quote": "## useConfig\n\nUsed to retrieve the Payload [Client Config](../custom-components/overview#accessing-the-payload-config).\n\n```tsx\n'use client'\nimport { useConfig } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { config } = useConfig()\n  // highlight-end\n\n  return <span>{config.serverURL}</span>\n}\n```\n\nIf you need to retrieve a specific collection or global config by its slug, `getEntityConfig` is the most efficient way to do so:\n\n```tsx\n'use client'\nimport { useConfig } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { getEntityConfig } = useConfig()\n  const mediaConfig = getEntityConfig({ collectionSlug: 'media' })\n  // highlight-end\n\n  return (\n    <span>The media collection has {mediaConfig.fields.length} fields.</span>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b694a10e87e678442c4a6044f0c024dbb7ed7cf14c06a65c160808be461ee20f",
+      "topic": "data",
+      "subject": "useDocumentEvents hook / return type",
+      "content": {
+        "fields": {
+          "mostRecentUpdate": "object — {entitySlug, id (if collection), updatedAt} — most recently updated document from cross-document events",
+          "reportUpdate": "function({entitySlug, id?, updatedAt}) — reports an update to a document"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1112,
+        "quote": "## useDocumentEvents\n\nThe `useDocumentEvents` hook provides a way of subscribing to cross-document events, such as updates made to nested documents within a drawer. This hook will report document events that are outside the scope of the document currently being edited. This hook provides the following:\n\n| Property               | Description                                                                                                                             |\n| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |\n| **`mostRecentUpdate`** | An object containing the most recently updated document. It contains the `entitySlug`, `id` (if collection), and `updatedAt` properties |\n| **`reportUpdate`**     | A method used to report updates to documents. It accepts the same arguments as the `mostRecentUpdate` property.                         |\n\n**Example:**\n\n```tsx\n'use client'\nimport { useDocumentEvents } from '@payloadcms/ui'\n\nconst ListenForUpdates: React.FC = () => {\n  const { mostRecentUpdate } = useDocumentEvents()\n\n  return <span>{JSON.stringify(mostRecentUpdate)}</span>\n}\n```\n\n<Banner type=\"info\">\n  Right now the `useDocumentEvents` hook only tracks recently updated documents,\n  but in the future it will track more document-related events as needed, such\n  as document creation, deletion, etc.\n</Banner>\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "33527569702017cb160eccacddba370a5b1fc55bb5865c95658ffb9eb2a93710",
+      "topic": "data",
+      "subject": "useDocumentForm hook",
+      "content": {
+        "fields": {
+          "behavior": "same as useForm but always returns the top-level Form context of the document, even from within nested child Forms (e.g. Lexical blocks)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 719,
+        "quote": "## useDocumentForm\n\nThe `useDocumentForm` hook works the same way as the [useForm](#useform) hook, but it always gives you access to the top-level `Form` of a document. This is useful if you need to access the document's `Form` context from within a child `Form`.\n\nAn example where this could happen would be custom components within lexical blocks, as lexical blocks initialize their own child `Form`.\n\n```tsx\n'use client'\n\nimport { useDocumentForm } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  const { fields: parentDocumentFields } = useDocumentForm()\n\n  return (\n    <p>\n      The document's Form has ${Object.keys(parentDocumentFields).length} fields\n    </p>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5ea397c814c16e44c026afeb8b7d8c72dc6d1a018acc0125ac128fcbb67b3483",
+      "topic": "data",
+      "subject": "useDocumentInfo hook / return type",
+      "content": {
+        "fields": {
+          "action": "string — URL for the form action attribute",
+          "apiURL": "string — API URL for the current document",
+          "collectionSlug": "string — collection slug if editing a collection document",
+          "currentEditor": "object — user currently editing the document",
+          "docConfig": "CollectionConfig | GlobalConfig — config of the document being edited",
+          "docPermissions": "object — document-level permissions; falls back to collection permissions when no id present",
+          "documentIsLocked": "boolean — whether document is locked by another user",
+          "getDocPermissions": "function — retrieves document-level permissions",
+          "getDocPreferences": "function — retrieves document-level user preferences",
+          "globalSlug": "string — global slug if editing a global document",
+          "hasPublishedDoc": "boolean — whether document has a published version",
+          "hasPublishPermission": "boolean — whether current user can publish",
+          "hasSavePermission": "boolean — whether current user can save",
+          "id": "string — document ID if collection document",
+          "incrementVersionCount": "function — increments version count",
+          "initialData": "object — initial data of the document",
+          "isEditing": "boolean — whether document is being edited vs created",
+          "isInitializing": "boolean — whether document info is still initializing",
+          "isLocked": "boolean — whether document is locked",
+          "lastUpdateTime": "timestamp — last update time",
+          "mostRecentVersionIsAutosaved": "boolean — whether most recent version is autosaved",
+          "preferencesKey": "string — key for document-level user preferences",
+          "data": "object — saved data of the document",
+          "setDocFieldPreferences": "function — sets preferences for a specific field",
+          "setHasPublishedDoc": "function — updates whether document has been published",
+          "unlockDocument": "function — unlocks the document",
+          "unpublishedVersionCount": "number — count of unpublished versions",
+          "updateDocumentEditor": "function — updates who is currently editing the document",
+          "updateSavedDocumentData": "function — updates saved document data",
+          "uploadStatus": "'idle' | 'uploading' | 'failed' — status of uploads in progress",
+          "versionCount": "number — current version count"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 774,
+        "quote": "## useDocumentInfo\n\nThe `useDocumentInfo` hook provides information about the current document being edited, including the following:\n\n| Property                           | Description                                                                                                                                      |\n| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |\n| **`action`**                       | The URL attached to the action attribute on the underlying form element, which specifies where to send the form data when the form is submitted. |\n| **`apiURL`**                       | The API URL for the current document.                                                                                                            |\n| **`collectionSlug`**               | The slug of the collection if editing a collection document.                                                                                     |\n| **`currentEditor`**                | The user currently editing the document.                                                                                                         |\n| **`docConfig`**                    | Either the Collection or Global config of the document, depending on what is being edited.                                                       |\n| **`docPermissions`**               | The current document's permissions. Fallback to collection permissions when no id is present.                                                    |\n| **`documentIsLocked`**             | Whether the document is currently locked by another user. [More details](./locked-documents).                                                    |\n| **`getDocPermissions`**            | Method to retrieve document-level permissions.                                                                                                   |\n| **`getDocPreferences`**            | Method to retrieve document-level user preferences. [More details](./preferences).                                                               |\n| **`globalSlug`**                   | The slug of the global if editing a global document.                                                                                             |\n| **`hasPublishedDoc`**              | Whether the document has a published version.                                                                                                    |\n| **`hasPublishPermission`**         | Whether the current user has permission to publish the document.                                                                                 |\n| **`hasSavePermission`**            | Whether the current user has permission to save the document.                                                                                    |\n| **`id`**                           | If the doc is a collection, its ID will be returned.                                                                                             |\n| **`incrementVersionCount`**        | Method to increment the version count of the document.                                                                                           |\n| **`initialData`**                  | The initial data of the document.                                                                                                                |\n| **`isEditing`**                    | Whether the document is being edited (as opposed to created).                                                                                    |\n| **`isInitializing`**               | Whether the document info is still initializing.                                                                                                 |\n| **`isLocked`**                     | Whether the document is locked. [More details](./locked-documents).                                                                              |\n| **`lastUpdateTime`**               | Timestamp of the last update to the document.                                                                                                    |\n| **`mostRecentVersionIsAutosaved`** | Whether the most recent version is an autosaved version.                                                                                         |\n| **`preferencesKey`**               | The `preferences` key to use when interacting with document-level user preferences. [More details](./preferences).                               |\n| **`data`**                         | The saved data of the document.                                                                                                                  |\n| **`setDocFieldPreferences`**       | Method to set preferences for a specific field. [More details](./preferences).                                                                   |\n| **`setHasPublishedDoc`**           | Method to update whether the document has been published.                                                                                        |\n| **`unlockDocument`**               | Method to unlock a document. [More details](./locked-documents).                                                                                 |\n| **`unpublishedVersionCount`**      | The number of unpublished versions of the document.                                                                                              |\n| **`updateDocumentEditor`**         | Method to update who is currently editing the document. [More details](./locked-documents).                                                      |\n| **`updateSavedDocumentData`**      | Method to update the saved document data.                                                                                                        |\n| **`uploadStatus`**                 | Status of any uploads in progress ('idle', 'uploading', or 'failed').                                                                            |\n| **`versionCount`**                 | The current version count of the document.                                                                                                       |\n\n**Example:**\n\n… (+24 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d1c922f099d92426db2c5f808353b7a8b4e27c019406bf0ccc51f10c01b4cccf",
+      "topic": "data",
+      "subject": "useDocumentTitle hook",
+      "content": {
+        "fields": {
+          "title": "string — the current rendered title of the document",
+          "setDocumentTitle": "function — imperatively set the document title"
+        },
+        "validation": {
+          "re-render scope": "Split from useDocumentInfo so components only depending on title do not re-render when other document state changes"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 838,
+        "quote": "## useDocumentTitle\n\nThe `useDocumentTitle` hook returns the current document's rendered title and a setter to override it. It is split out of `useDocumentInfo` so that components which only depend on the title do not re-render when other document state changes.\n\n| Property               | Description                           |\n| ---------------------- | ------------------------------------- |\n| **`title`**            | The current title of the document.    |\n| **`setDocumentTitle`** | Method to imperatively set the title. |\n\n**Example:**\n\n```tsx\n'use client'\nimport { useDocumentTitle } from '@payloadcms/ui'\n\nconst Heading: React.FC = () => {\n  const { title } = useDocumentTitle()\n  return <h2>{title}</h2>\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2698463f15b8e3fa0b1f1242dfeba48bad1262bafc204338c3bba9c001b6649a",
+      "topic": "data",
+      "subject": "useEditDepth hook",
+      "content": {
+        "fields": {
+          "return": "number — how many editing levels deep the current component is; relevant when editing in modal windows or adding new documents"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1014,
+        "quote": "## useEditDepth\n\nSends back how many editing levels \"deep\" the current component is. Edit depth is relevant while adding new documents / editing documents in modal windows and other cases.\n\n```tsx\n'use client'\nimport { useEditDepth } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const editDepth = useEditDepth()\n  // highlight-end\n\n  return <span>My component is {editDepth} levels deep</span>\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2be5779af8a407ad55fb47a2702e63244109b385e2ecc31d81faaef5145a03ef",
+      "topic": "data",
+      "subject": "useField hook / Lexical rich text update",
+      "content": {
+        "validation": {
+          "setValue on Lexical": "calling setValue alone updates form data but does NOT update the Lexical editor UI; must use dispatchFields UPDATE action with both value and initialValue set to trigger re-render"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 19,
+        "quote": "## useField\n\nThe `useField` hook is used internally within all field components. It manages sending and receiving a field's state from its parent form. When you build a [Custom Field Component](../fields/overview#custom-components), you will be responsible for sending and receiving the field's `value` to and from the form yourself.\n\nTo do so, import the `useField` hook as follows:\n\n```tsx\n'use client'\nimport type { TextFieldClientComponent } from 'payload'\nimport { useField } from '@payloadcms/ui'\n\nexport const CustomTextField: TextFieldClientComponent = ({ path }) => {\n  const { value, setValue } = useField({ path }) // highlight-line\n\n  return (\n    <div>\n      <p>{path}</p>\n      <input\n        onChange={(e) => {\n          setValue(e.target.value)\n        }}\n        value={value}\n      />\n    </div>\n  )\n}\n```\n\nThe `useField` hook accepts the following arguments:\n\n| Property          | Description                                                                                                                                                                                      |\n| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |\n| `path`            | If you do not provide a `path`, `name` will be used instead. This is the path to the field in the form data.                                                                                     |\n| `validate`        | A validation function executed client-side _before_ submitting the form to the server. Different than [Field-level Validation](../fields/overview#validation) which runs strictly on the server. |\n| `disableFormData` | If `true`, the field will not be included in the form data when the form is submitted.                                                                                                           |\n| `hasRows`         | If `true`, the field will be treated as a field with rows. This is useful for fields like `array` and `blocks`.                                                                                  |\n\nThe `useField` hook returns the following object:\n\n```ts\n… (+63 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5bfd03bab5e7a4554262a1795f3342dd4966aa69fd351131410c98974ef64233",
+      "topic": "data",
+      "subject": "useField hook / return type",
+      "content": {
+        "fields": {
+          "errorMessage": "string? — field error message",
+          "errorPaths": "string[]? — paths of fields with errors",
+          "filterOptions": "FilterOptionsResult? — filtered options",
+          "formInitializing": "boolean — whether the form is initializing",
+          "formProcessing": "boolean — whether the form is processing",
+          "formSubmitted": "boolean — whether the form has been submitted",
+          "initialValue": "T? — initial field value; Lexical editor uses this to re-mount and update UI",
+          "path": "string — path to the field in form data",
+          "permissions": "FieldPermissions — field permissions",
+          "readOnly": "boolean? — whether the field is read-only",
+          "rows": "Row[]? — rows for array/blocks fields",
+          "schemaPath": "string — schema path",
+          "setValue": "function(val, disableModifyingForm?) => void — sets field value",
+          "showError": "boolean — whether to show field error",
+          "valid": "boolean? — field validity",
+          "value": "T — current field value"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 19,
+        "quote": "## useField\n\nThe `useField` hook is used internally within all field components. It manages sending and receiving a field's state from its parent form. When you build a [Custom Field Component](../fields/overview#custom-components), you will be responsible for sending and receiving the field's `value` to and from the form yourself.\n\nTo do so, import the `useField` hook as follows:\n\n```tsx\n'use client'\nimport type { TextFieldClientComponent } from 'payload'\nimport { useField } from '@payloadcms/ui'\n\nexport const CustomTextField: TextFieldClientComponent = ({ path }) => {\n  const { value, setValue } = useField({ path }) // highlight-line\n\n  return (\n    <div>\n      <p>{path}</p>\n      <input\n        onChange={(e) => {\n          setValue(e.target.value)\n        }}\n        value={value}\n      />\n    </div>\n  )\n}\n```\n\nThe `useField` hook accepts the following arguments:\n\n| Property          | Description                                                                                                                                                                                      |\n| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |\n| `path`            | If you do not provide a `path`, `name` will be used instead. This is the path to the field in the form data.                                                                                     |\n| `validate`        | A validation function executed client-side _before_ submitting the form to the server. Different than [Field-level Validation](../fields/overview#validation) which runs strictly on the server. |\n| `disableFormData` | If `true`, the field will not be included in the form data when the form is submitted.                                                                                                           |\n| `hasRows`         | If `true`, the field will be treated as a field with rows. This is useful for fields like `array` and `blocks`.                                                                                  |\n\nThe `useField` hook returns the following object:\n\n```ts\n… (+63 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "be97cb73ebb8b80a4b2468d8d523252d43dc6c6d9fc91252b977214cb3879fd3",
+      "topic": "data",
+      "subject": "useForm hook / return type",
+      "content": {
+        "fields": {
+          "fields": "deprecated — not reliable as up-to-date form state",
+          "submit": "function — triggers form submit",
+          "dispatchFields": "function — dispatches actions to form field state",
+          "validateForm": "function — triggers validation of form state",
+          "createFormData": "function — creates multipart/form-data from current form state",
+          "disabled": "boolean — whether the form is disabled",
+          "getFields": "function — gets all fields from state",
+          "getField": "function(path) — gets a single field by path",
+          "getData": "function — returns data stored in the form",
+          "getSiblingData": "function(path) — returns sibling data for the given field path",
+          "getDataByPath": "function(path) — returns field data for given path; useful for arrays/blocks",
+          "setModified": "function — sets form modified state",
+          "setProcessing": "function — sets form processing state",
+          "setSubmitted": "function — sets form submitted state",
+          "formRef": "React.Ref — ref to the form HTML element",
+          "reset": "function — resets form to initial state",
+          "addFieldRow": "function({path, rowIndex?, data?}) — adds a row to array/block field",
+          "removeFieldRow": "function({path, rowIndex}) — removes a row from array/block field",
+          "replaceFieldRow": "function({path, rowIndex, data?}) — replaces a row in array/block field"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 218,
+        "quote": "## useForm\n\nThe `useForm` hook can be used to interact with the form itself, and sends back many methods that can be used to reactively fetch form state without causing rerenders within your components each time a field is changed. This is useful if you have action-based callbacks that your components fire, and need to interact with form state _based on a user action_.\n\n<Banner type=\"warning\">\n  **Warning:**\n\nThis hook is optimized to avoid causing rerenders when fields change, and as such, its `fields`\nproperty will be out of date. You should only leverage this hook if you need to perform actions\nagainst the form in response to your users' actions. Do not rely on its returned \"fields\" as being\nup-to-date. They will be removed from this hook's response in an upcoming version.\n\n</Banner>\n\nThe `useForm` hook returns an object with the following properties:\n\n<TableWithDrawers\n  columns={[\n    'Action',\n    'Description',\n    'Example',\n  ]}\n  rows={[\n    [\n      {\n        value: \"**`fields`**\",\n      },\n      {\n        value: \"Deprecated. This property cannot be relied on as up-to-date.\",\n      },\n      {\n        value: ''\n      }\n    ],\n    [\n      {\n        value: \"**`submit`**\",\n      },\n      {\n        value: \"Method to trigger the form to submit\",\n… (+461 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c4f48c27753d94d1c18a67f9345bc4a7f925e87775282489b5ff94d5cd45a483",
+      "topic": "data",
+      "subject": "useFormFields hook",
+      "content": {
+        "fields": {
+          "selector": "function([fields, dispatch]) => selected — Redux-like selector; component only re-renders when selected value changes",
+          "return": "selected field state value — optimized for performance via use-context-selector"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 122,
+        "quote": "## useFormFields\n\nThere are times when a custom field component needs to have access to data from other fields, and you have a few options to do so. The `useFormFields` hook is a powerful and highly performant way to retrieve a form's field state, as well as to retrieve the `dispatchFields` method, which can be helpful for setting other fields form states.\n\n<Banner type=\"success\">\n  **This hook is great for retrieving only certain fields from form state**\n  because it ensures that it will only cause a rerender when the items that you\n  ask for change.\n</Banner>\n\nThanks to the awesome package [`use-context-selector`](https://github.com/dai-shi/use-context-selector), you can retrieve a specific field's state easily. This is ideal because you can ensure you have an up-to-date field state, and your component will only re-render when _that field's state_ changes.\n\nYou can pass a Redux-like selector into the hook, which will ensure that you retrieve only the field that you want. The selector takes an argument with type of `[fields: Fields, dispatch: React.Dispatch<Action>]]`.\n\n```tsx\n'use client'\nimport { useFormFields } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // Get only the `amount` field state, and only cause a rerender when that field changes\n  const amount = useFormFields(([fields, dispatch]) => fields.amount)\n\n  // Do the same thing as above, but to the `feePercentage` field\n  const feePercentage = useFormFields(\n    ([fields, dispatch]) => fields.feePercentage,\n  )\n\n  if (\n    typeof amount?.value !== 'undefined' &&\n    typeof feePercentage?.value !== 'undefined'\n  ) {\n    return <span>The fee is ${(amount.value * feePercentage.value) / 100}</span>\n  }\n}\n```\n\n<Banner type=\"warning\">\n  Be aware: in the example above, `MyComponent` may re-render if an ancestor\n  component re-renders or if any of its props change (standard React behavior),\n  but not because any fields other than `amount` or `feePercentage` changed.\n… (+2 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5e98aff8fd18ac6665277b7921cd5a930d12f5e8b6a66163090adf0b6aa43596",
+      "topic": "data",
+      "subject": "useListQuery hook / return type",
+      "content": {
+        "fields": {
+          "data": "object — data being displayed in the List View",
+          "defaultLimit": "number — default items limit",
+          "defaultSort": "string — default sort order",
+          "handlePageChange": "function — handles page changes",
+          "handlePerPageChange": "function — handles per-page changes",
+          "handleSearchChange": "function — handles search changes",
+          "handleSortChange": "function — handles sort changes",
+          "handleWhereChange": "function — handles where filter changes",
+          "modified": "boolean — whether query has changed from Query Preset",
+          "query": "object — current query used to fetch list data"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 859,
+        "quote": "## useListQuery\n\nThe `useListQuery` hook is used to subscribe to the data, current query, and other properties used within the List View. You can use this hook within any Custom Component rendered within the List View.\n\n```tsx\n'use client'\nimport { useListQuery } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { data, query } = useListQuery()\n  // highlight-end\n\n  // ...\n}\n```\n\nThe `useListQuery` hook returns an object with the following properties:\n\n| Property                  | Description                                                                            |\n| ------------------------- | -------------------------------------------------------------------------------------- |\n| **`data`**                | The data that is being displayed in the List View.                                     |\n| **`defaultLimit`**        | The default limit of items to display in the List View.                                |\n| **`defaultSort`**         | The default sort order of items in the List View.                                      |\n| **`handlePageChange`**    | A method to handle page changes in the List View.                                      |\n| **`handlePerPageChange`** | A method to handle per page changes in the List View.                                  |\n| **`handleSearchChange`**  | A method to handle search changes in the List View.                                    |\n| **`handleSortChange`**    | A method to handle sort changes in the List View.                                      |\n| **`handleWhereChange`**   | A method to handle where changes in the List View.                                     |\n| **`modified`**            | Whether the query has been changed from its [Query Preset](../query-presets/overview). |\n| **`query`**               | The current query that is being used to fetch the data in the List View.               |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "6891e3b252c9143e5f3c7c4caaec2b394fb41b549f411b5306b4d7d1aa617323",
+      "topic": "data",
+      "subject": "useLocale hook / return type",
+      "content": {
+        "fields": {
+          "code": "string — locale code (e.g. 'en', 'es')",
+          "label": "string — human-readable locale label",
+          "rtl": "boolean — right-to-left language flag"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 929,
+        "quote": "## useLocale\n\nIn any Custom Component you can get the selected locale object with the `useLocale` hook. `useLocale` gives you the full locale object, consisting of a `label`, `rtl`(right-to-left) property, and then `code`. Here is a simple example:\n\n```tsx\n'use client'\nimport { useLocale } from '@payloadcms/ui'\n\nconst Greeting: React.FC = () => {\n  // highlight-start\n  const locale = useLocale()\n  // highlight-end\n\n  const trans = {\n    en: 'Hello',\n    es: 'Hola',\n  }\n\n  return <span> {trans[locale.code]} </span>\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "65bcafd9ccbde3e3a417857db99dd75278f7a55bc9998c14607d0aa59f9f3846",
+      "topic": "data",
+      "subject": "usePayloadAPI hook",
+      "content": {
+        "fields": {
+          "url": "string — API endpoint to fetch; relative URLs prefixed with Payload API route",
+          "options.initialData": "any — use this data instead of making initial request",
+          "options.initialParams": "object — initial query params; default {}",
+          "return[0].data": "any — API response data",
+          "return[0].isError": "boolean — whether request failed",
+          "return[0].isLoading": "boolean — whether request is in progress",
+          "return[1].setParams": "function(params) — updates request params and triggers refetch"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1169,
+        "quote": "## usePayloadAPI\n\nThe `usePayloadAPI` hook is a useful tool for making REST API requests to your Payload instance and handling responses reactively. It allows you to fetch and interact with data while automatically updating when parameters change.\n\nThis hook returns an array with two elements:\n\n1. An object containing the API response.\n2. A set of methods to modify request parameters.\n\n**Example:**\n\n```tsx\n'use client'\nimport { usePayloadAPI } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // Fetch data from a collection item using its ID\n  const [{ data, isError, isLoading }, { setParams }] = usePayloadAPI(\n    '/api/posts/123',\n    {\n      initialParams: { depth: 1 },\n    },\n  )\n\n  if (isLoading) return <p>Loading...</p>\n  if (isError) return <p>Error occurred while fetching data.</p>\n\n  return (\n    <div>\n      <h1>{data?.title}</h1>\n      <button onClick={() => setParams({ cacheBust: Date.now() })}>\n        Refresh Data\n      </button>\n    </div>\n  )\n}\n```\n\n**Arguments:**\n\n… (+38 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d7b6b08196f9e1ed8a5761eabb2188eaa4af3140afcb0bdf0d54239145823f82",
+      "topic": "data",
+      "subject": "useRouteTransition hook",
+      "content": {
+        "fields": {
+          "startRouteTransition": "function(callback) — wraps navigation calls to trigger immediate visual feedback on route transitions"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1247,
+        "quote": "## useRouteTransition\n\nRoute transitions are useful in showing immediate visual feedback to the user when navigating between pages. This is especially useful on slow networks when navigating to data heavy or process intensive pages.\n\nBy default, any instances of `Link` from `@payloadcms/ui` will trigger route transitions by default.\n\n```tsx\nimport { Link } from '@payloadcms/ui'\n\nconst MyComponent = () => {\n  return <Link href=\"/somewhere\">Go Somewhere</Link>\n}\n```\n\nYou can also trigger route transitions programmatically, such as when using `router.push` from `next/router`. To do this, wrap your function calls with the `startRouteTransition` method provided by the `useRouteTransition` hook.\n\n```ts\n'use client'\nimport React, { useCallback } from 'react'\nimport { useTransition } from '@payloadcms/ui'\nimport { useRouter } from 'next/navigation'\n\nconst MyComponent: React.FC = () => {\n  const router = useRouter()\n  const { startRouteTransition } = useRouteTransition()\n\n  const redirectSomewhere = useCallback(() => {\n    startRouteTransition(() => router.push('/somewhere'))\n  }, [startRouteTransition, router])\n\n  // ...\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "401f56754648c31c106e6d96ff785ad99da2fc9d2c43d3f7b9c4fe6efd22a9f8",
+      "topic": "data",
+      "subject": "useSelection hook / return type",
+      "content": {
+        "fields": {
+          "count": "number — count of currently selected rows",
+          "getQueryParams": "function — generates query string from current selection and optional filter params",
+          "selectAll": "enum — 'allAvailable' | 'allInPage' | 'none' | 'some' (exported as SelectAllStatus)",
+          "selected": "Map<id, boolean> — document id keys with boolean selection status",
+          "setSelection": "function — toggles selection status of a document row",
+          "toggleAll": "function(allAvailable?: boolean) — toggles selection for all docs on current page, or all available when passed true",
+          "totalDocs": "number — total documents in the collection"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 891,
+        "quote": "## useSelection\n\nThe `useSelection` hook provides information on the selected rows in the List view as well as helper methods to simplify selection. The `useSelection` hook returns an object with the following properties:\n\n| Property             | Description                                                                                                                                                               |\n| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| **`count`**          | The number of currently selected rows.                                                                                                                                    |\n| **`getQueryParams`** | A function that generates a query string based on the current selection state and optional additional filtering parameters.                                               |\n| **`selectAll`**      | An enum value representing the selection range: `'allAvailable'`, `'allInPage'`, `'none'`, and `'some'`. The enum, `SelectAllStatus`, is exported for easier comparisons. |\n| **`selected`**       | A map of document id keys and boolean values representing their selection status.                                                                                         |\n| **`setSelection`**   | A function that toggles the selection status of a document row.                                                                                                           |\n| **`toggleAll`**      | A function that toggles selection for all documents on the current page or selects all available documents when passed `true`.                                            |\n| **`totalDocs`**      | The number of total documents in the collection.                                                                                                                          |\n\n**Example:**\n\n```tsx\n'use client'\nimport { useSelection } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { count, toggleAll, totalDocs } = useSelection()\n  // highlight-end\n\n  return (\n    <>\n      <span>\n        Selected {count} out of {totalDocs} docs!\n      </span>\n      <button type=\"button\" onClick={() => toggleAll(true)}>\n        Toggle All Selections\n      </button>\n    </>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f2b1ed63c52fa8bc2f4d26248e7723c88443c39058a05abca27eedba02f48c26",
+      "topic": "data",
+      "subject": "useStepNav hook / return type",
+      "content": {
+        "fields": {
+          "setStepNav": "function(StepNavItem[]) — sets the step-nav breadcrumb array in the app header",
+          "stepNav": "StepNavItem[] — current breadcrumb items; each has label (string) and optionally url (string)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1140,
+        "quote": "## useStepNav\n\nThe `useStepNav` hook provides a way to change the step-nav breadcrumb links in the app header.\n\n| Property         | Description                                                                      |\n| ---------------- | -------------------------------------------------------------------------------- |\n| **`setStepNav`** | A state setter function which sets the `stepNav` array.                          |\n| **`stepNav`**    | A `StepNavItem` array where each `StepNavItem` has a label and optionally a url. |\n\n**Example:**\n\n```tsx\n'use client'\nimport { type StepNavItem, useStepNav } from '@payloadcms/ui'\nimport { useEffect } from 'react'\n\nexport const MySetStepNavComponent: React.FC<{\n  nav: StepNavItem[]\n}> = ({ nav }) => {\n  const { setStepNav } = useStepNav()\n\n  useEffect(() => {\n    setStepNav(nav)\n  }, [setStepNav, nav])\n\n  return null\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f2e65ede4b9307f4601722263a14c2fe9ca192bfcbe652ff7b3c1f126b382428",
+      "topic": "data",
+      "subject": "useTableColumns hook / return type",
+      "content": {
+        "fields": {
+          "columns": "array — current column states including active status and configuration",
+          "LinkedCellOverride": "React component — override for linked cells in the table",
+          "moveColumn": "function({fromIndex, toIndex}) — reorders columns",
+          "resetColumnsState": "function — resets columns to default configuration from collection config",
+          "setActiveColumns": "function(columnNames[]) — activates specific columns while preserving order and existing inactive state",
+          "toggleColumn": "function(columnName) — toggles a single column's visibility"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1066,
+        "quote": "## useTableColumns\n\nReturns properties and methods to manipulate table columns:\n| Property | Description |\n| ------------------------ | ------------------------------------------------------------------------------------------ |\n| **`columns`** | The current state of columns including their active status and configuration |\n| **`LinkedCellOverride`** | A component override for linked cells in the table |\n| **`moveColumn`** | A method to reorder columns. Accepts `{ fromIndex: number, toIndex: number }` as arguments |\n| **`resetColumnsState`** | A method to reset columns back to their default configuration as defined in the collection config |\n| **`setActiveColumns`** | A method to set specific columns to active state while preserving the existing column order. Accepts an array of column names to activate |\n| **`toggleColumn`** | A method to toggle a single column's visibility. Accepts a column name as string |\n\n```tsx\n'use client'\nimport { useTableColumns } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { setActiveColumns, resetColumnsState } = useTableColumns()\n\n  const activateSpecificColumns = () => {\n    // Only activates the id and createdAt columns\n    // Other columns retain their current active/inactive state\n    // The original column order is preserved\n    setActiveColumns(['id', 'createdAt'])\n  }\n\n  const resetToDefaults = () => {\n    // Resets to the default columns defined in the collection config\n    resetColumnsState()\n  }\n  // highlight-end\n\n  return (\n    <div>\n      <button type=\"button\" onClick={activateSpecificColumns}>\n        Activate Specific Columns\n      </button>\n      <button type=\"button\" onClick={resetToDefaults}>\n        Reset To Defaults\n… (+6 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e244d20377085545f0466d82424447b8da93cfdb394d004c00ad20bcfacd111b",
+      "topic": "data",
+      "subject": "useTheme hook / return type",
+      "content": {
+        "fields": {
+          "theme": "'light' | 'dark' | 'auto' — currently selected theme",
+          "setTheme": "function — updates the selected theme",
+          "autoMode": "boolean — whether theme is automatically set based on device preferences"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1035,
+        "quote": "## useTheme\n\nReturns the currently selected theme (`light`, `dark` or `auto`), a set function to update it and a boolean `autoMode`, used to determine if the theme value should be set automatically based on the user's device preferences.\n\n```tsx\n'use client'\nimport { useTheme } from '@payloadcms/ui'\n\nconst MyComponent: React.FC = () => {\n  // highlight-start\n  const { autoMode, setTheme, theme } = useTheme()\n  // highlight-end\n\n  return (\n    <>\n      <span>\n        The current theme is {theme} and autoMode is {autoMode}\n      </span>\n      <button\n        type=\"button\"\n        onClick={() =>\n          setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))\n        }\n      >\n        Toggle theme\n      </button>\n    </>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c6f4c9e20812ead1fdda0afff091f372076a1744881555b50fd684076f2bb8b2",
+      "topic": "endpoints",
+      "subject": "GET /preview (Next.js draft preview route)",
+      "content": {
+        "method": "GET",
+        "path": "/preview",
+        "queryParams": [
+          "slug",
+          "collection",
+          "path",
+          "previewSecret"
+        ],
+        "responses": {
+          "403": "preview secret mismatch or user not authenticated",
+          "404": "path param missing",
+          "500": "path does not start with /",
+          "redirect": "redirects to path after enabling Next.js draft mode"
+        },
+        "auth": "required — verifies user via payload.auth"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preview.mdx",
+        "line": 70,
+        "quote": "### Next.js\n\nIf you're using Next.js, you can do the following code to enter [Draft Mode](https://nextjs.org/docs/app/building-your-application/configuring/draft-mode).\n\n#### Step 1: Format the Preview URL\n\nFirst, format your `admin.preview` function to point to a custom endpoint that you'll open on your front-end. This URL should include a few key query search params:\n\n```ts\nimport type { CollectionConfig } from 'payload'\n\nexport const Pages: CollectionConfig = {\n  slug: 'pages',\n  admin: {\n    preview: ({ slug }) => {\n      const encodedParams = new URLSearchParams({\n        slug,\n        collection: 'pages',\n        path: `/${slug}`,\n        previewSecret: process.env.PREVIEW_SECRET || '',\n      })\n\n      return `/preview?${encodedParams.toString()}` // highlight-line\n    },\n  },\n  fields: [\n    {\n      name: 'slug',\n      type: 'text',\n    },\n  ],\n}\n```\n\n#### Step 2: Create the Preview Route\n\nThen, create an API route that verifies the preview secret, authenticates the user, and enters draft mode:\n\n`/app/preview/route.ts`\n\n… (+123 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-04-17T10:33:08-04:00"
+      },
+      "module": "preview",
+      "source": "extracted"
+    },
+    {
+      "id": "9dab57ef087843d5ad9bacc560d80ef55e25b1d18bbe83d7bd20823bb1abc084",
+      "topic": "endpoints",
+      "subject": "getPreference (Admin Panel hook)",
+      "content": {
+        "method": "GET",
+        "path": "preferences/getPreference",
+        "request": {
+          "key": "string — the preference key to retrieve"
+        },
+        "responses": {
+          "resolved": "the preference value (any data shape)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preferences.mdx",
+        "line": 57,
+        "quote": "#### `getPreference`\n\nThis async method provides an easy way to retrieve a user's preferences by `key`. It will return a promise containing the resulting preference value.\n\n**Arguments**\n\n- `key`: the `key` of your preference to retrieve.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-14T17:13:08+00:00"
+      },
+      "module": "preferences",
+      "source": "extracted"
+    },
+    {
+      "id": "38a5ac83c37a14fdab610d3250c6b27addf43f5dfb107cf8795d755a51e1721a",
+      "topic": "endpoints",
+      "subject": "payload.update (Local API) / document lock enforcement",
+      "content": {
+        "request": {
+          "overrideLock": "boolean, default true — set to false to enforce lock, preventing update on locked documents"
+        },
+        "responses": {
+          "error": "returned if overrideLock is false and document is currently locked by another user"
+        }
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/admin/locked-documents.mdx",
+        "line": 60,
+        "quote": "### Impact on APIs\n\nDocument locking affects both the Local and REST APIs, ensuring that if a document is locked, concurrent users will not be able to perform updates or deletes on that document (including globals). If a user attempts to update or delete a locked document, they will receive an error.\n\nOnce the document is unlocked or the lock duration has expired, other users can proceed with updates or deletes as normal.\n\n#### Overriding Locks\n\nFor operations like `update` and `delete`, Payload includes an `overrideLock` option. This boolean flag, when set to `false`, enforces document locks, ensuring that the operation will not proceed if another user currently holds the lock.\n\nBy default, `overrideLock` is set to `true`, which means that document locks are ignored, and the operation will proceed even if the document is locked. To enforce locks and prevent updates or deletes on locked documents, set `overrideLock: false`.\n\n```ts\nconst result = await payload.update({\n  collection: 'posts',\n  id: '123',\n  data: {\n    title: 'New title',\n  },\n  overrideLock: false, // Enforces the document lock, preventing updates if the document is locked\n})\n```\n\nThis option is particularly useful in scenarios where administrative privileges or specific workflows require you to override the lock and ensure the operation is completed.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-04-07T14:06:03-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2ed0ecbd38083f99f530ed904e183c85934c04911b0c6f92ca6eb21daffbefb9",
+      "topic": "endpoints",
+      "subject": "setPreference (Admin Panel hook)",
+      "content": {
+        "method": "POST",
+        "path": "preferences/setPreference",
+        "request": {
+          "key": "string — the preference key to set",
+          "value": "any — the value to store"
+        },
+        "responses": {
+          "void": "returns void"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preferences.mdx",
+        "line": 65,
+        "quote": "#### `setPreference`\n\nAlso async, this method provides you with an easy way to set a user preference. It returns `void`.\n\n**Arguments:**\n\n- `key`: the `key` of your preference to set.\n- `value`: the `value` of your preference that you're looking to set.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-14T17:13:08+00:00"
+      },
+      "module": "preferences",
+      "source": "extracted"
+    },
+    {
+      "id": "be61da9ce0d157e58d76e0ab2e080b54c97bbf14ff4f791df457f00a06eae5f3",
+      "topic": "overview",
+      "subject": "Admin Panel I18n",
+      "content": {
+        "summary": "The Admin Panel is translated in over 30 languages. Language is automatically detected from the user's browser; falls back to English if not detected or not supported. Users can also manually select their language from the account page."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 290,
+        "quote": "## I18n\n\nThe Payload Admin Panel is translated in over [30 languages and counting](https://github.com/payloadcms/payload/tree/main/packages/translations). Languages are automatically detected based on the user's browser and used by the Admin Panel to display all text in that language. If no language was detected, or if the user's language is not yet supported, English will be chosen. Users can easily specify their language by selecting one from their account page. See [I18n](../configuration/i18n) for more information.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f8eb2a440c115f79c851c71dce9683800a9207cf9381f02b18b7d4289db273e9",
+      "topic": "overview",
+      "subject": "Admin Panel accessibility compliance",
+      "content": {
+        "summary": "WCAG 2.2 AA compliance is currently In Progress for the admin panel."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/accessibility.mdx",
+        "line": 26,
+        "quote": "## Compliance standards\n\n| Standard                                     | Status      | Description                                                                                               |\n| -------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------- |\n| [WCAG 2.2 AA](https://www.w3.org/TR/WCAG22/) | In Progress | Web Content Accessibility Guidelines (WCAG) 2.2 AA is a widely recognized standard for web accessibility. |\n\nYou can view our [report](https://github.com/payloadcms/payload/discussions/14489) on the current state of the admin panel's accessibility compliance.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-12-01T11:37:31-05:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "13a159895616e34b48ad8b3d2a9147d1b8e1152e0861132a9c0a2d96f294e0ae",
+      "topic": "overview",
+      "subject": "Admin Panel light/dark mode",
+      "content": {
+        "summary": "Users can choose light or dark mode from their account page. The selection is saved to user preferences and persisted across sessions and devices. If no theme is selected, the Admin Panel detects the OS theme and uses it as default."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 294,
+        "quote": "## Light and Dark Modes\n\nUsers in the Admin Panel have the ability to choose between light mode and dark mode for their editing experience. Users can select their preferred theme from their account page. Once selected, it is saved to their user's preferences and persisted across sessions and devices. If no theme was selected, the Admin Panel will automatically detect the operation system's theme and use that as the default.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "e107b3d4e54cc25da1ac2cd01056be959bec45a0ec69e00ef536a99ad57db9b2",
+      "topic": "overview",
+      "subject": "Admin Panel project structure",
+      "content": {
+        "summary": "The Admin Panel serves as the entire HTTP layer for Payload. All Payload routes are nested within the (payload) route group in Next.js app/ directory: admin/[[...segments]]/page.tsx and not-found.tsx (admin UI pages), api/[...slug]/route.ts (REST API), graphql/route.ts and graphql-playground/route.ts (GraphQL), custom.scss (global styles), layout.tsx (sets lang/dir attributes). REST and GraphQL APIs are simply Next.js routes. Individual API directories can be deleted to opt out of those features."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/overview.mdx",
+        "line": 28,
+        "quote": "## Project Structure\n\nThe Admin Panel serves as the entire HTTP layer for Payload, providing a full CRUD interface for your app. This means that both the [REST](../rest-api/overview) and [GraphQL](../graphql/overview) APIs are simply [Next.js Routes](https://nextjs.org/docs/app/building-your-application/routing) that exist directly alongside your front-end application.\n\nOnce you [install Payload](../getting-started/installation), the following files and directories will be created in your app:\n\n```plaintext\napp\n├─ (payload)\n├── admin\n├─── [[...segments]]\n├──── page.tsx\n├──── not-found.tsx\n├── api\n├─── [...slug]\n├──── route.ts\n├── graphql\n├──── route.ts\n├── graphql-playground\n├──── route.ts\n├── custom.scss\n├── layout.tsx\n```\n\n<Banner type=\"info\">\n  If you are not familiar with Next.js project structure, you can [learn more\n  about it here](https://nextjs.org/docs/getting-started/project-structure).\n</Banner>\n\nAs shown above, all Payload routes are nested within the `(payload)` route group. This creates a boundary between the Admin Panel and the rest of your application by scoping all layouts and styles. The `layout.tsx` file within this directory, for example, is where Payload manages the `html` tag of the document to set proper [`lang`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/lang) and [`dir`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/dir) attributes, etc.\n\nThe `admin` directory contains all the _pages_ related to the interface itself, whereas the `api` and `graphql` directories contain all the _routes_ related to the [REST API](../rest-api/overview) and [GraphQL API](../graphql/overview). All admin routes are [easily configurable](#customizing-routes) to meet your application's exact requirements.\n\n<Banner type=\"success\">\n  **Tip:** The `(payload)` folder location is flexible. You can move it to match\n  your application's structure by updating the `routes` and `admin.importMap`\n  configuration. See [Customizing Admin Panel Location](./admin-panel-location)\n  for step-by-step instructions.\n</Banner>\n\n… (+17 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-21T11:18:58-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "a5cd49c3ea9ec76ddf8c599d53d5a1980bfb8ceed93c1cb147396256921ae8f4",
+      "topic": "overview",
+      "subject": "Admin preferences APIs",
+      "content": {
+        "summary": "User preferences are available through both GraphQL and REST APIs."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/preferences.mdx",
+        "line": 49,
+        "quote": "## APIs\n\nPreferences are available to both [GraphQL](/docs/graphql/overview#preferences) and [REST](/docs/rest-api/overview#preferences) APIs.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-03-14T17:13:08+00:00"
+      },
+      "module": "preferences",
+      "source": "extracted"
+    },
+    {
+      "id": "2bd9530357d541eb75c18ea3548cbc21ead1d697ba5676c1623bebf6ff2febc0",
+      "topic": "overview",
+      "subject": "Dashboard / User Customization",
+      "content": {
+        "summary": "Users can customize their dashboard via 'Edit Dashboard' mode: add widgets, edit widget data (for widgets with fields), resize via width dropdown, reorder via drag-and-drop, delete widgets, save or cancel changes. Users can reset to default layout via 'Reset Layout' option."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/dashboard.mdx",
+        "line": 182,
+        "quote": "### User Customization\n\nUsers can customize their dashboard by:\n\n1. Clicking the dashboard dropdown in the breadcrumb\n2. Selecting \"Edit Dashboard\"\n3. Adding widgets via the \"Add +\" button\n4. Editing widget data (for widgets with `fields`) via the edit button\n5. Resizing widgets using the width dropdown on each widget (if multiple widths are allowed)\n6. Reordering widgets via drag-and-drop\n7. Deleting widgets using the delete button\n8. Saving changes or canceling to revert\n\nUsers can also reset their dashboard to the default layout using the \"Reset Layout\" option.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T11:36:40-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "bf37bf297f30cf033c5d0572f02a8524cf17c1574ec76672fce5d9f520f68981",
+      "topic": "overview",
+      "subject": "Document Views / Edit View",
+      "content": {
+        "summary": "The Edit View is where users interact with individual Collection and Global Documents to view, edit, and save content. It is keyed under the 'default' property in the views.edit object."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/document-views.mdx",
+        "line": 88,
+        "quote": "### Edit View\n\nThe Edit View is where users interact with individual Collection and Global Documents. This is where they can view, edit, and save their content. The Edit View is keyed under the `default` property in the `views.edit` object.\n\nFor more information on customizing the Edit View, see the [Edit View](./edit-view) documentation.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2025-10-24T13:53:45-07:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "b4f6b279718ce156f1df39baf17de628faa5b1f90fe5315280fec88602c039ed",
+      "topic": "overview",
+      "subject": "Multiple admin dashboards pattern",
+      "content": {
+        "summary": "Payload and custom admin routes can coexist under /admin by placing Payload under /admin/content/(payload)/ with routes.admin='/admin/content' and api/graphQL routes under /admin/content/api, while custom admin routes (e.g. /admin/platform/) are placed as sibling Next.js route segments."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 160,
+        "quote": "## Scenario 3: Multiple Admin Dashboards\n\nIf you want both Payload and custom admin routes under `/admin`:\n\n**Folder Structure:**\n\n```\napp/\n├── admin/\n│   ├── content/              # Payload admin\n│   │   └── (payload)/\n│   │       ├── admin/\n│   │       ├── api/\n│   │       └── layout.tsx\n│   ├── platform/             # Your custom admin\n│   │   ├── dashboard/\n│   │   │   └── page.tsx\n│   │   └── layout.tsx\n│   └── page.tsx              # Choose between admins\n```\n\n**Configuration:**\n\n```ts\nexport default buildConfig({\n  routes: {\n    admin: '/admin/content',\n    api: '/admin/content/api',\n    graphQL: '/admin/content/api/graphql',\n    graphQLPlayground: '/admin/content/api/graphql-playground',\n  },\n  admin: {\n    importMap: {\n      baseDir: path.resolve(dirname, './src/app/admin/content/(payload)'),\n      importMapFile: path.resolve(\n        dirname,\n        './src/app/admin/content/(payload)/admin/importMap.js',\n      ),\n    },\n  },\n… (+3 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8c85142dc34f7f92272fbbc5eabaaae3704f8f642c0d7b72826bccd5ca6bfc95",
+      "topic": "overview",
+      "subject": "Payload default folder structure",
+      "content": {
+        "summary": "By default, Payload creates a (payload)/ directory in the Next.js app folder containing: admin/ (UI routes with [[...segments]]/not-found.tsx and page.tsx, plus importMap.js), api/ (REST API routes at [...slug]/route.ts), custom.scss, and layout.tsx (root layout importing the import map). importMap.js is auto-generated and regenerated on startup."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/admin-panel-location.mdx",
+        "line": 18,
+        "quote": "## Understanding the Payload Folder Structure\n\nBy default, Payload creates this structure in your Next.js app:\n\n```\napp/ (or src/app/)\n├── (payload)/\n│   ├── admin/\n│   │   ├── [[...segments]]/\n│   │   │   ├── not-found.tsx\n│   │   │   └── page.tsx\n│   │   └── importMap.js\n│   ├── api/\n│   │   └── [...slug]/\n│   │       └── route.ts\n│   ├── custom.scss\n│   └── layout.tsx\n```\n\n- **`(payload)/`** - Parent folder containing all Payload-related routes\n- **`admin/`** - Admin Panel UI routes\n- **`api/`** - REST API routes\n- **`layout.tsx`** - Root layout that imports the import map\n- **`importMap.js`** - Auto-generated file mapping component paths (regenerated on startup)\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-04T10:18:57-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "37c3182e8aca983a6d2c16d310390f0bf23cc02268dcce6491b9a9678e8e9685",
+      "topic": "overview",
+      "subject": "custom admin views / security model",
+      "content": {
+        "summary": "All Custom Views are public by default. Developers must secure their own custom views by checking authentication and authorization inside the view component (e.g. checking initPageResult.req.user)."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/custom-components/custom-views.mdx",
+        "line": 209,
+        "quote": "### Securing Custom Views\n\nAll Custom Views are public by default. It's up to you to secure your custom views. If your view requires a user to be logged in or to have certain access rights, you should handle that within your view component yourself.\n\nHere is how you might secure a Custom View:\n\n```tsx\nimport type { AdminViewServerProps } from 'payload'\n\nimport { Gutter } from '@payloadcms/ui'\nimport React from 'react'\n\nexport function MyCustomView({ initPageResult }: AdminViewServerProps) {\n  const {\n    req: { user },\n  } = initPageResult\n\n  if (!user) {\n    return <p>You must be logged in to view this page.</p>\n  }\n\n  return (\n    <Gutter>\n      <h1>Custom Default Root View</h1>\n      <p>This view uses the Default Template.</p>\n    </Gutter>\n  )\n}\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-29T07:13:29-04:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "94a6aba615a388dd6e33a3df171c1ae663cb2831671b428338f5379cc31a6dab",
+      "topic": "overview",
+      "subject": "usePreferences hook",
+      "content": {
+        "summary": "Returns getPreference and setPreference methods for setting and getting user preferences."
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/admin/react-hooks.mdx",
+        "line": 1031,
+        "quote": "## usePreferences\n\nReturns methods to set and get user preferences. More info can be found [here](https://payloadcms.com/docs/admin/preferences).\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-05-08T14:36:24-04:00"
+      },
+      "module": "preferences",
+      "source": "extracted"
+    }
+  ]
+}

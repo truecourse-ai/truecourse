@@ -1,0 +1,5 @@
+constant overrideLock.default {
+  origin "docs/admin/locked-documents.mdx" "Overriding Locks" 1..48
+  type boolean
+  expected-value true
+}

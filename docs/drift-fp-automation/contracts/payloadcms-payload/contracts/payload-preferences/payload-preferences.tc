@@ -1,0 +1,17 @@
+entity payload-preferences {
+  origin "docs/admin/preferences.mdx" "Database" 1..42
+  field id: string {
+    origin server-assigned
+    immutable
+  }
+  field key: string
+  field user.value: string
+  field user.relationTo: string
+  field value: any
+  field createdAt: string {
+    immutable
+  }
+  field updatedAt: string {
+    mutability refreshed-on-mutation
+  }
+}

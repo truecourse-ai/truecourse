@@ -1,0 +1,6 @@
+unenforceable-obligation admin-panel.theme {
+  origin "docs/admin/overview.mdx" "Light and Dark Modes" 1..288
+  spec-text "Users can choose light or dark mode from account page. Selection is saved to preferences and persisted across sessions and devices. Defaults to OS theme if none selected."
+  category ui-behavior
+  rationale "no structural encoding for theme persistence behavior"
+}
