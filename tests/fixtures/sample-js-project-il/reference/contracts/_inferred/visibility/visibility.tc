@@ -1,0 +1,8 @@
+enum visibility {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "src/fp-guards/enum-entity-collision-visibility.ts" 14..14
+  confidence high
+  representation string-literal
+  closed
+  values [private, public]
+}

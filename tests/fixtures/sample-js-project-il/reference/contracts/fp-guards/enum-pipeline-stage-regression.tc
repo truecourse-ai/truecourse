@@ -1,0 +1,4 @@
+enum PipelineStage {
+  origin "reference/specs/fp-guards/enums.md" "CI pipeline stage values" 18..22
+  values [build, deploy, release, test]
+}
