@@ -1,0 +1,22 @@
+entity Operation {
+  origin "api/src/ai/tools/operations/prompt.md" "Required Fields Summary / create - Add Operation to Flow" 99..120
+  field flow: uuid {
+    required
+  }
+  field key: string {
+    required
+  }
+  field type: Enum:OperationType {
+    required
+  }
+  field name: string
+  field position_x: integer {
+    required
+  }
+  field position_y: integer {
+    required
+  }
+  field options: object
+  field resolve: uuid
+  field reject: uuid
+}

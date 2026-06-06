@@ -1,0 +1,4 @@
+enum CollectionAccountability {
+  origin "api/src/ai/tools/collections/prompt.md" "Collection Structure" 12..45
+  values [all, activity, null]
+}

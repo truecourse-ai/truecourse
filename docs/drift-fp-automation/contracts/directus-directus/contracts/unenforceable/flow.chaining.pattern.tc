@@ -1,0 +1,4 @@
+unenforceable-obligation flow.chaining.pattern {
+  origin "api/src/ai/tools/flows/prompt.md" "Flow Chaining" 302..380
+  reason "Flow chaining pattern: child flows use trigger operation, parent flows call child via trigger operation type with UUID — architectural guidance, not a verifiable code contract"
+}

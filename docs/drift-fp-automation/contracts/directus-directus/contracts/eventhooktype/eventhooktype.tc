@@ -1,0 +1,4 @@
+enum EventHookType {
+  origin "api/src/ai/tools/flows/prompt.md" "Trigger Types & Options / Event Hook Trigger" 105..126
+  values [filter, action]
+}

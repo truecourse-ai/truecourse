@@ -1,0 +1,4 @@
+enum OperationType {
+  origin "api/src/ai/tools/operations/prompt.md" "Grid Positioning" 158..270
+  values [condition, item-create, item-read, item-update, item-delete, exec, mail, notification, request, json-web-token, transform, trigger, sleep, log, throw-error]
+}

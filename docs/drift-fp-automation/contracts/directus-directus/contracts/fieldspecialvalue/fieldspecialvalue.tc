@@ -1,0 +1,4 @@
+enum FieldSpecialValue {
+  origin "api/src/ai/tools/fields/prompt.md" "Common Interfaces / Special Fields" 391..410
+  values [uuid, user-created, date-created, user-updated, date-updated, cast-json]
+}

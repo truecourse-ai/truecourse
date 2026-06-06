@@ -1,0 +1,4 @@
+enum RelationOnDeleteAction {
+  origin "api/src/ai/tools/relations/prompt.md" "Relation Settings / Schema Options" 321..332
+  values [CASCADE, SET_NULL, NO_ACTION, RESTRICT, SET_DEFAULT]
+}

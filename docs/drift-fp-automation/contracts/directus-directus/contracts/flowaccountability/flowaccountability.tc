@@ -1,0 +1,4 @@
+enum FlowAccountability {
+  origin "api/src/ai/tools/flows/prompt.md" "Flow Data Structure" 19..35
+  values [all, activity, null]
+}

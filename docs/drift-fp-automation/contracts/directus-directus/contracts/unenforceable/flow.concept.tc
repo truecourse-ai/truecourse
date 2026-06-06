@@ -1,0 +1,4 @@
+unenforceable-obligation flow.concept {
+  origin "api/src/ai/tools/flows/prompt.md" "Key Concepts" 6..15
+  reason "Flow concept: a Flow consists of a Trigger + Operations + Data Chain; each flow has ONE trigger; operations execute sequentially; data chain accumulates results — narrative overview, not a verifiable contract"
+}

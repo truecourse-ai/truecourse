@@ -1,0 +1,4 @@
+enum FieldWidth {
+  origin "api/src/ai/tools/fields/prompt.md" "Common Interfaces / Layout" 322..327
+  values [half, full, fill]
+}

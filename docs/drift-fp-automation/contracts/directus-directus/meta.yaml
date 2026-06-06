@@ -1,0 +1,8 @@
+target_repo: directus/directus
+target_ref: 2f4e667c81119c565d6ac1529510560835f59908
+code_dir: "."
+generated_at: "2026-06-06"
+tool_version: 0.6.3
+llm: agent
+doc_scope:
+  - api/src/ai/tools
