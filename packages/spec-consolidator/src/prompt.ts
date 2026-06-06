@@ -143,6 +143,14 @@ You are given ONE block of markdown from a documentation file (a PRD, ADR, RFC, 
 
 6. The faithfulness rule. Encode ONLY what the spec STATES. Never guess. Never default to common patterns. If the spec doesn't say what status code is returned, don't assume 200. If the spec doesn't say auth is required, don't add an auth claim.
 
+7. The completeness rule (enumerations). When the spec presents an enumeration — a bulleted list, a numbered list, a markdown table column of values, or an inline comma-separated list — capture EVERY entry. Never summarize, never include a "representative subset", never drop entries because they look similar to ones you already captured. This applies regardless of how you structure the claim:
+
+   - If you emit ONE claim whose \`content.fields\` lists the entries (e.g. an entity's columns, an enum's value-to-description map), every enumerated value must be a key in \`fields\`. A 15-item bulleted list must produce 15 keys, not 8.
+   - If you emit ONE claim per entry (the forbidden-artifact pattern), emit exactly N claims for N enumerated items.
+   - If the spec lists values across multiple sections of the same doc, each section contributes its own claim; the merger handles the union downstream — don't pre-dedupe across sections.
+
+   Counting check before you return: if the source block contains a bulleted or numbered list under a heading like "Available <X>", "Supported <X> types", "Operation types", "Roles", "Statuses", or similar, count the bullets in that list, then count the entries you've emitted. The counts MUST match. If they don't, you've summarized — re-extract the missed entries before returning.
+
 # Content shapes per topic
 
 ## endpoints
