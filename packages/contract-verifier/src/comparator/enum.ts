@@ -145,6 +145,23 @@ function matchByName(
     }
     // Substring name + value-set overlap.
     if (codeName.includes(target) || target.includes(codeName)) {
+      // Entity-collision guard: when the spec name wholly contains the code name
+      // (e.g. `CollectionAccountability` contains `accountability`), check
+      // whether the qualifying prefix (the part of the spec name that precedes
+      // the code name) is longer than 5 characters. A long prefix signals an
+      // entity qualifier that makes the match spurious — e.g. "collection"
+      // (10 chars) before "accountability" is too heavy to treat as the same
+      // concept, but "flow" (4 chars) before "accountability" or "trigger"
+      // is a lightweight domain prefix that keeps the match valid.
+      // The guard only fires when the containment is one-directional (spec⊃code);
+      // when the code name also contains the spec name the names are co-equal and
+      // the guard is skipped.
+      if (!codeName.includes(target)) {
+        const qualifyingPrefix = target.slice(0, target.indexOf(codeName));
+        if (qualifyingPrefix.length > 5) {
+          continue;
+        }
+      }
       if (valueSetOverlap(contract.values, e.values) >= 0.5) {
         out.push(e);
         continue;
@@ -161,6 +178,17 @@ function matchByName(
       const overlap = valueSetOverlap(contract.values, e.values);
       const sizeDiff = Math.abs(contract.values.length - e.values.length);
       if (overlap >= 0.6 && sizeDiff <= 2) {
+        out.push(e);
+      }
+    } else if (minLen >= 2) {
+      // For small (2-value) enum sets, require an exact value-set match (Jaccard = 1,
+      // equal sizes) to avoid spurious cross-enum matches. This lets a module-scoped
+      // type alias like `type Status = 'active' | 'inactive'` satisfy a contract named
+      // `FlowStatus` even though the names don't align, while blocking unrelated
+      // 2-value enums that merely share one value.
+      const overlap = valueSetOverlap(contract.values, e.values);
+      const sizeDiff = Math.abs(contract.values.length - e.values.length);
+      if (overlap === 1.0 && sizeDiff === 0) {
         out.push(e);
       }
     }

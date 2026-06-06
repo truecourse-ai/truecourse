@@ -15,6 +15,7 @@ export type EnumShape =
   | 'as-const-object'    // const X = { A: 'a' } as const
   | 'set-literal'        // const VALID_X = new Set(['a', 'b'])
   | 'array-literal'      // const VALID_X = ['a', 'b'] (with conventional name)
+  | 'sibling-id-literal' // synthesised from id: 'x' in sibling */index.ts modules
   | 'py-enum'            // class X(str, Enum): A = 'a'
   | 'py-literal'         // X = Literal['a', 'b']
   | 'py-set'             // X_SET = {'a', 'b'} / frozenset({...})

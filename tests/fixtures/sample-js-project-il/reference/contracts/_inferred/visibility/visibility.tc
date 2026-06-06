@@ -1,0 +1,8 @@
+enum visibility {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "src/handlers/task-handler.ts" 29..29
+  confidence high
+  representation string-literal
+  closed
+  values [private, public]
+}
