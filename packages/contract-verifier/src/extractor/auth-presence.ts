@@ -87,14 +87,18 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
       if (!TS_EXT.has(ext)) continue;
       const source = fs.readFileSync(full, 'utf-8');
       const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
+      let tree: Tree | undefined;
       try {
         tree = parseFile(full, source, lang);
       } catch {
         continue;
       }
       scanned.push(full);
-      collectFromTree(tree, source, full, edges, fileDefaultExports, fileImports, routerVarsByFile);
+      try {
+        collectFromTree(tree, source, full, edges, fileDefaultExports, fileImports, routerVarsByFile);
+      } finally {
+        tree.delete();
+      }
     }
   };
   visit(rootDir);

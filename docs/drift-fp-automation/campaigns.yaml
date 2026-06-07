@@ -100,10 +100,12 @@ campaigns:
       - docs/rich-text           # 11 — rich-text editor features + node types
       - docs/custom-components   # 8 — extension points + lifecycle hooks
     priority: 4
-    status: discovering
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    notes: ["Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."]
+    status: done
+    baseline: { verified_at: "2026-06-07", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0 }
+    final:    { verified_at: "2026-06-07", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0, tp_rate: 1.0 }
+    notes:
+      - "Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."
+      - "Close verified at fp=0 on first run (2026-06-07). 3 drifts, all info: named-constant/no-code-counterpart for overrideLock.default (parameter default, not named constant), widget.maxWidth.default and widget.minWidth.default (optional API property defaults, not named constants). WidgetWidth enum and entity/auth contracts verified cleanly. Also fixed a WASM heap exhaustion bug: source walkers were not calling tree.delete() after parsing each file, causing the heap to fill after ~6000 parses and timing out verify on large monorepos (payloadcms/payload exposed this at 4493 TypeScript files)."
 
   # ---- Python — prefect (orchestration, state-machine-heavy enums) ----
   - target_repo: PrefectHQ/prefect

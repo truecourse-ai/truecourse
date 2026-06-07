@@ -156,30 +156,34 @@ function walkRoot(rootAbs: string, root: RouteRoot, out: ExtractedOperation[]): 
 
       const source = fs.readFileSync(full, 'utf-8');
       const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
+      let tree: Tree | undefined;
       try {
         tree = parseFile(full, source, lang);
       } catch {
         continue;
       }
-      const exports = collectHttpMethodExports(tree.rootNode, source);
-      for (const exp of exports) {
-        const contract: OperationContract = {
-          protocol: 'http',
-          method: exp.method.toUpperCase(),
-          path: url,
-          tags: [],
-          responses: extractResponsesFromBody(exp.body, source),
-        };
-        out.push({
-          identity: `${exp.method.toUpperCase()} ${url}`,
-          contract,
-          filePath: full,
-          declarationLine: exp.line,
-          observed: collectHandlerObservationsFromBody(exp.body, source),
-          handlerBody: exp.body,
-          handlerSource: source,
-        });
+      try {
+        const exports = collectHttpMethodExports(tree.rootNode, source);
+        for (const exp of exports) {
+          const contract: OperationContract = {
+            protocol: 'http',
+            method: exp.method.toUpperCase(),
+            path: url,
+            tags: [],
+            responses: extractResponsesFromBody(exp.body, source),
+          };
+          out.push({
+            identity: `${exp.method.toUpperCase()} ${url}`,
+            contract,
+            filePath: full,
+            declarationLine: exp.line,
+            observed: collectHandlerObservationsFromBody(exp.body, source),
+            handlerBody: exp.body,
+            handlerSource: source,
+          });
+        }
+      } finally {
+        tree.delete();
       }
     }
   };

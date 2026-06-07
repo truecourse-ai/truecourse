@@ -107,14 +107,18 @@ export async function detectIdempotencyPresence(
   // ---- Pass 2: per route, decide protected-or-not.
   const protectedRoutes = new Set<string>();
   for (const [filePath, { tree, source }] of fileTrees) {
-    walkRoutes(tree.rootNode, source, (declarationLine, middlewareIdents, handlerBody) => {
-      if (
-        anyIdentIsAware(middlewareIdents, filePath, fileBindings) ||
-        (handlerBody && nodeReadsHeader(handlerBody, source, headerLower))
-      ) {
-        protectedRoutes.add(routeKey(filePath, declarationLine));
-      }
-    });
+    try {
+      walkRoutes(tree.rootNode, source, (declarationLine, middlewareIdents, handlerBody) => {
+        if (
+          anyIdentIsAware(middlewareIdents, filePath, fileBindings) ||
+          (handlerBody && nodeReadsHeader(handlerBody, source, headerLower))
+        ) {
+          protectedRoutes.add(routeKey(filePath, declarationLine));
+        }
+      });
+    } finally {
+      tree.delete();
+    }
   }
 
   return { protectedRoutes, scannedFiles: scanned };

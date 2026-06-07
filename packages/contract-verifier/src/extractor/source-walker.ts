@@ -91,11 +91,17 @@ export async function eachParsedSource(
       } catch {
         continue;
       }
+      let tree: Tree | undefined;
       try {
-        const tree = parseFile(full, source, lang);
+        tree = parseFile(full, source, lang);
         visit({ filePath: full, source, tree, lang });
       } catch {
         // Parse failure on one file is non-fatal.
+      } finally {
+        // Explicitly free the WASM heap allocation. Without this, long-running
+        // processes that walk thousands of files exhaust the tree-sitter WASM
+        // heap, causing abort() on subsequent parses.
+        tree?.delete();
       }
     }
   };
