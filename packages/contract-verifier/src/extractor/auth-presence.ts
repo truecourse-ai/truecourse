@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { trackTree } from './source-walker.js';
 import { loadTcIgnore } from '@truecourse/shared';
 import { eachParsedSource } from './source-walker.js';
 import { fastApiFileHasAuthRouter } from './operation-fastapi.js';
@@ -93,6 +94,7 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
       } catch {
         continue;
       }
+      trackTree(tree);
       scanned.push(full);
       collectFromTree(tree, source, full, edges, fileDefaultExports, fileImports, routerVarsByFile);
     }

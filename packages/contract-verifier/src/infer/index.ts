@@ -41,6 +41,7 @@ import {
   type ExtractedQuery,
   type ExtractedOperation,
 } from '../extractor/index.js';
+import { disposeAllTrackedTrees } from '../extractor/source-walker.js';
 import type {
   ArchitectureCategory,
   ArchitectureDecisionContract,
@@ -86,30 +87,36 @@ export interface InferResult {
 }
 
 export async function infer(opts: InferOptions): Promise<InferResult> {
-  const authored = loadAuthored(opts.contractsDir);
-  const coverage = buildCoverage(authored);
+  try {
+    const authored = loadAuthored(opts.contractsDir);
+    const coverage = buildCoverage(authored);
 
-  // All code-side data flows through one shared, lazily-memoized extraction
-  // set — the same layer `verify` reads (see extractor/code-contracts.ts).
-  const code = extractCodeContracts(opts.codeDir);
-  const ops = await code.operations();
+    // All code-side data flows through one shared, lazily-memoized extraction
+    // set — the same layer `verify` reads (see extractor/code-contracts.ts).
+    const code = extractCodeContracts(opts.codeDir);
+    const ops = await code.operations();
 
-  const decisions: InferredDecision[] = [];
-  decisions.push(...inferOperations(ops, code.codeDir, coverage));
-  decisions.push(...(await inferConstants(code, coverage)));
-  decisions.push(...(await inferEnums(code, coverage)));
-  decisions.push(...(await inferQueryRules(code, coverage)));
-  decisions.push(...(await inferEffectGroups(code, coverage)));
-  decisions.push(...(await inferEntities(code, coverage)));
-  decisions.push(...(await inferFormulas(code, coverage)));
-  decisions.push(...(await inferStateMachines(code, coverage)));
-  decisions.push(...(await inferCrossCutting(ops, code, coverage)));
-  decisions.push(...(await inferArchitecture(code, coverage)));
+    const decisions: InferredDecision[] = [];
+    decisions.push(...inferOperations(ops, code.codeDir, coverage));
+    decisions.push(...(await inferConstants(code, coverage)));
+    decisions.push(...(await inferEnums(code, coverage)));
+    decisions.push(...(await inferQueryRules(code, coverage)));
+    decisions.push(...(await inferEffectGroups(code, coverage)));
+    decisions.push(...(await inferEntities(code, coverage)));
+    decisions.push(...(await inferFormulas(code, coverage)));
+    decisions.push(...(await inferStateMachines(code, coverage)));
+    decisions.push(...(await inferCrossCutting(ops, code, coverage)));
+    decisions.push(...(await inferArchitecture(code, coverage)));
 
-  // Stable order so output is deterministic across runs (and diffable in tests).
-  decisions.sort((a, b) => `${a.kind}:${a.identity}`.localeCompare(`${b.kind}:${b.identity}`));
+    // Stable order so output is deterministic across runs (and diffable in tests).
+    decisions.sort((a, b) => `${a.kind}:${a.identity}`.localeCompare(`${b.kind}:${b.identity}`));
 
-  return { decisions, coveredCounts: coverage.counts };
+    return { decisions, coveredCounts: coverage.counts };
+  } finally {
+    // Mirror verify(): free every tree parsed during inference.
+    // See source-walker.ts file header for why deferred deletion is required.
+    disposeAllTrackedTrees();
+  }
 }
 
 // ---------------------------------------------------------------------------
