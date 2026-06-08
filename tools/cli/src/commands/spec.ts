@@ -16,11 +16,7 @@
 
 import * as p from "@clack/prompts";
 import path from "node:path";
-import {
-  summarizeExtractionFailures,
-  type Conflict,
-  type ExtractionFailureReport,
-} from "@truecourse/spec-consolidator";
+import type { Conflict } from "@truecourse/spec-consolidator";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   RESOLVE_STEPS,
@@ -177,6 +173,73 @@ export function decideScanOutcome(input: {
         ? "No claims extracted — nothing to generate yet."
         : "No open conflicts — run `truecourse contracts generate`.";
   return { exitCode: 0, outro };
+}
+
+// ---------------------------------------------------------------------------
+// Failure summarization
+//
+// `extractClaims` never throws on a per-block failure — a transient
+// subprocess error, a parse miss, or an expired `claude` login all land in
+// `failures[]` so a partial scan still yields whatever claims succeeded.
+// That's correct for a few stragglers, but a *total* failure (every block
+// errored → zero claims) is indistinguishable from "clean repo" unless the
+// caller inspects the failures. This helper classifies them so the scan
+// command can surface the actual error messages instead of a misleading
+// success. It lives in the CLI (not the shared extractor) because the scan
+// path is its only consumer — the extractor stays focused on returning raw
+// extraction results.
+//
+// Auth is deliberately *not* sniffed here: every command that spawns `claude`
+// runs the same up-front auth preflight (preflightClaudeOrExit →
+// @truecourse/core/lib/cli-binary), so a broken/expired login is caught before
+// any block runs. Re-guessing it from per-block stderr afterwards would
+// duplicate that check (scan-only) and be far less reliable than the live
+// round-trip the preflight already does.
+// ---------------------------------------------------------------------------
+
+export interface FailureSample {
+  /** The failure message. */
+  message: string;
+  /** How many blocks failed with this exact message. */
+  count: number;
+}
+
+export interface ExtractionFailureReport {
+  /** Total failed blocks. */
+  total: number;
+  /** True when at least one block was attempted and every one failed. */
+  allFailed: boolean;
+  /** Distinct failure messages, most frequent first, capped to `sampleLimit`. */
+  samples: FailureSample[];
+}
+
+/**
+ * Classify an extraction's failures for user-facing reporting: collapse
+ * duplicate messages (152 identical errors → one line with a count) and flag a
+ * total wipeout so callers can surface the real cause instead of a misleading
+ * success. Pure — safe to call on every scan.
+ */
+export function summarizeExtractionFailures(
+  result: { failures: ReadonlyArray<{ error: string }>; blocksAttempted: number },
+  opts: { sampleLimit?: number } = {},
+): ExtractionFailureReport {
+  const { failures, blocksAttempted } = result;
+  const sampleLimit = opts.sampleLimit ?? 3;
+
+  const counts = new Map<string, number>();
+  for (const f of failures) {
+    counts.set(f.error, (counts.get(f.error) ?? 0) + 1);
+  }
+  const samples: FailureSample[] = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, sampleLimit)
+    .map(([message, count]) => ({ message, count }));
+
+  return {
+    total: failures.length,
+    allFailed: blocksAttempted > 0 && failures.length === blocksAttempted,
+    samples,
+  };
 }
 
 // ---------------------------------------------------------------------------

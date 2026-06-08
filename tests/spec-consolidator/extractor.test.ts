@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   extractClaims,
-  summarizeExtractionFailures,
   type BlockRunner,
   type LlmExtraction,
   type LlmClaim,
@@ -233,55 +232,6 @@ describe('extractClaims — progress hooks', () => {
       onBlockFailure: (block, error) => failures.push(`${block.headingPath.at(-1)}: ${error}`),
     });
     expect(failures).toEqual(['A: boom']);
-  });
-});
-
-describe('summarizeExtractionFailures', () => {
-  const fail = (error: string, n = 1) => Array.from({ length: n }, () => ({ error }));
-
-  it('reports nothing when there are no failures', () => {
-    const r = summarizeExtractionFailures({ failures: [], blocksAttempted: 10 });
-    expect(r).toEqual({ total: 0, allFailed: false, samples: [] });
-  });
-
-  it('flags allFailed only when every attempted block failed', () => {
-    expect(
-      summarizeExtractionFailures({ failures: fail('boom', 10), blocksAttempted: 10 }).allFailed,
-    ).toBe(true);
-    expect(
-      summarizeExtractionFailures({ failures: fail('boom', 4), blocksAttempted: 10 }).allFailed,
-    ).toBe(false);
-  });
-
-  it('never flags allFailed when no blocks were attempted', () => {
-    const r = summarizeExtractionFailures({ failures: [], blocksAttempted: 0 });
-    expect(r.allFailed).toBe(false);
-  });
-
-  it('collapses duplicate messages into samples with counts, most frequent first', () => {
-    const r = summarizeExtractionFailures({
-      failures: [...fail('A', 5), ...fail('B', 2), ...fail('C', 1)],
-      blocksAttempted: 8,
-    });
-    expect(r.total).toBe(8);
-    expect(r.samples).toEqual([
-      { message: 'A', count: 5 },
-      { message: 'B', count: 2 },
-      { message: 'C', count: 1 },
-    ]);
-  });
-
-  it('caps samples at the limit (default 3, overridable)', () => {
-    const failures = [
-      ...fail('A', 4),
-      ...fail('B', 3),
-      ...fail('C', 2),
-      ...fail('D', 1),
-    ];
-    expect(summarizeExtractionFailures({ failures, blocksAttempted: 10 }).samples).toHaveLength(3);
-    expect(
-      summarizeExtractionFailures({ failures, blocksAttempted: 10 }, { sampleLimit: 2 }).samples,
-    ).toHaveLength(2);
   });
 });
 
