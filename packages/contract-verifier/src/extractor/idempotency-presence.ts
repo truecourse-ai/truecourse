@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { trackTree } from './source-walker.js';
 import { loadTcIgnore } from '@truecourse/shared';
 
 const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
@@ -97,6 +98,7 @@ export async function detectIdempotencyPresence(
       } catch {
         continue;
       }
+      trackTree(tree);
       scanned.push(full);
       fileTrees.set(full, { tree, source });
       fileBindings.set(full, collectBindings(tree, source, full, headerLower));

@@ -19,6 +19,7 @@ import {
   getArchitectureDetector,
   type DetectedArchitectureChoice,
 } from './extractor/index.js';
+import { disposeAllTrackedTrees } from './extractor/source-walker.js';
 import {
   compareOperation,
   compareErrorEnvelope,
@@ -83,6 +84,21 @@ export interface VerifyResult {
 }
 
 export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
+  try {
+    return await verifyImpl(opts);
+  } finally {
+    // Free every tree-sitter Tree that any extractor parsed during this run.
+    // Without this, the WASM heap grows monotonically (~6000+ trees on a
+    // large monorepo exhausts it and produces abort() on subsequent parses).
+    // We dispose at the very end because many extractor return values retain
+    // SyntaxNode references that downstream comparators / facts harvesters
+    // walk — disposing per-file (as PR #531 tried) crashes those walks with
+    // `RuntimeError: memory access out of bounds`.
+    disposeAllTrackedTrees();
+  }
+}
+
+async function verifyImpl(opts: VerifyOptions): Promise<VerifyResult> {
   // ---- Spec side: parse + resolve every .tc file ----
   const specFiles: ReturnType<typeof parseFile>[] = [];
   walkTcFiles(opts.contractsDir, (filePath) => {

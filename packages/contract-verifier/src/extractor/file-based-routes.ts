@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { trackTree } from './source-walker.js';
 import { loadTcIgnore } from '@truecourse/shared';
 import type { OperationContract } from '../types/index.js';
 import { extractResponsesFromBody, collectHandlerObservationsFromBody } from './operation.js';
@@ -162,6 +163,7 @@ function walkRoot(rootAbs: string, root: RouteRoot, out: ExtractedOperation[]): 
       } catch {
         continue;
       }
+      trackTree(tree);
       const exports = collectHttpMethodExports(tree.rootNode, source);
       for (const exp of exports) {
         const contract: OperationContract = {

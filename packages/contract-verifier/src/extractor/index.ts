@@ -10,7 +10,7 @@ import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import { extractOperationsFromFile, extractPluginStyleRoutesFromFile, type ExtractedOperation } from './operation.js';
 import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
-import { eachParsedSource } from './source-walker.js';
+import { eachParsedSource, trackTree } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 import {
   analyzeRouterFile,
@@ -102,6 +102,7 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
         ext === '.ts' || ext === '.tsx' ? (ext === '.tsx' ? 'tsx' : 'typescript') : 'javascript';
       try {
         const tree = parseFile(full, source, lang);
+        trackTree(tree);
         rawOps.push(...extractOperationsFromFile(full, source, tree));
         rawOps.push(...extractPluginStyleRoutesFromFile(full, source, tree));
         fileAnalyses.push(analyzeRouterFile(full, source, tree));
