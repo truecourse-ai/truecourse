@@ -6,11 +6,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import { extractOperationsFromFile, extractPluginStyleRoutesFromFile, type ExtractedOperation } from './operation.js';
 import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
-import { eachParsedSource, trackTree } from './source-walker.js';
+import { eachParsedSource } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 import {
   analyzeRouterFile,
@@ -100,9 +101,9 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
       const source = fs.readFileSync(full, 'utf-8');
       const lang =
         ext === '.ts' || ext === '.tsx' ? (ext === '.tsx' ? 'tsx' : 'typescript') : 'javascript';
+      let tree: Tree | undefined;
       try {
-        const tree = parseFile(full, source, lang);
-        trackTree(tree);
+        tree = parseFile(full, source, lang);
         rawOps.push(...extractOperationsFromFile(full, source, tree));
         rawOps.push(...extractPluginStyleRoutesFromFile(full, source, tree));
         fileAnalyses.push(analyzeRouterFile(full, source, tree));
@@ -110,6 +111,12 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
         // Parse failures are silent — the verifier flags them via a
         // separate diagnostic channel later. Don't crash the whole
         // extraction pass on one bad file.
+      } finally {
+        // Safe to dispose per-file: the eager handler-facts extraction
+        // in operation.ts has already reduced any handler-body data we
+        // need to plain Sets / Maps / arrays on the ExtractedOperation,
+        // and FileAnalysis contains only strings.
+        tree?.delete();
       }
     }
   };

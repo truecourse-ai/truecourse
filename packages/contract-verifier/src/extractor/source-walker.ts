@@ -13,17 +13,15 @@
  * change.
  *
  * Tree lifetime: tree-sitter `Tree` objects are backed by a fixed-size
- * WASM heap allocation that is NOT freed until `tree.delete()` is called.
+ * WASM heap allocation that isn't freed until `tree.delete()` is called.
  * Long verify runs over large monorepos (~6000+ files) exhaust the heap
- * if trees are never disposed. We can't dispose per-file because many
- * extractors RETURN values that retain `SyntaxNode` references into the
- * tree (e.g. `ExtractedOperation.handlerBody` for downstream effect /
- * authorization analysis). So we track every parsed tree in a
- * module-level registry and free them all in one shot at the end of
- * verify() / infer() via `disposeAllTrackedTrees()`. Eager per-file
- * deletion was attempted in PR #531 and produced
- * `RuntimeError: memory access out of bounds` because downstream
- * comparators / facts harvesters walked the deleted nodes.
+ * if trees aren't disposed promptly. This walker disposes each tree in a
+ * `finally` block after `visit()` returns — safe because matchers eagerly
+ * reduce the tree to plain data (`ExtractedEnum` etc. carry only
+ * `SourceLocation`, never `SyntaxNode`). Other direct `parseFile` callers
+ * (auth-presence, file-based-routes, idempotency-presence, the operation
+ * extractor in `extractor/index.ts`) follow the same per-file dispose
+ * pattern with their own `finally` blocks.
  */
 
 import fs from 'node:fs';
@@ -40,39 +38,6 @@ export interface ParsedSource {
   source: string;
   tree: Tree;
   lang: SupportedLanguage;
-}
-
-// ---------------------------------------------------------------------------
-// Tree lifetime registry — see file header.
-// ---------------------------------------------------------------------------
-
-const trackedTrees: Tree[] = [];
-
-/**
- * Register a freshly-parsed tree. Every call site that invokes `parseFile`
- * inside the verifier must call this so the tree is eventually freed.
- * `eachParsedSource` calls it automatically; direct `parseFile` callers
- * (auth-presence, file-based-routes, idempotency-presence, the operation
- * extractor in `extractor/index.ts`) must call it explicitly.
- */
-export function trackTree(tree: Tree): void {
-  trackedTrees.push(tree);
-}
-
-/**
- * Dispose every tracked tree. Call once at the end of verify() / infer().
- * Safe to call multiple times (deletion is idempotent — a subsequent
- * `delete()` on an already-freed tree throws, which we swallow).
- */
-export function disposeAllTrackedTrees(): void {
-  for (const tree of trackedTrees) {
-    try {
-      tree.delete();
-    } catch {
-      // Already disposed — ignore.
-    }
-  }
-  trackedTrees.length = 0;
 }
 
 /** Extension → tree-sitter language. The single source of truth for
@@ -137,12 +102,14 @@ export async function eachParsedSource(
       } catch {
         continue;
       }
+      let tree: Tree | undefined;
       try {
-        const tree = parseFile(full, source, lang);
-        trackTree(tree);
+        tree = parseFile(full, source, lang);
         visit({ filePath: full, source, tree, lang });
       } catch {
-        // Parse failure on one file is non-fatal.
+        // Parse failure or visit error on one file is non-fatal.
+      } finally {
+        tree?.delete();
       }
     }
   };

@@ -24,7 +24,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
-import { trackTree } from './source-walker.js';
 import { loadTcIgnore } from '@truecourse/shared';
 import { eachParsedSource } from './source-walker.js';
 import { fastApiFileHasAuthRouter } from './operation-fastapi.js';
@@ -88,15 +87,20 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
       if (!TS_EXT.has(ext)) continue;
       const source = fs.readFileSync(full, 'utf-8');
       const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
+      let tree: Tree | undefined;
       try {
         tree = parseFile(full, source, lang);
       } catch {
         continue;
       }
-      trackTree(tree);
-      scanned.push(full);
-      collectFromTree(tree, source, full, edges, fileDefaultExports, fileImports, routerVarsByFile);
+      try {
+        scanned.push(full);
+        // `collectFromTree` reduces the AST to plain `UseEdge` records
+        // (strings only). After it returns the tree can be freed.
+        collectFromTree(tree, source, full, edges, fileDefaultExports, fileImports, routerVarsByFile);
+      } finally {
+        tree.delete();
+      }
     }
   };
   visit(rootDir);
