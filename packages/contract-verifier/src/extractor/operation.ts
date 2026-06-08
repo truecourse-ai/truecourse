@@ -25,6 +25,7 @@
  */
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
+import { extractHandlerFacts } from './handler-facts.js';
 import type {
   OperationContract,
   ResponseContract,
@@ -56,16 +57,22 @@ export interface ExtractedOperation {
    */
   observed: HandlerObservations;
   /**
-   * The resolved handler body AST node — already follows single-file
-   * delegation. Cross-cutting comparators (EffectGroup,
-   * AuthorizationRule) walk this directly when they need block-scoped
-   * facts the contract / observations don't preserve.
-   *
-   * In-memory only; not serializable across process boundaries. The
-   * `source` is the file's raw text (for slicing node ranges).
+   * Pre-computed emission facts (`emit('order.placed', …)`, dynamic emits,
+   * failure-block emits, branch emits). Populated eagerly by the operation
+   * extractor while the AST is alive, so downstream comparators
+   * (`compareEffectGroup`) consume plain data and the tree can be freed
+   * per-file. Absent when the handler body couldn't be resolved.
    */
-  handlerBody?: SyntaxNode;
-  handlerSource?: string;
+  emission?: import('./handler-facts.js').OperationEmission;
+  /**
+   * Pre-computed list of every equality comparison in the handler that
+   * compares an auth-side reference (req.auth.*, request.user.*,
+   * current_user.*) against a member access whose terminal property is
+   * captured as `resourceField`. `compareAuthorizationRule` does a plain
+   * `.some()` lookup against the contract's field name. Absent when the
+   * handler body couldn't be resolved.
+   */
+  ownershipCheckCandidates?: import('./handler-facts.js').OwnershipCheckCandidate[];
   /**
    * True when the route declares `config.auth: false` (Strapi/plugin-style
    * explicit opt-out). The auth-requirement comparator skips these routes
@@ -204,6 +211,7 @@ function tryExtractRouteCall(
 
   const responses = extractResponses(bodyToWalk, source);
   const observed = collectHandlerObservations(bodyToWalk, source);
+  const facts = extractHandlerFacts(bodyToWalk, source);
   return {
     identity: `${method.toUpperCase()} ${pathLit}`,
     contract: {
@@ -217,8 +225,8 @@ function tryExtractRouteCall(
     declarationLine: call.startPosition.row + 1,
     routerName,
     observed,
-    handlerBody: bodyToWalk,
-    handlerSource: source,
+    emission: facts.emission,
+    ownershipCheckCandidates: facts.ownershipCheckCandidates,
   };
 }
 

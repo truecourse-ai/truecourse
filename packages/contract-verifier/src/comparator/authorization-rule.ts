@@ -1,20 +1,27 @@
 /**
  * AuthorizationRule comparator. For each operation in `appliesTo`,
- * walk the handler body looking for a per-row authorization check that
- * matches the rule's predicate. If absent → IDOR-class drift.
+ * look for a per-row authorization check that matches the rule's
+ * predicate. If absent → IDOR-class drift.
  *
- * The contract stores the predicate as an opaque string (Phase-4 doesn't yet
- * parse predicate expressions). The comparator performs a *signature*
+ * The contract stores the predicate as an opaque string (Phase-4 doesn't
+ * yet parse predicate expressions). The comparator performs a *signature*
  * match: the predicate references `request.auth` and a resource
  * member-access (`loaded.<Entity>.<field>`); the comparator looks for a
- * binary equality / inequality in the handler involving (a) a
- * `req.auth*` member-access AND (b) a member-access on a resource-like
- * variable. Conservative — false negatives possible, false positives
- * not (which is the project's invariant).
+ * binary equality / inequality in the handler involving (a) a `req.auth*`
+ * member-access AND (b) a member-access on a resource-like variable.
+ * Conservative — false negatives possible, false positives not.
+ *
+ * Tree-lifetime: this comparator used to walk `op.handlerBody`
+ * (`SyntaxNode`) directly. That kept tree-sitter WASM allocations alive
+ * across the whole verify run and crashed large monorepos. The handler
+ * is now scanned eagerly in `extractor/handler-facts.ts`, which emits
+ * every equality with an auth-side ref as
+ * `op.ownershipCheckCandidates: Array<{ resourceField, line }>`. This
+ * comparator just checks whether any candidate's `resourceField` matches
+ * the contract's parsed field name.
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type {
   ContractDrift,
   ArtifactRef,
@@ -42,16 +49,19 @@ export function compareAuthorizationRule(
   // form we author looks like:
   //   request.auth.userId == loaded.Order.customerId
   // The comparator extracts `customerId` (the resource field) and
-  // requires a comparison node in the handler that touches both
+  // requires an ownership-check candidate in the handler that touches
   // `req.auth*` and `<x>.customerId`.
   const fieldName = parseResourceField(input.contract.predicate);
   if (!fieldName) return out;
 
   for (const op of input.recognizedOps) {
     if (!targets.has(op.identity)) continue;
-    if (!op.handlerBody || !op.handlerSource) continue;
+    // No candidates extracted (handler body wasn't resolved at extraction
+    // time) — treat as inconclusive rather than fire a drift, matching
+    // the prior behavior where missing handlerBody was a `continue`.
+    if (!op.ownershipCheckCandidates) continue;
 
-    if (handlerHasOwnershipCheck(op.handlerBody, op.handlerSource, fieldName)) continue;
+    if (op.ownershipCheckCandidates.some((c) => c.resourceField === fieldName)) continue;
 
     out.push({
       id: randomUUID(),
@@ -83,83 +93,4 @@ function parseResourceField(predicate: string): string | null {
   const m = predicate.match(/loaded\.[A-Za-z_][\w]*\.([A-Za-z_][\w]*)/);
   if (m) return m[1];
   return null;
-}
-
-// ---------------------------------------------------------------------------
-// Ownership-check pattern detection in the handler
-// ---------------------------------------------------------------------------
-
-function handlerHasOwnershipCheck(body: SyntaxNode, source: string, fieldName: string): boolean {
-  let found = false;
-  const check = (left: SyntaxNode, right: SyntaxNode): boolean =>
-    (matchesAuthSide(left, source) || matchesAuthSide(right, source)) &&
-    (matchesResourceField(left, source, fieldName) || matchesResourceField(right, source, fieldName));
-  const visit = (node: SyntaxNode): void => {
-    if (found) return;
-    // JS equality: binary_expression with ===/==/!==/!=
-    if (node.type === 'binary_expression') {
-      const opNode = node.childForFieldName('operator');
-      const op = opNode ? source.slice(opNode.startIndex, opNode.endIndex) : '';
-      if (op === '===' || op === '==' || op === '!==' || op === '!=') {
-        const left = node.childForFieldName('left');
-        const right = node.childForFieldName('right');
-        if (left && right && check(left, right)) { found = true; return; }
-      }
-    }
-    // Python equality: comparison_operator with ==/!=
-    if (node.type === 'comparison_operator') {
-      const a = node.namedChild(0);
-      const b = node.namedChild(1);
-      if (a && b) {
-        const op = source.slice(a.endIndex, b.startIndex).trim();
-        if ((op === '==' || op === '!=') && check(a, b)) { found = true; return; }
-      }
-    }
-    for (const child of node.namedChildren) {
-      visit(child);
-      if (found) return;
-    }
-  };
-  visit(body);
-  return found;
-}
-
-/** True if the expression touches `req.auth.*` / `request.user.*` /
- *  `current_user` (JS member chains + Python attribute chains). */
-function matchesAuthSide(node: SyntaxNode, source: string): boolean {
-  // Python attribute chain: `request.user.id`, `request.auth.user_id`, `current_user.id`.
-  if (node.type === 'attribute') {
-    return /\b(req|request)\.(auth|user)\b|\bcurrent_user\b/.test(source.slice(node.startIndex, node.endIndex));
-  }
-  // Walk up the member chain looking for `req` / `request` then `.auth`.
-  let cur: SyntaxNode | null = node;
-  while (cur) {
-    if (cur.type === 'identifier') {
-      const text = source.slice(cur.startIndex, cur.endIndex);
-      if (text === 'req' || text === 'request') return false; // bare identifier — not enough
-      return false;
-    }
-    if (cur.type === 'member_expression') {
-      // does the chain include `.auth`?
-      const text = source.slice(cur.startIndex, cur.endIndex);
-      if (/\b(req|request)\.auth\b|\b(req|request)\?\.auth\b/.test(text)) return true;
-      cur = cur.childForFieldName('object');
-      continue;
-    }
-    if (cur.type === 'optional_chain_expression' || cur.type === 'subscript_expression') {
-      cur = cur.childForFieldName('object');
-      continue;
-    }
-    return false;
-  }
-  return false;
-}
-
-/** True if the expression terminates in `.<fieldName>` (JS member access
- *  or Python attribute access). */
-function matchesResourceField(node: SyntaxNode, source: string, fieldName: string): boolean {
-  if (node.type !== 'member_expression' && node.type !== 'attribute') return false;
-  const prop = node.childForFieldName('property') ?? node.childForFieldName('attribute');
-  if (!prop) return false;
-  return source.slice(prop.startIndex, prop.endIndex) === fieldName;
 }

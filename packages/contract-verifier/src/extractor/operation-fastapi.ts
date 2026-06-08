@@ -23,6 +23,7 @@ import type {
   BodyShape,
 } from '../types/index.js';
 import type { ExtractedOperation, HandlerObservations } from './operation.js';
+import { extractHandlerFacts, emptyHandlerFacts } from './handler-facts.js';
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
 
@@ -54,6 +55,7 @@ export function extractFastApiOperationsFromFile(
       const paramsNode = def.childForFieldName('parameters');
       const responses = extractResponses(body, source, route.successStatus);
       const observed = collectObservations(paramsNode, body, source, fullPath);
+      const facts = body ? extractHandlerFacts(body, source) : emptyHandlerFacts();
       out.push({
         identity: `${route.method.toUpperCase()} ${fullPath}`,
         contract: {
@@ -67,8 +69,8 @@ export function extractFastApiOperationsFromFile(
         declarationLine: node.startPosition.row + 1,
         routerName: route.routerVar,
         observed,
-        handlerBody: body ?? undefined,
-        handlerSource: source,
+        emission: facts.emission,
+        ownershipCheckCandidates: facts.ownershipCheckCandidates,
       });
       break; // one route decorator per function
     }
