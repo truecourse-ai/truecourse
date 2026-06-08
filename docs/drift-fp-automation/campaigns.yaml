@@ -100,10 +100,13 @@ campaigns:
       - docs/rich-text           # 11 — rich-text editor features + node types
       - docs/custom-components   # 8 — extension points + lifecycle hooks
     priority: 4
-    status: discovering
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    notes: ["Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."]
+    status: done
+    baseline: { verified_at: "2026-06-07", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0 }
+    final:    { verified_at: "2026-06-08", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0, tp_rate: 1.0 }
+    notes:
+      - "Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."
+      - "Closed at fp=0 on first verify run. 3 drifts, all named-constant/no-code-counterpart [info]: overrideLock.default (documented API default stored as a parameter default, not a named constant), widget.maxWidth.default + widget.minWidth.default (optional API property defaults, also not named constants). 17 contracts total — 9 UnenforceableObligation (can't drift by design), 3 NamedConstant (these 3 info drifts), 2 AuthRequirement, 2 Entity, 1 Enum, all clean. WidgetWidth enum and entity/auth contracts verified cleanly."
+      - "Surfaced the WASM tree-sitter heap exhaustion bug on a 4493-file TS monorepo (PR #531 was the routine's wrong-shape attempt at fixing it inline + bundling with close; PR #532 was a tests-pass-but-still-crashes deferred-disposal; PR #533 was the real fix — eager handler-fact extraction + per-file tree disposal). Verified end-to-end on this branch: 69s wall-clock, exit 0, zero Aborted(), drift set unchanged."
 
   # ---- Python — prefect (orchestration, state-machine-heavy enums) ----
   - target_repo: PrefectHQ/prefect
