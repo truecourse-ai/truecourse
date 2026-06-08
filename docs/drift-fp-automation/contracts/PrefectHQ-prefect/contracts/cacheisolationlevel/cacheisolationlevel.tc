@@ -1,0 +1,4 @@
+enum CacheIsolationLevel {
+  origin "docs/v3/concepts/caching.mdx" "Cache isolation level" 1..4289
+  values [READ_COMMITTED, SERIALIZABLE]
+}

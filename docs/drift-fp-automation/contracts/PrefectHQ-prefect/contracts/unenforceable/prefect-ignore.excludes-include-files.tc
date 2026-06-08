@@ -1,0 +1,6 @@
+unenforceable-obligation prefect-ignore.excludes-include-files {
+  origin "docs/v3/advanced/submit-flows-directly-to-dynamic-infrastructure.mdx" ".prefectignore" 1..4289
+  spec-text "Files matching .prefectignore patterns are excluded from deployment uploads even if they also match include_files patterns."
+  category deployment-behavior
+  rationale "File filtering precedence in deployment uploads is a CLI build-time behavior not encodable as an API contract fragment"
+}

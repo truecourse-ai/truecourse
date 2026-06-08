@@ -1,0 +1,6 @@
+unenforceable-obligation asset-dependency-modeling {
+  origin "docs/v3/concepts/assets.mdx" "Dependency modeling" 1..1044
+  spec-text "Asset dependencies are determined through two complementary mechanisms: task graph inference and explicit declaration via asset_deps parameter. The backend tracks dependencies across workflow boundaries."
+  category behavior
+  rationale "Conceptual description of asset dependency tracking; no HTTP endpoint or structural schema to encode"
+}

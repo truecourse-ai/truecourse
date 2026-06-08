@@ -1,0 +1,6 @@
+entity PrefectResource {
+  origin "docs/v3/concepts/events.mdx" "Event / resource" 50..50
+  field prefect_resource_id: string {
+    immutable
+  }
+}

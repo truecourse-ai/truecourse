@@ -1,0 +1,6 @@
+unenforceable-obligation artifact.per-call-creation {
+  origin "docs/v3/concepts/artifacts.mdx" "Artifact / types" 25..25
+  spec-text "Each call to create_link_artifact() or create_markdown_artifact() generates a distinct artifact."
+  category behavioral
+  rationale "The per-call artifact creation rule is an SDK/runtime behavior constraint; it cannot be structurally encoded as an HTTP contract fragment"
+}

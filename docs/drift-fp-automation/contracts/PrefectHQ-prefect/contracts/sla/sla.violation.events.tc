@@ -1,0 +1,8 @@
+effect-group sla.violation.events {
+  origin "docs/v3/concepts/slas.mdx" "_shared -> effects" 1..586
+  effect prefect.sla.violation {
+    emit-when {
+      trigger-condition flow-run-exceeds-time-to-completion-duration
+    }
+  }
+}

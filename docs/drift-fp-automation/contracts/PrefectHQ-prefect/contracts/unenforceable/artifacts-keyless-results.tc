@@ -1,0 +1,6 @@
+unenforceable-obligation artifacts-keyless-results {
+  origin "docs/v3/advanced/api-client.mdx" "Create, read, or delete artifacts" 1..57
+  spec-text "If you don't specify a key or that a key must exist, you will also return results, which are a type of key-less artifact."
+  category behavior
+  rationale "Describes implicit query behavior for key-less artifacts; cannot be expressed as a request/response contract predicate"
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation task-key-uniqueness {
+  origin "docs/v3/concepts/tasks.mdx" "What is a task?" 1..40
+  spec-text "Tasks are uniquely identified by a task key, which is a hash composed of the task name and the fully qualified name of the function."
+  category identity
+  rationale "Task key hashing algorithm is a behavioral/implementation constraint; not an HTTP contract"
+}

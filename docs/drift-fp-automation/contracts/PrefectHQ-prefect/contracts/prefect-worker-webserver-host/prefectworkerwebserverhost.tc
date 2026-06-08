@@ -1,0 +1,4 @@
+constant PREFECT_WORKER_WEBSERVER_HOST {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "worker healthcheck" 20..20
+  type string
+}

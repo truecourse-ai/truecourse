@@ -1,0 +1,6 @@
+enum TaskRunStateName {
+  origin "docs/v3/concepts/tasks.mdx" "task run / state machine" 1..4289
+  values [Pending, Running, Completed, Retrying, AwaitingRetry, Crashed, Failed, Scheduled]
+  trigger-subset terminal [Completed, Crashed, Failed]
+  trigger-subset background-initial [Scheduled]
+}

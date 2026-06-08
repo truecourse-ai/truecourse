@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.request-context.authorization-header-removed {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook template context / HTTP request" 133..133
+  spec-text "To prevent accidental disclosures, the Authorization header is removed."
+  category security
+  rationale "Header stripping in Jinja2 template context cannot be verified structurally as an HTTP contract"
+}

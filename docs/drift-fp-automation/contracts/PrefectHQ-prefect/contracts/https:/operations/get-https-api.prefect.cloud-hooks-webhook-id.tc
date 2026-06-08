@@ -1,0 +1,7 @@
+operation GET "https://api.prefect.cloud/hooks/{webhook-id}" {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook Endpoints" 1..73
+  response 204 on success {
+  }
+  response 400 on error {
+  }
+}

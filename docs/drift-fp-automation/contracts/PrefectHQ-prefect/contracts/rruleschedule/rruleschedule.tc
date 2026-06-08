@@ -1,0 +1,5 @@
+entity RRuleSchedule {
+  origin "docs/v3/concepts/schedules.mdx" "RRule schedule / fields" 1..4289
+  field rrule: string {}
+  field timezone: string {}
+}

@@ -1,0 +1,9 @@
+auth-requirement auth.bearer.webhook {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook authentication" 30..30
+  scheme Bearer
+  selector path-glob "/hooks/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

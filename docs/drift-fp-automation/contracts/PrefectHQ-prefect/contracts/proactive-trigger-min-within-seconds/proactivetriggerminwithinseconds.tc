@@ -1,0 +1,5 @@
+constant PROACTIVE_TRIGGER_MIN_WITHIN_SECONDS {
+  origin "docs/v3/concepts/event-triggers.mdx" "proactive trigger / within" 1..4289
+  type number
+  expected-value 10
+}

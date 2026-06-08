@@ -1,0 +1,5 @@
+constant SCHEDULER_MIN_SCHEDULED_TIME_HOURS {
+  origin "docs/v3/concepts/schedules.mdx" "How scheduling works" 1..1044
+  type number
+  expected-value 1
+}

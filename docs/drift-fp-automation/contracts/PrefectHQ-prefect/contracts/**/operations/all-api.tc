@@ -1,0 +1,9 @@
+operation ALL "/api/**" {
+  origin "docs/v3/concepts/rate-limits.mdx" "Prefect Cloud API request size limit" 1..89
+  status shipped
+  request {
+    header content-length required
+  }
+  response 411 on length_required {}
+  response 413 on content_too_large {}
+}

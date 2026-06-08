@@ -1,0 +1,8 @@
+entity SLA {
+  origin "docs/v3/concepts/slas.mdx" "SLA / fields" 1..4289
+  field name: string {}
+  field severity: string {}
+  field duration: integer {}
+  field within: integer {}
+  field stale_after: integer {}
+}

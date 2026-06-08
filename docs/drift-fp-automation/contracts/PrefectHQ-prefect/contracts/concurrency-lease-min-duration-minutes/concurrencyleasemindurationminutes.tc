@@ -1,0 +1,5 @@
+constant CONCURRENCY_LEASE_MIN_DURATION_MINUTES {
+  origin "docs/v3/concepts/global-concurrency-limits.mdx" "global concurrency limit / timed leases" 1..4289
+  type number
+  expected-value 1
+}

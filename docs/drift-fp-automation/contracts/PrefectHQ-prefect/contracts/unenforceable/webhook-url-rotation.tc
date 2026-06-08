@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-url-rotation {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook Endpoints" 1..73
+  spec-text "You may rotate your webhook URL at any time without losing the associated configuration."
+  category behavior
+  rationale "URL rotation preserving configuration is a server-side operational guarantee; not an HTTP contract constraint"
+}

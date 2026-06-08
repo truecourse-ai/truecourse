@@ -107,7 +107,8 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
         continue;
       }
       if (!entry.isFile()) continue;
-      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ext !== '.md' && ext !== '.mdx') continue;
 
       const candidate = makeCandidate(full, rootDir, previewLines, opts);
       if (candidate) out.push(candidate);

@@ -1,0 +1,9 @@
+auth-requirement auth.bearer.prefect-cloud {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "Prefect Cloud API" 61..61
+  scheme Bearer
+  selector path-glob "/api/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

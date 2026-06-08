@@ -1,0 +1,6 @@
+unenforceable-obligation plugin-error-isolation {
+  origin "docs/v3/advanced/plugins.mdx" "Error Handling" 1..1044
+  spec-text "Plugin errors are isolated; one plugin failure does not affect other plugins. With required=True (strict mode), a plugin failure aborts Prefect startup. Timeouts apply globally across all plugin initializations."
+  category behavior
+  rationale "Runtime isolation behavior; not a structural HTTP contract"
+}

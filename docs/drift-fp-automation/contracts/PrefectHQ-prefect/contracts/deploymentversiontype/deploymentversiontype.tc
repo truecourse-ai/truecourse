@@ -1,0 +1,4 @@
+enum DeploymentVersionType {
+  origin "docs/v3/concepts/deployments.mdx" "Deployment / metadata fields" 1..4289
+  values ["vcs:github", "vcs:gitlab", "vcs:bitbucket", "vcs:azuredevops", "vcs:git", "prefect:simple"]
+}

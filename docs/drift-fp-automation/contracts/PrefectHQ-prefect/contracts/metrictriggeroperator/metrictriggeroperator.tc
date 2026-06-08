@@ -1,0 +1,4 @@
+enum MetricTriggerOperator {
+  origin "docs/v3/concepts/event-triggers.mdx" "MetricTriggerQuery" 1..4289
+  values ["<", "<=", ">", ">="]
+}

@@ -1,0 +1,28 @@
+effect-group automation.lifecycle.events {
+  origin "docs/v3/concepts/automations.mdx" "_shared -> effects" 1..586
+  effect prefect.automation.triggered {
+    emit-when {
+      trigger-condition trigger-condition-met
+    }
+  }
+  effect prefect.automation.resolved {
+    emit-when {
+      trigger-condition trigger-condition-met
+    }
+  }
+  effect prefect.automation.action.triggered {
+    emit-when {
+      trigger-condition action-starts
+    }
+  }
+  effect prefect.automation.action.executed {
+    emit-when {
+      trigger-condition action-completes-successfully
+    }
+  }
+  effect prefect.automation.action.failed {
+    emit-when {
+      trigger-condition action-fails
+    }
+  }
+}

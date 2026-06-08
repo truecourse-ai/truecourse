@@ -1,0 +1,6 @@
+unenforceable-obligation runinput.custom-validation-post-resume {
+  origin "docs/v3/advanced/interactive.mdx" "RunInput / custom validation" 1..4289
+  spec-text "Calling custom validation runs after the flow resumes, not client-side. If ValidationError is raised, flow run fails and logs error unless caught."
+  category runtime-validation
+  rationale "Pydantic model_validator execution timing on flow resume is a runtime behavior not structurally encodable"
+}

@@ -1,0 +1,6 @@
+entity EmailContent {
+  origin "docs/v3/advanced/form-building.mdx" "EmailContent / fields" 1..4289
+  field subject: string {}
+  field body: string {}
+  field attachments: array {}
+}

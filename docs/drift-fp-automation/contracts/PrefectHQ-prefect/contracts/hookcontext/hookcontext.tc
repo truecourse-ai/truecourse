@@ -1,0 +1,6 @@
+entity HookContext {
+  origin "docs/v3/advanced/plugins.mdx" "HookContext" 1..1
+  field prefect_version: string {}
+  field api_url: string|null {}
+  field logger_factory: callable {}
+}

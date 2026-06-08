@@ -1,0 +1,5 @@
+constant PREFECT_PLUGINS_SETUP_TIMEOUT_SECONDS {
+  origin "docs/v3/advanced/plugins.mdx" "plugin system environment variables" 1..4289
+  type number
+  expected-value 20
+}

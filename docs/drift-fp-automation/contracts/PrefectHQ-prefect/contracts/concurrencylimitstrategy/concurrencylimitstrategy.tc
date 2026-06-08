@@ -1,0 +1,4 @@
+enum ConcurrencyLimitStrategy {
+  origin "docs/v3/concepts/deployments.mdx" "Deployment / concurrency_limit" 1..4289
+  values [ENQUEUE, CANCEL_NEW]
+}

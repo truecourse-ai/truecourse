@@ -1,0 +1,7 @@
+entity AssetProperties {
+  origin "docs/v3/concepts/assets.mdx" "AssetProperties / fields" 1..4289
+  field name: string {}
+  field description: string {}
+  field owners: array {}
+  field url: string {}
+}

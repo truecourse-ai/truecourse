@@ -1,0 +1,5 @@
+constant PREFECT_WORKER_WEBSERVER_PORT_DEFAULT {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "PREFECT_WORKER_WEBSERVER_PORT" 1..4289
+  type number
+  expected-value 8080
+}

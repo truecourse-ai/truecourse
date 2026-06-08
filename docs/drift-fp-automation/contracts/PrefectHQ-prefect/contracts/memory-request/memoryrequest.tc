@@ -1,0 +1,5 @@
+constant memory_request {
+  origin "docs/v3/advanced/customize-base-job-templates.mdx" "Kubernetes work pool job / resource limits" 131..131
+  type string
+  expected-value "256Mi"
+}

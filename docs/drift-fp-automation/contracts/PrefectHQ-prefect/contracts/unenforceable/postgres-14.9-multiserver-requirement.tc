@@ -1,0 +1,6 @@
+unenforceable-obligation postgres-14.9-multiserver-requirement {
+  origin "docs/v3/advanced/self-hosted.mdx" "self-hosted database / configuration" 1..4289
+  spec-text "PostgreSQL version 14.9 or higher is required for multi-server deployments. SQLite does not support the features needed for state synchronization across multiple servers."
+  category infrastructure-requirement
+  rationale "Database version requirements are infrastructure provisioning constraints not structurally verifiable as a code contract"
+}

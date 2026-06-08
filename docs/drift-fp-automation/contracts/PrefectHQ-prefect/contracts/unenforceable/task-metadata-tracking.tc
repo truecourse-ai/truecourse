@@ -1,0 +1,6 @@
+unenforceable-obligation task-metadata-tracking {
+  origin "docs/v3/concepts/tasks.mdx" "What is a task?" 1..40
+  spec-text "Metadata about task runs, such as run time and final state, is automatically tracked. Each state the task enters is recorded, enabling observability and state-based logic."
+  category behavior
+  rationale "Automatic metadata tracking behavior is a runtime guarantee; no HTTP endpoint or structural contract to encode"
+}

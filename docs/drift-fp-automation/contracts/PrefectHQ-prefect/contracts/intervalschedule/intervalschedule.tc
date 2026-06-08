@@ -1,0 +1,6 @@
+entity IntervalSchedule {
+  origin "docs/v3/concepts/schedules.mdx" "Interval schedule / fields" 1..4289
+  field interval: string {}
+  field anchor_date: string {}
+  field timezone: string {}
+}

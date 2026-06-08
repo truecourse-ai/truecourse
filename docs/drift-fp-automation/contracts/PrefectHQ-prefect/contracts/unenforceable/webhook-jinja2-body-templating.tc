@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-jinja2-body-templating {
+  origin "docs/v3/concepts/webhooks.mdx" "Dynamic Webhook Events" 1..70
+  spec-text "Body fields model and friendly_name are used in a Jinja2 template to produce dynamic event resource IDs and names. All subsequent POST requests will produce events with those variable resource IDs and names."
+  category behavior
+  rationale "Jinja2 template rendering logic is not structurally encodable as an HTTP contract constraint"
+}

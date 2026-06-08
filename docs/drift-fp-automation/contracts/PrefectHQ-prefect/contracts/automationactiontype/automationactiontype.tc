@@ -1,0 +1,4 @@
+enum AutomationActionType {
+  origin "docs/v3/concepts/automations.mdx" "Automation / action types" 1..4289
+  values [cancel-flow-run, delete-flow-run, change-flow-run-state, suspend-flow-run, resume-flow-run, run-deployment, pause-deployment, resume-deployment, pause-work-pool, resume-work-pool, pause-work-queue, resume-work-queue, pause-automation, resume-automation, send-notification, call-webhook, send-email-notification, declare-incident]
+}

@@ -1,0 +1,5 @@
+constant ZOMBIE_FLOW_DETECTION_WITHIN_SECONDS {
+  origin "docs/v3/advanced/detect-zombie-flows.mdx" "zombie flow detection / configuration" 1..4289
+  type number
+  expected-value 90
+}

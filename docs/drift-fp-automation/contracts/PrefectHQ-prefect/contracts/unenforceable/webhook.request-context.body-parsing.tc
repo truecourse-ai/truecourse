@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.request-context.body-parsing {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook template context / HTTP request" 133..133
+  spec-text "If the Content-Type of the request is application/json, the body will be parsed as a JSON object. If the Content-Type is application/x-www-form-urlencoded, the body is parsed into a flat dict-like object of key-value pairs. In any case where the body cannot be transformed into JSON, it is made available to your templates as a Python str."
+  category behavioral
+  rationale "Content-type-conditional body parsing logic in the template context layer cannot be structurally encoded as an HTTP contract fragment"
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation zombie-flow.proactive-trigger {
+  origin "docs/v3/advanced/detect-zombie-flows.mdx" "Zombie flow detection automation" 1..586
+  spec-text "An automation using a Proactive EventTrigger that watches for flow-run heartbeat events fires when the expected event does NOT occur within the specified window (90 seconds). Used to detect crashed or zombie flow runs."
+  category automation-configuration
+  rationale "The zombie flow detection automation is a runtime Prefect Automation configuration, not an API operation or effect group contract"
+}

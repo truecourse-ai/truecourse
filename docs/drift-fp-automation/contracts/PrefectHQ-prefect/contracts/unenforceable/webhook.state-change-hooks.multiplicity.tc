@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.state-change-hooks.multiplicity {
+  origin "docs/v3/concepts/states.mdx" "state change hooks" 247..247
+  spec-text "State change hooks are versatile, allowing you to specify multiple state change hooks for the same state transition, or to use the same state change hook for different transitions."
+  category behavioral
+  rationale "Hook multiplicity is a runtime/SDK behavior not structurally encodable as an HTTP contract fragment"
+}

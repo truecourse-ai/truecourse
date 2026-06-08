@@ -1,0 +1,5 @@
+constant CONCURRENCY_DEFAULT_GRACE_PERIOD_SECONDS {
+  origin "docs/v3/concepts/deployments.mdx" "Deployment / concurrency_options / grace_period_seconds" 1..4289
+  type number
+  expected-value 300
+}

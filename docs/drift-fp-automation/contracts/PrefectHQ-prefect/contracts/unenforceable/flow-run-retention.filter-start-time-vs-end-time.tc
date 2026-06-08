@@ -1,0 +1,6 @@
+unenforceable-obligation flow-run-retention.filter-start-time-vs-end-time {
+  origin "docs/v3/advanced/database-maintenance.mdx" "flow run retention / filtering constraints" 1..4289
+  spec-text "Custom flow filters by start_time (when flow run began execution), not created time. Flows created but never started are not deleted by this approach. The built-in vacuum service uses end_time instead, so it can clean up runs that reached a terminal state without ever entering a running state."
+  category database-maintenance
+  rationale "The distinction between filtering on start_time vs end_time for retention is a database query implementation detail not encodable as a structural API contract"
+}

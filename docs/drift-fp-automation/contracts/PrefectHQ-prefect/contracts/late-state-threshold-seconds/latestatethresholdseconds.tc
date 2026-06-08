@@ -1,0 +1,5 @@
+constant LATE_STATE_THRESHOLD_SECONDS {
+  origin "docs/v3/concepts/states.mdx" "FlowRun / state types" 1..4289
+  type number
+  expected-value 15
+}

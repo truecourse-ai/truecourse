@@ -1,0 +1,7 @@
+entity FlowRun {
+  origin "docs/v3/concepts/flows.mdx" "FlowRun / state machine" 37..60
+  status shipped
+  fields {
+    status: Enum:FlowRunStateType
+  }
+}

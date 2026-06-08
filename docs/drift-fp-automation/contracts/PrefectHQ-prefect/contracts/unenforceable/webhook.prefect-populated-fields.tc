@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.prefect-populated-fields {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook event population" 1..586
+  spec-text "Prefect Cloud sets default values for any missing fields such as occurred and id. Prefect Cloud adds the webhook itself as a related resource on all of the events it produces. If the template does not produce a payload field, the payload defaults to a standard set of debugging information including the HTTP method, headers, and body."
+  category webhook-behavior
+  rationale "Server-side field population defaults on webhook events are Prefect Cloud internal behavior, not verifiable as a structural API contract"
+}

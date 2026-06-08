@@ -1,0 +1,28 @@
+effect-group asset.lifecycle.events {
+  origin "docs/v3/concepts/assets.mdx" "_shared -> effects" 1..586
+  effect prefect.asset.materialization.succeeded {
+    emit-when {
+      operation asset-task-run
+      on-status completed
+    }
+  }
+  effect prefect.asset.materialization.failed {
+    emit-when {
+      operation asset-task-run
+      on-status failed
+    }
+  }
+  effect prefect.asset.referenced {
+    emit-when {
+      operation asset-task-run
+      on-status completed
+    }
+    emit-when {
+      operation asset-task-run
+      on-status failed
+    }
+  }
+  forbids {
+    forbid emission when-response-status [cached]
+  }
+}

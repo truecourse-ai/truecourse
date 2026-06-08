@@ -1,0 +1,6 @@
+unenforceable-obligation resource.filter.logical-and {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST API / filter query" 1..93
+  spec-text "When multiple criteria are specified, logical AND will be applied to the criteria."
+  category query-semantics
+  rationale "Filter logical composition is not structurally encodable in the operation contract"
+}

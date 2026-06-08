@@ -1,0 +1,15 @@
+state-machine FlowRun.status {
+  origin "docs/v3/concepts/flows.mdx" "FlowRun / state machine" 1..4289
+  scope {
+    entity Entity:FlowRun
+    field status
+  }
+  states Enum:FlowRunStateName
+  initial [Scheduled]
+  terminal [Cancelled, Completed, Cached, RolledBack, Failed, TimedOut, Crashed]
+  transitions {
+    Scheduled -> [Pending]
+    Pending -> [Running]
+    Running -> [Completed, Failed, Cancelled, Crashed]
+  }
+}

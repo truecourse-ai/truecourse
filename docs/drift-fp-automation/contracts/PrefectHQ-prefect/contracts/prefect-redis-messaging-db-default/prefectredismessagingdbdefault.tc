@@ -1,0 +1,5 @@
+constant PREFECT_REDIS_MESSAGING_DB_DEFAULT {
+  origin "docs/v3/advanced/self-hosted.mdx" "Redis messaging configuration env vars" 1..4289
+  type number
+  expected-value 0
+}

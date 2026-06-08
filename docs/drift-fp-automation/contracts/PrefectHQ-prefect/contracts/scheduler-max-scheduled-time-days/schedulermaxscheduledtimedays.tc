@@ -1,0 +1,5 @@
+constant SCHEDULER_MAX_SCHEDULED_TIME_DAYS {
+  origin "docs/v3/concepts/schedules.mdx" "scheduler / configuration" 1..4289
+  type number
+  expected-value 100
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.static-event-template {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook" 1..586
+  spec-text "A webhook with a static template may be invoked through any of the HTTP methods, including a GET request with no body. Each time the script hits the webhook, the webhook produces a single Prefect event."
+  category webhook-behavior
+  rationale "Webhook event production from arbitrary HTTP methods is a runtime behavior of Prefect Cloud webhook processing, not an API contract verifiable as an operation or effect group"
+}

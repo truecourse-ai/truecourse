@@ -1,0 +1,6 @@
+unenforceable-obligation worker-health.503-threshold {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "worker health endpoint" 1..89
+  spec-text "A worker is considered unhealthy if it hasn't polled for flow runs within PREFECT_WORKER_QUERY_SECONDS * 30 seconds; its health endpoint will return 503 (Service Unavailable)."
+  category health-check-logic
+  rationale "The 503 threshold is computed dynamically from a runtime setting (PREFECT_WORKER_QUERY_SECONDS * 30) and cannot be expressed as a structural constant"
+}

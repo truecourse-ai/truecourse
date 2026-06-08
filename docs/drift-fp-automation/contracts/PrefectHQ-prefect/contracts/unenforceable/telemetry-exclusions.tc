@@ -1,0 +1,6 @@
+unenforceable-obligation telemetry-exclusions {
+  origin "docs/v3/concepts/telemetry.mdx" "What We Do NOT Collect" 1..1044
+  spec-text "Prefect telemetry never collects: user identity, credentials, API keys, code, flow definitions, task parameters, flow/task/deployment names, file paths, environment variables, secrets, error messages, stack traces, IP addresses, network information, or any PII."
+  category compliance
+  rationale "Data collection policy; not structurally verifiable in code contracts"
+}

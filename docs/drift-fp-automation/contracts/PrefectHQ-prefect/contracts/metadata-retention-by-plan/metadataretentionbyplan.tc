@@ -1,0 +1,11 @@
+constant METADATA_RETENTION_BY_PLAN {
+  origin "docs/v3/concepts/rate-limits.mdx" "metadata retention by plan" 1..4289
+  type object
+  expected-value {
+    Hobby: "7 days"
+    Starter: "7 days"
+    Team: "14 days"
+    Pro: "30 days"
+    Enterprise: "Custom"
+  }
+}

@@ -1,0 +1,5 @@
+constant SDK_RATE_LIMIT_MAX_RETRIES {
+  origin "docs/v3/concepts/rate-limits.mdx" "SDK retry behavior" 1..1044
+  type number
+  expected-value 5
+}

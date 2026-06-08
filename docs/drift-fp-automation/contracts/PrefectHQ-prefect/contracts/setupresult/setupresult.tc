@@ -1,0 +1,6 @@
+entity SetupResult {
+  origin "docs/v3/advanced/plugins.mdx" "SetupResult" 1..4289
+  field env: object {}
+  field note: string {}
+  field required: boolean {}
+}

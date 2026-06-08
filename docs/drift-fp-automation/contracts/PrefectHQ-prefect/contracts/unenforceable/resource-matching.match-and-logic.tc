@@ -1,0 +1,6 @@
+unenforceable-obligation resource-matching.match-and-logic {
+  origin "docs/v3/concepts/event-triggers.mdx" "trigger / resource matching" 44..44
+  spec-text "Each label added to a match filter is ANDed with the other labels, and can accept a single value or a list of multiple values that are ORed together. Prefix value with ! to negate."
+  category behavioral
+  rationale "AND/OR/negation filter logic within match and match_related fields cannot be structurally encoded as an HTTP contract predicate"
+}

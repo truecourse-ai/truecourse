@@ -1,0 +1,6 @@
+unenforceable-obligation asset.metadata.single-source-of-truth {
+  origin "docs/v3/concepts/assets.mdx" "asset / metadata" 1..4289
+  spec-text "Asset properties should have one source of truth to avoid conflicts. When materializing an asset with properties, those properties perform a complete overwrite of all metadata fields for that asset."
+  category data-integrity
+  rationale "Single-source-of-truth enforcement and overwrite semantics are runtime behaviors not structurally encodable as a contract fragment"
+}

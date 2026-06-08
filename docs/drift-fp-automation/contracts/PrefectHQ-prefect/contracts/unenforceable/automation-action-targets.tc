@@ -1,0 +1,6 @@
+unenforceable-obligation automation-action-targets {
+  origin "docs/v3/concepts/automations.mdx" "Selected and inferred action targets" 1..1044
+  spec-text "Automation actions support two target modes: selected (explicit target) and inferred (deduced from the trigger itself)."
+  category behavior
+  rationale "Describes UI/automation behavior; no HTTP endpoint contract to encode"
+}

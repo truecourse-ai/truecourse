@@ -1,0 +1,12 @@
+constant FILTER_OPERATORS {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST API / filter query" 1..93
+  type object
+  expected-value {
+    any_: "Match any of the provided values"
+    is_null_: "Match null values"
+    eq_: "Exact equality match"
+    all_: "Match all of the provided values"
+    before_: "Match values before a datetime"
+    after_: "Match values after a datetime"
+  }
+}

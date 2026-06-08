@@ -1,0 +1,6 @@
+unenforceable-obligation block.encryption-at-rest {
+  origin "docs/v3/advanced/custom-blocks.mdx" "Block / secret fields" 1..4289
+  spec-text "All block field values are encrypted at rest."
+  category compliance
+  rationale "Storage-layer encryption is not structurally encodable as a contract fragment"
+}

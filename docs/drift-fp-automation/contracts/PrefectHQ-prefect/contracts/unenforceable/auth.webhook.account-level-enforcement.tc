@@ -1,0 +1,6 @@
+unenforceable-obligation auth.webhook.account-level-enforcement {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook account-level security enforcement" 44..44
+  spec-text "An account-level setting is available to enforce authentication on all webhooks. When enabled: All existing webhooks without an associated service account will be automatically disabled. New webhooks must be created with an associated service account. Existing webhooks must be updated to include a service account before they can be re-enabled."
+  category security
+  rationale "Account-level webhook enforcement is an administrative policy that cannot be structurally encoded as a per-endpoint HTTP contract"
+}

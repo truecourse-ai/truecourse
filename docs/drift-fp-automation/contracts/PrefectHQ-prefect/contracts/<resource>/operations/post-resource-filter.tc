@@ -1,0 +1,9 @@
+operation POST "/<resource>/filter" {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST API / filter query" 1..93
+  status shipped
+  request {
+    body {
+      filter: object
+    }
+  }
+}

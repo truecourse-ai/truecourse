@@ -1,0 +1,5 @@
+constant SCHEDULER_MAX_SCHEDULED_DAYS {
+  origin "docs/v3/concepts/schedules.mdx" "How scheduling works" 1..1044
+  type number
+  expected-value 100
+}

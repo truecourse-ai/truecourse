@@ -1,0 +1,6 @@
+unenforceable-obligation rate-limit.slot-decay-required {
+  origin "docs/v3/concepts/global-concurrency-limits.mdx" "rate_limit / slot decay" 1..4289
+  spec-text "Using rate_limit with a limit that has no slot decay configured will result in an error."
+  category runtime-validation
+  rationale "Server-side validation of slot decay configuration on rate_limit calls is not structurally encodable"
+}

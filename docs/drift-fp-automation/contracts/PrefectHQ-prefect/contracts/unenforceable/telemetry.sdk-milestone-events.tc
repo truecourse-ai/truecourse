@@ -1,0 +1,6 @@
+unenforceable-obligation telemetry.sdk-milestone-events {
+  origin "docs/v3/concepts/telemetry.mdx" "telemetry" 1..586
+  spec-text "The SDK tracks milestone events in the Quick Start Funnel: first_sdk_import, first_flow_defined, first_flow_run, first_deployment_created, first_schedule_created. Each milestone event is only sent once per installation."
+  category telemetry
+  rationale "SDK telemetry events are emitted by the client SDK to an external telemetry service, not the Prefect API; not structurally encodable as an EffectGroup on an API operation"
+}

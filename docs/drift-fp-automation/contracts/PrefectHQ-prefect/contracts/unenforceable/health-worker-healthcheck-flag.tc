@@ -1,0 +1,6 @@
+unenforceable-obligation health-worker-healthcheck-flag {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "Health endpoint not accessible" 1..29
+  spec-text "Verify the worker was started with --with-healthcheck"
+  category deployment-requirement
+  rationale "Worker startup flag requirement cannot be verified via HTTP contract inspection"
+}

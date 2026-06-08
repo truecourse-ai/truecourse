@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-url-opaque {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook Endpoints" 1..73
+  spec-text "The webhook endpoints have randomly generated opaque URLs that do not divulge any information about your Prefect Cloud workspace. Prefect Cloud assigns this URL when you create a webhook; it cannot be set through the API."
+  category security
+  rationale "URL opacity and server-side assignment policy cannot be structurally verified"
+}

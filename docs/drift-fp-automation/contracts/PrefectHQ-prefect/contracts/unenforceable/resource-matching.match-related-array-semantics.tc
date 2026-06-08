@@ -1,0 +1,6 @@
+unenforceable-obligation resource-matching.match-related-array-semantics {
+  origin "docs/v3/concepts/event-triggers.mdx" "trigger / resource matching" 44..44
+  spec-text "match_related can be a single object or array. AND logic between array elements (each must match a distinct related resource)."
+  category behavioral
+  rationale "Array element AND logic across distinct related-resource matches cannot be structurally encoded as an HTTP contract fragment"
+}

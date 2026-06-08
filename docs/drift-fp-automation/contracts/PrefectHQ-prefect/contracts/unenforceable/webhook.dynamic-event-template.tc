@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.dynamic-event-template {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook / dynamic event" 1..586
+  spec-text "POST requests to dynamic webhook URL produce events with resource IDs constructed from Jinja2 templates using request body fields."
+  category webhook-behavior
+  rationale "Jinja2 template rendering for dynamic webhook events is a Prefect Cloud server behavior not encodable as a structural contract fragment"
+}

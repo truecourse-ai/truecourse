@@ -1,0 +1,5 @@
+constant PREFECT_FLOWS_HEARTBEAT_FREQUENCY {
+  origin "docs/v3/advanced/detect-zombie-flows.mdx" "PREFECT_FLOWS_HEARTBEAT_FREQUENCY" 1..4289
+  type number
+  expected-value 180
+}

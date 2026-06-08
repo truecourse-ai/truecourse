@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.state-change-hooks.client-side-execution {
+  origin "docs/v3/concepts/states.mdx" "state change hooks" 247..247
+  spec-text "State change hooks execute code in response to client side changes in flow or task run states, enabling you to define actions for specific state transitions in a workflow."
+  category behavioral
+  rationale "Client-side hook execution cannot be structurally verified in the HTTP contract layer"
+}

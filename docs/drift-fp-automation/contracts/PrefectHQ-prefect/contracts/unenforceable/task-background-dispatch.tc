@@ -1,0 +1,6 @@
+unenforceable-obligation task-background-dispatch {
+  origin "docs/v3/concepts/tasks.mdx" "Background tasks" 1..40
+  spec-text "Background tasks are dispatched non-blocking using .delay(), which pushes the task to a server-side topic. Execution is handled by task workers (separate from flow workers). The calling code does not wait for the result."
+  category behavior
+  rationale "Task dispatch model is a runtime/infrastructure behavior; not structurally encodable as an HTTP contract"
+}

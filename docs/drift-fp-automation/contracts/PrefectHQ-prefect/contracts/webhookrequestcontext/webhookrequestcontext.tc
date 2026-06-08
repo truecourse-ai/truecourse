@@ -1,0 +1,6 @@
+entity WebhookRequestContext {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook template context / HTTP request" 133..133
+  field method: string {}
+  field headers: object {}
+  field body: object|string {}
+}

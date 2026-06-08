@@ -1,0 +1,6 @@
+unenforceable-obligation debounce.schedule-after-semantics {
+  origin "docs/v3/advanced/debouncing-events.mdx" "Debounce trigger / prefect.yaml definition" 1..586
+  spec-text "An event trigger with posture Reactive and a schedule_after duration acts as a debounce — the automation only fires after the specified quiet period following the last matching event."
+  category automation-configuration
+  rationale "Debounce behavior (Reactive posture + schedule_after) is an automation trigger configuration pattern, not structurally encodable as an effect group or operation contract"
+}

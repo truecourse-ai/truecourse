@@ -1,0 +1,6 @@
+unenforceable-obligation webhook.account-level-security-enforcement {
+  origin "docs/v3/concepts/webhooks.mdx" "webhook / security constraints" 1..4289
+  spec-text "When account-level enforcement is enabled: all existing webhooks without an associated service account are automatically disabled; new webhooks must be created with an associated service account."
+  category security-policy
+  rationale "Account-level webhook security enforcement is a Prefect Cloud administrative policy not verifiable as a structural API contract"
+}

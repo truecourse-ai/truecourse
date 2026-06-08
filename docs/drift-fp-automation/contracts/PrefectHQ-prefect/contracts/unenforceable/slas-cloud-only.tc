@@ -1,0 +1,6 @@
+unenforceable-obligation slas-cloud-only {
+  origin "docs/v3/concepts/slas.mdx" "Prerequisites" 1..1044
+  spec-text "SLAs are only available in Prefect Cloud. Requires Prefect Client version 3.1.12 or later."
+  category platform-constraint
+  rationale "Platform availability constraint; not a code-level enforcement"
+}

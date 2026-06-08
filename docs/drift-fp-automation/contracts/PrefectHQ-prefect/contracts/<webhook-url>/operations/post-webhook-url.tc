@@ -1,0 +1,9 @@
+operation POST "<webhook-url>" {
+  origin "docs/v3/concepts/webhooks.mdx" "Dynamic Webhook Events" 1..70
+  request {
+    body {
+      model: string
+      friendly_name: string
+    }
+  }
+}

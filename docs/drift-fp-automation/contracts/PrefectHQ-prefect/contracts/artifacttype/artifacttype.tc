@@ -1,0 +1,4 @@
+enum ArtifactType {
+  origin "docs/v3/concepts/artifacts.mdx" "Artifact / types" 25..25
+  values [link, markdown, progress, image, table]
+}

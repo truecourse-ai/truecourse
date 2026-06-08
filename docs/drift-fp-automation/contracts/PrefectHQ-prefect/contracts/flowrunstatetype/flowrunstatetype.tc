@@ -1,0 +1,5 @@
+enum FlowRunStateType {
+  origin "docs/v3/concepts/states.mdx" "FlowRun / state types" 1..4289
+  values [SCHEDULED, PENDING, RUNNING, PAUSED, CANCELLING, CANCELLED, COMPLETED, FAILED, CRASHED]
+  trigger-subset terminal [CANCELLED, COMPLETED, FAILED, CRASHED]
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation metric-triggers-cloud-only {
+  origin "docs/v3/concepts/event-triggers.mdx" "Support for event trigger types" 1..1044
+  spec-text "Metric Triggers are available on Prefect Cloud only. Event Triggers and Composite Triggers are available on both Prefect Cloud and self-hosted Prefect."
+  category platform-constraint
+  rationale "Platform availability matrix; not structurally encodable as an HTTP contract"
+}

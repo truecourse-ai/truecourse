@@ -1,0 +1,13 @@
+operation POST "/artifacts/filter" {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "POST /artifacts/filter" 1..81
+  status shipped
+  request {
+    header authorization required value "Bearer {PREFECT_API_KEY}"
+    body {
+      sort: string
+      limit: integer
+      artifacts: object
+    }
+  }
+  response 200 on success {}
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation asset-materialization-model {
+  origin "docs/v3/concepts/assets.mdx" "Materializations" 1..1044
+  spec-text "A materialization occurs when a workflow mutates an asset through creation, updating, or overwriting. Declared using the @materialize decorator. Operates on an 'intent to materialize' model: when the decorated function executes, Prefect records the materialization attempt; success or failure is determined by the underlying task's execution state."
+  category behavior
+  rationale "Describes Python decorator behavior and internal state tracking; no HTTP contract to encode"
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation multi-server-postgres-requirement {
+  origin "docs/v3/advanced/self-hosted.mdx" "Requirements" 1..1044
+  spec-text "Multi-server deployments require PostgreSQL version 14.9 or higher (SQLite does not support multi-server synchronization), Redis for event messaging, and a load balancer for API traffic distribution."
+  category infrastructure-constraint
+  rationale "Infrastructure deployment requirement; not verifiable from HTTP contracts"
+}

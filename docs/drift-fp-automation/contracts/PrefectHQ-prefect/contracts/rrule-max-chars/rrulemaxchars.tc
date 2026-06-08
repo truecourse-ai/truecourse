@@ -1,0 +1,5 @@
+constant RRULE_MAX_CHARS {
+  origin "docs/v3/concepts/schedules.mdx" "RRule schedule / fields" 1..4289
+  type number
+  expected-value 6500
+}

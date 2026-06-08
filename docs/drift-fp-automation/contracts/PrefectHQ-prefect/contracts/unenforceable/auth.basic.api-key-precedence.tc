@@ -1,0 +1,6 @@
+unenforceable-obligation auth.basic.api-key-precedence {
+  origin "docs/v3/advanced/security-settings.mdx" "Basic authentication" 10..10
+  spec-text "PREFECT_API_KEY takes precedence over PREFECT_API_AUTH_STRING; if both are set the client raises HTTP 401."
+  category behavioral
+  rationale "Client-side credential precedence logic cannot be structurally encoded as an HTTP endpoint contract"
+}

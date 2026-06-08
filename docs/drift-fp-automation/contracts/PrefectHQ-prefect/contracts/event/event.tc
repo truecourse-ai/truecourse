@@ -1,0 +1,14 @@
+entity Event {
+  origin "docs/v3/concepts/events.mdx" "Event" 1..4289
+  field occurred: string {
+    immutable
+  }
+  field event: string {}
+  field resource: object {}
+  field related: array {}
+  field payload: object {}
+  field id: string {
+    immutable
+  }
+  field follows: string {}
+}

@@ -1,0 +1,6 @@
+enum FlowRunStateName {
+  origin "docs/v3/concepts/states.mdx" "FlowRun / state types" 1..4289
+  values [Scheduled, Late, AwaitingRetry, AwaitingConcurrencySlot, Resuming, Pending, Running, Retrying, Paused, Suspended, Cancelling, Cancelled, Completed, Cached, RolledBack, Failed, TimedOut, Crashed]
+  trigger-subset terminal [Cancelled, Completed, Cached, RolledBack, Failed, TimedOut, Crashed]
+  trigger-subset non-terminal [Scheduled, Late, AwaitingRetry, AwaitingConcurrencySlot, Resuming, Pending, Running, Retrying, Paused, Suspended, Cancelling]
+}

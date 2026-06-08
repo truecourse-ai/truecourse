@@ -1,0 +1,6 @@
+unenforceable-obligation auth.csrf.server-settings {
+  origin "docs/v3/advanced/security-settings.mdx" "CSRF protection settings" 4..4
+  spec-text "server.api.csrf_protection_enabled activates CSRF protection on the server, requiring valid CSRF tokens for applicable requests. server.api.csrf_token_expiration sets the expiration duration for server-issued CSRF tokens, default is 1 hour. client.csrf_support_enabled enables or disables CSRF token handling in the Prefect client."
+  category security
+  rationale "CSRF protection is a server-configuration concern; the token validation behavior and expiry cannot be structurally encoded as HTTP operation contract fragments"
+}

@@ -1,0 +1,5 @@
+constant ARTIFACTS_FILTER_SORT_CREATED_DESC {
+  origin "docs/v3/advanced/api-client.mdx" "Create, read, or delete artifacts" 1..57
+  type string
+  expected-value "CREATED_DESC"
+}

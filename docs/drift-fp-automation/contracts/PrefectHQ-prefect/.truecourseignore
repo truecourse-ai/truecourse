@@ -1,0 +1,5 @@
+*.md
+*.mdx
+!docs/v3/concepts/**
+!docs/v3/advanced/**
+!docs/v3/api-ref/rest-api/**

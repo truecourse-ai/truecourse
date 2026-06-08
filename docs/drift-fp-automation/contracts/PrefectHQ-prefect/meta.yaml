@@ -1,0 +1,10 @@
+target_repo: PrefectHQ/prefect
+target_ref: db66b14dbaea18e726fc4ea0100fd194383c6c59
+code_dir: "."
+generated_at: "2026-06-08"
+tool_version: 0.6.5
+llm: agent
+doc_scope:
+  - docs/v3/concepts
+  - docs/v3/advanced
+  - docs/v3/api-ref/rest-api

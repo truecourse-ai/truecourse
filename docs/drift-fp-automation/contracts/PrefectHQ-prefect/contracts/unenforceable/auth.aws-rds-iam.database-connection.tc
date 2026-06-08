@@ -1,0 +1,6 @@
+unenforceable-obligation auth.aws-rds-iam.database-connection {
+  origin "docs/v3/advanced/self-hosted.mdx" "AWS RDS IAM authentication" 108..108
+  spec-text "To use AWS IAM authentication for your PostgreSQL database (experimental)."
+  category auth-strategy
+  rationale "AWS RDS IAM authentication applies to the database connection layer, not the HTTP API; cannot be encoded as an auth-requirement for HTTP endpoints"
+}

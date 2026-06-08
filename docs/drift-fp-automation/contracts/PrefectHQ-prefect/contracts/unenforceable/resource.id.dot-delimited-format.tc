@@ -1,0 +1,6 @@
+unenforceable-obligation resource.id.dot-delimited-format {
+  origin "docs/v3/concepts/events.mdx" "Event / resource" 50..50
+  spec-text "Resources are used as quasi-stable identifiers for sources of events, and are represented as dot-delimited strings."
+  category format
+  rationale "Dot-delimited string format constraint on prefect.resource.id cannot be structurally encoded as an HTTP contract field constraint"
+}

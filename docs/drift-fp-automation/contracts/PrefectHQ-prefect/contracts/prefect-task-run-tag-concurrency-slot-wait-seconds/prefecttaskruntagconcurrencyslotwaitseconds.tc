@@ -1,0 +1,5 @@
+constant PREFECT_TASK_RUN_TAG_CONCURRENCY_SLOT_WAIT_SECONDS {
+  origin "docs/v3/concepts/tag-based-concurrency-limits.mdx" "PREFECT_TASK_RUN_TAG_CONCURRENCY_SLOT_WAIT_SECONDS" 1..4289
+  type number
+  expected-value 30
+}

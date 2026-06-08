@@ -1,0 +1,8 @@
+entity MetricTriggerQuery {
+  origin "docs/v3/concepts/event-triggers.mdx" "MetricTriggerQuery" 1..4289
+  field name: string {}
+  field threshold: number {}
+  field operator: Enum:MetricTriggerOperator {}
+  field range: number {}
+  field firing_for: number {}
+}

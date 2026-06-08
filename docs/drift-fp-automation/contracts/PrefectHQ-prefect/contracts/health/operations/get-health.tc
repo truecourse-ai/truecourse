@@ -1,0 +1,13 @@
+operation GET "/health" {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "worker healthcheck" 20..93
+  response 200 on healthy {
+    body {
+      message: string
+    }
+  }
+  response 503 on unhealthy {
+    body {
+      message: string
+    }
+  }
+}

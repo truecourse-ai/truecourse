@@ -1,0 +1,6 @@
+unenforceable-obligation event-query.14-day-window {
+  origin "docs/v3/concepts/rate-limits.mdx" "event query" 1..89
+  spec-text "Event queries are limited to a 14-day window per request. You can query any 14-day period within your retention period, but each individual query cannot span more than 14 days."
+  category query-semantics
+  rationale "Date-window enforcement on event queries is a server-side constraint not encodable as a structural operation contract"
+}

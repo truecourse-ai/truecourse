@@ -1,0 +1,4 @@
+enum PrefectMetricName {
+  origin "docs/v3/concepts/event-triggers.mdx" "Prefect metric names" 1..4289
+  values [successes, duration, lateness]
+}
