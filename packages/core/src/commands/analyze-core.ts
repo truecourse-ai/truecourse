@@ -15,9 +15,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { log } from '../lib/logger.js';
-import { getGit } from '../lib/git.js';
+import { getGit, runWithStash } from '../lib/git.js';
 import { readProjectConfig } from '../config/project-config.js';
 import { touchProject } from '../config/registry.js';
 import type { RegistryEntry } from '../config/registry.js';
@@ -152,42 +151,32 @@ export async function analyzeCore(
 
     // ------------------------------------------------------------
     // Stash dirty working tree so the entire pipeline (parse + LLM scan +
-    // persist) sees the committed state. Diff mode never stashes — it
-    // analyzes the working tree by design.
+    // persist) sees the committed state. The shared helper scopes the stash
+    // to code only — it excludes TrueCourse's own `.truecourse/` working dir
+    // so generated artifacts and baselines survive. Diff mode (and skipGit)
+    // never stash — they analyze the working tree by design.
     // ------------------------------------------------------------
-    let didStash = false;
-    let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
-    if (!isDiff && !skipGit && !options.skipStash) {
-      try {
-        stashGit = await getGit(project.path);
-        const status = await stashGit.status();
-        if (!status.isClean()) {
-          const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
-          // Skip stashing when the repo path is a subdirectory of a larger
-          // repo (e.g., test fixtures inside the main repo). Stashing there
-          // would touch unrelated parent-repo files.
-          const isSubdirectory = path.resolve(project.path) !== path.resolve(gitRoot);
-          if (!isSubdirectory) {
-            options.tracker?.detail('parse', 'Stashing pending changes...');
-            options.onProgress?.({ detail: 'Stashing pending changes to analyze committed state...' });
-            const stashResult = await stashGit.stash([
-              'push',
-              '--include-untracked',
-              '-m',
-              'truecourse-analysis-stash',
-            ]);
-            // git stash push prints "No local changes to save" if nothing to stash
-            didStash = !stashResult.includes('No local changes');
-          }
-        }
-      } catch (error) {
-        log.warn(
-          `[Analyzer] Failed to stash changes, analyzing current state: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-  try {
+    return await runWithStash(
+      project.path,
+      {
+        skipStash: isDiff || skipGit || (options.skipStash ?? false),
+        message: 'truecourse-analysis-stash',
+        onStashStart: () => {
+          options.tracker?.detail('parse', 'Stashing pending changes...');
+          options.onProgress?.({ detail: 'Stashing pending changes to analyze committed state...' });
+        },
+        onRestoreStart: () => {
+          options.tracker?.detail('parse', 'Restoring pending changes...');
+          options.onProgress?.({ detail: 'Restoring pending changes...' });
+        },
+        onStashError: (error) =>
+          log.warn(`[Analyzer] Failed to stash changes, analyzing current state: ${error.message}`),
+        onRestoreError: (error) =>
+          log.error(
+            `[Analyzer] Failed to restore stashed changes. Run "git stash pop" manually. ${error.message}`,
+          ),
+      },
+      async () => {
     // ------------------------------------------------------------
     // Parse the code
     // ------------------------------------------------------------
@@ -363,19 +352,8 @@ export async function analyzeCore(
       previousAnalysisId,
       analysisResult: result,
     };
-    } finally {
-      if (didStash && stashGit) {
-        options.tracker?.detail('parse', 'Restoring pending changes...');
-        options.onProgress?.({ detail: 'Restoring pending changes...' });
-        try {
-          await stashGit.stash(['pop']);
-        } catch (error) {
-          log.error(
-            `[Analyzer] Failed to restore stashed changes. Run "git stash pop" manually. ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
-    }
+      },
+    );
   } finally {
     releaseAnalyzeLock(project.path);
   }

@@ -2,13 +2,34 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TRUECOURSE_DIR = '.truecourse';
+// Canonical name of the per-repo TrueCourse working directory. Exported as the
+// single source of truth so callers (e.g. the git stash helper, which must
+// never sweep this dir) reference the constant instead of a literal string.
+export const TRUECOURSE_DIR = '.truecourse';
+// Default `.truecourse/.gitignore`, mirroring the documented committable-vs-local
+// layout (see README "Setup"). Local-only state is ignored; the canonical spec
+// (`specs/`), the diff baselines (`LATEST.json`, `verifier/LATEST.json`) and
+// `config.json` stay committable so they travel with the repo.
+//
 // `LATEST.json` is intentionally tracked: it travels with the repo via git so
 // fresh clones and `git worktree add` checkouts inherit a baseline without
 // having to cold-start `truecourse analyze`. Convention: only commit it after
 // merging to main (post-merge analyze). Branch-local analyzes shouldn't
 // commit it, to avoid PR conflicts on a generated JSON.
-const GITIGNORE_CONTENTS = 'analyses/\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
+const GITIGNORE_CONTENTS = [
+  'analyses/',
+  'history.json',
+  'diff.json',
+  'ui-state.json',
+  'logs/',
+  '.analyze.lock',
+  'contracts/',
+  'verifier/runs/',
+  'verifier/history.json',
+  'verifier/diff.json',
+  '.cache/',
+  '',
+].join('\n');
 
 // ---------------------------------------------------------------------------
 // Global paths (user-level)

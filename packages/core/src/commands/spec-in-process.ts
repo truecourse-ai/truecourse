@@ -61,7 +61,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getGit, isGitRepo } from '../lib/git.js';
+import { getGit, isGitRepo, runWithStash } from '../lib/git.js';
 import {
   writeVerifyRun,
   writeVerifyLatest,
@@ -841,8 +841,20 @@ export async function verifyInProcess(
     // one tracker call because the engine doesn't surface them yet.
     // Stash dirty changes first (unless opted out) so the baseline reflects
     // the committed state — same model as a full `analyze`.
-    result = await runWithStash(repoRoot, options.skipStash ?? false, tracker, () =>
-      verify({ contractsDir, codeDir }),
+    result = await runWithStash(
+      repoRoot,
+      {
+        skipStash: options.skipStash ?? false,
+        message: 'truecourse-verify-stash',
+        onStashStart: () => tracker?.detail?.('load', 'Stashing pending changes...'),
+        onRestoreStart: () => tracker?.detail?.('load', 'Restoring pending changes...'),
+        onRestoreError: (e) =>
+          // eslint-disable-next-line no-console
+          console.error(
+            `[Verify] Failed to restore stashed changes. Run "git stash pop" manually. ${e.message}`,
+          ),
+      },
+      () => verify({ contractsDir, codeDir }),
     );
   } catch (e) {
     tracker?.error('load', (e as Error).message);
@@ -943,52 +955,6 @@ async function gitMeta(repoRoot: string): Promise<{ branch: string | null; commi
     return { branch, commitHash };
   } catch {
     return { branch: null, commitHash: null };
-  }
-}
-
-/**
- * Run `fn` against the committed state by stashing the dirty working tree first
- * and popping after — mirroring `analyze-core`'s full-mode stash. No-ops when
- * `skipStash`, when the tree is clean, when the repo is a subdirectory of a
- * larger repo (stashing would touch parent-repo files), or when git is
- * unavailable.
- */
-async function runWithStash<T>(
-  repoRoot: string,
-  skipStash: boolean,
-  tracker: StepTracker | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  let didStash = false;
-  let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
-  if (!skipStash) {
-    try {
-      stashGit = await getGit(repoRoot);
-      const status = await stashGit.status();
-      if (!status.isClean()) {
-        const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
-        if (path.resolve(repoRoot) === path.resolve(gitRoot)) {
-          tracker?.detail?.('load', 'Stashing pending changes...');
-          const res = await stashGit.stash(['push', '--include-untracked', '-m', 'truecourse-verify-stash']);
-          didStash = !res.includes('No local changes');
-        }
-      }
-    } catch {
-      // Not a git repo / git unavailable — verify the current state as-is.
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    if (didStash && stashGit) {
-      tracker?.detail?.('load', 'Restoring pending changes...');
-      try {
-        await stashGit.stash(['pop']);
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(`[Verify] Failed to restore stashed changes. Run "git stash pop" manually. ${(e as Error).message}`);
-      }
-    }
   }
 }
 
