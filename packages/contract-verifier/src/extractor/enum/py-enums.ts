@@ -50,7 +50,9 @@ function extractEnumClass(node: SyntaxNode, filePath: string, source: string): E
   const name = textOfField(node, 'name', source);
   if (!name) return null;
   const supers = node.childForFieldName('superclasses');
-  if (!supers || !superclassesLookEnum(supers, source)) return null;
+  if (!supers) return null;
+  const isAutoEnum = superclassesHaveAutoEnum(supers, source);
+  if (!superclassesLookEnum(supers, source) && !isAutoEnum) return null;
   const body = node.childForFieldName('body');
   if (!body) return null;
   const values: string[] = [];
@@ -59,14 +61,30 @@ function extractEnumClass(node: SyntaxNode, filePath: string, source: string): E
     if (stmt?.type !== 'expression_statement') continue;
     const assign = stmt.namedChild(0);
     if (assign?.type !== 'assignment') continue;
+    const left = assign.childForFieldName('left');
     const right = assign.childForFieldName('right');
     if (right?.type === 'string') {
       const v = stringValue(right, source);
       if (v !== null) values.push(v);
+    } else if (isAutoEnum && right?.type === 'call' && left?.type === 'identifier') {
+      // AutoEnum.auto() (or equivalent) — member name is the string value.
+      values.push(source.slice(left.startIndex, left.endIndex));
     }
   }
   if (values.length === 0) return null;
   return mkEnum(name, values, 'py-enum', node, filePath);
+}
+
+// True when the superclass list contains an AutoEnum base (name ends with AutoEnum),
+// which uses member names as values via _generate_next_value_.
+function superclassesHaveAutoEnum(supers: SyntaxNode, source: string): boolean {
+  for (let i = 0; i < supers.namedChildCount; i++) {
+    const c = supers.namedChild(i);
+    if (!c) continue;
+    const text = source.slice(c.startIndex, c.endIndex);
+    if (/(^|\.)AutoEnum$/.test(text)) return true;
+  }
+  return false;
 }
 
 function superclassesLookEnum(supers: SyntaxNode, source: string): boolean {
