@@ -117,10 +117,12 @@ campaigns:
       - docs/v3/advanced         # 29 — advanced behavior: retries, caching, transactions
       - docs/v3/api-ref/rest-api # REST API operation reference (server/flow-runs, server/deployments, …)
     priority: 5
-    status: pending
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    status: discovering
+    baseline: { verified_at: "2026-06-08", target_ref: "db66b14dbaea18e726fc4ea0100fd194383c6c59", total_drifts: 79, tp: 0, fp: 72, info: 7, fp_rate: 1.00 }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    notes: ["Probe 2026-06-06: 406 auto-generated Python API ref docs under docs/v3/api-ref/python (excluded from doc_scope — they shadow the source code and would be redundant). The behavioral specs live under docs/v3/concepts (26 files) and docs/v3/advanced (29 files); the REST API under docs/v3/api-ref/rest-api/server/ is genuinely behavioral. Tests Python state-enum lifting (flow-run STATES are heavily enumerated) beyond what feast surfaced."]
+    notes:
+      - "Probe 2026-06-06: 406 auto-generated Python API ref docs under docs/v3/api-ref/python (excluded from doc_scope — they shadow the source code and would be redundant). The behavioral specs live under docs/v3/concepts (26 files) and docs/v3/advanced (29 files); the REST API under docs/v3/api-ref/rest-api/server/ is genuinely behavioral. Tests Python state-enum lifting (flow-run STATES are heavily enumerated) beyond what feast surfaced."
+      - "Discovery run (2026-06-08): 79 drifts, 0 TP, 72 FP, 7 info. FP kinds: operation/implementation-missing (2 FPs — Python FastAPI routes not extracted by the operation extractor; 5 contract-quality: template placeholders + Cloud-only URLs), entity/field-mutability (27 FPs — contract-quality: LLM inferred {immutable} on Event.id/occurred from required-field semantics; docs do not state immutability), enum/no-code-counterpart (12 FPs — Python implements categorical values via string literals, Union type aliases, discriminated union classes, or renamed AutoEnums; exact class-name matching fails for ArtifactType, AutomationActionType, CacheIsolationLevel, CachePolicy, DeploymentVersionType, FlowRunStateName+subsets, FlowRunStateType subset, TaskRunStateName+subsets), named-constant/no-code-counterpart (~26 FPs — Python constants stored as Pydantic settings fields or inline literals with different naming conventions; RRULE_MAX_CHARS vs MAX_RRULE_LENGTH, SCHEDULER_MAX_RUNS vs PREFECT_API_SERVICES_SCHEDULER_MAX_RUNS, etc.; 7 info: K8s defaults, HTTP status codes, Cloud-only retention plan data). Issues filed: #539 (operation/implementation-missing), #540 (enum/no-code-counterpart), #541 (named-constant/no-code-counterpart)."
 
   # ---- Python monorepo — dagster (data orchestration, asset/op model) ----
   - target_repo: dagster-io/dagster
