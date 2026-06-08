@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "npx turbo-ignore @truecourse/landing --fallback=HEAD^1",
   "rewrites": [
     {
       "source": "/((?!api/).*)",
