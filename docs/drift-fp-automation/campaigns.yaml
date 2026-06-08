@@ -117,7 +117,7 @@ campaigns:
       - docs/v3/advanced         # 29 — advanced behavior: retries, caching, transactions
       - docs/v3/api-ref/rest-api # REST API operation reference (server/flow-runs, server/deployments, …)
     priority: 5
-    status: pending
+    status: discovering
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes: ["Probe 2026-06-06: 406 auto-generated Python API ref docs under docs/v3/api-ref/python (excluded from doc_scope — they shadow the source code and would be redundant). The behavioral specs live under docs/v3/concepts (26 files) and docs/v3/advanced (29 files); the REST API under docs/v3/api-ref/rest-api/server/ is genuinely behavioral. Tests Python state-enum lifting (flow-run STATES are heavily enumerated) beyond what feast surfaced."]
