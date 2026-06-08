@@ -8,6 +8,7 @@ import {
   hasCanonicalSpec,
   spawnRunner,
 } from "@truecourse/contract-extractor";
+import type { ValidationIssue } from "@truecourse/contract-extractor/validator";
 import { agentTransport } from "@truecourse/shared/llm";
 import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
 import { trackEvent, bucketFileCount, bucketDuration } from "@truecourse/core/services/telemetry";
@@ -24,6 +25,30 @@ export interface RunContractsGenerateOptions {
   llm?: "cli" | "agent";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+}
+
+export function partitionValidationIssues(issues: ValidationIssue[]): {
+  hardIssues: ValidationIssue[];
+  softIssues: ValidationIssue[];
+} {
+  const seenSoft = new Set<string>();
+  const hardIssues: ValidationIssue[] = [];
+  const softIssues: ValidationIssue[] = [];
+
+  for (const issue of issues) {
+    if (issue.severity === "hard") {
+      hardIssues.push(issue);
+      continue;
+    }
+
+    const key = `${issue.artifactKey}\0${issue.message}`;
+    if (!seenSoft.has(key)) {
+      softIssues.push(issue);
+      seenSoft.add(key);
+    }
+  }
+
+  return { hardIssues, softIssues };
 }
 
 export async function runContractsGenerate(
@@ -119,14 +144,26 @@ export async function runContractsGenerate(
     }
   }
 
-  // Surface validation issues — these block the write.
-  if (result.validationIssues.length > 0) {
-    p.log.error(`Validation gate failed (${result.validationIssues.length} issue${result.validationIssues.length === 1 ? "" : "s"}):`);
-    for (const issue of result.validationIssues) {
+  const { hardIssues, softIssues } = partitionValidationIssues(result.validationIssues);
+
+  // Surface hard validation issues — these block the write.
+  if (hardIssues.length > 0) {
+    p.log.error(`Validation gate failed (${hardIssues.length} issue${hardIssues.length === 1 ? "" : "s"}):`);
+    for (const issue of hardIssues) {
       console.log(`  ${issue.artifactKey}: ${issue.message}`);
     }
     p.outro("No contracts were written. Edit the spec or re-run after fixing.");
     process.exit(1);
+  }
+
+  // Soft validation issues are diagnostics from otherwise usable contracts.
+  // The extractor writes the resolvable contracts and returns these warnings
+  // so users can fix unresolved cross-references without losing generated output.
+  if (softIssues.length > 0) {
+    p.log.warn(`Validation warning${softIssues.length === 1 ? "" : "s"} (${softIssues.length} soft issue${softIssues.length === 1 ? "" : "s"}):`);
+    for (const issue of softIssues) {
+      console.log(`  ${issue.artifactKey}: ${issue.message}`);
+    }
   }
 
   // Surface merge diagnostics (non-blocking). Repair "re-prompting" lines were
