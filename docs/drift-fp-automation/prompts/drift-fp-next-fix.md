@@ -132,7 +132,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
 - **Fixtures must look like real application code, not test scaffolding.** The IL fixture
   project is a fake e-commerce/catalog app (`handlers/`, `services/`, `controllers/`,
   `repos/`, `middleware/`, `plugins/`, `processors/`, `events/`, `routes/`). New code-side
-  fixture material slots into that layout. **Four hard rules**:
+  fixture material slots into that layout. **Five hard rules**:
   1. **No new top-level subdirs under `code/src/` (or `code/app/`).** No `fp-guards/`, no
      `regressions/`, no per-drift-kind folders. Files live alongside the existing domain
      dirs.
@@ -150,6 +150,18 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   4. **Prefer extending an existing fixture file** that already represents the relevant
      domain. Only create a new file when no existing one fits (and when you do create one,
      it gets a domain name and lives at the language's existing layout — see rule 1+2).
+  5. **No test files that read from `/tmp` or any path outside `tests/fixtures/`.** Scratch
+     `debug-*.test.ts` files you wrote while investigating the FP — e.g. files that
+     `fs.readFileSync('/tmp/<target>/...')` or call `verify({ codeDir: '/tmp/...' })` against a
+     local-only target clone — **must be deleted before the batch PR opens**. Locally they
+     pass (the staging dir exists on your session); in CI the staging dir is absent and the
+     test fails with ENOENT, blocking the PR. The legitimate fixture surface is
+     `tests/fixtures/sample-{js,python}-project-il/` — every test file under
+     `tests/contract-verifier/` must drive the verifier through that fixture or a constructed
+     in-memory AST, never an OSS clone. Same rule for the contracts side: don't commit a test
+     that does `extractCodeContracts('/tmp/<target>')`. If you needed an OSS-clone-backed
+     repro to investigate, the artifacts of that investigation belong in the PR body as
+     evidence (OSS source URLs, drift-count delta), not as a committed test.
 - Add the matching **contract** under
   `tests/fixtures/sample-{js,python}-project-il/reference/contracts/` — a minimal valid `.tc`
   mirroring an existing fixture contract of that kind (so it parses/resolves with no new
@@ -168,7 +180,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   `code/app/` for Python) with `// IL-DRIFT: <drift-key>` on the offending line (the key the
   verifier should emit), plus its matching `.tc` contract under
   `sample-{js,python}-project-il/reference/contracts/`.
-- **Same four hard rules as step 5** — no new subdirs, domain-named files, no comment-only
+- **Same five hard rules as step 5** — no new subdirs, domain-named files, no comment-only
   files, prefer extending existing files. The regression case is the most common reason a
   routine reaches for a comment-only file (because there's no code-side content); resist
   that. The IL-DRIFT marker attaches to a contextual narrative comment inside a natural file,
