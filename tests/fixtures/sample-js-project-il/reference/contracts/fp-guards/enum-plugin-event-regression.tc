@@ -1,0 +1,4 @@
+enum PluginEventType {
+  origin "reference/specs/fp-guards/enums.md" "Plugin lifecycle event types" 30..34
+  values [activated, deactivated, installed, removed]
+}

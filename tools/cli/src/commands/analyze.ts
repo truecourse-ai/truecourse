@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import path from "node:path";
+import { agentTransport } from "@truecourse/shared/llm";
 import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
 import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/core/progress";
 import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
@@ -116,8 +117,12 @@ function stopSpinner(): void {
  * Same shape as `installSkills` below.
  */
 export interface AnalyzeOptions {
-  /** Override `enableLlmRules` for this run. */
+  /** Override `enableLlmRules` for this run (whether LLM rules run at all). */
   llm?: boolean;
+  /** How to reach the LLM: `cli` (spawn claude -p, default) or `agent` (filesystem mailbox under `io`). */
+  llmTransport?: "cli" | "agent";
+  /** I/O dir for the `agent` transport's request/response mailbox. */
+  io?: string;
   /**
    * Stash decision override.
    *   - `true`  → pre-approve stashing dirty working tree (no prompt).
@@ -277,9 +282,17 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   };
   process.on("SIGINT", onSigint);
 
+  if (options.llmTransport === "agent" && !options.io) {
+    p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
+    process.exit(1);
+  }
+  const transport =
+    options.llmTransport === "agent" ? agentTransport(options.io as string) : undefined;
+
   try {
     const result = await analyzeInProcess(project, {
       tracker,
+      transport,
       signal: abortController.signal,
       skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,

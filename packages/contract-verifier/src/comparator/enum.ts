@@ -63,10 +63,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
     });
   } else {
     for (const m of nameMatches) {
-      const specSet = new Set(contract.values);
-      const codeSet = new Set(m.values);
-      const missing = contract.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const specNorm = new Map(contract.values.map((v) => [normalizeValue(v), v]));
+      const codeNorm = new Map(m.values.map((v) => [normalizeValue(v), v]));
+      const missing = contract.values.filter((v) => !codeNorm.has(normalizeValue(v)));
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
         drifts.push(mkValueDrift(ref, 'missing-value', v, m, contract.values));
       }
@@ -96,10 +96,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       continue;
     }
     for (const m of subsetMatches) {
-      const specSet = new Set(subset.values);
-      const codeSet = new Set(m.values);
-      const missing = subset.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const specNorm = new Map(subset.values.map((v) => [normalizeValue(v), v]));
+      const codeNorm = new Map(m.values.map((v) => [normalizeValue(v), v]));
+      const missing = subset.values.filter((v) => !codeNorm.has(normalizeValue(v)));
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
         drifts.push(mkSubsetDrift(ref, subset.name, 'missing-value', v, m, subset.values));
       }
@@ -145,6 +145,23 @@ function matchByName(
     }
     // Substring name + value-set overlap.
     if (codeName.includes(target) || target.includes(codeName)) {
+      // Entity-collision guard: when the spec name wholly contains the code name
+      // (e.g. `CollectionAccountability` contains `accountability`), check
+      // whether the qualifying prefix (the part of the spec name that precedes
+      // the code name) is longer than 5 characters. A long prefix signals an
+      // entity qualifier that makes the match spurious — e.g. "collection"
+      // (10 chars) before "accountability" is too heavy to treat as the same
+      // concept, but "flow" (4 chars) before "accountability" or "trigger"
+      // is a lightweight domain prefix that keeps the match valid.
+      // The guard only fires when the containment is one-directional (spec⊃code);
+      // when the code name also contains the spec name the names are co-equal and
+      // the guard is skipped.
+      if (!codeName.includes(target)) {
+        const qualifyingPrefix = target.slice(0, target.indexOf(codeName));
+        if (qualifyingPrefix.length > 5) {
+          continue;
+        }
+      }
       if (valueSetOverlap(contract.values, e.values) >= 0.5) {
         out.push(e);
         continue;
@@ -163,14 +180,30 @@ function matchByName(
       if (overlap >= 0.6 && sizeDiff <= 2) {
         out.push(e);
       }
+    } else if (minLen >= 2) {
+      // For small (2-value) enum sets, require an exact value-set match (Jaccard = 1,
+      // equal sizes) to avoid spurious cross-enum matches. This lets a module-scoped
+      // type alias like `type Status = 'active' | 'inactive'` satisfy a contract named
+      // `FlowStatus` even though the names don't align, while blocking unrelated
+      // 2-value enums that merely share one value.
+      const overlap = valueSetOverlap(contract.values, e.values);
+      const sizeDiff = Math.abs(contract.values.length - e.values.length);
+      if (overlap === 1.0 && sizeDiff === 0) {
+        out.push(e);
+      }
     }
   }
   return out;
 }
 
+/** Strip non-alphanumeric separators and lowercase so SET_NULL ≡ SET NULL ≡ set-null. */
+function normalizeValue(v: string): string {
+  return v.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
 function valueSetOverlap(a: string[], b: string[]): number {
-  const aSet = new Set(a);
-  const bSet = new Set(b);
+  const aSet = new Set(a.map(normalizeValue));
+  const bSet = new Set(b.map(normalizeValue));
   const intersection = [...aSet].filter((v) => bSet.has(v)).length;
   const union = new Set([...aSet, ...bSet]).size;
   return union === 0 ? 0 : intersection / union;

@@ -1,0 +1,14 @@
+constant widget.EMBED_DARK_MODE {
+  origin "reference/specs/widget/globals.md" "Window globals" 1..10
+  type boolean
+}
+
+constant widget.EMBED_LOCALE {
+  origin "reference/specs/widget/globals.md" "Window globals" 1..10
+  type string
+}
+
+constant widget.EMBED_THEME {
+  origin "reference/specs/widget/globals.md" "Window globals" 1..10
+  type string
+}

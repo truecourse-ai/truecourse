@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   extractClaims,
   summarizeExtractionFailures,
-  isLikelyAuthFailure,
   type BlockRunner,
   type LlmExtraction,
   type LlmClaim,
@@ -242,7 +241,7 @@ describe('summarizeExtractionFailures', () => {
 
   it('reports nothing when there are no failures', () => {
     const r = summarizeExtractionFailures({ failures: [], blocksAttempted: 10 });
-    expect(r).toEqual({ total: 0, allFailed: false, likelyAuth: false, samples: [] });
+    expect(r).toEqual({ total: 0, allFailed: false, samples: [] });
   });
 
   it('flags allFailed only when every attempted block failed', () => {
@@ -283,55 +282,6 @@ describe('summarizeExtractionFailures', () => {
     expect(
       summarizeExtractionFailures({ failures, blocksAttempted: 10 }, { sampleLimit: 2 }).samples,
     ).toHaveLength(2);
-  });
-
-  it('detects auth failures when the majority of messages match', () => {
-    const authMsg = 'claude exited 1: Invalid API key · Please run /login';
-    const r = summarizeExtractionFailures({
-      failures: fail(authMsg, 152),
-      blocksAttempted: 152,
-    });
-    expect(r.likelyAuth).toBe(true);
-    expect(r.allFailed).toBe(true);
-  });
-
-  it('does not flag auth when only a minority of failures look like auth', () => {
-    const r = summarizeExtractionFailures({
-      failures: [...fail('claude exited 1: unauthorized', 1), ...fail('claude timed out', 9)],
-      blocksAttempted: 10,
-    });
-    expect(r.likelyAuth).toBe(false);
-  });
-
-  it('does not mislabel ordinary errors as auth', () => {
-    const r = summarizeExtractionFailures({
-      failures: [...fail('claude timed out after 240000ms', 3), ...fail('claude returned no text', 2)],
-      blocksAttempted: 5,
-    });
-    expect(r.likelyAuth).toBe(false);
-  });
-});
-
-describe('isLikelyAuthFailure', () => {
-  it.each([
-    'claude exited 1: 401 Unauthorized',
-    'Error: invalid API key',
-    'OAuth token has expired',
-    'Please run /login to authenticate',
-    'You are not logged in',
-    'Authentication required',
-    'session expired — credentials missing',
-  ])('classifies %j as an auth failure', (msg) => {
-    expect(isLikelyAuthFailure(msg)).toBe(true);
-  });
-
-  it.each([
-    'claude timed out after 240000ms for block abc',
-    'claude returned no text for block abc',
-    'Unexpected token < in JSON at position 0',
-    'ENOENT: command not found',
-  ])('does not classify %j as an auth failure', (msg) => {
-    expect(isLikelyAuthFailure(msg)).toBe(false);
   });
 });
 

@@ -1,0 +1,9 @@
+operation POST "/catalog/items/search" {
+  origin "reference/specs/modules/catalog/endpoints.md" "POST /catalog/items/search" 1..20
+  response 200 on success {
+    body {
+      items: array element Entity:Item
+      total: integer
+    }
+  }
+}

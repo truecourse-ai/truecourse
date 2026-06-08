@@ -39,7 +39,7 @@ const VALID_TYPES = new Set<NamedConstantContract['type']>([
 
 export function liftNamedConstant(body: StatementNode[]): NamedConstantContract {
   let type: NamedConstantContract['type'] = 'string';
-  let expectedValue: unknown = '';
+  let expectedValue: unknown = undefined;
 
   for (const stmt of body) {
     const h = stmt.head;

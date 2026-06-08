@@ -59,7 +59,6 @@ export type { LlmExtraction, LlmClaim } from './prompt.js';
 export {
   extractClaims,
   summarizeExtractionFailures,
-  isLikelyAuthFailure,
 } from './extractor.js';
 export type {
   ExtractOptions,

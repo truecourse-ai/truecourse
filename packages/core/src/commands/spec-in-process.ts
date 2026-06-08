@@ -40,6 +40,7 @@ import {
   type GenerateResult,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+import { agentTransport, type LlmTransport } from '@truecourse/shared/llm';
 
 // Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
 function perfNow(): number {
@@ -223,11 +224,33 @@ export interface SpecInProcessOptions {
    * telemetry (e.g. tests, internal re-scans).
    */
   source?: TelemetrySource;
+  /**
+   * LLM transport mode. `cli` (default) spawns `claude -p`; `agent` uses a
+   * filesystem mailbox under `io` so an orchestrating agent answers the
+   * prompts (no `claude` binary, no API key). `agent` requires `io`.
+   */
+  llm?: 'cli' | 'agent';
+  /** I/O dir for the agent transport's request/response mailbox. */
+  io?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build the LLM transport for a run. `cli` (default) → undefined, so each
+ * runner factory falls back to its built-in cli transport (spawn `claude -p`),
+ * preserving today's behavior exactly. `agent` → a filesystem-mailbox transport
+ * under `options.io` (required).
+ */
+function resolveTransport(options: SpecInProcessOptions): LlmTransport | undefined {
+  if (options.llm !== 'agent') return undefined;
+  if (!options.io) {
+    throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
+  }
+  return agentTransport(options.io);
+}
 
 /**
  * Marker file stamped after a successful `contracts generate` run. The
@@ -356,6 +379,7 @@ export async function scanInProcess(
       chainRunner: options.chainRunner,
       disableLlmChainDetection: options.disableLlmChainDetection,
       skipGit: options.skipGit,
+      transport: resolveTransport(options),
       models: resolveConsolidateModels(repoRoot),
       onRelevanceProgress: (doneCount, total) => {
         // Numbered progress while "Discovering docs" runs (LLM relevance
@@ -520,6 +544,7 @@ export async function resolveAllDefaultsInProcess(
     chainRunner: options.chainRunner,
     disableLlmChainDetection: options.disableLlmChainDetection,
     skipGit: options.skipGit,
+    transport: resolveTransport(options),
     models: resolveConsolidateModels(repoRoot),
   };
 
@@ -667,9 +692,12 @@ export async function generateContractsInProcess(
 
   try {
     const extractModels = resolveExtractModels(repoRoot);
+    const transport = resolveTransport(options);
     const il = await generateContracts({
       repoRoot,
+      transport,
       runner: spawnExtractorRunner({
+        transport,
         concurrency: defaultExtractorConcurrency(),
         model: extractModels.extract,
         fallbackModel: extractModels.fallback,

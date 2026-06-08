@@ -1,0 +1,4 @@
+enum ProcessorKind {
+  origin "reference/specs/fp-guards/enums.md" "Message processor types" 24..28
+  values [batch, queue, stream, transform]
+}

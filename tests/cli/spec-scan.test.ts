@@ -11,7 +11,7 @@ import type { ExtractionFailureReport } from '@truecourse/spec-consolidator';
  * mocking clack / process.exit / the pipeline.
  */
 function report(over: Partial<ExtractionFailureReport> = {}): ExtractionFailureReport {
-  return { total: 0, allFailed: false, likelyAuth: false, samples: [], ...over };
+  return { total: 0, allFailed: false, samples: [], ...over };
 }
 
 describe('decideScanOutcome', () => {
@@ -20,23 +20,11 @@ describe('decideScanOutcome', () => {
       blocksAttempted: 152,
       claims: 0,
       openConflicts: 0,
-      failures: report({ total: 152, allFailed: true, likelyAuth: true }),
+      failures: report({ total: 152, allFailed: true }),
     });
     expect(outcome.exitCode).toBe(1);
     expect(outcome.outro).toBe('Aborted — all 152 blocks failed, no claims extracted.');
-    expect(outcome.showAuthHint).toBe(true);
     expect(outcome.outro).not.toContain('contracts generate');
-  });
-
-  it('surfaces the auth hint on a total wipeout only when it looks like auth', () => {
-    const outcome = decideScanOutcome({
-      blocksAttempted: 10,
-      claims: 0,
-      openConflicts: 0,
-      failures: report({ total: 10, allFailed: true, likelyAuth: false }),
-    });
-    expect(outcome.exitCode).toBe(1);
-    expect(outcome.showAuthHint).toBe(false);
   });
 
   it('does not suggest contracts generate when zero claims were extracted', () => {
@@ -71,17 +59,6 @@ describe('decideScanOutcome', () => {
     });
     expect(outcome.exitCode).toBe(0);
     expect(outcome.outro).toBe('4 open.');
-  });
-
-  it('propagates the auth hint on a partial (non-fatal) failure', () => {
-    const outcome = decideScanOutcome({
-      blocksAttempted: 10,
-      claims: 5,
-      openConflicts: 0,
-      failures: report({ total: 5, likelyAuth: true }),
-    });
-    expect(outcome.exitCode).toBe(0);
-    expect(outcome.showAuthHint).toBe(true);
   });
 });
 

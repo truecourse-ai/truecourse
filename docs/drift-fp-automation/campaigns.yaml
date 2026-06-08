@@ -1,0 +1,168 @@
+# Drift-FP campaigns — source of truth for which repos we run the drift verifier
+# against, in what order, and the results.
+#
+# Owned by the drift-fp-automation routines. Humans add/reorder entries; routine
+# sessions update `status`, `baseline`, `final`, and `notes`. Always read the
+# latest from `main`. The CONTRACTS themselves are NOT stored here — they live on
+# per-campaign storage branches `claude/drift-fp-store/<owner>-<repo>` (generated
+# once by drift-fp-generate, deleted at close). See README "Generating & storing
+# contracts".
+#
+# Status values (no `in_progress` — a campaign stays `discovering` from issue
+# filing through the whole fix loop until it closes):
+#   pending      — not yet started. drift-fp-generate picks the first `pending`
+#                  campaign whose storage branch doesn't exist yet (branch
+#                  existence, not a yaml flag, is the "already generated" signal).
+#   discovering  — drift-fp-discover has run / the fix loop is in progress
+#                  (set by the discovery PR that merges to main).
+#   done         — drift-fp-next-fix verified NO false-positive drifts remain
+#                  (fp == 0); campaign-close PR merged; vX.Y.Z tagged; storage
+#                  branch deleted.
+#   skipped      — manually deprioritized; note explains why
+#
+# Convergence is driven toward fp == 0 (not "tp_rate >= 0.90" — these targets
+# have ~0 genuine drift, so tp≈0 and a TP-rate gate is meaningless). The close
+# gate is "no false-positive drift-kinds remain". See README "TP/FP rubric".
+#
+# Per-campaign fields:
+#   target_repo      — owner/repo
+#   tech_stack       — informational
+#   code_dir         — passed to `verify --code-dir` (relative to repo root; "." = root).
+#                      Authoritative copy lives in the storage branch's meta.yaml.
+#   doc_scope        — the .md dirs the `.truecourseignore` keeps (drift-fp-generate uses this)
+#   priority         — pick order
+#   baseline/final   — drift snapshots: { verified_at, target_ref, total_drifts, tp, fp, info, fp_rate }
+#                      target_ref MUST equal the storage branch's meta.yaml target_ref.
+#
+# Each campaign also writes its open issues with label
+# `drift-fp-target:<owner>-<repo>` so a session can find them without crawling this file.
+# Targets are vetted empirically (clone + `infer --dry-run` probe of spec↔code
+# overlap) before seeding — see README "Selecting targets".
+
+campaigns:
+  # ---- JS/TS — strongest validated drift fit (fit 88, strong) ----
+  - target_repo: strapi/strapi
+    tech_stack: [typescript, monorepo, knex]
+    code_dir: "."
+    doc_scope:
+      - docs/docs/docs/01-core/authentication
+      - docs/docs/docs/01-core/content-manager
+      - docs/docs/docs/01-core/content-releases
+      - docs/docs/docs/01-core/permissions
+      - docs/docs/rfcs
+    priority: 1
+    status: done
+    baseline: { verified_at: "2026-06-04", target_ref: "b2ba15617de4c8ada9099789f7c774bb32328970", total_drifts: 38, tp: 0, fp: 29, info: 9, fp_rate: 1.00 }
+    final:    { verified_at: "2026-06-05", target_ref: "b2ba15617de4c8ada9099789f7c774bb32328970", total_drifts: 18, tp: 0, fp: 5, info: 13, fp_rate: 1.00 }
+    notes:
+      - "Validation run found 44 drift items, ~0 genuine: 20 Operation implementation.missing FPs (relative-path plugin routes mounted under a prefix; extractor doesn't reconstruct the mount), 13 NamedConstant ACTIONS value-mismatch FPs (bare-name collision, no module scoping), 11 no-code-counterpart info notes. PublicationFilter enum verified cleanly (true negative). Strong first FP corpus: operation mount-prefix + named-constant module-scoping."
+      - "Default branch is develop, not main — pin target_ref off develop."
+      - "Discovery run (2026-06-04): 38 drifts, 29 FP, 0 TP, 9 info. FP kinds: operation/implementation-missing (16 FPs — mount-prefix not reconstructed; 5 contract-quality for routes outside packages/core), operation/response-status (1 FP — route matched in test mock), auth-requirement/unprotected (2 FPs — same test-mock root cause), named-constant/no-code-counterpart (10 FPs — ACTIONS.* dotted-path object props + preview.STRAPI_* window globals). Info: enum/extra-value PublicationFilter (contract missed published-with-draft), enum/no-code-counterpart ReleaseStatus (case mismatch), maxPendingReleases (inline literal, not named constant)."
+      - "Closed manually at fp=5 (not the routine's fp==0 gate). Iterations through the fix loop drove total_drifts 38→18 and fp 29→5 via FP-GUARD coverage in the comparator + named-constant extractor; the remaining 5 are all operation/implementation-missing on plugin content-api routes that strapi mounts under `/api/` (4 auth routes: GET/POST /api/auth/* under packages/core/admin/server/src/routes/content-api/authentication.ts, plus 1 runtime-generated `/api/content-manager/:collection` route). The plugin-mount extractor only reconstructs `/<plugin>` prefixes from `<plugin>/server/routes/` paths; strapi's content-api convention (`/api/` prefix, `routes/content-api/*` subdirs) and runtime-built routes are not lifted. Fixing this generically (mount-tolerant matching: method + path suffix + signature fingerprint) is queued — revisit after feast/directus campaigns reveal what conventions are worth handling. These 5 are documented limitations, not engine regressions."
+
+  # ---- Python — best validated Python drift fit (fit 78, strong) ----
+  - target_repo: feast-dev/feast
+    tech_stack: [python, feature-store]
+    code_dir: "."
+    doc_scope: []        # fill before generating (keep the behavioral docs/ .md; drop the 93 .rst)
+    priority: 2
+    status: done
+    baseline: { verified_at: "2026-06-05", target_ref: "276b6df562e16fefba7efb493736ff32046d4a76", total_drifts: 17, tp: 0, fp: 13, info: 4, fp_rate: 1.00 }
+    final:    { verified_at: "2026-06-05", target_ref: "276b6df562e16fefba7efb493736ff32046d4a76", total_drifts: 11, tp: 0, fp: 0, info: 11, fp_rate: 0, tp_rate: 1.0 }
+    notes:
+      - "Probe histogram: NamedConstant 189, Operation 71, Enum 20, Formula 6, Pagination present. Has 93 .rst (invisible to the tool) alongside .md."
+      - "Discovery run (2026-06-05): 17 drifts, 13 FP, 0 TP, 4 info. FP kinds: named-constant/value-mismatch (Python constants extracted as strings vs int/bool literals), named-constant/no-code-counterpart (env-var and config default constants stored as Python dict literals, not named constants). Info: 4 no-code-counterpart items for constants documented but not exposed as named symbols."
+      - "Close verified at fp=0 against node dist/cli.mjs on pinned contracts (target_ref unchanged). 11 remaining drifts are all named-constant/no-code-counterpart [info] — documented constants that aren't exposed as named Python symbols (env vars, config defaults, batch engine type string). No false-positive drifts remain."
+
+  # ---- JS/TS — secondary validated fit (fit 42, 'maybe') ----
+  - target_repo: directus/directus
+    tech_stack: [typescript, knex]
+    code_dir: "."
+    doc_scope:
+      - api/src/ai/tools   # 13 prompt.md files, ~3K lines of behavioral spec for the AI tool surface (flows, operations, items, fields, …)
+    priority: 3
+    status: done
+    baseline: { verified_at: "2026-06-06", target_ref: "2f4e667c81119c565d6ac1529510560835f59908", total_drifts: 7, tp: 1, fp: 1, info: 5, fp_rate: 0.50 }
+    final:    { verified_at: "2026-06-06", target_ref: "2f4e667c81119c565d6ac1529510560835f59908", total_drifts: 6, tp: 1, fp: 0, info: 5, fp_rate: 0, tp_rate: 1.0 }
+    notes: ["Narrow but real overlap: Flows TriggerType/accountability/status enums in prompt.md ↔ code enums. Docs mostly live in a separate repo, so spec surface is thin.", "doc_scope filled 2026-06-05: 13 api/src/ai/tools/*/prompt.md files (~3K lines) cover the AI tool surface; biggest is flows/prompt.md (540 lines) which contains the trigger/status/accountability enums called out in the campaign hint.", "First discovery run (2026-06-05, contracts on now-deleted claude/drift-fp-store/directus-directus): 6 drifts, 3 FP, 1 TP, 2 info. Discovery filed #516 (enum/extra-value × 7) which the next-fix routine triaged as a bad-contract artifact: the OperationType contract captured 8 of 15 spec-documented values, dropping json-web-token/log/request/sleep/throw-error/transform/trigger. Campaign was stuck (#517) until the under-extraction was root-caused.", "Reset to pending 2026-06-06: PR #518 fixed the spec-scan completeness rule that caused the OperationType under-extraction; storage branch deleted to force regeneration with the fixed prompt. Issues #516 #517 superseded by this regeneration and closed."]
+
+  # ---- Round 2 — 5 candidates probed 2026-06-06 (clone + .md tree inspection); all confirmed to ship behavioral specs in-repo. ----
+  # See round 1 closes (strapi/feast/directus) for the campaign template; pick order follows priority below.
+
+  # ---- TS monorepo — payloadcms (CMS, same shape family as strapi) ----
+  - target_repo: payloadcms/payload
+    tech_stack: [typescript, monorepo]
+    code_dir: "."
+    doc_scope:
+      - docs/fields              # 23 .md/.mdx — field types, validation, options
+      - docs/admin               # 9 — admin UI behavior, access control surface
+      - docs/plugins             # 13 — plugin contracts (e.g. cloud-storage, search)
+      - docs/rich-text           # 11 — rich-text editor features + node types
+      - docs/custom-components   # 8 — extension points + lifecycle hooks
+    priority: 4
+    status: done
+    baseline: { verified_at: "2026-06-07", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0 }
+    final:    { verified_at: "2026-06-08", target_ref: "a6e494ed6b8488e186e7e1b02d3bb0a9309c0bbd", total_drifts: 3, tp: 0, fp: 0, info: 3, fp_rate: 0, tp_rate: 1.0 }
+    notes:
+      - "Probe 2026-06-06: 147 .md + 154 .mdx in-repo. docs/fields and docs/plugins describe field-type enums + plugin config constants — same drift-fp surface as strapi (collections / content-manager) but a different codebase. Tests whether strapi-era comparator fixes generalize across TS CMS implementations."
+      - "Closed at fp=0 on first verify run. 3 drifts, all named-constant/no-code-counterpart [info]: overrideLock.default (documented API default stored as a parameter default, not a named constant), widget.maxWidth.default + widget.minWidth.default (optional API property defaults, also not named constants). 17 contracts total — 9 UnenforceableObligation (can't drift by design), 3 NamedConstant (these 3 info drifts), 2 AuthRequirement, 2 Entity, 1 Enum, all clean. WidgetWidth enum and entity/auth contracts verified cleanly."
+      - "Surfaced the WASM tree-sitter heap exhaustion bug on a 4493-file TS monorepo (PR #531 was the routine's wrong-shape attempt at fixing it inline + bundling with close; PR #532 was a tests-pass-but-still-crashes deferred-disposal; PR #533 was the real fix — eager handler-fact extraction + per-file tree disposal). Verified end-to-end on this branch: 69s wall-clock, exit 0, zero Aborted(), drift set unchanged."
+
+  # ---- Python — prefect (orchestration, state-machine-heavy enums) ----
+  - target_repo: PrefectHQ/prefect
+    tech_stack: [python, orchestration]
+    code_dir: "."
+    doc_scope:
+      - docs/v3/concepts         # 26 — behavioral concepts: flow runs, deployments, schedules
+      - docs/v3/advanced         # 29 — advanced behavior: retries, caching, transactions
+      - docs/v3/api-ref/rest-api # REST API operation reference (server/flow-runs, server/deployments, …)
+    priority: 5
+    status: discovering
+    baseline: { verified_at: "2026-06-08", target_ref: "db66b14dbaea18e726fc4ea0100fd194383c6c59", total_drifts: 79, tp: 0, fp: 72, info: 7, fp_rate: 1.00 }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes:
+      - "Probe 2026-06-06: 406 auto-generated Python API ref docs under docs/v3/api-ref/python (excluded from doc_scope — they shadow the source code and would be redundant). The behavioral specs live under docs/v3/concepts (26 files) and docs/v3/advanced (29 files); the REST API under docs/v3/api-ref/rest-api/server/ is genuinely behavioral. Tests Python state-enum lifting (flow-run STATES are heavily enumerated) beyond what feast surfaced."
+      - "Discovery run (2026-06-08): 79 drifts, 0 TP, 72 FP, 7 info. FP kinds: operation/implementation-missing (2 FPs — Python FastAPI routes not extracted by the operation extractor; 5 contract-quality: template placeholders + Cloud-only URLs), entity/field-mutability (27 FPs — contract-quality: LLM inferred {immutable} on Event.id/occurred from required-field semantics; docs do not state immutability), enum/no-code-counterpart (12 FPs — Python implements categorical values via string literals, Union type aliases, discriminated union classes, or renamed AutoEnums; exact class-name matching fails for ArtifactType, AutomationActionType, CacheIsolationLevel, CachePolicy, DeploymentVersionType, FlowRunStateName+subsets, FlowRunStateType subset, TaskRunStateName+subsets), named-constant/no-code-counterpart (~26 FPs — Python constants stored as Pydantic settings fields or inline literals with different naming conventions; RRULE_MAX_CHARS vs MAX_RRULE_LENGTH, SCHEDULER_MAX_RUNS vs PREFECT_API_SERVICES_SCHEDULER_MAX_RUNS, etc.; 7 info: K8s defaults, HTTP status codes, Cloud-only retention plan data). Issues filed: #539 (operation/implementation-missing), #540 (enum/no-code-counterpart), #541 (named-constant/no-code-counterpart)."
+
+  # ---- Python monorepo — dagster (data orchestration, asset/op model) ----
+  - target_repo: dagster-io/dagster
+    tech_stack: [python, monorepo, orchestration]
+    code_dir: "."
+    doc_scope:
+      - docs/docs/guides/build       # asset materialization, op patterns, external resources
+      - docs/docs/deployment         # 19 — deployment behavior (kubernetes, dagster-plus)
+      - docs/docs/integrations/libraries  # 36 — integration adapters (aws/gcp/snowflake/dbt/…)
+    priority: 6
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: rich in-repo docs at docs/docs/guides/build/assets (12), build/external-resources (11), deployment/dagster-plus/management (12), integrations/libraries/aws (12). Python monorepo (python_modules/dagster/, python_modules/libraries/*); narrow code_dir if generate runs hot, but start with `.` like the other monorepos."]
+
+  # ---- TS framework — redwoodjs/redwood (full-stack TS framework, auth/graphql/deploy docs) ----
+  - target_repo: redwoodjs/redwood
+    tech_stack: [typescript, framework]
+    code_dir: "."
+    doc_scope:
+      - docs/docs                # 44 top-level + subdirs (skip versioned_docs/* — versioned snapshots, redundant)
+    priority: 7
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 121 .md/.mdx under docs/docs/ (current version). Strong behavioral surface in how-to (20), deploy (9), auth (9), graphql (5), tutorial/chapter1 (6). Note: versioned_docs/version-{8.2…8.8} are frozen snapshots of the same docs/docs/ content; doc_scope excludes them to avoid 8x duplication of every claim."]
+
+  # ---- TS infra — sst/sst (serverless deployment, infra-as-code) ----
+  - target_repo: sst/sst
+    tech_stack: [typescript, infrastructure]
+    code_dir: "."
+    doc_scope:
+      - www/src/content/docs/docs   # 25 top-level + start/aws (21) — behavioral docs via Astro Starlight
+    priority: 8
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-06: 46+ behavioral .md/.mdx under www/src/content/docs/docs/. Different domain than the other 4: infra-as-code, lots of named-constant surface (region names, runtime versions, config defaults) and operation-like resource definitions. Should stress NamedConstant comparator on infra-domain naming conventions."]
+
+  # ---- Add more campaigns below once validated (probe via `infer --dry-run`) ----
+  # Bar: concrete .md specs in REAL (non-dot) folders that OVERLAP liftable app
+  # code (Prisma entities / TS|Zod|str-Enum enums / Express|FastAPI routes /
+  # Knex|Prisma queries / named constants). See README "Selecting targets".

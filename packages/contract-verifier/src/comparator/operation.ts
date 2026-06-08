@@ -42,6 +42,13 @@ export function compareOperation(input: CompareInput): ContractDrift[] {
   const codeByStatus = new Map<string, ResponseContract>();
   for (const r of input.code.responses) codeByStatus.set(r.status, r);
 
+  // Plugin-style route descriptors reference handlers by string name; the
+  // extractor produces responses:[] because no handler body is walked (cross-
+  // handler tracing is out of v1 scope). Treat that as "unverifiable" — skip
+  // response-status, header, and body checks rather than emitting false-
+  // positive response.N drifts for every such route.
+  if (input.code.responses.length === 0) return out;
+
   for (const specResp of input.spec.responses) {
     // 401/403 inherited responses are validated by the cross-cutting
     // comparator (`AuthRequirement` / `AuthorizationRule`), not here.

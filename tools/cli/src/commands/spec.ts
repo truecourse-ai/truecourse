@@ -40,6 +40,10 @@ import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
   cwd?: string;
+  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (filesystem mailbox under `io`). */
+  llm?: "cli" | "agent";
+  /** I/O dir for the `agent` transport's request/response mailbox. */
+  io?: string;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
@@ -70,13 +74,16 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // command reports success on a scan that produced nothing. The `.catch`
   // handler returns `never` (process.exit), so `consolidate` is always
   // assigned past this point.
-  const { consolidate } = await scanInProcess(root, { tracker, source: "cli" }).catch(
-    (e: unknown) => {
-      renderer.dispose();
-      p.cancel(`Failed: ${(e as Error).message}`);
-      process.exit(1);
-    },
-  );
+  const { consolidate } = await scanInProcess(root, {
+    tracker,
+    source: "cli",
+    llm: opts.llm,
+    io: opts.io,
+  }).catch((e: unknown) => {
+    renderer.dispose();
+    p.cancel(`Failed: ${(e as Error).message}`);
+    process.exit(1);
+  });
   renderer.dispose();
   const { extract, merge } = consolidate;
   p.log.step(`docs        ${extract.docsScanned}`);
@@ -86,9 +93,10 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.log.step(`decided     ${merge.decidedConflicts.length}`);
   p.log.step(`open        ${merge.openConflicts.length}`);
 
-  // A count alone hides actionable errors (e.g. an expired `claude` login).
-  // Surface the most common distinct messages and, when the failures look
-  // like an auth problem, point the user at re-authenticating.
+  // A count alone hides actionable errors. Surface the most common distinct
+  // failure messages verbatim so the real cause is visible. (Auth specifically
+  // is caught by the up-front preflight above, which covers every command that
+  // spawns `claude` — no need to re-classify it from per-block stderr here.)
   const failures = summarizeExtractionFailures(extract);
   const outcome = decideScanOutcome({
     blocksAttempted: extract.blocksAttempted,
@@ -101,11 +109,6 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     p.log.warn(`${failures.total} block${failures.total === 1 ? "" : "s"} failed to extract:`);
     for (const s of failures.samples) {
       p.log.message(`  • ${oneLine(s.message)}${s.count > 1 ? `  (×${s.count})` : ""}`);
-    }
-    if (outcome.showAuthHint) {
-      p.log.message("");
-      p.log.warn("This looks like an authentication problem with the `claude` CLI.");
-      p.log.message("  Your Claude login may have expired — run `claude` to re-authenticate (e.g. `/login`), then retry.");
     }
   }
 
@@ -143,15 +146,12 @@ export interface ScanOutcome {
   exitCode: 0 | 1;
   /** Final outro line. */
   outro: string;
-  /** Whether to print the re-authentication hint. */
-  showAuthHint: boolean;
 }
 
 /**
- * Decide how a scan ends: its exit code, outro line, and whether to nudge the
- * user to re-authenticate. Pure so the policy is unit-tested without driving
- * clack/process.exit. Two failure-aware rules sit on top of the old
- * open-conflicts/outro logic:
+ * Decide how a scan ends: its exit code and outro line. Pure so the policy is
+ * unit-tested without driving clack/process.exit. Two failure-aware rules sit
+ * on top of the old open-conflicts/outro logic:
  *   - every attempted block failed → exit 1 (a total wipeout is an error, not
  *     a clean repo).
  *   - zero claims (but not a wipeout) → don't suggest `contracts generate`;
@@ -168,7 +168,6 @@ export function decideScanOutcome(input: {
     return {
       exitCode: 1,
       outro: `Aborted — all ${input.blocksAttempted} blocks failed, no claims extracted.`,
-      showAuthHint: failures.likelyAuth,
     };
   }
   const outro =
@@ -177,7 +176,7 @@ export function decideScanOutcome(input: {
       : input.claims === 0
         ? "No claims extracted — nothing to generate yet."
         : "No open conflicts — run `truecourse contracts generate`.";
-  return { exitCode: 0, outro, showAuthHint: failures.likelyAuth };
+  return { exitCode: 0, outro };
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +203,7 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
   await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
-    const { additions } = await resolveAllDefaultsInProcess(root, { tracker });
+    const { additions } = await resolveAllDefaultsInProcess(root, { tracker, llm: opts.llm, io: opts.io });
     renderer.dispose();
     p.log.step(`accepted    ${additions} default${additions === 1 ? "" : "s"}`);
     p.log.step(`written     ${path.relative(root, decisionsRelPath(root))}`);
@@ -228,7 +227,7 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   p.intro("Spec status");
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    const { consolidate } = await scanInProcess(root, { tracker });
+    const { consolidate } = await scanInProcess(root, { tracker, llm: opts.llm, io: opts.io });
     renderer.dispose();
     const { extract, merge, skippedDocs } = consolidate;
     const rows: Array<[string, string]> = [

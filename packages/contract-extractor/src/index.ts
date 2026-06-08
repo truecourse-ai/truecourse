@@ -37,6 +37,7 @@ import { normalizeMergedArtifacts } from './normalizer.js';
 import { repair, type RepairProgress } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
 import type { Manifest, SpecSlice } from './types.js';
 import crypto from 'node:crypto';
@@ -57,6 +58,12 @@ export interface ExtractModels {
 export interface GenerateOptions {
   /** Repo root — `.truecourse/specs/` and `.truecourse/contracts/` live here. */
   repoRoot: string;
+  /**
+   * LLM transport for the auto-created slice runner + the repair pass. Defaults
+   * to the cli transport (spawn `claude -p`). The CLI/dashboard pass an agent
+   * transport for headless runs. An explicit `runner` override ignores this.
+   */
+  transport?: LlmTransport;
   /** Override the runner; defaults to `spawnRunner()`. Tests pass a stub. */
   runner?: SliceRunner;
   /** Per-stage model overrides (extract / repair / fallback). */
@@ -116,6 +123,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   opts.onSlicesReady?.(slices.length);
   const models = opts.models ?? {};
   const runner = opts.runner ?? spawnRunner({
+    transport: opts.transport,
     onSliceStart: opts.onSliceStart,
     onSliceDone: opts.onSliceDone,
     model: models.extract,
@@ -208,6 +216,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   // directly and would bypass any injected stub runner.
   if (slices.length > 0 && !dryRun && !opts.disableRepair) {
     const repaired = await repair(merged.artifacts, slices, {
+      transport: opts.transport,
       model: models.repair,
       fallbackModel: models.fallback,
       onProgress: opts.onRepairProgress,

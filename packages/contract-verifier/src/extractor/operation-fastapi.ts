@@ -23,6 +23,7 @@ import type {
   BodyShape,
 } from '../types/index.js';
 import type { ExtractedOperation, HandlerObservations } from './operation.js';
+import { extractHandlerFacts, emptyHandlerFacts } from './handler-facts.js';
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
 
@@ -37,6 +38,7 @@ export function extractFastApiOperationsFromFile(
   tree: Tree,
 ): ExtractedOperation[] {
   const routers = collectRouters(tree.rootNode, source);
+  const stringVars = collectStringVars(tree.rootNode, source);
   const out: ExtractedOperation[] = [];
 
   walk(tree.rootNode, (node) => {
@@ -46,7 +48,7 @@ export function extractFastApiOperationsFromFile(
     for (let i = 0; i < node.namedChildCount; i++) {
       const dec = node.namedChild(i);
       if (dec?.type !== 'decorator') continue;
-      const route = parseRouteDecorator(dec, source);
+      const route = parseRouteDecorator(dec, source, stringVars);
       if (!route) continue;
       const router = routers.get(route.routerVar) ?? { prefix: '', hasAuthDep: false };
       const fullPath = joinPath(router.prefix, route.path);
@@ -54,6 +56,7 @@ export function extractFastApiOperationsFromFile(
       const paramsNode = def.childForFieldName('parameters');
       const responses = extractResponses(body, source, route.successStatus);
       const observed = collectObservations(paramsNode, body, source, fullPath);
+      const facts = body ? extractHandlerFacts(body, source) : emptyHandlerFacts();
       out.push({
         identity: `${route.method.toUpperCase()} ${fullPath}`,
         contract: {
@@ -67,8 +70,8 @@ export function extractFastApiOperationsFromFile(
         declarationLine: node.startPosition.row + 1,
         routerName: route.routerVar,
         observed,
-        handlerBody: body ?? undefined,
-        handlerSource: source,
+        emission: facts.emission,
+        ownershipCheckCandidates: facts.ownershipCheckCandidates,
       });
       break; // one route decorator per function
     }
@@ -92,7 +95,7 @@ function collectRouters(root: SyntaxNode, source: string): Map<string, RouterInf
     if (left?.type !== 'identifier' || right?.type !== 'call') return;
     const fn = right.childForFieldName('function');
     const fnName = fn ? source.slice(fn.startIndex, fn.endIndex) : '';
-    if (fnName !== 'APIRouter' && fnName !== 'FastAPI') return;
+    if (fnName !== 'FastAPI' && !fnName.endsWith('Router')) return;
     const args = right.childForFieldName('arguments');
     let prefix = '';
     let hasAuthDep = false;
@@ -124,6 +127,45 @@ export function fastApiFileHasAuthRouter(source: string, tree: Tree): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// String variable collection — module-level assignments + function parameter
+// defaults. Used to resolve identifier path arguments in route decorators
+// (e.g. `@app.get(health_check_path)` where `health_check_path: str = "/health"`
+// is a parameter of the enclosing function).
+// ---------------------------------------------------------------------------
+
+function collectStringVars(root: SyntaxNode, source: string): Map<string, string> {
+  const vars = new Map<string, string>();
+  walk(root, (node) => {
+    // module-level assignment: path_var = "/some/path"
+    if (node.type === 'assignment') {
+      const left = node.childForFieldName('left');
+      const right = node.childForFieldName('right');
+      if (left?.type === 'identifier' && right?.type === 'string') {
+        vars.set(source.slice(left.startIndex, left.endIndex), pyStr(right, source));
+      }
+    }
+    // function parameter with a string default: func(x: str = "/path")
+    if (node.type === 'function_definition') {
+      const params = node.childForFieldName('parameters');
+      if (params) {
+        for (let i = 0; i < params.namedChildCount; i++) {
+          const p = params.namedChild(i);
+          if (!p) continue;
+          if (p.type === 'typed_default_parameter' || p.type === 'default_parameter') {
+            const name = p.childForFieldName('name');
+            const value = p.childForFieldName('value');
+            if (name?.type === 'identifier' && value?.type === 'string') {
+              vars.set(source.slice(name.startIndex, name.endIndex), pyStr(value, source));
+            }
+          }
+        }
+      }
+    }
+  });
+  return vars;
+}
+
+// ---------------------------------------------------------------------------
 // Route decorator parsing
 // ---------------------------------------------------------------------------
 
@@ -134,7 +176,7 @@ interface RouteDecorator {
   successStatus: string;
 }
 
-function parseRouteDecorator(dec: SyntaxNode, source: string): RouteDecorator | null {
+function parseRouteDecorator(dec: SyntaxNode, source: string, stringVars: Map<string, string>): RouteDecorator | null {
   const call = dec.namedChild(0);
   if (call?.type !== 'call') return null;
   const fn = call.childForFieldName('function');
@@ -159,6 +201,17 @@ function parseRouteDecorator(dec: SyntaxNode, source: string): RouteDecorator | 
       if (name && value && source.slice(name.startIndex, name.endIndex) === 'status_code' && isIntLike(value)) {
         successStatus = source.slice(value.startIndex, value.endIndex).replace(/_/g, '');
       }
+    }
+  }
+  // If the path argument was an identifier (not a string literal), try to
+  // resolve it from collected string variables (parameter defaults or
+  // module-level assignments). Handles `@app.get(health_path)` where
+  // `health_path: str = "/health"` is a function parameter default.
+  if (path === null) {
+    const firstArg = args.namedChild(0);
+    if (firstArg?.type === 'identifier') {
+      const resolved = stringVars.get(source.slice(firstArg.startIndex, firstArg.endIndex));
+      if (resolved !== undefined) path = resolved;
     }
   }
   if (path === null) return null;

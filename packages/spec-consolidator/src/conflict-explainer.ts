@@ -13,15 +13,13 @@
  * explanation.
  */
 
-import { spawn } from 'node:child_process';
-import { resolveClaudeBinary } from '@truecourse/shared';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
-import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'conflict-explanations.json';
 
@@ -36,6 +34,12 @@ export type ConflictExplainerRunner = (
 export interface ConflictExplainerOptions {
   /** Override the runner. Tests pass a stub. */
   runner?: ConflictExplainerRunner;
+  /**
+   * LLM transport forwarded to the default runner. Defaults to `cliTransport()`
+   * (spawns `claude -p`). The CLI/dashboard pass `agentTransport(io)` for
+   * headless/routine runs.
+   */
+  transport?: LlmTransport;
   /** When false, skip the LLM calls entirely. */
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 4). */
@@ -72,7 +76,11 @@ export async function explainConflicts(
   if (conflicts.length === 0) return;
   const runner =
     opts.runner ??
-    spawnConflictExplainerRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnConflictExplainerRunner({
+      transport: opts.transport,
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+    });
   const concurrency = opts.concurrency ?? 4;
   opts.onStart?.(conflicts.length);
 
@@ -291,59 +299,25 @@ function truncateJson(value: unknown, max = 1500): string {
 }
 
 function spawnConflictExplainerRunner(
-  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictExplainerRunner {
-  const bin = opts.bin ?? resolveClaudeBinary();
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 90_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
-  return (input: ConflictExplainerInput): Promise<string> => {
+  return async (input: ConflictExplainerInput): Promise<string> => {
     const chain = isChainConflict(input.conflict);
-    const args = [
-      '-p',
-      chain
+    const raw = await transport({
+      id: `spec.conflictExplain:${input.conflict.id}`,
+      stage: 'spec.conflictExplain',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: chain ? CHAIN_EXPLAINER_SYSTEM_PROMPT : CONFLICT_EXPLAINER_SYSTEM_PROMPT,
+      user: chain
         ? buildChainExplainerUserPrompt(input.conflict)
         : buildExplainerUserPrompt(input.conflict),
-      ...modelArgs,
-      '--output-format',
-      'json',
-      '--append-system-prompt',
-      chain ? CHAIN_EXPLAINER_SYSTEM_PROMPT : CONFLICT_EXPLAINER_SYSTEM_PROMPT,
-      '--setting-sources',
-      'project',
-    ];
-    return new Promise<string>((resolve, reject) => {
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error(`conflict-explainer: claude timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-      proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`conflict-explainer: claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-          return;
-        }
-        try {
-          const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
-          if (typeof text !== 'string') {
-            reject(new Error('conflict-explainer: claude returned no text'));
-            return;
-          }
-          resolve(text);
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
+      responseFormat: 'text',
+      timeoutMs,
     });
+    return raw;
   };
 }
 

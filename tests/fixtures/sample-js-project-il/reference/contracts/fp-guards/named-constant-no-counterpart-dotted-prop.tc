@@ -1,0 +1,17 @@
+constant CRUD_PERMS.read {
+  origin "reference/specs/modules/catalog/perms.md" "CRUD Permissions" 1..10
+  type string
+  expected-value "module::catalog.items.read"
+}
+
+constant CRUD_PERMS.create {
+  origin "reference/specs/modules/catalog/perms.md" "CRUD Permissions" 1..10
+  type string
+  expected-value "module::catalog.items.create"
+}
+
+constant CRUD_PERMS.write {
+  origin "reference/specs/modules/catalog/perms.md" "CRUD Permissions" 1..10
+  type string
+  expected-value "module::catalog.items.write"
+}

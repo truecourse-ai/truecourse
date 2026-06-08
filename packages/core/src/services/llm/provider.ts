@@ -1,5 +1,6 @@
 import type { Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type { FlowEnrichmentContext } from './prompts.js';
 import type { UsageData } from '../usage.service.js';
 
@@ -264,6 +265,11 @@ export interface LLMProvider {
 // Factory — Claude Code CLI is the only supported provider.
 // ---------------------------------------------------------------------------
 
-export function createLLMProvider(): LLMProvider {
-  return new ClaudeCodeProvider();
+/**
+ * Build the LLM provider. Pass an `LlmTransport` to route every LLM call
+ * through it (e.g. the agent file-mailbox, for headless/routine runs); omit it
+ * to spawn the `claude` CLI (the default).
+ */
+export function createLLMProvider(transport?: LlmTransport): LLMProvider {
+  return new ClaudeCodeProvider(transport);
 }

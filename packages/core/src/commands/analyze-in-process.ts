@@ -8,6 +8,7 @@
 import { removeFromHistory } from '../lib/analysis-store.js';
 import type { RegistryEntry } from '../config/registry.js';
 import type { LLMProvider } from '../services/llm/provider.js';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type { StepTracker } from '../progress.js';
 import { analyzeCore, type LlmEstimate } from './analyze-core.js';
 import { persistFullAnalysis, type PersistFullResult } from './analyze-persist.js';
@@ -41,6 +42,8 @@ export interface AnalyzeInProcessOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;
   provider?: LLMProvider;
+  /** LLM transport for the auto-created provider (cli default; agent for headless). */
+  transport?: LlmTransport;
   signal?: AbortSignal;
   /**
    * Adapter that triggered this run. Auto-emitted in the telemetry payload so

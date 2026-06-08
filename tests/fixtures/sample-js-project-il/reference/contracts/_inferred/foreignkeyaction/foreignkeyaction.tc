@@ -1,0 +1,8 @@
+enum ForeignKeyAction {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "src/db.ts" 21..21
+  confidence high
+  representation string-literal
+  closed
+  values [CASCADE, NO ACTION, RESTRICT, SET DEFAULT, SET NULL]
+}

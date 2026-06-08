@@ -326,3 +326,62 @@ function walk(node: SyntaxNode, visit: (n: SyntaxNode) => boolean | void): void 
     if (c) walk(c, visit);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Sibling-module id-literal extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Looks for a top-level `export default <object|call>({id: 'string'})` or
+ * `export default { id: 'string', … }` and returns the id value.
+ *
+ * Used by the enum/index.ts orchestrator to synthesise a cross-file enum from
+ * sibling `* /index.ts` modules that each export a handler object with an
+ * `id` discriminant (e.g. operation handlers, processor plugins).
+ */
+export function extractIdLiteralFromExport(
+  _filePath: string,
+  _source: string,
+  tree: Tree,
+): string | null {
+  for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
+    const node = tree.rootNode.namedChild(i);
+    if (!node || node.type !== 'export_statement') continue;
+    // The exported value is the last meaningful named child (after the
+    // `default` keyword, which is an unnamed / keyword node in the grammar).
+    for (let j = 0; j < node.namedChildCount; j++) {
+      const child = node.namedChild(j);
+      if (!child) continue;
+      const id = extractIdFromObjectLike(child);
+      if (id !== null) return id;
+    }
+  }
+  return null;
+}
+
+function extractIdFromObjectLike(node: SyntaxNode): string | null {
+  if (node.type === 'object') {
+    return extractIdProperty(node);
+  }
+  if (node.type === 'call_expression') {
+    for (const arg of collectArgs(node)) {
+      if (arg.type === 'object') {
+        const id = extractIdProperty(arg);
+        if (id !== null) return id;
+      }
+    }
+  }
+  return null;
+}
+
+function extractIdProperty(obj: SyntaxNode): string | null {
+  for (let i = 0; i < obj.namedChildCount; i++) {
+    const pair = obj.namedChild(i);
+    if (pair?.type !== 'pair') continue;
+    const key = pair.childForFieldName('key');
+    if (key?.text !== 'id') continue;
+    const value = pair.childForFieldName('value');
+    if (value?.type === 'string') return value.text.slice(1, -1);
+  }
+  return null;
+}

@@ -21,6 +21,7 @@ import { detectModules, SHARED_MODULE, type DetectedModule } from './module-dete
 import { extractClaims, type ExtractResult } from './extractor.js';
 import { mergeClaims, type DecidedConflict, type MergeResult } from './merger.js';
 import { spawnRunner, type BlockRunner, type BlockRunResult } from './runner.js';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type { Block } from './slicer.js';
 import {
   DecisionsFileSchema,
@@ -95,6 +96,13 @@ export interface ConsolidateOptions {
    * overrides take precedence (tests inject stubs that way).
    */
   models?: ConsolidateModels;
+  /**
+   * LLM transport for the auto-created runners (block extraction, relevance,
+   * chain, conflict explain/resolve). Defaults to the cli transport (spawn
+   * `claude -p`). The CLI/dashboard pass an agent transport for headless runs.
+   * Explicit `*Runner` overrides (test stubs) ignore this.
+   */
+  transport?: LlmTransport;
   /** Override block-extraction runner. Tests pass a stub. */
   blockRunner?: BlockRunner;
   /**
@@ -237,6 +245,7 @@ export async function consolidate(
     runner: opts.relevanceRunner,
     enabled: opts.disableRelevanceFilter !== true,
     manualIncludes: decisions.manualIncludes ?? [],
+    transport: opts.transport,
     model: models.relevance,
     fallbackModel,
     onProgress: opts.onRelevanceProgress,
@@ -254,6 +263,7 @@ export async function consolidate(
   const llmChains = await detectVersionChainsViaLlm(repoRoot, docs, {
     runner: opts.chainRunner,
     enabled: opts.disableLlmChainDetection !== true,
+    transport: opts.transport,
     model: models.chainDetect,
     fallbackModel,
   });
@@ -272,6 +282,7 @@ export async function consolidate(
     repoRoot,
     opts.blockRunner ??
       spawnRunner({
+        transport: opts.transport,
         onBlockDone: () => opts.onBlockDone?.(),
         model: models.claimExtract,
         fallbackModel,
@@ -314,6 +325,7 @@ export async function consolidate(
   const recheckChains = await runChainRecheck(repoRoot, recheckPairs, {
     runner: opts.chainRecheckRunner,
     enabled: opts.disableChainRecheck !== true,
+    transport: opts.transport,
     model: models.chainRecheck,
     fallbackModel,
   });
@@ -356,6 +368,7 @@ export async function consolidate(
   await explainConflicts(repoRoot, stitchedMerge.openConflicts, {
     runner: opts.conflictExplainerRunner,
     enabled: opts.disableConflictExplanations !== true,
+    transport: opts.transport,
     model: models.conflictExplain,
     fallbackModel,
     onStart: opts.onExplainStart,
@@ -376,6 +389,7 @@ export async function consolidate(
   const autoResolved = await resolveConflicts(repoRoot, stitchedMerge.openConflicts, {
     runner: opts.conflictResolverRunner,
     enabled: opts.disableConflictResolution !== true,
+    transport: opts.transport,
     model: models.conflictResolve,
     fallbackModel,
     onStart: opts.onResolveStart,

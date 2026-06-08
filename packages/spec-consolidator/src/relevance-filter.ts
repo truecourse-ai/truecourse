@@ -19,15 +19,13 @@
  * to keep noise than silently drop a real spec doc).
  */
 
-import { spawn } from 'node:child_process';
-import { resolveClaudeBinary } from '@truecourse/shared';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
-import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'relevance.json';
 
@@ -49,6 +47,8 @@ export type RelevanceRunner = (input: RelevanceRunnerInput) => Promise<Relevance
 export interface RelevanceFilterOptions {
   /** Override the runner. Tests pass a stub. */
   runner?: RelevanceRunner;
+  /** LLM transport for the auto-created runner (defaults to cli). */
+  transport?: LlmTransport;
   /** When false, skip the LLM call entirely; every doc stays included. */
   enabled?: boolean;
   /**
@@ -93,7 +93,7 @@ export async function filterByRelevance(
   const manualSet = new Set(opts.manualIncludes ?? []);
   const runner =
     opts.runner ??
-    spawnRelevanceRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
+    spawnRelevanceRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? 4;
 
   const total = docs.length;
@@ -218,65 +218,32 @@ const RelevanceVerdictSchema = z.object({
 });
 
 function spawnRelevanceRunner(
-  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+  opts: {
+    /** LLM transport. Defaults to `cliTransport()` (spawns `claude -p`). */
+    transport?: LlmTransport;
+    bin?: string;
+    timeoutMs?: number;
+    model?: string;
+    fallbackModel?: string;
+  } = {},
 ): RelevanceRunner {
-  const bin = opts.bin ?? resolveClaudeBinary();
+  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 60_000;
-  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
-  return (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
-    const args = [
-      '-p',
-      buildRelevanceUserPrompt(input.doc),
-      ...modelArgs,
-      '--output-format',
-      'json',
-      '--append-system-prompt',
-      RELEVANCE_SYSTEM_PROMPT,
-      '--setting-sources',
-      'project',
-    ];
-    return new Promise<RelevanceVerdict>((resolve, reject) => {
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
-        reject(new Error(`relevance: claude timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      proc.stdout.on('data', (b: Buffer) => stdout.push(b));
-      proc.stderr.on('data', (b: Buffer) => stderr.push(b));
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`relevance: claude exited ${code}: ${Buffer.concat(stderr).toString('utf-8')}`));
-          return;
-        }
-        try {
-          const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
-          if (typeof text !== 'string') {
-            reject(new Error('relevance: claude returned no text'));
-            return;
-          }
-          const inner = JSON.parse(stripCodeFences(text));
-          const parsed = RelevanceVerdictSchema.parse(inner);
-          resolve({ path: input.doc.path, include: parsed.include, reason: parsed.reason });
-        } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
+  return async (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
+    const raw = await transport({
+      id: `spec.relevance:${input.doc.path}`,
+      stage: 'spec.relevance',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: RELEVANCE_SYSTEM_PROMPT,
+      user: buildRelevanceUserPrompt(input.doc),
+      responseFormat: 'json',
+      timeoutMs,
     });
+    const inner = JSON.parse(stripCodeFences(raw));
+    const parsed = RelevanceVerdictSchema.parse(inner);
+    return { path: input.doc.path, include: parsed.include, reason: parsed.reason };
   };
-}
-
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const m = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return m ? m[1] : trimmed;
 }
 
 // ---------------------------------------------------------------------------

@@ -131,33 +131,16 @@ export async function extractClaims(
 // That's correct for a few stragglers, but a *total* failure (every block
 // errored → zero claims) is indistinguishable from "clean repo" unless the
 // caller inspects the failures. This helper classifies them so the CLI and
-// dashboard can surface an actionable message instead of a misleading
+// dashboard can surface the actual error messages instead of a misleading
 // success.
+//
+// Auth is deliberately *not* sniffed here: every command that spawns `claude`
+// runs the same up-front auth preflight (tools/cli/src/lib/claude-preflight.ts
+// → @truecourse/core/lib/cli-binary), so a broken/expired login is caught
+// before any block runs. Re-guessing it from per-block stderr afterwards would
+// duplicate that check (scan-only) and be far less reliable than the live
+// round-trip the preflight already does.
 // ---------------------------------------------------------------------------
-
-/**
- * Patterns that mark a `claude` subprocess failure as an authentication
- * problem (expired/missing login, invalid key) rather than a transient
- * error. Matched case-insensitively against the failure message, which for
- * subprocess exits is `claude exited <code>: <stderr>`.
- */
-const AUTH_FAILURE_PATTERNS: RegExp[] = [
-  /\b401\b/,
-  /unauthor/i, // unauthorized / unauthorised
-  /authenticat/i, // authentication / authenticate / unauthenticated
-  /\blog(?:ged)? ?in\b/i, // login / "log in" / "logged in"
-  /\/login\b/i, // the `/login` slash command Claude Code suggests
-  /invalid (?:api )?key/i,
-  /\bapi key\b/i,
-  /oauth/i,
-  /(?:token|session|credentials?) (?:has |have )?expired/i,
-  /\bcredentials?\b/i,
-];
-
-/** True when a failure message looks like an auth problem (see patterns). */
-export function isLikelyAuthFailure(message: string): boolean {
-  return AUTH_FAILURE_PATTERNS.some((re) => re.test(message));
-}
 
 export interface FailureSample {
   /** The failure message. */
@@ -171,17 +154,15 @@ export interface ExtractionFailureReport {
   total: number;
   /** True when at least one block was attempted and every one failed. */
   allFailed: boolean;
-  /** True when a majority of the failures look like an auth problem. */
-  likelyAuth: boolean;
   /** Distinct failure messages, most frequent first, capped to `sampleLimit`. */
   samples: FailureSample[];
 }
 
 /**
  * Classify an extraction's failures for user-facing reporting: collapse
- * duplicate messages (152 identical auth errors → one line with a count),
- * flag a total wipeout, and detect the auth signature so callers can prompt
- * a re-login. Pure — safe to call on every scan.
+ * duplicate messages (152 identical errors → one line with a count) and flag a
+ * total wipeout so callers can surface the real cause instead of a misleading
+ * success. Pure — safe to call on every scan.
  */
 export function summarizeExtractionFailures(
   result: { failures: ReadonlyArray<{ error: string }>; blocksAttempted: number },
@@ -191,10 +172,8 @@ export function summarizeExtractionFailures(
   const sampleLimit = opts.sampleLimit ?? 3;
 
   const counts = new Map<string, number>();
-  let authMatches = 0;
   for (const f of failures) {
     counts.set(f.error, (counts.get(f.error) ?? 0) + 1);
-    if (isLikelyAuthFailure(f.error)) authMatches++;
   }
   const samples: FailureSample[] = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -204,9 +183,6 @@ export function summarizeExtractionFailures(
   return {
     total: failures.length,
     allFailed: blocksAttempted > 0 && failures.length === blocksAttempted,
-    // Majority rule so one coincidental "login" mention among many unrelated
-    // errors doesn't mislabel the batch as an auth failure.
-    likelyAuth: failures.length > 0 && authMatches * 2 >= failures.length,
     samples,
   };
 }

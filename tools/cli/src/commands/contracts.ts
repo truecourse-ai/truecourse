@@ -8,6 +8,7 @@ import {
   hasCanonicalSpec,
   spawnRunner,
 } from "@truecourse/contract-extractor";
+import { agentTransport } from "@truecourse/shared/llm";
 import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
 import { trackEvent, bucketFileCount, bucketDuration } from "@truecourse/core/services/telemetry";
 import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
@@ -20,6 +21,10 @@ export interface RunContractsGenerateOptions {
   diff?: boolean;
   /** Override the repo root; defaults to cwd. */
   cwd?: string;
+  /** LLM transport: `cli` (default, spawn `claude -p`) or `agent` (filesystem mailbox under `io`). */
+  llm?: "cli" | "agent";
+  /** I/O dir for the `agent` transport's request/response mailbox. */
+  io?: string;
 }
 
 export async function runContractsGenerate(
@@ -59,7 +64,15 @@ export async function runContractsGenerate(
   // completions makes the count reflect real, finished work.
   let totalSlices = 0;
   let doneSlices = 0;
+  if (options.llm === "agent" && !options.io) {
+    p.log.error("--llm agent requires --io <dir> (the request/response mailbox directory).");
+    p.outro("Aborted.");
+    process.exit(1);
+  }
+  const transport =
+    options.llm === "agent" ? agentTransport(options.io as string) : undefined;
   const runner = spawnRunner({
+    transport,
     concurrency,
     model: extractModel,
     fallbackModel,
@@ -74,6 +87,7 @@ export async function runContractsGenerate(
   try {
     result = await generateContracts({
       repoRoot,
+      transport,
       runner,
       models: { extract: extractModel, repair: repairModel, fallback: fallbackModel },
       dryRun: !!options.diff,
