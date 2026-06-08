@@ -1,5 +1,13 @@
-from enum import Enum
+from enum import Enum, auto as _auto
 from typing import Literal
+
+
+class AutoEnum(str, Enum):
+    """Enum subclass whose member values equal the member names."""
+    @staticmethod
+    def _generate_next_value_(name, *args, **kwargs): return name  # type: ignore[override]
+    @staticmethod
+    def auto(): return _auto()
 
 
 # Spec's OrderStatus enum is [placed, paid, shipped, delivered, cancelled].
@@ -37,3 +45,20 @@ REFUNDABLE_SET = {"paid", "shipped", "returned"}
 # Spec declares a ShippingCarrier enum [ups, fedex, usps]; there is no
 # corresponding code-side enum, so carrier selection is unmodeled.
 # IL-DRIFT: Enum:ShippingCarrier / enum.ShippingCarrier.no-code-counterpart
+
+
+# FP-GUARD: enum/no-code-counterpart — must NOT drift
+# Transaction isolation is expressed via an AutoEnum subclass whose member
+# values are auto-derived from their names.  The verifier must lift these
+# members even though the RHS is AutoEnum.auto(), not a string literal.
+class TxIsolation(AutoEnum):
+    OPTIMISTIC = AutoEnum.auto()
+    SERIALIZABLE = AutoEnum.auto()
+
+
+# Job scheduling priority.  LOW is intentionally unimplemented in this
+# service — the spec declares it but the platform does not support it yet.
+# IL-DRIFT: Enum:JobPriority / enum.JobPriority.missing-value.LOW
+class JobPriority(str, Enum):
+    HIGH = "HIGH"
+    NORMAL = "NORMAL"
