@@ -33,14 +33,49 @@ export function extractPyConstantsFromFile(
     if (left?.type !== 'identifier') return true;
     const right = node.childForFieldName('right');
     if (!right) return true;
+    const name = source.slice(left.startIndex, left.endIndex);
+    const pos = { filePath, lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1 };
+
+    // Case 1: plain literal RHS (existing behavior for both bare and typed assignments)
     const value = parseLiteral(right, source);
-    if (value === UNPARSEABLE) return true;
-    out.push({
-      name: source.slice(left.startIndex, left.endIndex),
-      value,
-      shape: 'const-literal',
-      source: { filePath, lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1 },
-    });
+    if (value !== UNPARSEABLE) {
+      out.push({ name, value, shape: 'const-literal', source: pos });
+      return true;
+    }
+
+    // Case 2: annotated Pydantic Field(default=<literal>, validation_alias=AliasChoices("env_alias"))
+    // In tree-sitter-python v0.21+, `x: Type = Field(...)` is an `assignment` node with a `type`
+    // field. The env-alias strings expose the constant under the name the spec uses.
+    if (!node.childForFieldName('type')) return true;  // must be a typed assignment
+    if (right.type !== 'call') return true;
+    const fn = right.childForFieldName('function');
+    if (!fn) return true;
+    if (!source.slice(fn.startIndex, fn.endIndex).endsWith('Field')) return true;
+    const callArgs = right.childForFieldName('arguments');
+    if (!callArgs) return true;
+
+    let defaultVal: unknown = UNPARSEABLE;
+    const aliasStrings: string[] = [];
+
+    for (let i = 0; i < callArgs.namedChildCount; i++) {
+      const arg = callArgs.namedChild(i);
+      if (arg?.type !== 'keyword_argument') continue;
+      const kwName = arg.childForFieldName('name');
+      const kwVal = arg.childForFieldName('value');
+      if (!kwName || !kwVal) continue;
+      const kw = source.slice(kwName.startIndex, kwName.endIndex);
+      if (kw === 'default' && defaultVal === UNPARSEABLE) {
+        defaultVal = parseLiteral(kwVal, source);
+      } else if (kw === 'validation_alias') {
+        aliasStrings.push(...extractAliasChoiceStrings(kwVal, source));
+      }
+    }
+
+    if (defaultVal === UNPARSEABLE) return true;
+    out.push({ name, value: defaultVal, shape: 'const-literal', source: pos });
+    for (const alias of aliasStrings) {
+      out.push({ name: alias, value: defaultVal, shape: 'const-literal', source: pos });
+    }
     return true;
   });
   return out;
@@ -100,6 +135,27 @@ function parseLiteral(node: SyntaxNode, source: string): unknown {
       // Calls, subscripts (Literal[...]), sets, comprehensions, identifiers.
       return UNPARSEABLE;
   }
+}
+
+// Extracts plain string literals from AliasChoices(AliasPath("x"), "alias1", "alias2").
+// AliasPath calls are skipped — only flat string aliases are returned.
+function extractAliasChoiceStrings(node: SyntaxNode, source: string): string[] {
+  if (node.type !== 'call') return [];
+  const fn = node.childForFieldName('function');
+  if (!fn) return [];
+  const fnText = source.slice(fn.startIndex, fn.endIndex);
+  if (!fnText.endsWith('AliasChoices')) return [];
+  const args = node.childForFieldName('arguments');
+  if (!args) return [];
+  const result: string[] = [];
+  for (let i = 0; i < args.namedChildCount; i++) {
+    const c = args.namedChild(i);
+    if (c?.type === 'string') {
+      const v = stringValue(c, source);
+      if (v !== null) result.push(v);
+    }
+  }
+  return result;
 }
 
 function stringValue(node: SyntaxNode, source: string): string | null {
