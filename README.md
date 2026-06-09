@@ -361,10 +361,9 @@ CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = defaul
 CLAUDE_CODE_TIMEOUT_MS=120000         # per-call timeout (ms)
 CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failure
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
-TRUECOURSE_SKIP_CLAUDE_CHECK=         # set to 1 to skip the up-front `claude` login preflight
 ```
 
-Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `spec resolve`, `contracts generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. Set `TRUECOURSE_SKIP_CLAUDE_CHECK=1` to skip it (e.g. on CI where auth is known good). `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
+Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `spec resolve`, `contracts generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
 
 **`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single run. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
 

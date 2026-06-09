@@ -19,12 +19,8 @@ import { checkClaudeAuth, type ClaudeAuthResult } from "@truecourse/core/lib/cli
 /**
  * Probe the `claude` CLI and exit non-zero with an actionable message if it
  * isn't ready. Returns normally when the CLI is installed and its login works.
- *
- * Set `TRUECOURSE_SKIP_CLAUDE_CHECK=1` to skip the probe (CI where auth is known
- * good, or to avoid the tiny round-trip call).
  */
 export async function preflightClaudeOrExit(): Promise<void> {
-  if (process.env.TRUECOURSE_SKIP_CLAUDE_CHECK) return;
   const s = p.spinner();
   s.start("Checking the `claude` CLI is logged in");
   const result = await checkClaudeAuth();
