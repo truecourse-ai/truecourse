@@ -60,6 +60,38 @@ describe('runWithStash', () => {
     expect(fs.existsSync(contract)).toBe(true);
   });
 
+  it('resolves a symlinked repoRoot to its realpath so the stash still happens', async () => {
+    // Deterministic guard for the realpath comparison in runWithStash. `git
+    // --show-toplevel` returns the realpath, so a symlinked repoRoot (a
+    // symlinked $HOME, or macOS /tmp → /private/tmp) fails a lexical
+    // path.resolve compare → the repo looks like a subdir of a larger repo →
+    // the stash is silently skipped and the run sees the dirty tree (the
+    // #542-adjacent regression). Symlinking repoRoot explicitly pins this on
+    // every platform, not just macOS where os.tmpdir() happens to be symlinked.
+    const realDir = path.join(repo, 'real');
+    fs.mkdirSync(realDir);
+    gitInit(realDir);
+    const tracked = path.join(realDir, 'app.ts');
+    commitFile(realDir, 'app.ts', 'export const x = 1;\n');
+    fs.writeFileSync(tracked, 'export const x = 2;\n'); // dirty tracked edit
+
+    // A symlink pointing at the real repo, handed to runWithStash as repoRoot.
+    const linkDir = path.join(repo, 'link');
+    fs.symlinkSync(realDir, linkDir);
+
+    let codeDuringRun = '';
+    await runWithStash(linkDir, { skipStash: false, message: 'tc-test' }, async () => {
+      codeDuringRun = fs.readFileSync(path.join(linkDir, 'app.ts'), 'utf-8');
+    });
+
+    // The stash happened despite the symlinked path: committed state is visible.
+    // Under the old lexical compare, linkDir !== realpath(gitRoot) → stash
+    // skipped → this would be the dirty 'export const x = 2;'.
+    expect(codeDuringRun).toBe('export const x = 1;\n');
+    // …and the dirty edit is restored after the run.
+    expect(fs.readFileSync(tracked, 'utf-8')).toBe('export const x = 2;\n');
+  });
+
   it('skipStash: runs fn against the working tree as-is', async () => {
     gitInit(repo);
     const tracked = path.join(repo, 'app.ts');

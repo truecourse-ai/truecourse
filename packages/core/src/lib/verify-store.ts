@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
 import { buildAnalysisFilename } from './analysis-store.js';
+import { TRUECOURSE_DIR } from '../config/paths.js';
 import { summarizeDrifts } from '../types/verify-snapshot.js';
 import type {
   VerifyDiff,
@@ -26,7 +27,6 @@ import type {
   VerifyRunSnapshot,
 } from '../types/verify-snapshot.js';
 
-const TRUECOURSE_DIR = '.truecourse';
 const VERIFIER_DIR = 'verifier';
 const RUNS_DIR = 'runs';
 const LATEST_FILE = 'LATEST.json';

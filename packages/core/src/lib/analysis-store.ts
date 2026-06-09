@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
+import { TRUECOURSE_DIR } from '../config/paths.js';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -22,7 +23,6 @@ import type {
 // Consumers pass `repoPath` (the repo root, not the `.truecourse` dir).
 // ---------------------------------------------------------------------------
 
-const TRUECOURSE_DIR = '.truecourse';
 const ANALYSES_DIR = 'analyses';
 const LATEST_FILE = 'LATEST.json';
 const HISTORY_FILE = 'history.json';
