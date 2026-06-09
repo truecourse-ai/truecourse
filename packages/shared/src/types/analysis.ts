@@ -4,7 +4,7 @@ import { z } from 'zod'
 // Supported Languages
 // ---------------------------------------------------------------------------
 
-export const SupportedLanguageSchema = z.enum(['typescript', 'tsx', 'javascript', 'python'])
+export const SupportedLanguageSchema = z.enum(['typescript', 'tsx', 'javascript', 'python', 'csharp'])
 export type SupportedLanguage = z.infer<typeof SupportedLanguageSchema>
 
 // ---------------------------------------------------------------------------

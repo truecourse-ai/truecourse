@@ -1,0 +1,7 @@
+operation POST "/api/orders/{id}/cancel" {
+  origin "reference/specs/modules/orders/endpoints.md" "POST /api/orders/:id/cancel" 62..68
+  response 200 on success {
+    body Entity:Order
+  }
+  tags [transition]
+}

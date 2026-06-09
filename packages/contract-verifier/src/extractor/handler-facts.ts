@@ -21,6 +21,7 @@
  */
 
 import type { Node as SyntaxNode } from 'web-tree-sitter';
+import { resolveColumn, type CsColumnMap } from './shared/cs-column-map.js';
 
 // ---------------------------------------------------------------------------
 // Public IR (replaces handlerBody/handlerSource on ExtractedOperation)
@@ -61,10 +62,10 @@ export interface HandlerFacts {
  * tree is gone. Called once per resolved handler in the operation /
  * file-based-routes / fastapi extractors.
  */
-export function extractHandlerFacts(body: SyntaxNode, source: string): HandlerFacts {
+export function extractHandlerFacts(body: SyntaxNode, source: string, columnMap?: CsColumnMap): HandlerFacts {
   return {
     emission: extractEmission(body, source),
-    ownershipCheckCandidates: extractOwnershipCandidates(body, source),
+    ownershipCheckCandidates: extractOwnershipCandidates(body, source, columnMap),
   };
 }
 
@@ -110,13 +111,13 @@ function extractEmission(body: SyntaxNode, source: string): OperationEmission {
 // ---- Language-agnostic node predicates (JS + Python) ----
 
 function isCall(n: SyntaxNode): boolean {
-  return n.type === 'call_expression' || n.type === 'call';
+  return n.type === 'call_expression' || n.type === 'call' || n.type === 'invocation_expression';
 }
 function isMember(n: SyntaxNode | null): boolean {
-  return n?.type === 'member_expression' || n?.type === 'attribute';
+  return n?.type === 'member_expression' || n?.type === 'attribute' || n?.type === 'member_access_expression';
 }
 function memberProp(n: SyntaxNode, source: string): string {
-  const p = n.childForFieldName('property') ?? n.childForFieldName('attribute');
+  const p = n.childForFieldName('property') ?? n.childForFieldName('attribute') ?? n.childForFieldName('name');
   return p ? source.slice(p.startIndex, p.endIndex) : '';
 }
 function isBlock(n: SyntaxNode): boolean {
@@ -124,18 +125,24 @@ function isBlock(n: SyntaxNode): boolean {
 }
 function isFnBoundary(n: SyntaxNode): boolean {
   return n.type === 'function_declaration' || n.type === 'arrow_function'
-    || n.type === 'function_expression' || n.type === 'function_definition';
+    || n.type === 'function_expression' || n.type === 'function_definition'
+    || n.type === 'method_declaration' || n.type === 'local_function_statement' || n.type === 'lambda_expression';
 }
 function isControlFlow(n: SyntaxNode): boolean {
-  return /^(if_statement|switch_statement|try_statement|for_statement|for_in_statement|while_statement|do_statement)$/.test(n.type);
+  return /^(if_statement|switch_statement|switch_expression|try_statement|for_statement|for_in_statement|foreach_statement|while_statement|do_statement)$/.test(n.type);
 }
 function strVal(n: SyntaxNode, source: string): string | null {
-  if (n.type !== 'string') return null;
-  const frag = n.namedChildren.find((c) => c.type === 'string_fragment' || c.type === 'string_content');
+  if (n.type !== 'string' && n.type !== 'string_literal') return null;
+  const frag = n.namedChildren.find((c) => c.type === 'string_fragment' || c.type === 'string_content' || c.type === 'string_literal_content');
   return frag ? source.slice(frag.startIndex, frag.endIndex) : null;
 }
+/** Unwrap C#'s `argument` wrapper inside an `argument_list`. */
+function argValue(n: SyntaxNode | null): SyntaxNode | null {
+  if (!n) return null;
+  return n.type === 'argument' ? n.namedChild(0) : n;
+}
 function isEmitFn(fn: SyntaxNode, source: string): boolean {
-  if (isMember(fn)) return memberProp(fn, source) === 'emit';
+  if (isMember(fn)) return memberProp(fn, source).toLowerCase() === 'emit';
   if (fn.type === 'identifier') return /^emit/i.test(source.slice(fn.startIndex, fn.endIndex));
   return false;
 }
@@ -147,7 +154,7 @@ function collectEmitCalls(body: SyntaxNode, source: string): Map<string, SyntaxN
       const fn = node.childForFieldName('function');
       const args = node.childForFieldName('arguments');
       if (fn && args && isEmitFn(fn, source)) {
-        const first = args.namedChild(0);
+        const first = argValue(args.namedChild(0));
         const eventName = first ? strVal(first, source) : null;
         if (eventName !== null) {
           const arr = out.get(eventName) ?? [];
@@ -170,8 +177,8 @@ function handlerHasDynamicEmit(body: SyntaxNode, source: string): boolean {
       const fn = node.childForFieldName('function');
       const args = node.childForFieldName('arguments');
       if (fn && args && isEmitFn(fn, source)) {
-        const first = args.namedChild(0);
-        if (first && first.type !== 'string') { dynamic = true; return; }
+        const first = argValue(args.namedChild(0));
+        if (first && first.type !== 'string' && first.type !== 'string_literal') { dynamic = true; return; }
       }
     }
     for (const child of node.namedChildren) { visit(child); if (dynamic) return; }
@@ -210,11 +217,27 @@ function containsTopLevelFailureStatus(stmt: SyntaxNode, source: string): boolea
   return found;
 }
 
+const CS_FAILURE_FACTORIES = new Set([
+  'BadRequest', 'NotFound', 'Unauthorized', 'Forbid', 'Conflict', 'UnprocessableEntity', 'Problem', 'ValidationProblem',
+]);
+
 function callEmitsFailureStatus(call: SyntaxNode, source: string): boolean {
   const fn = call.childForFieldName('function');
   if (!fn) return false;
   const args = call.childForFieldName('arguments');
   if (!args) return false;
+
+  // C#: `return BadRequest(...)` / `NotFound(...)` / `StatusCode(4xx|5xx, …)` and
+  // their `Results.<X>` minimal-API equivalents.
+  const csName = fn.type === 'identifier' ? source.slice(fn.startIndex, fn.endIndex)
+    : fn.type === 'member_access_expression' ? memberProp(fn, source) : '';
+  if (csName) {
+    if (CS_FAILURE_FACTORIES.has(csName)) return true;
+    if (csName === 'StatusCode') {
+      const a = argValue(args.namedChild(0));
+      if (a?.type === 'integer_literal' && /^[45]\d{2}$/.test(source.slice(a.startIndex, a.endIndex))) return true;
+    }
+  }
 
   if (isMember(fn) && memberProp(fn, source) === 'status') {
     const arg = args.namedChild(0);
@@ -322,7 +345,7 @@ function blockHasAnyEmit(block: SyntaxNode, source: string): boolean {
 // At comparison time the comparator just checks
 // `op.ownershipCheckCandidates.some(c => c.resourceField === contractField)`.
 
-function extractOwnershipCandidates(body: SyntaxNode, source: string): OwnershipCheckCandidate[] {
+function extractOwnershipCandidates(body: SyntaxNode, source: string, columnMap?: CsColumnMap): OwnershipCheckCandidate[] {
   const out: OwnershipCheckCandidate[] = [];
   const tryEq = (left: SyntaxNode, right: SyntaxNode, line: number): void => {
     const leftAuth = matchesAuthSide(left, source);
@@ -332,11 +355,11 @@ function extractOwnershipCandidates(body: SyntaxNode, source: string): Ownership
     // other is unambiguously the resource side. If BOTH sides are auth (rare)
     // emit candidates for both — the comparator filters by name anyway.
     if (rightAuth) {
-      const field = terminalProperty(left, source);
+      const field = terminalProperty(left, source, columnMap);
       if (field) out.push({ resourceField: field, line });
     }
     if (leftAuth) {
-      const field = terminalProperty(right, source);
+      const field = terminalProperty(right, source, columnMap);
       if (field) out.push({ resourceField: field, line });
     }
   };
@@ -366,8 +389,16 @@ function extractOwnershipCandidates(body: SyntaxNode, source: string): Ownership
   return out;
 }
 
-/** Terminal `.<name>` of a member_expression / attribute chain. */
-function terminalProperty(node: SyntaxNode, source: string): string | null {
+/** Terminal `.<name>` of a member_expression / attribute / member_access chain.
+ *  For C#, resolves the property to its mapped `[Column]` so it matches the
+ *  contract's snake_case `resourceField` (e.g. `CustomerId` → `customer_id`). */
+function terminalProperty(node: SyntaxNode, source: string, columnMap?: CsColumnMap): string | null {
+  if (node.type === 'member_access_expression') {
+    const prop = node.childForFieldName('name');
+    if (!prop) return null;
+    const raw = source.slice(prop.startIndex, prop.endIndex);
+    return columnMap ? resolveColumn(columnMap, raw) : raw;
+  }
   if (node.type !== 'member_expression' && node.type !== 'attribute') return null;
   const prop = node.childForFieldName('property') ?? node.childForFieldName('attribute');
   if (!prop) return null;
@@ -377,6 +408,11 @@ function terminalProperty(node: SyntaxNode, source: string): string | null {
 /** True if the expression touches `req.auth.*` / `request.user.*` /
  *  `current_user.*` (JS member chains + Python attribute chains). */
 function matchesAuthSide(node: SyntaxNode, source: string): boolean {
+  // C#: the auth side is `CurrentUserId()`, `User.IsInRole/FindFirst/Identity/Claims`,
+  // `HttpContext.User`, or `ClaimTypes.*`.
+  if (/\bCurrentUserId\b|\bUser\.(IsInRole|FindFirst|Identity|Claims)\b|\bHttpContext\.User\b|\bClaimTypes\./.test(source.slice(node.startIndex, node.endIndex))) {
+    return true;
+  }
   // Python attribute chain: `request.user.id`, `request.auth.user_id`, `current_user.id`.
   if (node.type === 'attribute') {
     return /\b(req|request)\.(auth|user)\b|\bcurrent_user\b/.test(source.slice(node.startIndex, node.endIndex));

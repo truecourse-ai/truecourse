@@ -1,0 +1,7 @@
+constant API_KEY {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "NamedConstantNoCodeCounterpartLastSegmentConstLiteral.cs" 14..14
+  confidence high
+  type string
+  expected-value "api_key"
+}

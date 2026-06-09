@@ -19,7 +19,9 @@ export type EnumShape =
   | 'py-enum'            // class X(str, Enum): A = 'a'
   | 'py-literal'         // X = Literal['a', 'b']
   | 'py-set'             // X_SET = {'a', 'b'} / frozenset({...})
-  | 'py-list';           // VALID_X = ['a', 'b'] (with conventional name)
+  | 'py-list'            // VALID_X = ['a', 'b'] (with conventional name)
+  | 'cs-enum'            // enum X { A, B }  (member names lowercased)
+  | 'cs-set';            // static readonly HashSet<string> XSet = new() { 'a', 'b' }
 
 export interface ExtractedEnum {
   /** Identifier in code — type name, const name, or property key. */

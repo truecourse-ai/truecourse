@@ -1,0 +1,9 @@
+operation GET "/api/orders/{id}" {
+  origin "reference/specs/modules/orders/endpoints.md" "GET /api/orders/:id" 33..42
+  response 200 on success {
+    body Entity:Order
+  }
+  response 404 on not_found {
+    forbid status 200 when resource-missing
+  }
+}

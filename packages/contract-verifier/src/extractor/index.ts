@@ -11,6 +11,8 @@ import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import { extractOperationsFromFile, extractPluginStyleRoutesFromFile, type ExtractedOperation } from './operation.js';
 import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
+import { extractAspNetOperationsFromFile } from './operation-aspnet.js';
+import { csColumnMap } from './shared/cs-column-map.js';
 import { eachParsedSource } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 import {
@@ -144,6 +146,20 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
   await eachParsedSource(rootDir, (s) => {
     if (s.lang !== 'python') return;
     for (const op of extractFastApiOperationsFromFile(s.filePath, s.source, s.tree)) {
+      if (!seen.has(op.identity)) {
+        expressOps.push(op);
+        seen.add(op.identity);
+      }
+    }
+  });
+
+  // C# (ASP.NET Core controllers + minimal APIs). Class-level [Route] / MapGroup
+  // prefixes are resolved in-file, so no cross-file mount graph is needed. The
+  // column map resolves ownership-check properties (`order.CustomerId`) to columns.
+  const csColumns = await csColumnMap(rootDir);
+  await eachParsedSource(rootDir, (s) => {
+    if (s.lang !== 'csharp') return;
+    for (const op of extractAspNetOperationsFromFile(s.filePath, s.source, s.tree, csColumns)) {
       if (!seen.has(op.identity)) {
         expressOps.push(op);
         seen.add(op.identity);

@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "tree-sitter-c-sharp": "^0.23.5",
     "tree-sitter-javascript": "^0.25.0",
     "tree-sitter-python": "^0.25.0",
     "tree-sitter-typescript": "^0.23.2"

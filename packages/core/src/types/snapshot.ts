@@ -90,7 +90,7 @@ export interface MethodDepRecord {
 export interface DatabaseRecord {
   id: string;
   name: string;
-  type: 'postgres' | 'redis' | 'mongodb' | 'mysql' | 'sqlite';
+  type: 'postgres' | 'redis' | 'mongodb' | 'mysql' | 'sqlite' | 'sqlserver';
   driver: string;
   connectionConfig: unknown | null;     // jsonb blob
   tables: unknown | null;               // TableInfo[] jsonb blob

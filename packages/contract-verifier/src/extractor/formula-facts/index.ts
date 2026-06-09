@@ -41,7 +41,9 @@ export async function extractFormulaFacts(
     if (result) return;
     const found = s.lang === 'python'
       ? scanPyFunction(s.tree.rootNode, s.source, names)
-      : scanJsFunction(s.tree.rootNode, s.source, names);
+      : s.lang === 'csharp'
+        ? scanCsFunction(s.tree.rootNode, s.source, names)
+        : scanJsFunction(s.tree.rootNode, s.source, names);
     if (!found) return;
     const isPython = s.lang === 'python';
     result = {
@@ -74,6 +76,10 @@ function candidateNames(fieldName: string): Set<string> {
     names.add(`compute_${base}`);
     names.add(`calculate_${base}`);
     names.add(`get_${base}`);
+    // C# PascalCase method names (ComputeDiscountCents / CalculateTax / GetTotal).
+    names.add(`Compute${cap(base)}`);
+    names.add(`Calculate${cap(base)}`);
+    names.add(`Get${cap(base)}`);
   }
   return names;
 }
@@ -135,6 +141,35 @@ function scanPyFunction(root: SyntaxNode, source: string, names: Set<string>): F
   };
   visit(root);
   return result;
+}
+
+function scanCsFunction(root: SyntaxNode, source: string, names: Set<string>): FnHit | null {
+  let result: FnHit | null = null;
+  const visit = (node: SyntaxNode): void => {
+    if (result) return;
+    if (node.type === 'method_declaration' || node.type === 'local_function_statement') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && names.has(source.slice(nameNode.startIndex, nameNode.endIndex))) {
+        const body = node.childForFieldName('body')
+          ?? node.namedChildren.find((c) => c.type === 'arrow_expression_clause') ?? null;
+        const paramsNode = node.childForFieldName('parameters');
+        if (body && paramsNode) { result = { body, params: csParamNames(paramsNode, source), line: node.startPosition.row + 1 }; return; }
+      }
+    }
+    for (const child of node.namedChildren) { visit(child); if (result) return; }
+  };
+  visit(root);
+  return result;
+}
+
+function csParamNames(paramsNode: SyntaxNode, source: string): string[] {
+  const out: string[] = [];
+  for (const child of paramsNode.namedChildren) {
+    if (child.type !== 'parameter') continue;
+    const nameNode = child.childForFieldName('name');
+    if (nameNode?.type === 'identifier') out.push(source.slice(nameNode.startIndex, nameNode.endIndex));
+  }
+  return out;
 }
 
 function jsParamNames(paramsNode: SyntaxNode, source: string): string[] {
@@ -215,8 +250,9 @@ function collectOperatorsByLiteral(body: SyntaxNode, source: string, isPython: b
 }
 
 function numValue(node: SyntaxNode, source: string): number | null {
-  if (node.type === 'number' || node.type === 'integer' || node.type === 'float') {
-    return Number(source.slice(node.startIndex, node.endIndex).replace(/_/g, ''));
+  if (node.type === 'number' || node.type === 'integer' || node.type === 'float'
+    || node.type === 'integer_literal' || node.type === 'real_literal') {
+    return Number(source.slice(node.startIndex, node.endIndex).replace(/_/g, '').replace(/[uUlLfFdDmM]+$/, ''));
   }
   return null;
 }

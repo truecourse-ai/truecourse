@@ -10,6 +10,7 @@ export const DatabaseTypeSchema = z.enum([
   'mongodb',
   'mysql',
   'sqlite',
+  'sqlserver',
 ])
 
 export type DatabaseType = z.infer<typeof DatabaseTypeSchema>

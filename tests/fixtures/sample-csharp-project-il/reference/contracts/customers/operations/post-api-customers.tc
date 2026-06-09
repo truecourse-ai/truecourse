@@ -1,0 +1,6 @@
+operation POST "/api/customers" {
+  origin "reference/specs/modules/customers/endpoints.md" "POST /api/customers" 3..14
+  response 201 on success {
+    body Entity:Customer
+  }
+}

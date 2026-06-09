@@ -6,8 +6,8 @@ const PRISMA_SCHEMA = ['prisma/schema.prisma', 'schema.prisma'];
 const SPECS: ChoiceSpec[] = [
   {
     value: 'postgres',
-    packages: ['pg', 'postgres', 'node-postgres', '@prisma/client', 'psycopg2', 'psycopg2-binary', 'psycopg', 'asyncpg', 'pg8000'],
-    imports: ['pg', 'postgres', 'psycopg2', 'psycopg', 'asyncpg'],
+    packages: ['pg', 'postgres', 'node-postgres', '@prisma/client', 'psycopg2', 'psycopg2-binary', 'psycopg', 'asyncpg', 'pg8000', 'Npgsql', 'Npgsql.EntityFrameworkCore.PostgreSQL'],
+    imports: ['pg', 'postgres', 'psycopg2', 'psycopg', 'asyncpg', 'Npgsql'],
     configContent: { globs: PRISMA_SCHEMA, pattern: /provider\s*=\s*"postgresql"/ },
   },
   {
@@ -18,8 +18,8 @@ const SPECS: ChoiceSpec[] = [
   },
   {
     value: 'mongodb',
-    packages: ['mongoose', 'mongodb', 'pymongo', 'mongoengine', 'motor', 'beanie'],
-    imports: ['mongoose', 'mongodb', 'pymongo', 'mongoengine', 'motor'],
+    packages: ['mongoose', 'mongodb', 'pymongo', 'mongoengine', 'motor', 'beanie', 'MongoDB.Driver', 'MongoDB.Bson'],
+    imports: ['mongoose', 'mongodb', 'pymongo', 'mongoengine', 'motor', 'MongoDB.Driver'],
     configContent: { globs: PRISMA_SCHEMA, pattern: /provider\s*=\s*"mongodb"/ },
   },
   {
@@ -27,7 +27,7 @@ const SPECS: ChoiceSpec[] = [
     packages: ['better-sqlite3', 'sqlite', 'sqlite3', 'aiosqlite'],
     configContent: { globs: PRISMA_SCHEMA, pattern: /provider\s*=\s*"sqlite"/ },
   },
-  { value: 'dynamodb', packages: ['@aws-sdk/client-dynamodb', 'dynamoose'] },
+  { value: 'dynamodb', packages: ['@aws-sdk/client-dynamodb', 'dynamoose', 'AWSSDK.DynamoDBv2'] },
   { value: 'redis-primary', packages: ['ioredis', 'redis', '@upstash/redis'] },
   { value: 'bigquery', packages: ['@google-cloud/bigquery'] },
   { value: 'cassandra', packages: ['cassandra-driver'] },

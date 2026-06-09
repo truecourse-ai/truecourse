@@ -1,0 +1,8 @@
+enum NotificationChannel {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "Domain/NotificationChannel.cs" 7..7
+  confidence high
+  representation string-literal
+  closed
+  values [email, push, sms]
+}

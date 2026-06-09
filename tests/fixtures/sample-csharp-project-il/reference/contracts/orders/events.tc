@@ -1,0 +1,26 @@
+effect-group order.lifecycle.events {
+  origin "reference/specs/modules/orders/effects.md" "Orders — Effects" 1..11
+  channel event-bus
+  payload-shape {
+    id: uuid
+    status: Enum:OrderStatus
+    at: iso-8601
+  }
+  effect order.placed {
+    emit-when {
+      operation Operation:"POST /api/orders"
+      on-status 201
+    }
+    payload-constraint status = "placed"
+  }
+  effect order.cancelled {
+    emit-when {
+      operation Operation:"POST /api/orders/{id}/cancel"
+      on-status 200
+    }
+    payload-constraint status = "cancelled"
+  }
+  forbids {
+    forbid emission when-response-status [4xx, 5xx]
+  }
+}

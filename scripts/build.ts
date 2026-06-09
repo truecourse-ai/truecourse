@@ -135,6 +135,7 @@ const WASM_SUBPATHS = [
   'tree-sitter-typescript/tree-sitter-tsx.wasm',
   'tree-sitter-javascript/tree-sitter-javascript.wasm',
   'tree-sitter-python/tree-sitter-python.wasm',
+  'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm',
 ];
 for (const subpath of WASM_SUBPATHS) {
   const srcPath = requireFromAnalyzer.resolve(subpath);
