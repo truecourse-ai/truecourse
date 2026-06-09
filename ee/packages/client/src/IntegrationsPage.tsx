@@ -149,11 +149,8 @@ function SyncButton({
   job: JobView | undefined;
 }) {
   const syncing = !!job || submitting;
-  const label = job && job.progress.total > 0
-    ? `Syncing ${job.progress.current}/${job.progress.total}`
-    : syncing
-      ? 'Syncing…'
-      : 'Sync now';
+  // Just "Syncing…" on the button — the stepped detail lives in the progress popup.
+  const label = syncing ? 'Syncing…' : 'Sync now';
   return (
     <button
       type="button"

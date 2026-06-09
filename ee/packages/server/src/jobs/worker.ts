@@ -15,7 +15,8 @@
  */
 
 import { run, type Runner, type Task } from 'graphile-worker';
-import type { EeDb } from '@truecourse/ee-db';
+import { and, eq } from 'drizzle-orm';
+import { workspaceContractSets, type EeDb } from '@truecourse/ee-db';
 import { JobStore, NotificationStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { runWithTrace, type TraceContext } from '@truecourse/ee-llm';
 import { log } from '@truecourse/core/lib/logger';
@@ -76,6 +77,12 @@ export interface StartWorkerDeps {
    * never flips the (already-succeeded) contracts job.
    */
   onContractsRegenerated?: (repoKey: string, workspaceOrgId: string) => Promise<void>;
+  /**
+   * Called when a workspace's contracts actually CHANGED (KB sync / workspace
+   * decision), to re-verify every connected repo against the new effective
+   * contracts. Returns the number of repos re-verified (for the sync notice).
+   */
+  onWorkspaceContractsChanged?: (workspaceOrgId: string) => Promise<number>;
 }
 
 /**
@@ -171,6 +178,35 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
+  // Fingerprint of a workspace's contract corpus — lets us detect whether a KB
+  // sync / workspace decision actually CHANGED the contracts (so we only re-verify
+  // repos when there's something new). Null = no workspace contracts stored.
+  const wsContractsHash = async (org: string): Promise<string | null> => {
+    const [row] = await db
+      .select({ h: workspaceContractSets.manifestHash })
+      .from(workspaceContractSets)
+      .where(and(eq(workspaceContractSets.workspaceOrgId, org), eq(workspaceContractSets.kind, 'contracts')))
+      .limit(1);
+    return row?.h ?? null;
+  };
+
+  // If the workspace contracts changed since `beforeHash`, re-verify every repo in
+  // the workspace against the new effective set. Returns the count re-verified
+  // (0 when unchanged). Best-effort — never throws into the calling job.
+  const reverifyReposIfWorkspaceChanged = async (
+    org: string,
+    beforeHash: string | null,
+  ): Promise<number> => {
+    try {
+      const afterHash = await wsContractsHash(org);
+      if (afterHash === beforeHash) return 0;
+      return (await deps.onWorkspaceContractsChanged?.(org)) ?? 0;
+    } catch (err) {
+      log.warn(`[ee-jobs] workspace→repos re-verify failed for ${org}: ${(err as Error).message}`);
+      return 0;
+    }
+  };
+
   const knowledgeSync: Task = async (rawPayload) => {
     const { jobId, org, kind } = rawPayload as SyncJobPayload;
 
@@ -191,6 +227,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
         ],
         stepEmit(jobId, org),
       );
+      const beforeHash = await wsContractsHash(org);
       const result = await syncWorkspaceKnowledge(org, knowledge, connector, cfg, {
         onProgress: async (current, total, message) => {
           if (message === SYNC_MSG_CONSOLIDATE) await tracker.advance('consolidate');
@@ -204,14 +241,19 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
           void tracker.detail('consolidate', `repairing ${done}/${total}`),
       });
 
+      const reverified = await reverifyReposIfWorkspaceChanged(org, beforeHash);
       const done = await jobStore.markSucceeded(jobId, { synced: result.synced });
       const note = await notifications.add({
         org,
         kind: KNOWLEDGE_SYNC_TASK,
         level: 'success',
         title: 'Knowledge sync complete',
-        body: `Synced ${result.synced} document${result.synced === 1 ? '' : 's'}.`,
-        data: { jobId, synced: result.synced },
+        body: `Synced ${result.synced} document${result.synced === 1 ? '' : 's'}.${
+          reverified > 0
+            ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'} against the updated contracts.`
+            : ''
+        }`,
+        data: { jobId, synced: result.synced, reverified },
       });
       // Terminal job state first (clears the client's activeJobs), then the toast.
       if (done) await publishEvent(db, org, { type: 'job.progress', job: done });
@@ -246,7 +288,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   // does NOT run the OSS code-analysis pass (graph/violations). The gate store +
   // GitHub auth are rebuilt from db + env config (cheap).
   const repoBaseline: Task = async (rawPayload) => {
-    const { jobId, repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force } =
+    const { jobId, repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
       rawPayload as BaselineJobPayload;
 
     const running = await jobStore.markRunning(jobId);
@@ -284,17 +326,22 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       );
 
       const done = await jobStore.markSucceeded(jobId, { repoFullName });
-      const notice = baselineNotice(repoFullName, result);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_BASELINE_TASK,
-        level: notice.level,
-        title: notice.title,
-        body: notice.body,
-        data: { jobId, repoFullName },
-      });
       if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
+      // Quiet runs (the workspace→repos ripple) suppress the SUCCESS toast — one KB
+      // sync re-verifying N repos shouldn't fan out N notifications. The job still
+      // tracks (popup) and FAILURES still notify (the catch below, unconditionally).
+      if (!quiet) {
+        const notice = baselineNotice(repoFullName, result);
+        const note = await notifications.add({
+          org: workspaceOrgId,
+          kind: REPO_BASELINE_TASK,
+          level: notice.level,
+          title: notice.title,
+          body: notice.body,
+          data: { jobId, repoFullName },
+        });
+        await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
+      }
     } catch (err) {
       const message = (err as Error).message;
       const failed = await jobStore.markFailed(jobId, message);
@@ -404,20 +451,24 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
 
     try {
       await tracker.advance('contracts');
+      const beforeHash = await wsContractsHash(workspaceOrgId);
       await generateWorkspaceContractsInProcess(workspaceOrgId, {
         onSliceProgress: (done, total) =>
           void tracker.detail('contracts', `${done}/${total} slices`),
         onRepairProgress: (done, total) =>
           void tracker.detail('contracts', `repairing ${done}/${total}`),
       });
+      const reverified = await reverifyReposIfWorkspaceChanged(workspaceOrgId, beforeHash);
       const done = await jobStore.markSucceeded(jobId, {});
       const note = await notifications.add({
         org: workspaceOrgId,
         kind: WORKSPACE_CONTRACTS_TASK,
         level: 'success',
         title: 'Workspace contracts updated',
-        body: 'Knowledge contracts regenerated from your resolved spec.',
-        data: { jobId },
+        body: `Knowledge contracts regenerated from your resolved spec.${
+          reverified > 0 ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'}.` : ''
+        }`,
+        data: { jobId, reverified },
       });
       if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
       await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });

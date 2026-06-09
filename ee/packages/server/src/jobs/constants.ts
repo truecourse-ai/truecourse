@@ -44,6 +44,12 @@ export interface BaselineEnqueueRequest {
    * unset for connect/push (their dedup is intentional).
    */
   force?: boolean;
+  /**
+   * Suppress the success notification (still tracks the job + notifies on FAILURE).
+   * Set for the workspace→repos ripple, where one KB sync re-verifies N repos and
+   * N success toasts would be a storm.
+   */
+  quiet?: boolean;
   /** The repo's workspace org — scopes the job + its notifications. */
   workspaceOrgId: string;
 }

@@ -30,7 +30,7 @@ export function JobProgressPopup({ jobs }: { jobs: JobView[] }) {
   const active = jobs.filter((j) => j.status === 'queued' || j.status === 'running');
   if (active.length === 0) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 z-40 flex w-80 -translate-x-1/2 flex-col gap-2">
+    <div className="fixed bottom-4 left-1/2 z-40 flex w-96 -translate-x-1/2 flex-col gap-2">
       {active.map((job) => (
         <JobCard key={job.id} job={job} />
       ))}

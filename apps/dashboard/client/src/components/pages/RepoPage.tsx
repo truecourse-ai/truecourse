@@ -347,6 +347,27 @@ function RepoPageInner() {
     verifyStale,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
+
+  // Switching to a data tab re-fetches its data, so the panel reflects the latest
+  // server state without a full page reload. These hooks live at page level (they
+  // survive tab switches), so otherwise they only fetch on mount / socket events.
+  // A ref holds the latest refetchers so the effect depends ONLY on `leftTab` —
+  // it fires on a tab change, never on a refetcher's identity (so no refetch loop).
+  // Cheap reads only; we deliberately don't trigger a re-scan here.
+  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchCanonical, refetchStaleness });
+  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchCanonical, refetchStaleness };
+  useEffect(() => {
+    const r = tabRefetchersRef.current;
+    if (leftTab === 'verify') {
+      void r.refetchVerify();
+      void r.refetchStaleness();
+    } else if (leftTab === 'contracts') {
+      void r.refetchContracts();
+      void r.refetchStaleness();
+    } else if (leftTab === 'spec') {
+      void r.refetchCanonical();
+    }
+  }, [leftTab]);
   // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
   // (URL `?view=diff`) so the toggle persists across reloads exactly like
   // analyze. Toggling only switches the view — the diff is computed by the
@@ -1408,6 +1429,7 @@ function RepoPageInner() {
                       filters={driftFilters}
                       onClearFilter={clearDriftFilter}
                       onOpenDrift={handleOpenDrift}
+                      onSetSeverity={isEe ? toggleDriftSeverity : undefined}
                       hosted={isEe}
                     />
                   </div>
@@ -1432,7 +1454,9 @@ function RepoPageInner() {
             })()
           ) : leftTab === 'driftanalytics' ? (
             // EE-only standalone analytics tab — the same drift charts/stats the
-            // OSS Verify view shows in its left aside, here full-width.
+            // OSS Verify view shows in its left aside, here full-width. Display-
+            // only (interactive=false): the drift list lives on the Verify tab, so
+            // clicking a chart can't filter it — Verify has its own severity filter.
             <div className="h-full w-full overflow-auto">
               <VerifyStatsColumn
                 state={effectiveVerifyState}
@@ -1444,6 +1468,7 @@ function RepoPageInner() {
                 onToggleSeverity={toggleDriftSeverity}
                 onToggleKind={toggleDriftKind}
                 onToggleFile={toggleDriftFile}
+                interactive={false}
               />
             </div>
           ) : leftTab === 'runs' ? (

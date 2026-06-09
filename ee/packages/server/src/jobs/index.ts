@@ -23,6 +23,7 @@ import type { Runner } from 'graphile-worker';
 import { selectGateStore } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
+import { reverifyWorkspaceRepos } from './reverify.js';
 import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
@@ -213,6 +214,12 @@ export async function registerJobs(
     });
   };
 
+  // When a workspace's contracts change (KB sync / workspace decision), re-verify
+  // every connected repo against the new effective set (forced + quiet — see
+  // reverify.ts). Returns the count enqueued, for the sync notification.
+  const onWorkspaceContractsChanged = (workspaceOrgId: string): Promise<number> =>
+    reverifyWorkspaceRepos(gateStore, enqueueBaseline, workspaceOrgId);
+
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
     // job. Reap them so the single-flight key frees and stale "Syncing…" clears.
@@ -225,6 +232,7 @@ export async function registerJobs(
       masterSecret: opts.masterSecret,
       jobStore,
       onContractsRegenerated,
+      onWorkspaceContractsChanged,
     });
   } catch (err) {
     log.error(`[ee-jobs] background services failed to start (jobs will not process): ${(err as Error).message}`);
