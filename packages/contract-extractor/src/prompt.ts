@@ -528,14 +528,20 @@ Use sensible defaults when the spec doesn't spell them out:
     on-violation {
       status 401
       error-code unauthenticated
-      body ErrorEnvelope:error.envelope.standard
     }
   }
 
-Default \`on-violation\` is **always** status 401, error-code \`unauthenticated\`,
-body \`ErrorEnvelope:error.envelope.standard\` when the spec doesn't specify
-otherwise. Default selector is \`path-glob "/api/**"\` when the spec says "all
-/api/* endpoints" without naming a more specific pattern.
+Default \`on-violation\` is status 401, error-code \`unauthenticated\`. Add a
+\`body ErrorEnvelope:error.envelope.standard\` line ONLY when the spec/corpus
+actually establishes a standard error envelope — a dedicated errors /
+error-response section, an error-code catalog, or another slice that describes
+the error body shape. When the spec is SILENT about the error response body
+(common for terse auth docs that only state the scheme), OMIT the \`body\` line:
+a \`body\` reference to an envelope nothing defines is a dangling cross-reference
+that fails the validation gate, while an omitted body is faithful. See
+"Error-envelope references must be grounded" below. Default selector is
+\`path-glob "/api/**"\` when the spec says "all /api/* endpoints" without naming a
+more specific pattern.
 
 When a spec describes role-based auth ("admin only", "moderators can …"), produce
 a SEPARATE \`auth-requirement\` with \`required-role <role>\`, identity
@@ -570,7 +576,8 @@ is the correct fallback when the slice lacks operation context.
     on-violation {
       status 403
       error-code forbidden
-      body ErrorEnvelope:error.envelope.standard
+      // body ErrorEnvelope:error.envelope.standard only when that envelope is
+      // defined in the corpus — see "Error-envelope references must be grounded".
     }
   }
 
@@ -1116,6 +1123,37 @@ response as a literal:
   \`inherits AuthRequirement:auth.role.<role>\`.
 - Only declare a literal \`response 401/403 on …\` when the spec describes the
   response as standalone, NOT delegated to a rule.
+
+# Error-envelope references must be grounded
+
+\`ErrorEnvelope:error.envelope.standard\` is a CROSS-REFERENCE, not a literal — it
+only resolves if a matching \`error-envelope error.envelope.standard { … }\`
+artifact exists somewhere in the corpus. Emitting the reference with nothing
+defining it produces a dangling cross-reference that fails the validation gate,
+exactly like referencing an undefined \`Enum:\`. This is the same prime-directive
+rule as enums ("never reference an enum without defining it"), applied to error
+bodies.
+
+The rule applies EVERYWHERE an envelope can appear:
+\`on-violation { … body ErrorEnvelope:… }\` on auth-requirements and
+authorization-rules, and \`response … { body envelope ErrorEnvelope:… { … } }\`
+on operations.
+
+- Reference \`ErrorEnvelope:error.envelope.standard\` ONLY when the spec actually
+  establishes a standard error envelope: a dedicated errors / error-response
+  section, an error-code catalog, or prose that names "the standard error
+  envelope". In a multi-doc corpus the defining section may live in ANOTHER
+  slice — that's fine, just like an \`Enum:\` defined in a sibling slice.
+- When you reference it AND the slice in front of you is the one that describes
+  the envelope, ALSO emit the \`error-envelope error.envelope.standard { … }\`
+  artifact — mirroring the described shape; never invent fields the spec does
+  not list.
+- When the spec is SILENT about the error response body — no error section, no
+  envelope, no error codes — do NOT emit the reference at all. Omit the \`body\`
+  line from \`on-violation\`; on an operation response use a plain \`body …\` only
+  if the spec gives a shape, otherwise omit it. Faithful under-specification
+  beats a dangling reference: never conjure a standard envelope just to fill the
+  slot.
 
 # Naming conventions for artifact identities
 
