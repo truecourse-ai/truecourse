@@ -2,16 +2,18 @@
  * Enterprise LLM provider wiring. Installs an AI-SDK transport (so hosted
  * scan/infer/verify/analyze run against Anthropic/OpenAI/Bedrock/Copilot rather
  * than a `claude` binary) and exposes the Models settings API. The active
- * provider comes from the encrypted Postgres config (set via the UI), falling
- * back to env vars. ee is always Postgres; no provider configured yet just
- * leaves the OSS CLI transport in place.
+ * provider comes ONLY from the encrypted Postgres config (set via the Models
+ * page) — there is no CLI/.env provider fallback in EE. Until a provider is set,
+ * there is simply no transport and LLM work errors loudly.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import type { EeServerRegistry } from '@truecourse/shared';
+import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import { setDefaultTransport } from '@truecourse/shared/llm';
+import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
+import { setDefaultTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import type { LlmTraceRecorder } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
 import {
   createAiSdkTransport,
@@ -22,37 +24,35 @@ import { LlmConfigStore } from './store.js';
 
 const PROVIDERS: LlmProviderKind[] = ['anthropic', 'openai', 'bedrock', 'copilot'];
 
-// ---------------------------------------------------------------------------
-// Env fallback — for deploys that prefer env over the in-app Models page.
-// ---------------------------------------------------------------------------
+/**
+ * The enterprise edition NEVER falls back to the local `claude` CLI. Until a
+ * provider is configured we install this transport as the process default, so
+ * any LLM work errors loudly instead of silently spawning the CLI (the OSS
+ * default when no transport is installed). Replaced by the real AI-SDK transport
+ * the moment a provider is saved/loaded.
+ */
+const noProviderTransport: LlmTransport = async () => {
+  throw new Error(NO_LLM_PROVIDER_MESSAGE);
+};
 
-function loadEnvProviderConfig(): ProviderConfig | null {
-  const provider = process.env.LLM_PROVIDER as LlmProviderKind | undefined;
-  if (!provider || !PROVIDERS.includes(provider)) return null;
-  const model = process.env.LLM_MODEL;
-  if (!model) {
-    log.warn('[ee-llm] LLM_PROVIDER set but LLM_MODEL missing — ignoring env config');
-    return null;
-  }
-  const cfg: ProviderConfig = {
-    provider,
-    model,
-    fallbackModel: process.env.LLM_FALLBACK_MODEL,
-    baseURL: process.env.LLM_BASE_URL,
-  };
-  if (provider === 'bedrock') {
-    cfg.region = process.env.AWS_REGION;
-    cfg.accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    cfg.secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-    cfg.sessionToken = process.env.AWS_SESSION_TOKEN;
-  } else if (provider === 'anthropic') {
-    cfg.apiKey = process.env.ANTHROPIC_API_KEY;
-  } else if (provider === 'openai') {
-    cfg.apiKey = process.env.OPENAI_API_KEY;
-  } else if (provider === 'copilot') {
-    cfg.apiKey = process.env.COPILOT_API_KEY ?? process.env.GITHUB_COPILOT_TOKEN;
-  }
-  return cfg;
+/**
+ * Whether a REAL provider transport is installed (not the no-provider sentinel
+ * above, and not unset). EE entry points that do LLM work check this up front to
+ * fail loudly — otherwise the consolidator's fail-open error handling (e.g. the
+ * relevance filter defaults to "include" on a transport error) silently swallows
+ * the "no provider" failure and the run looks like it succeeded with no output.
+ */
+export function isLlmConfigured(): boolean {
+  const t = getDefaultTransport();
+  return t !== undefined && t !== noProviderTransport;
+}
+
+/** The shared user-facing error message for the "no provider configured" failure. */
+export const NO_LLM_PROVIDER_MESSAGE =
+  'No LLM provider is configured. Set one in Settings → Models to enable knowledge sync.';
+
+function orgIdOf(req: Request): string | undefined {
+  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,15 +110,20 @@ async function testConfig(cfg: ProviderConfig): Promise<void> {
   }
 }
 
-function createLlmRouter(store: LlmConfigStore, envManaged: boolean): Router {
+function createLlmRouter(store: LlmConfigStore, recorder?: LlmTraceRecorder): Router {
   const router = Router();
 
-  router.get('/config', async (_req: Request, res: Response) => {
+  router.get('/config', async (req: Request, res: Response) => {
     try {
       const config = await store.getView();
-      res.json({ config, envManaged, providers: PROVIDERS });
+      res.json({ config, providers: PROVIDERS });
     } catch (err) {
-      log.error(`[ee-llm] get config failed: ${(err as Error).message}`);
+      log.error(`[ee-llm] get config failed (org ${orgIdOf(req) ?? 'unknown'}): ${(err as Error).message}`);
+      captureEeException(err, {
+        component: 'llm',
+        orgId: orgIdOf(req),
+        route: 'GET /api/ee/llm/config',
+      });
       res.status(500).json({ error: 'failed to load config' });
     }
   });
@@ -142,13 +147,27 @@ function createLlmRouter(store: LlmConfigStore, envManaged: boolean): Router {
     try {
       await testConfig(candidate);
     } catch (err) {
+      // The provider-test failure (bad key, wrong model, outage) was previously
+      // surfaced only to the browser and lost server-side — log + report it.
+      const upstreamStatus = upstreamStatusOf(err);
+      log.warn(
+        `[ee-llm] provider test failed (${input.provider}${upstreamStatus ? ` ${upstreamStatus}` : ''}) for org ${orgIdOf(req) ?? 'unknown'}: ${(err as Error).message}`,
+      );
+      captureEeException(err, {
+        component: 'llm',
+        orgId: orgIdOf(req),
+        provider: input.provider,
+        upstreamStatus,
+        route: 'PATCH /api/ee/llm/config',
+        level: 'warning',
+      });
       res.status(400).json({ error: `Provider test failed: ${(err as Error).message}` });
       return;
     }
 
     await store.save(input);
     // Make the new provider live immediately for this process.
-    setDefaultTransport(createAiSdkTransport(candidate));
+    setDefaultTransport(createAiSdkTransport(candidate, { recorder }));
     log.info(`[ee-llm] provider updated → ${candidate.provider} (${candidate.model})`);
     res.json({ config: await store.getView() });
   });
@@ -161,57 +180,42 @@ function createLlmRouter(store: LlmConfigStore, envManaged: boolean): Router {
 // ---------------------------------------------------------------------------
 
 export interface RegisterLlmOptions {
-  /** Shared ee-db (Postgres) when hosted; null → no in-app Models store. */
-  db: EeDb | null;
-  masterSecret: string | null;
+  /** Shared ee-db (Postgres). EE is always Postgres; required. */
+  db: EeDb;
+  /** Master secret deriving the store's AES key; validated (>=32) by the caller. */
+  masterSecret: string;
+  /** LLM trace sink — installed transports record every call to it. Omit ⇒ no tracing. */
+  recorder?: LlmTraceRecorder;
 }
 
 /**
- * Install the LLM provider transport + Models API. Returns true when the
- * in-app Models page should light up (i.e. the encrypted store is available).
+ * Install the encrypted Postgres provider store + the Models API, and load the
+ * stored provider as the active transport.
+ *
+ * EE has NO CLI/.env provider fallback: `DATABASE_URL` + `TRUECOURSE_SECRET_KEY`
+ * are required (the caller fails boot if the secret is missing/weak), and the
+ * provider comes only from the in-app store. Until one is set via the Models
+ * page there is simply no transport — LLM work errors loudly rather than
+ * silently using an ambient CLI/.env key.
  */
 export async function registerLlmProviders(
   registry: EeServerRegistry,
   opts: RegisterLlmOptions,
-): Promise<boolean> {
-  const envCfg = loadEnvProviderConfig();
-
-  // The master secret derives the AES key for every stored provider key, so a
-  // weak one is refused loudly rather than silently producing a weak key.
-  const masterSecret =
-    opts.masterSecret && opts.masterSecret.length >= 32 ? opts.masterSecret : null;
-  if (opts.masterSecret && !masterSecret) {
-    log.error(
-      '[ee-llm] TRUECOURSE_SECRET_KEY must be at least 32 characters — refusing to enable the encrypted provider store',
-    );
+): Promise<void> {
+  const store = new LlmConfigStore(opts.db, opts.masterSecret);
+  const recorder = opts.recorder;
+  const stored = await store.getProviderConfig().catch((err) => {
+    log.error(`[ee-llm] reading stored config failed: ${(err as Error).message}`);
+    return null;
+  });
+  if (stored) {
+    setDefaultTransport(createAiSdkTransport(stored, { recorder }));
+    log.info(`[ee-llm] installed ${stored.provider} transport`);
+  } else {
+    // Install the loud no-op so LLM work fails clearly instead of falling back
+    // to the local CLI. Cleared when a provider is configured below.
+    setDefaultTransport(noProviderTransport);
+    log.info('[ee-llm] no provider configured yet — LLM work errors until one is set via the Models page');
   }
-
-  if (opts.db && masterSecret) {
-    const store = new LlmConfigStore(opts.db, masterSecret);
-    const stored = await store.getProviderConfig().catch((err) => {
-      log.error(`[ee-llm] reading stored config failed: ${(err as Error).message}`);
-      return null;
-    });
-    const active = stored ?? envCfg;
-    if (active) {
-      setDefaultTransport(createAiSdkTransport(active));
-      log.info(`[ee-llm] installed ${active.provider} transport`);
-    } else {
-      log.info(
-        '[ee-llm] no provider configured yet — using the CLI default until set via the Models page',
-      );
-    }
-    registry.registerRouter('/api/ee/llm', createLlmRouter(store, !!envCfg));
-    return true;
-  }
-
-  if (envCfg) {
-    setDefaultTransport(createAiSdkTransport(envCfg));
-    log.info(
-      `[ee-llm] installed ${envCfg.provider} transport from env (set DATABASE_URL + TRUECOURSE_SECRET_KEY to manage providers in-app)`,
-    );
-    return false;
-  }
-
-  return false;
+  registry.registerRouter('/api/ee/llm', createLlmRouter(store, recorder));
 }

@@ -4,8 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { AuthUser, GithubConnectStatusResponse } from '@truecourse/shared';
+import type {
+  AuthUser,
+  GithubConnectStatusResponse,
+  GithubInstallationReposResponse,
+} from '@truecourse/shared';
 import { createConnectRouter, FileGateStore } from '../../ee/packages/github-app/src/index';
+import type { OctokitClient } from '../../ee/packages/github-app/src/octokit';
 // Shared via the bare specifier so this overrides the singleton `connect.ts` uses.
 import {
   setRegistryStore,
@@ -17,6 +22,12 @@ let dir: string;
 let store: FileGateStore;
 let app: Express;
 let currentOrg: string | null;
+// Repos the stubbed installation client returns (the connect router paginates it).
+let installRepos: Array<{ full_name: string; default_branch: string; private: boolean }>;
+const stubOctokit = {
+  apps: { listReposAccessibleToInstallation: () => undefined },
+  paginate: async () => installRepos,
+} as unknown as OctokitClient;
 
 // In hosted EE the registry is Postgres; stub it here so the connect router's
 // `registerProject(repoFullName)` doesn't create an `<cwd>/owner/repo/.truecourse`
@@ -36,6 +47,10 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-connect-'));
   store = new FileGateStore(dir);
   currentOrg = 'org_A';
+  installRepos = [
+    { full_name: 'acme/api', default_branch: 'main', private: true },
+    { full_name: 'acme/web', default_branch: 'develop', private: false },
+  ];
   app = express();
   app.use(express.json());
   // Stand in for the enterprise auth gate: attach req.eeUser.
@@ -53,6 +68,7 @@ beforeEach(() => {
       store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
+      octokitFor: () => stubOctokit,
     }),
   );
   setRegistryStore(stubRegistry);
@@ -94,6 +110,23 @@ describe('connect router', () => {
     expect(body.installations).toEqual([]);
   });
 
+  it('lists the installation’s accessible repos for the connect picker', async () => {
+    await seedInstallation('org_A');
+    const res = await request(app)
+      .get('/api/ee/github/installations/100/repos')
+      .expect(200);
+    const body = res.body as GithubInstallationReposResponse;
+    expect(body.repos).toEqual([
+      { fullName: 'acme/api', defaultBranch: 'main', private: true },
+      { fullName: 'acme/web', defaultBranch: 'develop', private: false },
+    ]);
+  });
+
+  it('refuses to list repos for an installation in another workspace', async () => {
+    await seedInstallation('org_OTHER');
+    await request(app).get('/api/ee/github/installations/100/repos').expect(403);
+  });
+
   it('refuses to link a repo whose installation is not in the workspace', async () => {
     await seedInstallation('org_OTHER'); // installation 100 belongs to a different org
     await request(app)
@@ -109,7 +142,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/integrations/github');
+      .expect('location', 'http://localhost:3000/repositories');
     // Ownership is unchanged.
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_OTHER');
   });
@@ -178,6 +211,37 @@ describe('connect router', () => {
       .post('/api/ee/github/repos/link')
       .send({ repoFullName: 'acme/api' }) // missing installationId + defaultBranch
       .expect(400);
+  });
+
+  it('defaults all notification types on, and a partial PATCH flips only what it sends', async () => {
+    await seedInstallation('org_A');
+    await request(app)
+      .post('/api/ee/github/repos/link')
+      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
+      .expect(201);
+
+    // Unset on the record → API resolves every type on.
+    let res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
+      gateFailure: true,
+      scanOffer: true,
+      inferResult: true,
+      conflicts: true,
+    });
+
+    // Partial PATCH only flips gateFailure; the rest stay on.
+    await request(app)
+      .patch('/api/ee/github/repos/config')
+      .send({ repoFullName: 'acme/api', notifications: { gateFailure: false } })
+      .expect(200);
+
+    res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
+      gateFailure: false,
+      scanOffer: true,
+      inferResult: true,
+      conflicts: true,
+    });
   });
 
   it('sets notifyEmails (normalized + deduped) and rejects invalid ones', async () => {

@@ -6,14 +6,23 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { registerProject } from '@truecourse/core/config/registry';
+import { log } from '@truecourse/core/lib/logger';
+import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
+import { getScanState } from '@truecourse/core/commands/spec-in-process';
+import { latestSpecCommit } from '@truecourse/core/lib/spec-store';
+import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
+  GithubInstallableRepo,
+  GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
   GithubRunSummary,
+  WorkspaceRunItem,
 } from '@truecourse/shared';
+import type { OctokitClient } from './octokit.js';
+import { resolveNotificationPrefs, NOTIFICATION_KEYS } from './notifications.js';
 import type {
   GateStore,
   InstallationRecord,
@@ -40,7 +49,12 @@ function toInstallationSummary(
   };
 }
 
-function toRepoSummary(r: RepoLinkRecord): GithubRepoSummary {
+function toRepoSummary(
+  r: RepoLinkRecord,
+  slug: string | null,
+  openConflicts: number,
+  hasContracts: boolean,
+): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
     installationId: r.installationId,
@@ -48,6 +62,10 @@ function toRepoSummary(r: RepoLinkRecord): GithubRepoSummary {
     blocking: r.blocking,
     enabled: r.enabled,
     notifyEmails: r.notifyEmails ?? [],
+    notifications: resolveNotificationPrefs(r),
+    slug,
+    openConflicts,
+    hasContracts,
   };
 }
 
@@ -68,6 +86,19 @@ export interface ConnectDeps {
   appSlug: string;
   /** Dashboard client origin, for browser-facing redirects (e.g. /setup). */
   appUrl: string;
+  /** Installation-scoped GitHub client, for listing the repos a user can connect. */
+  octokitFor: (installationId: number) => OctokitClient;
+  /**
+   * Enqueue the initial repo scan on connect (background job). Returns the job id
+   * or null when one is already running. Omitted ⇒ no auto-scan (e.g. tests).
+   */
+  enqueueBaseline?: (req: {
+    repoFullName: string;
+    installationId: number;
+    defaultBranch: string;
+    commitSha: string;
+    workspaceOrgId: string;
+  }) => Promise<string | null>;
 }
 
 export function createConnectRouter(deps: ConnectDeps): Router {
@@ -92,14 +123,77 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       deps.store.listInstallationsForWorkspace(orgId),
       deps.store.listReposForWorkspace(orgId),
     ]);
+    // Resolve each repo's dashboard slug (registered on link) so the UI can
+    // deep-link to `/repos/:slug`, plus its open-conflict count (re-merged from
+    // stored claims — no LLM) so the list can flag repos that need review.
+    const repoSummaries = await Promise.all(
+      repos.map(async (r) => {
+        const [project, scan, commit] = await Promise.all([
+          getProjectByPath(r.repoFullName),
+          getScanState(r.repoFullName).catch(() => null),
+          latestSpecCommit(r.repoFullName).catch(() => null),
+        ]);
+        // hasContracts: any generated contract files at the latest scanned commit.
+        const files = commit
+          ? await listContractFiles(r.repoFullName, 'contracts', commit).catch(() => [])
+          : [];
+        return toRepoSummary(
+          r,
+          project?.slug ?? null,
+          scan?.openConflicts.length ?? 0,
+          files.length > 0,
+        );
+      }),
+    );
     const body: GithubConnectStatusResponse = {
       configured: true,
       installUrl: buildInstallUrl(orgId),
       installations: installations.map(toInstallationSummary),
-      repos: repos.map(toRepoSummary),
+      repos: repoSummaries,
     };
     res.json(body);
   });
+
+  // Repos the installation can access — populates the connect drawer's repo
+  // picker (so users choose from a list instead of typing `owner/name`).
+  router.get(
+    '/installations/:installationId/repos',
+    async (req: Request, res: Response) => {
+      const orgId = orgIdOf(req);
+      const installationId = Number(req.params.installationId);
+      if (!orgId || !Number.isInteger(installationId)) {
+        res.status(400).json({ error: 'installationId required' });
+        return;
+      }
+      // Ownership: only list repos for an installation in the caller's workspace.
+      const inst = await deps.store.getInstallation(installationId);
+      if (!inst || inst.workspaceOrgId !== orgId) {
+        res.status(403).json({ error: 'installation not in your workspace' });
+        return;
+      }
+      try {
+        const octokit = deps.octokitFor(installationId);
+        const repos = await octokit.paginate(
+          octokit.apps.listReposAccessibleToInstallation,
+          { per_page: 100 },
+        );
+        const body: GithubInstallationReposResponse = {
+          repos: repos.map(
+            (r): GithubInstallableRepo => ({
+              fullName: r.full_name,
+              defaultBranch: r.default_branch,
+              private: r.private,
+            }),
+          ),
+        };
+        res.json(body);
+      } catch (err) {
+        res
+          .status(502)
+          .json({ error: `could not list repositories: ${(err as Error).message}` });
+      }
+    },
+  );
 
   // Post-install redirect target (configured as the App's Setup URL). GitHub
   // sends the browser here with ?installation_id=&state=<orgId>; we associate
@@ -134,7 +228,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       // Else: the installation already belongs to another workspace — never
       // re-link it (prevents cross-tenant installation takeover).
     }
-    res.redirect(`${deps.appUrl}/integrations/github`);
+    res.redirect(`${deps.appUrl}/repositories`);
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {
@@ -183,9 +277,30 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       updatedAt: now,
     });
     // Surface the connected repo in the dashboard's project list immediately
-    // (keyed by `owner/repo`, deterministic slug). The first default-branch
-    // merge then fills in its analysis.
+    // (keyed by `owner/repo`, deterministic slug).
     await registerProject(repoFullName, repoFullName);
+
+    // Kick off the INITIAL scan now (background job) rather than waiting for the
+    // next default-branch push — so the repo's spec/contracts (and the merge with
+    // workspace Knowledge) populate as soon as it's connected, in either order.
+    // Best-effort: a failure to enqueue must not fail the link.
+    if (deps.enqueueBaseline) {
+      try {
+        const [owner, repo] = repoFullName.split('/');
+        const octokit = deps.octokitFor(installationId);
+        const branch = await octokit.repos.getBranch({ owner, repo, branch: defaultBranch });
+        await deps.enqueueBaseline({
+          repoFullName,
+          installationId,
+          defaultBranch,
+          commitSha: branch.data.commit.sha,
+          workspaceOrgId: orgId,
+        });
+      } catch (err) {
+        log.warn(`[github-app] initial scan enqueue failed for ${repoFullName}: ${(err as Error).message}`);
+      }
+    }
+
     res.status(201).json({ ok: true });
   });
 
@@ -232,6 +347,24 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       }
       notifyEmails = deduped;
     }
+
+    // Per-type notification toggles — merge any provided booleans onto the
+    // resolved (defaults-applied) prefs so a partial PATCH only flips what it sends.
+    let notifications = existing.notifications;
+    if (body.notifications !== undefined) {
+      const incoming = body.notifications;
+      if (typeof incoming !== 'object' || incoming === null || Array.isArray(incoming)) {
+        res.status(400).json({ error: 'notifications must be an object' });
+        return;
+      }
+      const merged = resolveNotificationPrefs(existing);
+      for (const key of NOTIFICATION_KEYS) {
+        const v = (incoming as Record<string, unknown>)[key];
+        if (typeof v === 'boolean') merged[key] = v;
+      }
+      notifications = merged;
+    }
+
     await deps.store.linkRepo({
       ...existing,
       blocking:
@@ -239,6 +372,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       enabled:
         typeof body.enabled === 'boolean' ? body.enabled : existing.enabled,
       notifyEmails,
+      notifications,
       updatedAt: new Date().toISOString(),
     });
     res.json({ ok: true });
@@ -272,6 +406,28 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     const runs = await deps.store.listRuns(repoFullName);
     res.json({ runs: runs.map(toRunSummary) });
+  });
+
+  // Cross-repo gate activity for the workspace home — recent runs across every
+  // connected repo, merged + newest-first. (N small per-repo reads; the repo
+  // count per workspace is bounded.)
+  router.get('/runs', async (req: Request, res: Response) => {
+    const orgId = orgIdOf(req);
+    if (!orgId) {
+      res.json({ runs: [] });
+      return;
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
+    const repos = await deps.store.listReposForWorkspace(orgId);
+    const all: WorkspaceRunItem[] = [];
+    for (const repo of repos) {
+      const runs = await deps.store.listRuns(repo.repoFullName, limit);
+      for (const r of runs) {
+        all.push({ ...toRunSummary(r), repoFullName: repo.repoFullName });
+      }
+    }
+    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    res.json({ runs: all.slice(0, limit) });
   });
 
   return router;

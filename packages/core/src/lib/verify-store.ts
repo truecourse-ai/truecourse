@@ -88,6 +88,10 @@ export interface WrittenVerifyRun {
 
 /** Pluggable verify store. File-backed by default; EE injects Postgres/Blob. */
 export interface VerifyStore {
+  /** True when keyed by an on-disk working-tree path (OSS file store); false for
+   *  the hosted store, which keys by a stable repo identity. Lets callers choose
+   *  the right key (repoRoot vs repoKey) — see `verifyInProcess`. */
+  readonly materializesInPlace: boolean;
   readVerifyLatest(repoPath: string): Promise<VerifyLatest | null>;
   writeVerifyLatest(repoPath: string, latest: VerifyLatest): Promise<void>;
   deleteVerifyLatest(repoPath: string): Promise<void>;
@@ -109,6 +113,7 @@ export interface VerifyStore {
 const latestCache = new Map<string, { mtime: number; data: VerifyLatest }>();
 
 class FileVerifyStore implements VerifyStore {
+  readonly materializesInPlace = true;
   async readVerifyLatest(repoPath: string): Promise<VerifyLatest | null> {
     const file = verifyLatestPath(repoPath);
     let mtime: number;
@@ -228,6 +233,8 @@ let active: VerifyStore = new FileVerifyStore();
 export function getVerifyStore(): VerifyStore {
   return active;
 }
+/** True when the active verify store keys by an on-disk path (OSS file store). */
+export const verifyMaterializeInPlace = (): boolean => active.materializesInPlace;
 /** Install a verify store (e.g. the enterprise Postgres/Blob impl). */
 export function setVerifyStore(store: VerifyStore): void {
   active = store;

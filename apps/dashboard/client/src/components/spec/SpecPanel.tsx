@@ -42,7 +42,7 @@ export function SpecPanel({
   activeCanonicalPath,
   onOpenCanonicalFile,
 }: SpecPanelProps) {
-  const { scan, hydrating, error } = useSpec();
+  const { scan, hydrating, error, supportsRescan } = useSpec();
 
   return (
     <div className="flex h-full flex-col">
@@ -60,7 +60,7 @@ export function SpecPanel({
         {hydrating ? (
           <CenteredSpinner />
         ) : !scan ? (
-          <NoScanYet />
+          <NoScanYet supportsRescan={supportsRescan} />
         ) : (
           <>
             <div
@@ -87,6 +87,7 @@ export function SpecPanel({
                 error={canonicalError}
                 activePath={activeCanonicalPath}
                 onOpen={onOpenCanonicalFile}
+                supportsRescan={supportsRescan}
               />
             </div>
           </>
@@ -304,16 +305,23 @@ function CenteredSpinner() {
   );
 }
 
-function NoScanYet() {
+function NoScanYet({ supportsRescan }: { supportsRescan: boolean }) {
   return (
     <EmptyState
       icon={Play}
       title="No scan yet"
       body={
-        <>
-          Click <strong>Scan</strong> in the header to discover docs, extract
-          claims, and surface conflicts.
-        </>
+        supportsRescan ? (
+          <>
+            Click <strong>Scan</strong> in the header to discover docs, extract
+            claims, and surface conflicts.
+          </>
+        ) : (
+          <>
+            The spec is generated automatically when this repository is scanned.
+            Claims and conflicts will appear here once a scan completes.
+          </>
+        )
       }
     />
   );

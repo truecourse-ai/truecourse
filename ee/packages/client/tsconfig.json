@@ -4,10 +4,18 @@
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "jsx": "react-jsx",
     "types": ["node"],
-    "rootDir": "src",
     "noEmit": true,
     "module": "ESNext",
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    // The Knowledge page reuses the OSS dashboard's spec/contract components via
+    // the `@/*` alias, so source spans two locations — rootDir is the repo root.
+    // (This package is built + typechecked by the OSS vite app that aliases
+    // `@truecourse/ee-client` to this source; standalone tsc is not a gate.)
+    "rootDir": "../../..",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../../../apps/dashboard/client/src/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

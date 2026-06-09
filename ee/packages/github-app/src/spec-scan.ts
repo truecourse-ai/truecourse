@@ -14,6 +14,7 @@ import {
   scanInProcess,
   generateContractsInProcess,
 } from '@truecourse/core/commands/spec-in-process';
+import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
 import {
   getInstallationToken,
@@ -31,22 +32,48 @@ export interface SpecScanPipeline {
    * auto-defaulted to keep the pipeline moving, so a positive count means the
    * generated contracts encode a guess that a human should confirm.
    */
-  scan(repoRoot: string, ref: RepoRef): Promise<{ openConflicts: number }>;
-  /** Generate contracts and persist them under `ref` (`saveContracts`). Returns the file count. */
-  generate(repoRoot: string, ref: RepoRef): Promise<{ fileCount: number }>;
+  scan(
+    repoRoot: string,
+    ref: RepoRef,
+    tracker?: StepTracker,
+  ): Promise<{ openConflicts: number }>;
+  /** Generate contracts and persist them under `ref` (`saveContracts`). Returns the
+   *  file count. `onSliceProgress(done, total)` reports per-slice progress for the
+   *  EE job popup (the same "N/M slices" the OSS popup shows). */
+  generate(
+    repoRoot: string,
+    ref: RepoRef,
+    onSliceProgress?: (done: number, total: number) => void,
+    onRepairProgress?: (done: number, total: number) => void,
+  ): Promise<{ fileCount: number }>;
 }
 
 export const defaultSpecScanPipeline: SpecScanPipeline = {
-  async scan(repoRoot, ref) {
+  async scan(repoRoot, ref, tracker) {
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). The
     // explicit `ref` makes scan/generate ingest into the server-side store.
-    const { scanState } = await scanInProcess(repoRoot, { skipGit: true, ref });
+    const { scanState } = await scanInProcess(repoRoot, { skipGit: true, ref, tracker });
     return { openConflicts: scanState.openConflicts.length };
   },
-  async generate(repoRoot, ref) {
-    const res = await generateContractsInProcess(repoRoot, { skipGit: true, ref });
+  async generate(repoRoot, ref, onSliceProgress, onRepairProgress) {
+    const res = await generateContractsInProcess(repoRoot, {
+      skipGit: true,
+      ref,
+      onSliceProgress,
+      onRepairProgress,
+    });
     if (res.il.kind === 'failed') throw res.il.error;
     if (res.il.kind === 'extracted') {
+      // A resolver-hard corpus error wrote nothing — surface it as a failure
+      // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
+      if (res.il.result.resolverHard) {
+        const reasons = res.il.result.validationIssues
+          .filter((i) => i.severity === 'hard')
+          .map((i) => i.message);
+        throw new Error(
+          `Contract corpus failed to resolve — ${reasons.slice(0, 3).join('; ') || 'duplicate or conflicting artifact identities'}`,
+        );
+      }
       return { fileCount: res.il.result.write.written.length };
     }
     return { fileCount: 0 };

@@ -129,13 +129,14 @@ export function Header({
       </div>
 
       <div className="flex items-center gap-1">
-        {/* Enterprise nav (Workspace, …) + user menu — empty in community. */}
-        <EeNavSlot />
-        <EeUserMenu />
-        {/* GitHub / Discord / theme live in the header for community; in
-            the enterprise edition they move into the user menu dropdown. */}
+        {/* In enterprise the console shell (left sidebar) owns global nav, the
+            user menu, and GitHub/Discord/theme — so the repo header keeps its
+            right side clear instead of duplicating them. Community shows them
+            here (EeNavSlot / EeUserMenu render nothing without the ee module). */}
         {edition !== 'enterprise' && (
           <>
+            <EeNavSlot />
+            <EeUserMenu />
             <a
               href={GITHUB_URL}
               target="_blank"

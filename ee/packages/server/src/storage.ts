@@ -31,13 +31,20 @@ import {
   PgSpecStore,
   PgRepoConfigStore,
   PgUiStateStore,
-  PgRegistryStore,
+  GhReposRegistryStore,
   PgKvCacheStore,
+  PgBlobTraceStore,
   PgAnalyzeLock,
 } from '@truecourse/ee-data-store';
 
+/** What `installEeStores` hands back for the caller to wire (not a core seam). */
+export interface EeStoreHandles {
+  /** LLM trace sink — passed to the transport as its recorder + the traces routes. */
+  traceStore: PgBlobTraceStore;
+}
+
 /** Swap every core/llm storage seam for its Postgres/Blob hosted impl. */
-export function installEeStores({ db, lockPool }: EeDbHandle): void {
+export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   const blobConfig = loadBlobStoreConfig();
   const blob = selectBlobStore(blobConfig, db);
 
@@ -49,7 +56,9 @@ export function installEeStores({ db, lockPool }: EeDbHandle): void {
   setSpecStore(new PgSpecStore(db));
   setRepoConfigStore(new PgRepoConfigStore(db));
   setUiStateStore(new PgUiStateStore(db));
-  setRegistryStore(new PgRegistryStore(db));
+  // The "registry" is a derived view of the gate's gh_repos — no separate table,
+  // so it can't drift or orphan (slug routing resolves only connected repos).
+  setRegistryStore(new GhReposRegistryStore(db));
   // Content-addressed LLM-stage cache (global) → Postgres.
   setKvCacheStore(new PgKvCacheStore(db));
   // Cross-process analyze serialization → session-level `pg_advisory_lock` on a
@@ -57,12 +66,19 @@ export function installEeStores({ db, lockPool }: EeDbHandle): void {
   // clones; the dedicated pool keeps held locks from starving the store pool).
   setAnalyzeLock(new PgAnalyzeLock(lockPool));
 
+  // LLM observability sink (metadata → Postgres, payloads → BlobStore). NOT a
+  // core seam — it's handed to the transport as its recorder and to the traces
+  // routes, so it's returned rather than installed globally.
+  const traceStore = new PgBlobTraceStore(db, blob);
+
   log.info(`[ee-server] hosted storage installed (blob=${blobConfig.kind})`);
+  return { traceStore };
 }
 
 // Prefixes our materialize/clone temp dirs use: loadContracts → `tc-<kind>-`
-// (contracts / contracts_inferred); the gate runners → `tc-gate-*`.
-const TEMP_PREFIXES = ['tc-contracts-', 'tc-contracts_inferred-', 'tc-gate-'];
+// (contracts / contracts_inferred); the gate runners → `tc-gate-*`; the
+// workspace Knowledge consolidator → `tc-knowledge-*` (transient doc-body scratch).
+const TEMP_PREFIXES = ['tc-contracts-', 'tc-contracts_inferred-', 'tc-gate-', 'tc-knowledge-'];
 const STALE_MS = 60 * 60 * 1000; // 1 hour
 
 /**

@@ -34,3 +34,23 @@ export const contractObjectPrefix = (repoKey: string, kind: string): string =>
 /** One immutable, content-addressed `.tc` object (`sha` = `sha256-<hex>`). */
 export const contractObjectKey = (repoKey: string, kind: string, sha: string): string =>
   `${contractObjectPrefix(repoKey, kind)}${sha}`;
+
+/**
+ * Workspace contract objects share the content-addressed `.tc` blob layout but
+ * live under a `ws:<org>` namespace so they can't collide with a repo whose key
+ * equals the org id. Deduped per `(org, kind)`, exactly like the repo objects.
+ */
+export const workspaceObjectNamespace = (workspaceOrgId: string): string => `ws:${workspaceOrgId}`;
+export const workspaceContractObjectKey = (
+  workspaceOrgId: string,
+  kind: string,
+  sha: string,
+): string => contractObjectKey(workspaceObjectNamespace(workspaceOrgId), kind, sha);
+
+/**
+ * LLM-trace payload objects (prompt/output/reasoning), content-addressed by sha
+ * and org-scoped (tenant isolation over cross-tenant dedup). GC scans the prefix.
+ */
+export const traceObjectPrefix = (org: string): string => `traces/${repoPrefix(org)}/objects/`;
+export const traceObjectKey = (org: string, sha: string): string =>
+  `${traceObjectPrefix(org)}${sha}`;

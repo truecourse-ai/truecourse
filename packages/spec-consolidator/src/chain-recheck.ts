@@ -21,15 +21,14 @@
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict, DocKind } from './types.js';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
-import { cachePaths, ensureCacheDirs } from './cache.js';
 
-const CACHE_FILE = 'chain-recheck.json';
+const CACHE_NAME = 'consolidator/chain-recheck';
 
 /**
  * Subjects that warrant a chain re-check when two PRDs disagree.
@@ -208,15 +207,16 @@ export async function runChainRecheck(
   const confirmedChains: VersionChain[] = [];
 
   for (const pair of pairs) {
-    const olderContent = readSafe(pair.older.absPath);
-    const newerContent = readSafe(pair.newer.absPath);
+    // In-memory body when present (connector/RAM source); else read the file.
+    const olderContent = pair.older.content ?? readSafe(pair.older.absPath);
+    const newerContent = pair.newer.content ?? readSafe(pair.newer.absPath);
     if (olderContent === null || newerContent === null) continue;
 
     const cacheKey = computePairCacheKey(pair, olderContent, newerContent);
-    const cached = readPairCache(repoRoot, cacheKey);
+    const cached = await readPairCache(repoRoot, cacheKey);
     const result =
       cached ?? (await safeRun(runner, { pair, olderContent, newerContent }));
-    if (!cached) writePairCache(repoRoot, cacheKey, result);
+    if (!cached) await writePairCache(repoRoot, cacheKey, result);
 
     if (!result.superseded || !result.olderPath || !result.newerPath) continue;
     if (result.olderPath === result.newerPath) continue;
@@ -353,12 +353,6 @@ function spawnChainRecheckRunner(
 // Cache — per-pair, invalidated when content changes
 // ---------------------------------------------------------------------------
 
-interface PairCacheEntry {
-  cacheKey: string;
-  result: ChainRecheckResult;
-  cachedAt: string;
-}
-
 const PROMPT_FINGERPRINT = createHash('sha256')
   .update(CHAIN_RECHECK_SYSTEM_PROMPT)
   .digest('hex')
@@ -376,41 +370,21 @@ function computePairCacheKey(
     .digest('hex');
 }
 
-function pairCacheFile(repoRoot: string): string {
-  return path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
+// Per-pair, content-addressed (key folds in both docs' content hashes), via the
+// pluggable KV seam (Postgres in EE, file in OSS).
+async function readPairCache(scope: string, cacheKey: string): Promise<ChainRecheckResult | null> {
+  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
+  if (raw === null) return null;
+  const parsed = ChainRecheckResultSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
-function readPairCache(repoRoot: string, cacheKey: string): ChainRecheckResult | null {
-  const file = pairCacheFile(repoRoot);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as { entries: PairCacheEntry[] };
-    const entry = (raw.entries ?? []).find((e) => e.cacheKey === cacheKey);
-    return entry ? ChainRecheckResultSchema.parse(entry.result) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writePairCache(
-  repoRoot: string,
+async function writePairCache(
+  scope: string,
   cacheKey: string,
   result: ChainRecheckResult,
-): void {
-  ensureCacheDirs(repoRoot);
-  const file = pairCacheFile(repoRoot);
-  let entries: PairCacheEntry[] = [];
-  if (fs.existsSync(file)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as { entries: PairCacheEntry[] };
-      entries = raw.entries ?? [];
-    } catch {
-      entries = [];
-    }
-  }
-  const filtered = entries.filter((e) => e.cacheKey !== cacheKey);
-  filtered.push({ cacheKey, result, cachedAt: new Date().toISOString() });
-  fs.writeFileSync(file, JSON.stringify({ entries: filtered }, null, 2) + '\n');
+): Promise<void> {
+  await setCacheEntry(scope, CACHE_NAME, cacheKey, result);
 }
 
 // Re-export so tests can use it directly without importing from index.

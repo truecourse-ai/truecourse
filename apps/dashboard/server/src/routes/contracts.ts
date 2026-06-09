@@ -17,8 +17,14 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { AuthUser } from '@truecourse/shared';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { listContractFiles, readContractFile } from '@truecourse/core/lib/contract-store';
+import {
+  listContractFiles,
+  readContractFile,
+  listWorkspaceContractFiles,
+  readWorkspaceContractFile,
+} from '@truecourse/core/lib/contract-store';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   GENERATE_STEPS,
@@ -32,10 +38,15 @@ import {
 
 const router: Router = Router();
 
+/** Which layer a contract came from — `workspace` is inherited (enterprise). */
+type Provenance = 'workspace' | 'repo';
+
 interface ContractFile {
   name: string;
   /** Relative to the contracts root (e.g. `orders/operations/get-api-orders.tc`). */
   path: string;
+  /** `workspace` for an inherited contract; `repo` (or absent) for the repo's own. */
+  provenance?: Provenance;
 }
 
 interface ContractModule {
@@ -43,19 +54,25 @@ interface ContractModule {
   files: ContractFile[];
 }
 
+interface EffectiveFile {
+  path: string;
+  provenance: Provenance;
+}
+
 /**
  * Group flat posix-relative `.tc` paths by their top-level segment (module),
  * matching how the writer lays out files. `_shared`/`_inferred`/`_unenforceable`
  * sort first — cross-cutting reference material the user wants at the top.
  */
-function groupByModule(relPaths: string[]): ContractModule[] {
+function groupByModule(files: EffectiveFile[]): ContractModule[] {
   const byModule = new Map<string, ContractFile[]>();
-  for (const p of relPaths) {
+  for (const f of files) {
+    const p = f.path;
     const slash = p.indexOf('/');
     const moduleName = slash === -1 ? p : p.slice(0, slash);
     const name = p.slice(p.lastIndexOf('/') + 1);
     if (!byModule.has(moduleName)) byModule.set(moduleName, []);
-    byModule.get(moduleName)!.push({ name, path: p });
+    byModule.get(moduleName)!.push({ name, path: p, provenance: f.provenance });
   }
   const modules: ContractModule[] = [...byModule.entries()].map(([name, files]) => ({
     name,
@@ -70,11 +87,41 @@ function groupByModule(relPaths: string[]): ContractModule[] {
   return modules;
 }
 
-/** Authored + inferred files, with the inferred set surfaced under `_inferred/`. */
-async function currentContractFiles(repoKey: string): Promise<string[]> {
-  const authored = await listContractFiles(repoKey, 'contracts');
-  const inferred = await listContractFiles(repoKey, 'contracts_inferred');
-  return [...authored, ...inferred.map((p) => `_inferred/${p}`)];
+/**
+ * The repo's EFFECTIVE contract files = its own (authored + inferred) UNIONed
+ * with the workspace corpus it inherits, the repo winning on a relpath collision
+ * — mirroring what the gate verifies. Each file is tagged with its layer for the
+ * provenance badge. In OSS (no workspace org, file store) the workspace list is
+ * empty, so this is repo-only and unchanged.
+ */
+export async function effectiveContractFiles(
+  repoKey: string,
+  workspaceOrgId: string | undefined,
+  commitSha?: string,
+): Promise<EffectiveFile[]> {
+  const authored = await listContractFiles(repoKey, 'contracts', commitSha);
+  const inferred = await listContractFiles(repoKey, 'contracts_inferred', commitSha);
+  const repoPaths = [...authored, ...inferred.map((p) => `${INFERRED_PREFIX}${p}`)];
+  const out: EffectiveFile[] = repoPaths.map((path) => ({ path, provenance: 'repo' }));
+  if (workspaceOrgId) {
+    const repoSet = new Set(repoPaths);
+    const ws = await listWorkspaceContractFiles({ workspaceOrgId }, 'contracts');
+    for (const path of ws) {
+      if (!repoSet.has(path)) out.push({ path, provenance: 'workspace' });
+    }
+  }
+  return out;
+}
+
+/** Optional `?ref=<commit>` — the dashboard ref switcher (EE). Empty ⇒ latest. */
+function refOf(req: Request): string | undefined {
+  const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+  return ref || undefined;
+}
+
+/** The signed-in workspace org (enterprise), set by the auth gate. Absent in OSS. */
+function workspaceOrgOf(req: Request): string | undefined {
+  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;
 }
 
 const INFERRED_PREFIX = '_inferred/';
@@ -88,7 +135,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      const files = await currentContractFiles(repo.path);
+      const files = await effectiveContractFiles(repo.path, workspaceOrgOf(req), refOf(req));
       res.json({ hasContracts: files.length > 0, modules: groupByModule(files) });
     } catch (e) {
       next(e);
@@ -112,9 +159,19 @@ router.get(
       }
       // `_inferred/` paths come from the split `contracts_inferred` kind; the
       // store rejects traversal (a path not in its manifest/tree returns null).
-      const content = requested.startsWith(INFERRED_PREFIX)
-        ? await readContractFile(repo.path, 'contracts_inferred', requested.slice(INFERRED_PREFIX.length))
-        : await readContractFile(repo.path, 'contracts', requested);
+      const ref = refOf(req);
+      let content: string | null;
+      if (requested.startsWith(INFERRED_PREFIX)) {
+        content = await readContractFile(repo.path, 'contracts_inferred', requested.slice(INFERRED_PREFIX.length), ref);
+      } else {
+        // Prefer the repo's own file; fall back to the inherited workspace
+        // contract (enterprise) for a `provenance: 'workspace'` entry.
+        content = await readContractFile(repo.path, 'contracts', requested, ref);
+        const org = workspaceOrgOf(req);
+        if (content === null && org) {
+          content = await readWorkspaceContractFile({ workspaceOrgId: org }, 'contracts', requested);
+        }
+      }
       if (content === null) {
         res.status(404).json({ error: 'File not found.' });
         return;

@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { verifyInProcess } from '@truecourse/core/commands/spec-in-process';
-import { hasContracts, type RepoRef } from '@truecourse/core/lib/contract-store';
+import { hasContracts, listWorkspaceContractFiles, type RepoRef } from '@truecourse/core/lib/contract-store';
 import { loadSpec } from '@truecourse/core/lib/spec-store';
 import type { GateStore, GateDrift } from './store/types.js';
 import {
@@ -34,12 +34,18 @@ import { defaultSpecScanPipeline, type SpecScanPipeline } from './spec-scan.js';
 /**
  * Verify a checkout against the contracts stored under `ref`; returns its
  * drifts, or null when verification can't run (no contracts). Code = `dir`.
+ * `workspaceOrgId` (enterprise) folds the workspace contracts under the repo's
+ * for an EFFECTIVE verify (repo wins on collision); omit for repo-only.
  */
-export type VerifyFn = (dir: string, ref: RepoRef) => Promise<GateDrift[] | null>;
+export type VerifyFn = (
+  dir: string,
+  ref: RepoRef,
+  workspaceOrgId?: string | null,
+) => Promise<GateDrift[] | null>;
 
-const defaultVerify: VerifyFn = async (dir, ref) => {
+const defaultVerify: VerifyFn = async (dir, ref, workspaceOrgId) => {
   try {
-    const { verify } = await verifyInProcess(dir, { skipStash: true, ref });
+    const { verify } = await verifyInProcess(dir, { skipStash: true, ref, workspaceOrgId });
     return verify.drifts;
   } catch (e) {
     // ONLY the genuine "no contracts for this commit" case is neutral. Every
@@ -81,6 +87,8 @@ export interface GateVerifyRequest {
   baseBranch: string;
   /** The repo default branch (saved baseline is only valid for this). */
   defaultBranch: string;
+  /** The repo's linked workspace org (enterprise) — drives the effective merge. */
+  workspaceOrgId?: string | null;
 }
 
 export interface GateVerifyOutput {
@@ -124,6 +132,7 @@ export async function driftsForCommit(
   repoFullName: string,
   sha: string,
   checkoutDir: string,
+  workspaceOrgId?: string | null,
 ): Promise<CommitDrifts> {
   const ref: RepoRef = { repoKey: repoFullName, commitSha: sha };
   let openConflicts: number;
@@ -137,8 +146,16 @@ export async function driftsForCommit(
     const ss = await loadSpec<{ openConflicts?: unknown[] }>(ref, 'scanState');
     openConflicts = ss?.openConflicts?.length ?? 0;
   }
-  if (!(await hasContracts(ref, 'contracts'))) return { drifts: null, openConflicts }; // genuinely no spec
-  const d = await verify(checkoutDir, ref);
+  // Neutral ONLY when the repo has neither its own contracts nor any workspace
+  // contracts to inherit — otherwise the repo is verified against its EFFECTIVE
+  // contracts (workspace ∪ repo). A repo with no contracts of its own still
+  // drifts against the shared workspace contracts: the cross-repo ripple.
+  const repoHas = await hasContracts(ref, 'contracts');
+  const wsHas = workspaceOrgId
+    ? (await listWorkspaceContractFiles({ workspaceOrgId }, 'contracts')).length > 0
+    : false;
+  if (!repoHas && !wsHas) return { drifts: null, openConflicts }; // genuinely no spec
+  const d = await verify(checkoutDir, ref, workspaceOrgId);
   return { drifts: d ? relativizeDrifts(d, checkoutDir) : null, openConflicts };
 }
 
@@ -151,7 +168,7 @@ export async function runGateVerify(
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-verify-'));
 
   const driftsAt = (sha: string): Promise<CommitDrifts> =>
-    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp);
+    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId);
 
   try {
     const token = await getInstallationToken(deps.auth, req.installationId);

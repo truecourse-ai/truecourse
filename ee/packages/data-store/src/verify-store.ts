@@ -46,6 +46,7 @@ function materializeVerifyLatest(snap: VerifyRunSnapshot, filename: string): Ver
 }
 
 export class PgBlobVerifyStore implements VerifyStore {
+  readonly materializesInPlace = false;
   constructor(
     private readonly db: EeDb,
     private readonly blob: BlobStore,

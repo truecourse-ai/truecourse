@@ -31,6 +31,21 @@ export interface RepoRef {
   commitSha: string;
 }
 
+/**
+ * Identity of a WORKSPACE-scoped set (enterprise only). Workspace Knowledge is
+ * generated from connected tools (or manual upload) and shared by every repo in
+ * the workspace. It is **always-latest** — one current set per org per
+ * artifact/kind, with no commit dimension. `workspaceOrgId` is the WorkOS
+ * organization id (= `req.eeUser.organizationId`, the same value stored as
+ * `gh_repos.workspace_org_id`).
+ *
+ * Declared here next to `RepoRef` — the canonical home for store scope handles —
+ * and re-exported by `spec-store.ts` so both seams share one definition.
+ */
+export interface WorkspaceRef {
+  workspaceOrgId: string;
+}
+
 /** Independent lifecycles: authored contracts vs reverse-engineered (`infer`). */
 export type ContractKind = 'contracts' | 'contracts_inferred';
 
@@ -76,13 +91,42 @@ export interface ContractStore {
   /** Cheap existence probe (the gate uses it: "is this head already saved?"). */
   hasContracts(ref: RepoRef, kind: ContractKind): Promise<boolean>;
   /**
-   * Posix-relative paths of every `.tc` in the repo's CURRENT set, for the
-   * dashboard contract browser. Keyed by repo only (the impl picks the current
-   * set — the live tree for the file impl, the latest stored set for EE).
+   * Posix-relative paths of every `.tc` in a set, for the dashboard contract
+   * browser. EE: `commitSha` browses that commit's stored set (the ref switcher);
+   * omit for the latest stored set. The file impl always reads the live tree.
    */
-  listContractFiles(repoKey: string, kind: ContractKind): Promise<string[]>;
-  /** One `.tc` file's content (by relative path) from the current set, or null. */
-  readContractFile(repoKey: string, kind: ContractKind, relPath: string): Promise<string | null>;
+  listContractFiles(repoKey: string, kind: ContractKind, commitSha?: string): Promise<string[]>;
+  /** One `.tc` file's content (by relative path) from the set, or null. */
+  readContractFile(
+    repoKey: string,
+    kind: ContractKind,
+    relPath: string,
+    commitSha?: string,
+  ): Promise<string | null>;
+
+  // --- Workspace scope (enterprise only; always-latest, keyed by org) --------
+  // Workspace contracts are generated IN MEMORY from the workspace's canonical
+  // claims (no repo tree, no scratch dir), so the save takes a `{ relPath →
+  // content }` map rather than a source directory. The file default throws on
+  // save and is empty on read, so an effective read degrades to repo-only in OSS.
+
+  /** Persist an in-memory `.tc` corpus under WORKSPACE scope. Overwrites prior. */
+  saveWorkspaceContracts(
+    ref: WorkspaceRef,
+    kind: ContractKind,
+    files: Record<string, string>,
+  ): Promise<SaveContractsResult>;
+  /** Materialize the workspace set into a dir the verifier can read, or `null`. */
+  loadWorkspaceContracts(ref: WorkspaceRef, kind: ContractKind): Promise<MaterializedDir | null>;
+  /** Posix-relative paths of every `.tc` in the workspace set (dashboard browser). */
+  listWorkspaceContractFiles(ref: WorkspaceRef, kind: ContractKind): Promise<string[]>;
+  /** One workspace `.tc` file's content (by relative path), or null. */
+  readWorkspaceContractFile(
+    ref: WorkspaceRef,
+    kind: ContractKind,
+    relPath: string,
+  ): Promise<string | null>;
+
   /**
    * Capability flag: `true` when `loadContracts` returns the live repo tree
    * (file impl) — callers must treat `dir` as read-only and generate in place;
@@ -181,7 +225,9 @@ class FileContractStore implements ContractStore {
     return fs.existsSync(path.join(ref.repoKey, ...KIND_REL[kind]));
   }
 
-  async listContractFiles(repoKey: string, kind: ContractKind): Promise<string[]> {
+  // The file impl reads the live repo tree, which is whatever is checked out —
+  // there is no per-commit history, so `commitSha` is ignored (OSS is latest).
+  async listContractFiles(repoKey: string, kind: ContractKind, _commitSha?: string): Promise<string[]> {
     return walkTcRel(path.join(repoKey, ...KIND_REL[kind]), kind === 'contracts');
   }
 
@@ -189,10 +235,27 @@ class FileContractStore implements ContractStore {
     repoKey: string,
     kind: ContractKind,
     relPath: string,
+    _commitSha?: string,
   ): Promise<string | null> {
     const dest = safeResolve(path.join(repoKey, ...KIND_REL[kind]), relPath);
     if (!dest || !fs.existsSync(dest) || !fs.statSync(dest).isFile()) return null;
     return fs.readFileSync(dest, 'utf-8');
+  }
+
+  // OSS/local has no workspace concept (mirrors the spec store). Writing throws
+  // (fail loud — a caller that reached here is mis-wired); reads are empty so an
+  // effective-contracts read degrades cleanly to repo-only without special-casing.
+  async saveWorkspaceContracts(): Promise<SaveContractsResult> {
+    throw new Error('[contract-store] workspace-scoped contracts require the enterprise store');
+  }
+  async loadWorkspaceContracts(): Promise<MaterializedDir | null> {
+    return null;
+  }
+  async listWorkspaceContractFiles(): Promise<string[]> {
+    return [];
+  }
+  async readWorkspaceContractFile(): Promise<string | null> {
+    return null;
   }
 }
 
@@ -226,12 +289,36 @@ export const loadContracts = (
 ): Promise<MaterializedDir | null> => active.loadContracts(ref, kind);
 export const hasContracts = (ref: RepoRef, kind: ContractKind): Promise<boolean> =>
   active.hasContracts(ref, kind);
-export const listContractFiles = (repoKey: string, kind: ContractKind): Promise<string[]> =>
-  active.listContractFiles(repoKey, kind);
+export const listContractFiles = (
+  repoKey: string,
+  kind: ContractKind,
+  commitSha?: string,
+): Promise<string[]> => active.listContractFiles(repoKey, kind, commitSha);
 export const readContractFile = (
   repoKey: string,
   kind: ContractKind,
   relPath: string,
-): Promise<string | null> => active.readContractFile(repoKey, kind, relPath);
+  commitSha?: string,
+): Promise<string | null> => active.readContractFile(repoKey, kind, relPath, commitSha);
+
+export const saveWorkspaceContracts = (
+  ref: WorkspaceRef,
+  kind: ContractKind,
+  files: Record<string, string>,
+): Promise<SaveContractsResult> => active.saveWorkspaceContracts(ref, kind, files);
+export const loadWorkspaceContracts = (
+  ref: WorkspaceRef,
+  kind: ContractKind,
+): Promise<MaterializedDir | null> => active.loadWorkspaceContracts(ref, kind);
+export const listWorkspaceContractFiles = (
+  ref: WorkspaceRef,
+  kind: ContractKind,
+): Promise<string[]> => active.listWorkspaceContractFiles(ref, kind);
+export const readWorkspaceContractFile = (
+  ref: WorkspaceRef,
+  kind: ContractKind,
+  relPath: string,
+): Promise<string | null> => active.readWorkspaceContractFile(ref, kind, relPath);
+
 /** Whether the active store materializes the live repo tree in place (file) or a temp dir (EE). */
 export const contractsMaterializeInPlace = (): boolean => active.materializesInPlace;

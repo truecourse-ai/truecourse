@@ -85,6 +85,23 @@ export function writeContracts(
   return { written, proposed };
 }
 
+/**
+ * Compose the `.tc` corpus IN MEMORY: `{ posix relPath → tcSource }`, using the
+ * same path planning + body composition as {@link writeContracts} but touching
+ * no disk. The enterprise workspace path persists the returned map straight to
+ * Postgres/Blob (no scratch tree), honoring the "no local files" rule.
+ */
+export function composeContractFiles(artifacts: MergedArtifact[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const req of planWrites('', artifacts)) {
+    // pickFilePath('', a) yields a root-relative path; normalize to posix + strip
+    // any leading separator so the keys match the file store's relPath form.
+    const rel = req.filePath.split(path.sep).join('/').replace(/^\/+/, '');
+    out[rel] = req.tcSource;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // File path planning
 // ---------------------------------------------------------------------------

@@ -99,4 +99,26 @@ describe('contract browse — EE impl (latest stored set, content-addressed)', (
     expect(await listContractFiles('other/repo', 'contracts')).toEqual([]);
     fs.rmSync(src2, { recursive: true, force: true });
   });
+
+  it('browses a SPECIFIC commit when given a commitSha (the ref switcher)', async () => {
+    seed(srcDir, { '_shared/auth.tc': 'auth', 'order/get.tc': 'v1' });
+    await saveContracts({ repoKey: REPO_KEY, commitSha: 'c1' }, 'contracts', srcDir);
+
+    const src2 = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-browse-src2-'));
+    seed(src2, { '_shared/auth.tc': 'auth', 'order/get.tc': 'v2', 'order/list.tc': 'list' });
+    await saveContracts({ repoKey: REPO_KEY, commitSha: 'c2' }, 'contracts', src2);
+
+    // Pin to c1 → the OLD set (no order/list.tc; get.tc is v1), not the latest.
+    expect((await listContractFiles(REPO_KEY, 'contracts', 'c1')).sort()).toEqual([
+      '_shared/auth.tc',
+      'order/get.tc',
+    ]);
+    expect(await readContractFile(REPO_KEY, 'contracts', 'order/get.tc', 'c1')).toBe('v1');
+    expect(await readContractFile(REPO_KEY, 'contracts', 'order/list.tc', 'c1')).toBeNull(); // not in c1
+    // c2 explicitly → the newer set.
+    expect(await readContractFile(REPO_KEY, 'contracts', 'order/get.tc', 'c2')).toBe('v2');
+    // an unknown commit → nothing.
+    expect(await listContractFiles(REPO_KEY, 'contracts', 'nope')).toEqual([]);
+    fs.rmSync(src2, { recursive: true, force: true });
+  });
 });

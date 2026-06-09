@@ -207,6 +207,79 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
   });
 });
 
+describe('PgBlobContractStore — workspace scope (pglite + fs blob)', () => {
+  const ORG = 'org_A';
+  const wref = { workspaceOrgId: ORG };
+  let client: PGlite;
+  let blobDir: string;
+  let blob: FsBlobStore;
+  let store: PgBlobContractStore;
+
+  beforeEach(async () => {
+    const s = setup();
+    client = s.client;
+    blobDir = s.blobDir;
+    blob = s.blob;
+    store = new PgBlobContractStore(await makeDb(client), blob);
+  });
+  afterEach(async () => {
+    await client.close();
+    fs.rmSync(blobDir, { recursive: true, force: true });
+  });
+
+  const corpus = {
+    '_shared/auth.tc': 'auth requirement',
+    'order/operations/get-order.tc': 'GET /orders',
+    'order/order-model.tc': 'Order entity',
+  };
+
+  it('saves an in-memory map, then lists / reads / materializes it byte-identically', async () => {
+    const res = await store.saveWorkspaceContracts(wref, 'contracts', corpus);
+    expect(res.fileCount).toBe(3);
+    expect(res.objectsWritten).toBe(3);
+    expect(res.manifestHash).toMatch(/^sha256-/);
+
+    expect((await store.listWorkspaceContractFiles(wref, 'contracts')).sort()).toEqual([
+      '_shared/auth.tc',
+      'order/operations/get-order.tc',
+      'order/order-model.tc',
+    ]);
+    expect(await store.readWorkspaceContractFile(wref, 'contracts', 'order/operations/get-order.tc')).toBe(
+      'GET /orders',
+    );
+    expect(await store.readWorkspaceContractFile(wref, 'contracts', 'nope.tc')).toBeNull();
+
+    const mat = await store.loadWorkspaceContracts(wref, 'contracts');
+    expect(mat).not.toBeNull();
+    expect(listFilesRel(mat!.dir)).toEqual([
+      '_shared/auth.tc',
+      'order/operations/get-order.tc',
+      'order/order-model.tc',
+    ]);
+    await mat!.cleanup();
+    expect(fs.existsSync(mat!.dir)).toBe(false);
+  });
+
+  it('is always-latest: re-saving overwrites the set for the org', async () => {
+    await store.saveWorkspaceContracts(wref, 'contracts', corpus);
+    await store.saveWorkspaceContracts(wref, 'contracts', { 'only/one.tc': 'just one' });
+    expect(await store.listWorkspaceContractFiles(wref, 'contracts')).toEqual(['only/one.tc']);
+  });
+
+  it('isolates orgs (one org cannot read another’s workspace contracts)', async () => {
+    await store.saveWorkspaceContracts(wref, 'contracts', corpus);
+    const other = { workspaceOrgId: 'org_B' };
+    expect(await store.listWorkspaceContractFiles(other, 'contracts')).toEqual([]);
+    expect(await store.loadWorkspaceContracts(other, 'contracts')).toBeNull();
+  });
+
+  it('rejects path-traversal relpaths on save', async () => {
+    await expect(
+      store.saveWorkspaceContracts(wref, 'contracts', { '../escape.tc': 'x' }),
+    ).rejects.toThrow(/unsafe|escape|absolute/i);
+  });
+});
+
 describe('PgSpecStore (pglite)', () => {
   let client: PGlite;
   let store: PgSpecStore;

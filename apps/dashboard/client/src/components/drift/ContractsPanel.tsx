@@ -23,9 +23,19 @@ interface ContractsPanelProps {
   validationIssues?: IlValidationIssue[];
   /** Single-click opens a transient tab; double-click pins it. */
   onOpen: (path: string, pinned: boolean) => void;
+  /** Hosted (EE): contracts are generated server-side, not via an Apply/Generate button. */
+  hosted?: boolean;
 }
 
-export function ContractsPanel({ tree, isLoading, error, activePath, validationIssues, onOpen }: ContractsPanelProps) {
+export function ContractsPanel({
+  tree,
+  isLoading,
+  error,
+  activePath,
+  validationIssues,
+  onOpen,
+  hosted = false,
+}: ContractsPanelProps) {
   if (isLoading && !tree) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -47,11 +57,19 @@ export function ContractsPanel({ tree, isLoading, error, activePath, validationI
         icon={FileCode2}
         title="No contracts yet"
         body={
-          <>
-            Resolve all open conflicts in <strong>Spec</strong>, click{' '}
-            <strong>Apply</strong>, then click <strong>Generate</strong> here to
-            extract TC contracts.
-          </>
+          hosted ? (
+            <>
+              Resolve the open conflicts in the <strong>Spec</strong> tab —
+              contracts are generated automatically once every conflict is
+              resolved.
+            </>
+          ) : (
+            <>
+              Resolve all open conflicts in <strong>Spec</strong>, click{' '}
+              <strong>Apply</strong>, then click <strong>Generate</strong> here to
+              extract TC contracts.
+            </>
+          )
         }
       />
     );
@@ -88,7 +106,7 @@ function ModuleGroup({
   onOpen,
 }: {
   label: string;
-  files: Array<{ name: string; path: string }>;
+  files: Array<{ name: string; path: string; provenance?: 'workspace' | 'repo' }>;
   activePath: string | null;
   onOpen: (path: string, pinned: boolean) => void;
 }) {
@@ -133,10 +151,20 @@ function ModuleGroup({
                   ? 'bg-primary/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
               }`}
-              title={`${f.path} — click to preview, double-click to pin`}
+              title={`${f.path} — click to preview, double-click to pin${
+                f.provenance === 'workspace' ? ' · inherited from workspace Knowledge' : ''
+              }`}
             >
               <FileCode2 className="h-3 w-3 shrink-0" />
               <span className="truncate">{display}</span>
+              {f.provenance === 'workspace' && (
+                <span
+                  className="ml-auto shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary"
+                  title="Inherited from workspace Knowledge — shared by every repo"
+                >
+                  workspace
+                </span>
+              )}
             </button>
           );
         })}

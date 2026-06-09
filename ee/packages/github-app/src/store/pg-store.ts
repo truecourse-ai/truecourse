@@ -49,6 +49,7 @@ function toRepo(r: RepoRow): RepoLinkRecord {
     blocking: r.blocking,
     enabled: r.enabled,
     notifyEmails: r.notifyEmails,
+    notifications: (r.notifications as unknown as RepoLinkRecord['notifications']) ?? undefined,
     createdAt: toIso(r.createdAt),
     updatedAt: toIso(r.updatedAt),
   };
@@ -163,7 +164,11 @@ export class PostgresGateStore implements GateStore {
   async linkRepo(rec: RepoLinkRecord): Promise<void> {
     await this.db
       .insert(ghRepos)
-      .values({ ...rec, notifyEmails: rec.notifyEmails ?? [] })
+      .values({
+        ...rec,
+        notifyEmails: rec.notifyEmails ?? [],
+        notifications: (rec.notifications ?? null) as Record<string, boolean> | null,
+      })
       .onConflictDoUpdate({
         target: ghRepos.repoFullName,
         set: {
@@ -173,6 +178,7 @@ export class PostgresGateStore implements GateStore {
           blocking: sql`excluded.blocking`,
           enabled: sql`excluded.enabled`,
           notifyEmails: sql`excluded.notify_emails`,
+          notifications: sql`excluded.notifications`,
           updatedAt: sql`excluded.updated_at`,
         },
       });

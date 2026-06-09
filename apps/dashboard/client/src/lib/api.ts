@@ -669,6 +669,8 @@ export type SpecClaim = {
   kind?: 'definition' | 'constraint';
   provenance: { file: string; line: number; quote: string };
   metadata: { docKind: string; status?: string; lastTouched: string };
+  /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
+  layer?: 'workspace' | 'repo';
 };
 
 export type SpecConflictCandidate = {
@@ -760,12 +762,16 @@ export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
 export type CanonicalSpecTopic = {
   topic: string;
   claimCount: number;
+  /** Every claim in this topic is inherited from workspace Knowledge (enterprise). */
+  inherited?: boolean;
 };
 
 export type CanonicalSpecModule = {
   name: string;
   manifest: Record<string, unknown>;
   topics: CanonicalSpecTopic[];
+  /** Every topic in this module is entirely workspace-inherited (enterprise). */
+  inherited?: boolean;
 };
 
 export type CanonicalSpecTree = {
@@ -781,16 +787,22 @@ export type CanonicalSpecSection = {
   claims: SpecClaim[];
 };
 
-export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
-  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
+export function getSpecCanonicalTree(
+  repoId: string,
+  ref?: string,
+): Promise<CanonicalSpecTree> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree${q}`);
 }
 
 export function getSpecCanonicalSection(
   repoId: string,
   moduleName: string,
   topic: string,
+  ref?: string,
 ): Promise<CanonicalSpecSection> {
   const params = new URLSearchParams({ module: moduleName, topic });
+  if (ref) params.set('ref', ref);
   return fetchApi<CanonicalSpecSection>(
     `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
   );
@@ -804,7 +816,12 @@ export type ContractsTree = {
   hasContracts: boolean;
   modules: Array<{
     name: string;
-    files: Array<{ name: string; path: string }>;
+    files: Array<{
+      name: string;
+      path: string;
+      /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
+      provenance?: 'workspace' | 'repo';
+    }>;
   }>;
 };
 
@@ -813,14 +830,19 @@ export type ContractsFile = {
   content: string;
 };
 
-export function getContractsTree(repoId: string): Promise<ContractsTree> {
-  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree`);
+export function getContractsTree(repoId: string, ref?: string): Promise<ContractsTree> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree${q}`);
 }
 
-export function getContractsFile(repoId: string, filePath: string): Promise<ContractsFile> {
-  return fetchApi<ContractsFile>(
-    `/api/repos/${repoId}/contracts/file?path=${encodeURIComponent(filePath)}`,
-  );
+export function getContractsFile(
+  repoId: string,
+  filePath: string,
+  ref?: string,
+): Promise<ContractsFile> {
+  const params = new URLSearchParams({ path: filePath });
+  if (ref) params.set('ref', ref);
+  return fetchApi<ContractsFile>(`/api/repos/${repoId}/contracts/file?${params.toString()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -857,9 +879,13 @@ export type VerifyState = {
  * Persisted verify state. Returns null on 404 (no run yet); other
  * errors propagate.
  */
-export async function getVerifyState(repoId: string): Promise<VerifyState | null> {
+export async function getVerifyState(
+  repoId: string,
+  ref?: string,
+): Promise<VerifyState | null> {
   try {
-    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state`);
+    const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state${q}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;

@@ -22,8 +22,10 @@ import {
   readVerifyDiff,
   readVerifyHistory,
   deleteVerifyRun,
+  type VerifyState,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { loadSpec } from '@truecourse/core/lib/spec-store';
 import { getGit, isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   createSocketSpecTracker,
@@ -65,7 +67,12 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      const state = await readVerifyState(repo.path);
+      // `?ref=<commit>` (EE ref switcher) → that commit's persisted snapshot;
+      // omitted → the repo's latest verify state.
+      const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+      const state = ref
+        ? await loadSpec<VerifyState>({ repoKey: repo.path, commitSha: ref }, 'verifyState')
+        : await readVerifyState(repo.path);
       if (!state) {
         res.status(404).json({ error: 'No verify run has been recorded yet.' });
         return;

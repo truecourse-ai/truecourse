@@ -16,26 +16,32 @@ import type {
   WorkspaceMembersResponse,
   WorkspaceOverviewResponse,
 } from '@truecourse/shared';
-import { readRegistry } from '@truecourse/core/config/registry';
+import { slugify } from '@truecourse/core/config/registry';
 import { listViolations } from '@truecourse/core/services/violation-query';
 import { readVerifyState } from '@truecourse/core/commands/spec-in-process';
 
-// A repo counts as stale if it was never analyzed or not within this window.
+// A repo counts as stale if it was never analyzed/scanned or not within this window.
 const STALE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
-// Core readers the overview aggregates over, injectable so the route is
-// unit-testable without touching the real registry/filesystem.
+// Per-repo readers the overview aggregates over, injectable so the route is
+// unit-testable without touching the real stores.
 export interface WorkspaceDataReaders {
-  readRegistry: typeof readRegistry;
   listViolations: typeof listViolations;
   readVerifyState: typeof readVerifyState;
 }
 
 const defaultReaders: WorkspaceDataReaders = {
-  readRegistry,
   listViolations,
   readVerifyState,
 };
+
+/**
+ * The repo identities (repoKeys) connected to a workspace — the gate's `gh_repos`,
+ * scoped per org. This is what makes the overview workspace-isolated (vs the old
+ * global registry, which leaked repos across workspaces). Injected by the server
+ * (backed by the gate store) and stubbed in tests.
+ */
+export type ReposForWorkspace = (orgId: string) => Promise<string[]>;
 
 // The OSS auth gate attaches the resolved user; read it without
 // depending on the OSS type augmentation.
@@ -46,6 +52,7 @@ function orgIdOf(req: Request): string | null {
 
 export function createWorkspaceRouter(
   workos: WorkOS,
+  reposForWorkspace: ReposForWorkspace,
   readers: WorkspaceDataReaders = defaultReaders,
 ): Router {
   const router = Router();
@@ -85,41 +92,39 @@ export function createWorkspaceRouter(
     let staleCount = 0;
     const now = Date.now();
 
-    const entries = await readers.readRegistry();
-    const repos = await Promise.all(entries.map(async (e) => {
+    // Repos connected to THIS workspace (the gate's gh_repos) — not a global
+    // list — so the overview is workspace-isolated and matches the Repositories
+    // page. Each repo is keyed by its full name (repoKey); the slug is derived.
+    const organizationId = orgIdOf(req);
+    const repoKeys = organizationId ? await reposForWorkspace(organizationId) : [];
+    const repos = await Promise.all(repoKeys.map(async (repoKey) => {
       let v = 0;
       let d = 0;
+      let lastAnalyzed: string | null = null;
       try {
-        const { violations } = await readers.listViolations(e.path, { status: 'active' });
+        const { violations } = await readers.listViolations(repoKey, { status: 'active' });
         v = violations.length;
         for (const vi of violations) severity[vi.severity] += 1;
       } catch {
         // unanalyzed / unreadable repo — counts stay 0
       }
       try {
-        const vstate = await readers.readVerifyState(e.path);
+        const vstate = await readers.readVerifyState(repoKey);
         d = vstate?.drifts.length ?? 0;
+        lastAnalyzed = vstate?.verifiedAt ?? null;
       } catch {
         // no verify run recorded
       }
       violationCount += v;
       driftCount += d;
-      const stale =
-        !e.lastAnalyzed || now - Date.parse(e.lastAnalyzed) > STALE_WINDOW_MS;
+      const stale = !lastAnalyzed || now - Date.parse(lastAnalyzed) > STALE_WINDOW_MS;
       if (stale) staleCount += 1;
-      return {
-        id: e.slug,
-        name: e.name,
-        lastAnalyzed: e.lastAnalyzed ?? null,
-        violations: v,
-        drift: d,
-      };
+      return { id: slugify(repoKey, []), name: repoKey, lastAnalyzed, violations: v, drift: d };
     }));
 
     // Org name from WorkOS (best-effort — repo stats still render if
     // WorkOS is briefly unavailable). Members live on the Workspace page.
     let organizationName: string | null = null;
-    const organizationId = orgIdOf(req);
     if (organizationId) {
       try {
         organizationName = (
@@ -133,7 +138,7 @@ export function createWorkspaceRouter(
     const body: WorkspaceOverviewResponse = {
       organizationName,
       stats: {
-        repoCount: entries.length,
+        repoCount: repoKeys.length,
         violationCount,
         driftCount,
         staleCount,

@@ -11,7 +11,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@truecourse/shared": "workspace:*"
+    "@truecourse/shared": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "react": "^19.0.0",

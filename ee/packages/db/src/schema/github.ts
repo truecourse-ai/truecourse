@@ -38,6 +38,10 @@ export const ghRepos = pgTable('gh_repos', {
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
+  // Per-type email toggles ({ gateFailure, scanOffer, ... }). Loosely typed here
+  // (ee-db is a dependency-free leaf); the gate store casts at the boundary.
+  // Null = unset → every type on.
+  notifications: jsonb('notifications').$type<Record<string, boolean>>(),
   createdAt: ts('created_at').notNull(),
   updatedAt: ts('updated_at').notNull(),
 });

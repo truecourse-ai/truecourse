@@ -72,6 +72,10 @@
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
     },
+    "./lib/background-tasks": {
+      "types": "./dist/lib/background-tasks.d.ts",
+      "import": "./dist/lib/background-tasks.js"
+    },
     "./lib/repo-ref": {
       "types": "./dist/lib/repo-ref.d.ts",
       "import": "./dist/lib/repo-ref.js"

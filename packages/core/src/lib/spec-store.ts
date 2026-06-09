@@ -11,11 +11,30 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RepoRef } from './contract-store.js';
+import type { RepoRef, WorkspaceRef } from './contract-store.js';
 
-export type { RepoRef } from './contract-store.js';
+export type { RepoRef, WorkspaceRef } from './contract-store.js';
 
-export type SpecArtifact = 'claims' | 'decisions' | 'scanState';
+/**
+ * Per-(repo, commit) JSON artifacts. `claims`/`decisions`/`scanState` are the
+ * consolidated spec; `verifyState` is the verifier's drift snapshot for that
+ * commit — persisted by the gate so the dashboard's ref switcher can show a PR's
+ * drift (the verify-store's LATEST is per-repo, not per-commit). Written only in
+ * EE (the gate passes a `ref`); OSS never stores it.
+ *
+ * `rawClaims`/`chains` are the pre-merge extracted claim set + detected version
+ * chains. They are persisted under WORKSPACE scope only, so a decision can be
+ * re-applied via a body-free `remerge()` without re-reading the source docs
+ * (workspace Knowledge never stores the bodies). Repos re-derive these from the
+ * working tree on each scan, so they don't persist them.
+ */
+export type SpecArtifact =
+  | 'claims'
+  | 'decisions'
+  | 'scanState'
+  | 'verifyState'
+  | 'rawClaims'
+  | 'chains';
 
 /** Pluggable spec store. File-backed by default; EE injects Postgres. */
 export interface SpecStore {
@@ -25,6 +44,23 @@ export interface SpecStore {
   loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null>;
   /** Read the repo's CURRENT artifact (the latest stored, for the dashboard), or `null`. */
   loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null>;
+  /**
+   * The repo's latest stored commit SHA (the one `loadLatest` reads from), or
+   * `null` when nothing is stored. EE-only — the file impl materializes in place
+   * and has no commit dimension, so it returns null.
+   */
+  latestCommit(repoKey: string): Promise<string | null>;
+  /**
+   * Persist one spec JSON artifact under WORKSPACE scope (enterprise only).
+   * Always-latest: one current row per `(workspaceOrgId, artifact)`, no commit.
+   * The file default throws — OSS/local has no workspace concept.
+   */
+  saveWorkspaceSpec(ref: WorkspaceRef, artifact: SpecArtifact, json: unknown): Promise<void>;
+  /**
+   * Read one workspace spec artifact, or `null`. The file default returns
+   * `null` (so a future effective-spec read degrades to repo-only in OSS).
+   */
+  loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact): Promise<T | null>;
   /** `true` when load returns the live repo file (file impl). */
   readonly materializesInPlace: boolean;
 }
@@ -69,6 +105,22 @@ class FileSpecStore implements SpecStore {
   async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null> {
     return this.loadSpec<T>({ repoKey, commitSha: '' }, artifact);
   }
+
+  // No commit dimension in the file edition.
+  async latestCommit(): Promise<string | null> {
+    return null;
+  }
+
+  // OSS/local has no workspace concept. Writing throws (fail loud — a caller
+  // that reached here is mis-wired); reading is empty so an effective-spec read
+  // degrades cleanly to repo-only without special-casing the file edition.
+  async saveWorkspaceSpec(): Promise<void> {
+    throw new Error('[spec-store] workspace-scoped specs require the enterprise store');
+  }
+
+  async loadWorkspaceSpec<T = unknown>(): Promise<T | null> {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -98,5 +150,16 @@ export const loadLatestSpec = <T = unknown>(
   repoKey: string,
   artifact: SpecArtifact,
 ): Promise<T | null> => active.loadLatest<T>(repoKey, artifact);
+export const latestSpecCommit = (repoKey: string): Promise<string | null> =>
+  active.latestCommit(repoKey);
+export const saveWorkspaceSpec = (
+  ref: WorkspaceRef,
+  artifact: SpecArtifact,
+  json: unknown,
+): Promise<void> => active.saveWorkspaceSpec(ref, artifact, json);
+export const loadWorkspaceSpec = <T = unknown>(
+  ref: WorkspaceRef,
+  artifact: SpecArtifact,
+): Promise<T | null> => active.loadWorkspaceSpec<T>(ref, artifact);
 /** Whether the active spec store reads/writes the live repo files (file) or Postgres (EE). */
 export const specsMaterializeInPlace = (): boolean => active.materializesInPlace;

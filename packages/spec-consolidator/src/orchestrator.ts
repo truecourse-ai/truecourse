@@ -167,6 +167,17 @@ export interface ConsolidateOptions {
    * data on `result.modules` / `result.claimEntries` without a write.
    */
   skipClaimsWrite?: boolean;
+  /**
+   * Inject the doc set instead of walking the filesystem. EE feeds in-memory
+   * docs (each carrying `content`) so a workspace scan touches no local disk;
+   * omitted → `discoverDocs(repoRoot)` as the OSS/repo path always has.
+   */
+  docSource?: () => DocCandidate[] | Promise<DocCandidate[]>;
+  /**
+   * Inject the decisions file instead of reading `decisions.json` from disk
+   * (EE supplies it from Postgres). Omitted → `readDecisions(repoRoot)`.
+   */
+  decisions?: DecisionsFile;
   /** Hooks for progress UIs / logging. */
   /**
    * Fires during the discover phase as the LLM relevance filter classifies
@@ -209,6 +220,12 @@ export interface ConsolidateResult {
   /** Entries written to (or that would be written to) `claims.json`. */
   claimEntries: ClaimsFileEntry[];
   /**
+   * The version chains the run stitched into the conflict set. Returned so a
+   * caller that persists derived state (e.g. workspace Knowledge) can re-run a
+   * decision-only `remerge()` later without re-reading the source docs.
+   */
+  chains: VersionChain[];
+  /**
    * Docs the LLM relevance filter marked as non-spec material and
    * excluded from extraction. Each carries a short reason for the
    * dashboard, plus the doc's repo-relative path so the user can
@@ -230,12 +247,16 @@ export async function consolidate(
   repoRoot: string,
   opts: ConsolidateOptions = {},
 ): Promise<ConsolidateResult> {
-  const decisions = readDecisions(repoRoot);
+  // Decisions + docs can be injected (EE feeds them from RAM/Postgres, no disk);
+  // absent → read from the filesystem exactly as the OSS/repo path always has.
+  const decisions = opts.decisions ?? readDecisions(repoRoot);
   const models = opts.models ?? {};
   const fallbackModel = models.fallback;
 
   // ---- Discover -------------------------------------------------------
-  const allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
+  const allDocs = opts.docSource
+    ? await opts.docSource()
+    : discoverDocs(repoRoot, { skipGit: opts.skipGit });
 
   // ---- LLM relevance filter -------------------------------------------
   // Drop docs the LLM tags as non-spec material (task lists, research
@@ -472,7 +493,65 @@ export async function consolidate(
     });
   }
 
-  return { extract, merge: finalMerge, modules, claimEntries, decisions, skippedDocs };
+  return { extract, merge: finalMerge, modules, claimEntries, decisions, skippedDocs, chains: chainsForStitch };
+}
+
+// ---------------------------------------------------------------------------
+// remerge — re-apply decisions to an already-extracted claim set
+// ---------------------------------------------------------------------------
+
+/** What a body-free re-merge produces — the deterministic outputs of the merge. */
+export interface RemergeResult {
+  merge: MergeResult;
+  modules: DetectedModule[];
+  claimEntries: ClaimsFileEntry[];
+}
+
+/**
+ * Re-merge an already-extracted claim set against a (possibly updated) decisions
+ * file — **without re-reading the source docs and without any LLM call**.
+ *
+ * `consolidate()` fuses extraction (needs the docs + LLM) with the deterministic
+ * merge (a pure function of claims + chains + decisions). When a caller has
+ * persisted the raw `claims` and detected `chains` (e.g. workspace Knowledge,
+ * which never stores the bodies), applying a user decision is just re-running
+ * that deterministic tail. This is the workspace equivalent of the repo
+ * dashboard's "re-scan from files after a decision" — same merge math, sourced
+ * from stored derived state instead of the working tree.
+ *
+ * The LLM auto-resolve/explain passes are intentionally skipped: the user has
+ * made the decision, and any prior high-confidence auto-resolutions the caller
+ * wants to keep should already be persisted as decisions in `decisions`.
+ */
+export function remerge(
+  claims: Claim[],
+  chains: VersionChain[],
+  decisions: DecisionsFile,
+): RemergeResult {
+  const chainConflicts = chains.map(synthesizeChainConflict);
+  const winners = resolveChainWinners(chainConflicts, chains, decisions);
+  const filtered = filterByChainWinners(claims, chains, winners);
+  const merged = mergeClaims(filtered, decisions);
+  const enriched = enrichChainConflictsWithStats(chainConflicts, claims);
+  const stitched = stitchChainConflicts(merged, enriched, chains, decisions);
+
+  const renderable = collectRenderableClaims(stitched);
+  const detection = detectModules(renderable);
+  const moduleByClaimId = new Map<string, string>();
+  for (const m of detection.modules) {
+    for (const c of m.claims) moduleByClaimId.set(c.id, m.name);
+  }
+  const claimEntries: ClaimsFileEntry[] = renderable
+    .filter((c) => c.metadata.status !== 'out-of-scope')
+    .map((c) =>
+      entryFromClaim(
+        c,
+        moduleByClaimId.get(c.id) ?? SHARED_MODULE,
+        c.id.startsWith('custom-') ? 'custom' : 'extracted',
+      ),
+    );
+
+  return { merge: stitched, modules: detection.modules, claimEntries };
 }
 
 // ---------------------------------------------------------------------------

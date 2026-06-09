@@ -30,10 +30,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   claimsFilePath,
-  readClaims,
+  type ClaimsFile,
   type Resolution,
 } from '@truecourse/spec-consolidator';
+import type { AuthUser } from '@truecourse/shared';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import {
+  loadSpec,
+  loadLatestSpec,
+  loadWorkspaceSpec,
+  specsMaterializeInPlace,
+} from '@truecourse/core/lib/spec-store';
+import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
+import { readVerifyLatest } from '@truecourse/core/lib/verify-store';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addManualChain,
@@ -44,6 +53,9 @@ import {
   removeManualChain,
   removeManualInclude,
   resolveAllDefaultsInProcess,
+  resolveAllDefaultsRemerge,
+  refreshRepoCanonicalSpec,
+  regenerateRepoContractsFromDecisions,
   revokeDecision as revokeDecisionInProcess,
   SCAN_STEPS,
   scanInProcess,
@@ -55,8 +67,49 @@ import {
   emitSpecComplete,
   emitSpecProgress,
 } from '../socket/handlers.js';
+import { log } from '@truecourse/core/lib/logger';
+import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 
 const router: Router = Router();
+
+function orgOf(req: Request): string | undefined {
+  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;
+}
+
+/**
+ * After a HOSTED repo decision (the OSS local flow re-runs the on-demand Scan):
+ *
+ *  1. SYNCHRONOUSLY re-merge + persist the canonical `claims` + `scan-state` —
+ *     fast (no docs/git/LLM), so the Spec view reflects the decision immediately.
+ *  2. Defer the slow `.tc` contract regen to the background queue (off the request
+ *     path); inline best-effort when no queue is wired (tests).
+ *
+ * Both steps are best-effort — a failure never fails the decision (the spec
+ * re-merges on read regardless, and contracts refresh on the next scan). No-op on
+ * the OSS file edition.
+ */
+async function refreshHostedContracts(repoKey: string, org: string | undefined): Promise<void> {
+  if (specsMaterializeInPlace()) return;
+  try {
+    await refreshRepoCanonicalSpec(repoKey);
+  } catch (e) {
+    log.warn(`[spec] spec refresh after decision failed (${repoKey}): ${(e as Error).message}`);
+  }
+  const enqueue = getBackgroundTaskRunner();
+  if (enqueue && org) {
+    try {
+      await enqueue({ type: 'repo.contracts', workspaceOrgId: org, repoKey });
+    } catch (e) {
+      log.warn(`[spec] enqueue contract refresh failed (${repoKey}): ${(e as Error).message}`);
+    }
+    return;
+  }
+  try {
+    await regenerateRepoContractsFromDecisions(repoKey);
+  } catch (e) {
+    log.warn(`[spec] contract refresh after decision failed (${repoKey}): ${(e as Error).message}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/scan
@@ -150,6 +203,7 @@ router.post(
         candidateFingerprint: body.candidateFingerprint,
         note: body.note,
       });
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(next);
     } catch (e) {
       next(e);
@@ -168,6 +222,7 @@ router.delete(
       const repo = await resolveProjectForRequest(req.params.id as string);
       const conflictId = req.params.conflictId as string;
       const nextFile = await revokeDecisionInProcess(repo.path, conflictId);
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -199,6 +254,7 @@ router.post(
         newer: body.newer,
         note: body.note,
       });
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -222,6 +278,7 @@ router.post(
         return;
       }
       const nextFile = await addManualInclude(repo.path, body.path);
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -240,6 +297,7 @@ router.delete(
         return;
       }
       const nextFile = await removeManualInclude(repo.path, body.path);
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -258,6 +316,7 @@ router.delete(
         return;
       }
       const nextFile = await removeManualChain(repo.path, { older: body.older, newer: body.newer });
+      await refreshHostedContracts(repo.path, orgOf(req));
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -279,7 +338,16 @@ router.post(
         res.status(400).json({ error: 'Only mode="all-defaults" is supported.' });
         return;
       }
-      // Same code path as the CLI's `spec resolve --all-defaults`.
+      // Hosted (stored sets, no working tree): re-merge from the persisted raw
+      // claims + chains rather than re-consolidating from docs we don't have —
+      // git-free, mirroring the workspace accept-all.
+      if (!specsMaterializeInPlace()) {
+        const postScanState = await resolveAllDefaultsRemerge(repo.path);
+        await refreshHostedContracts(repo.path, orgOf(req));
+        res.json({ postScanState });
+        return;
+      }
+      // OSS local: same code path as the CLI's `spec resolve --all-defaults`.
       // Persists decisions.json and refreshes scan-state.json so the
       // dashboard's next mount sees the updated conflict picture.
       const result = await resolveAllDefaultsInProcess(repo.path);
@@ -310,6 +378,29 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
+
+      // EE (stored sets, not the live tree): there are no local marker files to
+      // stat, and the gate produces spec → contracts → verify TOGETHER per
+      // commit, so the latest stored sets are always in sync. Report existence
+      // from the stores; nothing is stale.
+      if (!contractsMaterializeInPlace()) {
+        const [claims, contractFiles, verify] = await Promise.all([
+          loadLatestSpec<unknown>(repo.path, 'claims'),
+          listContractFiles(repo.path, 'contracts'),
+          readVerifyLatest(repo.path),
+        ]);
+        res.json({
+          contractsStale: false,
+          verifyStale: false,
+          hasClaims: claims !== null,
+          hasGenerated: contractFiles.length > 0,
+          hasVerified: verify !== null,
+        });
+        return;
+      }
+
+      // OSS: cheap mtime probe (the IL writers stamp files in place, and the
+      // scan/generate/verify steps run independently, so they can drift).
       const claimsMtime = mtimeIfExists(claimsFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
       // Verifier store's LATEST.json is the verify marker (its own write stamp).
@@ -343,6 +434,76 @@ function mtimeIfExists(file: string): number | null {
   }
 }
 
+/** The latest claim set, or a specific commit's when `?ref=<commit>` is given
+ *  (the EE ref switcher — default branch vs a PR head). OSS ignores `ref`. */
+function claimsFor(repoKey: string, req: Request): Promise<ClaimsFile | null> {
+  const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+  return ref
+    ? loadSpec<ClaimsFile>({ repoKey, commitSha: ref }, 'claims')
+    : loadLatestSpec<ClaimsFile>(repoKey, 'claims');
+}
+
+/** The signed-in workspace org (enterprise), set by the auth gate. Absent in OSS. */
+function workspaceOrgOf(req: Request): string | undefined {
+  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;
+}
+
+type SpecLayer = 'workspace' | 'repo';
+type ClaimEntry = ClaimsFile['claims'][number];
+type LayeredClaim = ClaimEntry & { layer: SpecLayer };
+
+interface EffectiveClaims {
+  generatedAt: string;
+  modules: ClaimsFile['modules'];
+  claims: LayeredClaim[];
+}
+
+/** A claim's logical identity within the canonical set (for cross-layer dedupe). */
+function claimKey(c: ClaimEntry): string {
+  return `${c.module} ${c.topic} ${c.subject}`;
+}
+
+/**
+ * A repo's EFFECTIVE canonical claims = its own UNIONed with the workspace
+ * claims it inherits, the repo winning on a `(module, topic, subject)` collision,
+ * each claim tagged with its layer for the provenance badge. Repo-only in OSS
+ * (no workspace org / the file store returns null for the workspace artifact) —
+ * mirrors the Contracts-tab merge, but at the claim level (claims are additive
+ * context, so it's a union; the gate verifies contracts, not claims).
+ */
+export async function effectiveClaims(
+  repoKey: string,
+  workspaceOrgId: string | undefined,
+  req: Request,
+): Promise<EffectiveClaims | null> {
+  const repo = await claimsFor(repoKey, req);
+  const ws = workspaceOrgId
+    ? await loadWorkspaceSpec<ClaimsFile>({ workspaceOrgId }, 'claims')
+    : null;
+  if (!repo && !ws) return null;
+
+  const seen = new Set<string>();
+  const claims: LayeredClaim[] = [];
+  for (const c of repo?.claims ?? []) {
+    claims.push({ ...c, layer: 'repo' });
+    seen.add(claimKey(c));
+  }
+  for (const c of ws?.claims ?? []) {
+    if (!seen.has(claimKey(c))) claims.push({ ...c, layer: 'workspace' });
+  }
+
+  // Module manifests: repo wins on a name collision; union the rest.
+  const modulesByName = new Map<string, ClaimsFile['modules'][number]>();
+  for (const m of ws?.modules ?? []) modulesByName.set(m.name, m);
+  for (const m of repo?.modules ?? []) modulesByName.set(m.name, m);
+
+  return {
+    generatedAt: repo?.generatedAt ?? ws?.generatedAt ?? new Date().toISOString(),
+    modules: [...modulesByName.values()],
+    claims,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/canonical/tree
 // GET /api/repos/:id/spec/canonical/section?module=…&topic=…
@@ -362,29 +523,31 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      const claims = readClaims(repo.path);
+      const claims = await effectiveClaims(repo.path, workspaceOrgOf(req), req);
       if (!claims) {
         res.json({ hasCanonical: false, modules: [] });
         return;
       }
-      const claimsByModuleTopic = new Map<string, Map<string, number>>();
+      // Per (module, topic): claim count + how many are the repo's own, so a
+      // topic/module that is ENTIRELY inherited from the workspace is badged.
+      const agg = new Map<string, Map<string, { count: number; repo: number }>>();
       for (const c of claims.claims) {
-        const byTopic = claimsByModuleTopic.get(c.module) ?? new Map<string, number>();
-        byTopic.set(c.topic, (byTopic.get(c.topic) ?? 0) + 1);
-        claimsByModuleTopic.set(c.module, byTopic);
+        const byTopic = agg.get(c.module) ?? new Map<string, { count: number; repo: number }>();
+        const t = byTopic.get(c.topic) ?? { count: 0, repo: 0 };
+        t.count += 1;
+        if (c.layer === 'repo') t.repo += 1;
+        byTopic.set(c.topic, t);
+        agg.set(c.module, byTopic);
       }
       const modules = claims.modules
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((manifest) => {
-          const topics = claimsByModuleTopic.get(manifest.name) ?? new Map<string, number>();
-          return {
-            name: manifest.name,
-            manifest,
-            topics: [...topics.entries()]
-              .map(([topic, count]) => ({ topic, claimCount: count }))
-              .sort((a, b) => a.topic.localeCompare(b.topic)),
-          };
+          const topics = [...(agg.get(manifest.name) ?? new Map<string, { count: number; repo: number }>()).entries()]
+            .map(([topic, t]) => ({ topic, claimCount: t.count, inherited: t.repo === 0 }))
+            .sort((a, b) => a.topic.localeCompare(b.topic));
+          const inherited = topics.length > 0 && topics.every((t) => t.inherited);
+          return { name: manifest.name, manifest, inherited, topics };
         });
       res.json({
         hasCanonical: true,
@@ -408,7 +571,7 @@ router.get(
         res.status(400).json({ error: 'Missing `module` or `topic` query parameter.' });
         return;
       }
-      const claims = readClaims(repo.path);
+      const claims = await effectiveClaims(repo.path, workspaceOrgOf(req), req);
       if (!claims) {
         res.status(404).json({ error: 'No canonical spec yet — run scan first.' });
         return;
@@ -418,6 +581,7 @@ router.get(
         res.status(404).json({ error: `Module ${moduleName} not found.` });
         return;
       }
+      // Each claim carries `layer` ('workspace' | 'repo') for the provenance badge.
       const items = claims.claims
         .filter((c) => c.module === moduleName && c.topic === topic)
         .sort((a, b) => a.subject.localeCompare(b.subject));

@@ -43,6 +43,7 @@ import {
   type InferResultSummary,
 } from './infer-scan.js';
 import { contractsDashboardUrl } from './links.js';
+import { wantsNotification } from './notifications.js';
 
 export interface InferOfferDeps {
   store: GateStore;
@@ -167,7 +168,12 @@ export async function handleCommentEditedInfer(
     // Notify only when inference actually captured decisions (mirrors the
     // comment's "done" vs "nochange" branch, so no email on an empty re-run).
     const notifyEmails = link.notifyEmails ?? [];
-    if (result.decisions.length > 0 && notifyEmails.length > 0 && deps.notifier) {
+    if (
+      result.decisions.length > 0 &&
+      notifyEmails.length > 0 &&
+      deps.notifier &&
+      wantsNotification(link, 'inferResult')
+    ) {
       void deps.notifier.sendInferResult(notifyEmails, {
         repoFullName,
         prNumber,

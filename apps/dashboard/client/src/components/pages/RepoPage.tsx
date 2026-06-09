@@ -1,9 +1,17 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, Navigate } from 'react-router-dom';
+import { useParams, Navigate, useNavigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
+import { useEdition } from '@/contexts/CapabilityContext';
+import { useVisibleTabsForSection } from '@/navigation/registry';
+import { EeRepoChrome } from '@/ee/EeRepoChrome';
+import { RepoSettings } from '@/ee/RepoSettings';
+
+/** EE repo tab bar: BL-Drift only, curated order. Analytics leads + is default.
+ *  Spec → Decisions → Contracts mirrors the workspace Knowledge page order. */
+const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'decisions', 'contracts', 'settings'];
 import {
   NavigationProvider,
   useNavigation,
@@ -32,6 +40,7 @@ import { ContractsFile } from '@/components/drift/ContractsFile';
 import { VerifyPanel, type DriftFilterTarget } from '@/components/drift/VerifyPanel';
 import { VerifyStatsColumn, type DriftFilters } from '@/components/drift/VerifyStatsColumn';
 import { VerifyRunsPanel } from '@/components/drift/VerifyRunsPanel';
+import { PullRequestsView } from '@/components/drift/PullRequestsView';
 import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
 import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
 import { useVerifyState } from '@/hooks/useVerifyState';
@@ -50,7 +59,7 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecPanel } from '@/components/spec/SpecPanel';
-import { SpecProvider } from '@/components/spec/SpecContext';
+import { SpecProvider, createRepoSpecDataSource } from '@/components/spec/SpecContext';
 import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
 import { useGraph } from '@/hooks/useGraph';
@@ -170,9 +179,34 @@ function RepoPageInner() {
     handleOpenDrift,
     handleCloseDrift,
     reconcileDriftTabs,
+    selectedRef,
+    setSelectedRef,
   } = useDriftView();
 
   const currentBranch = repo?.defaultBranch;
+
+  // Enterprise shows ONLY BL Drift on the repo page (no Code Analysis), as a
+  // curated horizontal tab bar. Analytics leads and is the default. `pulls` +
+  // `runs` are dropped here: PRs live in the header ref selector + the cross-repo
+  // sidebar feed, and "Runs" is an OSS-local concept (no local runs in EE).
+  const isEe = useEdition() === 'enterprise';
+  const driftTabs = useVisibleTabsForSection('drift');
+  const navigate = useNavigate();
+  const eeTabs = EE_REPO_TAB_ORDER.map((id) => driftTabs.find((t) => t.id === id)).filter(
+    (t): t is NonNullable<typeof t> => Boolean(t),
+  );
+  useEffect(() => {
+    if (!isEe) return;
+    // Force a coherent EE state: BL-Drift section + one of the curated tabs,
+    // defaulting to Analytics. Redirects stale OSS tabs (home/runs/pulls/…).
+    if (dashboardSection === 'drift' && leftTab && EE_REPO_TAB_ORDER.includes(leftTab)) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', 'drift');
+    const t = url.searchParams.get('tab');
+    if (!t || !EE_REPO_TAB_ORDER.includes(t)) url.searchParams.set('tab', 'driftanalytics');
+    navigate(url.pathname + url.search, { replace: true });
+  }, [isEe, dashboardSection, leftTab, navigate]);
+
   const {
     isConnected,
     analysisProgress,
@@ -275,13 +309,22 @@ function RepoPageInner() {
     isLoading: contractsLoading,
     error: contractsError,
     refetch: refetchContracts,
-  } = useContractsTree(repoId);
+  } = useContractsTree(repoId, isEe ? selectedRef : undefined);
+  // The repo-scoped spec data seam — shared by the SpecProvider below and the
+  // canonical tree hook so both read the same source (the EE Knowledge page
+  // passes a workspace source instead).
+  const specSource = useMemo(
+    // EE repos are hosted (Postgres store, no working tree) — the source then
+    // refreshes via the server's re-merge instead of an on-demand rescan.
+    () => createRepoSpecDataSource(repoId, isEe ? selectedRef : undefined, isEe),
+    [repoId, isEe, selectedRef],
+  );
   const {
     tree: canonicalTree,
     isLoading: canonicalLoading,
     error: canonicalError,
     refetch: refetchCanonical,
-  } = useCanonicalSpecTree(repoId);
+  } = useCanonicalSpecTree(specSource);
   const {
     state: verifyState,
     diff: verifyDiff,
@@ -293,7 +336,7 @@ function RepoPageInner() {
     refetch: refetchVerify,
     run: runVerify,
     runDiff: runVerifyDiff,
-  } = useVerifyState(repoId);
+  } = useVerifyState(repoId, isEe ? selectedRef : undefined);
   const {
     generating: contractsGenerating,
     result: contractsGenerateResult,
@@ -861,63 +904,84 @@ function RepoPageInner() {
     syncFlowNames(flowList);
   }, [flowList, syncFlowNames]);
 
-  return (
-    <SpecProvider repoId={repoId}>
-    <div className="flex h-screen flex-col">
-      <Header
-        repoName={repo?.name}
-        currentBranch={currentBranch}
-        onAnalyze={
-          dashboardSection !== 'analysis' || isViewingHistory || repoError || repo?.isGitRepo === false
-            ? undefined
-            : handleAnalyze
-        }
-        isAnalyzing={isAnalyzing || isDiffChecking}
-        showBack
-        backHref="/"
-        isDiffMode={isDiffMode}
-        onEnterDiffMode={
-          dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
-            ? undefined
-            : handleEnterDiffMode
-        }
-        onExitDiffMode={
-          dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
-            ? undefined
-            : handleExitDiffMode
-        }
-        analyses={analyses}
-        selectedAnalysisId={selectedAnalysisId}
-        onSelectAnalysis={setSelectedAnalysisId}
-        currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
-        dashboardSection={dashboardSection}
-        onDashboardSectionChange={setDashboardSection}
-        sectionActions={
-          leftTab === 'spec' ? (
-            <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} />
-          ) : leftTab === 'contracts' ? (
-            <ContractsHeaderActions
-              isGenerating={contractsGenerating}
-              onGenerate={runContractsGenerate}
-              stale={contractsStale}
-              isGitRepo={repo?.isGitRepo !== false}
-            />
-          ) : leftTab === 'verify' ? (
-            <VerifyHeaderActions
-              isRunning={isDiffMode ? verifyDiffing : verifyRunning}
-              onRun={isDiffMode ? runVerifyDiff : runVerify}
-              stale={verifyStale}
-              diffMode={isDiffMode}
-              onToggleDiff={setIsDiffMode}
-              isGitRepo={repo?.isGitRepo !== false}
-              runItems={verifyRunItems}
-              selectedRunId={selectedVerifyRunId}
-              onSelectRun={setSelectedVerifyRunId}
-              viewingHistory={isViewingVerifyRun}
-            />
-          ) : null
-        }
+  // Per-tab header actions (Spec Apply, Contracts Generate, Verify Run) — shared
+  // by both the OSS Header and the EE repo chrome.
+  const sectionActionsNode =
+    leftTab === 'spec' ? (
+      <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} hosted={isEe} />
+    ) : leftTab === 'contracts' ? (
+      <ContractsHeaderActions
+        isGenerating={contractsGenerating}
+        onGenerate={runContractsGenerate}
+        stale={contractsStale}
+        isGitRepo={repo?.isGitRepo !== false}
       />
+    ) : leftTab === 'verify' ? (
+      <VerifyHeaderActions
+        isRunning={isDiffMode ? verifyDiffing : verifyRunning}
+        onRun={isDiffMode ? runVerifyDiff : runVerify}
+        stale={verifyStale}
+        diffMode={isDiffMode}
+        onToggleDiff={setIsDiffMode}
+        isGitRepo={repo?.isGitRepo !== false}
+        runItems={verifyRunItems}
+        selectedRunId={selectedVerifyRunId}
+        onSelectRun={setSelectedVerifyRunId}
+        viewingHistory={isViewingVerifyRun}
+      />
+    ) : null;
+
+  return (
+    <SpecProvider source={specSource}>
+    <div className="flex h-screen flex-col">
+      {isEe ? (
+        // EE has no working tree, so the git-only actions (Scan / Generate /
+        // Verify Run) stay hidden — each self-gates on isGitRepo/supportsRescan.
+        // But "Accept all defaults" resolves conflicts server-side (no tree), so
+        // we surface the Spec tab's actions, which for hosted renders just that
+        // button (the Scan button self-hides).
+        <EeRepoChrome
+          repoName={repo?.name}
+          branch={currentBranch}
+          tabs={eeTabs}
+          activeTab={leftTab}
+          onTabChange={(t) => handleLeftTabChange(t)}
+          selectedRef={selectedRef}
+          onSelectRef={setSelectedRef}
+          actions={leftTab === 'spec' ? sectionActionsNode : undefined}
+        />
+      ) : (
+        <Header
+          repoName={repo?.name}
+          currentBranch={currentBranch}
+          onAnalyze={
+            dashboardSection !== 'analysis' || isViewingHistory || repoError || repo?.isGitRepo === false
+              ? undefined
+              : handleAnalyze
+          }
+          isAnalyzing={isAnalyzing || isDiffChecking}
+          showBack
+          backHref="/"
+          isDiffMode={isDiffMode}
+          onEnterDiffMode={
+            dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
+              ? undefined
+              : handleEnterDiffMode
+          }
+          onExitDiffMode={
+            dashboardSection !== 'analysis' || isViewingHistory || repo?.isGitRepo === false
+              ? undefined
+              : handleExitDiffMode
+          }
+          analyses={analyses}
+          selectedAnalysisId={selectedAnalysisId}
+          onSelectAnalysis={setSelectedAnalysisId}
+          currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+          dashboardSection={dashboardSection}
+          onDashboardSectionChange={setDashboardSection}
+          sectionActions={sectionActionsNode}
+        />
+      )}
 
       {/* Page-level banners — span full width above both sidebar and main. */}
       {!showingCodeViewer && isViewingHistory && selectedAnalysis && (
@@ -962,7 +1026,9 @@ function RepoPageInner() {
           <span>{repoError}</span>
         </div>
       )}
-      {!repoError && repo?.isGitRepo === false && (
+      {/* The local-git-repo check is an OSS concept — EE governs connected
+          GitHub repos (the gate clones server-side), so it never applies there. */}
+      {!isEe && !repoError && repo?.isGitRepo === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span>This directory is not a git repository — analyze, spec scan, contract generation, and verify are unavailable (TrueCourse needs git for commit-anchored baselines, diff, and history).</span>
@@ -974,11 +1040,15 @@ function RepoPageInner() {
           for new results and emits toasts, no layout impact. */}
       <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
+      {leftTab === 'settings' ? (
+        <RepoSettings repoFullName={repo?.name} />
+      ) : (
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar: icon rail + violations/rules panel */}
+        {/* Left sidebar: icon rail (hidden in EE) + violations/rules panel */}
         <LeftSidebar
           section={dashboardSection}
           activeTab={leftTab}
+          hideRail={isEe}
           onTabChange={handleLeftTabChange}
           badgeCounts={{
             home: allViolations.length,
@@ -1073,6 +1143,7 @@ function RepoPageInner() {
                   : undefined
               }
               onOpen={handleOpenContracts}
+              hosted={isEe}
             />
           )}
           {leftTab === 'decisions' && (
@@ -1274,7 +1345,7 @@ function RepoPageInner() {
               isTab
             />
           ) : showingCanonicalFile && activeCanonicalPath ? (
-            <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
+            <SpecCanonicalFile filePath={activeCanonicalPath} />
           ) : showingSpecConflict && activeSpecConflictId ? (
             <SpecConflictDetail
               conflictId={activeSpecConflictId}
@@ -1301,6 +1372,9 @@ function RepoPageInner() {
                 ).find((d) => d.id === activeDriftId) ?? null;
               return (
                 <div className="flex h-full w-full overflow-hidden">
+                  {/* EE promotes the analytics aside to its own "Analytics" tab,
+                      so the Drift view there is just the list + detail. */}
+                  {!isEe && (
                   <aside
                     style={{ width: verifyPanelWidth }}
                     className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-card"
@@ -1321,6 +1395,7 @@ function RepoPageInner() {
                       onMouseDown={handleVerifyResizeDown}
                     />
                   </aside>
+                  )}
                   <div className="w-[380px] shrink-0 overflow-hidden border-r border-border">
                     <VerifyPanel
                       state={effectiveVerifyState}
@@ -1333,6 +1408,7 @@ function RepoPageInner() {
                       filters={driftFilters}
                       onClearFilter={clearDriftFilter}
                       onOpenDrift={handleOpenDrift}
+                      hosted={isEe}
                     />
                   </div>
                   <div className="min-w-0 flex-1 overflow-hidden">
@@ -1354,13 +1430,32 @@ function RepoPageInner() {
                 </div>
               );
             })()
+          ) : leftTab === 'driftanalytics' ? (
+            // EE-only standalone analytics tab — the same drift charts/stats the
+            // OSS Verify view shows in its left aside, here full-width.
+            <div className="h-full w-full overflow-auto">
+              <VerifyStatsColumn
+                state={effectiveVerifyState}
+                diff={verifyDiff}
+                history={verifyHistory}
+                mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
+                isDiffing={verifyDiffing}
+                filters={driftFilters}
+                onToggleSeverity={toggleDriftSeverity}
+                onToggleKind={toggleDriftKind}
+                onToggleFile={toggleDriftFile}
+              />
+            </div>
           ) : leftTab === 'runs' ? (
             <VerifyRunsPanel
               history={verifyHistory}
               selectedRunId={selectedVerifyRunId}
               onViewRun={handleViewVerifyRun}
               onDeleteRun={handleDeleteVerifyRun}
+              hosted={isEe}
             />
+          ) : leftTab === 'pulls' ? (
+            <PullRequestsView repoFullName={repo?.name} />
           ) : leftTab === 'decisions' ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
               <p className="max-w-md">
@@ -1526,6 +1621,7 @@ function RepoPageInner() {
         </div>
 
       </div>
+      )}
 
       {/* Global analysis overlays — float over any tab. */}
       {analysisError && (

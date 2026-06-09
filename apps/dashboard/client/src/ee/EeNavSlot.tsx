@@ -6,19 +6,23 @@
  */
 
 import { Link, useLocation } from 'react-router-dom';
-import { Building2, Github, Cpu, type LucideIcon } from 'lucide-react';
+import { Home, FolderGit2, Settings, Building2, Github, Cpu, GitPullRequest, BookOpen, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { useEeModule } from '@/ee/EeModuleContext';
+import { useEeAuth } from '@/ee/EeAuthContext';
 
-const ICONS: Record<string, LucideIcon> = { Building2, Github, Cpu };
+const ICONS: Record<string, LucideIcon> = { Home, FolderGit2, Settings, Building2, Github, Cpu, GitPullRequest, BookOpen, ShieldCheck };
 
 export function EeNavSlot() {
   const { navItems } = useEeModule();
+  const { user } = useEeAuth();
   const { pathname } = useLocation();
-  if (navItems.length === 0) return null;
+  // Operator-only items (Admin) are hidden for regular members.
+  const visibleNav = navItems.filter((n) => !n.requiresOperator || user?.isOperator);
+  if (visibleNav.length === 0) return null;
 
   return (
     <>
-      {navItems.map((item) => {
+      {visibleNav.map((item) => {
         const Icon = item.iconName ? ICONS[item.iconName] : undefined;
         const active = pathname === item.to;
         return (

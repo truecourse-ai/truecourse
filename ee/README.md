@@ -85,6 +85,31 @@ contracts back to the PR branch), Metadata (read). Subscribe to `pull_request`,
 `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`; optional `RESEND_API_KEY` +
 `RESEND_FROM` (email) and `DATABASE_URL` (hosted Postgres store).
 
+## Error tracking (Sentry)
+
+Server-side error tracking is **EE only** — the OSS server has no Sentry
+dependency or import. `ee-server` initialises Sentry in its `register()` (which
+the OSS loader awaits before building the app) and EE code reports exceptions
+manually at the route/webhook seams (`observability/sentry.ts`,
+`captureEeException`; the GitHub App reports from its fire-and-forget handlers
+via `observability.ts`, `reportGithubError`). A failed Confluence/LLM key
+connect therefore surfaces as a grouped issue **attributed to the customer org**
+(`org_id`, plus `provider`/`connector`/`upstream_status` tags) instead of dying
+silently on the server.
+
+Two guarantees keep it strictly EE-scoped and secret-safe:
+
+- **EE only.** The global uncaught-exception/unhandled-rejection integrations are
+  removed, and `beforeSend` drops any event without our `component` tag — so an
+  uncaught error from an OSS route is never sent.
+- **Default-deny scrub.** `beforeSend` strips request data, breadcrumbs,
+  contexts, stack-frame locals/source, and known secret shapes, and reduces the
+  user to an opaque `org_id`. So the master secret, provider keys, integration
+  tokens, Confluence page bodies, and customer source never leave the box.
+
+Set `SENTRY_DSN` (EU-region DSN for EU residency) to enable; unset ⇒ no-op. See
+`.env.example` for `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_RELEASE`.
+
 ## Enablement
 
 Enterprise mode turns on when WorkOS is configured (or

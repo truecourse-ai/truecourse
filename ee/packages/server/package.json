@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@sentry/node": "^10.0.0",
     "@truecourse/core": "workspace:*",
     "@truecourse/ee-data-store": "workspace:*",
     "@truecourse/ee-db": "workspace:*",
@@ -27,6 +28,8 @@
     "@truecourse/shared": "workspace:*",
     "@workos-inc/node": "^7.0.0",
     "drizzle-orm": "^0.45.2",
+    "graphile-worker": "^0.16.6",
+    "pg": "^8.13.1",
     "zod": "^3.23.8"
   },
   "peerDependencies": {
@@ -35,6 +38,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.10",
     "typescript": "^5.7.0"
   }
 }

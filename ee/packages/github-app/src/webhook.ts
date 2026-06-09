@@ -16,6 +16,8 @@ export interface BaselineTrigger {
   installationId: number;
   defaultBranch: string;
   commitSha: string;
+  /** The repo's workspace org (from the gate link) — scopes the scan job + notifications. */
+  workspaceOrgId: string;
 }
 
 export interface WebhookDeps {
@@ -181,5 +183,6 @@ async function handlePush(
     installationId: payload.installation.id,
     defaultBranch: payload.repository.default_branch,
     commitSha: payload.after,
+    workspaceOrgId: link.workspaceOrgId,
   });
 }

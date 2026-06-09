@@ -4,7 +4,7 @@
  * API :3001; prod: same origin) and sends the session cookie.
  */
 
-function serverUrl(): string {
+export function serverUrl(): string {
   if (typeof window === 'undefined') return '';
   const port = window.location.port;
   if (port && port !== '3001') {
@@ -27,6 +27,14 @@ async function failure(res: Response): Promise<Error> {
 
 export async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${serverUrl()}${path}`, { credentials: 'include' });
+  if (!res.ok) throw await failure(res);
+  return res.json() as Promise<T>;
+}
+
+/** Like `getJson`, but a 404 resolves to `null` (e.g. "no scan run yet"). */
+export async function getJsonAllow404<T>(path: string): Promise<T | null> {
+  const res = await fetch(`${serverUrl()}${path}`, { credentials: 'include' });
+  if (res.status === 404) return null;
   if (!res.ok) throw await failure(res);
   return res.json() as Promise<T>;
 }

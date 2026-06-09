@@ -55,8 +55,13 @@ const registry = new Registry();
 
 /**
  * Load + register the enterprise plugin if we're in enterprise mode.
- * Safe to call once at boot. A missing or broken ee package logs and
- * falls back to community rather than crashing the server.
+ *
+ * The ONLY legitimate fallback to community is the ee-server package being
+ * genuinely absent (the community build externalizes it). EVERY other failure —
+ * an enterprise install that's misconfigured (e.g. a missing `DATABASE_URL`) —
+ * is FATAL: we crash boot rather than silently degrading enterprise to a broken
+ * half-community state (no sidebar, no auth, empty capabilities) that hides the
+ * real problem.
  */
 export async function loadEnterprise(): Promise<void> {
   if (registry.loaded) return;
@@ -64,29 +69,38 @@ export async function loadEnterprise(): Promise<void> {
 
   if (!isEnterprise()) return;
 
+  // Dynamic, name-based import — the sanctioned seam. Static imports of
+  // @truecourse/ee-* are forbidden in OSS (enforced by test); the specifier is
+  // held in a variable so the OSS build type-checks even when the package isn't
+  // present (community), resolving at runtime only in an enterprise install.
+  const eeServerPkg = '@truecourse/ee-server';
+  let mod: { default?: EePlugin } & Partial<EePlugin>;
   try {
-    // Dynamic, name-based import — the sanctioned seam. Static imports
-    // of @truecourse/ee-* are forbidden in OSS (enforced by test). The
-    // specifier is held in a variable so the OSS build type-checks even
-    // when the ee package isn't present (community); it resolves at
-    // runtime only in an enterprise install.
-    const eeServerPkg = '@truecourse/ee-server';
-    const mod = await import(/* @vite-ignore */ eeServerPkg);
-    const plugin = (mod.default ?? mod) as EePlugin;
-    await plugin.register(registry);
-    registry.capabilities = [...plugin.capabilities];
-    log.info(
-      `[EE] Enterprise plugin loaded — capabilities: ${registry.capabilities.join(', ') || '(none)'}`,
-    );
+    mod = await import(/* @vite-ignore */ eeServerPkg);
   } catch (err) {
-    // Enterprise was requested but the plugin couldn't load. Fail
-    // closed to community so the server still boots; surface loudly.
-    log.error(
-      `[EE] Failed to load enterprise plugin; running as community. ${err instanceof Error ? err.message : String(err)}`,
-    );
-    registry.capabilities = [];
-    registry.authVerifier = null;
+    // Package not installed → community build. Anything else is a real error.
+    if ((err as NodeJS.ErrnoException)?.code === 'ERR_MODULE_NOT_FOUND') {
+      log.info('[EE] @truecourse/ee-server not installed — running as community.');
+      return;
+    }
+    throw err;
   }
+
+  // The plugin is present: a registration failure is a misconfiguration, not a
+  // reason to fall back. Surface it and crash boot.
+  const plugin = (mod.default ?? mod) as EePlugin;
+  try {
+    await plugin.register(registry);
+  } catch (err) {
+    log.error(
+      `[EE] enterprise plugin failed to start — refusing to boot. ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
+  registry.capabilities = [...plugin.capabilities];
+  log.info(
+    `[EE] Enterprise plugin loaded — capabilities: ${registry.capabilities.join(', ') || '(none)'}`,
+  );
 }
 
 /** Capabilities the loaded enterprise plugin lit up ([] in community). */

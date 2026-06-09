@@ -34,12 +34,12 @@ const MODEL_PLACEHOLDER: Record<LlmProviderKind, string> = {
 };
 
 const inputCls =
-  'w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none';
+  'w-full rounded bg-background px-3 py-1.5 text-sm text-foreground ring-1 ring-border placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-sm text-neutral-300">{label}</span>
+      <span className="text-sm text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -117,7 +117,7 @@ export default function ModelsPage() {
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">Models</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-muted-foreground">
           The LLM provider TrueCourse uses for spec scans, inference,
           verification, and analysis. Keys are encrypted at rest and never shown
           again.
@@ -125,30 +125,24 @@ export default function ModelsPage() {
       </header>
 
       {error && (
-        <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+        <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
         </div>
       )}
       {saved && (
-        <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+        <div className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
           Provider verified and saved.
-        </div>
-      )}
-      {data?.envManaged && (
-        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-          A provider is also configured via environment variables. Saving here
-          overrides it for this process.
         </div>
       )}
 
       {current && (
-        <section className="rounded border border-neutral-800 bg-neutral-900/40 px-4 py-3 text-sm">
-          <div className="text-neutral-400">Active provider</div>
+        <section className="rounded border border-border bg-card px-4 py-3 text-sm text-foreground">
+          <div className="text-muted-foreground">Active provider</div>
           <div className="mt-1 font-medium">
             {PROVIDER_LABELS[current.provider]} —{' '}
             <span className="font-mono">{current.model}</span>
           </div>
-          <div className="mt-1 text-neutral-500">
+          <div className="mt-1 text-muted-foreground">
             {current.hasKey ? `Key ${current.keyMask}` : 'No stored key'} · updated{' '}
             {new Date(current.updatedAt).toLocaleString()}
           </div>
@@ -241,7 +235,7 @@ export default function ModelsPage() {
         <button
           type="submit"
           disabled={busy}
-          className="inline-flex items-center rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+          className="inline-flex items-center rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
           {busy ? 'Testing…' : 'Test & save'}
         </button>

@@ -5,8 +5,13 @@
  */
 
 import { and, desc, eq } from 'drizzle-orm';
-import { specSets, type EeDb } from '@truecourse/ee-db';
-import type { RepoRef, SpecArtifact, SpecStore } from '@truecourse/core/lib/spec-store';
+import { specSets, workspaceSpecSets, type EeDb } from '@truecourse/ee-db';
+import type {
+  RepoRef,
+  WorkspaceRef,
+  SpecArtifact,
+  SpecStore,
+} from '@truecourse/core/lib/spec-store';
 
 /**
  * `decisions` are the user's accumulated conflict resolutions — a single
@@ -61,6 +66,53 @@ export class PgSpecStore implements SpecStore {
       .from(specSets)
       .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, artifact)))
       .orderBy(desc(specSets.createdAt))
+      .limit(1);
+    return rows[0] ? (rows[0].payload as T) : null;
+  }
+
+  // The commit of the latest stored `rawClaims` — i.e. the commit a body-free
+  // re-merge reads from, so a decision-driven contract regen writes back to the
+  // SAME commit (keeping the dashboard-latest and the gate's per-commit lookup
+  // consistent).
+  async latestCommit(repoKey: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ commitSha: specSets.commitSha })
+      .from(specSets)
+      .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, 'rawClaims')))
+      .orderBy(desc(specSets.createdAt))
+      .limit(1);
+    return rows[0]?.commitSha ?? null;
+  }
+
+  // --- Workspace scope (always-latest, keyed by org, no commit) -------------
+
+  async saveWorkspaceSpec(ref: WorkspaceRef, artifact: SpecArtifact, json: unknown): Promise<void> {
+    // verifyState is a per-commit repo artifact (the gate's drift snapshot) and
+    // has no always-latest workspace analogue — reject it loudly rather than
+    // silently persisting a meaningless row.
+    if (artifact === 'verifyState') {
+      throw new Error('[ee-data-store] verifyState is repo-scoped only');
+    }
+    const now = new Date().toISOString();
+    await this.db
+      .insert(workspaceSpecSets)
+      .values({ workspaceOrgId: ref.workspaceOrgId, artifact, payload: json, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [workspaceSpecSets.workspaceOrgId, workspaceSpecSets.artifact],
+        set: { payload: json, updatedAt: now },
+      });
+  }
+
+  async loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact): Promise<T | null> {
+    const rows = await this.db
+      .select({ payload: workspaceSpecSets.payload })
+      .from(workspaceSpecSets)
+      .where(
+        and(
+          eq(workspaceSpecSets.workspaceOrgId, ref.workspaceOrgId),
+          eq(workspaceSpecSets.artifact, artifact),
+        ),
+      )
       .limit(1);
     return rows[0] ? (rows[0].payload as T) : null;
   }

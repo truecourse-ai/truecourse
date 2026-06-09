@@ -38,6 +38,7 @@ import {
 } from './gate-runner.js';
 import type { SpecScanPipeline } from './spec-scan.js';
 import type { EmailNotifier } from './email.js';
+import { wantsNotification } from './notifications.js';
 import { contractsDashboardUrl } from './links.js';
 
 const GATE_ACTIONS = ['opened', 'synchronize', 'reopened'];
@@ -95,7 +96,15 @@ export async function handlePullRequestGate(
     try {
       output = await runVerify(
         { store: deps.store, auth: deps.auth, verify: deps.verify, scanPipeline: deps.scanPipeline },
-        { repoFullName, installationId, prNumber, baseBranch, defaultBranch: link.defaultBranch },
+        {
+          repoFullName,
+          installationId,
+          prNumber,
+          baseBranch,
+          defaultBranch: link.defaultBranch,
+          // The repo's linked workspace → verify against EFFECTIVE contracts.
+          workspaceOrgId: link.workspaceOrgId,
+        },
       );
     } catch (err) {
       log.error(
@@ -157,20 +166,24 @@ export async function handlePullRequestGate(
     const prUrl = `https://github.com/${repoFullName}/pull/${prNumber}`;
     if (recorded && notifyEmails.length > 0 && deps.notifier) {
       if (decision.conclusion === 'failure') {
-        void deps.notifier.sendGateFailure(notifyEmails, {
-          repoFullName,
-          prNumber,
-          prUrl,
-          added: decision.added,
-        });
+        if (wantsNotification(link, 'gateFailure')) {
+          void deps.notifier.sendGateFailure(notifyEmails, {
+            repoFullName,
+            prNumber,
+            prUrl,
+            added: decision.added,
+          });
+        }
       } else if (decision.neutralReason === 'unresolved-conflicts') {
-        void deps.notifier.sendConflictsNeedResolution(notifyEmails, {
-          repoFullName,
-          prNumber,
-          prUrl,
-          openConflicts: decision.unresolvedConflicts ?? 0,
-          dashboardUrl: conflictsUrl,
-        });
+        if (wantsNotification(link, 'conflicts')) {
+          void deps.notifier.sendConflictsNeedResolution(notifyEmails, {
+            repoFullName,
+            prNumber,
+            prUrl,
+            openConflicts: decision.unresolvedConflicts ?? 0,
+            dashboardUrl: conflictsUrl,
+          });
+        }
       }
     }
 

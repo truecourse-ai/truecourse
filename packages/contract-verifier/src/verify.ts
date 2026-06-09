@@ -61,6 +61,14 @@ export interface VerifyOptions {
   /** Directory containing TS/JS source files to verify against. */
   codeDir: string;
   /**
+   * Optional lower-precedence BASE contracts directory (enterprise: the
+   * workspace `.tc` corpus shared by every repo). The repo's `contractsDir`
+   * wins on a `${kind}:${identity}` collision; otherwise the two are unioned, so
+   * a repo is verified against its EFFECTIVE contracts (workspace ∪ repo). Omit
+   * for repo-only verification (OSS/local, and EE repos with no workspace).
+   */
+  baseContractsDir?: string;
+  /**
    * Include the `_inferred/` subtree in verification. Off by default:
    * inferred contracts are descriptive (reverse-engineered from code), not
    * prescriptive obligations, so verifying code against them would just
@@ -89,7 +97,16 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const source = fs.readFileSync(filePath, 'utf-8');
     specFiles.push(parseFile(filePath, source));
   }, opts.includeInferred ?? false);
-  const resolution = resolve(specFiles);
+  // Optional enterprise base layer (workspace contracts). The repo's contracts
+  // win on a key collision; the resolver unions the rest.
+  const baseFiles: ReturnType<typeof parseFile>[] = [];
+  if (opts.baseContractsDir && fs.existsSync(opts.baseContractsDir)) {
+    walkTcFiles(opts.baseContractsDir, (filePath) => {
+      const source = fs.readFileSync(filePath, 'utf-8');
+      baseFiles.push(parseFile(filePath, source));
+    }, opts.includeInferred ?? false);
+  }
+  const resolution = resolve(specFiles, { baseFiles });
 
   // ---- Code side: one shared, lazily-memoized extraction set ----
   // (the same layer `infer` reads — see extractor/code-contracts.ts).

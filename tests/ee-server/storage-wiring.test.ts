@@ -23,7 +23,7 @@ import {
   PgSpecStore,
   PgRepoConfigStore,
   PgUiStateStore,
-  PgRegistryStore,
+  GhReposRegistryStore,
   PgKvCacheStore,
   PgAnalyzeLock,
 } from '@truecourse/ee-data-store';
@@ -72,7 +72,7 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
     expect(getSpecStore()).toBeInstanceOf(PgSpecStore);
     expect(getRepoConfigStore()).toBeInstanceOf(PgRepoConfigStore);
     expect(getUiStateStore()).toBeInstanceOf(PgUiStateStore);
-    expect(getRegistryStore()).toBeInstanceOf(PgRegistryStore);
+    expect(getRegistryStore()).toBeInstanceOf(GhReposRegistryStore);
     expect(getKvCacheStore()).toBeInstanceOf(PgKvCacheStore);
     expect(getAnalyzeLock()).toBeInstanceOf(PgAnalyzeLock);
   });

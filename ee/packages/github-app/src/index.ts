@@ -13,7 +13,6 @@ import { loadGithubAppConfig } from './config.js';
 import { createGithubAuth } from './github.js';
 import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
-import { runRepoAnalyze } from './analyze.js';
 import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
 import { installationOctokit } from './octokit.js';
@@ -27,19 +26,29 @@ import {
 } from './infer-offer.js';
 import { handlePullRequestGate } from './gate-handler.js';
 import { createEmailNotifier } from './email.js';
+import { reportGithubError } from './observability.js';
+
+/**
+ * Enqueue an initial/refresh repo scan onto the background job queue. Returns the
+ * job id, or null when a scan is already running for the repo. Supplied by
+ * ee-server (the jobs runtime); when absent, the gate falls back to running the
+ * baseline inline (fire-and-forget) so unit tests need no queue.
+ */
+export type EnqueueBaseline = (req: {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  commitSha: string;
+  workspaceOrgId: string;
+}) => Promise<string | null>;
 
 export interface RegisterGithubAppOptions {
   /** Dashboard client origin for browser-facing redirects (e.g. /setup). */
   appUrl?: string;
   /** Shared ee-db (Postgres) when hosted; null → the file gate store. */
   db?: EeDb | null;
-}
-
-/** Strip any credentials that might appear in a logged message. */
-function redactSecrets(msg: string): string {
-  return msg
-    .replace(/x-access-token:[^@\s]+@/g, 'x-access-token:***@')
-    .replace(/(extraheader=Authorization:\s*Basic\s+)[A-Za-z0-9+/=]+/gi, '$1***');
+  /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
+  enqueueBaseline?: EnqueueBaseline;
 }
 
 /**
@@ -89,50 +98,44 @@ export async function registerGithubApp(
       secret: cfg.webhookSecret,
       store,
       onBaseline: (trigger) => {
-        // Refresh the drift-gate baseline AND run a full analysis for the
-        // dashboard — both on a merge to the default branch, both server-side.
-        void runBaseline({ store, auth }, trigger).catch((err) => {
-          log.error(
-            `[github-app] baseline failed for ${trigger.repoFullName}: ${redactSecrets((err as Error).message)}`,
+        // Refresh the repo's spec → contracts → drift-gate baseline on a merge to
+        // the default branch. Prefer the background job queue (progress + a
+        // notification, durable); fall back to inline fire-and-forget when no
+        // queue is wired (unit tests). EE does not run the OSS code-analysis pass.
+        const repo = trigger.repoFullName;
+        if (opts.enqueueBaseline) {
+          void opts.enqueueBaseline(trigger).catch((err) =>
+            reportGithubError(store, 'baseline enqueue failed', { repo }, err),
           );
-        });
-        void runRepoAnalyze({ auth }, trigger).catch((err) => {
-          log.error(
-            `[github-app] analyze failed for ${trigger.repoFullName}: ${redactSecrets((err as Error).message)}`,
-          );
-        });
+          return;
+        }
+        void runBaseline({ store, auth }, trigger).catch((err) =>
+          reportGithubError(store, 'baseline failed', { repo }, err),
+        );
       },
       // On PR open/sync: run the drift gate (Phase 4) and offer the spec scan
       // (Phase 2) + infer run (Phase 3).
       onPullRequest: (payload) => {
-        void handlePullRequestGate(offerDeps, payload).catch((err) => {
-          log.error(
-            `[github-app] gate failed: ${redactSecrets((err as Error).message)}`,
-          );
-        });
-        void handlePullRequestSpecOffer(offerDeps, payload).catch((err) => {
-          log.error(
-            `[github-app] spec offer failed: ${redactSecrets((err as Error).message)}`,
-          );
-        });
-        void handlePullRequestInferOffer(offerDeps, payload).catch((err) => {
-          log.error(
-            `[github-app] infer offer failed: ${redactSecrets((err as Error).message)}`,
-          );
-        });
+        const ctx = { repo: payload.repository.full_name, pr: payload.number };
+        void handlePullRequestGate(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'gate failed', ctx, err),
+        );
+        void handlePullRequestSpecOffer(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'spec offer failed', ctx, err),
+        );
+        void handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'infer offer failed', ctx, err),
+        );
       },
       // On comment edit: the matching handler (by marker) runs its checkbox flow.
       onCommentEdited: (payload) => {
-        void handleCommentEditedScan(offerDeps, payload).catch((err) => {
-          log.error(
-            `[github-app] comment-edited scan failed: ${redactSecrets((err as Error).message)}`,
-          );
-        });
-        void handleCommentEditedInfer(offerDeps, payload).catch((err) => {
-          log.error(
-            `[github-app] comment-edited infer failed: ${redactSecrets((err as Error).message)}`,
-          );
-        });
+        const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
+        void handleCommentEditedScan(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'comment-edited scan failed', ctx, err),
+        );
+        void handleCommentEditedInfer(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'comment-edited infer failed', ctx, err),
+        );
       },
     }),
     { public: true },
@@ -141,14 +144,19 @@ export async function registerGithubApp(
   // Protected: dashboard connect/config endpoints, scoped to the workspace.
   registry.registerRouter(
     '/api/ee/github',
-    createConnectRouter({ store, appSlug: cfg.appSlug, appUrl }),
+    createConnectRouter({
+      store,
+      appSlug: cfg.appSlug,
+      appUrl,
+      octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
+      enqueueBaseline: opts.enqueueBaseline,
+    }),
   );
 
   log.info('[github-app] registered — github-gate on');
   return true;
 }
 
-export { loadGithubAppConfig } from './config.js';
 export { verifyWebhookSignature } from './signature.js';
 export { createWebhookRouter } from './webhook.js';
 export type {
@@ -157,8 +165,9 @@ export type {
   IssueCommentPayload,
 } from './webhook.js';
 export { createConnectRouter } from './connect.js';
-export { runBaseline } from './baseline.js';
-export { createGithubAuth, getInstallationToken, cloneUrl } from './github.js';
+export { runBaseline, type BaselineResult } from './baseline.js';
+export { loadGithubAppConfig } from './config.js';
+export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
 
 // Phase 2: spec-doc scan

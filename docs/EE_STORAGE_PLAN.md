@@ -427,7 +427,10 @@ analyzer layer-classification failures; build 17/17.
   optional `AZURE_STORAGE_CONNECTION_STRING`.
 - **S3:** `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`,
   `S3_SECRET_ACCESS_KEY` (MinIO/on-prem use the endpoint override).
-- (existing) `TRUECOURSE_SECRET_KEY`, `LLM_*`, `GITHUB_APP_*`.
+- `TRUECOURSE_SECRET_KEY` — **required** (like `DATABASE_URL`): the AES key for
+  the encrypted LLM-provider store. Missing/weak → boot fails (no CLI/.env
+  provider fallback; the provider is set in-app via the Models page).
+- (existing) `GITHUB_APP_*`.
 
 ---
 

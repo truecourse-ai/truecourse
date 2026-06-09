@@ -26,6 +26,7 @@ import {
 import { detectSpecDocChanges } from './spec-detect.js';
 import { contractsDashboardUrl } from './links.js';
 import type { EmailNotifier } from './email.js';
+import { wantsNotification } from './notifications.js';
 import {
   SCAN_MARKER,
   renderScanComment,
@@ -130,7 +131,7 @@ export async function handlePullRequestSpecOffer(
       await createComment(octokit, coords, payload.number, body);
       // Notify once, when the offer first appears — not on every later refresh.
       const notifyEmails = link.notifyEmails ?? [];
-      if (notifyEmails.length > 0 && deps.notifier) {
+      if (notifyEmails.length > 0 && deps.notifier && wantsNotification(link, 'scanOffer')) {
         void deps.notifier.sendScanOffer(notifyEmails, {
           repoFullName,
           prNumber: payload.number,

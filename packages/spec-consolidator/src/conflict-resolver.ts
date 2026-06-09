@@ -20,14 +20,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
-import { cachePaths, ensureCacheDirs } from './cache.js';
 
-const CACHE_FILE = 'conflict-resolutions.json';
+const CACHE_NAME = 'consolidator/conflict-resolutions';
 
 export interface ConflictResolverInput {
   conflict: Conflict;
@@ -145,7 +143,7 @@ async function resolveOne(
 ): Promise<ConflictResolution> {
   const cacheKey = computeCacheKey(conflict);
   const t0 = perfNow();
-  const cached = readCache(repoRoot, cacheKey);
+  const cached = await readCache(repoRoot, cacheKey);
   const tCacheRead = perfNow() - t0;
   if (cached) {
     debugLog(`resolve:${shortId(conflict.id)} cache-hit readMs=${tCacheRead.toFixed(0)}`);
@@ -166,7 +164,7 @@ async function resolveOne(
       } as ConflictResolution)
     : resolution;
   const tWriteStart = perfNow();
-  writeCache(repoRoot, cacheKey, final);
+  await writeCache(repoRoot, cacheKey, final);
   const tWriteMs = perfNow() - tWriteStart;
   debugLog(
     `resolve:${shortId(conflict.id)} miss runnerMs=${tRunMs.toFixed(0)} cacheReadMs=${tCacheRead.toFixed(0)} cacheWriteMs=${tWriteMs.toFixed(0)} totalMs=${(perfNow() - t0).toFixed(0)}`,
@@ -316,24 +314,10 @@ function spawnConflictResolverRunner(
 // Cache
 // ---------------------------------------------------------------------------
 
-interface ResolutionCacheEntry {
-  cacheKey: string;
-  resolution: ConflictResolution;
-  cachedAt: string;
-}
-
-const ResolutionCacheFileSchema = z.object({
-  entries: z.array(
-    z.object({
-      cacheKey: z.string(),
-      resolution: z.object({
-        pick: z.number().int(),
-        confidence: z.enum(['high', 'medium', 'low']),
-        reasoning: z.string(),
-      }),
-      cachedAt: z.string(),
-    }),
-  ),
+const CachedResolutionSchema = z.object({
+  pick: z.number().int(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  reasoning: z.string(),
 });
 
 const PROMPT_FINGERPRINT = createHash('sha256')
@@ -348,34 +332,15 @@ function computeCacheKey(conflict: Conflict): string {
     .digest('hex');
 }
 
-function cacheFile(repoRoot: string): string {
-  return path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
+// Cached via the pluggable KV seam (Postgres in EE, file in OSS); the content-
+// addressed key makes the stored value just the resolution.
+async function readCache(scope: string, cacheKey: string): Promise<ConflictResolution | null> {
+  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
+  if (raw === null) return null;
+  const parsed = CachedResolutionSchema.safeParse(raw);
+  return parsed.success ? (parsed.data as ConflictResolution) : null;
 }
 
-function readCache(repoRoot: string, cacheKey: string): ConflictResolution | null {
-  const file = cacheFile(repoRoot);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = ResolutionCacheFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')));
-    const entry = raw.entries.find((e) => e.cacheKey === cacheKey);
-    return entry ? entry.resolution : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(repoRoot: string, cacheKey: string, resolution: ConflictResolution): void {
-  ensureCacheDirs(repoRoot);
-  const file = cacheFile(repoRoot);
-  let entries: ResolutionCacheEntry[] = [];
-  if (fs.existsSync(file)) {
-    try {
-      entries = ResolutionCacheFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8'))).entries;
-    } catch {
-      entries = [];
-    }
-  }
-  const filtered = entries.filter((e) => e.cacheKey !== cacheKey);
-  filtered.push({ cacheKey, resolution, cachedAt: new Date().toISOString() });
-  fs.writeFileSync(file, JSON.stringify({ entries: filtered }, null, 2) + '\n');
+async function writeCache(scope: string, cacheKey: string, resolution: ConflictResolution): Promise<void> {
+  await setCacheEntry(scope, CACHE_NAME, cacheKey, resolution);
 }

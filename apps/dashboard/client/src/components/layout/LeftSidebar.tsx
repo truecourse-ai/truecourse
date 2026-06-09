@@ -32,6 +32,11 @@ type LeftSidebarProps = {
    * value is the tooltip text shown on hover.
    */
   tabWarnings?: Partial<Record<LeftTab, string | null>>;
+  /**
+   * Hide the vertical icon rail (EE renders a horizontal tab bar instead).
+   * The side panel still shows for the active tab.
+   */
+  hideRail?: boolean;
 };
 
 export function LeftSidebar({
@@ -43,6 +48,7 @@ export function LeftSidebar({
   minWidth = 260,
   badgeCounts,
   tabWarnings,
+  hideRail = false,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
@@ -94,7 +100,8 @@ export function LeftSidebar({
 
   return (
     <div className="flex flex-shrink-0 h-full">
-      {/* Icon rail */}
+      {/* Icon rail — hidden in EE, where a horizontal tab bar drives the tabs. */}
+      {!hideRail && (
       <div className="flex w-12 flex-col items-center gap-1 border-r border-border bg-card pt-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -143,6 +150,7 @@ export function LeftSidebar({
           );
         })}
       </div>
+      )}
 
       {/* Content panel */}
       {isOpen && (

@@ -7,6 +7,7 @@
  */
 
 import type { VerifyState } from '@truecourse/core/commands/spec-in-process';
+import type { GithubNotificationPrefs } from '@truecourse/shared';
 
 /** A single contract drift (re-typed from core's verify output). */
 export type GateDrift = VerifyState['drifts'][number];
@@ -37,6 +38,8 @@ export interface RepoLinkRecord {
   enabled: boolean;
   /** Addresses notified (via Resend) when the gate fails. */
   notifyEmails?: string[];
+  /** Per-type email toggles. Absent = every type on (the default). */
+  notifications?: GithubNotificationPrefs;
   createdAt: string;
   updatedAt: string;
 }

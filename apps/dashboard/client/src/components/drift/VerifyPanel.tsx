@@ -29,6 +29,9 @@ interface VerifyPanelProps {
    * preview tab (replaces the existing preview); `pinned=true` pins it
    * as a permanent tab. Mirrors the file / contracts viewer pattern. */
   onOpenDrift: (id: string, pinned: boolean) => void;
+  /** Hosted (EE): drift is computed automatically by the server-side scan; there
+   * is no in-dashboard Verify button, so empty-state copy must not point at one. */
+  hosted?: boolean;
 }
 
 /** Apply the analytics-driven filters (severity / kind / file) to a drift set. */
@@ -120,6 +123,7 @@ export function VerifyPanel({
   filters,
   onClearFilter,
   onOpenDrift,
+  hosted = false,
 }: VerifyPanelProps) {
   if (isLoading && !state) {
     return (
@@ -144,10 +148,17 @@ export function VerifyPanel({
         icon={ShieldCheck}
         title="No verify run yet"
         body={
-          <>
-            Click <strong>Verify</strong> in the header to compare your code
-            against the generated TC contracts.
-          </>
+          hosted ? (
+            <>
+              Drift is computed automatically when your default branch is scanned.
+              Results will appear here once a scan completes.
+            </>
+          ) : (
+            <>
+              Click <strong>Verify</strong> in the header to compare your code
+              against the generated TC contracts.
+            </>
+          )
         }
       />
     );
@@ -163,6 +174,7 @@ export function VerifyPanel({
           filters={filters}
           onClearFilter={onClearFilter}
           onOpenDrift={onOpenDrift}
+          hosted={hosted}
         />
       </div>
     );
@@ -225,6 +237,7 @@ function VerifyDiffView({
   filters,
   onClearFilter,
   onOpenDrift,
+  hosted = false,
 }: {
   diff: VerifyDiff | null;
   isDiffing: boolean;
@@ -232,6 +245,7 @@ function VerifyDiffView({
   filters: DriftFilters;
   onClearFilter: (target: DriftFilterTarget) => void;
   onOpenDrift: (id: string, pinned: boolean) => void;
+  hosted?: boolean;
 }) {
   if (isDiffing && !diff) {
     return (
@@ -245,7 +259,11 @@ function VerifyDiffView({
       <EmptyState
         icon={GitCompare}
         title="No diff computed yet"
-        body="Click Verify to compare the current code's drifts against the committed baseline."
+        body={
+          hosted
+            ? 'Drift is compared against the committed baseline automatically on each scan.'
+            : "Click Verify to compare the current code's drifts against the committed baseline."
+        }
       />
     );
   }

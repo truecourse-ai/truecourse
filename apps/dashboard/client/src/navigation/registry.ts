@@ -33,6 +33,9 @@ import {
   FileCode2,
   ShieldCheck,
   GitMerge,
+  GitPullRequest,
+  SlidersHorizontal,
+  BarChart3,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
 import { useMemo } from 'react';
@@ -105,11 +108,39 @@ export const SECTIONS: SectionDescriptor[] = [
     icon: ShieldCheck,
     defaultTab: 'spec',
     tabs: [
+      // EE-only: the PR gate's runs for this repo. OSS filters it out.
+      {
+        id: 'pulls',
+        label: 'Pull requests',
+        icon: GitPullRequest,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
       { id: 'spec', label: 'Spec', icon: BookOpen },
       { id: 'contracts', label: 'Contracts', icon: FileCode2 },
       { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
+      // EE-only: the drift analytics (charts/hotspots/trend) as a standalone tab.
+      // In OSS the same `VerifyStatsColumn` stays as the Verify view's left aside.
+      {
+        // `driftanalytics` (not `analytics`) avoids colliding with the legacy
+        // `?tab=analytics → home` URL alias in NavigationContext.
+        id: 'driftanalytics',
+        label: 'Analytics',
+        icon: BarChart3,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
       { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
       { id: 'decisions', label: 'Decisions', icon: GitMerge },
+      // EE-only: per-repo gate settings (notify emails, blocking, notification
+      // toggles). Rendered as a tab in the EE repo console; OSS filters it out.
+      {
+        id: 'settings',
+        label: 'Settings',
+        icon: SlidersHorizontal,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
     ],
   },
 ];
