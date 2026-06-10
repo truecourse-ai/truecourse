@@ -1,0 +1,6 @@
+unenforceable-obligation prefectclient-async-context-manager {
+  origin "docs/v3/advanced/api-client.mdx" "Overview" 7..7
+  spec-text "get_client() returns async client used as context manager by default; synchronous client available via get_client(sync_client=True)"
+  category api-client
+  rationale "Client usage pattern (async vs sync context manager) is not structurally encodable as a contract artifact"
+}

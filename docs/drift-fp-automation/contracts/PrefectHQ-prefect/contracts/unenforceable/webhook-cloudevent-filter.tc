@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-cloudevent-filter {
+  origin "docs/v3/concepts/webhooks.mdx" "Accepting CloudEvents" 1..1
+  spec-text "{{ body|from_cloud_event(headers) }} Jinja2 filter converts CloudEvent to Prefect event: subject->resource, source->resource if no subject, data->payload[data], other metadata->payload[cloudevents]"
+  category webhook-template
+  rationale "Jinja2 filter transformation semantics for CloudEvent conversion cannot be structurally encoded"
+}

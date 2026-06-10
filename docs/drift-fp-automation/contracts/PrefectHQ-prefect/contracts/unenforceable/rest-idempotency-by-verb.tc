@@ -1,0 +1,6 @@
+unenforceable-obligation rest-idempotency-by-verb {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST guidelines" 124..124
+  spec-text "GET, PUT, DELETE requests are always idempotent. POST and PATCH are not guaranteed to be idempotent."
+  category api-design
+  rationale "Cross-cutting idempotency assertion across all endpoints is not encodable per-artifact"
+}

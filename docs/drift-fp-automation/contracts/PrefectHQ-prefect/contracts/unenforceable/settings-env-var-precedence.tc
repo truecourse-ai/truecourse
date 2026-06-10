@@ -1,0 +1,6 @@
+unenforceable-obligation settings-env-var-precedence {
+  origin "docs/v3/concepts/settings-and-profiles.mdx" "Settings precedence" 1..1
+  spec-text "Environment variables ALWAYS override all other sources of settings configuration regardless of other config files"
+  category configuration
+  rationale "Settings source precedence ordering is a runtime behavior pattern, not a structural code contract"
+}

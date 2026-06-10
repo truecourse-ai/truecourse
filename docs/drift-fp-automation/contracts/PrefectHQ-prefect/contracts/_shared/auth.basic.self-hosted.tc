@@ -1,0 +1,9 @@
+auth-requirement auth.basic.self-hosted {
+  origin "docs/v3/advanced/security-settings.mdx" "Basic Authentication" 1..1
+  scheme Basic
+  selector path-glob "/api/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

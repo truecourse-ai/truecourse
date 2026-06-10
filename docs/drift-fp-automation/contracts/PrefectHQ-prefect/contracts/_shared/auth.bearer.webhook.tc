@@ -1,0 +1,9 @@
+auth-requirement auth.bearer.webhook {
+  origin "docs/v3/concepts/webhooks.mdx" "API key authentication" 1..1
+  scheme Bearer
+  selector path-glob "https://api.prefect.cloud/hooks/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

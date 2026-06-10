@@ -1,0 +1,6 @@
+unenforceable-obligation sla-violation-event {
+  origin "docs/v3/concepts/slas.mdx" "SLA violation event" 1..1
+  spec-text "SLA violation emits a prefect.sla.violation event"
+  category sla
+  rationale "SLA violation event emission is an internal platform behavior without a structural EffectGroup encoding"
+}

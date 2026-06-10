@@ -1,0 +1,4 @@
+enum CachePolicies {
+  origin "docs/v3/concepts/caching.mdx" "Cache policies" 1..1
+  values [DEFAULT, INPUTS, TASK_SOURCE, FLOW_PARAMETERS, NO_CACHE]
+}

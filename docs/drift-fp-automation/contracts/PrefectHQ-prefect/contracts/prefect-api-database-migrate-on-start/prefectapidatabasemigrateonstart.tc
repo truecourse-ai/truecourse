@@ -1,0 +1,5 @@
+constant PREFECT_API_DATABASE_MIGRATE_ON_START {
+  origin "docs/v3/advanced/self-hosted.mdx" "Database migrations" 1..1
+  type boolean
+  expected-value true
+}

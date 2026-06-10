@@ -1,0 +1,10 @@
+pagination-contract pagination.offset.standard {
+  origin "docs/v3/advanced/api-client.mdx" "Pagination and default query limits" 47..47
+  scheme offset
+  query {
+    limit: integer optional {
+      default 200
+    }
+    offset: integer optional
+  }
+}

@@ -1,0 +1,6 @@
+unenforceable-obligation tag-concurrency-all-tags-required {
+  origin "docs/v3/concepts/tag-based-concurrency-limits.mdx" "Tag-based concurrency limits" 1..1
+  spec-text "When a task run has multiple tags, it can only begin execution if ALL of its tags have available concurrency slots simultaneously; limit=0 immediately aborts the run"
+  category concurrency
+  rationale "Multi-tag atomic slot acquisition across all tags cannot be encoded as a structural contract"
+}

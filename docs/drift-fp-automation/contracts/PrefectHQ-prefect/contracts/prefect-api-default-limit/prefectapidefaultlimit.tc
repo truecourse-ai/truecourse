@@ -1,0 +1,5 @@
+constant PREFECT_API_DEFAULT_LIMIT {
+  origin "docs/v3/advanced/api-client.mdx" "Pagination and default query limits" 47..47
+  type number
+  expected-value 200
+}

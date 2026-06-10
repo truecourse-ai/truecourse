@@ -1,0 +1,11 @@
+operation POST "/collection/filter" {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST guidelines" 124..124
+  status out-of-scope
+  request {
+    body {
+      limit: integer optional
+      offset: integer optional
+      sort: string optional
+    }
+  }
+}

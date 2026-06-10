@@ -1,0 +1,6 @@
+unenforceable-obligation flow-run-event-state-name-pattern {
+  origin "docs/v3/advanced/detect-zombie-flows.mdx" "Custom state names" 1..1
+  spec-text "Flow run event names are based on the state name, not its type: prefect.flow-run.<state_name>. Custom state names produce custom event names (e.g. prefect.flow-run.SuccessfullyProcessed instead of prefect.flow-run.Completed)"
+  category event-naming
+  rationale "Dynamic event name derived from runtime state name cannot be encoded as a static EffectGroup artifact"
+}

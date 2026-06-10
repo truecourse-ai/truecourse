@@ -1,0 +1,6 @@
+unenforceable-obligation api-key-precedence-over-auth-string {
+  origin "docs/v3/advanced/security-settings.mdx" "Basic Authentication" 1..1
+  spec-text "If both PREFECT_API_KEY and PREFECT_API_AUTH_STRING are set on client, PREFECT_API_KEY takes precedence and causes HTTP 401 against self-hosted server"
+  category configuration
+  rationale "Runtime setting precedence ordering is not structurally encodable"
+}

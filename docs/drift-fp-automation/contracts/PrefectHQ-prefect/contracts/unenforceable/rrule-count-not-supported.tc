@@ -1,0 +1,6 @@
+unenforceable-obligation rrule-count-not-supported {
+  origin "docs/v3/concepts/schedules.mdx" "RRule schedule" 1..1
+  spec-text "RRule schedules do not support COUNT parameter; use UNTIL instead. Max 6500 characters."
+  category scheduling
+  rationale "RRule parameter validation constraints are not structurally encodable as a contract artifact"
+}

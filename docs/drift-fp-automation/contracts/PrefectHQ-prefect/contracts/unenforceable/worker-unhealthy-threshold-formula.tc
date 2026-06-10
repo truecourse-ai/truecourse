@@ -1,0 +1,6 @@
+unenforceable-obligation worker-unhealthy-threshold-formula {
+  origin "docs/v3/advanced/worker-healthchecks.mdx" "Health Detection Logic" 1..1
+  spec-text "Worker is unhealthy if it has not polled within PREFECT_WORKER_QUERY_SECONDS * 30 seconds (default 450 seconds / 7.5 min); health endpoint returns 503"
+  category health
+  rationale "Threshold is a formula based on a configurable setting, not a single literal constant"
+}

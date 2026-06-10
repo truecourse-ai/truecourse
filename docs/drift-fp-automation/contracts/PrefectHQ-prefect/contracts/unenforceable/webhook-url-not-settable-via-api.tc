@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-url-not-settable-via-api {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook Endpoints" 1..1
+  spec-text "Webhook URL is assigned by Prefect Cloud on creation; it cannot be set through the API. URL may be rotated without losing configuration."
+  category api-constraint
+  rationale "URL assignment behavior is a platform constraint, not a structural code contract"
+}

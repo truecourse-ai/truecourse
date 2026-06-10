@@ -1,0 +1,6 @@
+unenforceable-obligation asset-property-overwrite {
+  origin "docs/v3/advanced/assets.mdx" "Updating asset properties" 305..305
+  spec-text "Materializing an asset with properties performs complete overwrite of all metadata fields; partial updates not supported — all metadata to preserve must be provided"
+  category data-integrity
+  rationale "Overwrite-vs-partial-update semantics for asset materialization cannot be encoded as a structural contract"
+}

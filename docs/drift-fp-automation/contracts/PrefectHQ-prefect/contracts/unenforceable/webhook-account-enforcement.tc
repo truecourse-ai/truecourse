@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-account-enforcement {
+  origin "docs/v3/concepts/webhooks.mdx" "Account-level security enforcement" 1..1
+  spec-text "Account-level setting enforces authentication on all webhooks; existing webhooks without service account auto-disabled on enable"
+  category configuration
+  rationale "Account-level platform enforcement policy is not structurally encodable as a code contract"
+}

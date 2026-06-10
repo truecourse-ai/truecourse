@@ -1,0 +1,5 @@
+constant PREFECT_API_SERVICES_SCHEDULER_LOOP_SECONDS {
+  origin "docs/v3/concepts/schedules.mdx" "Scheduler service" 1..1
+  type number
+  expected-value 60
+}

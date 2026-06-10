@@ -1,0 +1,5 @@
+constant ConcurrencySlotLeaseDuration {
+  origin "docs/v3/concepts/global-concurrency-limits.mdx" "Timed leases" 1..1
+  type string
+  expected-value "5 minutes"
+}

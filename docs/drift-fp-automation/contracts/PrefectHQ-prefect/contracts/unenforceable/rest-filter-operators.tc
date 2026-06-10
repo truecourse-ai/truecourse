@@ -1,0 +1,6 @@
+unenforceable-obligation rest-filter-operators {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "Filter results" 152..152
+  spec-text "REST filter criteria in POST body: any_ (matches any value), is_null_ (null check), eq_ (equal), all_ (matches all), before_ (datetime <=), after_ (datetime >=); multiple criteria = logical AND"
+  category api-contract
+  rationale "Generic filter operator schema applies across all collection endpoints with no specific binding"
+}

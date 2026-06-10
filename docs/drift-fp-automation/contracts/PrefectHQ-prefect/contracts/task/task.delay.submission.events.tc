@@ -1,0 +1,9 @@
+effect-group task.delay.submission.events {
+  origin "docs/v3/concepts/tasks.mdx" "Background tasks" 1..1
+  channel server-side-topic
+  effect task.delay.submitted {
+    emit-when {
+      operation-class "task.delay-invocation"
+    }
+  }
+}

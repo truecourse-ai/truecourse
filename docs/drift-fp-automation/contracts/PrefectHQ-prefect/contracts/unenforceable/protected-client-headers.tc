@@ -1,0 +1,6 @@
+unenforceable-obligation protected-client-headers {
+  origin "docs/v3/advanced/security-settings.mdx" "Custom client headers" 1..1
+  spec-text "User-Agent, Prefect-Csrf-Token, Prefect-Csrf-Client headers are protected and cannot be overridden via PREFECT_CLIENT_CUSTOM_HEADERS; Prefect logs warning and ignores the custom value"
+  category security
+  rationale "Runtime header override rejection is behavioral, not structurally encodable as a contract"
+}

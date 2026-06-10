@@ -1,0 +1,6 @@
+unenforceable-obligation aws-rds-iam-prerequisites {
+  origin "docs/v3/advanced/self-hosted.mdx" "AWS RDS IAM Authentication" 1..1
+  spec-text "AWS RDS IAM auth requires: PREFECT_PLUGINS_ENABLED=true, rds-db:connect IAM policy, prefect-aws package installed"
+  category configuration
+  rationale "Multi-prerequisite IAM policy + package requirement chain cannot be structurally encoded"
+}

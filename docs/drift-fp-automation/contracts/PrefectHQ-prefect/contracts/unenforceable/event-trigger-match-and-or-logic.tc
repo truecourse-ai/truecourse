@@ -1,0 +1,6 @@
+unenforceable-obligation event-trigger-match-and-or-logic {
+  origin "docs/v3/concepts/event-triggers.mdx" "Resource matching" 1..1
+  spec-text "Event trigger match/match_related: each label added to match filter is ANDed with other labels; single value or list of values ORed together. match_related uses same AND/OR logic."
+  category event-filtering
+  rationale "Composite AND/OR filter logic across dynamic event labels cannot be encoded as a structural contract"
+}

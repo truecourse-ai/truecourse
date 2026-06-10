@@ -1,0 +1,6 @@
+unenforceable-obligation rest-http-verb-semantics {
+  origin "docs/v3/api-ref/rest-api/index.mdx" "REST guidelines" 124..124
+  spec-text "GET/PUT/DELETE always idempotent; POST/PATCH not guaranteed idempotent; GET cannot use request body; POST /collection creates; GET /collection lists; GET /collection/:id gets specific; DELETE /collection/:id deletes specific"
+  category api-design
+  rationale "HTTP verb semantics are design principles applying broadly across all endpoints, not encodable per-operation"
+}

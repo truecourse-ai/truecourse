@@ -1,0 +1,6 @@
+unenforceable-obligation plugin-register-hook-required {
+  origin "docs/v3/advanced/plugins.mdx" "Hook Specification" 1..1
+  spec-text "@register_hook decorator is required on plugin hook functions; without it, plugin will not be discovered by the plugin system"
+  category plugin
+  rationale "Decorator presence on plugin functions cannot be verified without inspecting plugin module code structure"
+}

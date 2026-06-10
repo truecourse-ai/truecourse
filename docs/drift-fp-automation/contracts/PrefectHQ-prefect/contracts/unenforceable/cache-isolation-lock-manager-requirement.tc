@@ -1,0 +1,6 @@
+unenforceable-obligation cache-isolation-lock-manager-requirement {
+  origin "docs/v3/advanced/caching.mdx" "CacheIsolationLevel" 53..53
+  spec-text "SERIALIZABLE cache isolation requires a lock_manager (MemoryLockManager for threads, FileSystemLockManager for processes, RedisLockManager for multi-machine)"
+  category cache
+  rationale "Lock manager requirement and selection logic cannot be structurally encoded as a standalone contract artifact"
+}

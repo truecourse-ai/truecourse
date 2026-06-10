@@ -1,0 +1,5 @@
+constant PREFECT_SERVER_ANALYTICS_ENABLED {
+  origin "docs/v3/concepts/telemetry.mdx" "Server Telemetry" 1..1
+  type boolean
+  expected-value true
+}

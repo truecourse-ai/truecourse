@@ -1,0 +1,6 @@
+unenforceable-obligation webhook-response-204-400 {
+  origin "docs/v3/concepts/webhooks.mdx" "Webhook Endpoints" 1..1
+  spec-text "Webhooks return 204 No Content on success and 400 Bad Request on any error interpreting the request"
+  category api-contract
+  rationale "Response code constraint already captured as Operation artifacts in the endpoints module"
+}
