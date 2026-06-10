@@ -662,6 +662,27 @@ not narrow the set.
 substitute for \`immutable\`. If a derived/server-computed field is also frozen
 after creation, emit BOTH \`computed-at\` AND \`immutable\`.
 
+**NEVER infer \`immutable\` from what a field IS — only from what the spec SAYS
+about changing it.** The following do NOT imply immutability, alone or combined:
+
+- The field is required (\`Required? yes\` in a field table).
+- The field is an identifier (\`id\`, \`uuid\`, "identifier of this X").
+- The field is a timestamp ("when the event happened", \`occurred\`, \`createdAt\`).
+- The field is client-provided or server-assigned (provenance is not mutability).
+
+Counter-example — a field table like:
+
+| Name     | Type   | Required? | Description                              |
+| -------- | ------ | --------- | ---------------------------------------- |
+| occurred | String | yes       | When the event happened                  |
+| id       | String | yes       | Client-provided identifier of this event |
+
+asserts NOTHING about mutability. Both fields get plain \`field occurred: string {}\`
+/ \`field id: string {}\` — no \`immutable\`, even though an id "sounds" immutable.
+Emitting un-stated \`immutable\` creates a false drift against every codebase whose
+model simply doesn't freeze the field. If the spec is silent on mutability, the
+contract is silent on mutability.
+
 # Enum extraction — required whenever spec defines an enum
 
 Whenever the spec text contains any of:
@@ -1012,6 +1033,42 @@ constant whose \`expected-value\` block has one line per row.
 Don't emit constants whose value is a function call, expression, or
 external reference — only literal values (strings, numbers, booleans,
 arrays of literals, flat object literals of literals).
+
+**Don't extract constants from customization examples.** A constant asserts
+"the code MUST hold this value". A doc that shows users how to CUSTOMIZE or
+OVERRIDE something is asserting the opposite — "you can put whatever value
+you want here" — and its example values are illustrations, not obligations.
+Skip a candidate value when EITHER signal is present:
+
+1. **Context signal**: the page title or enclosing section heading describes
+   a customization/override mechanism — "Customize …", "Override …",
+   "… template", "… variables", "Configure your own …", "Example
+   configuration".
+2. **Shape signal**: the value sits inside a JSON-schema-style variables
+   block, i.e. an object of the form
+   \`"<name>": { "title": …, "description": …, "default": <value>, "type": … }\`.
+   That quadruple is a schema DECLARING an overridable variable; the
+   \`"default"\` there is a starting point the user is expected to change.
+
+Counter-example — a page titled "Customize Base Job Templates" containing:
+
+\`\`\`json
+"cpu_request": {
+  "title": "CPU Request",
+  "description": "CPU allocation to request for this pod",
+  "default": "100m",
+  "type": "string"
+}
+\`\`\`
+
+emits NO constant. Both signals fire: the page is a customization guide, and
+the value is a variables-schema \`default\`. Extracting
+\`constant cpu_request { expected-value "100m" }\` would demand every codebase
+hard-code the example — a guaranteed false drift.
+
+By contrast, prose like "the scheduler polls every 15 seconds" or "the API
+version is \`v2\`" in a behavioral spec section IS an assertion about the
+system — extract those normally.
 
 # ArchitectureDecision — extract when the spec/ADR fixes a platform choice
 
