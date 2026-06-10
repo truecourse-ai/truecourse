@@ -332,10 +332,27 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
    first**: for each drift-kind still showing FPs, skip if an open `drift-fp-fix` issue
    (any label, including `drift-fp-blocked`) already exists; else file one (discovery shape).
    - Filed ≥1 new issue → continue into the per-issue loop this session.
-   - Filed 0 (every FP-kind already tracked, all blocked) → file/update a single
-     `[drift-fp-campaign-stuck] <owner>/<repo>` tracking issue (current `fp` count + `fp_rate`,
-     the close gate `fp == 0`, checklist of open `drift-fp-blocked` issues, `cc @mushgev`), then
-     end. Never dead-end silently.
+   - Filed 0 (every FP-kind already tracked, all blocked) → maintain a single
+     `[drift-fp-campaign-stuck] <owner>/<repo>` tracking issue with the current state.
+     Body carries: current `fp` count + `fp_rate`, the close gate `fp == 0`, a checklist
+     of open `drift-fp-blocked` issues. End with `cc @mushgev`.
+
+     **Notify-on-change protocol** — the Telegram alert (`notify-campaign-alert`) only
+     fires on `issues.opened` / `issues.reopened`, not on edits/comments. So:
+
+     - **No existing tracker** → open a new one. Telegram fires on `opened`. ✓
+     - **Existing tracker, state unchanged** — `fp` count is the same AND the set of
+       blocked-issue numbers in the body's checklist is identical (treat as a set, order
+       doesn't matter) — **edit the body in place** (refresh the timestamp, leave the
+       state as-is). Stay silent; the human has no new information to act on.
+     - **Existing tracker, state changed** — either `fp` count differs OR the
+       blocked-issue set differs — **close the tracker, then reopen it** via the GitHub
+       API, with the body rewritten to the new state AND a "## State change since last
+       run" header at the top summarising the delta (e.g.
+       `fp 65 → 8`, `blocked-issues +#557, -#552`). Telegram fires on `reopened`. ✓
+
+     This makes the human pinged exactly when there is news, never on silent re-runs.
+     Never dead-end silently.
 
 If the queue empties **after** ≥1 success, ship the batch PR instead — don't run this path in a
 session that already produced fixes.
