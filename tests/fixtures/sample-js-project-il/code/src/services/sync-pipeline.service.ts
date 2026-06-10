@@ -33,3 +33,8 @@ export function createRun(id: string): PipelineRun {
 export function finishRun(run: PipelineRun): PipelineRun {
   return { ...run, state: 'inactive', finishedAt: new Date() };
 }
+
+// The spec declares a POST /api/sync/push endpoint for triggering push
+// deliveries; the implementation is incomplete — no route handler is
+// registered for it yet.
+// IL-DRIFT: Operation:POST /api/sync/push / implementation.missing

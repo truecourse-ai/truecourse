@@ -120,6 +120,11 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
       // a code-side implementation yet — suppress the drift.
       if (st === 'planned' || st === 'deferred' || st === 'out-of-scope') continue;
 
+      // Operations whose identity is an absolute URL (e.g., "GET https://api.example.com/...")
+      // describe endpoints on external services. The codebase under verification will never
+      // implement them, so an implementation.missing drift here is always a false positive.
+      if (/^[A-Z]+ https?:\/\//.test(artifact.ref.identity)) continue;
+
       drifts.push({
         id: cryptoRandomId(),
         type: 'contract-drift',
