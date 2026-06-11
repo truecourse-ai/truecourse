@@ -68,7 +68,12 @@ export const elementOverwriteVisitor: CodeRuleVisitor = {
         // the property is the React `.current` accessor.
         const isRefCurrent =
           left.type === 'member_expression' && indexOrProp.text === 'current'
-        if (!wasRead && !(isRefCurrent && hasAwait)) {
+        // Read-modify-write: `x = x.concat(...)` then `x = Array.from(new Set(x))`.
+        // The second assignment's RHS reads the value the first produced, so the
+        // first write is consumed — not a dead store.
+        const right = expr.childForFieldName('right')
+        const readsSelfInRhs = right ? right.text.includes(left.text) : false
+        if (!wasRead && !readsSelfInRhs && !(isRefCurrent && hasAwait)) {
           return makeViolation(
             this.ruleKey, expr, filePath, 'high',
             'Element overwritten before read',
