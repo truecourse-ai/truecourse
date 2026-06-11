@@ -3,3 +3,4 @@ packages:
   - "apps/landing"
   - "packages/*"
   - "tools/*"
+  - "ee/packages/*"
