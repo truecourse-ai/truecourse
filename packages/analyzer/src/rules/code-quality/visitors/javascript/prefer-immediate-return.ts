@@ -29,6 +29,19 @@ export const preferImmediateReturnVisitor: CodeRuleVisitor = {
     const nameNode = decl.childForFieldName('name')
     if (nameNode?.text !== retName) return null
 
+    // Skip when the assigned expression is large enough that the binding
+    // name adds clarity. Inlining a multi-hundred-line builder (e.g. a
+    // `new SocketConnection({ handlers: { … } })` with 200 lines of
+    // handler bodies) into the `return` statement strictly hurts
+    // readability, which is the opposite of what this rule should
+    // encourage. The 10-line cutoff stays well below any "trivial
+    // expression with a redundant temp" case.
+    const valueNode = decl.childForFieldName('value')
+    if (valueNode) {
+      const lineSpan = valueNode.endPosition.row - valueNode.startPosition.row + 1
+      if (lineSpan > 10) return null
+    }
+
     let usageCount = 0
     function countUsages(n: SyntaxNode) {
       if (n.type === 'identifier' && n.text === retName) {

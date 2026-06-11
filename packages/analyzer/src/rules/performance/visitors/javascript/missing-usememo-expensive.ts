@@ -41,6 +41,24 @@ export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip trivial .reduce() callbacks — a single binary expression on the
+    // two parameters (e.g. `(sum, v) => sum + v`) is O(1) per item and does
+    // not benefit from memoization. The expensive reduce shape (object
+    // spread accumulator) is handled by spread-in-reduce.
+    if (prop.text === 'reduce') {
+      const args = node.childForFieldName('arguments')
+      const callback = args?.namedChild(0)
+      if (callback?.type === 'arrow_function' || callback?.type === 'function_expression' || callback?.type === 'function') {
+        const body = callback.childForFieldName('body')
+        let inspect = body
+        // Unwrap a parenthesized arrow body like `(acc, x) => (acc + x)`.
+        if (inspect?.type === 'parenthesized_expression') {
+          inspect = inspect.namedChildren[0] ?? inspect
+        }
+        if (inspect?.type === 'binary_expression') return null
+      }
+    }
+
     // Check if inside a React component function (heuristic: PascalCase function containing JSX return)
     const enclosingFn = findEnclosingFunctionNode(node)
     if (!enclosingFn) return null
