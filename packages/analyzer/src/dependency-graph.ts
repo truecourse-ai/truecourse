@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'f
 import type { FileAnalysis, ModuleDependency } from '@truecourse/shared'
 import { buildScopedCompilerOptions, resolveModule, type ScopedCompilerOptions } from './ts-compiler.js'
 import { monorepoPatterns } from './patterns/service-patterns.js'
-import { getImportResolver } from './resolvers/registry.js'
+import { getImportResolver, getEdgeContributor } from './resolvers/registry.js'
 import { getLanguageConfig } from './language-config.js'
 
 /**
@@ -149,7 +149,27 @@ export function buildDependencyGraph(
   // Set of analyzed file paths for filtering resolved targets
   const analyzedFiles = new Set(files.map((f) => f.filePath))
 
+  // Languages with an edge contributor (C#) get their edges from a
+  // whole-language pass — their cross-file deps don't map onto imports.
+  const contributedLanguages = new Set<string>()
+  if (rootPath) {
+    const byLanguage = new Map<string, FileAnalysis[]>()
+    for (const file of files) {
+      if (!byLanguage.has(file.language)) byLanguage.set(file.language, [])
+      byLanguage.get(file.language)!.push(file)
+    }
+    for (const [language, languageFiles] of byLanguage) {
+      const contributor = getEdgeContributor(language as FileAnalysis['language'])
+      if (!contributor) continue
+      contributedLanguages.add(language)
+      for (const edge of contributor(languageFiles, rootPath)) {
+        if (analyzedFiles.has(edge.target)) dependencies.push(edge)
+      }
+    }
+  }
+
   for (const file of files) {
+    if (contributedLanguages.has(file.language)) continue
     // Collect import sources: both imports and re-exports (export { x } from './y')
     const depSources: { source: string; names: string[] }[] = []
 

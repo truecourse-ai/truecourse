@@ -6,6 +6,9 @@
 > verify is pure tree-sitter. (Earlier drafts of this doc scoped the full `analyze`/scan
 > treatment — LSP, resolvers, ~601 rule visitors — which is *not* needed here.)
 >
+> **C# `analyze` support ships together with this work on the same branch** — see the
+> companion plan `CSHARP_ANALYZE_PLAN.md`. Neither merges without the other.
+>
 > File:line references are as-of-research pointers and may drift; treat the file and
 > the named symbol as authoritative, not the exact line.
 

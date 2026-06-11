@@ -49,6 +49,13 @@ export { checkStyleRules } from './style/checker.js'
 export type { CodeRuleVisitor } from './types.js'
 export { makeViolation, walkAstWithVisitors } from './types.js'
 
+// --- Language-support matrix ---
+
+import { withLanguageSupport } from './language-support.js'
+import { ALL_CODE_VISITORS } from './combined-code-checker.js'
+export { withLanguageSupport, summarizeLanguageSupport, RULE_LANGUAGE_DISPOSITIONS, LANGUAGE_FAMILY, UNIVERSAL_VISITOR_FAMILIES } from './language-support.js'
+export { ALL_CODE_VISITORS } from './combined-code-checker.js'
+
 // --- Backwards-compatible aggregate arrays ---
 
 /** All deterministic rules across all domains. */
@@ -88,14 +95,18 @@ export const CODE_RULES: AnalysisRule[] = [
   ...CODE_QUALITY_DETERMINISTIC_RULES,
 ]
 
-/** All default rules across all domains and types. */
-export const ALL_DEFAULT_RULES: AnalysisRule[] = [
-  ...DETERMINISTIC_RULES,
-  ...ARCHITECTURE_LLM_RULES,
-  ...DATABASE_LLM_RULES,
-  ...SECURITY_LLM_RULES,
-  ...BUGS_LLM_RULES,
-  ...CODE_QUALITY_LLM_RULES,
-  ...PERFORMANCE_LLM_RULES,
-  ...RELIABILITY_LLM_RULES,
-]
+/** All default rules across all domains and types, with the per-language
+ *  support matrix populated from visitor coverage + curated dispositions. */
+export const ALL_DEFAULT_RULES: AnalysisRule[] = withLanguageSupport(
+  [
+    ...DETERMINISTIC_RULES,
+    ...ARCHITECTURE_LLM_RULES,
+    ...DATABASE_LLM_RULES,
+    ...SECURITY_LLM_RULES,
+    ...BUGS_LLM_RULES,
+    ...CODE_QUALITY_LLM_RULES,
+    ...PERFORMANCE_LLM_RULES,
+    ...RELIABILITY_LLM_RULES,
+  ],
+  ALL_CODE_VISITORS,
+)

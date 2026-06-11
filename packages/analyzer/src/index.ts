@@ -18,7 +18,7 @@ export { parseCode, parseFile, getParser, initParsers } from './parser.js'
 
 // Language configuration
 export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, getMaxParameters, type LanguageConfig } from './language-config.js'
-export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG } from './language-config.js'
+export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG, CSHARP_CONFIG } from './language-config.js'
 
 // TypeScript Compiler API utilities
 export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, createTypeQueryService, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference, type TypeQueryService } from './ts-compiler.js'
@@ -46,7 +46,22 @@ export {
   extractPythonImports,
   extractPythonExports,
 } from './extractors/languages/python.js'
+export {
+  extractCSharpFunctions,
+  extractCSharpClasses,
+  extractCSharpImports,
+  extractCSharpExports,
+} from './extractors/languages/csharp.js'
 export { createSourceLocation, extractDocComment } from './extractors/languages/common.js'
+
+// C# symbol index — the C# semantic layer (no LSP; see docs/CSHARP_ANALYZE_PLAN.md)
+export {
+  buildCSharpSymbolIndex,
+  contributeCSharpEdges,
+  type CSharpSymbolIndex,
+  type CSharpTypeDecl,
+} from './symbol-index/csharp-symbol-index.js'
+export { discoverProjects, readCsproj, buildFileProjectMap, type CsprojInfo } from './symbol-index/csproj.js'
 
 // LSP client
 export { LspClient, type LspServerConfig, type LspAnalysisResult } from './lsp-client.js'

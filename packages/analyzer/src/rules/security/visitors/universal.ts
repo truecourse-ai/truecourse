@@ -6,13 +6,16 @@ import type { CodeRuleVisitor } from '../../types.js'
 import { makeViolation } from '../../types.js'
 import { scanForSecrets, isSensitiveFile } from '../secret-scanner.js'
 
+// String-literal node types across the JS, Python, and C# grammars
+const STRING_NODE_TYPES = ['string', 'template_string', 'string_literal', 'verbatim_string_literal', 'interpolated_string_expression', 'raw_string_literal']
+
 export const hardcodedSecretVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-secret',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text
     // Strip string prefix (f, b, r, u for Python) and quotes
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
     if (stripped.length < 8) return null
 
     // Skip dict/object keys (only check values)
@@ -120,10 +123,10 @@ const EXCLUDED_IPS = new Set(['127.0.0.1', '0.0.0.0', '255.255.255.255'])
 
 export const hardcodedIpVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-ip',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
     const match = IPV4_REGEX.exec(stripped)
     if (!match) return null
@@ -175,10 +178,10 @@ const LOCALHOST_PREFIXES = ['http://localhost', 'http://127.0.0.1', 'http://0.0.
 
 export const clearTextProtocolVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/clear-text-protocol',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
     const lower = stripped.toLowerCase()
 
     for (const protocol of CLEARTEXT_PROTOCOLS) {
@@ -195,14 +198,26 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
         // protocol (e.g. `http://${addr}`, `http://[${addr}]`). These are URL
         // templates built for parsing — `new URL(...)`, isPrivateUrl(...) /
         // SSRF validators — not hardcoded plaintext connection targets.
-        if (node.type === 'template_string') {
+        if (node.type === 'template_string' || node.type === 'interpolated_string_expression') {
           const afterProtocol = stripped.slice(protocol.length)
-          if (afterProtocol.startsWith('${') || afterProtocol.startsWith('[${')) {
+          if (afterProtocol.startsWith('${') || afterProtocol.startsWith('[${') ||
+              afterProtocol.startsWith('{') || afterProtocol.startsWith('[{')) {
             return null
           }
         }
         // Exclude string comparisons/checks — the protocol URL is being inspected, not used
         // as a connection target. E.g., input.startsWith('http://'), url.includes('http://').
+        // C#: url.StartsWith("http://") etc. — string inspection, not usage
+        if (node.parent?.type === 'argument') {
+          const invocation = node.parent.parent?.parent
+          const fn = invocation?.type === 'invocation_expression' ? invocation.childForFieldName('function') : null
+          if (fn?.type === 'member_access_expression') {
+            const name = fn.childForFieldName('name')?.text
+            if (name === 'StartsWith' || name === 'Contains' || name === 'EndsWith' || name === 'IndexOf') {
+              return null
+            }
+          }
+        }
         const parent = node.parent
         if (parent?.type === 'arguments') {
           const grandparent = parent.parent
@@ -336,10 +351,10 @@ const BIP39_COMMON_WORDS = new Set([
 
 export const hardcodedBlockchainMnemonicVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-blockchain-mnemonic',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
     const words = stripped.trim().split(/\s+/)
     // BIP39 mnemonics are 12 or 24 words
@@ -371,6 +386,9 @@ const DB_URL_PATTERN = /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle
 const DB_PASSWORD_KV_PATTERNS = [
   /password\s*=\s*['"][^'"]{4,}['"]/i,
   /pwd\s*=\s*['"][^'"]{4,}['"]/i,
+  // ADO.NET connection-string form: `…;Password=value;…` — the value is
+  // unquoted, delimited by `;`. Leading `{`/`$`/quote means a template.
+  /(?:^|;)\s*(?:password|pwd)\s*=\s*[^;'"{$\s][^;]{3,}/i,
 ]
 
 // A password segment that is *not* a literal value: f-string / template
@@ -381,10 +399,10 @@ const NON_LITERAL_PASSWORD_SEGMENT = /^\{[^{}]*\}$|^\$\{[^}]*\}$|^%s$|^%\([^)]+\
 
 export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-database-password',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
     // Generic placeholder/env-var exclusion (applies to any pattern).
     if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
@@ -428,11 +446,11 @@ export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
 
 export const ldapUnauthenticatedVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/ldap-unauthenticated',
-  nodeTypes: ['string', 'template_string'],
+  nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     // LDAP anonymous bind DSN: ldap://host or ldaps://host without credentials
     const text = node.text
-    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const stripped = text.replace(/^[fFbBrRuU@$]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
     const lower = stripped.toLowerCase()
     if (!lower.startsWith('ldap://') && !lower.startsWith('ldaps://')) return null
@@ -502,14 +520,14 @@ const HASH_FUNCTIONS_NEEDING_SALT = new Set([
 
 export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/unpredictable-salt-missing',
-  nodeTypes: ['call_expression', 'call'],
+  nodeTypes: ['call_expression', 'call', 'invocation_expression'],
   visit(node, filePath, sourceCode) {
     const fn = node.childForFieldName('function')
     if (!fn) return null
 
     let methodName = ''
-    if (fn.type === 'member_expression' || fn.type === 'attribute') {
-      const prop = fn.childForFieldName('property') ?? fn.childForFieldName('attribute')
+    if (fn.type === 'member_expression' || fn.type === 'attribute' || fn.type === 'member_access_expression') {
+      const prop = fn.childForFieldName('property') ?? fn.childForFieldName('attribute') ?? fn.childForFieldName('name')
       if (prop) methodName = prop.text
     } else if (fn.type === 'identifier') {
       methodName = fn.text
@@ -535,7 +553,8 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
         return null
       }
       if (parent.type === 'function_declaration' || parent.type === 'function_definition' ||
-          parent.type === 'method_definition' || parent.type === 'program') break
+          parent.type === 'method_definition' || parent.type === 'program' ||
+          parent.type === 'method_declaration' || parent.type === 'compilation_unit') break
       parent = parent.parent
     }
 
@@ -549,7 +568,7 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
 
 export const sensitiveFileVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-secret',
-  nodeTypes: ['program', 'module'],
+  nodeTypes: ['program', 'module', 'compilation_unit'],
   visit(node, filePath, sourceCode) {
     const result = isSensitiveFile(filePath)
     if (result?.isSensitive) {
@@ -574,7 +593,7 @@ export const sensitiveFileVisitor: CodeRuleVisitor = {
  */
 function stripCommentMarkers(text: string): string {
   return text
-    .replace(/^\/\/\s?/, '')        // single-line JS/TS
+    .replace(/^\/{2,3}\s?/, '')       // single-line JS/TS/C# (incl. ///)
     .replace(/^\/\*\s?/, '')        // block comment start
     .replace(/\s?\*\/$/, '')        // block comment end
     .replace(/^\s*\*\s?/gm, '')    // middle lines of block comment

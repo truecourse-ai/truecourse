@@ -217,6 +217,21 @@ function toMethodInfo(
  * - Fallback to file name
  */
 function deriveModuleName(analysis: FileAnalysis): string {
+  // C#: standalone functions are the methods of a static class, and the
+  // module is that class. Its name is the export that is neither a regular
+  // class nor one of the functions (the extractor exports the static class
+  // name alongside its public methods).
+  if (analysis.language === 'csharp') {
+    const classNames = new Set(analysis.classes.map((c) => c.name))
+    const functionNames = new Set(analysis.functions.map((f) => f.name))
+    const staticClassExport = analysis.exports.find(
+      (e) => !e.source && !classNames.has(e.name) && !functionNames.has(e.name),
+    )
+    if (staticClassExport) {
+      return staticClassExport.name
+    }
+  }
+
   // Next.js convention: route.ts/page.tsx files export HTTP methods (GET, POST, etc.)
   // or page components. Derive a unique name from the directory path to avoid collisions.
   const nextjsName = deriveNextjsRouteName(analysis.filePath)
@@ -713,7 +728,9 @@ function buildMethodDependencies(
 }
 
 function matchesLowerCase(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase()
+  // Strip the private-field prefix (`_orderService` in C#, `this._service`
+  // in JS after `this.` removal) so receivers match their module names.
+  return a.toLowerCase().replace(/^_/, '') === b.toLowerCase().replace(/^_/, '')
 }
 
 function isBuiltinCall(methodName: string, fullCallee: string): boolean {

@@ -4,6 +4,7 @@ import type { FileAnalysis, DatabaseType, DatabaseInfo, DatabaseConnectionInfo, 
 import { DATABASE_IMPORT_MAP, DOCKER_IMAGE_MAP } from './patterns/database-patterns.js'
 import { parsePrismaSchema } from './schema-parsers/prisma.js'
 import { SCHEMA_PARSERS } from './schema-parsers/registry.js'
+import { readAllDependencies } from './service-detectors/registry.js'
 import type { Service } from './service-detector.js'
 
 interface DetectedDatabase {
@@ -30,7 +31,24 @@ export function detectDatabases(
     if (!service) continue
 
     for (const imp of analysis.imports) {
-      const dbMatch = DATABASE_IMPORT_MAP[imp.source]
+      // Map keys are lowercase; C# namespaces are PascalCase (StackExchange.Redis)
+      const dbMatch = DATABASE_IMPORT_MAP[imp.source] ?? DATABASE_IMPORT_MAP[imp.source.toLowerCase()]
+      if (dbMatch) {
+        detections.push({
+          type: dbMatch.type,
+          driver: dbMatch.driver,
+          serviceName: service.name,
+        })
+      }
+    }
+  }
+
+  // 1b. Scan declared manifest dependencies. In C#, a database provider is a
+  // PackageReference configured via UseNpgsql()/UseSqlServer() — the package
+  // name never appears in a using directive, so import scanning can't see it.
+  for (const service of services) {
+    for (const dep of readAllDependencies(service.rootPath)) {
+      const dbMatch = DATABASE_IMPORT_MAP[dep] ?? DATABASE_IMPORT_MAP[dep.toLowerCase()]
       if (dbMatch) {
         detections.push({
           type: dbMatch.type,

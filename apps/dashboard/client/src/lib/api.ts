@@ -380,6 +380,7 @@ export type RuleResponse = {
   enabled: boolean;
   severity: string;
   type: string;
+  languageSupport?: Record<string, { status: string; reason?: string }>;
 };
 
 export function getRules(repoId?: string): Promise<RuleResponse[]> {

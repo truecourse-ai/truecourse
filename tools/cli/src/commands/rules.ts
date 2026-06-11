@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { DOMAIN_ORDER } from "@truecourse/shared";
+import { DOMAIN_ORDER, ANALYSIS_LANGUAGES, type AnalysisLanguage } from "@truecourse/shared";
 import {
   readProjectConfig,
   updateProjectConfig,
@@ -143,11 +143,31 @@ export interface RulesListOptions {
   disabled?: boolean;
   enabled?: boolean;
   search?: string;
+  language?: string;
 }
+
+const LANGUAGE_STATUS_GLYPHS: Record<string, string> = {
+  supported: "\x1b[32m✓\x1b[0m",
+  partial: "\x1b[33m◐\x1b[0m",
+  "not-applicable": "\x1b[2m—\x1b[0m",
+  unsupported: "\x1b[31m✗\x1b[0m",
+};
+
+const LANGUAGE_ABBREV: Record<AnalysisLanguage, string> = {
+  javascript: "js",
+  python: "py",
+  csharp: "cs",
+};
 
 export async function runRulesList(options: RulesListOptions): Promise<void> {
   const repo = requireRegisteredRepo();
   const rules = await getRules(repo.path);
+
+  const language = options.language as AnalysisLanguage | undefined;
+  if (language && !ANALYSIS_LANGUAGES.includes(language)) {
+    p.log.error(`Invalid language: ${language}. Valid: ${ANALYSIS_LANGUAGES.join(", ")}`);
+    process.exit(1);
+  }
 
   const search = options.search?.toLowerCase();
   let filtered = rules;
@@ -176,6 +196,17 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
     `Rules for ${repo.name}: ${filtered.length} shown (${enabledCount} enabled, ${disabledCount} disabled).`,
   );
 
+  if (language) {
+    const counts = { supported: 0, partial: 0, "not-applicable": 0, unsupported: 0 };
+    for (const r of filtered) {
+      const entry = r.languageSupport?.[language];
+      if (entry) counts[entry.status]++;
+    }
+    p.log.info(
+      `${language}: ${counts.supported} supported, ${counts.partial} partial, ${counts["not-applicable"]} not applicable, ${counts.unsupported} unsupported.`,
+    );
+  }
+
   const keyWidth = Math.min(
     60,
     filtered.reduce((max, r) => Math.max(max, r.key.length), 0),
@@ -184,10 +215,29 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
   for (const r of filtered) {
     const status = r.enabled ? COLOR_ENABLED : COLOR_DISABLED;
     const domain = r.domain ?? r.category;
-    console.log(`  ${r.key.padEnd(keyWidth)}  ${status}  ${COLOR_DIM(`[${domain}/${r.severity}]`)}  ${r.name}`);
+
+    if (language) {
+      const entry = r.languageSupport?.[language];
+      const glyph = entry ? LANGUAGE_STATUS_GLYPHS[entry.status] : " ";
+      const reason = entry?.reason ? `  ${COLOR_DIM(entry.reason)}` : "";
+      console.log(
+        `  ${glyph} ${r.key.padEnd(keyWidth)}  ${status}  ${COLOR_DIM(`[${domain}/${r.severity}]`)}  ${r.name}${reason}`,
+      );
+    } else {
+      const langs = ANALYSIS_LANGUAGES.map((lang) => {
+        const entry = r.languageSupport?.[lang];
+        return `${LANGUAGE_ABBREV[lang]}${entry ? LANGUAGE_STATUS_GLYPHS[entry.status] : "?"}`;
+      }).join(" ");
+      console.log(
+        `  ${r.key.padEnd(keyWidth)}  ${status}  ${COLOR_DIM(`[${domain}/${r.severity}]`)}  [${langs}]  ${r.name}`,
+      );
+    }
   }
   console.log("");
   p.log.info("Toggle with: truecourse rules enable <key> | truecourse rules disable <key>");
+  if (!language) {
+    p.log.info("Per-language detail: truecourse rules list --language <javascript|python|csharp>");
+  }
 }
 
 export interface RulesResetOptions {

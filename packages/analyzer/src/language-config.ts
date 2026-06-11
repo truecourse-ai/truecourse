@@ -232,9 +232,67 @@ export const PYTHON_CONFIG: LanguageConfig = {
 }
 
 /**
+ * C# language configuration
+ */
+export const CSHARP_CONFIG: LanguageConfig = {
+  name: 'csharp',
+  fileExtensions: ['.cs'],
+
+  moduleResolution: {
+    extensions: ['.cs'],
+    indexFiles: [], // C# has no barrel files — namespaces span files
+  },
+
+  functionNodeTypes: ['method_declaration', 'local_function_statement'],
+  classNodeTypes: [
+    'class_declaration',
+    'struct_declaration',
+    'enum_declaration',
+    'interface_declaration',
+    'record_declaration',
+    'record_struct_declaration',
+  ],
+  importNodeTypes: ['using_directive'],
+  exportNodeTypes: [], // C# exports = public visibility modifier — handled in extractor
+  callNodeTypes: ['invocation_expression'],
+
+  urlInterpolation: {
+    // C# interpolated strings: $"{baseUrl}/users/{id}"
+    baseUrlVar: /\{[^}]*[Uu]rl[^}]*\}/gi,
+    paramVar: /\{[^}]+\}/g,
+  },
+
+  functionQuery: `
+    (method_declaration) @function
+    (local_function_statement) @function
+  `,
+
+  classQuery: `
+    (class_declaration) @class
+    (struct_declaration) @class
+    (enum_declaration) @class
+    (interface_declaration) @class
+    (record_declaration) @class
+  `,
+
+  importQuery: `(using_directive) @import`,
+
+  packageIndicatorFiles: ['*.csproj', '*.sln'],
+  ignorePatterns: ['**/bin/', '**/obj/', '**/.vs/'],
+  testPatterns: ['**/*Tests.cs', '**/*Test.cs', '**/*.Tests/'],
+  bootstrap: {
+    filePattern: /(?:^|[/\\])(?:Program|Startup)\.cs$/,
+    functionNames: ['Main'],
+  },
+  thresholds: {
+    maxParameters: 7, // DI-style option/dependency parameters are idiomatic
+  },
+}
+
+/**
  * Registry of all language configurations. Add new languages here.
  */
-const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG]
+const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG, CSHARP_CONFIG]
 
 // ---------------------------------------------------------------------------
 // Helpers — aggregate across all languages

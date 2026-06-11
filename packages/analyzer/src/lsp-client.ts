@@ -36,7 +36,12 @@ export interface LspServerConfig {
 export interface LspAnalysisResult {
   /** Map of file path → set of exported symbol names */
   exportMap: Map<string, Set<string>>
-  /** Map of method name → set of implementing class names */
+  /**
+   * Map of method name → set of implementing class names.
+   * TODO: computed but never consumed — callers only read exportMap
+   * (see analyzer.service.ts). Either wire this into flow tracing
+   * (resolve interface calls to implementations) or remove it.
+   */
   interfaceImplementations: Map<string, Set<string>>
 }
 
