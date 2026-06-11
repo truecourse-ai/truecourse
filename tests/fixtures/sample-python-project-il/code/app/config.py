@@ -37,3 +37,19 @@ class JobSettings(BaseSettings):
             "app_workers_concurrency_limit",
         ),
     )
+
+
+from pydantic_settings import SettingsConfigDict
+
+
+class WebhookSettings(BaseSettings):
+    """Webhook delivery settings, scoped to the APP_WEBHOOK_ env namespace."""
+
+    model_config = SettingsConfigDict(env_prefix="APP_WEBHOOK_")
+
+    # FP-GUARD: named-constant/no-code-counterpart — must NOT drift
+    # The spec names this APP_WEBHOOK_TIMEOUT_SECONDS. There is no bare module
+    # constant or validation_alias of that name; the verifier must derive the
+    # env-var name from the class's env_prefix + field name and bind by value.
+    timeout_seconds: int = Field(default=30, description="Per-delivery timeout.")
+    verify_tls: bool = Field(default=True, description="Verify TLS on delivery.")
