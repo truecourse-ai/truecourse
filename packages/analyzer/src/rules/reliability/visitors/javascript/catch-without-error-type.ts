@@ -43,6 +43,14 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     // them is noise.
     if (!hasBranchingConstruct(body)) return null
 
+    // Skip when the body narrows the error through a user-defined type guard,
+    // e.g. `if (!isExecaChildProcess(error)) throw error`. `instanceof`/`typeof`
+    // are not the only ways to discriminate an error — predicate functions
+    // (`isXxx` / `hasXxx` / `assertXxx`) applied to the caught binding are the
+    // idiomatic TS type-guard pattern and narrow it just as effectively.
+    const paramName = param.type === 'identifier' ? param.text : null
+    if (paramName && narrowsViaTypeGuard(body, paramName)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Catch without error type discrimination',
@@ -51,6 +59,39 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
       'Use instanceof checks or type guards in the catch block to handle specific error types.',
     )
   },
+}
+
+// True when `body` contains a type-guard-style call (`isXxx`/`hasXxx`/`assertXxx`)
+// that receives the caught error binding as an argument — the user-defined
+// equivalent of an `instanceof` narrowing.
+const TYPE_GUARD_NAME = /^(is|has|assert)[A-Z]/
+function narrowsViaTypeGuard(node: SyntaxNode, paramName: string): boolean {
+  if (node.type === 'call_expression') {
+    const fn = node.childForFieldName('function')
+    let calleeName: string | null = null
+    if (fn?.type === 'identifier') calleeName = fn.text
+    else if (fn?.type === 'member_expression') calleeName = fn.childForFieldName('property')?.text ?? null
+    if (calleeName && TYPE_GUARD_NAME.test(calleeName)) {
+      const args = node.childForFieldName('arguments')
+      if (args && referencesBinding(args, paramName)) return true
+    }
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const ch = node.child(i)
+    if (ch && narrowsViaTypeGuard(ch, paramName)) return true
+  }
+  return false
+}
+
+// True when `node` contains an identifier matching `name` (the bare binding or
+// the object root of a member access like `name.cause`).
+function referencesBinding(node: SyntaxNode, name: string): boolean {
+  if (node.type === 'identifier' && node.text === name) return true
+  for (let i = 0; i < node.childCount; i++) {
+    const ch = node.child(i)
+    if (ch && referencesBinding(ch, name)) return true
+  }
+  return false
 }
 
 function hasBranchingConstruct(node: SyntaxNode): boolean {
