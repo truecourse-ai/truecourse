@@ -1,0 +1,4 @@
+operation POST "/imports/catalog_feed/" {
+  origin "reference/specs/modules/catalog/imports.md" "POST /imports/catalog_feed/" 1..12
+  response 200 on success
+}
