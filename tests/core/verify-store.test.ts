@@ -215,6 +215,29 @@ describe('full verify stashes the dirty tree (baseline = committed state)', () =
     // The dirty edit was stashed for the run, then popped back.
     expect(fs.readFileSync(tracked, 'utf-8')).toBe('uncommitted edit\n');
   });
+
+  it('does not stash away contracts under the repo .truecourse/ dir (issue #542)', async () => {
+    gitInit(repo);
+    // A committed code file so the tree has tracked history to stash against.
+    fs.writeFileSync(path.join(repo, 'app.ts'), 'committed\n');
+    execSync('git add app.ts', { cwd: repo });
+    execSync('git commit -q -m code', { cwd: repo });
+    fs.writeFileSync(path.join(repo, 'app.ts'), 'uncommitted edit\n'); // dirty → stash fires
+
+    // Generated contracts live UNTRACKED under .truecourse/contracts, exactly
+    // as `contracts generate` leaves them when .truecourse/ isn't committed.
+    const repoContracts = path.join(repo, '.truecourse', 'contracts');
+    fs.mkdirSync(repoContracts, { recursive: true });
+    fs.cpSync(CONTRACTS, repoContracts, { recursive: true });
+
+    // skipStash defaults false → full stash. Before the fix this threw
+    // `ENOENT scandir '.../.truecourse/contracts'` because the stash swept the
+    // contracts away before the verifier could read them.
+    const { verify } = await verifyInProcess(repo, { contractsDir: repoContracts, codeDir: CODE });
+
+    expect(verify.artifactCount).toBeGreaterThan(0); // contracts were actually read
+    expect(fs.existsSync(repoContracts)).toBe(true); // and survived the stash window
+  });
 });
 
 // ---------------------------------------------------------------------------
