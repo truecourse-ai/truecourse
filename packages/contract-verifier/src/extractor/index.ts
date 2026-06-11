@@ -10,7 +10,10 @@ import type { Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import { extractOperationsFromFile, extractPluginStyleRoutesFromFile, type ExtractedOperation } from './operation.js';
-import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
+import {
+  extractFastApiOperationsFromFile,
+  extractStarletteRoutesFromFile,
+} from './operation-fastapi.js';
 import { eachParsedSource } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 import {
@@ -143,7 +146,11 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
   // (`APIRouter(prefix=…)`), so no cross-file mount graph is needed.
   await eachParsedSource(rootDir, (s) => {
     if (s.lang !== 'python') return;
-    for (const op of extractFastApiOperationsFromFile(s.filePath, s.source, s.tree)) {
+    const pythonOps = [
+      ...extractFastApiOperationsFromFile(s.filePath, s.source, s.tree),
+      ...extractStarletteRoutesFromFile(s.filePath, s.source, s.tree),
+    ];
+    for (const op of pythonOps) {
       if (!seen.has(op.identity)) {
         expressOps.push(op);
         seen.add(op.identity);

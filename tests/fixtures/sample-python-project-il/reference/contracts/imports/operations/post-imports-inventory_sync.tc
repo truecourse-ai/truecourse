@@ -1,0 +1,4 @@
+operation POST "/imports/inventory_sync/" {
+  origin "reference/specs/modules/catalog/imports.md" "POST /imports/inventory_sync/" 13..24
+  response 200 on success
+}

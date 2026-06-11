@@ -32,6 +32,114 @@ interface RouterInfo {
   hasAuthDep: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Starlette route extraction
+//
+// Some Python servers (Starlette directly, and frameworks built on it) declare
+// routes as a `Route(path, endpoint, methods=[...])` list passed to a
+// `Starlette(routes=[...])` app or `Mount`, rather than via `@router.<method>`
+// decorators. The FastAPI extractor above only lifts decorator-style routes,
+// so these endpoints read as `implementation.missing` even though they ship.
+//
+// We lift every `Route("/path", endpoint, methods=[...])` call we can find:
+//   - method(s) come from the `methods=[...]` kwarg; absent → GET (Starlette's
+//     default for a Route).
+//   - Starlette path converters (`{name:int}`, `{name:path}`) are normalized to
+//     the spec-side `{name}` form so identities line up.
+//   - a trailing catch-all segment (`/{name:path}`, which matches the rest of
+//     the URL including slashes) additionally yields the static-prefix identity
+//     (`/report_asset_materialization/`), because the documented endpoint for
+//     such routes is that prefix with the key appended as a path tail. Both
+//     identities are emitted; extra code-side identities that match no spec are
+//     harmless.
+// ---------------------------------------------------------------------------
+
+export function extractStarletteRoutesFromFile(
+  filePath: string,
+  source: string,
+  tree: Tree,
+): ExtractedOperation[] {
+  const out: ExtractedOperation[] = [];
+
+  walk(tree.rootNode, (node) => {
+    if (node.type !== 'call') return;
+    const fn = node.childForFieldName('function');
+    // Starlette `Route(...)` — plain identifier callee.
+    if (fn?.type !== 'identifier' || source.slice(fn.startIndex, fn.endIndex) !== 'Route') return;
+    const args = node.childForFieldName('arguments');
+    if (!args) return;
+
+    // First positional arg must be a string path; second positional arg is the
+    // endpoint callable. This signature is what distinguishes a Starlette
+    // `Route` from any other call that happens to be named `Route`.
+    const first = args.namedChild(0);
+    if (first?.type !== 'string') return;
+    const rawPath = pyStr(first, source);
+    if (!rawPath.startsWith('/')) return;
+    const second = args.namedChild(1);
+    if (!second || second.type === 'keyword_argument') return;
+
+    const methods = readStarletteMethods(args, source);
+    const identities = starletteIdentitiesForPath(rawPath);
+    const line = node.startPosition.row + 1;
+
+    for (const method of methods) {
+      for (const path of identities) {
+        out.push({
+          identity: `${method} ${path}`,
+          contract: {
+            protocol: 'http',
+            method,
+            path,
+            responses: [],
+            tags: [],
+          } satisfies OperationContract,
+          filePath,
+          declarationLine: line,
+          observed: { queryParams: [], numericClamps: [], hasClampCall: false },
+        });
+      }
+    }
+  });
+
+  return out;
+}
+
+/** Methods from a `methods=[...]` kwarg; defaults to `['GET']` when absent. */
+function readStarletteMethods(args: SyntaxNode, source: string): string[] {
+  for (let i = 0; i < args.namedChildCount; i++) {
+    const a = args.namedChild(i);
+    if (a?.type !== 'keyword_argument') continue;
+    const name = a.childForFieldName('name');
+    if (!name || source.slice(name.startIndex, name.endIndex) !== 'methods') continue;
+    const value = a.childForFieldName('value');
+    if (value?.type !== 'list') return ['GET'];
+    const methods: string[] = [];
+    for (let j = 0; j < value.namedChildCount; j++) {
+      const el = value.namedChild(j);
+      if (el?.type === 'string') methods.push(pyStr(el, source).toUpperCase());
+    }
+    return methods.length > 0 ? methods : ['GET'];
+  }
+  return ['GET'];
+}
+
+/**
+ * Normalize a Starlette path to the identity the spec side uses.
+ * When the final segment is a catch-all (`{name:path}`, which matches the rest
+ * of the URL including slashes), the documented endpoint is the static prefix
+ * with the key appended as a path tail — so the identity is that prefix
+ * (`/report_asset_materialization/`). Otherwise the converter is stripped to the
+ * spec-side `{name}` form (`{run_id:str}` → `{run_id}`).
+ */
+function starletteIdentitiesForPath(rawPath: string): string[] {
+  const catchAll = rawPath.match(/^(\/.*\/)\{\w+:path\}$/);
+  if (catchAll) {
+    return [catchAll[1].replace(/\{(\w+):[^}]+\}/g, '{$1}')];
+  }
+  return [rawPath.replace(/\{(\w+):[^}]+\}/g, '{$1}')];
+}
+
 export function extractFastApiOperationsFromFile(
   filePath: string,
   source: string,
