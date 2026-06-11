@@ -64,6 +64,26 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
     });
   }
 
+  // Settings-field suffix match. A Pydantic settings field is emitted under its
+  // env scope WITHOUT the project prefix (`SERVER_ANALYTICS_ENABLED`), while the
+  // spec names it with the prefix (`PREFECT_SERVER_ANALYTICS_ENABLED`). Bind them
+  // when the spec name ENDS WITH the code name and the values are equal. The
+  // value gate + the suffix being multi-segment (the code name still carries the
+  // scope, e.g. `serveranalyticsenabled`) keeps this from matching unrelated
+  // single-word constants. Scoped to `settings-field` shape only — no effect on
+  // any other constant kind or campaign.
+  if (matches.length === 0) {
+    matches = codeConstants.filter((c) => {
+      if (c.shape !== 'settings-field') return false;
+      const codeName = normalizeName(c.name);
+      if (codeName.length < 8 || !target.endsWith(codeName)) return false;
+      return (
+        contract.expectedValue === undefined ||
+        deepEqual(contract.expectedValue, c.value, /*allowExtraCodeKeys*/ true)
+      );
+    });
+  }
+
   if (matches.length === 0) {
     return [{
       id: randomUUID(),

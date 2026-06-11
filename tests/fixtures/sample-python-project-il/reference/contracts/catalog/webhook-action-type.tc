@@ -1,0 +1,4 @@
+enum WebhookActionType {
+  origin "reference/specs/modules/catalog/webhooks.md" "Webhook action types" 1..10
+  values [send-email, post-message, open-ticket, run-script]
+}

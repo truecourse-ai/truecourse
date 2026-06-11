@@ -62,3 +62,36 @@ class TxIsolation(AutoEnum):
 class JobPriority(str, Enum):
     HIGH = "HIGH"
     NORMAL = "NORMAL"
+
+
+# FP-GUARD: enum/no-code-counterpart — must NOT drift
+# Pricing strategies are modeled as module-level singletons, each an instance
+# of a subclass of a common base (not an Enum). The verifier must synthesize a
+# `PricingStrategy` enum from the constant NAMES so the spec's PricingStrategies
+# enum has a code counterpart. STANDARD is composed from other strategies.
+class PricingStrategy:
+    """Base class for all pricing strategies."""
+
+class FlatRate(PricingStrategy): ...
+class Tiered(PricingStrategy): ...
+class Promotional(PricingStrategy): ...
+
+FLAT_RATE = FlatRate()
+TIERED = Tiered()
+PROMOTIONAL = Promotional()
+STANDARD = FLAT_RATE  # alias-composed member
+
+
+# FP-GUARD: enum/no-code-counterpart — must NOT drift
+# Fulfilment stage subsets exposed as named sets of enum-member references
+# (not string literals). The spec models `picked`/`packed` as trigger subsets of
+# FulfilmentStage; the verifier must lift the member last-segments and resolve
+# the set-difference for OUTSTANDING_STAGES.
+class FulfilmentStage(AutoEnum):
+    PICKED = AutoEnum.auto()
+    PACKED = AutoEnum.auto()
+    SHIPPED = AutoEnum.auto()
+    DELIVERED = AutoEnum.auto()
+
+COMPLETED_STAGES: set[FulfilmentStage] = {FulfilmentStage.SHIPPED, FulfilmentStage.DELIVERED}
+OUTSTANDING_STAGES = list(set(FulfilmentStage) - COMPLETED_STAGES)
