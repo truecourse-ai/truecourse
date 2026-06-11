@@ -21,8 +21,11 @@ export const missingFinallyCleanupVisitor: CodeRuleVisitor = {
     const bodyText = body.text
 
     for (const method of RESOURCE_OPEN_METHODS) {
-      // Use word boundary + call syntax to avoid matching substrings (e.g. "connection" matching "connect")
-      if (new RegExp(`\\b${method}\\s*\\(`).test(bodyText)) {
+      // Require a real identifier boundary before the method name so we match
+      // whole identifiers only. `\b` treats `$` as a boundary, which wrongly
+      // matches managed-client methods like Prisma's `$connect()` as the raw
+      // `connect()` resource-open. `$` is a JS identifier char, so exclude it.
+      if (new RegExp(`(?<![\\w$])${method}\\s*\\(`).test(bodyText)) {
         // Skip createServer with .listen() — server lifecycle, not resource leak
         if (method === 'createServer' && bodyText.includes('.listen')) continue
         // Skip 'connect' and 'open' when called as method on existing object (pool/managed resource)

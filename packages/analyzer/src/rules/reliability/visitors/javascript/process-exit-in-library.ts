@@ -13,6 +13,14 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (obj?.text !== 'process' || prop?.text !== 'exit') return null
 
+    // Files with a Node entry-point guard (`require.main === module`) or an ESM
+    // `import.meta.main` check are runnable scripts, not library modules —
+    // process.exit is the conventional way they terminate, regardless of the
+    // file's name.
+    if (/require\.main\s*===?\s*module|module\s*===?\s*require\.main|import\.meta\.main/.test(sourceCode)) {
+      return null
+    }
+
     // Allow in files that look like entry points
     const lowerPath = filePath.toLowerCase()
     if (

@@ -2,6 +2,30 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 
+// True when the string is rendered inside JSX markup — either a direct
+// attribute value or any string embedded in a JSX `{…}` expression container
+// (e.g. `className={cond ? "ml-auto" : ""}`, `style={{ height: "100vh" }}`,
+// `to={docsPath("guides/x")}`, `{value ?? "Not set"}`). These are presentation
+// strings (CSS values, Tailwind classes, UI labels), not domain constants worth
+// extracting. The walk stops at a function boundary so strings inside inline
+// event-handler callbacks are still considered imperative code.
+function isInsideJsxMarkup(n: SyntaxNode): boolean {
+  let cur: SyntaxNode | null = n.parent
+  while (cur) {
+    if (
+      cur.type === 'arrow_function' ||
+      cur.type === 'function' ||
+      cur.type === 'function_declaration' ||
+      cur.type === 'function_expression' ||
+      cur.type === 'method_definition'
+    ) return false
+    if (cur.type === 'jsx_expression' || cur.type === 'jsx_attribute') return true
+    if (cur.type === 'program') return false
+    cur = cur.parent
+  }
+  return false
+}
+
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -32,8 +56,11 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
           && (parent.parent?.type === 'call_expression' || parent.parent?.type === 'new_expression')
           && /^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(inner)
           && (inner.match(/-/g)?.length ?? 0) <= 2) return
-        // Skip JSX attribute values (SVG props, className, Tailwind classes)
-        if (parent?.type === 'jsx_attribute') return
+        // Skip strings rendered inside JSX markup (attribute values and any
+        // string embedded in a JSX `{…}` expression — CSS values, Tailwind
+        // classes, conditional UI labels). Presentation strings, not domain
+        // constants worth extracting.
+        if (isInsideJsxMarkup(n)) return
         // Skip type annotations and type contexts
         if (parent?.type === 'type_annotation' || parent?.type === 'type_alias_declaration'
           || parent?.type === 'property_signature' || parent?.type === 'literal_type') return
