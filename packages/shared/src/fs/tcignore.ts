@@ -23,6 +23,18 @@ export interface TcIgnore {
   root: string;
   /** True when `absPath` (a file or directory) is excluded. */
   ignores(absPath: string): boolean;
+  /**
+   * True when `absPath` is *explicitly re-included* by a negation rule
+   * (a `!pattern` line) — as opposed to merely not matching any rule.
+   *
+   * This is the signal that distinguishes "the scope deliberately opted
+   * into this path" from "no opinion". Directory walkers use it to let an
+   * explicit re-include override a hardcoded skip list: an allow-list
+   * ignore (`*.md` + `!docs/.../build/**`) re-includes the `.md` files
+   * inside a `build/` tree, so a probe of a markdown descendant reports
+   * `true` here even though the bare directory matches no rule.
+   */
+  reincludes(absPath: string): boolean;
 }
 
 /**
@@ -62,6 +74,11 @@ export function loadTcIgnore(startDir: string): TcIgnore {
       // Empty (the root itself) or escaping the root → out of scope.
       if (rel === '' || rel.startsWith('..')) return false;
       return ig.ignores(rel);
+    },
+    reincludes(absPath: string): boolean {
+      const rel = path.relative(root, path.resolve(absPath)).split(path.sep).join('/');
+      if (rel === '' || rel.startsWith('..')) return false;
+      return ig.test(rel).unignored;
     },
   };
 }

@@ -53,6 +53,31 @@ describe('loadTcIgnore', () => {
   });
 });
 
+describe('TcIgnore.reincludes', () => {
+  it('is true only for paths explicitly re-included by a negation rule', () => {
+    fs.writeFileSync(path.join(root, '.truecourseignore'), '*.md\n!docs/build/**\n');
+    const ig = loadTcIgnore(root);
+    // Re-included subtree (and nested descendants via `**`).
+    expect(ig.reincludes(path.join(root, 'docs/build/x.md'))).toBe(true);
+    expect(ig.reincludes(path.join(root, 'docs/build/assets/y.md'))).toBe(true);
+    // Ignored-but-not-re-included (a plain `*.md` match) → false.
+    expect(ig.reincludes(path.join(root, 'docs/other.md'))).toBe(false);
+    // A path no rule mentions at all → false (no opinion ≠ re-included).
+    expect(ig.reincludes(path.join(root, 'src/app.ts'))).toBe(false);
+  });
+
+  it('returns false when there is no .truecourseignore', () => {
+    const ig = loadTcIgnore(root);
+    expect(ig.reincludes(path.join(root, 'docs/build/x.md'))).toBe(false);
+  });
+
+  it('never re-includes paths outside the repo root', () => {
+    fs.writeFileSync(path.join(root, '.truecourseignore'), '!**\n');
+    const ig = loadTcIgnore(root);
+    expect(ig.reincludes(path.join(path.dirname(root), 'sibling.md'))).toBe(false);
+  });
+});
+
 describe('findRepoRoot', () => {
   it('stops at the directory holding .truecourseignore', () => {
     fs.writeFileSync(path.join(root, '.truecourseignore'), 'x\n');
