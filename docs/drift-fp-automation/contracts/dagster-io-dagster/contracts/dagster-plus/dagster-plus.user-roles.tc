@@ -1,0 +1,4 @@
+enum dagster-plus.user-roles {
+  origin "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/user-roles-permissions.md" "Dagster+ user roles" 22..22
+  values ["Organization Admin", Admin, Editor, Launcher, Viewer]
+}

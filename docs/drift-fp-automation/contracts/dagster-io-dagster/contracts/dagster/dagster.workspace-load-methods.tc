@@ -1,0 +1,4 @@
+enum dagster.workspace-load-methods {
+  origin "docs/docs/guides/build/projects/workspaces/workspace-yaml.md" "File structure" 45..45
+  values [python_file, python_module, grpc_server]
+}

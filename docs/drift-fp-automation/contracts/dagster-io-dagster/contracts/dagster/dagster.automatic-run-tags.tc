@@ -1,0 +1,4 @@
+enum dagster.automatic-run-tags {
+  origin "docs/docs/guides/build/assets/metadata-and-tags/tags.md" "Run tags" 64..64
+  values ["dagster/code_location", "dagster/user", "dagster/op_selection", "dagster/partition", "dagster/schedule_name", "dagster/sensor_name", "dagster/backfill", "dagster/parent_run_id", "dagster/image"]
+}

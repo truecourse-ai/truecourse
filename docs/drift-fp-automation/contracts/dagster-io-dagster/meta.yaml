@@ -1,0 +1,10 @@
+target_repo: dagster-io/dagster
+target_ref: d05d8a4b60da5036ae1facc03b59477b506fe949   # AUTHORITATIVE — discover/next-fix verify at this SHA (master)
+code_dir: "."
+generated_at: "2026-06-11"
+tool_version: 0.6.7
+llm: agent                      # transport used
+doc_scope:
+  - docs/docs/guides/build
+  - docs/docs/deployment
+  - docs/docs/integrations/libraries

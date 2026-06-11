@@ -1,0 +1,4 @@
+enum dagster.step-event-types {
+  origin "docs/docs/deployment/troubleshooting/scheduling-latency-gke.md" "Relevant event types" 15..15
+  values [STEP_WORKER_STARTING, STEP_WORKER_STARTED, STEP_START]
+}

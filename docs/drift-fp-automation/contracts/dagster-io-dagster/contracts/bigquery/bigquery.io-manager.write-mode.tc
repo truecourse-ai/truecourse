@@ -1,0 +1,4 @@
+enum bigquery.io-manager.write-mode {
+  origin "docs/docs/integrations/libraries/gcp/bigquery/reference.md" "Configuring write modes" 48..48
+  values [truncate, replace, append]
+}

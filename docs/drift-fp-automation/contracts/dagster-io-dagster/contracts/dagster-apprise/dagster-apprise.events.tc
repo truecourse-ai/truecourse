@@ -1,0 +1,4 @@
+enum dagster-apprise.events {
+  origin "docs/docs/integrations/libraries/apprise.md" "Supported Events" 79..79
+  values [SUCCESS, FAILURE, CANCELED, RUNNING]
+}

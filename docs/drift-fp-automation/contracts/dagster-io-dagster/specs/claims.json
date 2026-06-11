@@ -1,0 +1,626 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-11T19:26:41.490Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/audit-logs.md",
+        "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/user-roles-permissions.md",
+        "docs/docs/deployment/execution/run-coordinators.md",
+        "docs/docs/deployment/execution/run-retries.md",
+        "docs/docs/deployment/oss/dagster-yaml.md",
+        "docs/docs/deployment/troubleshooting/scheduling-latency-gke.md",
+        "docs/docs/guides/build/assets/defining-assets.md",
+        "docs/docs/guides/build/assets/metadata-and-tags/index.md",
+        "docs/docs/guides/build/assets/metadata-and-tags/tags.md",
+        "docs/docs/guides/build/projects/workspaces/workspace-yaml.md",
+        "docs/docs/integrations/libraries/apprise.md",
+        "docs/docs/integrations/libraries/elasticsearch.md",
+        "docs/docs/integrations/libraries/gcp/bigquery/reference.md",
+        "docs/docs/integrations/libraries/gcp/bigquery/using-bigquery-with-dagster.md",
+        "docs/docs/integrations/libraries/teradata/teradata-reference.md"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    {
+      "name": "report-asset-materialization",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/guides/build/assets/external-assets.md"
+      ],
+      "scope": {
+        "paths": [
+          "/report_asset_materialization"
+        ]
+      },
+      "description": "report-asset-materialization module — POST /report_asset_materialization/."
+    }
+  ],
+  "claims": [
+    {
+      "id": "4e6fc7cbcd84606ae5a0b8b5c4be6901f0f73d03a2f106d3da13c4dc8d124a10",
+      "topic": "auth",
+      "subject": "Dagster+ user roles",
+      "content": {
+        "roles": [
+          "Organization Admin",
+          "Admin",
+          "Editor",
+          "Launcher",
+          "Viewer"
+        ],
+        "model": "hierarchical RBAC — a more permissive role includes all permissions of the roles beneath it",
+        "notes": {
+          "Launcher": "Pro plans only"
+        },
+        "enforcedIn": [
+          "Dagster+",
+          "GraphQL API"
+        ]
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/user-roles-permissions.md",
+        "line": 22,
+        "quote": "## Dagster+ user roles\n\nDagster+ uses a hierarchical model for RBAC, meaning that the most permissive roles include permissions from the roles beneath them. The following user roles are currently supported, in order from the **most** permissive to the **least** permissive:\n\n- Organization Admin\n- Admin\n- Editor\n- Launcher (Pro plans only)\n- Viewer\n\nFor example, the **Admin** user role includes permissions specific to this role and all permissions in the **Editor**, **Launcher**, and **Viewer** user roles. Refer to the [User permissions reference](#user-permissions-reference) for the full list of user permissions in Dagster+. All user roles are enforced both in Dagster+ and the [GraphQL API](/api/graphql).\n\n:::tip Teams in Dagster+ Pro\n\nDagster+ Pro users can create teams of users and assign default permission sets. For more information, see [Managing teams in Dagster+](/deployment/dagster-plus/authentication-and-access-control/rbac/teams).\n\n:::\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "080e4ffdfae76abdd43c6c120e5d96a315717c790ecfcffff86a807317867d97",
+      "topic": "data",
+      "subject": "BigQuery I/O manager write_mode",
+      "content": {
+        "enumKind": "closed value set for the BigQuery I/O manager write_mode option",
+        "values": [
+          "truncate",
+          "replace",
+          "append"
+        ],
+        "default": "truncate",
+        "valueDescriptions": {
+          "truncate": "Deletes all rows in the table but keeps the schema (default)",
+          "replace": "Drops the table and creates a new one; allows schema evolution",
+          "append": "Appends data to the existing table without deleting rows"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/integrations/libraries/gcp/bigquery/using-bigquery-with-dagster.md",
+        "line": 56,
+        "quote": "[docs/docs/integrations/libraries/gcp/bigquery/using-bigquery-with-dagster.md:56] ### Step 1: Configure the BigQuery resource\n\nTo use the BigQuery resource, you'll need to add it to your `Definitions` object. The BigQuery resource requires some configuration:\n\n- A `project`\n- One method of authentication. You can follow the GCP authentication instructions [here](https://cloud.google.com/docs/authentication/provide-credentials-adc), or see [Providing credentials as configuration](reference#providing-credentials-as-configuration) in the BigQuery reference guide.\n\nYou can also specify a `location` where computation should take place.\n\n<CodeExample\n  path=\"docs_snippets/docs_snippets/integrations/bigquery/tutorial/resource/configuration.py\"\n  startAfter=\"start_example\"\n  endBefore=\"end_example\"\n/>\n\n#### Configuring write modes\n\nBy default, the BigQuery I/O manager truncates data when writing to an existing table. You can change this behavior using the `write_mode` configuration option:\n\n- `truncate` (default): Deletes all rows in the table but keeps the schema.\n- `replace`: Drops the table and creates a new one. Useful when the schema changes.\n- `append`: Appends data to the existing table without deleting rows.\n\n```python\nfrom dagster_gcp import BigQueryIOManager\nfrom dagster import Definitions, EnvVar\n\ndefs = Definitions(\n    resources={\n        \"io_manager\": BigQueryIOManager(\n            project=EnvVar(\"GCP_PROJECT\"),\n            dataset=\"my_dataset\",\n            write_mode=\"replace\"  # Change write mode here\n        )\n    }\n)\n```\n\n---\n[docs/docs/integrations/libraries/gcp/bigquery/reference.md:48] ## Configuring write modes\n\nBy default, the BigQuery I/O manager performs a `TRUNCATE` operation when writing to an existing table. This deletes all rows but preserves the table schema. If the schema of your DataFrame changes (e.g., adding a new column), the insertion will fail.\n\nYou can configure the `write_mode` to handle these scenarios:\n\n- `\"truncate\"` (default): Truncates the table before inserting data. Schema is preserved.\n- `\"replace\"`: Drops the table and recreates it. This allows schema evolution.\n- `\"append\"`: Inserts data without deleting existing rows.\n\n:::note\n\nFor partitioned assets, the write mode is ignored, and the I/O manager will replace data in the targeted partitions.\n\n:::\n\n```python\nfrom dagster_gcp import BigQueryIOManager\nfrom dagster import Definitions, EnvVar\n\ndefs = Definitions(\n    resources={\n        \"io_manager\": BigQueryIOManager(\n            project=EnvVar(\"GCP_PROJECT\"),\n            write_mode=\"replace\"\n        )\n    }\n)\n```\n",
+        "additionalSources": [
+          {
+            "file": "docs/docs/integrations/libraries/gcp/bigquery/reference.md",
+            "line": 48,
+            "quote": "## Configuring write modes\n\nBy default, the BigQuery I/O manager performs a `TRUNCATE` operation when writing to an existing table. This deletes all rows but preserves the table schema. If the schema of your DataFrame changes (e.g., adding a new column), the insertion will fail.\n\nYou can configure the `write_mode` to handle these scenarios:\n\n- `\"truncate\"` (default): Truncates the table before inserting data. Schema is preserved.\n- `\"replace\"`: Drops the table and recreates it. This allows schema evolution.\n- `\"append\"`: Inserts data without deleting existing rows.\n\n:::note\n\nFor partitioned assets, the write mode is ignored, and the I/O manager will replace data in the targeted partitions.\n\n:::\n\n```python\nfrom dagster_gcp import BigQueryIOManager\nfrom dagster import Definitions, EnvVar\n\ndefs = Definitions(\n    resources={\n        \"io_manager\": BigQueryIOManager(\n            project=EnvVar(\"GCP_PROJECT\"),\n            write_mode=\"replace\"\n        )\n    }\n)\n```\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "4d9edf97173b3c4e7a35ab1aefcaae2620b8a95136084e04b596e948a5ca99e6",
+      "topic": "data",
+      "subject": "Dagster asset decorators",
+      "content": {
+        "enumKind": "the four asset decorator types",
+        "values": [
+          "asset",
+          "multi_asset",
+          "graph_asset",
+          "graph_multi_asset"
+        ],
+        "valueDescriptions": {
+          "asset": "Defines a single asset",
+          "multi_asset": "Outputs multiple assets from a single operation",
+          "graph_asset": "Outputs a single asset from multiple operations",
+          "graph_multi_asset": "Outputs multiple assets from multiple operations"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/defining-assets.md",
+        "line": 24,
+        "quote": "## Asset decorators\n\nDagster has four types of asset decorators:\n\n| Decorator            | Description                                                                                                                    |\n| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |\n| `@asset`             | Defines a single asset. [See an example](#single-asset).                                                                       |\n| `@multi_asset`       | Outputs multiple assets from a single operation. [See an example](#multi-asset).                                               |\n| `@graph_asset`       | Outputs a single asset from multiple operations without making each operation itself an asset. [See an example](#graph-asset). |\n| `@graph_multi_asset` | Outputs multiple assets from multiple operations                                                                               |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c3bad7cf1ed6896e85eb966d7338d12581667aa0fc4730b86fa886dbe6c305ca",
+      "topic": "data",
+      "subject": "Dagster automatic run tags",
+      "content": {
+        "description": "Tags Dagster automatically adds to job runs when applicable",
+        "tagKeys": [
+          "dagster/code_location",
+          "dagster/user",
+          "dagster/op_selection",
+          "dagster/partition",
+          "dagster/schedule_name",
+          "dagster/sensor_name",
+          "dagster/backfill",
+          "dagster/parent_run_id",
+          "dagster/image"
+        ]
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/metadata-and-tags/tags.md",
+        "line": 64,
+        "quote": "### Run tags\n\nThe following table lists the tags Dagster will automatically add to job runs when applicable:\n\n| Tag                     | Description                         |\n| ----------------------- | ----------------------------------- |\n| `dagster/code_location` | The code location of the run        |\n| `dagster/user`          | The user who executed the run.      |\n| `dagster/op_selection`  | The op selection for the run        |\n| `dagster/partition`     | The partition of the run            |\n| `dagster/schedule_name` | The schedule that triggered the run |\n| `dagster/sensor_name`   | The sensor that triggered the run   |\n| `dagster/backfill`      | The backfill ID                     |\n| `dagster/parent_run_id` | The parent run of a re-executed run |\n| `dagster/image`         | The Docker image tag                |\n\n#### Customizing run execution with run tags\n\nWhile tags are primarily used for labeling and organization, some run execution features are controlled using run tags:\n\n- [Customizing Kubernetes config](/deployment/oss/deployment-options/kubernetes/customizing-your-deployment)\n- [Specifying Celery config](/deployment/oss/deployment-options/kubernetes/kubernetes-and-celery)\n- [Setting concurrency limits when using the `QueuedRunCoordinator`](/guides/operate/managing-concurrency)\n- [Setting the priority of different runs](/deployment/execution/customizing-run-queue-priority)\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "5dd8d3bdb7fdc2bcf573a0a6a1f627dbcaed4c85a4393655e72ebf43d672d0af",
+      "topic": "data",
+      "subject": "Dagster standard metadata keys",
+      "content": {
+        "description": "Metadata keys given special treatment in the Dagster UI",
+        "keys": {
+          "dagster/uri": "str",
+          "dagster/column_schema": "TableSchema",
+          "dagster/column_lineage": "TableColumnLineage",
+          "dagster/row_count": "int",
+          "dagster/partition_row_count": "int",
+          "dagster/table_name": "str",
+          "dagster/code_references": "CodeReferencesMetadataValue"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/metadata-and-tags/index.md",
+        "line": 82,
+        "quote": "## Standard metadata types \\{#standard-metadata-types}\n\nThe following metadata keys are given special treatment in the Dagster UI.\n\n| Key                           | Description                                                                                                                                                                                                                                                                                                                                                     |\n| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| `dagster/uri`                 | **Type:** `str` <br/><br/> The URI for the asset, for example: \"s3://my_bucket/my_object\"                                                                                                                                                                                                                                                                               |\n| `dagster/column_schema`       | **Type:** <PyObject section=\"metadata\" module=\"dagster\" object=\"TableSchema\" /> <br/><br/> For an asset that's a table, the schema of the columns in the table. Refer to the [Table and column metadata](#table-column) section for details.                                                                                                                                                      |\n| `dagster/column_lineage`      | **Type:** <PyObject section=\"metadata\" module=\"dagster\" object=\"TableColumnLineage\" /><br/><br/> For an asset that's a table, the lineage of column inputs to column outputs for the table. Refer to the [Table and column metadata](#table-column) section for details.                                                                                                                         |\n| `dagster/row_count`           | **Type:** `int` <br/><br/> For an asset that's a table, the number of rows in the table. Refer to the Table metadata documentation for details.                                                                                                                                                                                                                 |\n| `dagster/partition_row_count` | **Type:** `int` <br/><br/> For a partition of an asset that's a table, the number of rows in the partition.                                                                                                                                                                                                                                                     |\n| `dagster/table_name`          | **Type:** `str` <br/><br/> A unique identifier for the table/view, typically fully qualified. For example, my_database.my_schema.my_table                                                                                                                                                                                                                       |\n| `dagster/code_references`     | **Type:** <PyObject section=\"metadata\" module=\"dagster\" object=\"CodeReferencesMetadataValue\" /><br/><br/> A list of [code references](#source-code) for the asset, such as file locations or references to GitHub URLs. Should only be provided in definition-level metadata, not materialization metadata. |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "38796ca33922c585fec930713bec29547e16de135c22e8fa23d2db4ab045f6db",
+      "topic": "data",
+      "subject": "Elasticsearch rollover strategies",
+      "content": {
+        "configOption": "rollover_strategy",
+        "enumKind": "closed value set",
+        "values": [
+          "auto",
+          "timestamp",
+          "run_id",
+          "partition",
+          "none"
+        ],
+        "valueDescriptions": {
+          "auto": "Uses the partition key for partitioned assets, otherwise a timestamp",
+          "timestamp": "Appends a UTC timestamp suffix",
+          "run_id": "Appends the Dagster run ID",
+          "partition": "Appends a slugified partition key",
+          "none": "Uses no suffix"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/integrations/libraries/elasticsearch.md",
+        "line": 65,
+        "quote": "## Alias rollover\n\nSet `use_alias=True` to write each materialization to a fresh physical index and atomically swap a stable alias to the new index. This lets readers and downstream assets query the alias while avoiding partial updates.\n\nRollover strategies include:\n\n| Strategy    | Behavior                                                              |\n| ----------- | --------------------------------------------------------------------- |\n| `auto`      | Uses the partition key for partitioned assets, otherwise a timestamp. |\n| `timestamp` | Appends a UTC timestamp suffix.                                       |\n| `run_id`    | Appends the Dagster run ID.                                           |\n| `partition` | Appends a slugified partition key.                                    |\n| `none`      | Uses no suffix.                                                       |\n\nUse `keep_last` to delete older rollover indices after successful alias swaps.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "53cec8461cefaff78c9380bc7e6aa6fb9430a00461b6772d83f2c7e08178bebb",
+      "topic": "data",
+      "subject": "Teradata compute cluster query_strategy",
+      "content": {
+        "operation": "create_teradata_compute_cluster",
+        "param": "query_strategy",
+        "enumKind": "closed value set",
+        "values": [
+          "STANDARD",
+          "ANALYTIC"
+        ],
+        "default": "STANDARD",
+        "valueDescriptions": {
+          "STANDARD": "The default strategy at the database level, optimized for general query execution",
+          "ANALYTIC": "Optimized for complex analytical workloads"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/integrations/libraries/teradata/teradata-reference.md",
+        "line": 267,
+        "quote": "### Create a Compute Cluster (`create_teradata_compute_cluster`)\n\nThis operation provisions a new compute cluster within Teradata VantageCloud Lake using `dagster-teradata`. It enables users to define the cluster's configuration, including compute profiles, resource allocation, and query execution strategies, directly within a Dagster job.\n\n**Args:**\n\n- `compute_profile_name` (str) – Specifies the name of the compute profile.\n- `compute_group_name` (str) – Identifies the compute group to which the profile belongs.\n- `query_strategy` (str, optional, default=\"STANDARD\") – Defines the method used by the Teradata Optimizer to execute SQL queries efficiently. Acceptable values:\n  - `STANDARD` – The default strategy at the database level, optimized for general query execution.\n  - `ANALYTIC` – Optimized for complex analytical workloads.\n- `compute_map` (Optional[str], default=None) – Maps compute resources to specific nodes within the cluster.\n- `compute_attribute` (Optional[str], default=None) – Specifies additional configuration attributes for the compute profile, such as:\n  - `MIN_COMPUTE_COUNT(1) MAX_COMPUTE_COUNT(5) INITIALLY_SUSPENDED('FALSE')`\n- `timeout` (int, optional, default=constants.CC_OPR_TIME_OUT) – The maximum duration (in seconds) to wait for the cluster creation process to complete. Default: 20 minutes.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c9c7d2b3e16e837206ad26588ee07d059e269be94e1ec96fce9771ae38ccd5c7",
+      "topic": "data",
+      "subject": "compute_logs.class options",
+      "content": {
+        "configField": "compute_logs.class",
+        "enumKind": "closed value set",
+        "values": [
+          "LocalComputeLogManager",
+          "NoOpComputeLogManager",
+          "AzureBlobComputeLogManager",
+          "GCSComputeLogManager",
+          "S3ComputeLogManager"
+        ],
+        "valueDescriptions": {
+          "LocalComputeLogManager": "Writes logs to disk",
+          "NoOpComputeLogManager": "Does not store logs",
+          "AzureBlobComputeLogManager": "Writes logs to Azure Blob Storage",
+          "GCSComputeLogManager": "Writes logs to Google Cloud Storage",
+          "S3ComputeLogManager": "Writes logs to AWS S3"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/oss/dagster-yaml.md",
+        "line": 226,
+        "quote": "### `compute_logs`\n\nControls the capture and persistence of stdout and stderr logs.\n\n```yaml\ncompute_logs:\n  module: dagster.core.storage.local_compute_log_manager\n  class: LocalComputeLogManager\n  config:\n    base_dir: /path/to/compute/logs\n```\n\nOptions:\n\n- `LocalComputeLogManager`: Writes logs to disk\n- `NoOpComputeLogManager`: Does not store logs\n- `AzureBlobComputeLogManager`: Writes logs to Azure Blob Storage\n- `GCSComputeLogManager`: Writes logs to Google Cloud Storage\n- `S3ComputeLogManager`: Writes logs to AWS S3\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "cb3a1b346c8a033f4a321abe33e2aa66a8c7090c9087a6388e54a9b5f1097db1",
+      "topic": "data",
+      "subject": "dagster/retry_strategy values",
+      "content": {
+        "tag": "dagster/retry_strategy",
+        "enumKind": "closed value set (partial — see also FROM_ASSET_FAILURE)",
+        "values": [
+          "FROM_ASSET_FAILURE"
+        ],
+        "default": "FROM_FAILURE",
+        "valueDescriptions": {
+          "FROM_FAILURE": "Re-execute from failure; successful ops are skipped but their output is used for downstream ops",
+          "ALL_STEPS": "All ops run again",
+          "FROM_ASSET_FAILURE": "Use persisted asset materialization records to automatically exclude already-materialized assets during retry (use with retry_on_asset_or_op_failure=false)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/execution/run-retries.md",
+        "line": 43,
+        "quote": "[line 43] ### Retry strategy\n\nThe `dagster/retry_strategy` tag controls which ops the retry will run.\n\nBy default, retries will re-execute from failure (tag value `FROM_FAILURE`). This means that any successful ops will be skipped, but their output will be used for downstream ops. If the `dagster/retry_strategy` tag is set to `ALL_STEPS`, all the ops will run again.\n\n:::note\n\n`FROM_FAILURE` requires an I/O manager that can access outputs from other runs. For example, on Kubernetes the <PyObject section=\"libraries\" integration=\"aws\" object=\"s3.s3_pickle_io_manager\" module=\"dagster_aws\" /> would work but the <PyObject section=\"io-managers\" object=\"FilesystemIOManager\" module=\"dagster\" /> would not, since the new run is in a new Kubernetes job with a separate filesystem.\n\n:::\n\n---\n[line 87] ### FROM_ASSET_FAILURE strategy\n\nUse the `FROM_ASSET_FAILURE` strategy together with a `dagster/retry_on_asset_or_op_failure` setting value of `false` to use persisted asset materialization records from the event log and automatically exclude already-materialized assets during retry. This can significantly improve recovery times from infrastructure interruptions, such as a Kubernetes node eviction or spot instance loss. It's particularly useful for dbt pipelines, as it enables recovering without requiring persisted dbt artifacts.\n\n<CodeExample\n  path=\"docs_snippets/docs_snippets/deployment/execution/asset_job_from_asset_failure_retries.py\"\n  startAfter=\"start_from_asset_failure_job\"\n  endBefore=\"end_from_asset_failure_job\"\n  title=\"src/my_project/jobs.py\"\n/>\n",
+        "additionalSources": [
+          {
+            "file": "docs/docs/deployment/execution/run-retries.md",
+            "line": 87,
+            "quote": "### FROM_ASSET_FAILURE strategy\n\nUse the `FROM_ASSET_FAILURE` strategy together with a `dagster/retry_on_asset_or_op_failure` setting value of `false` to use persisted asset materialization records from the event log and automatically exclude already-materialized assets during retry. This can significantly improve recovery times from infrastructure interruptions, such as a Kubernetes node eviction or spot instance loss. It's particularly useful for dbt pipelines, as it enables recovering without requiring persisted dbt artifacts.\n\n<CodeExample\n  path=\"docs_snippets/docs_snippets/deployment/execution/asset_job_from_asset_failure_retries.py\"\n  startAfter=\"start_from_asset_failure_job\"\n  endBefore=\"end_from_asset_failure_job\"\n  title=\"src/my_project/jobs.py\"\n/>\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1eec7f1325f50cac3d4e75f4841d763f2df5599284911ec6e4d2a4c95b7359dc",
+      "topic": "data",
+      "subject": "run coordinator types",
+      "content": {
+        "enumKind": "closed value set",
+        "values": [
+          "DefaultRunCoordinator",
+          "QueuedRunCoordinator"
+        ],
+        "valueDescriptions": {
+          "DefaultRunCoordinator": "Calls launch_run on the instance's run launcher immediately in the same process, without applying any limits or prioritization rules",
+          "QueuedRunCoordinator": "Sends runs to the Dagster daemon via a run queue; enables instance-level run concurrency limits and custom prioritization rules"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/execution/run-coordinators.md",
+        "line": 11,
+        "quote": "## Run coordinator types\n\nThe following run coordinators can be configured on your [Dagster instance](/deployment/oss/oss-instance-configuration):\n\n| Term                                                                                                  | Definition                                                                                                                                                                                                                                                                                                                                                                                    |\n| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| <PyObject section=\"internals\" module=\"dagster._core.run_coordinator\" object=\"DefaultRunCoordinator\"/> | The `DefaultRunCoordinator` calls launch_run on the instance’s run launcher immediately in the same process, without applying any limits or prioritization rules.<br />When this coordinator is set, clicking **Launch Run** in the Dagster UI will immediately launch the run from the Dagster daemon process. Similarly, scheduled runs will immediately launch from the scheduler process. |\n| <PyObject section=\"internals\" module=\"dagster._core.run_coordinator\" object=\"QueuedRunCoordinator\"/>  | The `QueuedRunCoordinator` sends runs to the Dagster daemon via a run queue. The daemon pulls runs from the queue and calls launch_run on submitted runs.<br/>Using this run coordinator enables instance-level limits on run concurrency, as well as custom run prioritization rules.                                                                                                        |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "734d0269228ab60e0afdae38309d7eaa10cbde426bdeb4fd06d94306f18e8c35",
+      "topic": "data",
+      "subject": "run_coordinator.class options",
+      "content": {
+        "configField": "run_coordinator.class",
+        "enumKind": "closed value set",
+        "values": [
+          "DefaultRunCoordinator",
+          "QueuedRunCoordinator"
+        ],
+        "valueDescriptions": {
+          "DefaultRunCoordinator": "Immediately sends runs to the run launcher",
+          "QueuedRunCoordinator": "Allows setting limits on concurrent runs"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/oss/dagster-yaml.md",
+        "line": 209,
+        "quote": "### `run_coordinator`\n\nSets prioritization rules and concurrency limits for runs.\n\n```yaml\nrun_coordinator:\n  module: dagster.core.run_coordinator\n  class: QueuedRunCoordinator\n  config:\n    max_concurrent_runs: 25\n```\n\nOptions:\n\n- `DefaultRunCoordinator`: Immediately sends runs to the run launcher\n- `QueuedRunCoordinator`: Allows setting limits on concurrent runs\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "76766141163b945b48a1183b771d38d65fd7a1b337094067a2e0c8c7fd668b85",
+      "topic": "data",
+      "subject": "run_launcher.class options",
+      "content": {
+        "configField": "run_launcher.class",
+        "enumKind": "closed value set",
+        "values": [
+          "DefaultRunLauncher",
+          "DockerRunLauncher",
+          "K8sRunLauncher"
+        ],
+        "valueDescriptions": {
+          "DefaultRunLauncher": "Spawns a new process on the same node as the job's code location",
+          "DockerRunLauncher": "Allocates a Docker container per run",
+          "K8sRunLauncher": "Allocates a Kubernetes job per run"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/oss/dagster-yaml.md",
+        "line": 127,
+        "quote": "### `run_launcher`\n\nDetermines where runs are executed.\n\n```yaml\nrun_launcher:\n  module: dagster.core.launcher\n  class: DefaultRunLauncher\n```\n\nOptions:\n\n- `DefaultRunLauncher`: Spawns a new process on the same node as the job's code location\n- `DockerRunLauncher`: Allocates a Docker container per run\n- `K8sRunLauncher`: Allocates a Kubernetes job per run\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "88806e6c4de87eae20a60f37769cf784ff42e23e04e66bb0a90c27cdead2ba27",
+      "topic": "data",
+      "subject": "storage options",
+      "content": {
+        "configField": "storage",
+        "enumKind": "closed value set",
+        "values": [
+          "sqlite",
+          "postgres",
+          "mysql"
+        ],
+        "valueDescriptions": {
+          "sqlite": "Use SQLite for storage",
+          "postgres": "Use PostgreSQL for storage (requires dagster-postgres library)",
+          "mysql": "Use MySQL for storage (requires dagster-mysql library)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/oss/dagster-yaml.md",
+        "line": 177,
+        "quote": "### `storage`\n\nConfigures how job and asset history is persisted.\n\n```yaml\nstorage:\n  sqlite:\n    base_dir: /path/to/sqlite/storage\n```\n\nOptions:\n\n- `sqlite`: Use SQLite for storage\n- `postgres`: Use PostgreSQL for storage (requires `dagster-postgres` library)\n- `mysql`: Use MySQL for storage (requires `dagster-mysql` library)\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "7949ce83ec40c3186b2015d4c938d9ad636b36d914d07a4affbe466d89cc5060",
+      "topic": "data",
+      "subject": "workspace.yaml load_from methods",
+      "content": {
+        "configKey": "load_from[].<method>",
+        "enumKind": "closed set of code-location loading methods",
+        "values": [
+          "python_file",
+          "python_module",
+          "grpc_server"
+        ]
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/projects/workspaces/workspace-yaml.md",
+        "line": 45,
+        "quote": "## File structure\n\nThe `workspace.yaml` file uses the following structure:\n\n```yaml\n# workspace.yaml\nload_from:\n  - <loading_method>: <configuration_options>\n```\n\nWhere `<loading_method>` can be one of:\n\n- `python_file`\n- `python_module`\n- `grpc_server`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "08296de4aaa49c8bdcfbcb28bb36b4cf4da43dc7f6b8bc7aedd7fa89c9eb46b0",
+      "topic": "effects",
+      "subject": "Dagster step-level event types",
+      "content": {
+        "enumKind": "documented subset of step-level Dagster event types",
+        "values": [
+          "STEP_WORKER_STARTING",
+          "STEP_WORKER_STARTED",
+          "STEP_START"
+        ],
+        "valueDescriptions": {
+          "STEP_WORKER_STARTING": "The subprocess or pod is being launched",
+          "STEP_WORKER_STARTED": "The worker process has started and is ready",
+          "STEP_START": "The actual op execution begins"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/troubleshooting/scheduling-latency-gke.md",
+        "line": 15,
+        "quote": "### Relevant event types\n\nDagster emits the following step-level events that you can use to measure latency:\n\n| Event                  | Meaning                                      |\n| ---------------------- | -------------------------------------------- |\n| `STEP_WORKER_STARTING` | The subprocess or pod is being launched.     |\n| `STEP_WORKER_STARTED`  | The worker process has started and is ready. |\n| `STEP_START`           | The actual op execution begins.              |\n\nCalculate scheduling latency by measuring the time difference between `STEP_WORKER_STARTED` and `STEP_START`. This captures how long a job waited after the worker was ready before execution began.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "1b54f2ad0bcd804996b2cc29aebb3bbc03679307d4b915b99880d40d3c460b21",
+      "topic": "effects",
+      "subject": "Dagster+ audit log entry types",
+      "content": {
+        "eventTypes": [
+          "Log in",
+          "Update sensor",
+          "Update schedule",
+          "Update alert policy",
+          "Create deployment",
+          "Delete deployment",
+          "Create user token",
+          "Revoke user token",
+          "Create code location",
+          "Update code location",
+          "Delete code location",
+          "Change user permissions",
+          "Create agent token",
+          "Revoke agent token",
+          "Update agent token permissions",
+          "Create secret",
+          "Update secret",
+          "Delete secret",
+          "Update subscription"
+        ]
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/audit-logs.md",
+        "line": 57,
+        "quote": "## Audit log entry types\n\n| Event type                     | Description                                                                                                                            | Additional details                                                        |\n| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |\n| Log in                         | A user logs in to the Dagster+ organization                                                                                            |                                                                           |\n| Update sensor                  | A user toggles a sensor on or off                                                                                                      | The sensor name, code location, and cursor                                |\n| Update schedule                | A user toggles a schedule on or off                                                                                                    | The schedule name, code location, and cursor                              |\n| Update alert policy            | A user modifies an [alert policy](/guides/observe/alerts/creating-alerts)                                                              | The new configuration for the alert policy                                |\n| Create deployment              | A user creates a new deployment                                                                                                        | Whether the deployment is a branch deployment                             |\n| Delete deployment              | A user removes an existing deployment                                                                                                  | Whether the deployment is a branch deployment                             |\n| Create user token              | A user creates a new user token                                                                                                        |                                                                           |\n| Revoke user token              | A user revokes an existing user token                                                                                                  |                                                                           |\n| Create code location           | A user creates a new code location                                                                                                     | The code location name, image, and git metadata                           |\n| Update code location           | A user updates an existing code location                                                                                               | The code location name, image, and git metadata                           |\n| Delete code location           | A user removes a code location                                                                                                         | The code location name                                                    |\n| Change user permissions        | A user alters [permissions](/deployment/dagster-plus/authentication-and-access-control/rbac/user-roles-permissions) for another user   | The permission grant and targeted deployment                              |\n| Create agent token             | A user creates a new agent token                                                                                                       |                                                                           |\n| Revoke agent token             | A user revokes an existing agent token                                                                                                 |                                                                           |\n| Update agent token permissions | A user alters [permissions](/deployment/dagster-plus/authentication-and-access-control/rbac/user-roles-permissions) for an agent token | The permission grant and targeted deployment                              |\n| Create secret                  | A user creates a new [environment variable](/deployment/dagster-plus/management/environment-variables/dagster-ui)                      | The created variable name                                                 |\n| Update secret                  | A user modifies an existing [environment variable](/deployment/dagster-plus/management/environment-variables/dagster-ui)               | The previous and current variable names and whether the value was changed |\n| Delete secret                  | A user removes an [environment variable](/deployment/dagster-plus/management/environment-variables/dagster-ui)                         | The deleted variable name                                                 |\n| Update subscription            | A user modifies the selected Dagster+ subscription for the organization                                                                | The previous and current plan types                                       |\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "f237745a4ca98d035f351cc3d1bb2c0ae0d77592d1142f84756769c38ea52fb4",
+      "topic": "effects",
+      "subject": "dagster-apprise supported events",
+      "content": {
+        "enumKind": "closed set of job events the dagster-apprise integration can notify on",
+        "values": [
+          "SUCCESS",
+          "FAILURE",
+          "CANCELED",
+          "RUNNING"
+        ],
+        "valueDescriptions": {
+          "SUCCESS": "Job completed successfully",
+          "FAILURE": "Job failed",
+          "CANCELED": "Job was canceled",
+          "RUNNING": "Job started running"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/integrations/libraries/apprise.md",
+        "line": 79,
+        "quote": "### Supported Events\n\n- `SUCCESS`: Job completed successfully\n- `FAILURE`: Job failed\n- `CANCELED`: Job was canceled\n- `RUNNING`: Job started running\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d33b52100014d5978fc0aa9a2dd015a9db895188e84e0787c7f16cd072517b70",
+      "topic": "endpoints",
+      "subject": "POST /report_asset_materialization/",
+      "content": {
+        "method": "POST",
+        "path": "/report_asset_materialization/",
+        "request": {
+          "asset_key": "string",
+          "metadata": "object (key → value)"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none (Dagster OSS); Dagster+ requires Dagster-Cloud-Api-Token header",
+        "note": "Report that an external asset has materialized"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/external-assets.md",
+        "line": 56,
+        "quote": "### Pushing with the REST API\n\nYou can inform Dagster that an external asset has materialized by pushing the event from an external system to the REST API. The following examples demonstrate how to inform Dagster that a materialization of the `raw_transactions` external asset has occurred.\n\nThe required headers for the REST API depend on whether you're using Dagster+ or OSS. Use the tabs to view an example API request for each Dagster type.\n\n<Tabs>\n<TabItem value=\"dagster-plus\" label=\"Dagster+\">\n\nAuthentication headers are required if using Dagster+. The request should made to your Dagster+ organization and a specific deployment in the organization.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  -H 'Dagster-Cloud-Api-Token: [YOUR API TOKEN]' \\\n  'https://[YOUR ORG NAME].dagster.cloud/[YOUR DEPLOYMENT NAME]/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n    \"file_last_modified_at_ms\": 1724614700266\n  }\n}'\n```\n\n</TabItem>\n<TabItem value=\"oss\" label=\"OSS\">\n\nAuthentication headers aren't required if using Dagster OSS. The request should be pointed at your open source URL, which is `http://localhost:3000` in this example.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  'http://localhost:3000/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n… (+10 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-11T18:14:24+00:00"
+      },
+      "module": "report-asset-materialization",
+      "source": "extracted"
+    }
+  ]
+}

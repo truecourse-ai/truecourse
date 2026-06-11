@@ -1,0 +1,4 @@
+enum dagster.run-coordinators {
+  origin "docs/docs/deployment/oss/dagster-yaml.md" "run_coordinator" 209..209
+  values [DefaultRunCoordinator, QueuedRunCoordinator]
+}

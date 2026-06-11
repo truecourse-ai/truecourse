@@ -1,0 +1,4 @@
+enum teradata.query-strategy {
+  origin "docs/docs/integrations/libraries/teradata/teradata-reference.md" "Create a Compute Cluster" 267..267
+  values [STANDARD, ANALYTIC]
+}

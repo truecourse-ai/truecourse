@@ -1,0 +1,4 @@
+enum dagster.standard-metadata-keys {
+  origin "docs/docs/guides/build/assets/metadata-and-tags/index.md" "Standard metadata types" 82..82
+  values ["dagster/uri", "dagster/column_schema", "dagster/column_lineage", "dagster/row_count", "dagster/partition_row_count", "dagster/table_name", "dagster/code_references"]
+}

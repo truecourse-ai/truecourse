@@ -1,0 +1,4 @@
+enum elasticsearch.rollover-strategy {
+  origin "docs/docs/integrations/libraries/elasticsearch.md" "Alias rollover" 65..65
+  values [auto, timestamp, run_id, partition, none]
+}

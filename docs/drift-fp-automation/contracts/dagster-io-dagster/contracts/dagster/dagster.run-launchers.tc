@@ -1,0 +1,4 @@
+enum dagster.run-launchers {
+  origin "docs/docs/deployment/oss/dagster-yaml.md" "run_launcher" 193..193
+  values [DefaultRunLauncher, DockerRunLauncher, K8sRunLauncher]
+}

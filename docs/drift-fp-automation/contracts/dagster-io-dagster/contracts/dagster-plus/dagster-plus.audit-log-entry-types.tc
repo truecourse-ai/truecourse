@@ -1,0 +1,4 @@
+enum dagster-plus.audit-log-entry-types {
+  origin "docs/docs/deployment/dagster-plus/authentication-and-access-control/rbac/audit-logs.md" "Audit log entry types" 57..57
+  values ["Log in", "Update sensor", "Update schedule", "Update alert policy", "Create deployment", "Delete deployment", "Create user token", "Revoke user token", "Create code location", "Update code location", "Delete code location", "Change user permissions", "Create agent token", "Revoke agent token", "Update agent token permissions", "Create secret", "Update secret", "Delete secret", "Update subscription"]
+}

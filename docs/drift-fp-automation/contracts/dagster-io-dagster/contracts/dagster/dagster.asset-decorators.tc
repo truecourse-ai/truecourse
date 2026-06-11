@@ -1,0 +1,4 @@
+enum dagster.asset-decorators {
+  origin "docs/docs/guides/build/assets/defining-assets.md" "Asset decorators" 24..24
+  values [asset, multi_asset, graph_asset, graph_multi_asset]
+}

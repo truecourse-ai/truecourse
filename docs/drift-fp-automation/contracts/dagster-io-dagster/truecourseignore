@@ -1,0 +1,4 @@
+*.md
+!docs/docs/guides/build/**
+!docs/docs/deployment/**
+!docs/docs/integrations/libraries/**

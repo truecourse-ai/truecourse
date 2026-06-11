@@ -1,0 +1,10 @@
+operation POST "/report_asset_materialization/" {
+  origin "docs/docs/guides/build/assets/external-assets.md" "Pushing with the REST API" 56..71
+  request {
+    header content-type required value "application/json"
+    body {
+      asset_key: string
+      metadata: object
+    }
+  }
+}
