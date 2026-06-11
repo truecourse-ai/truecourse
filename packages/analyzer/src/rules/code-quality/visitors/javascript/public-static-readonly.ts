@@ -14,7 +14,13 @@ export const publicStaticReadonlyVisitor: CodeRuleVisitor = {
         && (c.text === 'private' || c.text === 'protected'))
       const isReadonly = member.children.some((c) => c.type === 'readonly')
 
-      if (isStatic && isPublic && !isReadonly) {
+      // A field with no initializer is a late-bound slot (assigned later by
+      // a consumer, in a static initializer, or via a getter) — not a
+      // constant. It cannot be `readonly`, since a readonly field must be
+      // initialized at its declaration, so flagging it is a false positive.
+      const hasInitializer = member.childForFieldName('value') != null
+
+      if (isStatic && isPublic && !isReadonly && hasInitializer) {
         const nameNode = member.childForFieldName('name')
         const name = nameNode?.text ?? 'field'
         return makeViolation(

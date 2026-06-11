@@ -703,6 +703,12 @@
       "layer": "service"
     },
     {
+      "name": "bootstrapProfile",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "buildApiUrl",
       "service": "utils",
       "kind": "standalone",
@@ -835,6 +841,12 @@
       "layer": "service"
     },
     {
+      "name": "configure",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "confusing-void-expression-non-void-caller",
       "service": "utils",
       "kind": "standalone",
@@ -868,6 +880,12 @@
       "name": "CounterBox",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "countWords",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1060,6 +1078,12 @@
       "name": "hardcoded-ip-internal-host",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "HeaderBuilder",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1330,6 +1354,12 @@
       "name": "resolveDocument",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "RetryPolicy",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {

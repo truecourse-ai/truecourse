@@ -47,6 +47,14 @@ export const preferThisReturnTypeVisitor: CodeRuleVisitor = {
 
     // Check if the return type annotation is exactly the class name
     if (typeText === className) {
+      // Only flag methods that actually `return this`. A method annotated
+      // with the class name but returning a *freshly-constructed* instance
+      // (a factory / clone / child-context builder) is correctly typed —
+      // the value handed back is a different object, so `this` would be
+      // wrong. The `this`-return suggestion only applies to fluent methods
+      // that hand back the receiver for chaining.
+      if (!methodReturnsThis(node)) return null
+
       return makeViolation(
         this.ruleKey,
         returnTypeNode,
@@ -61,6 +69,41 @@ export const preferThisReturnTypeVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+/**
+ * True when the method body contains at least one `return this` statement
+ * (the bare receiver), not crossing into nested function scopes. Returning
+ * `this.something` or a freshly-built instance does not count.
+ */
+function methodReturnsThis(method: SyntaxNode): boolean {
+  const body = method.childForFieldName('body')
+  if (!body) return false
+
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    // Don't descend into nested function scopes — their `return this`
+    // refers to a different receiver.
+    if (n.id !== body!.id && (n.type === 'function_declaration'
+      || n.type === 'function_expression' || n.type === 'arrow_function'
+      || n.type === 'method_definition')) {
+      return
+    }
+    if (n.type === 'return_statement') {
+      const arg = n.namedChildren[0]
+      if (arg?.type === 'this') {
+        found = true
+        return
+      }
+    }
+    for (let i = 0; i < n.namedChildCount; i++) {
+      const child = n.namedChild(i)
+      if (child) walk(child)
+    }
+  }
+  walk(body)
+  return found
 }
 
 function findEnclosingClass(node: SyntaxNode): SyntaxNode | null {

@@ -16,6 +16,23 @@ function isDirectCallbackArg(fn: SyntaxNode): SyntaxNode | null {
   return p?.type === 'arguments' ? p : null
 }
 
+// Array-iteration methods take synchronous functional callbacks (data
+// transforms / predicates), not continuation-style async callbacks. A
+// chain of nested `.map`/`.filter`/etc. reads top-to-bottom as data and is
+// not the pyramid-of-doom the rule targets, so these don't add to depth.
+const ARRAY_ITERATION_METHODS = new Set([
+  'map', 'filter', 'forEach', 'reduce', 'reduceRight', 'flatMap',
+  'some', 'every', 'find', 'findIndex', 'findLast', 'findLastIndex',
+  'sort', 'flat',
+])
+
+function isArrayIterationCall(callExpr: SyntaxNode): boolean {
+  const fn = callExpr.childForFieldName('function')
+  if (fn?.type !== 'member_expression') return false
+  const prop = fn.childForFieldName('property')
+  return prop != null && ARRAY_ITERATION_METHODS.has(prop.text)
+}
+
 function findEnclosingFn(start: SyntaxNode | null): SyntaxNode | null {
   let n = start
   while (n) {
@@ -37,18 +54,21 @@ export const deepCallbackNestingVisitor: CodeRuleVisitor = {
     while (true) {
       const argsNode = isDirectCallbackArg(current)
       if (!argsNode) break
-      depth++
-      if (depth >= 4) {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'medium',
-          'Deep callback nesting',
-          `Callback nested ${depth} levels deep — refactor using async/await or named functions.`,
-          sourceCode,
-          'Extract nested callbacks into named functions or use async/await to flatten the nesting.',
-        )
-      }
       const callExpr = argsNode.parent
       if (!callExpr) break
+      // Functional array-iteration callbacks don't count toward nesting depth.
+      if (!isArrayIterationCall(callExpr)) {
+        depth++
+        if (depth >= 4) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Deep callback nesting',
+            `Callback nested ${depth} levels deep — refactor using async/await or named functions.`,
+            sourceCode,
+            'Extract nested callbacks into named functions or use async/await to flatten the nesting.',
+          )
+        }
+      }
       const enclosing = findEnclosingFn(callExpr.parent)
       if (!enclosing) break
       current = enclosing

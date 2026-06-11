@@ -68,7 +68,14 @@ export const elementOverwriteVisitor: CodeRuleVisitor = {
         // the property is the React `.current` accessor.
         const isRefCurrent =
           left.type === 'member_expression' && indexOrProp.text === 'current'
-        if (!wasRead && !(isRefCurrent && hasAwait)) {
+        // Self-referential reassignment (`x = f(x)`) is not a dead store —
+        // the overwriting assignment *reads* the value it replaces. The
+        // `wasRead` scan only looks at statements strictly between the two
+        // writes, so it misses a read on the second assignment's own RHS
+        // (e.g. `tags = tags.concat(x); tags = Array.from(new Set(tags))`).
+        const right = expr.childForFieldName('right')
+        const overwriteReadsTarget = right != null && right.text.includes(left.text)
+        if (!wasRead && !overwriteReadsTarget && !(isRefCurrent && hasAwait)) {
           return makeViolation(
             this.ruleKey, expr, filePath, 'high',
             'Element overwritten before read',
