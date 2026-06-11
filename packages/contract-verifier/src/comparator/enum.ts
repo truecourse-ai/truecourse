@@ -51,6 +51,12 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
   // overlap) — so a partial copy of an enum (e.g. a server-side subset) can't
   // contribute spurious `missing-value` drifts alongside the canonical match.
   const matched = matchByName(contract, codeEnums, ref.identity);
+  // A value-only match (no name link) is a weaker signal than a name match: the
+  // overlap could be a deliberate subset constant (a "finished"/"terminal"
+  // status family) rather than a renamed copy of the enum. We track this so the
+  // main-set diff can withhold `missing-value` for value-only matches that are
+  // strict subsets of the spec — see below.
+  const valueOnlyMatch = matched.byName.length === 0;
   const nameMatches =
     matched.byName.length > 0 ? matched.byName : bestValueMatch(contract, matched.byValue);
   if (nameMatches.length === 0) {
@@ -96,7 +102,16 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       const g = byName.get(key)!;
       for (const v of m.values) g.values.add(normalizeValue(v));
     }
+    const specNormSet = new Set(contract.values.map(normalizeValue));
     for (const g of byName.values()) {
+      // Wrong-symbol-collision guard: a value-only match (no name evidence) whose
+      // value set is a STRICT subset of the spec is most likely a deliberate
+      // subset constant (e.g. `FINISHED_STATUSES` = the terminal slice of a run-
+      // status family) rather than a renamed copy of the full enum. The
+      // "missing" complement is then just the part the subset legitimately
+      // omits, not a divergence — so withhold `missing-value` for it. Name
+      // matches and non-subset value matches still report missing normally.
+      if (valueOnlyMatch && isStrictSubset(g.values, specNormSet)) continue;
       const missing = contract.values.filter(
         (v) => !g.values.has(normalizeValue(v)) && !cloudOnlyValues.has(normalizeValue(v)),
       );
@@ -282,6 +297,15 @@ function isSynthesizedEnumShape(shape: ExtractedEnum['shape']): boolean {
 /** Strip non-alphanumeric separators and lowercase so SET_NULL ≡ SET NULL ≡ set-null. */
 function normalizeValue(v: string): string {
   return v.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+/** True when every (normalized) value in `codeValues` is in `specNorm` AND
+ *  `codeValues` is smaller — i.e. the code set is a proper subset of the spec
+ *  value set. Both inputs are already normalized. */
+function isStrictSubset(codeValues: Set<string>, specNorm: Set<string>): boolean {
+  if (codeValues.size === 0 || codeValues.size >= specNorm.size) return false;
+  for (const v of codeValues) if (!specNorm.has(v)) return false;
+  return true;
 }
 
 function valueSetOverlap(a: string[], b: string[]): number {
