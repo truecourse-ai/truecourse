@@ -30,6 +30,15 @@ export const defaultParameterPositionVisitor: CodeRuleVisitor = {
         // Skip when the non-default param after a default is optional (valid TS pattern)
         const isOptional = param.type === 'optional_parameter' || param.text.includes('?')
         if (isOptional) continue
+        // Skip when the trailing required param is a destructuring pattern. Fixed-arity
+        // callback signatures (framework run/handler functions) routinely take a leading
+        // arg with a default followed by a destructured context object the caller always
+        // supplies — e.g. `(payload = {}, { ctx }) => …`. The default there is a runtime
+        // safety net, not a misplaced default, so flagging it is a false positive.
+        const patternNode = param.childForFieldName('pattern') ?? param.namedChildren[0]
+        const isDestructured = param.type === 'object_pattern' || param.type === 'array_pattern'
+          || patternNode?.type === 'object_pattern' || patternNode?.type === 'array_pattern'
+        if (isDestructured) continue
         const nameNode = param.childForFieldName('pattern') ?? param.childForFieldName('name') ?? param.namedChildren[0]
         const name = nameNode?.text ?? 'parameter'
         return makeViolation(
