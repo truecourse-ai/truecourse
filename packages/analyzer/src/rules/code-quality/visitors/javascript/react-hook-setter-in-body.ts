@@ -73,6 +73,11 @@ export const reactHookSetterInBodyVisitor: CodeRuleVisitor = {
     if (!fn.text.startsWith('set') || fn.text.length < 4) return null
     if (!/^set[A-Z]/.test(fn.text)) return null
 
+    // Only flag setters that actually run during a React component's render —
+    // a `set`-prefixed call inside a class method or a plain module function is
+    // not a hook setter and cannot cause a render loop.
+    if (!isComponentBody(node)) return null
+
     // Make sure it's not inside useEffect or event handler
     if (isInsideEventHandlerOrEffect(node)) return null
 
