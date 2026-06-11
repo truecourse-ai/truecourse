@@ -69,6 +69,19 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
     });
   } else {
     const specNorm = new Map(contract.values.map((v) => [normalizeValue(v), v]));
+    // Values the contract marks as belonging to a `cloud-only` trigger-subset are
+    // environment-gated: documented for the hosted/cloud tier and expected to be
+    // ABSENT from a self-hosted/OSS code enum. Their omission from the main code
+    // enum is not a missing implementation, so exclude them from the main-set
+    // `missing-value` diff. (The `cloud-only` subset itself is still diffed below
+    // — an absent code counterpart surfaces as the subset's info-level
+    // no-code-counterpart, so the gating is still reported, just not as a
+    // high-severity missing-value on the self-hosted target.)
+    const cloudOnlyValues = new Set(
+      (contract.triggerSubsets ?? [])
+        .filter((s) => isEnvironmentGatedSubset(s.name))
+        .flatMap((s) => s.values.map(normalizeValue)),
+    );
     // Merge matches that are the SAME enum (same normalized name) — e.g. a client
     // and server copy of one action union, one a subset of the other — by unioning
     // their value sets, so a value present in either copy counts as present.
@@ -84,7 +97,9 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       for (const v of m.values) g.values.add(normalizeValue(v));
     }
     for (const g of byName.values()) {
-      const missing = contract.values.filter((v) => !g.values.has(normalizeValue(v)));
+      const missing = contract.values.filter(
+        (v) => !g.values.has(normalizeValue(v)) && !cloudOnlyValues.has(normalizeValue(v)),
+      );
       for (const v of missing) {
         drifts.push(mkValueDrift(ref, 'missing-value', v, g.repr, contract.values));
       }
@@ -155,6 +170,16 @@ function normalizeName(s: string): string {
     }
   }
   return n;
+}
+
+/** A trigger-subset whose name marks its members as available only on the
+ *  hosted/cloud tier (`cloud-only`). Such values are documented for the managed
+ *  product and are expected to be absent from a self-hosted/OSS code enum, so
+ *  their omission is not a `missing-value` drift — see compareEnum. Kept tight
+ *  to the established `cloud-only` convention to avoid suppressing genuine
+ *  missing values that merely happen to live in some other named subset. */
+function isEnvironmentGatedSubset(name: string): boolean {
+  return normalizeName(name) === 'cloudonly';
 }
 
 /** Matches split by HOW they matched: `byName` (exact or substring name link)
