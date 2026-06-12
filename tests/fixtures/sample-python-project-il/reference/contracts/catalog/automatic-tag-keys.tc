@@ -1,0 +1,11 @@
+enum AutomaticTagKey {
+  origin "reference/specs/modules/catalog/automatic-tags.md" "Automatic tag keys" 1..10
+  values [
+    "sample-app/schedule_name",
+    "sample-app/partition",
+    "sample-app/user",
+    "sample-app/code_location",
+    "sample-app/parent_run_id",
+    "sample-app/sensor_name",
+  ]
+}

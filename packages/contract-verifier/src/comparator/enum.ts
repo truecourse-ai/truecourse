@@ -290,7 +290,8 @@ function isSynthesizedEnumShape(shape: ExtractedEnum['shape']): boolean {
   return (
     shape === 'sibling-id-literal' ||
     shape === 'py-instance-registry' ||
-    shape === 'py-discriminated-union'
+    shape === 'py-discriminated-union' ||
+    shape === 'py-constant-cluster'
   );
 }
 

@@ -22,6 +22,7 @@ export type EnumShape =
   | 'py-list'            // VALID_X = ['a', 'b'] (with conventional name)
   | 'py-instance-registry'    // NAME = Subclass()  ×N of a common base → enum of NAMEs
   | 'py-discriminated-union'  // Union[A, B, …] of models each with type: Literal["x"]
+  | 'py-constant-cluster'     // ≥3 module-level string constants sharing a value prefix
   | 'py-set-difference';      // NAME = set(X) - Y — transient; resolved in enum/index.ts
 
 export interface ExtractedEnum {

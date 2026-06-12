@@ -16,6 +16,7 @@
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { ExtractedEnum, EnumShape } from './types.js';
+import { collectStringConstantTable, stringValue } from '../py-string-resolver.js';
 
 const ENUM_CONVENTION_NAME = /^(?:VALID|ALLOWED|KNOWN|ENUM)_/i;
 const ENUM_CONVENTION_SUFFIX = /_(?:VALUES|SET|CLASSIFICATIONS|STATUSES|KINDS|TYPES|OPTIONS|CHOICES)$/i;
@@ -26,6 +27,7 @@ export function extractPyEnumsFromFile(
   tree: Tree,
 ): ExtractedEnum[] {
   const out: ExtractedEnum[] = [];
+  const stringTable = collectStringConstantTable(tree.rootNode, source);
   walk(tree.rootNode, (node) => {
     if (node.type === 'class_definition') {
       const decl = extractEnumClass(node, filePath, source);
@@ -41,6 +43,7 @@ export function extractPyEnumsFromFile(
   });
   out.push(...synthesizeInstanceRegistryEnum(tree.rootNode, filePath, source));
   out.push(...synthesizeDiscriminatedUnionEnum(tree.rootNode, filePath, source));
+  out.push(...synthesizeConstantClusterEnums(tree.rootNode, filePath, source, stringTable));
   return out;
 }
 
@@ -206,6 +209,125 @@ function collectTypeIdentifiers(node: SyntaxNode, out: string[], source: string)
 // those names as values, so the comparator binds it (by value-set) to a spec
 // enum like `CachePolicies`.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Module-level constant cluster → enum
+//
+// Documented value sets are often realized as a cluster of UPPER_SNAKE_CASE
+// module-level string constants sharing a common value prefix — frequently
+// built via f-strings off a single PREFIX constant:
+//
+//   SYSTEM_TAG_PREFIX = "dagster"
+//   SCHEDULE_NAME_TAG = f"{SYSTEM_TAG_PREFIX}/schedule_name"
+//   PARTITION_NAME_TAG = f"{SYSTEM_TAG_PREFIX}/partition"
+//   ...
+//
+// The shared value prefix is the signal — it identifies the constants as a
+// single namespace of allowed values, not a coincidental co-location. We pull
+// the longest common value prefix (length ≥ MIN_PREFIX), require at least
+// MIN_CLUSTER_MEMBERS string constants under that prefix, and emit one enum
+// with the resolved string values. The synthesized name keeps the prefix so a
+// later value-overlap match (Jaccard ≥ 0.6) binds it to a spec enum like
+// `dagster.automatic-run-tags`. Shape `py-constant-cluster` is heuristic, so
+// the comparator treats it like other synthesized shapes — name+overlap
+// matching is fine, but `extra-value` is suppressed against it.
+// ---------------------------------------------------------------------------
+
+const MIN_PREFIX = 6;
+const MIN_CLUSTER_MEMBERS = 3;
+const MAX_CLUSTER_MEMBERS = 200;
+
+function synthesizeConstantClusterEnums(
+  root: SyntaxNode,
+  filePath: string,
+  source: string,
+  stringTable: Map<string, SyntaxNode>,
+): ExtractedEnum[] {
+  // Collect (name → resolved string value) for every module-level string
+  // constant. The table already canonicalises f-strings via the shared
+  // resolver, so we can read each entry as a plain literal here.
+  const named: Array<{ name: string; value: string }> = [];
+  for (const [name, node] of stringTable) {
+    const v = stringValue(node, source, stringTable);
+    if (v === null) continue;
+    named.push({ name, value: v });
+  }
+  if (named.length < MIN_CLUSTER_MEMBERS) return [];
+
+  // Partition by longest-shared value prefix of length ≥ MIN_PREFIX.
+  // Sort by value first so members of the same prefix are contiguous, then
+  // collapse the longest-common-prefix run into a cluster. A trivial prefix
+  // (the empty string, or a too-short fragment) yields no cluster.
+  named.sort((a, b) => (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+
+  const clusters: Array<{ prefix: string; members: typeof named }> = [];
+  let i = 0;
+  while (i < named.length) {
+    let j = i + 1;
+    let prefix = named[i].value;
+    while (j < named.length) {
+      const next = commonPrefix(prefix, named[j].value);
+      if (next.length < MIN_PREFIX) break;
+      prefix = next;
+      j++;
+    }
+    if (j - i >= MIN_CLUSTER_MEMBERS && j - i <= MAX_CLUSTER_MEMBERS && prefix.length >= MIN_PREFIX) {
+      clusters.push({ prefix, members: named.slice(i, j) });
+    }
+    i = j === i + 1 ? i + 1 : j;
+  }
+
+  // Refuse a cluster whose values aren't a real namespace — `"hello world A"`
+  // and `"hello world B"` would share an 11-char prefix without being a value
+  // family. Require either a delimiter (`/`, `-`, `_`, `.`, `:`) at the
+  // boundary, or that every value's tail past the shared prefix is a clean
+  // identifier-shaped token. Either way the prefix has to look like a real
+  // namespace boundary, not a coincidental substring overlap.
+  //
+  // Drop "no-tail" members first: when one constant's value IS the shared
+  // prefix (e.g. `SYSTEM_TAG_PREFIX = "dagster"` paired with
+  // `SCHEDULE_NAME_TAG = f"{SYSTEM_TAG_PREFIX}/schedule_name"`), that constant
+  // is the *building block*, not a member of the value set. Re-derive the
+  // common prefix from the remaining members so the namespace boundary
+  // (`"dagster/"`) lands correctly, then guard.
+  const out: ExtractedEnum[] = [];
+  for (const cluster of clusters) {
+    const realMembers = cluster.members.filter((m) => m.value.length > cluster.prefix.length);
+    if (realMembers.length < MIN_CLUSTER_MEMBERS) continue;
+    let prefix = realMembers[0].value;
+    for (let k = 1; k < realMembers.length; k++) {
+      prefix = commonPrefix(prefix, realMembers[k].value);
+      if (prefix.length < MIN_PREFIX) break;
+    }
+    if (prefix.length < MIN_PREFIX) continue;
+    const trailingDelim = /[/\-_.:]$/.test(prefix);
+    const allCleanTails =
+      trailingDelim ||
+      realMembers.every((m) => /^[A-Za-z0-9_\-./:]+$/.test(m.value.slice(prefix.length)));
+    if (!allCleanTails) continue;
+    const trimmedName = prefix.replace(/[^A-Za-z0-9]+$/, '') || prefix;
+    const firstNode = stringTable.get(realMembers[0].name);
+    const lastNode = stringTable.get(realMembers[realMembers.length - 1].name);
+    out.push({
+      name: trimmedName,
+      values: [...new Set(realMembers.map((m) => m.value))].sort(),
+      shape: 'py-constant-cluster',
+      source: {
+        filePath,
+        lineStart: firstNode ? firstNode.startPosition.row + 1 : 1,
+        lineEnd: lastNode ? lastNode.endPosition.row + 1 : 1,
+      },
+    });
+  }
+  return out;
+}
+
+function commonPrefix(a: string, b: string): string {
+  const len = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < len && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return a.slice(0, i);
+}
 
 function synthesizeInstanceRegistryEnum(
   root: SyntaxNode,
@@ -520,27 +642,6 @@ function collectStringChildren(node: SyntaxNode, source: string): string[] {
     if (v !== null) out.push(v);
   }
   return out;
-}
-
-/** Pull the literal text of a Python `string` node (handles prefixes
- *  like f"" / r"" and triple quotes by reading the string_content). */
-function stringValue(node: SyntaxNode, source: string): string | null {
-  let content = '';
-  let sawContent = false;
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const c = node.namedChild(i);
-    if (c?.type === 'string_content') {
-      content += source.slice(c.startIndex, c.endIndex);
-      sawContent = true;
-    } else if (c?.type === 'interpolation' || c?.type === 'format_specifier') {
-      return null; // f-string with interpolation isn't a literal value
-    }
-  }
-  if (sawContent) return content;
-  // Empty string ("") has no string_content child.
-  const raw = source.slice(node.startIndex, node.endIndex);
-  const m = raw.match(/^[a-zA-Z]*('''|"""|'|")([\s\S]*)\1$/);
-  return m ? m[2] : null;
 }
 
 function textOfField(node: SyntaxNode, field: string, source: string): string {

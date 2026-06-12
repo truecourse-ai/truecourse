@@ -1,0 +1,7 @@
+constant SYSTEM_TAG_PREFIX {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/tag_keys.py" 19..19
+  confidence high
+  type string
+  expected-value "sample-app"
+}
