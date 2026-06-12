@@ -705,6 +705,27 @@ data document. If \`Entity:Customer\` references \`Enum:LoyaltyTier\` and the sa
 slice contains "LoyaltyTier values: standard, silver, gold", emit BOTH the entity
 fragment AND the enum fragment.
 
+**An enum is a closed set of DATA VALUES the code compares against** (the
+string/number literals a field is set to or checked against) — NOT a catalog of
+code symbols a caller picks between. Before emitting, check what the listed items
+ARE. Emit nothing when the list is:
+
+- **Implementation / plugin classes** — e.g. "run launchers: \`DefaultRunLauncher\`,
+  \`DockerRunLauncher\`, \`K8sRunLauncher\`", storage backends, compute-log managers.
+  These are swappable extension points (a user can add their own); the items are
+  class names, not a closed value set.
+- **API functions, decorators, or methods** — e.g. "asset decorators: \`asset\`,
+  \`multi_asset\`, \`graph_asset\`". These are symbols a user calls, not values.
+- **An incidental excerpt** — a few items quoted inside a troubleshooting,
+  example, or how-to passage ("relevant event types: …") rather than a
+  definitional "the valid values of X are …". A subset mentioned in passing is
+  not an enum definition.
+
+Discriminator: if the items are **names of code symbols** (classes / functions a
+caller selects), do NOT emit an enum. Only emit when the items are **literal data
+values** the code stores or compares against (config keys, status strings, tag
+keys, numeric codes).
+
 **Never reference an enum without defining it.** Every \`Enum:X\` identifier you
 emit (in \`field: Enum:X\` or \`states Enum:X\`) MUST have a matching \`enum X { … }\`
 artifact somewhere in the same slice (or you must assume another slice provides
