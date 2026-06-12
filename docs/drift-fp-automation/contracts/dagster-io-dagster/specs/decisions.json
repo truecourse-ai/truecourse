@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "decisions": [
+    {
+      "conflictId": "91a6e64e4bb142ef2a59ff38623bfdc44e3685b19af732a555db5c2f695dc74b",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 0
+      },
+      "resolvedAt": "2026-06-12T21:14:44.498Z",
+      "candidateFingerprint": "7a1f7d11118554b3f6bc681c90b4e21c2ea4ee290d14e6250c02bcbdb72a1426"
+    },
+    {
+      "conflictId": "2b909a9ddeb013fad2b17ecdbd1c8511fa01eb7d8252bf2acb676d9fbfb308c8",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-12T21:14:44.498Z",
+      "candidateFingerprint": "6414262df696dd1873b663306f4fbe92aa74d3277179f4d820f3338e31f1b289"
+    },
+    {
+      "conflictId": "9dffd5813fe386f0a801fbb4723e4ac25fb54834721c8c5a1e2389b8afc630d3",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 0
+      },
+      "resolvedAt": "2026-06-12T21:14:44.498Z",
+      "candidateFingerprint": "ffa89ed63db0511c3aa72e01b31b24ba042af1f920822121f8af72c2b056ff00"
+    },
+    {
+      "conflictId": "9777b71a2b9bfbb5729e894d9e9aef13e8e9890a0f1e9b59c18f7eae0ba329b4",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 1
+      },
+      "resolvedAt": "2026-06-12T21:14:44.498Z",
+      "candidateFingerprint": "be47fd4ca0688ae30bc6fd8f4966db4a4b76aacfcc37274f6d8bfb58d6fec7d3"
+    },
+    {
+      "conflictId": "f95596ec043497334d111d62684e2ffb9e376e2938a763151224ae23f555746d",
+      "resolution": {
+        "kind": "pick",
+        "candidateIndex": 0
+      },
+      "resolvedAt": "2026-06-12T21:14:44.498Z",
+      "candidateFingerprint": "f418cf399c179b70cac9a66807418fa1fbfca9a3bc790b6aa131e35cdbdf1b6d"
+    }
+  ],
+  "manualChains": [],
+  "manualIncludes": []
+}

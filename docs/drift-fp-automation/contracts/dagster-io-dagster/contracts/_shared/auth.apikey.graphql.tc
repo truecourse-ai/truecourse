@@ -1,0 +1,9 @@
+auth-requirement auth.apikey.graphql {
+  origin "docs/docs/deployment/troubleshooting/unauthorized-error-graphql-api.md" "Dagster+ GraphQL API auth" 574..584
+  scheme ApiKey
+  selector path-glob "/graphql"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}
