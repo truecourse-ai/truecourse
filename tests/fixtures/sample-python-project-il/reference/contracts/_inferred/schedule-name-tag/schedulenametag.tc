@@ -1,0 +1,7 @@
+constant SCHEDULE_NAME_TAG {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/tag_keys.py" 24..24
+  confidence high
+  type string
+  expected-value "sample-app/schedule_name"
+}
