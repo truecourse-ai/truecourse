@@ -6,8 +6,8 @@
 import type { FileAnalysis, Entity, EntityField, EntityRelationship, SupportedLanguage } from '@truecourse/shared'
 import { dataLayerPatterns } from '../patterns/layer-patterns.js'
 import { matchesPattern } from '../patterns/index.js'
-import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
-import { getParser } from '../parser.js'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
+import { withParsedTree } from '../parser.js'
 
 /**
  * Check if a file likely contains entities based on ORM import patterns
@@ -101,12 +101,6 @@ function mapToSimpleType(type: string): string {
 }
 
 class TypeScriptEntityDetector {
-  // Lazy: do not call getParser() at construction time — callers may
-  // instantiate this before initParsers() has completed.
-  private get parser() {
-    return getParser('typescript')
-  }
-
   shouldScanFile(filePath: string): boolean {
     if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
       return false
@@ -125,32 +119,29 @@ class TypeScriptEntityDetector {
   }
 
   detectEntities(sourceCode: string, filePath: string, service: string): Entity[] {
-    const tree = this.parser.parse(sourceCode)
-    const entities: Entity[] = []
+    return withParsedTree(filePath, sourceCode, 'typescript', (tree) => {
+      const entities: Entity[] = []
 
-    if (!tree) return entities
-
-    // Find all class declarations
-    const classNodes = this.findClassDeclarations(tree.rootNode)
-
-    for (const classNode of classNodes) {
-      const entity = this.detectEntityFromClass(classNode, sourceCode, filePath, service)
-      if (entity) {
-        entities.push(entity)
+      // Find all class declarations
+      const classNodes = this.findClassDeclarations(tree.rootNode)
+      for (const classNode of classNodes) {
+        const entity = this.detectEntityFromClass(classNode, sourceCode, filePath, service)
+        if (entity) {
+          entities.push(entity)
+        }
       }
-    }
 
-    // Also find interface declarations (for projects using plain interfaces as models)
-    const interfaceNodes = this.findInterfaceDeclarations(tree.rootNode)
-
-    for (const interfaceNode of interfaceNodes) {
-      const entity = this.detectEntityFromInterface(interfaceNode, sourceCode, filePath, service)
-      if (entity) {
-        entities.push(entity)
+      // Also find interface declarations (for projects using plain interfaces as models)
+      const interfaceNodes = this.findInterfaceDeclarations(tree.rootNode)
+      for (const interfaceNode of interfaceNodes) {
+        const entity = this.detectEntityFromInterface(interfaceNode, sourceCode, filePath, service)
+        if (entity) {
+          entities.push(entity)
+        }
       }
-    }
 
-    return entities
+      return entities
+    })
   }
 
   private findClassDeclarations(node: SyntaxNode): SyntaxNode[] {
