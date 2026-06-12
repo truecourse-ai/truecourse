@@ -1,0 +1,4 @@
+enum FlowRunStatus {
+  origin "reference/specs/fp-guards/enums.md" "Pipeline run state values" 12..16
+  values [active, inactive]
+}

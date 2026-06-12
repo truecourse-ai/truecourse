@@ -2,11 +2,40 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-function containsSpread(node: SyntaxNode): boolean {
-  if (node.type === 'spread_element') return true
+/**
+ * The O(n^2) anti-pattern is spreading the ACCUMULATOR itself on each
+ * iteration (`acc.reduce((acc, x) => ({ ...acc, ...x }), {})`) — every pass
+ * copies the whole accumulator. Spreading some other, fixed-size value while
+ * mutating the accumulator in place (`acc[x.id] = { ...x.state, ... }; return acc`)
+ * is linear and must not be flagged.
+ */
+function getAccumulatorName(callback: SyntaxNode): string | null {
+  if (
+    callback.type !== 'arrow_function' &&
+    callback.type !== 'function_expression' &&
+    callback.type !== 'function'
+  ) {
+    return null
+  }
+  const params = callback.childForFieldName('parameters')
+  if (!params) return null
+  const first = params.namedChildren.find((c) => c.type !== 'comment')
+  if (!first) return null
+  if (first.type === 'identifier') return first.text
+  // TS wraps the binding in required_parameter / optional_parameter.
+  const pattern = first.childForFieldName('pattern')
+  if (pattern && pattern.type === 'identifier') return pattern.text
+  return null
+}
+
+function spreadsIdentifier(node: SyntaxNode, name: string): boolean {
+  if (node.type === 'spread_element') {
+    const arg = node.namedChildren[0]
+    if (arg && arg.type === 'identifier' && arg.text === name) return true
+  }
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i)
-    if (child && containsSpread(child)) return true
+    if (child && spreadsIdentifier(child, name)) return true
   }
   return false
 }
@@ -28,8 +57,11 @@ export const spreadInReduceVisitor: CodeRuleVisitor = {
     const callback = args.namedChildren[0]
     if (!callback) return null
 
-    // Check if callback body contains spread_element
-    if (containsSpread(callback)) {
+    const accName = getAccumulatorName(callback)
+    if (!accName) return null
+
+    // Only flag when the accumulator itself is spread (the actual O(n^2) shape).
+    if (spreadsIdentifier(callback, accName)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Spread operator in reduce callback',

@@ -15,10 +15,14 @@ export type EnumShape =
   | 'as-const-object'    // const X = { A: 'a' } as const
   | 'set-literal'        // const VALID_X = new Set(['a', 'b'])
   | 'array-literal'      // const VALID_X = ['a', 'b'] (with conventional name)
+  | 'sibling-id-literal' // synthesised from id: 'x' in sibling */index.ts modules
   | 'py-enum'            // class X(str, Enum): A = 'a'
   | 'py-literal'         // X = Literal['a', 'b']
   | 'py-set'             // X_SET = {'a', 'b'} / frozenset({...})
-  | 'py-list';           // VALID_X = ['a', 'b'] (with conventional name)
+  | 'py-list'            // VALID_X = ['a', 'b'] (with conventional name)
+  | 'py-instance-registry'    // NAME = Subclass()  ×N of a common base → enum of NAMEs
+  | 'py-discriminated-union'  // Union[A, B, …] of models each with type: Literal["x"]
+  | 'py-set-difference';      // NAME = set(X) - Y — transient; resolved in enum/index.ts
 
 export interface ExtractedEnum {
   /** Identifier in code — type name, const name, or property key. */
@@ -27,4 +31,7 @@ export interface ExtractedEnum {
   values: string[];
   shape: EnumShape;
   source: SourceLocation;
+  /** Only on a transient `py-set-difference`: the operand enum names to resolve
+   *  (`set(<base>) - <minus>`). Cleared once enum/index.ts computes the diff. */
+  unresolved?: { base: string; minus: string };
 }

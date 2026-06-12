@@ -4,25 +4,28 @@
  * the configured idempotency request header.
  *
  * Algorithm:
- *   1. Walk every TS/JS file. Build per-file:
- *        - Function index: name → body node (declarations + arrow consts).
- *        - Default-import bindings: imported-name → resolved file path.
- *        - Named-import bindings: imported-name → resolved file path.
- *        - Set of function names whose body reads the idempotency header.
- *   2. Aggregate: a function is idempotency-aware globally if its body
- *      reads `req.headers['<key>']` (any case) or `req.get('<Key>')` /
- *      `req.header('<Key>')` where `<key>` matches the contract's
- *      configured request header (case-insensitive).
- *   3. Walk every route registration `<router>.<method>(<path>, ...args, handler)`.
- *      For each route, the route is idempotency-protected when:
- *        a) any middleware-arg identifier resolves to an idempotency-aware
- *           function (locally declared OR imported from another file), or
- *        b) the handler body itself (after delegation resolution by the
- *           Operation extractor) reads the idempotency header.
+ *   1. Walk every TS/JS file. For each file, while its tree is alive,
+ *      collect:
+ *        - FileBindings: function index, default+named import bindings,
+ *          set of locally-declared function names whose body reads the
+ *          header.
+ *        - PendingRoutes: per route registration in this file, capture
+ *          `{ declarationLine, middlewareIdents, handlerReadsHeader }`.
+ *          The header-read check runs against the handler-body AST HERE,
+ *          while we still have the tree, and we store only the boolean.
+ *      Then dispose the tree.
+ *   2. Cross-file resolution pass. For each file's PendingRoutes, decide
+ *      protected-or-not using only plain data:
+ *        a) any middleware-arg identifier is locally-aware OR imports an
+ *           aware function from another file's FileBindings, or
+ *        b) the pre-computed `handlerReadsHeader` boolean is true.
  *
- * The handler-body check is partially redundant with (a) but covers the
- * inline case where the route registers no middleware and the handler
- * does the check itself.
+ * Pre-refactor: Pass 2 held every file's tree alive across the whole
+ * scan (a `Map<filePath, { tree, source }>`) so it could re-walk for
+ * routes. On a 4500-file monorepo that exhausted the WASM heap exactly
+ * like the operation extractor used to. This rewrite keeps the scan
+ * single-pass-per-file and frees each tree as soon as we've reduced it
+ * to plain data.
  */
 
 import fs from 'node:fs';
@@ -60,6 +63,13 @@ interface FileBindings {
   declaredFunctions: Set<string>;
 }
 
+interface PendingRoute {
+  declarationLine: number;
+  middlewareIdents: string[];
+  /** Pre-computed against the handler-body AST while the tree was alive. */
+  handlerReadsHeader: boolean;
+}
+
 /**
  * Build the protected-routes set for the given root directory and configured
  * header. The header match is case-insensitive on the wire format
@@ -72,11 +82,11 @@ export async function detectIdempotencyPresence(
   await initParsers();
   const headerLower = requestHeader.toLowerCase();
   const fileBindings = new Map<string, FileBindings>();
-  const fileTrees = new Map<string, { tree: Tree; source: string }>();
+  const pendingByFile = new Map<string, PendingRoute[]>();
   const scanned: string[] = [];
   const tcIgnore = loadTcIgnore(rootDir);
 
-  // ---- Pass 1: parse every file, collect bindings + per-file aware funcs.
+  // ---- Pass 1: parse every file once, reduce to plain data, dispose tree.
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
@@ -91,37 +101,38 @@ export async function detectIdempotencyPresence(
       if (!TS_EXT.has(ext)) continue;
       const source = fs.readFileSync(full, 'utf-8');
       const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
+      let tree: Tree | undefined;
       try {
         tree = parseFile(full, source, lang);
       } catch {
         continue;
       }
-      scanned.push(full);
-      fileTrees.set(full, { tree, source });
-      fileBindings.set(full, collectBindings(tree, source, full, headerLower));
+      try {
+        scanned.push(full);
+        fileBindings.set(full, collectBindings(tree, source, full, headerLower));
+        pendingByFile.set(full, collectPendingRoutes(tree, source, headerLower));
+      } finally {
+        tree.delete();
+      }
     }
   };
   visit(rootDir);
 
-  // ---- Pass 2: per route, decide protected-or-not.
+  // ---- Pass 2: cross-file resolution. No trees needed — all plain data.
   const protectedRoutes = new Set<string>();
-  for (const [filePath, { tree, source }] of fileTrees) {
-    walkRoutes(tree.rootNode, source, (declarationLine, middlewareIdents, handlerBody) => {
-      if (
-        anyIdentIsAware(middlewareIdents, filePath, fileBindings) ||
-        (handlerBody && nodeReadsHeader(handlerBody, source, headerLower))
-      ) {
-        protectedRoutes.add(routeKey(filePath, declarationLine));
+  for (const [filePath, routes] of pendingByFile) {
+    for (const r of routes) {
+      if (r.handlerReadsHeader || anyIdentIsAware(r.middlewareIdents, filePath, fileBindings)) {
+        protectedRoutes.add(routeKey(filePath, r.declarationLine));
       }
-    });
+    }
   }
 
   return { protectedRoutes, scannedFiles: scanned };
 }
 
 // ---------------------------------------------------------------------------
-// Bindings collection
+// Per-file collection (called once per parsed tree, before dispose)
 // ---------------------------------------------------------------------------
 
 function collectBindings(
@@ -196,6 +207,18 @@ function collectBindings(
 
   visit(tree.rootNode);
   return { imports, awareLocally, declaredFunctions };
+}
+
+function collectPendingRoutes(tree: Tree, source: string, headerLower: string): PendingRoute[] {
+  const out: PendingRoute[] = [];
+  walkRoutes(tree.rootNode, source, (declarationLine, middlewareIdents, handlerBody) => {
+    out.push({
+      declarationLine,
+      middlewareIdents,
+      handlerReadsHeader: !!handlerBody && nodeReadsHeader(handlerBody, source, headerLower),
+    });
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------

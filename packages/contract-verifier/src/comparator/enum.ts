@@ -46,7 +46,19 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
   const drifts: ContractDrift[] = [];
 
   // ---- Main value set ----
-  const nameMatches = matchByName(contract, codeEnums, ref.identity);
+  // A name match is authoritative. Only when NO enum matches by name do we fall
+  // back to value-set matches, and then to the single most-complete one (highest
+  // overlap) — so a partial copy of an enum (e.g. a server-side subset) can't
+  // contribute spurious `missing-value` drifts alongside the canonical match.
+  const matched = matchByName(contract, codeEnums, ref.identity);
+  // A value-only match (no name link) is a weaker signal than a name match: the
+  // overlap could be a deliberate subset constant (a "finished"/"terminal"
+  // status family) rather than a renamed copy of the enum. We track this so the
+  // main-set diff can withhold `missing-value` for value-only matches that are
+  // strict subsets of the spec — see below.
+  const valueOnlyMatch = matched.byName.length === 0;
+  const nameMatches =
+    matched.byName.length > 0 ? matched.byName : bestValueMatch(contract, matched.byValue);
   if (nameMatches.length === 0) {
     drifts.push({
       id: randomUUID(),
@@ -63,14 +75,59 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       specOrigin: origin ?? undefined,
     });
   } else {
+    const specNorm = new Map(contract.values.map((v) => [normalizeValue(v), v]));
+    // Values the contract marks as belonging to a `cloud-only` trigger-subset are
+    // environment-gated: documented for the hosted/cloud tier and expected to be
+    // ABSENT from a self-hosted/OSS code enum. Their omission from the main code
+    // enum is not a missing implementation, so exclude them from the main-set
+    // `missing-value` diff. (The `cloud-only` subset itself is still diffed below
+    // — an absent code counterpart surfaces as the subset's info-level
+    // no-code-counterpart, so the gating is still reported, just not as a
+    // high-severity missing-value on the self-hosted target.)
+    const cloudOnlyValues = new Set(
+      (contract.triggerSubsets ?? [])
+        .filter((s) => isEnvironmentGatedSubset(s.name))
+        .flatMap((s) => s.values.map(normalizeValue)),
+    );
+    // Merge matches that are the SAME enum (same normalized name) — e.g. a client
+    // and server copy of one action union, one a subset of the other — by unioning
+    // their value sets, so a value present in either copy counts as present.
+    // Distinct-named matches (a fuzzy value-set match against a DIFFERENT entity's
+    // enum) stay separate, so a value genuinely missing from the named enum still
+    // drifts. Each name-group is diffed independently; a value fires `missing` if
+    // absent from any group's union.
+    const byName = new Map<string, { values: Set<string>; repr: ExtractedEnum }>();
     for (const m of nameMatches) {
-      const specSet = new Set(contract.values);
-      const codeSet = new Set(m.values);
-      const missing = contract.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const key = normalizeName(m.name);
+      if (!byName.has(key)) byName.set(key, { values: new Set(), repr: m });
+      const g = byName.get(key)!;
+      for (const v of m.values) g.values.add(normalizeValue(v));
+    }
+    const specNormSet = new Set(contract.values.map(normalizeValue));
+    for (const g of byName.values()) {
+      // Wrong-symbol-collision guard: a value-only match (no name evidence) whose
+      // value set is a STRICT subset of the spec is most likely a deliberate
+      // subset constant (e.g. `FINISHED_STATUSES` = the terminal slice of a run-
+      // status family) rather than a renamed copy of the full enum. The
+      // "missing" complement is then just the part the subset legitimately
+      // omits, not a divergence — so withhold `missing-value` for it. Name
+      // matches and non-subset value matches still report missing normally.
+      if (valueOnlyMatch && isStrictSubset(g.values, specNormSet)) continue;
+      const missing = contract.values.filter(
+        (v) => !g.values.has(normalizeValue(v)) && !cloudOnlyValues.has(normalizeValue(v)),
+      );
       for (const v of missing) {
-        drifts.push(mkValueDrift(ref, origin, 'missing-value', v, m, contract.values));
+        drifts.push(mkValueDrift(ref, origin, 'missing-value', v, g.repr, contract.values));
       }
+    }
+    // `extra-value` (code has a value the spec omits) is only meaningful for an
+    // EXACT declared value set. Synthesized code enums (sibling-id-literal,
+    // py-instance-registry, py-discriminated-union) are heuristic supersets that
+    // sweep in internal/alias/composed members a docs enum legitimately omits,
+    // so skip extra-value for them. Real declared enums still report extras.
+    for (const m of nameMatches) {
+      if (isSynthesizedEnumShape(m.shape)) continue;
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of extra) {
         drifts.push(mkValueDrift(ref, origin, 'extra-value', v, m, contract.values));
       }
@@ -79,7 +136,7 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
 
   // ---- Trigger subsets ----
   for (const subset of contract.triggerSubsets ?? []) {
-    const subsetMatches = matchSubsetByName(subset.name, codeEnums);
+    const subsetMatches = matchSubsetByName(subset.name, subset.values, codeEnums);
     if (subsetMatches.length === 0) {
       drifts.push({
         id: randomUUID(),
@@ -98,10 +155,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       continue;
     }
     for (const m of subsetMatches) {
-      const specSet = new Set(subset.values);
-      const codeSet = new Set(m.values);
-      const missing = subset.values.filter((v) => !codeSet.has(v));
-      const extra = m.values.filter((v) => !specSet.has(v));
+      const specNorm = new Map(subset.values.map((v) => [normalizeValue(v), v]));
+      const codeNorm = new Map(m.values.map((v) => [normalizeValue(v), v]));
+      const missing = subset.values.filter((v) => !codeNorm.has(normalizeValue(v)));
+      const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
         drifts.push(mkSubsetDrift(ref, origin, subset.name, 'missing-value', v, m, subset.values));
       }
@@ -132,23 +189,60 @@ function normalizeName(s: string): string {
   return n;
 }
 
+/** A trigger-subset whose name marks its members as available only on the
+ *  hosted/cloud tier (`cloud-only`). Such values are documented for the managed
+ *  product and are expected to be absent from a self-hosted/OSS code enum, so
+ *  their omission is not a `missing-value` drift — see compareEnum. Kept tight
+ *  to the established `cloud-only` convention to avoid suppressing genuine
+ *  missing values that merely happen to live in some other named subset. */
+function isEnvironmentGatedSubset(name: string): boolean {
+  return normalizeName(name) === 'cloudonly';
+}
+
+/** Matches split by HOW they matched: `byName` (exact or substring name link)
+ *  vs `byValue` (pure value-set similarity, no name link). A name match is
+ *  authoritative; value matches are fallbacks used only when no name match
+ *  exists. See compareEnum. */
+interface EnumMatches {
+  byName: ExtractedEnum[];
+  byValue: ExtractedEnum[];
+}
+
 function matchByName(
   contract: EnumContract,
   codeEnums: ExtractedEnum[],
   specName: string,
-): ExtractedEnum[] {
+): EnumMatches {
   const target = normalizeName(specName);
-  const out: ExtractedEnum[] = [];
+  const byName: ExtractedEnum[] = [];
+  const byValue: ExtractedEnum[] = [];
   for (const e of codeEnums) {
     const codeName = normalizeName(e.name);
     if (codeName === target) {
-      out.push(e);
+      byName.push(e);
       continue;
     }
     // Substring name + value-set overlap.
     if (codeName.includes(target) || target.includes(codeName)) {
+      // Entity-collision guard: when the spec name wholly contains the code name
+      // (e.g. `CollectionAccountability` contains `accountability`), check
+      // whether the qualifying prefix (the part of the spec name that precedes
+      // the code name) is longer than 5 characters. A long prefix signals an
+      // entity qualifier that makes the match spurious — e.g. "collection"
+      // (10 chars) before "accountability" is too heavy to treat as the same
+      // concept, but "flow" (4 chars) before "accountability" or "trigger"
+      // is a lightweight domain prefix that keeps the match valid.
+      // The guard only fires when the containment is one-directional (spec⊃code);
+      // when the code name also contains the spec name the names are co-equal and
+      // the guard is skipped.
+      if (!codeName.includes(target)) {
+        const qualifyingPrefix = target.slice(0, target.indexOf(codeName));
+        if (qualifyingPrefix.length > 5) {
+          continue;
+        }
+      }
       if (valueSetOverlap(contract.values, e.values) >= 0.5) {
-        out.push(e);
+        byName.push(e);
         continue;
       }
     }
@@ -163,16 +257,62 @@ function matchByName(
       const overlap = valueSetOverlap(contract.values, e.values);
       const sizeDiff = Math.abs(contract.values.length - e.values.length);
       if (overlap >= 0.6 && sizeDiff <= 2) {
-        out.push(e);
+        byValue.push(e);
+      }
+    } else if (minLen >= 2) {
+      // For small (2-value) enum sets, require an exact value-set match (Jaccard = 1,
+      // equal sizes) to avoid spurious cross-enum matches. This lets a module-scoped
+      // type alias like `type Status = 'active' | 'inactive'` satisfy a contract named
+      // `FlowStatus` even though the names don't align, while blocking unrelated
+      // 2-value enums that merely share one value.
+      const overlap = valueSetOverlap(contract.values, e.values);
+      const sizeDiff = Math.abs(contract.values.length - e.values.length);
+      if (overlap === 1.0 && sizeDiff === 0) {
+        byValue.push(e);
       }
     }
   }
-  return out;
+  return { byName, byValue };
+}
+
+/** Of several value-set matches, keep only the most complete (highest overlap
+ *  with the contract). Ties keep all — they have identical value coverage so
+ *  the missing/extra diff is the same regardless of which is the representative. */
+function bestValueMatch(contract: EnumContract, byValue: ExtractedEnum[]): ExtractedEnum[] {
+  if (byValue.length <= 1) return byValue;
+  let best = -1;
+  for (const e of byValue) best = Math.max(best, valueSetOverlap(contract.values, e.values));
+  return byValue.filter((e) => valueSetOverlap(contract.values, e.values) === best);
+}
+
+/** Code enums we SYNTHESIZE from non-declarative shapes (rather than lift from a
+ *  literal value list). These are heuristic supersets, so `extra-value` against
+ *  them is unreliable — see compareEnum. */
+function isSynthesizedEnumShape(shape: ExtractedEnum['shape']): boolean {
+  return (
+    shape === 'sibling-id-literal' ||
+    shape === 'py-instance-registry' ||
+    shape === 'py-discriminated-union'
+  );
+}
+
+/** Strip non-alphanumeric separators and lowercase so SET_NULL ≡ SET NULL ≡ set-null. */
+function normalizeValue(v: string): string {
+  return v.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+/** True when every (normalized) value in `codeValues` is in `specNorm` AND
+ *  `codeValues` is smaller — i.e. the code set is a proper subset of the spec
+ *  value set. Both inputs are already normalized. */
+function isStrictSubset(codeValues: Set<string>, specNorm: Set<string>): boolean {
+  if (codeValues.size === 0 || codeValues.size >= specNorm.size) return false;
+  for (const v of codeValues) if (!specNorm.has(v)) return false;
+  return true;
 }
 
 function valueSetOverlap(a: string[], b: string[]): number {
-  const aSet = new Set(a);
-  const bSet = new Set(b);
+  const aSet = new Set(a.map(normalizeValue));
+  const bSet = new Set(b.map(normalizeValue));
   const intersection = [...aSet].filter((v) => bSet.has(v)).length;
   const union = new Set([...aSet, ...bSet]).size;
   return union === 0 ? 0 : intersection / union;
@@ -180,10 +320,27 @@ function valueSetOverlap(a: string[], b: string[]): number {
 
 function matchSubsetByName(
   subsetName: string,
+  subsetValues: string[],
   codeEnums: ExtractedEnum[],
 ): ExtractedEnum[] {
   const target = normalizeName(subsetName);
-  return codeEnums.filter((e) => normalizeName(e.name) === target);
+  const out: ExtractedEnum[] = [];
+  for (const e of codeEnums) {
+    const codeName = normalizeName(e.name);
+    if (codeName === target) {
+      out.push(e);
+      continue;
+    }
+    // A subset is often exposed as a named set whose identifier embeds the
+    // subset word (`terminal` → `TERMINAL_STATES` → normalized `terminalstates`).
+    // Accept a substring name link, but GATE on value-set overlap so a near-name
+    // (`terminal` is a substring of `nonterminalstates`) can't cross-match a set
+    // with a disjoint value set.
+    if (codeName.includes(target) || target.includes(codeName)) {
+      if (valueSetOverlap(subsetValues, e.values) >= 0.5) out.push(e);
+    }
+  }
+  return out;
 }
 
 function countOverlap<T>(a: T[], b: T[]): number {

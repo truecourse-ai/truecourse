@@ -37,6 +37,7 @@ import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import type { OperationContract } from '../types/index.js';
 import { extractResponsesFromBody, collectHandlerObservationsFromBody } from './operation.js';
+import { extractHandlerFacts } from './handler-facts.js';
 import type { ExtractedOperation } from './operation.js';
 
 const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
@@ -156,30 +157,35 @@ function walkRoot(rootAbs: string, root: RouteRoot, out: ExtractedOperation[]): 
 
       const source = fs.readFileSync(full, 'utf-8');
       const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
+      let tree: Tree | undefined;
       try {
         tree = parseFile(full, source, lang);
       } catch {
         continue;
       }
-      const exports = collectHttpMethodExports(tree.rootNode, source);
-      for (const exp of exports) {
-        const contract: OperationContract = {
-          protocol: 'http',
-          method: exp.method.toUpperCase(),
-          path: url,
-          tags: [],
-          responses: extractResponsesFromBody(exp.body, source),
-        };
-        out.push({
-          identity: `${exp.method.toUpperCase()} ${url}`,
-          contract,
-          filePath: full,
-          declarationLine: exp.line,
-          observed: collectHandlerObservationsFromBody(exp.body, source),
-          handlerBody: exp.body,
-          handlerSource: source,
-        });
+      try {
+        const exports = collectHttpMethodExports(tree.rootNode, source);
+        for (const exp of exports) {
+          const contract: OperationContract = {
+            protocol: 'http',
+            method: exp.method.toUpperCase(),
+            path: url,
+            tags: [],
+            responses: extractResponsesFromBody(exp.body, source),
+          };
+          const facts = extractHandlerFacts(exp.body, source);
+          out.push({
+            identity: `${exp.method.toUpperCase()} ${url}`,
+            contract,
+            filePath: full,
+            declarationLine: exp.line,
+            observed: collectHandlerObservationsFromBody(exp.body, source),
+            emission: facts.emission,
+            ownershipCheckCandidates: facts.ownershipCheckCandidates,
+          });
+        }
+      } finally {
+        tree.delete();
       }
     }
   };

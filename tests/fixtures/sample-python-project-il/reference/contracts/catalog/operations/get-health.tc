@@ -1,0 +1,4 @@
+operation GET "/health" {
+  origin "reference/specs/modules/catalog/health.md" "GET /health" 1..5
+  response 200 on success
+}

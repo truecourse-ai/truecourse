@@ -1,0 +1,10 @@
+auth-requirement auth.bearer.internal {
+  origin "reference/specs/shared/auth.md" "Internal auth" 1..4
+  scheme Bearer
+  selector path-glob "/internal/**"
+  on-violation {
+    status 401
+    error-code unauthenticated
+    body ErrorEnvelope:error.envelope.standard
+  }
+}

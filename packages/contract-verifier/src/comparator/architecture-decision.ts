@@ -46,6 +46,10 @@ export function compareArchitectureDecision(input: ArchitectureDecisionCompareIn
   const { category, chosen, reason } = contract;
   const why = reason ? ` Rationale: ${reason}` : '';
 
+  // No structured choice — the contract body contained only free-form `decision` text;
+  // the lifter defaulted `chosen` to ''. Nothing to compare.
+  if (!chosen) return [];
+
   // Inconclusive — no signal either way. Info, never a false positive.
   if (detected.confidence === 'inconclusive') {
     return [

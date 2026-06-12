@@ -37,7 +37,52 @@ export interface NamedConstantCompareInput {
 export function compareNamedConstant(input: NamedConstantCompareInput): ContractDrift[] {
   const { ref, origin, contract, codeConstants } = input;
   const target = normalizeName(ref.identity);
-  const matches = codeConstants.filter((c) => normalizeName(c.name) === target);
+  let matches = codeConstants.filter((c) => normalizeName(c.name) === target);
+
+  // For namespaced spec identities (e.g. "auth.type.kubernetes"), fall back to
+  // matching the last segment ("kubernetes") against window-global constants
+  // and flat const-literal constants. This covers browser globals (window.X)
+  // and Python/TS flat SCREAMING_SNAKE names paired with hierarchical spec
+  // identities (e.g. KUBERNETES = "kubernetes" ↔ auth.type.kubernetes).
+  //
+  // For const-literal shapes the match also requires value equality when the
+  // spec carries an expectedValue — this avoids spurious value-mismatch drifts
+  // from unrelated constants that happen to share a last-segment name.
+  if (matches.length === 0 && ref.identity.includes('.')) {
+    const lastPart = ref.identity.split('.').pop()!;
+    const lastTarget = normalizeName(lastPart);
+    matches = codeConstants.filter((c) => {
+      if (normalizeName(c.name) !== lastTarget) return false;
+      if (c.shape === 'window-global') return true;
+      if (c.shape === 'const-literal') {
+        return (
+          contract.expectedValue === undefined ||
+          deepEqual(contract.expectedValue, c.value, /*allowExtraCodeKeys*/ true)
+        );
+      }
+      return false;
+    });
+  }
+
+  // Settings-field suffix match. A Pydantic settings field is emitted under its
+  // env scope WITHOUT the project prefix (`SERVER_ANALYTICS_ENABLED`), while the
+  // spec names it with the prefix (`PREFECT_SERVER_ANALYTICS_ENABLED`). Bind them
+  // when the spec name ENDS WITH the code name and the values are equal. The
+  // value gate + the suffix being multi-segment (the code name still carries the
+  // scope, e.g. `serveranalyticsenabled`) keeps this from matching unrelated
+  // single-word constants. Scoped to `settings-field` shape only — no effect on
+  // any other constant kind or campaign.
+  if (matches.length === 0) {
+    matches = codeConstants.filter((c) => {
+      if (c.shape !== 'settings-field') return false;
+      const codeName = normalizeName(c.name);
+      if (codeName.length < 8 || !target.endsWith(codeName)) return false;
+      return (
+        contract.expectedValue === undefined ||
+        deepEqual(contract.expectedValue, c.value, /*allowExtraCodeKeys*/ true)
+      );
+    });
+  }
 
   if (matches.length === 0) {
     return [{
@@ -49,11 +94,17 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
       filePath: ref.identity,
       lineStart: 0,
       lineEnd: 0,
-      message: `Spec declares constant \`${ref.identity}\` (expected ${formatValue(contract.expectedValue)}), but no code-side constant matches by name.`,
+      message: `Spec declares constant \`${ref.identity}\` but no code-side constant matches by name.`,
       specSide: `expected: ${formatValue(contract.expectedValue)}`,
       codeSide: '<no match>',
       specOrigin: origin ?? undefined,
     }];
+  }
+
+  // A contract without an explicit expected-value (undefined) only asserts
+  // presence; skip value comparison entirely.
+  if (contract.expectedValue === undefined) {
+    return [];
   }
 
   const drifts: ContractDrift[] = [];

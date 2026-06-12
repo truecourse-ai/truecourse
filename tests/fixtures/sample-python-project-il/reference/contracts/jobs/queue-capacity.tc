@@ -1,0 +1,5 @@
+constant TASK_QUEUE_MAX_PENDING {
+  origin "docs/operations/jobs.md" "Queue capacity" 20..25
+  type number
+  expected-value 500
+}

@@ -23,6 +23,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveClaudeBinary } from '../claude-binary.js';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `spec.claimExtract:<block.id>`).
@@ -87,12 +88,17 @@ export function stripCodeFences(text: string): string {
 // ---------------------------------------------------------------------------
 
 export interface CliTransportOptions {
-  /** Binary; defaults to `CLAUDE_CODE_BIN` env or `claude`. */
+  /**
+   * Binary; defaults to `resolveClaudeBinary()` (CLAUDE_CODE_BINARY →
+   * CLAUDE_CODE_BIN → `claude` on PATH). Resolving here — the one place that
+   * spawns `claude` — keeps every runner pointed at the same binary the
+   * up-front CLI preflight tests, with no per-runner duplication.
+   */
   bin?: string;
 }
 
 export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
-  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const bin = opts.bin ?? resolveClaudeBinary();
   return (req) =>
     new Promise<string>((resolve, reject) => {
       const modelArgs: string[] = [];

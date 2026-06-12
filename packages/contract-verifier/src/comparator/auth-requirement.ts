@@ -40,6 +40,7 @@ export function compareAuthRequirement(input: AuthRequirementCompareInput): Cont
     if (!specOp) continue;
     if (!matchesOperation(input.contract.selector, op, specOp)) continue;
 
+    if (op.authExempt) continue; // route explicitly declares config.auth: false
     if (input.protectedFiles.has(op.filePath)) continue; // satisfied
 
     // `except` selectors — paths explicitly excluded from this requirement.

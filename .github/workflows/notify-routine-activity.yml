@@ -16,7 +16,15 @@ on:
   pull_request:
     types: [opened]
   issues:
-    types: [opened]
+    # `opened` covers first-time issue creation. `reopened` lets the
+    # drift-fp-next-fix queue-empty path notify on a material state
+    # change of an existing [drift-fp-campaign-stuck] tracker — the
+    # routine closes + reopens the tracker (with a "State change since
+    # last run" delta header) instead of spawning a new issue every run.
+    # Silent re-runs (no state change) edit the body in place and don't
+    # trigger this workflow. See drift-fp-next-fix.md
+    # "Notify-on-change protocol".
+    types: [opened, reopened]
 
 permissions:
   issues: read
@@ -112,15 +120,79 @@ jobs:
             --data-urlencode "text=${MESSAGE}" \
             > /dev/null
 
+  # Same debounce-rollup pattern for drift-fp-fix issues filed by
+  # drift-fp-discover / drift-fp-next-fix. Independent concurrency
+  # group from the analysis fp-fix burst so the two never cancel
+  # each other when both chains happen to be active.
+  notify-drift-fp-fix-burst:
+    if: >
+      github.event_name == 'issues' &&
+      contains(github.event.issue.labels.*.name, 'drift-fp-fix')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: drift-fp-fix-burst
+      cancel-in-progress: true
+    steps:
+      - name: Wait for burst to settle
+        run: sleep 60
+
+      - name: Send rollup Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
+            exit 0
+          fi
+
+          since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+          issues_json=$(gh issue list \
+            --repo "$REPO" \
+            --label drift-fp-fix \
+            --state open \
+            --search "created:>${since}" \
+            --json number,title \
+            --limit 200)
+
+          count=$(echo "$issues_json" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "No drift-fp-fix issues opened in window — nothing to roll up."
+            exit 0
+          fi
+
+          sample=$(echo "$issues_json" | jq -r '.[0:5][] | "• #\(.number) \(.title)"')
+          first_num=$(echo "$issues_json" | jq -r '.[0].number')
+          first_url="https://github.com/${REPO}/issues/${first_num}"
+
+          if [ "$count" -eq 1 ]; then
+            MESSAGE=$(printf "📋 1 new drift-fp-fix issue filed\n\n%s\n\n%s" \
+              "$sample" "$first_url")
+          else
+            MESSAGE=$(printf "📋 %s new drift-fp-fix issues filed\n\n%s\n\n%s" \
+              "$count" "$sample" "$first_url")
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            > /dev/null
+
   # Campaign-level alerts filed individually and rarely — no rollup,
-  # fire per-issue. Covers close-time failures ([fp-campaign-close])
-  # and the "all remaining issues blocked, can't self-progress"
-  # tracking issue ([fp-campaign-stuck]).
+  # fire per-issue. Covers close-time failures ([fp-campaign-close] /
+  # [drift-fp-campaign-close]), the "all remaining issues blocked,
+  # can't self-progress" tracking issues ([fp-campaign-stuck] /
+  # [drift-fp-campaign-stuck]), and drift campaigns that hit an
+  # unrecoverable state in discover/generate ([drift-campaign-broken]).
   notify-campaign-alert:
     if: >
       github.event_name == 'issues' &&
       (startsWith(github.event.issue.title, '[fp-campaign-close]') ||
-       startsWith(github.event.issue.title, '[fp-campaign-stuck]'))
+       startsWith(github.event.issue.title, '[fp-campaign-stuck]') ||
+       startsWith(github.event.issue.title, '[drift-fp-campaign-close]') ||
+       startsWith(github.event.issue.title, '[drift-fp-campaign-stuck]') ||
+       startsWith(github.event.issue.title, '[drift-campaign-broken]'))
     runs-on: ubuntu-latest
     steps:
       - name: Send Telegram message

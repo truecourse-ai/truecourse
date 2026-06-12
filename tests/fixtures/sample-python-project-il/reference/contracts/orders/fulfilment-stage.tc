@@ -1,0 +1,6 @@
+enum FulfilmentStage {
+  origin "reference/specs/modules/orders/fulfilment.md" "Fulfilment stages" 1..12
+  values [PICKED, PACKED, SHIPPED, DELIVERED]
+  trigger-subset completed [SHIPPED, DELIVERED]
+  trigger-subset outstanding [PICKED, PACKED]
+}

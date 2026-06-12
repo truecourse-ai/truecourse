@@ -9,7 +9,12 @@ import type { SourceLocation } from '../../types/index.js';
 export type ConstantShape =
   | 'const-literal'   // const X = <literal>
   | 'object-property' // const X = { key: <literal>, ... }  — one record per property
-  | 'default-arg';    // function f(name = <literal>)
+  | 'default-arg'     // function f(name = <literal>)
+  | 'window-global'   // window.X access — value is undefined; matched by last-segment fallback
+  | 'settings-field'; // Pydantic settings field `f: T = Field(default=v)` in a class whose
+                      //   config declares an env scope. Emitted under `<SCOPE>_<FIELD>`
+                      //   (no project prefix); comparator matches it by value-gated suffix
+                      //   so a spec name like `PREFECT_SERVER_PORT` binds to code `SERVER_PORT`.
 
 export interface ExtractedConstant {
   name: string;

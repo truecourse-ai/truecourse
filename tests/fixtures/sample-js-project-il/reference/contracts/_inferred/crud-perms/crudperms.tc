@@ -1,0 +1,8 @@
+enum CRUD_PERMS {
+  // inferred — enum defined in code but documented in no spec
+  inferred-from "src/services/permission-guard.ts" 6..9
+  confidence high
+  representation string-literal
+  closed
+  values [module::catalog.items.create, module::catalog.items.read]
+}

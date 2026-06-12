@@ -1,0 +1,4 @@
+enum scheduler.run-phases {
+  origin "reference/specs/modules/jobs/scheduler.md" "Run phases" 1..1
+  values [PENDING, ACTIVE, PAUSED, DONE]
+}

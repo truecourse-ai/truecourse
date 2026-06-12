@@ -1,0 +1,3 @@
+operation POST "/catalog/" {
+  origin "reference/specs/modules/catalog/endpoints.md" "POST /catalog/" 1..5
+}

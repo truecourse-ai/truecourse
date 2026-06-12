@@ -1,0 +1,5 @@
+operation GET "/catalog/items/{item_id}" {
+  // inferred — route handled in code but documented in no spec
+  inferred-from "app/routers/catalog.py" 24..24
+  confidence high
+}

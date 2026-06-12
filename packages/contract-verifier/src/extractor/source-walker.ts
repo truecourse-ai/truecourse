@@ -11,6 +11,17 @@
  * per-language matcher map and let `makeDirExtractor` drive the dispatch
  * — adding a language is a new entry in the map, never a structural
  * change.
+ *
+ * Tree lifetime: tree-sitter `Tree` objects are backed by a fixed-size
+ * WASM heap allocation that isn't freed until `tree.delete()` is called.
+ * Long verify runs over large monorepos (~6000+ files) exhaust the heap
+ * if trees aren't disposed promptly. This walker disposes each tree in a
+ * `finally` block after `visit()` returns — safe because matchers eagerly
+ * reduce the tree to plain data (`ExtractedEnum` etc. carry only
+ * `SourceLocation`, never `SyntaxNode`). Other direct `parseFile` callers
+ * (auth-presence, file-based-routes, idempotency-presence, the operation
+ * extractor in `extractor/index.ts`) follow the same per-file dispose
+ * pattern with their own `finally` blocks.
  */
 
 import fs from 'node:fs';
@@ -91,11 +102,14 @@ export async function eachParsedSource(
       } catch {
         continue;
       }
+      let tree: Tree | undefined;
       try {
-        const tree = parseFile(full, source, lang);
+        tree = parseFile(full, source, lang);
         visit({ filePath: full, source, tree, lang });
       } catch {
-        // Parse failure on one file is non-fatal.
+        // Parse failure or visit error on one file is non-fatal.
+      } finally {
+        tree?.delete();
       }
     }
   };
