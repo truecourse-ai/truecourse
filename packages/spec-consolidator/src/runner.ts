@@ -37,7 +37,7 @@ export interface SpawnRunnerOptions {
    * CLI/dashboard pass `agentTransport(io)` for headless/routine runs.
    */
   transport?: LlmTransport;
-  /** Path to the claude binary (cli transport only). Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
+  /** Path to the claude binary (cli transport only). Defaults to `resolveClaudeBinary()`. */
   bin?: string;
   /**
    * Model name passed to `claude --model`. When unset, the CLI default

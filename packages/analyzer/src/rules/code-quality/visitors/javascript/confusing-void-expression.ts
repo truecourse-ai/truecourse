@@ -56,13 +56,19 @@ export const confusingVoidExpressionVisitor: CodeRuleVisitor = {
     }
 
     // Mirrors `@typescript-eslint/no-confusing-void-expression`'s
-    // `ignoreVoidReturningFunctions` option for the common framework-handler
-    // shape: an *arrow* whose return type resolves to `void` / `Promise<void>`
-    // / `undefined`. tRPC mutation handlers, Express middlewares etc. use
-    // `return await voidFn()` to forward the void result — not confusing
-    // when the outer signature is itself void. Restricting to arrows keeps
-    // the existing function-declaration coverage intact.
-    if (containingFn?.type === 'arrow_function') {
+    // `ignoreVoidReturningFunctions` option. Two shapes:
+    //   (1) Any return value from an arrow whose own type is void/Promise<void>
+    //       — the tRPC/Express handler pattern.
+    //   (2) `return await voidFn()` from a non-arrow (function declaration,
+    //       function expression, class method) whose own type is
+    //       void/Promise<void>. The explicit `await` signals deliberate
+    //       void-forwarding — retry helpers (recursive `return await self()`)
+    //       and async-method delegations (`return await this.helper()`) use
+    //       this to preserve the stack trace while still waiting on the
+    //       inner promise. Without the `await` requirement, `function f() {
+    //       return sideEffect() }` would silently bypass the rule.
+    const isContainingFnVoid = (): boolean => {
+      if (!containingFn) return false
       const fnReturnType = typeQuery.getReturnType(
         filePath,
         containingFn.startPosition.row,
@@ -70,9 +76,18 @@ export const confusingVoidExpressionVisitor: CodeRuleVisitor = {
         containingFn.endPosition.row,
         containingFn.endPosition.column,
       )
-      if (fnReturnType && /^(void|undefined|Promise<\s*(void|undefined)\s*>)$/.test(fnReturnType)) {
-        return null
-      }
+      return !!fnReturnType && /^(void|undefined|Promise<\s*(void|undefined)\s*>)$/.test(fnReturnType)
+    }
+    if (containingFn?.type === 'arrow_function') {
+      if (isContainingFnVoid()) return null
+    } else if (
+      value.type === 'await_expression' &&
+      (containingFn?.type === 'function_declaration' ||
+        containingFn?.type === 'function_expression' ||
+        containingFn?.type === 'method_definition' ||
+        containingFn?.type === 'function')
+    ) {
+      if (isContainingFnVoid()) return null
     }
 
     return makeViolation(

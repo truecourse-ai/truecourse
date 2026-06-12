@@ -528,14 +528,20 @@ Use sensible defaults when the spec doesn't spell them out:
     on-violation {
       status 401
       error-code unauthenticated
-      body ErrorEnvelope:error.envelope.standard
     }
   }
 
-Default \`on-violation\` is **always** status 401, error-code \`unauthenticated\`,
-body \`ErrorEnvelope:error.envelope.standard\` when the spec doesn't specify
-otherwise. Default selector is \`path-glob "/api/**"\` when the spec says "all
-/api/* endpoints" without naming a more specific pattern.
+Default \`on-violation\` is status 401, error-code \`unauthenticated\`. Add a
+\`body ErrorEnvelope:error.envelope.standard\` line ONLY when the spec/corpus
+actually establishes a standard error envelope — a dedicated errors /
+error-response section, an error-code catalog, or another slice that describes
+the error body shape. When the spec is SILENT about the error response body
+(common for terse auth docs that only state the scheme), OMIT the \`body\` line:
+a \`body\` reference to an envelope nothing defines is a dangling cross-reference
+that fails the validation gate, while an omitted body is faithful. See
+"Error-envelope references must be grounded" below. Default selector is
+\`path-glob "/api/**"\` when the spec says "all /api/* endpoints" without naming a
+more specific pattern.
 
 When a spec describes role-based auth ("admin only", "moderators can …"), produce
 a SEPARATE \`auth-requirement\` with \`required-role <role>\`, identity
@@ -570,7 +576,8 @@ is the correct fallback when the slice lacks operation context.
     on-violation {
       status 403
       error-code forbidden
-      body ErrorEnvelope:error.envelope.standard
+      // body ErrorEnvelope:error.envelope.standard only when that envelope is
+      // defined in the corpus — see "Error-envelope references must be grounded".
     }
   }
 
@@ -654,6 +661,27 @@ not narrow the set.
 \`computed-at order-creation\` describes WHEN a field is computed; it is NOT a
 substitute for \`immutable\`. If a derived/server-computed field is also frozen
 after creation, emit BOTH \`computed-at\` AND \`immutable\`.
+
+**NEVER infer \`immutable\` from what a field IS — only from what the spec SAYS
+about changing it.** The following do NOT imply immutability, alone or combined:
+
+- The field is required (\`Required? yes\` in a field table).
+- The field is an identifier (\`id\`, \`uuid\`, "identifier of this X").
+- The field is a timestamp ("when the event happened", \`occurred\`, \`createdAt\`).
+- The field is client-provided or server-assigned (provenance is not mutability).
+
+Counter-example — a field table like:
+
+| Name     | Type   | Required? | Description                              |
+| -------- | ------ | --------- | ---------------------------------------- |
+| occurred | String | yes       | When the event happened                  |
+| id       | String | yes       | Client-provided identifier of this event |
+
+asserts NOTHING about mutability. Both fields get plain \`field occurred: string {}\`
+/ \`field id: string {}\` — no \`immutable\`, even though an id "sounds" immutable.
+Emitting un-stated \`immutable\` creates a false drift against every codebase whose
+model simply doesn't freeze the field. If the spec is silent on mutability, the
+contract is silent on mutability.
 
 # Enum extraction — required whenever spec defines an enum
 
@@ -1006,6 +1034,42 @@ Don't emit constants whose value is a function call, expression, or
 external reference — only literal values (strings, numbers, booleans,
 arrays of literals, flat object literals of literals).
 
+**Don't extract constants from customization examples.** A constant asserts
+"the code MUST hold this value". A doc that shows users how to CUSTOMIZE or
+OVERRIDE something is asserting the opposite — "you can put whatever value
+you want here" — and its example values are illustrations, not obligations.
+Skip a candidate value when EITHER signal is present:
+
+1. **Context signal**: the page title or enclosing section heading describes
+   a customization/override mechanism — "Customize …", "Override …",
+   "… template", "… variables", "Configure your own …", "Example
+   configuration".
+2. **Shape signal**: the value sits inside a JSON-schema-style variables
+   block, i.e. an object of the form
+   \`"<name>": { "title": …, "description": …, "default": <value>, "type": … }\`.
+   That quadruple is a schema DECLARING an overridable variable; the
+   \`"default"\` there is a starting point the user is expected to change.
+
+Counter-example — a page titled "Customize Base Job Templates" containing:
+
+\`\`\`json
+"cpu_request": {
+  "title": "CPU Request",
+  "description": "CPU allocation to request for this pod",
+  "default": "100m",
+  "type": "string"
+}
+\`\`\`
+
+emits NO constant. Both signals fire: the page is a customization guide, and
+the value is a variables-schema \`default\`. Extracting
+\`constant cpu_request { expected-value "100m" }\` would demand every codebase
+hard-code the example — a guaranteed false drift.
+
+By contrast, prose like "the scheduler polls every 15 seconds" or "the API
+version is \`v2\`" in a behavioral spec section IS an assertion about the
+system — extract those normally.
+
 # ArchitectureDecision — extract when the spec/ADR fixes a platform choice
 
 A spec or ADR that records a system-wide technology choice — "we use
@@ -1116,6 +1180,37 @@ response as a literal:
   \`inherits AuthRequirement:auth.role.<role>\`.
 - Only declare a literal \`response 401/403 on …\` when the spec describes the
   response as standalone, NOT delegated to a rule.
+
+# Error-envelope references must be grounded
+
+\`ErrorEnvelope:error.envelope.standard\` is a CROSS-REFERENCE, not a literal — it
+only resolves if a matching \`error-envelope error.envelope.standard { … }\`
+artifact exists somewhere in the corpus. Emitting the reference with nothing
+defining it produces a dangling cross-reference that fails the validation gate,
+exactly like referencing an undefined \`Enum:\`. This is the same prime-directive
+rule as enums ("never reference an enum without defining it"), applied to error
+bodies.
+
+The rule applies EVERYWHERE an envelope can appear:
+\`on-violation { … body ErrorEnvelope:… }\` on auth-requirements and
+authorization-rules, and \`response … { body envelope ErrorEnvelope:… { … } }\`
+on operations.
+
+- Reference \`ErrorEnvelope:error.envelope.standard\` ONLY when the spec actually
+  establishes a standard error envelope: a dedicated errors / error-response
+  section, an error-code catalog, or prose that names "the standard error
+  envelope". In a multi-doc corpus the defining section may live in ANOTHER
+  slice — that's fine, just like an \`Enum:\` defined in a sibling slice.
+- When you reference it AND the slice in front of you is the one that describes
+  the envelope, ALSO emit the \`error-envelope error.envelope.standard { … }\`
+  artifact — mirroring the described shape; never invent fields the spec does
+  not list.
+- When the spec is SILENT about the error response body — no error section, no
+  envelope, no error codes — do NOT emit the reference at all. Omit the \`body\`
+  line from \`on-violation\`; on an operation response use a plain \`body …\` only
+  if the spec gives a shape, otherwise omit it. Faithful under-specification
+  beats a dangling reference: never conjure a standard envelope just to fill the
+  slot.
 
 # Naming conventions for artifact identities
 

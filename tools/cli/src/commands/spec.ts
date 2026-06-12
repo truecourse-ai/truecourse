@@ -16,7 +16,7 @@
 
 import * as p from "@clack/prompts";
 import path from "node:path";
-import { type Conflict } from "@truecourse/spec-consolidator";
+import type { Conflict } from "@truecourse/spec-consolidator";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   RESOLVE_STEPS,
@@ -30,6 +30,7 @@ import {
   INFER_STEPS,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
+import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { resolveStashDecision } from "./analyze.js";
 import { requireGitRepo } from "./git-guard.js";
 
@@ -57,45 +58,188 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec scan");
   await requireGitRepo(root);
+  // Extraction shells out to the `claude` CLI once per doc block, so a large
+  // repo can run for a while. If the login has expired every block fails — and
+  // the failure summary below only prints once the whole run is done, so the
+  // user sits through the entire scan just to learn their login was the
+  // problem. Probe the CLI up front and bail with an actionable message before
+  // discovering a single doc.
+  await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(SCAN_STEPS);
-  try {
-    const { consolidate } = await scanInProcess(root, { tracker, source: "cli", llm: opts.llm, io: opts.io });
-    renderer.dispose();
-    const { extract, merge } = consolidate;
-    p.log.step(`docs        ${extract.docsScanned}`);
-    p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
-    p.log.step(`claims      ${extract.claims.length}`);
-    p.log.step(`resolved    ${merge.resolvedClaims.length}`);
-    p.log.step(`decided     ${merge.decidedConflicts.length}`);
-    p.log.step(`open        ${merge.openConflicts.length}`);
-
-    if (merge.openConflicts.length > 0) {
-      p.log.message("");
-      p.log.message("Open conflicts:");
-      for (const c of merge.openConflicts.slice(0, 10)) {
-        p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
-        p.log.message(`    id: ${c.id}`);
-      }
-      if (merge.openConflicts.length > 10) {
-        p.log.message(`  … (+${merge.openConflicts.length - 10} more — run \`truecourse spec conflicts list\`)`);
-      }
-      p.log.message("");
-      p.log.message("Resolve them:");
-      p.log.message("  • dashboard:        truecourse dashboard            (Spec tab)");
-      p.log.message("  • per conflict:     truecourse spec conflicts show <id>");
-      p.log.message("                      truecourse spec conflicts pick <id> <candidateIndex>");
-      p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
-      p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
-    }
-    p.outro(
-      merge.openConflicts.length === 0
-        ? "No open conflicts — run `truecourse contracts generate`."
-        : `${merge.openConflicts.length} open.`,
-    );
-  } catch (e) {
+  // A hard failure inside the pipeline must exit non-zero — otherwise the
+  // command reports success on a scan that produced nothing. The `.catch`
+  // handler returns `never` (process.exit), so `consolidate` is always
+  // assigned past this point.
+  const { consolidate } = await scanInProcess(root, {
+    tracker,
+    source: "cli",
+    llm: opts.llm,
+    io: opts.io,
+  }).catch((e: unknown) => {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
+    process.exit(1);
+  });
+  renderer.dispose();
+  const { extract, merge } = consolidate;
+  p.log.step(`docs        ${extract.docsScanned}`);
+  p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
+  p.log.step(`claims      ${extract.claims.length}`);
+  p.log.step(`resolved    ${merge.resolvedClaims.length}`);
+  p.log.step(`decided     ${merge.decidedConflicts.length}`);
+  p.log.step(`open        ${merge.openConflicts.length}`);
+
+  // A count alone hides actionable errors. Surface the most common distinct
+  // failure messages verbatim so the real cause is visible. (Auth specifically
+  // is caught by the up-front preflight above, which covers every command that
+  // spawns `claude` — no need to re-classify it from per-block stderr here.)
+  const failures = summarizeExtractionFailures(extract);
+  const outcome = decideScanOutcome({
+    blocksAttempted: extract.blocksAttempted,
+    claims: extract.claims.length,
+    openConflicts: merge.openConflicts.length,
+    failures,
+  });
+  if (failures.total > 0) {
+    p.log.message("");
+    p.log.warn(`${failures.total} block${failures.total === 1 ? "" : "s"} failed to extract:`);
+    for (const s of failures.samples) {
+      p.log.message(`  • ${oneLine(s.message)}${s.count > 1 ? `  (×${s.count})` : ""}`);
+    }
   }
+
+  // Every block failing means zero claims — that's an error, not a clean
+  // repo. Bail with the failure outro and a non-zero exit before suggesting
+  // any downstream command.
+  if (outcome.exitCode !== 0) {
+    p.outro(outcome.outro);
+    process.exit(outcome.exitCode);
+  }
+
+  if (merge.openConflicts.length > 0) {
+    p.log.message("");
+    p.log.message("Open conflicts:");
+    for (const c of merge.openConflicts.slice(0, 10)) {
+      p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
+      p.log.message(`    id: ${c.id}`);
+    }
+    if (merge.openConflicts.length > 10) {
+      p.log.message(`  … (+${merge.openConflicts.length - 10} more — run \`truecourse spec conflicts list\`)`);
+    }
+    p.log.message("");
+    p.log.message("Resolve them:");
+    p.log.message("  • dashboard:        truecourse dashboard            (Spec tab)");
+    p.log.message("  • per conflict:     truecourse spec conflicts show <id>");
+    p.log.message("                      truecourse spec conflicts pick <id> <candidateIndex>");
+    p.log.message('                      truecourse spec conflicts custom <id> --text "…"');
+    p.log.message("  • accept defaults:  truecourse spec resolve --all-defaults");
+  }
+  p.outro(outcome.outro);
+}
+
+export interface ScanOutcome {
+  /** Process exit code — non-zero when the scan effectively failed. */
+  exitCode: 0 | 1;
+  /** Final outro line. */
+  outro: string;
+}
+
+/**
+ * Decide how a scan ends: its exit code and outro line. Pure so the policy is
+ * unit-tested without driving clack/process.exit. Two failure-aware rules sit
+ * on top of the old open-conflicts/outro logic:
+ *   - every attempted block failed → exit 1 (a total wipeout is an error, not
+ *     a clean repo).
+ *   - zero claims (but not a wipeout) → don't suggest `contracts generate`;
+ *     there's nothing to generate yet.
+ */
+export function decideScanOutcome(input: {
+  blocksAttempted: number;
+  claims: number;
+  openConflicts: number;
+  failures: ExtractionFailureReport;
+}): ScanOutcome {
+  const { failures } = input;
+  if (failures.allFailed) {
+    return {
+      exitCode: 1,
+      outro: `Aborted — all ${input.blocksAttempted} blocks failed, no claims extracted.`,
+    };
+  }
+  const outro =
+    input.openConflicts > 0
+      ? `${input.openConflicts} open.`
+      : input.claims === 0
+        ? "No claims extracted — nothing to generate yet."
+        : "No open conflicts — run `truecourse contracts generate`.";
+  return { exitCode: 0, outro };
+}
+
+// ---------------------------------------------------------------------------
+// Failure summarization
+//
+// `extractClaims` never throws on a per-block failure — a transient
+// subprocess error, a parse miss, or an expired `claude` login all land in
+// `failures[]` so a partial scan still yields whatever claims succeeded.
+// That's correct for a few stragglers, but a *total* failure (every block
+// errored → zero claims) is indistinguishable from "clean repo" unless the
+// caller inspects the failures. This helper classifies them so the scan
+// command can surface the actual error messages instead of a misleading
+// success. It lives in the CLI (not the shared extractor) because the scan
+// path is its only consumer — the extractor stays focused on returning raw
+// extraction results.
+//
+// Auth is deliberately *not* sniffed here: every command that spawns `claude`
+// runs the same up-front auth preflight (preflightClaudeOrExit →
+// @truecourse/core/lib/cli-binary), so a broken/expired login is caught before
+// any block runs. Re-guessing it from per-block stderr afterwards would
+// duplicate that check (scan-only) and be far less reliable than the live
+// round-trip the preflight already does.
+// ---------------------------------------------------------------------------
+
+export interface FailureSample {
+  /** The failure message. */
+  message: string;
+  /** How many blocks failed with this exact message. */
+  count: number;
+}
+
+export interface ExtractionFailureReport {
+  /** Total failed blocks. */
+  total: number;
+  /** True when at least one block was attempted and every one failed. */
+  allFailed: boolean;
+  /** Distinct failure messages, most frequent first, capped to `sampleLimit`. */
+  samples: FailureSample[];
+}
+
+/**
+ * Classify an extraction's failures for user-facing reporting: collapse
+ * duplicate messages (152 identical errors → one line with a count) and flag a
+ * total wipeout so callers can surface the real cause instead of a misleading
+ * success. Pure — safe to call on every scan.
+ */
+export function summarizeExtractionFailures(
+  result: { failures: ReadonlyArray<{ error: string }>; blocksAttempted: number },
+  opts: { sampleLimit?: number } = {},
+): ExtractionFailureReport {
+  const { failures, blocksAttempted } = result;
+  const sampleLimit = opts.sampleLimit ?? 3;
+
+  const counts = new Map<string, number>();
+  for (const f of failures) {
+    counts.set(f.error, (counts.get(f.error) ?? 0) + 1);
+  }
+  const samples: FailureSample[] = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, sampleLimit)
+    .map(([message, count]) => ({ message, count }));
+
+  return {
+    total: failures.length,
+    allFailed: blocksAttempted > 0 && failures.length === blocksAttempted,
+    samples,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +263,7 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
 
   p.intro("Spec resolve — accepting all defaults");
   await requireGitRepo(root);
+  await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
     const { additions } = await resolveAllDefaultsInProcess(root, { tracker, llm: opts.llm, io: opts.io });
@@ -349,4 +494,10 @@ function summarizeConflicts(label: string, conflicts: Conflict[]): void {
 
 function decisionsRelPath(root: string): string {
   return path.join(root, ".truecourse", "specs", "decisions.json");
+}
+
+/** Collapse whitespace and cap length so a multi-line stderr stays one tidy line. */
+function oneLine(s: string, max = 200): string {
+  const collapsed = s.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}…`;
 }

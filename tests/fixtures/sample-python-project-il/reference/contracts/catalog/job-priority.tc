@@ -1,0 +1,4 @@
+enum JobPriority {
+  origin "reference/specs/modules/catalog/scheduling.md" "JobPriority" 1..10
+  values [HIGH, LOW, NORMAL]
+}

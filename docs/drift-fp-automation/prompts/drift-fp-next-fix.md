@@ -132,7 +132,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
 - **Fixtures must look like real application code, not test scaffolding.** The IL fixture
   project is a fake e-commerce/catalog app (`handlers/`, `services/`, `controllers/`,
   `repos/`, `middleware/`, `plugins/`, `processors/`, `events/`, `routes/`). New code-side
-  fixture material slots into that layout. **Four hard rules**:
+  fixture material slots into that layout. **Five hard rules**:
   1. **No new top-level subdirs under `code/src/` (or `code/app/`).** No `fp-guards/`, no
      `regressions/`, no per-drift-kind folders. Files live alongside the existing domain
      dirs.
@@ -150,6 +150,18 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   4. **Prefer extending an existing fixture file** that already represents the relevant
      domain. Only create a new file when no existing one fits (and when you do create one,
      it gets a domain name and lives at the language's existing layout — see rule 1+2).
+  5. **No test files that read from `/tmp` or any path outside `tests/fixtures/`.** Scratch
+     `debug-*.test.ts` files you wrote while investigating the FP — e.g. files that
+     `fs.readFileSync('/tmp/<target>/...')` or call `verify({ codeDir: '/tmp/...' })` against a
+     local-only target clone — **must be deleted before the batch PR opens**. Locally they
+     pass (the staging dir exists on your session); in CI the staging dir is absent and the
+     test fails with ENOENT, blocking the PR. The legitimate fixture surface is
+     `tests/fixtures/sample-{js,python}-project-il/` — every test file under
+     `tests/contract-verifier/` must drive the verifier through that fixture or a constructed
+     in-memory AST, never an OSS clone. Same rule for the contracts side: don't commit a test
+     that does `extractCodeContracts('/tmp/<target>')`. If you needed an OSS-clone-backed
+     repro to investigate, the artifacts of that investigation belong in the PR body as
+     evidence (OSS source URLs, drift-count delta), not as a committed test.
 - Add the matching **contract** under
   `tests/fixtures/sample-{js,python}-project-il/reference/contracts/` — a minimal valid `.tc`
   mirroring an existing fixture contract of that kind (so it parses/resolves with no new
@@ -168,7 +180,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   `code/app/` for Python) with `// IL-DRIFT: <drift-key>` on the offending line (the key the
   verifier should emit), plus its matching `.tc` contract under
   `sample-{js,python}-project-il/reference/contracts/`.
-- **Same four hard rules as step 5** — no new subdirs, domain-named files, no comment-only
+- **Same five hard rules as step 5** — no new subdirs, domain-named files, no comment-only
   files, prefer extending existing files. The regression case is the most common reason a
   routine reaches for a comment-only file (because there's no code-side content); resist
   that. The IL-DRIFT marker attaches to a contextual narrative comment inside a natural file,
@@ -320,10 +332,27 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
    first**: for each drift-kind still showing FPs, skip if an open `drift-fp-fix` issue
    (any label, including `drift-fp-blocked`) already exists; else file one (discovery shape).
    - Filed ≥1 new issue → continue into the per-issue loop this session.
-   - Filed 0 (every FP-kind already tracked, all blocked) → file/update a single
-     `[drift-fp-campaign-stuck] <owner>/<repo>` tracking issue (current `fp` count + `fp_rate`,
-     the close gate `fp == 0`, checklist of open `drift-fp-blocked` issues, `cc @mushgev`), then
-     end. Never dead-end silently.
+   - Filed 0 (every FP-kind already tracked, all blocked) → maintain a single
+     `[drift-fp-campaign-stuck] <owner>/<repo>` tracking issue with the current state.
+     Body carries: current `fp` count + `fp_rate`, the close gate `fp == 0`, a checklist
+     of open `drift-fp-blocked` issues. End with `cc @mushgev`.
+
+     **Notify-on-change protocol** — the Telegram alert (`notify-campaign-alert`) only
+     fires on `issues.opened` / `issues.reopened`, not on edits/comments. So:
+
+     - **No existing tracker** → open a new one. Telegram fires on `opened`. ✓
+     - **Existing tracker, state unchanged** — `fp` count is the same AND the set of
+       blocked-issue numbers in the body's checklist is identical (treat as a set, order
+       doesn't matter) — **edit the body in place** (refresh the timestamp, leave the
+       state as-is). Stay silent; the human has no new information to act on.
+     - **Existing tracker, state changed** — either `fp` count differs OR the
+       blocked-issue set differs — **close the tracker, then reopen it** via the GitHub
+       API, with the body rewritten to the new state AND a "## State change since last
+       run" header at the top summarising the delta (e.g.
+       `fp 65 → 8`, `blocked-issues +#557, -#552`). Telegram fires on `reopened`. ✓
+
+     This makes the human pinged exactly when there is news, never on silent re-runs.
+     Never dead-end silently.
 
 If the queue empties **after** ≥1 success, ship the batch PR instead — don't run this path in a
 session that already produced fixes.

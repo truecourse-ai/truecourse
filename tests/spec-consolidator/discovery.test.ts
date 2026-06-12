@@ -193,6 +193,50 @@ describe('discoverDocs — walker', () => {
     expect(paths).not.toContain('.cache/leaked.md');
   });
 
+  it('descends into a SKIP_DIRS dir (build) when .truecourseignore re-includes it', () => {
+    // dagster keeps its primary docs under docs/docs/guides/build/ — a
+    // directory name that collides with the build-output skip list. An
+    // allow-list .truecourseignore (the shape the generate routine writes)
+    // must override the hardcoded skip for that opted-in subtree.
+    place('.truecourseignore', '*.md\n!docs/guides/build/**\n');
+    place('docs/guides/build/assets/materialization.md', '# assets');
+    place('docs/guides/build/external-resources.md', '# resources');
+    place('docs/other.md', '# not in scope');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/guides/build/assets/materialization.md');
+    expect(paths).toContain('docs/guides/build/external-resources.md');
+    // Allow-list semantics: a .md outside the re-included subtree is excluded.
+    expect(paths).not.toContain('docs/other.md');
+  });
+
+  it('still skips a build dir that is NOT re-included, even with a .truecourseignore present', () => {
+    // The override is scoped to the re-included subtree only — an
+    // unrelated build/ tree (and node_modules) stays pruned so the skip
+    // list keeps doing its job.
+    place('.truecourseignore', '*.md\n!docs/guides/build/**\n');
+    place('docs/guides/build/kept.md', '# in scope');
+    place('build/leaked.md', '# top-level build output — must stay skipped');
+    place('node_modules/pkg/build/leaked.md', '# dependency build — must stay skipped');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/guides/build/kept.md');
+    expect(paths).not.toContain('build/leaked.md');
+    expect(paths).not.toContain('node_modules/pkg/build/leaked.md');
+  });
+
+  it('a re-include cannot resurrect .truecourse/ (dotfile skip is not overridable)', () => {
+    // Even an explicit re-include of the consolidator's own output dir
+    // must not reopen the feedback loop — the dotfile guard wins.
+    place('.truecourseignore', '*.md\n!.truecourse/**\n!docs/**\n');
+    place('.truecourse/specs/overview.md', '# canonical — must not echo');
+    place('docs/source.md', '# original');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/source.md');
+    expect(paths).not.toContain('.truecourse/specs/overview.md');
+  });
+
   it('reading .truecourse/ would echo on every run — exclude is critical', () => {
     // Simulate a state where the consolidator already ran. If we
     // re-discovered its outputs, every run would compound on its own

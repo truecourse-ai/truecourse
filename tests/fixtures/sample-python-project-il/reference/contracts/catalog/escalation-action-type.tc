@@ -1,0 +1,5 @@
+enum EscalationActionType {
+  origin "reference/specs/modules/orders/escalations.md" "Escalation action types" 1..1
+  values [notify-team, reassign-ticket, post-update, page-oncall, open-incident]
+  trigger-subset cloud-only [page-oncall, open-incident]
+}

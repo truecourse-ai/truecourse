@@ -1,0 +1,4 @@
+enum notifier.job-events {
+  origin "reference/specs/modules/jobs/notifier.md" "Supported job events" 1..1
+  values [SUCCEEDED, FAILED, CANCELED, RUNNING]
+}

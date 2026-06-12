@@ -39,6 +39,11 @@ export const syncFsInRequestHandlerVisitor: CodeRuleVisitor = {
     const lowerPath = filePath.toLowerCase()
     if (lowerPath.includes('/scripts/') || lowerPath.includes('/bin/') || lowerPath.includes('/cli/')) return null
     if (SEED_FILE_PATH_PATTERN.test(filePath)) return null
+    // A file with a shebang (`#!/usr/bin/env node`) is an executable script run
+    // directly, not a server module on a request path — dev tooling, one-off
+    // utilities, leak detectors, etc. Sync FS there blocks the script's own
+    // process, never a shared event loop, so flagging it is noise.
+    if (sourceCode.startsWith('#!')) return null
 
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 

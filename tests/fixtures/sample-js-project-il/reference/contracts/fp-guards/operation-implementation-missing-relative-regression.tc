@@ -1,0 +1,4 @@
+operation POST "/api/sync/push" {
+  origin "reference/specs/modules/orders/endpoints.md" "POST /api/sync/push" 1..3
+  response 202 on success {}
+}

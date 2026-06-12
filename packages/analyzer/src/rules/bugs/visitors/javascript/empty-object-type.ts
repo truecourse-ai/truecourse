@@ -25,7 +25,7 @@ export const emptyObjectTypeVisitor: CodeRuleVisitor = {
 
     if (node.type === 'type_annotation') {
       const emptyObj = checkForEmptyObject(node)
-      if (emptyObj) {
+      if (emptyObj && !isReactPropsParameter(node, filePath)) {
         return makeViolation(
           this.ruleKey, emptyObj, filePath, 'high',
           'Empty object type {}',
@@ -54,4 +54,17 @@ export const emptyObjectTypeVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+// `function Component(props: {})` in a React (.tsx/.jsx) file is the idiomatic
+// "this component takes no props" annotation. The framework builds the props
+// bag, so the `{}`-matches-everything footgun does not apply here — flagging it
+// is noise. Scoped to a parameter literally named `props` in a JSX file so
+// genuine `{}` misuse on other parameters / variables / return types still fires.
+function isReactPropsParameter(typeAnnotation: import('web-tree-sitter').Node, filePath: string): boolean {
+  if (!/\.(tsx|jsx)$/i.test(filePath)) return false
+  const param = typeAnnotation.parent
+  if (param?.type !== 'required_parameter' && param?.type !== 'optional_parameter') return false
+  const pattern = param.childForFieldName('pattern')
+  return pattern?.text === 'props'
 }

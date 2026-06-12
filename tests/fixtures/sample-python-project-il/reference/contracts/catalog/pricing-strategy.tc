@@ -1,0 +1,4 @@
+enum PricingStrategies {
+  origin "reference/specs/modules/catalog/pricing.md" "Pricing strategies" 1..8
+  values [FLAT_RATE, TIERED, PROMOTIONAL, STANDARD]
+}

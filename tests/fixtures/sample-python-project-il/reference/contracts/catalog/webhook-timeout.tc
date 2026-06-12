@@ -1,0 +1,5 @@
+constant APP_WEBHOOK_TIMEOUT_SECONDS {
+  origin "reference/specs/modules/catalog/webhooks.md" "Webhook timeout" 12..14
+  type number
+  expected-value 30
+}

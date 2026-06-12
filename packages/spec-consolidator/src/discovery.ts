@@ -12,7 +12,10 @@
  *
  * Exclusions:
  *   - Build/tooling dirs (node_modules, dist, .next, build, .turbo,
- *     .git) — never user content.
+ *     .git) — never user content. A repo whose docs genuinely live
+ *     under such a name (e.g. dagster's `docs/docs/guides/build/`) can
+ *     override the skip with an explicit `.truecourseignore` re-include
+ *     (`!.../build/**`); the dotfile skip below is not overridable.
  *   - `.truecourse/` — the consolidator's own outputs live here. If
  *     we re-discovered them, every run would compound on its previous
  *     output and the canonical spec would echo into itself.
@@ -57,6 +60,13 @@ const SKIP_DIRS = new Set([
   'coverage',
 ]);
 
+// Synthetic markdown child used to ask `.truecourseignore` whether a
+// `SKIP_DIRS` directory has been explicitly re-included. An allow-list
+// ignore (`*.md` + `!path/build/**`) re-includes the markdown *under* a
+// dir, never the bare dir, so we test a `.md` descendant: `unignored`
+// comes back true only when a `!`-rule deliberately opted the tree in.
+const SKIP_DIR_PROBE = '__tc_skipdir_probe__.md';
+
 const PREVIEW_LINE_LIMIT = 200;
 
 export interface DiscoveryOptions {
@@ -98,9 +108,23 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
     for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      if (entry.name.startsWith('.') && entry.name !== '.') continue;
       const full = path.join(dir, entry.name);
+      // Build/tooling dirs are skipped by default — but an explicit
+      // `.truecourseignore` re-include (`!some/dir/build/**`) overrides the
+      // skip, so a doc tree that legitimately lives under a dir named
+      // `build`/`dist` is still discovered when the scope opts into it.
+      // The allow-list re-includes `.md` files, not the bare directory, so
+      // probe a markdown descendant rather than the directory itself.
+      if (
+        SKIP_DIRS.has(entry.name) &&
+        !(entry.isDirectory() && tcIgnore.reincludes(path.join(full, SKIP_DIR_PROBE)))
+      ) {
+        continue;
+      }
+      // Dotfiles stay unconditionally skipped — this guards the
+      // consolidator's own `.truecourse/` outputs from re-discovery even if
+      // an ignore file re-includes them above.
+      if (entry.name.startsWith('.') && entry.name !== '.') continue;
       if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);

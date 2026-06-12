@@ -60,9 +60,30 @@ export async function extractEnumsFromDir(rootDir: string): Promise<ExtractedEnu
     });
   }
 
+  // Resolve `py-set-difference` placeholders (NAME = set(base) - minus) against
+  // the full extracted enum set — base and minus may live in different files.
+  const norm = (s: string) => s.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  const valuesByName = new Map<string, string[]>();
+  for (const e of raw) {
+    if (e.shape !== 'py-set-difference') valuesByName.set(norm(e.name), e.values);
+  }
+  for (const e of raw) {
+    if (e.shape !== 'py-set-difference' || !e.unresolved) continue;
+    const baseVals = valuesByName.get(norm(e.unresolved.base));
+    const minusVals = valuesByName.get(norm(e.unresolved.minus));
+    if (baseVals && minusVals) {
+      const minusSet = new Set(minusVals.map((v) => v.replace(/[^A-Za-z0-9]/g, '').toLowerCase()));
+      e.values = [...new Set(baseVals.filter((v) => !minusSet.has(v.replace(/[^A-Za-z0-9]/g, '').toLowerCase())))].sort();
+      e.shape = 'py-set';
+      delete e.unresolved;
+    }
+  }
+  // Drop any placeholder that couldn't be resolved.
+  const resolved = raw.filter((e) => e.shape !== 'py-set-difference');
+
   // Dedup by (name, value-set).
   const seen = new Map<string, ExtractedEnum>();
-  for (const e of raw) {
+  for (const e of resolved) {
     const key = `${e.name}|${e.values.join(',')}`;
     if (!seen.has(key)) seen.set(key, e);
   }
