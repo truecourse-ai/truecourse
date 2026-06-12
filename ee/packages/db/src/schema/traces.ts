@@ -5,8 +5,8 @@
  * contract extraction, the repair pass). This holds the QUERYABLE metadata —
  * stage, slice, model, token usage, latency, status, and the prompt hash that
  * groups identical prompts (the same-prompt→divergent-output view). The heavy
- * prompt/output/reasoning payloads live in the BlobStore, referenced here by key
- * (`PgBlobTraceStore`, mirroring `contract_sets`).
+ * prompt/output/reasoning payloads are content-addressed in `content` (scope =
+ * org), referenced here by sha (mirroring `contract_sets`).
  *
  * Workspace-scoped by `workspace_org_id` (nullable — a call made outside a trace
  * context records with a null org and is simply invisible to per-tenant queries,
@@ -50,10 +50,10 @@ export const llmTraces = pgTable(
     totalTokens: integer('total_tokens'),
     reasoningTokens: integer('reasoning_tokens'),
     latencyMs: integer('latency_ms').notNull(),
-    /** BlobStore keys for the content-addressed payloads. */
-    promptBlobKey: text('prompt_blob_key').notNull(),
-    outputBlobKey: text('output_blob_key'),
-    reasoningBlobKey: text('reasoning_blob_key'),
+    /** shas into `content` (scope = org) for the content-addressed payloads. */
+    promptSha: text('prompt_sha').notNull(),
+    outputSha: text('output_sha'),
+    reasoningSha: text('reasoning_sha'),
     /** Free-form tags: repoFullName, commitSha, jobId, provider, … */
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     createdAt: ts('created_at').notNull(),

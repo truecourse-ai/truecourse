@@ -17,14 +17,6 @@ export interface GateFailureEmail {
   added: GateDrift[];
 }
 
-export interface ScanOfferEmail {
-  repoFullName: string;
-  prNumber: number;
-  prUrl: string;
-  /** Spec documents the PR changed, repo-relative. */
-  specDocs: string[];
-}
-
 export interface InferResultEmail {
   repoFullName: string;
   prNumber: number;
@@ -46,7 +38,6 @@ export interface ConflictsEmail {
 
 export interface EmailNotifier {
   sendGateFailure(to: string[], email: GateFailureEmail): Promise<void>;
-  sendScanOffer(to: string[], email: ScanOfferEmail): Promise<void>;
   sendInferResult(to: string[], email: InferResultEmail): Promise<void>;
   sendConflictsNeedResolution(to: string[], email: ConflictsEmail): Promise<void>;
 }
@@ -121,21 +112,6 @@ export function createEmailNotifier(
       const html =
         `<p>The TrueCourse drift gate failed on ${prLink(email)} ` +
         `with ${n} new contract drift${plural(n)}:</p><ul>${items}</ul>${more}`;
-      await sendEach(to, subject, html);
-    },
-
-    async sendScanOffer(to, email) {
-      const n = email.specDocs.length;
-      const subject = `TrueCourse: ${n} spec document${plural(n)} changed on ${email.repoFullName} #${email.prNumber} — re-scan?`;
-      const items = email.specDocs
-        .slice(0, 20)
-        .map((p) => `<li><code>${escapeHtml(p)}</code></li>`)
-        .join('');
-      const more = n > 20 ? `<p>…and ${n - 20} more.</p>` : '';
-      const html =
-        `<p>${prLink(email)} changes ${n} spec document${plural(n)} that may need ` +
-        `contract regeneration. Open the pull request and check the ` +
-        `<strong>“Run scan”</strong> box to regenerate contracts:</p><ul>${items}</ul>${more}`;
       await sendEach(to, subject, html);
     },
 

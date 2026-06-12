@@ -19,11 +19,14 @@ import type {
   ContractDrift,
   ArtifactRef,
   AuthorizationRuleContract,
+  SpecOrigin,
 } from '../types/index.js';
 import type { ExtractedOperation } from '../extractor/index.js';
 
 export interface AuthorizationRuleCompareInput {
   authzRef: ArtifactRef;
+  /** Spec-side origin of the authorization-rule artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: AuthorizationRuleContract;
   recognizedOps: ExtractedOperation[];
 }
@@ -68,6 +71,7 @@ export function compareAuthorizationRule(
         `not perform any ownership check on the loaded resource's \`${fieldName}\` field.`,
       specSide: `predicate "${input.contract.predicate}"` + (input.contract.except?.role ? ` except role ${input.contract.except.role}` : ''),
       codeSide: `no ownership comparison involving \`req.auth*\` and \`*.${fieldName}\` found in handler`,
+      specOrigin: input.origin ?? undefined,
     });
   }
 

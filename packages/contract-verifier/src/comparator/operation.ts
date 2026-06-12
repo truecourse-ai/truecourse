@@ -21,6 +21,7 @@ import type {
   HeaderDecl,
   ForbidClause,
   Severity,
+  SpecOrigin,
 } from '../types/index.js';
 
 export interface CompareInput {
@@ -30,6 +31,8 @@ export interface CompareInput {
   code: OperationContract;
   /** Where the spec artifact lives (used in drift report). */
   specRef: ArtifactRef;
+  /** Spec-side origin of the operation artifact (source doc + section). */
+  origin: SpecOrigin | null;
   /** Where the implementation handler lives (anchor for the drift). */
   codeFilePath: string;
   codeDeclarationLine: number;
@@ -289,5 +292,6 @@ function makeDrift(
     message: args.message,
     specSide: args.specSide,
     codeSide: args.codeSide,
+    specOrigin: input.origin ?? undefined,
   };
 }

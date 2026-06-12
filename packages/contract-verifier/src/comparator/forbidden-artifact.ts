@@ -34,7 +34,7 @@ export interface ForbiddenArtifactCompareInput {
 export async function compareForbiddenArtifact(
   input: ForbiddenArtifactCompareInput,
 ): Promise<ContractDrift[]> {
-  const { ref, contract, codeDir } = input;
+  const { ref, origin, contract, codeDir } = input;
   const { category, pattern, reason } = contract;
 
   const matches = await runDetector(category, codeDir, pattern);
@@ -53,6 +53,7 @@ export async function compareForbiddenArtifact(
     message: `Spec forbids ${category} \`${pattern}\` but code has it. ${reason}`.trim(),
     specSide: `forbidden ${category} ${pattern}`,
     codeSide: m.snippet ?? m.filePath,
+    specOrigin: origin ?? undefined,
   }));
 }
 

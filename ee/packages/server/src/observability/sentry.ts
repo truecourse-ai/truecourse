@@ -26,7 +26,15 @@ import { log } from '@truecourse/core/lib/logger';
 let enabled = false;
 let initialized = false;
 
-export type EeComponent = 'integrations' | 'knowledge' | 'llm' | 'github-gate' | 'admin';
+export type EeComponent =
+  | 'integrations'
+  | 'knowledge'
+  | 'llm'
+  | 'github-gate'
+  | 'admin'
+  // Generic bucket for errors that egress via the log transport (no explicit
+  // captureEeException call site) — e.g. the gate webhook's verify failure.
+  | 'server';
 
 export interface EeErrorContext {
   /** Which EE subsystem raised it — also the EE-only egress gate (see beforeSend). */

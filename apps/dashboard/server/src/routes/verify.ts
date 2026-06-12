@@ -25,8 +25,17 @@ import {
   type VerifyState,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { loadSpec } from '@truecourse/core/lib/spec-store';
+import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
+import {
+  resolveDriftOrigins,
+  collectOriginSources,
+  attachOriginLinks,
+} from '@truecourse/core/lib/spec-origin-resolver';
+import { resolveWorkspaceDocLinks } from '@truecourse/core/lib/workspace-doc-links';
+import type { ClaimsFile } from '@truecourse/spec-consolidator';
+import { diffDrifts, type VerifyDiff } from '@truecourse/core/types/verify-snapshot';
 import { getGit, isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
+import { enrichDrift, type DriftLike } from '@truecourse/core/lib/drift-enrichment';
 import {
   createSocketSpecTracker,
   createSocketStashConfirmHandler,
@@ -62,6 +71,42 @@ async function resolveVerifyStashDecision(
   return createSocketStashConfirmHandler(repoId)({ modifiedCount, untrackedCount });
 }
 
+/**
+ * Re-point each drift's `specOrigin` from the synthetic `claims.json#<module>/<topic>`
+ * pointer the contract was authored against to the REAL source doc the originating
+ * claim came from (its `provenance.{file,line}`), so the dashboard "Source" link
+ * resolves instead of 404-ing on the generated claims snapshot. Reads the repo's
+ * `claims.json` at the drift commit (falling back to the repo's latest) — so it
+ * works on ALREADY-STORED snapshots, no re-generate/re-verify. Best-effort: real-doc
+ * origins are left untouched, and any load failure returns the drifts unchanged.
+ */
+async function withResolvedOrigins<
+  T extends {
+    specOrigin?: {
+      source: string;
+      section: string;
+      lines: [number, number];
+      sourceUrl?: string | null;
+      sourceLabel?: string | null;
+    };
+  },
+>(repoKey: string, commitSha: string | null | undefined, drifts: T[]): Promise<T[]> {
+  try {
+    const claims =
+      (commitSha ? await loadSpec<ClaimsFile>({ repoKey, commitSha }, 'claims') : null) ??
+      (await loadLatestSpec<ClaimsFile>(repoKey, 'claims'));
+    let resolved = resolveDriftOrigins(drifts, claims);
+    // Then attach external links for sources that are synced workspace-KB docs
+    // (e.g. a Confluence page) — not repo files, so they deep-link out instead.
+    // No-op in OSS (no resolver installed) and for repos with no workspace.
+    const links = await resolveWorkspaceDocLinks(repoKey, collectOriginSources(resolved));
+    resolved = attachOriginLinks(resolved, links);
+    return resolved;
+  } catch {
+    return drifts;
+  }
+}
+
 router.get(
   '/:id/verify/state',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -77,7 +122,13 @@ router.get(
         res.status(404).json({ error: 'No verify run has been recorded yet.' });
         return;
       }
-      res.json(state);
+      const commitHash = state.commitHash ?? (ref || null);
+      state.drifts = await withResolvedOrigins(repo.path, commitHash, state.drifts);
+      // `?ref` IS the commit being viewed — backfill it for per-commit snapshots
+      // persisted before `commitHash` was stored, so the EE deep-link resolves on
+      // existing data too. The base (no-ref) state already carries its baseline
+      // commit from the verify store's LATEST.
+      res.json(commitHash && !state.commitHash ? { ...state, commitHash } : state);
     } catch (e) {
       next(e);
     }
@@ -151,6 +202,7 @@ router.get(
         res.status(404).json({ error: 'Verify run not found.' });
         return;
       }
+      state.drifts = await withResolvedOrigins(repo.path, state.commitHash, state.drifts);
       res.json(state);
     } catch (e) {
       next(e);
@@ -180,6 +232,37 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
+      // `?ref=<commit>` (EE PR view) → DERIVE the diff of that commit's snapshot
+      // against the repo's baseline snapshot (nothing diff-specific is stored).
+      // Omitted → the OSS working-tree diff (stored by `verify --diff`).
+      const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+      if (ref) {
+        const head = await loadSpec<VerifyState>(
+          { repoKey: repo.path, commitSha: ref },
+          'verifyState',
+        );
+        const baseline = await readVerifyState(repo.path);
+        if (!head || !baseline) {
+          res.status(404).json({ error: 'No verify snapshot for that ref.' });
+          return;
+        }
+        const { added, resolved, unchangedCount } = diffDrifts(baseline.drifts, head.drifts);
+        const computed: VerifyDiff = {
+          id: ref,
+          baseRunId: baseline.verifiedAt,
+          verifiedAt: head.verifiedAt,
+          branch: null,
+          commitHash: ref,
+          // The diff's added drifts live on the head; resolved ones on the baseline.
+          added: await withResolvedOrigins(repo.path, ref, added),
+          resolved: await withResolvedOrigins(repo.path, baseline.commitHash, resolved),
+          unchangedCount,
+          changedFiles: [],
+          summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
+        };
+        res.json(computed);
+        return;
+      }
       const diff = await readVerifyDiff(repo.path);
       if (!diff) {
         res.status(404).json({ error: 'No verify diff has been computed yet.' });
@@ -214,6 +297,59 @@ router.post(
           detail: (e as Error).message,
         });
       }
+      next(e);
+    }
+  },
+);
+
+/**
+ * On-demand, cached LLM enrichment of ONE drift into human-readable prose.
+ *
+ * The client POSTs the drift's content fields ({ artifactRef, obligationKey,
+ * message, severity, specSide?, codeSide?, specOrigin? }) and gets back the
+ * readable `{ specReadable, codeReadable, summary }` — or `null` (204) when no
+ * LLM transport is configured. The core `enrichDrift` is content-addressed and
+ * shares its cache with the gate, so a drift the gate already enriched is a hit.
+ *
+ * Degrades gracefully: never 500s on a missing transport (returns 204), only on
+ * a genuinely malformed request body (400). The client falls back to the
+ * structured snippets whenever this returns nothing.
+ */
+router.post(
+  '/:id/verify/drift/enrich',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as Partial<DriftLike> | undefined;
+      if (
+        !body ||
+        typeof body.obligationKey !== 'string' ||
+        typeof body.message !== 'string' ||
+        typeof body.severity !== 'string' ||
+        !body.artifactRef ||
+        typeof body.artifactRef.type !== 'string' ||
+        typeof body.artifactRef.identity !== 'string'
+      ) {
+        res.status(400).json({ error: 'Invalid drift payload.' });
+        return;
+      }
+      const drift: DriftLike = {
+        artifactRef: { type: body.artifactRef.type, identity: body.artifactRef.identity },
+        obligationKey: body.obligationKey,
+        message: body.message,
+        severity: body.severity,
+        specSide: body.specSide,
+        codeSide: body.codeSide,
+        specOrigin: body.specOrigin,
+      };
+      const enriched = await enrichDrift(drift);
+      if (!enriched) {
+        // No LLM transport configured, or the call failed/parsed badly — let
+        // the client fall back to the structured rendering.
+        res.status(204).end();
+        return;
+      }
+      res.json(enriched);
+    } catch (e) {
       next(e);
     }
   },

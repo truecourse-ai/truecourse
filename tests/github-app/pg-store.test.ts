@@ -9,14 +9,15 @@ import {
   type RepoLinkRecord,
   type GateRunRecord,
 } from '../../ee/packages/github-app/src/index';
-import { schema, MIGRATIONS_DIR } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, verifySnapshots } from '@truecourse/ee-db';
 
 let client: PGlite;
+let db: ReturnType<typeof drizzle>;
 let store: PostgresGateStore;
 
 beforeEach(async () => {
   client = new PGlite();
-  const db = drizzle(client, { schema });
+  db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   store = new PostgresGateStore(db as unknown as GateDb, () => client.close());
 });
@@ -81,7 +82,7 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
     expect(forA.map((x) => x.repoFullName)).toEqual(['acme/api', 'acme/web']);
   });
 
-  it('round-trips baselines including jsonb drifts and a null baseline', async () => {
+  it('baseline pointer + drifts from the baseline commit snapshot; null otherwise', async () => {
     const drift: any = {
       id: 'd1',
       artifactRef: { type: 'Operation', identity: 'GET /a' },
@@ -92,11 +93,24 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
       lineEnd: 2,
       message: 'm',
     };
+    // The baseline's drifts live in its verify_snapshot; gh_baselines is the pointer.
+    await db.insert(verifySnapshots).values({
+      repoKey: 'acme/api',
+      commitSha: 'abc',
+      branch: 'main',
+      snapshot: { drifts: [drift] },
+      driftCount: 1,
+      bySeverity: { high: 1 },
+      isBaseline: true,
+      verifiedAt: '2026-01-02T00:00:00.000Z',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
     await store.saveBaseline({ repoFullName: 'acme/api', commitSha: 'abc', drifts: [drift], capturedAt: '2026-01-02T00:00:00.000Z' });
     const b = await store.getBaseline('acme/api');
     expect(b?.commitSha).toBe('abc');
     expect(b?.drifts?.[0].obligationKey).toBe('ob1');
 
+    // No snapshot for the pointed commit → null drifts.
     await store.saveBaseline({ repoFullName: 'acme/web', commitSha: 'def', drifts: null, capturedAt: '2026-01-02T00:00:00.000Z' });
     expect((await store.getBaseline('acme/web'))?.drifts).toBeNull();
   });

@@ -255,8 +255,6 @@ export interface GithubInstallationSummary {
 export interface GithubNotificationPrefs {
   /** A PR's gate failed on new drift. */
   gateFailure: boolean
-  /** Spec documents changed → offer to re-scan. */
-  scanOffer: boolean
   /** Inference captured undocumented decisions. */
   inferResult: boolean
   /** Spec conflicts need resolution before contracts can regenerate. */
@@ -266,7 +264,6 @@ export interface GithubNotificationPrefs {
 /** All notification types on by default. */
 export const DEFAULT_NOTIFICATION_PREFS: GithubNotificationPrefs = {
   gateFailure: true,
-  scanOffer: true,
   inferResult: true,
   conflicts: true,
 }
@@ -331,6 +328,8 @@ export interface GithubInstallationReposResponse {
 /** A gate run tagged with its repo — for the cross-repo workspace activity feed. */
 export interface WorkspaceRunItem extends GithubRunSummary {
   repoFullName: string
+  /** The repo's registered dashboard slug, for deep-linking to /repos/:slug?pr=N. Null when unregistered. */
+  slug: string | null
 }
 
 export interface WorkspaceRunsResponse {

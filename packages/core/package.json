@@ -64,6 +64,10 @@
       "types": "./dist/lib/verify-store.d.ts",
       "import": "./dist/lib/verify-store.js"
     },
+    "./lib/drift-enrichment": {
+      "types": "./dist/lib/drift-enrichment.d.ts",
+      "import": "./dist/lib/drift-enrichment.js"
+    },
     "./lib/contract-store": {
       "types": "./dist/lib/contract-store.d.ts",
       "import": "./dist/lib/contract-store.js"
@@ -71,6 +75,14 @@
     "./lib/spec-store": {
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
+    },
+    "./lib/spec-origin-resolver": {
+      "types": "./dist/lib/spec-origin-resolver.d.ts",
+      "import": "./dist/lib/spec-origin-resolver.js"
+    },
+    "./lib/workspace-doc-links": {
+      "types": "./dist/lib/workspace-doc-links.d.ts",
+      "import": "./dist/lib/workspace-doc-links.js"
     },
     "./lib/background-tasks": {
       "types": "./dist/lib/background-tasks.d.ts",

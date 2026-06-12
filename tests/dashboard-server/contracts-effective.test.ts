@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobContractStore } from '../../ee/packages/data-store/src/index';
+import { PgContractStore } from '../../ee/packages/data-store/src/index';
 // Import the store from the SAME package path the route module uses
 // (`@truecourse/core/lib/contract-store`), so the test and the route share one
 // `active` store instance — not the separate source-path module.
@@ -43,7 +43,7 @@ describe('effectiveContractFiles (dashboard read-side merge)', () => {
     client = new PGlite();
     blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-eff-blob-'));
     repoSrc = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-eff-reposrc-'));
-    setContractStore(new PgBlobContractStore(await makeDb(client), new FsBlobStore(blobDir)));
+    setContractStore(new PgContractStore(await makeDb(client), new FsBlobStore(blobDir)));
 
     // Repo's own contracts: orders (also defined by the workspace) + a repo-only file.
     const c = path.join(repoSrc, '.truecourse', 'contracts');

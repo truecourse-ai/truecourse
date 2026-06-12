@@ -5,8 +5,9 @@
 
 export * from './github.js';
 export * from './llm.js';
-export * from './blobs.js';
-export * from './data.js';
+export * from './content.js';
+export * from './verify.js';
+export * from './decisions.js';
 export * from './config.js';
 export * from './contracts.js';
 export * from './cache.js';
@@ -17,8 +18,9 @@ export * from './traces.js';
 
 import { ghInstallations, ghRepos, ghBaselines, ghRuns } from './github.js';
 import { llmProviderConfig } from './llm.js';
-import { blobs } from './blobs.js';
-import { analyses, analysisHistory, verifyRuns, verifyHistory } from './data.js';
+import { content } from './content.js';
+import { verifySnapshots } from './verify.js';
+import { decisions } from './decisions.js';
 import { repoConfig, repoUiState, registry } from './config.js';
 import { contractSets, specSets } from './contracts.js';
 import { extractionCache } from './cache.js';
@@ -33,11 +35,9 @@ export const schema = {
   ghBaselines,
   ghRuns,
   llmProviderConfig,
-  blobs,
-  analyses,
-  analysisHistory,
-  verifyRuns,
-  verifyHistory,
+  content,
+  verifySnapshots,
+  decisions,
   repoConfig,
   repoUiState,
   registry,

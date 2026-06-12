@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { WorkspaceRunItem, WorkspaceRunsResponse } from '@truecourse/shared';
 import { getJson } from './api';
 
@@ -77,14 +78,10 @@ export default function PullRequestsPage() {
           </div>
         ) : (
           <ul className="divide-y divide-border">
-            {runs.map((r) => (
-              <li key={`${r.repoFullName}#${r.id}`}>
-                <a
-                  href={`https://github.com/${r.repoFullName}/pull/${r.prNumber}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-3 px-4 py-3 text-sm hover:bg-muted/50"
-                >
+            {runs.map((r) => {
+              const rowClass = 'flex items-center gap-3 px-4 py-3 text-sm hover:bg-muted/50';
+              const body = (
+                <>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[r.conclusion]}`} />
                   <span className="min-w-0 flex-1 truncate">
                     <span className="font-medium text-foreground">{r.repoFullName}</span>
@@ -101,9 +98,29 @@ export default function PullRequestsPage() {
                   <span className="shrink-0 text-[11px] text-muted-foreground">
                     {timeAgo(r.createdAt)}
                   </span>
-                </a>
-              </li>
-            ))}
+                </>
+              );
+              return (
+                <li key={`${r.repoFullName}#${r.id}`}>
+                  {r.slug ? (
+                    // Internal: open the repo page scoped to this PR (the diff view).
+                    <Link to={`/repos/${r.slug}?section=drift&tab=verify&pr=${r.prNumber}`} className={rowClass}>
+                      {body}
+                    </Link>
+                  ) : (
+                    // Unregistered repo (no dashboard page yet) → fall back to GitHub.
+                    <a
+                      href={`https://github.com/${r.repoFullName}/pull/${r.prNumber}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={rowClass}
+                    >
+                      {body}
+                    </a>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

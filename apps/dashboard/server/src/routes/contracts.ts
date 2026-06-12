@@ -93,14 +93,29 @@ function groupByModule(files: EffectiveFile[]): ContractModule[] {
  * — mirroring what the gate verifies. Each file is tagged with its layer for the
  * provenance badge. In OSS (no workspace org, file store) the workspace list is
  * empty, so this is repo-only and unchanged.
+ *
+ * Ref fallback: a CODE-ONLY PR head has NO stored repo contracts at its commit
+ * (the gate reuses the base's contracts for code-only PRs — #64), so the
+ * per-commit list comes back empty. Rather than collapse the repo layer to
+ * empty (which would make the Contracts tab show WORKSPACE-only), fall back to
+ * the repo's LATEST stored set (the base / main's). Net effect = base ∪
+ * workspace for code-only PRs, and the head's OWN contracts for spec-changing
+ * PRs (which DID get scanned at head, so the per-commit set is non-empty).
  */
 export async function effectiveContractFiles(
   repoKey: string,
   workspaceOrgId: string | undefined,
   commitSha?: string,
 ): Promise<EffectiveFile[]> {
-  const authored = await listContractFiles(repoKey, 'contracts', commitSha);
-  const inferred = await listContractFiles(repoKey, 'contracts_inferred', commitSha);
+  let authored = await listContractFiles(repoKey, 'contracts', commitSha);
+  let inferred = await listContractFiles(repoKey, 'contracts_inferred', commitSha);
+  if (commitSha && authored.length === 0 && inferred.length === 0) {
+    // Head wasn't scanned (code-only PR) — no contracts stored at this commit.
+    // Read the repo's latest stored set instead so the effective view is
+    // base + workspace, not workspace-only.
+    authored = await listContractFiles(repoKey, 'contracts');
+    inferred = await listContractFiles(repoKey, 'contracts_inferred');
+  }
   const repoPaths = [...authored, ...inferred.map((p) => `${INFERRED_PREFIX}${p}`)];
   const out: EffectiveFile[] = repoPaths.map((path) => ({ path, provenance: 'repo' }));
   if (workspaceOrgId) {
@@ -162,11 +177,22 @@ router.get(
       const ref = refOf(req);
       let content: string | null;
       if (requested.startsWith(INFERRED_PREFIX)) {
-        content = await readContractFile(repo.path, 'contracts_inferred', requested.slice(INFERRED_PREFIX.length), ref);
+        const rel = requested.slice(INFERRED_PREFIX.length);
+        content = await readContractFile(repo.path, 'contracts_inferred', rel, ref);
+        // Code-only PR head has no contracts stored at `ref` (the effective
+        // tree fell back to the base set) — read the latest stored file too.
+        if (content === null && ref) {
+          content = await readContractFile(repo.path, 'contracts_inferred', rel);
+        }
       } else {
         // Prefer the repo's own file; fall back to the inherited workspace
         // contract (enterprise) for a `provenance: 'workspace'` entry.
         content = await readContractFile(repo.path, 'contracts', requested, ref);
+        // Code-only PR head has no contracts stored at `ref` (the effective
+        // tree fell back to the base set) — read the latest stored file too.
+        if (content === null && ref) {
+          content = await readContractFile(repo.path, 'contracts', requested);
+        }
         const org = workspaceOrgOf(req);
         if (content === null && org) {
           content = await readWorkspaceContractFile({ workspaceOrgId: org }, 'contracts', requested);

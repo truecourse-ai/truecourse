@@ -1,40 +1,33 @@
 /**
  * Garbage collection for content-addressed contract objects. Objects are
- * immutable and shared across commits, so reclaiming is a periodic mark-sweep,
- * never inline ref-counting (which would add a hot-path write and a lost-
- * decrement race). Per `(repoKey, kind)`:
+ * immutable and shared across commits/kinds, so reclaiming is a periodic
+ * mark-sweep, never inline ref-counting (which would add a hot-path write and a
+ * lost-decrement race). Per repo:
  *
- *   1. mark  — union the object shas referenced by every live manifest row.
- *   2. sweep — `blob.list` the kind's object prefix and delete any object whose
+ *   1. mark  — union the object shas referenced by every live `contract_sets`
+ *              manifest row for the repo (all kinds — they share one scope).
+ *   2. sweep — delete every `content` row under the repo's contract scope whose
  *              sha is unreferenced (and not explicitly protected).
  *
  * Orphans only appear once RETENTION deletes old `contract_sets` rows (a later
  * phase); until then every object is referenced and this is a no-op reclaimer.
  *
- * Race note: between a save's `blob.put(object)` and its manifest-row commit, an
- * object looks unreferenced. A lock-free grace needs per-object timestamps,
- * which `BlobStore` does not surface — so run GC when saves are quiescent (a
- * maintenance-window batch), or pass `protectedShas` (e.g. objects the save
- * layer just wrote) to shield in-flight content. Deleting a still-referenced
- * object would surface later as a `loadContracts` integrity error, so this
- * conservatism is deliberate.
+ * Race note: between a save's content `put` and its manifest-row commit, an
+ * object looks unreferenced. Run GC when saves are quiescent (a maintenance
+ * batch), or pass `protectedShas` (e.g. objects the save layer just wrote) to
+ * shield in-flight content — deleting a still-referenced object would surface
+ * later as a `loadContracts` integrity error, so this conservatism is deliberate.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { contractSets, type EeDb } from '@truecourse/ee-db';
-import type { BlobStore } from '@truecourse/ee-storage';
-import type { ContractKind } from '@truecourse/core/lib/contract-store';
-import { contractObjectPrefix } from './keys.js';
+import { ContentStore, contentScope } from './content-store.js';
 
 export interface GcResult {
-  /** Object keys scanned under the prefix. */
-  scanned: number;
   /** Live shas referenced by manifests. */
   live: number;
   /** Objects deleted. */
   deleted: number;
-  /** The deleted object keys (for logging/metrics). */
-  deletedKeys: string[];
 }
 
 export interface GcOptions {
@@ -46,36 +39,24 @@ interface Manifest {
   files?: Record<string, string>;
 }
 
-/** Mark-sweep the content-addressed objects for one `(repoKey, kind)`. */
+/** Mark-sweep the content-addressed contract objects for one repo. */
 export async function gcContractObjects(
   db: EeDb,
-  blob: BlobStore,
   repoKey: string,
-  kind: ContractKind,
   options: GcOptions = {},
 ): Promise<GcResult> {
-  // mark: every sha any live manifest still points at.
-  const live = new Set<string>();
+  // mark: every sha any live manifest still points at (+ protected in-flight).
+  const live = new Set<string>(options.protectedShas ?? []);
   const rows = await db
     .select({ manifest: contractSets.manifest })
     .from(contractSets)
-    .where(and(eq(contractSets.repoKey, repoKey), eq(contractSets.kind, kind)));
+    .where(eq(contractSets.repoKey, repoKey));
   for (const row of rows) {
     const files = (row.manifest as Manifest).files ?? {};
     for (const sha of Object.values(files)) live.add(sha);
   }
 
-  // sweep: delete objects whose sha is neither live nor protected.
-  const prefix = contractObjectPrefix(repoKey, kind);
-  const keys = await blob.list(prefix);
-  const protectedShas = options.protectedShas ?? new Set<string>();
-  const deletedKeys: string[] = [];
-  for (const key of keys) {
-    const sha = key.slice(prefix.length);
-    if (live.has(sha) || protectedShas.has(sha)) continue;
-    await blob.delete(key);
-    deletedKeys.push(key);
-  }
-
-  return { scanned: keys.length, live: live.size, deleted: deletedKeys.length, deletedKeys };
+  // sweep: delete repo contract objects no live manifest references.
+  const deleted = await new ContentStore(db).gc(contentScope.contract(repoKey), live);
+  return { live: live.size, deleted };
 }

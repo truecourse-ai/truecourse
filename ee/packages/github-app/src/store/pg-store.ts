@@ -14,7 +14,7 @@ import type {
   BaselineRecord,
   GateRunRecord,
 } from './types.js';
-import { ghInstallations, ghRepos, ghBaselines, ghRuns } from '@truecourse/ee-db';
+import { ghInstallations, ghRepos, ghBaselines, ghRuns, verifySnapshots } from '@truecourse/ee-db';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
 export type GateDb = PgDatabase<any, any, any>;
@@ -52,16 +52,6 @@ function toRepo(r: RepoRow): RepoLinkRecord {
     notifications: (r.notifications as unknown as RepoLinkRecord['notifications']) ?? undefined,
     createdAt: toIso(r.createdAt),
     updatedAt: toIso(r.updatedAt),
-  };
-}
-
-function toBaseline(r: BaselineRow): BaselineRecord {
-  return {
-    repoFullName: r.repoFullName,
-    commitSha: r.commitSha,
-    // `drifts` is `unknown[]` at the ee-db layer; cast back to the domain type.
-    drifts: (r.drifts as BaselineRecord['drifts']) ?? null,
-    capturedAt: toIso(r.capturedAt),
   };
 }
 
@@ -211,26 +201,45 @@ export class PostgresGateStore implements GateStore {
   // --- baseline ---
 
   async saveBaseline(rec: BaselineRecord): Promise<void> {
+    // gh_baselines is just the pointer to the baseline commit; the drifts live in
+    // that commit's verify_snapshots row (written by the non-transient baseline
+    // verify, which marks it is_baseline). So we persist only the pointer here.
     await this.db
       .insert(ghBaselines)
-      .values(rec)
+      .values({ repoFullName: rec.repoFullName, commitSha: rec.commitSha, capturedAt: rec.capturedAt })
       .onConflictDoUpdate({
         target: ghBaselines.repoFullName,
         set: {
           commitSha: sql`excluded.commit_sha`,
-          drifts: sql`excluded.drifts`,
           capturedAt: sql`excluded.captured_at`,
         },
       });
   }
 
   async getBaseline(repoFullName: string): Promise<BaselineRecord | null> {
-    const rows = await this.db
+    const [row] = await this.db
       .select()
       .from(ghBaselines)
       .where(eq(ghBaselines.repoFullName, repoFullName))
       .limit(1);
-    return rows[0] ? toBaseline(rows[0]) : null;
+    if (!row) return null;
+    // Drifts come from the baseline commit's verify snapshot (the single home).
+    const [snap] = await this.db
+      .select({ snapshot: verifySnapshots.snapshot })
+      .from(verifySnapshots)
+      .where(
+        and(eq(verifySnapshots.repoKey, repoFullName), eq(verifySnapshots.commitSha, row.commitSha)),
+      )
+      .limit(1);
+    const drifts = snap
+      ? ((snap.snapshot as { drifts?: BaselineRecord['drifts'] }).drifts ?? null)
+      : null;
+    return {
+      repoFullName: row.repoFullName,
+      commitSha: row.commitSha,
+      drifts,
+      capturedAt: toIso(row.capturedAt),
+    };
   }
 
   // --- runs ---

@@ -5,6 +5,9 @@ import path from 'node:path';
 import {
   FileGateStore,
   handlePullRequestGate,
+  reverifyOpenPrs,
+  setPrReverifier,
+  getPrReverifier,
   GATE_MARKER,
   renderGateComment,
   type GateHandlerDeps,
@@ -34,6 +37,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
+  setPrReverifier(null); // isolate the module-global seam between tests
 });
 
 function drift(obligationKey: string, over: Record<string, unknown> = {}): any {
@@ -53,6 +57,7 @@ function drift(obligationKey: string, over: Record<string, unknown> = {}): any {
 function makeOctokit(opts: {
   comments?: { id: number; body: string; user?: { type: string } }[];
   reviewError?: number; // status code to throw from createReviewComment
+  openPrs?: any[]; // pulls.list payload (reverifyOpenPrs)
 } = {}) {
   const calls = {
     check: [] as any[],
@@ -79,6 +84,8 @@ function makeOctokit(opts: {
       },
     },
     pulls: {
+      listFiles: async () => ({ data: [] }), // no PR files → specChanged=false
+      list: async () => ({ data: opts.openPrs ?? [] }),
       listReviewComments: async () => ({ data: [] }),
       createReviewComment: async (p: any) => {
         calls.review.push(p);
@@ -189,6 +196,21 @@ describe('handlePullRequestGate', () => {
     expect(calls.check).toHaveLength(0);
   });
 
+  it('force re-gates a head sha that was already gated (post-resolution re-verify)', async () => {
+    await store.recordRun({
+      id: 'r0', repoFullName: 'acme/api', prNumber: 7, headSha: 'headsha', baseSha: 'b',
+      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
+    await handlePullRequestGate(deps, prPayload(), { force: true });
+    // The prior run no longer blocks: the head re-gates against fresh contracts.
+    expect(calls.check).toHaveLength(1);
+    expect(calls.check[0].conclusion).toBe('failure');
+    const runs = await store.listRuns('acme/api');
+    expect(runs).toHaveLength(2);
+  });
+
   it('ignores non-gate actions and unconnected repos', async () => {
     const { octokit, calls } = makeOctokit();
     const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
@@ -280,5 +302,64 @@ describe('handlePullRequestGate', () => {
 
     const runs = await store.listRuns('acme/api');
     expect(runs[0].conclusion).toBe('neutral');
+  });
+});
+
+describe('reverifyOpenPrs', () => {
+  // Echo each PR's head sha back from the verify stub so we can tell the re-gated
+  // PRs apart (the default depsWith hard-codes one head sha).
+  function echoDeps(octokit: any): GateHandlerDeps {
+    return {
+      store,
+      octokitFor: () => octokit,
+      runVerify: async (_d: any, req: any) => ({
+        baseSha: `base-${req.prNumber}`,
+        headSha: `h${req.prNumber}`,
+        baseDrifts: [],
+        headDrifts: [],
+      }),
+    } as unknown as GateHandlerDeps;
+  }
+
+  function openPr(number: number) {
+    return {
+      number,
+      head: { sha: `h${number}`, ref: `f${number}`, repo: { full_name: 'acme/api', fork: false } },
+      base: { sha: `b${number}`, ref: 'main' },
+    };
+  }
+
+  it('re-gates every open PR against current contracts, incl. ones already gated', async () => {
+    // PR 7 was already gated (neutral on conflicts); without `force` it would skip.
+    await store.recordRun({
+      id: 'r7', repoFullName: 'acme/api', prNumber: 7, headSha: 'h7', baseSha: 'b7',
+      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7), openPr(8)] });
+    await reverifyOpenPrs(echoDeps(octokit), 'acme/api');
+
+    expect(calls.check.map((c: any) => c.head_sha).sort()).toEqual(['h7', 'h8']);
+    const prNums = (await store.listRuns('acme/api')).map((r) => r.prNumber).sort();
+    expect(prNums).toEqual([7, 7, 8]); // PR 7's original neutral run + both re-verifies
+  });
+
+  it('no-ops for an unconnected/unknown repo', async () => {
+    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7)] });
+    await reverifyOpenPrs(echoDeps(octokit), 'stranger/repo');
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('no-ops when there are no open PRs', async () => {
+    const { octokit, calls } = makeOctokit({ openPrs: [] });
+    await reverifyOpenPrs(echoDeps(octokit), 'acme/api');
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('the PR-reverifier seam round-trips and defaults to null', async () => {
+    expect(getPrReverifier()).toBeNull();
+    const seen: string[] = [];
+    setPrReverifier(async (repo) => { seen.push(repo); });
+    await getPrReverifier()!('acme/api');
+    expect(seen).toEqual(['acme/api']);
   });
 });

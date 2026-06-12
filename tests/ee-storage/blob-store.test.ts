@@ -8,7 +8,6 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import {
   FsBlobStore,
-  PostgresBlobStore,
   selectBlobStore,
   loadBlobStoreConfig,
 } from '../../ee/packages/storage/src/index';
@@ -49,51 +48,14 @@ describe('FsBlobStore', () => {
   });
 });
 
-describe('PostgresBlobStore (pglite)', () => {
-  let client: PGlite;
-  let store: PostgresBlobStore;
-  beforeEach(async () => {
-    client = new PGlite();
-    const db = drizzle(client, { schema });
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    store = new PostgresBlobStore(db as unknown as EeDb);
-  });
-  afterEach(async () => {
-    await client.close();
-  });
-
-  it('round-trips bytea and overwrites on re-put', async () => {
-    await store.put('k1', Buffer.from('first'), { contentType: 'text/plain' });
-    expect((await store.get('k1'))?.toString()).toBe('first');
-    expect(await store.exists('k1')).toBe(true);
-    await store.put('k1', Buffer.from('second'));
-    expect((await store.get('k1'))?.toString()).toBe('second');
-  });
-
-  it('get null + exists false for missing; delete idempotent', async () => {
-    expect(await store.get('missing')).toBeNull();
-    expect(await store.exists('missing')).toBe(false);
-    await store.put('d', Buffer.from('x'));
-    await store.delete('d');
-    expect(await store.get('d')).toBeNull();
-    await expect(store.delete('d')).resolves.toBeUndefined();
-  });
-
-  it('preserves binary (non-utf8) bytes intact', async () => {
-    const bin = Buffer.from([0, 1, 2, 255, 254, 128]);
-    await store.put('bin', bin);
-    expect(await store.get('bin')).toEqual(bin);
-  });
-});
-
 describe('selectBlobStore / loadBlobStoreConfig', () => {
-  it('builds fs + s3 + azure adapters; postgres needs a db', () => {
+  it('builds fs + s3 + azure adapters; postgres is retired', () => {
     expect(selectBlobStore({ kind: 'fs', root: '/tmp/x' })).toBeInstanceOf(FsBlobStore);
     expect(() =>
       selectBlobStore({ kind: 's3', bucket: 'b', endpoint: 'http://localhost:9000' }),
     ).not.toThrow();
     expect(() => selectBlobStore({ kind: 'azure', account: 'acct', container: 'c' })).not.toThrow();
-    expect(() => selectBlobStore({ kind: 'postgres' })).toThrow(/requires/i);
+    expect(() => selectBlobStore({ kind: 'postgres' })).toThrow(/retired/i);
   });
 
   it('defaults to postgres when BLOB_STORE is unset', () => {

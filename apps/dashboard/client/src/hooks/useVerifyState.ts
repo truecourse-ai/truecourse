@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import * as api from '@/lib/api';
 import type { VerifyState, VerifyDiff, VerifyHistory } from '@/lib/api';
 
-export function useVerifyState(repoId: string | undefined, ref?: string) {
+export function useVerifyState(repoId: string | undefined, ref?: string, pr?: number) {
   const [state, setState] = useState<VerifyState | null>(null);
   const [diff, setDiff] = useState<VerifyDiff | null>(null);
   const [history, setHistory] = useState<VerifyHistory>({ runs: [] });
@@ -29,7 +29,18 @@ export function useVerifyState(repoId: string | undefined, ref?: string) {
     setIsLoading(true);
     setError(null);
     try {
-      if (ref) {
+      if (pr != null) {
+        // PR view (EE) → the PR head's drift snapshot PLUS the diff of that
+        // snapshot against the repo's baseline (derived server-side). Both key off
+        // the head ref; local run history is a default-branch concept.
+        const [d, s] = await Promise.all([
+          ref ? api.getVerifyDiff(repoId, { ref }) : Promise.resolve(null),
+          ref ? api.getVerifyState(repoId, ref) : Promise.resolve(null),
+        ]);
+        setDiff(d);
+        setState(s);
+        setHistory({ runs: [] });
+      } else if (ref) {
         // A specific ref (a PR head) → that commit's stored snapshot only; the
         // working-tree diff and local run history are default-branch concepts.
         const s = await api.getVerifyState(repoId, ref);
@@ -51,7 +62,7 @@ export function useVerifyState(repoId: string | undefined, ref?: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, ref]);
+  }, [repoId, ref, pr]);
 
   const run = useCallback(async () => {
     if (!repoId) return;

@@ -8,7 +8,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { setKvCacheStore, resetKvCacheStore } from '@truecourse/llm';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobContractStore, PgSpecStore, PgKvCacheStore } from '../../ee/packages/data-store/src/index';
+import { PgContractStore, PgSpecStore, PgKvCacheStore } from '../../ee/packages/data-store/src/index';
 import { generateWorkspaceContractsInProcess } from '../../packages/core/src/commands/spec-in-process.js';
 import {
   setSpecStore,
@@ -109,7 +109,7 @@ describe('generateWorkspaceContractsInProcess (pglite + fs blob)', () => {
     blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-blob-'));
     db = await makeDb(client);
     setSpecStore(new PgSpecStore(db));
-    setContractStore(new PgBlobContractStore(db, new FsBlobStore(blobDir)));
+    setContractStore(new PgContractStore(db, new FsBlobStore(blobDir)));
     setKvCacheStore(new PgKvCacheStore(db)); // slice cache → Postgres (no stray files)
   });
   afterEach(async () => {

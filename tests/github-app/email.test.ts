@@ -81,24 +81,6 @@ describe('createEmailNotifier', () => {
     expect(sends).toHaveLength(1);
   });
 
-  it('sends a spec-scan-offer email listing the changed spec docs', async () => {
-    const notifier = createEmailNotifier('re_test', 'bot@tc.dev', client);
-    await notifier.sendScanOffer(['a@x.com', 'b@y.com'], {
-      repoFullName: 'acme/api',
-      prNumber: 7,
-      prUrl: 'https://github.com/acme/api/pull/7',
-      specDocs: ['docs/spec.md', 'docs/<weird>.md'],
-    });
-    expect(sends.map((s) => s.to)).toEqual([['a@x.com'], ['b@y.com']]);
-    expect(sends[0].subject).toContain('acme/api');
-    expect(sends[0].subject).toContain('#7');
-    expect(sends[0].subject.toLowerCase()).toContain('re-scan');
-    expect(sends[0].html).toContain('docs/spec.md');
-    expect(sends[0].html).toContain('https://github.com/acme/api/pull/7');
-    // Spec-doc paths are HTML-escaped.
-    expect(sends[0].html).toContain('docs/&lt;weird&gt;.md');
-  });
-
   it('sends an infer-result email with decisions and the short commit sha', async () => {
     const notifier = createEmailNotifier('re_test', 'bot@tc.dev', client);
     await notifier.sendInferResult(['a@x.com'], {
@@ -155,12 +137,6 @@ describe('createEmailNotifier', () => {
 
   it('does not send the new notifications when there are no recipients', async () => {
     const notifier = createEmailNotifier('re_test', 'from@tc.dev', client);
-    await notifier.sendScanOffer([], {
-      repoFullName: 'acme/api',
-      prNumber: 7,
-      prUrl: 'u',
-      specDocs: ['docs/spec.md'],
-    });
     await notifier.sendInferResult([], {
       repoFullName: 'acme/api',
       prNumber: 7,

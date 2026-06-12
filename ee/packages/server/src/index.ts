@@ -24,6 +24,8 @@ import { registerJobs } from './jobs/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
 import { initSentry, flushSentry } from './observability/sentry.js';
+import { EeLogTransport } from './observability/log-transport.js';
+import { setLogTransport } from '@truecourse/core/lib/logger';
 
 const plugin: EePlugin = {
   capabilities: ['sso', 'workspace'],
@@ -31,6 +33,10 @@ const plugin: EePlugin = {
     // EE-only error tracking. Initialised first so every seam below can report.
     // A no-op without SENTRY_DSN; never reports OSS errors (see observability/sentry.ts).
     initSentry();
+    // Route the hosted server's logs to the terminal + Sentry (no log file). Also
+    // gives the gate webhook a Sentry path — it logs via the core logger, which
+    // now egresses errors through this transport (no upward import needed).
+    setLogTransport(new EeLogTransport());
     for (const sig of ['SIGTERM', 'SIGINT'] as const) {
       process.once(sig, () => {
         void flushSentry();

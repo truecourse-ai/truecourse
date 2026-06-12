@@ -224,7 +224,6 @@ describe('connect router', () => {
     let res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: true,
-      scanOffer: true,
       inferResult: true,
       conflicts: true,
     });
@@ -238,7 +237,6 @@ describe('connect router', () => {
     res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: false,
-      scanOffer: true,
       inferResult: true,
       conflicts: true,
     });

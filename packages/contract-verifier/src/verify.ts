@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from './parser/index.js';
 import { resolve, type ResolvedArtifact, refKey } from './resolver/index.js';
+import { assignOccurrenceIndices } from './occurrence.js';
+import { buildSymbolIndex, assignEnclosingSymbols } from './extractor/symbol-index.js';
 import {
   extractCodeContracts,
   extractEmissionFacts,
@@ -149,6 +151,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         message:
           `Operation ${refKey(artifact.ref)} declared in spec but no route ` +
           `with this method+path was found in the code under verification.`,
+        specOrigin: artifact.origin ?? undefined,
       });
       continue;
     }
@@ -171,6 +174,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
           `but the code has a matching route. The implementation should not ship.`,
         specSide: `status ${st}`,
         codeSide: `${code.filePath}:${code.declarationLine}`,
+        specOrigin: artifact.origin ?? undefined,
       });
       continue;
     }
@@ -179,6 +183,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         spec: specContract,
         code: code.contract,
         specRef: artifact.ref,
+        origin: artifact.origin,
         codeFilePath: code.filePath,
         codeDeclarationLine: code.declarationLine,
       }),
@@ -204,6 +209,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareErrorEnvelope({
         envelopeRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as ErrorEnvelopeContract,
         extractedOps: recognizedOps,
       }),
@@ -221,6 +227,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...comparePagination({
         paginationRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as PaginationContractC,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -239,6 +246,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareIdempotency({
         idempotencyRef: artifact.ref,
+        origin: artifact.origin,
         contract,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -254,6 +262,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareAuthRequirement({
         authRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as AuthRequirementContract,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -271,6 +280,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareEntity({
         entityRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as EntityContract,
         facts: entityFacts,
       }),
@@ -287,6 +297,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareStateMachine({
         machineRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as StateMachineContract,
         facts: stateMachineFacts,
       }),
@@ -300,6 +311,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareAuthorizationRule({
         authzRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as AuthorizationRuleContract,
         recognizedOps,
       }),
@@ -317,6 +329,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareEffectGroup({
         effectGroupRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as EffectGroupContract,
         emission: emissionFacts,
       }),
@@ -336,6 +349,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareFormula({
         formulaRef: artifact.ref,
+        origin: artifact.origin,
         contract,
         facts,
       }),
@@ -495,6 +509,16 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
       );
     }
   }
+
+  // Resolve the enclosing function symbol for every site-bearing drift in
+  // one general (file,line)→function pass over the codebase, then assign
+  // occurrence indices across the COMPLETE drift set (every comparator's
+  // output), so drifts sharing an enclosing symbol + obligation get stable,
+  // distinct site anchors for the PR gate. The symbol pass is a safe no-op
+  // when no source is parseable — drifts stay obligation-level.
+  const symbolIndex = await buildSymbolIndex(opts.codeDir);
+  assignEnclosingSymbols(drifts, symbolIndex);
+  assignOccurrenceIndices(drifts);
 
   return {
     drifts,

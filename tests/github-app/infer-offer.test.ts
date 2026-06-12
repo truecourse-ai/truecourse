@@ -93,10 +93,9 @@ const botComment = (id: number, body: string) => ({ id, body, user: { type: 'Bot
 
 /** A capturing fake notifier; pushes happen synchronously at call time. */
 function makeNotifier() {
-  const calls = { scan: [] as any[], infer: [] as any[], gate: [] as any[] };
+  const calls = { infer: [] as any[], gate: [] as any[] };
   const notifier: any = {
     sendGateFailure: async (to: string[], email: any) => { calls.gate.push({ to, email }); },
-    sendScanOffer: async (to: string[], email: any) => { calls.scan.push({ to, email }); },
     sendInferResult: async (to: string[], email: any) => { calls.infer.push({ to, email }); },
   };
   return { notifier, calls };
@@ -271,14 +270,14 @@ describe('handleCommentEditedInfer', () => {
       inferCalls++;
       return { decisions: [], commitSha: 'deadbeef' };
     });
-    // A checked SCAN comment must not trigger the infer handler.
-    const { renderScanComment } = await import('../../ee/packages/github-app/src/index');
+    // A checked checkbox in some OTHER bot comment must not trigger the infer
+    // handler — only our infer marker does.
     await handleCommentEditedInfer(
       deps,
       commentPayload({
         comment: {
           id: 1,
-          body: renderScanComment('offered').replace('- [ ]', '- [x]'),
+          body: 'Some unrelated bot comment\n\n- [x] do the thing',
           user: { type: 'Bot', login: 'tc[bot]' },
         },
       }),

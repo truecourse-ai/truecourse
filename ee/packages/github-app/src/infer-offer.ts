@@ -1,5 +1,5 @@
 /**
- * Phase 3 orchestration: offer + run inference on a PR. Mirrors spec-offer.
+ * Phase 3 orchestration: offer + run inference on a PR.
  *
  * - On `pull_request` (opened/synchronize/reopened): if the PR touches code,
  *   post/refresh a checkbox comment offering to infer undocumented decisions.
@@ -34,7 +34,7 @@ import {
   PR_OFFER_ACTIONS,
   WRITE_PERMISSIONS,
   isForkPr,
-} from './spec-offer.js';
+} from './pr-events.js';
 import {
   runInfer,
   type InferPipeline,
@@ -76,7 +76,7 @@ export async function handlePullRequestInferOffer(
   const link = await deps.store.getRepo(repoFullName);
   if (!link || !link.enabled) return;
 
-  // Collapse concurrent/redelivered deliveries of the same PR (see spec-offer).
+  // Collapse concurrent/redelivered deliveries of the same PR.
   const flightKey = `${repoFullName}#${payload.number}#infer`;
   if (deps.offerInFlight?.has(flightKey)) return;
   deps.offerInFlight?.add(flightKey);

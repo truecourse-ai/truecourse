@@ -288,4 +288,28 @@ describe('normalizeMergedArtifacts (pipeline)', () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].identity).toBe('order.eq-tenantid');
   });
+
+  it('collapses forbidden artifacts whose distinct glob patterns slug to the same identity', () => {
+    // The real corpus-corruption failure: the LLM emitted one out-of-scope route
+    // as two names with two glob spellings. dedupArtifacts keys on the EXACT
+    // (category, pattern) so it keeps both; assignDeterministicIdentities then
+    // slugs both globs to `orders-export` → identity collision. Without the
+    // post-assignment collapse, the resolver rejects the corpus on a duplicate.
+    const a = fragment(
+      'ForbiddenArtifact',
+      'orders-export.out-of-scope',
+      'forbidden-artifact orders-export.out-of-scope {\n  category file-glob\n  pattern "**/orders/**export*"\n}',
+    );
+    const b = fragment(
+      'ForbiddenArtifact',
+      'orders-id-export.out-of-scope',
+      'forbidden-artifact orders-id-export.out-of-scope {\n  category file-glob\n  pattern "**/orders/**/*export*"\n}',
+    );
+    const { artifacts, stats } = normalizeMergedArtifacts([a, b]);
+    const forbidden = artifacts.filter((x) => x.kind === 'ForbiddenArtifact');
+    expect(forbidden).toHaveLength(1);
+    expect(forbidden[0].identity).toBe('file-glob.orders-export');
+    // Exactly one artifact was collapsed (folded into artifactsDeduplicated).
+    expect(stats.artifactsDeduplicated).toBe(1);
+  });
 });

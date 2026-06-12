@@ -41,11 +41,22 @@ export type VerifyFn = (
   dir: string,
   ref: RepoRef,
   workspaceOrgId?: string | null,
+  contractsRef?: RepoRef,
 ) => Promise<GateDrift[] | null>;
 
-const defaultVerify: VerifyFn = async (dir, ref, workspaceOrgId) => {
+const defaultVerify: VerifyFn = async (dir, ref, workspaceOrgId, contractsRef) => {
   try {
-    const { verify } = await verifyInProcess(dir, { skipStash: true, ref, workspaceOrgId });
+    // Transient: record only this PR head's per-commit snapshot, never the repo's
+    // baseline (LATEST/history) — that belongs to the baseline job alone.
+    // `contractsRef` (set when the PR changed no specs) verifies the head's CODE
+    // against the BASE's contracts, so the head snapshot still keys by `ref`.
+    const { verify } = await verifyInProcess(dir, {
+      skipStash: true,
+      ref,
+      workspaceOrgId,
+      contractsRef,
+      transient: true,
+    });
     return verify.drifts;
   } catch (e) {
     // ONLY the genuine "no contracts for this commit" case is neutral. Every
@@ -89,6 +100,13 @@ export interface GateVerifyRequest {
   defaultBranch: string;
   /** The repo's linked workspace org (enterprise) — drives the effective merge. */
   workspaceOrgId?: string | null;
+  /**
+   * Whether the PR touches any spec docs vs the base. False → the head's spec ==
+   * the base's, so the gate verifies the head's CODE against the BASE's contracts
+   * (no re-scan, no re-resolving the base's already-resolved conflicts). True →
+   * the head is scanned for its own contracts (the cold path).
+   */
+  specChanged: boolean;
 }
 
 export interface GateVerifyOutput {
@@ -133,8 +151,22 @@ export async function driftsForCommit(
   sha: string,
   checkoutDir: string,
   workspaceOrgId?: string | null,
+  contractsRef?: RepoRef,
 ): Promise<CommitDrifts> {
   const ref: RepoRef = { repoKey: repoFullName, commitSha: sha };
+  // Base-reuse: the PR changed no specs, so the head's spec == the base's. Verify
+  // the head's CODE against the BASE's already-resolved contracts — no scan, no
+  // re-resolving the base's conflicts (which is what produced the duplicate), and
+  // its open-conflict count is 0 (the base is the resolved baseline).
+  if (contractsRef) {
+    const repoHas = await hasContracts(contractsRef, 'contracts');
+    const wsHas = workspaceOrgId
+      ? (await listWorkspaceContractFiles({ workspaceOrgId }, 'contracts')).length > 0
+      : false;
+    if (!repoHas && !wsHas) return { drifts: null, openConflicts: 0 };
+    const d = await verify(checkoutDir, ref, workspaceOrgId, contractsRef);
+    return { drifts: d ? relativizeDrifts(d, checkoutDir) : null, openConflicts: 0 };
+  }
   let openConflicts: number;
   if (!(await hasContracts(ref, 'contracts'))) {
     ({ openConflicts } = await scanPipeline.scan(checkoutDir, ref));
@@ -167,8 +199,8 @@ export async function runGateVerify(
   const scanPipeline = deps.scanPipeline ?? defaultSpecScanPipeline;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-verify-'));
 
-  const driftsAt = (sha: string): Promise<CommitDrifts> =>
-    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId);
+  const driftsAt = (sha: string, contractsRef?: RepoRef): Promise<CommitDrifts> =>
+    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId, contractsRef);
 
   try {
     const token = await getInstallationToken(deps.auth, req.installationId);
@@ -189,9 +221,11 @@ export async function runGateVerify(
     // valid only when the PR targets it; otherwise regenerate/verify the base.
     // (Base-side conflicts don't gate — only the head's spec is the PR's doing.)
     let baseDrifts: GateDrift[] | null;
+    let baselineCommit: string | null = null;
     if (req.baseBranch === req.defaultBranch) {
       const baseline = await deps.store.getBaseline(req.repoFullName);
       baseDrifts = baseline ? baseline.drifts : (await driftsAt(baseSha)).drifts;
+      baselineCommit = baseline?.commitSha ?? null;
     } else {
       baseDrifts = (await driftsAt(baseSha)).drifts;
     }
@@ -208,7 +242,14 @@ export async function runGateVerify(
     await git.raw(['checkout', '-f', 'FETCH_HEAD']);
     const headSha = (await git.revparse(['HEAD'])).trim();
 
-    const head = await driftsAt(headSha);
+    // PR changed no specs (and we have a baseline) → verify the head's CODE
+    // against the baseline's resolved contracts; no re-scan. Otherwise scan the
+    // head for its own contracts (the spec-changing path).
+    const headContractsRef: RepoRef | undefined =
+      !req.specChanged && baselineCommit
+        ? { repoKey: req.repoFullName, commitSha: baselineCommit }
+        : undefined;
+    const head = await driftsAt(headSha, headContractsRef);
     return {
       headDrifts: head.drifts,
       baseDrifts,

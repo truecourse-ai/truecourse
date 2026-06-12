@@ -5,9 +5,9 @@ import {
   isInferComment,
   isInferCheckboxChecked,
   hasInferOffer,
-  SCAN_MARKER,
-  isScanComment,
-  renderScanComment,
+  GATE_MARKER,
+  isGateComment,
+  renderGateComment,
 } from '../../ee/packages/github-app/src/index';
 
 describe('infer comment rendering', () => {
@@ -47,14 +47,17 @@ describe('infer comment rendering', () => {
   });
 });
 
-describe('scan vs infer markers do not collide', () => {
+describe('gate vs infer markers do not collide', () => {
   it('each predicate only matches its own comment', () => {
-    const scan = renderScanComment('offered');
+    const gate = renderGateComment(
+      { conclusion: 'success', added: [], resolved: [], belowThreshold: [] } as any,
+      {},
+    );
     const infer = renderInferComment('offered');
-    expect(INFER_MARKER).not.toBe(SCAN_MARKER);
-    expect(isInferComment(scan)).toBe(false);
-    expect(isScanComment(infer)).toBe(false);
-    expect(isScanComment(scan)).toBe(true);
+    expect(INFER_MARKER).not.toBe(GATE_MARKER);
+    expect(isInferComment(gate)).toBe(false);
+    expect(isGateComment(infer)).toBe(false);
+    expect(isGateComment(gate)).toBe(true);
     expect(isInferComment(infer)).toBe(true);
   });
 });

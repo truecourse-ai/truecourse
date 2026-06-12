@@ -17,14 +17,14 @@ import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
 import { installationOctokit } from './octokit.js';
 import {
-  handlePullRequestSpecOffer,
-  handleCommentEditedScan,
-} from './spec-offer.js';
-import {
   handlePullRequestInferOffer,
   handleCommentEditedInfer,
 } from './infer-offer.js';
-import { handlePullRequestGate } from './gate-handler.js';
+import {
+  handlePullRequestGate,
+  reverifyOpenPrs,
+  setPrReverifier,
+} from './gate-handler.js';
 import { createEmailNotifier } from './email.js';
 import { reportGithubError } from './observability.js';
 
@@ -91,6 +91,11 @@ export async function registerGithubApp(
     notifier,
   };
 
+  // Let the EE jobs layer re-verify open PRs after the repo.contracts job
+  // regenerates contracts (post-conflict-resolution), without reaching into the
+  // gate's deps. The seam is null until set here, so SSO-only deploys no-op.
+  setPrReverifier((repoFullName) => reverifyOpenPrs(offerDeps, repoFullName));
+
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
     '/api/ee/github',
@@ -113,15 +118,12 @@ export async function registerGithubApp(
           reportGithubError(store, 'baseline failed', { repo }, err),
         );
       },
-      // On PR open/sync: run the drift gate (Phase 4) and offer the spec scan
-      // (Phase 2) + infer run (Phase 3).
+      // On PR open/sync: run the drift gate (Phase 4) — it scans the head's specs
+      // automatically when the PR changes them — and offer an infer run (Phase 3).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
         void handlePullRequestGate(offerDeps, payload).catch((err) =>
           reportGithubError(store, 'gate failed', ctx, err),
-        );
-        void handlePullRequestSpecOffer(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'spec offer failed', ctx, err),
         );
         void handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
           reportGithubError(store, 'infer offer failed', ctx, err),
@@ -130,9 +132,6 @@ export async function registerGithubApp(
       // On comment edit: the matching handler (by marker) runs its checkbox flow.
       onCommentEdited: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
-        void handleCommentEditedScan(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'comment-edited scan failed', ctx, err),
-        );
         void handleCommentEditedInfer(offerDeps, payload).catch((err) =>
           reportGithubError(store, 'comment-edited infer failed', ctx, err),
         );
@@ -177,21 +176,7 @@ export {
   isCodeFile,
   hasCodeChanges,
 } from './spec-detect.js';
-export {
-  SCAN_MARKER,
-  SCAN_CHECKBOX_LABEL,
-  renderScanComment,
-  isScanComment,
-  isScanCheckboxChecked,
-  hasScanOffer,
-  type ScanCommentStatus,
-} from './scan-comment.js';
 export { runSpecScan, type SpecScanPipeline } from './spec-scan.js';
-export {
-  handlePullRequestSpecOffer,
-  handleCommentEditedScan,
-  type SpecOfferDeps,
-} from './spec-offer.js';
 export {
   installationOctokit,
   splitRepo,
@@ -232,6 +217,7 @@ export {
   renderGateComment,
   gateCheckOutput,
   inlineDriftBody,
+  type DriftEnrichmentMap,
 } from './gate-comment.js';
 export {
   runGateVerify,
@@ -242,6 +228,9 @@ export {
 } from './gate-runner.js';
 export {
   handlePullRequestGate,
+  reverifyOpenPrs,
+  setPrReverifier,
+  getPrReverifier,
   type GateHandlerDeps,
 } from './gate-handler.js';
 

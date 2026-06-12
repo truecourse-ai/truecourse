@@ -5,14 +5,13 @@ import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { eq } from 'drizzle-orm';
-import { schema, MIGRATIONS_DIR, contractSets, type EeDb } from '@truecourse/ee-db';
-import { FsBlobStore } from '../../ee/packages/storage/src/index';
+import { and, eq } from 'drizzle-orm';
+import { schema, MIGRATIONS_DIR, contractSets, content, type EeDb } from '@truecourse/ee-db';
 import {
-  PgBlobContractStore,
+  PgContractStore,
   PgSpecStore,
   gcContractObjects,
-  keys,
+  contentScope,
 } from '../../ee/packages/data-store/src/index';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
 
@@ -21,15 +20,23 @@ const refAt = (sha: string): RepoRef => ({ repoKey: REPO, commitSha: sha });
 
 function setup() {
   const client = new PGlite();
-  const blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-blob-'));
   const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-src-'));
-  return { client, blobDir, srcDir, blob: new FsBlobStore(blobDir) };
+  return { client, srcDir };
 }
 
 async function makeDb(client: PGlite): Promise<EeDb> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   return db as unknown as EeDb;
+}
+
+/** Count the deduped contract bodies stored for a repo (content-addressed rows). */
+async function objCount(db: EeDb, repoKey = REPO): Promise<number> {
+  const rows = await db
+    .select({ sha: content.sha })
+    .from(content)
+    .where(eq(content.scope, contentScope.contract(repoKey)));
+  return rows.length;
 }
 
 function writeFile(root: string, rel: string, content: string): void {
@@ -61,24 +68,21 @@ function listFilesRel(root: string): string[] {
   return out.sort();
 }
 
-describe('PgBlobContractStore (pglite + fs blob)', () => {
+describe('PgContractStore (pglite + Postgres content)', () => {
   let client: PGlite;
-  let blobDir: string;
   let srcDir: string;
-  let store: PgBlobContractStore;
-  let blob: FsBlobStore;
+  let db: EeDb;
+  let store: PgContractStore;
 
   beforeEach(async () => {
     const s = setup();
     client = s.client;
-    blobDir = s.blobDir;
     srcDir = s.srcDir;
-    blob = s.blob;
-    store = new PgBlobContractStore(await makeDb(client), blob);
+    db = await makeDb(client);
+    store = new PgContractStore(db);
   });
   afterEach(async () => {
     await client.close();
-    fs.rmSync(blobDir, { recursive: true, force: true });
     fs.rmSync(srcDir, { recursive: true, force: true });
   });
 
@@ -132,26 +136,23 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
   });
 
   it('dedupes identical content across commits; a one-file change writes one object', async () => {
-    const objPrefix = keys.contractObjectPrefix(REPO, 'contracts');
-
     const contracts = seedCorpus(srcDir);
     const a = await store.saveContracts(refAt('c1'), 'contracts', contracts);
     expect(a.objectsWritten).toBe(3);
-    const afterA = (await blob.list(objPrefix)).length;
-    expect(afterA).toBe(3);
+    expect(await objCount(db)).toBe(3);
 
     // Re-save the identical corpus at a new commit → no new objects, same hash.
     const b = await store.saveContracts(refAt('c2'), 'contracts', contracts);
     expect(b.objectsWritten).toBe(0);
     expect(b.manifestHash).toBe(a.manifestHash);
-    expect((await blob.list(objPrefix)).length).toBe(3);
+    expect(await objCount(db)).toBe(3);
 
     // Change exactly one contract → exactly one new object.
     const contracts2 = seedCorpus(srcDir, 'GET /orders?v=2');
     const c = await store.saveContracts(refAt('c3'), 'contracts', contracts2);
     expect(c.objectsWritten).toBe(1);
     expect(c.manifestHash).not.toBe(a.manifestHash);
-    expect((await blob.list(objPrefix)).length).toBe(4);
+    expect(await objCount(db)).toBe(4);
   });
 
   it('dedupes identical content WITHIN one save (two files, one object)', async () => {
@@ -163,7 +164,7 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
     const res = await store.saveContracts(refAt('dup1'), 'contracts', dir);
     expect(res.fileCount).toBe(2);
     expect(res.objectsWritten).toBe(1); // one unique content
-    expect((await blob.list(keys.contractObjectPrefix(REPO, 'contracts'))).length).toBe(1);
+    expect(await objCount(db)).toBe(1);
     // both paths still materialize (the manifest maps both to the one object)
     const mat = await store.loadContracts(refAt('dup1'), 'contracts');
     expect(listFilesRel(mat!.dir)).toEqual(['a/one.tc', 'b/two.tc']);
@@ -172,8 +173,7 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
   });
 
   it('materialize rejects path-traversal manifests and leaks no temp dir', async () => {
-    const db = await makeDb(client);
-    const traverseStore = new PgBlobContractStore(db, blob);
+    const traverseStore = new PgContractStore(db);
     const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('tc-contracts-')).length;
     for (const bad of ['../escape.tc', '/abs.tc', 'a/../../b.tc']) {
       await db.insert(contractSets).values({
@@ -197,9 +197,15 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
   it('materialize cleans up the temp dir when an object is missing', async () => {
     const contracts = seedCorpus(srcDir);
     await store.saveContracts(refAt('c1'), 'contracts', contracts);
-    // Delete one underlying object, leaving the manifest dangling.
-    const objKeys = await blob.list(keys.contractObjectPrefix(REPO, 'contracts'));
-    await blob.delete(objKeys[0]!);
+    // Delete one underlying content object, leaving the manifest dangling.
+    const [obj] = await db
+      .select({ sha: content.sha })
+      .from(content)
+      .where(eq(content.scope, contentScope.contract(REPO)))
+      .limit(1);
+    await db
+      .delete(content)
+      .where(and(eq(content.scope, contentScope.contract(REPO)), eq(content.sha, obj!.sha)));
     const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('tc-contracts-')).length;
     await expect(store.loadContracts(refAt('c1'), 'contracts')).rejects.toThrow(/missing object/i);
     const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('tc-contracts-')).length;
@@ -207,24 +213,19 @@ describe('PgBlobContractStore (pglite + fs blob)', () => {
   });
 });
 
-describe('PgBlobContractStore — workspace scope (pglite + fs blob)', () => {
+describe('PgContractStore — workspace scope (pglite + Postgres content)', () => {
   const ORG = 'org_A';
   const wref = { workspaceOrgId: ORG };
   let client: PGlite;
-  let blobDir: string;
-  let blob: FsBlobStore;
-  let store: PgBlobContractStore;
+  let store: PgContractStore;
 
   beforeEach(async () => {
     const s = setup();
     client = s.client;
-    blobDir = s.blobDir;
-    blob = s.blob;
-    store = new PgBlobContractStore(await makeDb(client), blob);
+    store = new PgContractStore(await makeDb(client));
   });
   afterEach(async () => {
     await client.close();
-    fs.rmSync(blobDir, { recursive: true, force: true });
   });
 
   const corpus = {
@@ -330,28 +331,31 @@ describe('PgSpecStore (pglite)', () => {
   });
 });
 
-describe('gcContractObjects (pglite + fs blob)', () => {
+describe('gcContractObjects (pglite + Postgres content)', () => {
   let client: PGlite;
-  let blobDir: string;
   let srcDir: string;
-  let store: PgBlobContractStore;
-  let blob: FsBlobStore;
+  let store: PgContractStore;
   let db: EeDb;
 
   beforeEach(async () => {
     const s = setup();
     client = s.client;
-    blobDir = s.blobDir;
     srcDir = s.srcDir;
-    blob = s.blob;
     db = await makeDb(client);
-    store = new PgBlobContractStore(db, blob);
+    store = new PgContractStore(db);
   });
   afterEach(async () => {
     await client.close();
-    fs.rmSync(blobDir, { recursive: true, force: true });
     fs.rmSync(srcDir, { recursive: true, force: true });
   });
+
+  const contractShas = async (): Promise<string[]> =>
+    (
+      await db
+        .select({ sha: content.sha })
+        .from(content)
+        .where(eq(content.scope, contentScope.contract(REPO)))
+    ).map((r) => r.sha);
 
   it('sweeps only objects no live manifest references', async () => {
     const contracts = seedCorpus(srcDir);
@@ -359,18 +363,18 @@ describe('gcContractObjects (pglite + fs blob)', () => {
     // c2 changes one file → 4 objects exist; c1 + c2 manifests both live.
     const contracts2 = seedCorpus(srcDir, 'GET /orders?v=2');
     await store.saveContracts(refAt('c2'), 'contracts', contracts2);
-    expect((await blob.list(keys.contractObjectPrefix(REPO, 'contracts'))).length).toBe(4);
+    expect(await objCount(db)).toBe(4);
 
     // Nothing to collect while both manifests are live.
-    let res = await gcContractObjects(db, blob, REPO, 'contracts');
+    let res = await gcContractObjects(db, REPO);
     expect(res.deleted).toBe(0);
-    expect(res.scanned).toBe(4);
+    expect(res.live).toBe(4);
 
     // Drop c2's manifest row → its exclusive object (the v=2 get-order) is orphaned.
     await db.delete(contractSets).where(eq(contractSets.commitSha, 'c2'));
-    res = await gcContractObjects(db, blob, REPO, 'contracts');
+    res = await gcContractObjects(db, REPO);
     expect(res.deleted).toBe(1);
-    expect((await blob.list(keys.contractObjectPrefix(REPO, 'contracts'))).length).toBe(3);
+    expect(await objCount(db)).toBe(3);
 
     // c1 still fully materializes (its objects survived).
     const mat = await store.loadContracts(refAt('c1'), 'contracts');
@@ -382,13 +386,10 @@ describe('gcContractObjects (pglite + fs blob)', () => {
     const contracts = seedCorpus(srcDir);
     await store.saveContracts(refAt('c1'), 'contracts', contracts);
     await db.delete(contractSets); // orphan everything
-    const objKeys = await blob.list(keys.contractObjectPrefix(REPO, 'contracts'));
-    const prefix = keys.contractObjectPrefix(REPO, 'contracts');
-    const keepSha = objKeys[0]!.slice(prefix.length);
-    const res = await gcContractObjects(db, blob, REPO, 'contracts', {
-      protectedShas: new Set([keepSha]),
-    });
-    expect(res.deleted).toBe(objKeys.length - 1);
-    expect(await blob.exists(objKeys[0]!)).toBe(true);
+    const shas = await contractShas();
+    const keepSha = shas[0]!;
+    const res = await gcContractObjects(db, REPO, { protectedShas: new Set([keepSha]) });
+    expect(res.deleted).toBe(shas.length - 1);
+    expect(await objCount(db)).toBe(1);
   });
 });

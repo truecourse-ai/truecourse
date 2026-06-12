@@ -14,12 +14,15 @@ import type {
   ContractDrift,
   ArtifactRef,
   ErrorEnvelopeContract,
+  SpecOrigin,
 } from '../types/index.js';
 import type { ExtractedOperation } from '../extractor/index.js';
 
 export interface ErrorEnvelopeCompareInput {
   /** The error-envelope artifact ref (`ErrorEnvelope:error.envelope.standard`). */
   envelopeRef: ArtifactRef;
+  /** Spec-side origin of the error-envelope artifact (source doc + section). */
+  origin: SpecOrigin | null;
   /** The lifted contract — currently used for `appliesTo.statusClass`. */
   contract: ErrorEnvelopeContract;
   /** Every extracted code-side operation. */
@@ -64,6 +67,7 @@ export function compareErrorEnvelope(input: ErrorEnvelopeCompareInput): Contract
         codeSide: resp.body.fields
           ? `body keys: ${Object.keys(resp.body.fields).join(', ')}`
           : `body shape unrecognized`,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }

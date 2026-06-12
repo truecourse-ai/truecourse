@@ -15,8 +15,8 @@ def list_orders(session, since, until):
     # predicate, the window is anchored on `created_at`, and it filters
     # soft-deleted rows out entirely.
     # IL-DRIFT: QueryRule:orders-list.tenant-scope / query.predicate.missing.tenant_id.eq
-    # IL-DRIFT: QueryRule:orders-list.date-anchor / query.date-binding.column-mismatch
-    # IL-DRIFT: QueryRule:orders-list.no-soft-deleted-included / query.predicate.forbidden-present.deleted_at.is-null
+    # IL-DRIFT: QueryRule:orders-list.date-anchor / query.date-binding.column-mismatch @ list_orders#0
+    # IL-DRIFT: QueryRule:orders-list.no-soft-deleted-included / query.predicate.forbidden-present.deleted_at.is-null @ list_orders#0
     return (
         session.query(Order)
         .filter(Order.created_at >= since)

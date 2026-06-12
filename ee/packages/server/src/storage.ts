@@ -14,7 +14,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { EeDbHandle } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
-import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setVerifyStore } from '@truecourse/core/lib/verify-store';
 import { setContractStore } from '@truecourse/core/lib/contract-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
@@ -22,37 +21,38 @@ import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
+import { setWorkspaceDocLinkResolver } from '@truecourse/core/lib/workspace-doc-links';
 import { setKvCacheStore } from '@truecourse/llm';
-import { loadBlobStoreConfig, selectBlobStore } from '@truecourse/ee-storage';
+import { eq } from 'drizzle-orm';
+import { ghRepos } from '@truecourse/ee-db';
 import {
-  PgBlobAnalysisStore,
-  PgBlobVerifyStore,
-  PgBlobContractStore,
+  PgVerifyStore,
+  PgContractStore,
   PgSpecStore,
   PgRepoConfigStore,
   PgUiStateStore,
   GhReposRegistryStore,
+  PgKnowledgeStore,
   PgKvCacheStore,
-  PgBlobTraceStore,
+  PgTraceStore,
   PgAnalyzeLock,
 } from '@truecourse/ee-data-store';
 
 /** What `installEeStores` hands back for the caller to wire (not a core seam). */
 export interface EeStoreHandles {
   /** LLM trace sink — passed to the transport as its recorder + the traces routes. */
-  traceStore: PgBlobTraceStore;
+  traceStore: PgTraceStore;
 }
 
 /** Swap every core/llm storage seam for its Postgres/Blob hosted impl. */
 export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
-  const blobConfig = loadBlobStoreConfig();
-  const blob = selectBlobStore(blobConfig, db);
-
-  // Bulky snapshots/corpora/objects → BlobStore; metadata + manifests → Postgres.
-  setAnalysisStore(new PgBlobAnalysisStore(db, blob));
-  setVerifyStore(new PgBlobVerifyStore(db, blob));
-  setContractStore(new PgBlobContractStore(db, blob));
-  // Small/queryable records → inline Postgres.
+  // All hosted content lives in Postgres — bulky bodies (contracts, spec
+  // artifacts, verify snapshots, trace payloads) are content-addressed in the
+  // `content` table; metadata + manifests are their own rows. No blob store.
+  // (Analyze is not part of the hosted edition — drift-only — so its seam stays
+  // the OSS default and is simply never exercised here.)
+  setVerifyStore(new PgVerifyStore(db));
+  setContractStore(new PgContractStore(db));
   setSpecStore(new PgSpecStore(db));
   setRepoConfigStore(new PgRepoConfigStore(db));
   setUiStateStore(new PgUiStateStore(db));
@@ -66,12 +66,33 @@ export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   // clones; the dedicated pool keeps held locks from starving the store pool).
   setAnalyzeLock(new PgAnalyzeLock(lockPool));
 
-  // LLM observability sink (metadata → Postgres, payloads → BlobStore). NOT a
-  // core seam — it's handed to the transport as its recorder and to the traces
-  // routes, so it's returned rather than installed globally.
-  const traceStore = new PgBlobTraceStore(db, blob);
+  // Resolve a drift's workspace-KB source doc (e.g. `knowledge/confluence/<id>.md`)
+  // to its real external link: repo → its workspace org (gh_repos) → the synced
+  // doc rows (knowledge_documents). The dashboard then links the "Source" out to
+  // the Confluence/Jira page instead of a 404-ing repo path. Repo docs don't match
+  // a docPath, so they're absent from the map and deep-link to GitHub as before.
+  const knowledgeStore = new PgKnowledgeStore(db);
+  setWorkspaceDocLinkResolver(async (repoKey, docPaths) => {
+    const links = new Map<string, { url: string | null; title: string | null }>();
+    const [repo] = await db
+      .select({ org: ghRepos.workspaceOrgId })
+      .from(ghRepos)
+      .where(eq(ghRepos.repoFullName, repoKey))
+      .limit(1);
+    if (!repo) return links;
+    const wanted = new Set(docPaths);
+    for (const doc of await knowledgeStore.listDocuments(repo.org)) {
+      if (wanted.has(doc.docPath)) links.set(doc.docPath, { url: doc.url, title: doc.title });
+    }
+    return links;
+  });
 
-  log.info(`[ee-server] hosted storage installed (blob=${blobConfig.kind})`);
+  // LLM observability sink (metadata → Postgres, payloads → content). NOT a core
+  // seam — it's handed to the transport as its recorder and to the traces routes,
+  // so it's returned rather than installed globally.
+  const traceStore = new PgTraceStore(db);
+
+  log.info('[ee-server] hosted storage installed (Postgres)');
   return { traceStore };
 }
 

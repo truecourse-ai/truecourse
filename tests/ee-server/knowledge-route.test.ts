@@ -14,7 +14,7 @@ import {
   resetContractStore,
   saveWorkspaceContracts,
 } from '@truecourse/core/lib/contract-store';
-import { PgBlobContractStore } from '../../ee/packages/data-store/src/index';
+import { PgContractStore } from '../../ee/packages/data-store/src/index';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
 
 // The consolidation pipeline is exercised by the driver test; here we mock the
@@ -93,7 +93,7 @@ beforeEach(async () => {
   db = await makeDb(client);
   // The contracts routes read through the global contract store; install the
   // Postgres/Blob impl so a seeded workspace corpus is visible to the route.
-  setContractStore(new PgBlobContractStore(db, new FsBlobStore(blobDir)));
+  setContractStore(new PgContractStore(db, new FsBlobStore(blobDir)));
   app = express();
   app.use(express.json());
   app.use((req, _res, next) => {

@@ -1,7 +1,7 @@
 /**
- * Content-addressed Postgres + Blob implementation of core's `ContractStore`.
- * Each unique `.tc` file content is one immutable blob object keyed by its
- * sha256 (deduped per repo+kind — an unchanged contract across commits is stored
+ * Content-addressed Postgres implementation of core's `ContractStore`. Each
+ * unique `.tc` file content is one immutable row in `content` keyed by its sha256
+ * (deduped per repo scope — an unchanged contract across commits/kinds is stored
  * once); a per-set MANIFEST (`{relPath: sha}`) lives as a jsonb row in
  * `contract_sets`, keyed by `(repo, commit, kind)`. `loadContracts` materializes
  * a set back into a temp dir the unchanged verifier/infer can read.
@@ -12,7 +12,6 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 import { and, desc, eq } from 'drizzle-orm';
 import { contractSets, workspaceContractSets, type EeDb } from '@truecourse/ee-db';
-import type { BlobStore } from '@truecourse/ee-storage';
 import type {
   ContractKind,
   ContractStore,
@@ -21,7 +20,7 @@ import type {
   SaveContractsResult,
   WorkspaceRef,
 } from '@truecourse/core/lib/contract-store';
-import { contractObjectKey, workspaceContractObjectKey } from './keys.js';
+import { ContentStore, contentScope } from './content-store.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys, walkTcRelFiles } from './pack.js';
 
 const OBJECT_CONCURRENCY = 16;
@@ -31,15 +30,13 @@ interface Manifest {
   files: Record<string, string>;
 }
 
-export class PgBlobContractStore implements ContractStore {
+export class PgContractStore implements ContractStore {
   readonly materializesInPlace = false;
-  /** Per-instance memo of objects known to exist, to skip redundant `exists` probes. */
-  private readonly known = new Set<string>();
+  private readonly content: ContentStore;
 
-  constructor(
-    private readonly db: EeDb,
-    private readonly blob: BlobStore,
-  ) {}
+  constructor(private readonly db: EeDb) {
+    this.content = new ContentStore(db);
+  }
 
   async saveContracts(
     ref: RepoRef,
@@ -67,17 +64,12 @@ export class PgBlobContractStore implements ContractStore {
     // crash mid-save can orphan objects, which GC reclaims, but never leaves a
     // manifest pointing at a missing object). Each sha appears once here, so the
     // per-key check-then-act can't race itself within a save.
+    const scope = contentScope.contract(ref.repoKey);
     let objectsWritten = 0;
     await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
-      const key = contractObjectKey(ref.repoKey, kind, sha);
-      if (this.known.has(key)) return;
-      if (await this.blob.exists(key)) {
-        this.known.add(key);
-        return;
+      if (await this.content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'))) {
+        objectsWritten += 1;
       }
-      await this.blob.put(key, uniqueBytes.get(sha)!, { contentType: 'text/plain' });
-      this.known.add(key);
-      objectsWritten += 1;
     });
 
     const sortedFiles = sortKeys(manifest);
@@ -112,14 +104,15 @@ export class PgBlobContractStore implements ContractStore {
     const dir = await fsp.mkdtemp(path.join(os.tmpdir(), `tc-${kind}-`));
     let ok = false;
     try {
+      const scope = contentScope.contract(ref.repoKey);
       await mapLimit(Object.entries(files), OBJECT_CONCURRENCY, async ([rel, sha]) => {
         const dest = safeJoin(dir, rel);
-        const bytes = await this.blob.get(contractObjectKey(ref.repoKey, kind, sha));
-        if (!bytes) {
+        const body = await this.content.get(scope, sha);
+        if (body == null) {
           throw new Error(`[ee-data-store] missing object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`);
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true });
-        await fsp.writeFile(dest, bytes);
+        await fsp.writeFile(dest, body);
       });
       ok = true;
       return {
@@ -153,12 +146,11 @@ export class PgBlobContractStore implements ContractStore {
     commitSha?: string,
   ): Promise<string | null> {
     const manifest = await this.manifestFor(repoKey, kind, commitSha);
-    const sha = manifest?.files?.[relPath]; // unknown/traversal path ⇒ no sha ⇒ null (no blob read)
+    const sha = manifest?.files?.[relPath]; // unknown/traversal path ⇒ no sha ⇒ null (no read)
     if (!sha) return null;
-    // Objects are content-addressed by sha (deduped across commits), so the blob
-    // key is the same regardless of which commit's manifest pointed at it.
-    const bytes = await this.blob.get(contractObjectKey(repoKey, kind, sha));
-    return bytes ? bytes.toString('utf-8') : null;
+    // Objects are content-addressed by sha (deduped across commits + kinds), so
+    // the lookup is the same regardless of which commit's manifest pointed at it.
+    return this.content.get(contentScope.contract(repoKey), sha);
   }
 
   /** Manifest of a specific commit's set (the ref switcher), or the latest. */
@@ -228,17 +220,12 @@ export class PgBlobContractStore implements ContractStore {
       if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
     }
 
+    const scope = contentScope.workspaceContract(org);
     let objectsWritten = 0;
     await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
-      const key = workspaceContractObjectKey(org, kind, sha);
-      if (this.known.has(key)) return;
-      if (await this.blob.exists(key)) {
-        this.known.add(key);
-        return;
+      if (await this.content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'))) {
+        objectsWritten += 1;
       }
-      await this.blob.put(key, uniqueBytes.get(sha)!, { contentType: 'text/plain' });
-      this.known.add(key);
-      objectsWritten += 1;
     });
 
     const sortedFiles = sortKeys(manifest);
@@ -276,14 +263,15 @@ export class PgBlobContractStore implements ContractStore {
     const dir = await fsp.mkdtemp(path.join(os.tmpdir(), `tc-ws-${kind}-`));
     let ok = false;
     try {
+      const scope = contentScope.workspaceContract(ref.workspaceOrgId);
       await mapLimit(Object.entries(files), OBJECT_CONCURRENCY, async ([rel, sha]) => {
         const dest = safeJoin(dir, rel);
-        const bytes = await this.blob.get(workspaceContractObjectKey(ref.workspaceOrgId, kind, sha));
-        if (!bytes) {
+        const body = await this.content.get(scope, sha);
+        if (body == null) {
           throw new Error(`[ee-data-store] missing workspace object ${sha} for ${rel} (${ref.workspaceOrgId})`);
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true });
-        await fsp.writeFile(dest, bytes);
+        await fsp.writeFile(dest, body);
       });
       ok = true;
       return {
@@ -310,8 +298,7 @@ export class PgBlobContractStore implements ContractStore {
     const manifest = await this.workspaceManifest(ref.workspaceOrgId, kind);
     const sha = manifest?.files?.[relPath]; // unknown/traversal path ⇒ no sha ⇒ null
     if (!sha) return null;
-    const bytes = await this.blob.get(workspaceContractObjectKey(ref.workspaceOrgId, kind, sha));
-    return bytes ? bytes.toString('utf-8') : null;
+    return this.content.get(contentScope.workspaceContract(ref.workspaceOrgId), sha);
   }
 
   private async workspaceManifest(org: string, kind: ContractKind): Promise<Manifest | null> {

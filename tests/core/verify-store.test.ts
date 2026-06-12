@@ -7,6 +7,8 @@ import {
   clearVerifyLatestCache,
   readVerifyLatest,
   readVerifyDiff,
+  writeVerifyDiff,
+  deleteVerifyDiff,
   readVerifyHistory,
   listVerifyRuns,
   verifyLatestPath,
@@ -15,7 +17,7 @@ import {
   appendVerifyHistory,
   deleteVerifyRun,
 } from '../../packages/core/src/lib/verify-store';
-import type { VerifyRunSnapshot } from '../../packages/core/src/types/verify-snapshot';
+import type { VerifyRunSnapshot, VerifyDiff } from '../../packages/core/src/types/verify-snapshot';
 import { diffDrifts, driftKey } from '../../packages/core/src/types/verify-snapshot';
 import {
   verifyInProcess,
@@ -59,6 +61,57 @@ function drift(identity: string, obligationKey: string): ContractDrift {
   };
 }
 
+function makeDiff(added: ContractDrift[], resolved: ContractDrift[]): VerifyDiff {
+  return {
+    id: 'd1',
+    baseRunId: 'base',
+    verifiedAt: '2026-01-01T00:00:00.000Z',
+    branch: 'feature',
+    commitHash: 'abc123',
+    added,
+    resolved,
+    unchangedCount: 0,
+    changedFiles: [{ path: 'src/a.ts', status: 'modified' }],
+    summary: { added: added.length, resolved: resolved.length, unchanged: 0 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Scoped diff slots — EE keys a diff per PR (`pr-<N>`) alongside the default
+// working-tree diff; the file store mirrors this with `diff-<scope>.json`.
+// ---------------------------------------------------------------------------
+
+describe('verify diff scope (per-PR slot)', () => {
+  it('round-trips a scoped diff independently of the default slot', async () => {
+    const prDiff = makeDiff([drift('GET /a', 'k1')], []);
+    await writeVerifyDiff(repo, prDiff, 'pr-7');
+
+    expect(await readVerifyDiff(repo, 'pr-7')).toEqual(prDiff);
+    // A different scope and the default (unscoped) slot are untouched.
+    expect(await readVerifyDiff(repo, 'pr-8')).toBeNull();
+    expect(await readVerifyDiff(repo)).toBeNull();
+  });
+
+  it('keeps the default diff and a PR diff in separate slots', async () => {
+    const mainDiff = makeDiff([], [drift('GET /b', 'k2')]);
+    const prDiff = makeDiff([drift('GET /c', 'k3')], []);
+    await writeVerifyDiff(repo, mainDiff);
+    await writeVerifyDiff(repo, prDiff, 'pr-12');
+
+    expect(await readVerifyDiff(repo)).toEqual(mainDiff);
+    expect(await readVerifyDiff(repo, 'pr-12')).toEqual(prDiff);
+  });
+
+  it('deleteVerifyDiff(scope) removes only that PR slot', async () => {
+    await writeVerifyDiff(repo, makeDiff([], []), 'pr-7');
+    await writeVerifyDiff(repo, makeDiff([], []), 'pr-8');
+    await deleteVerifyDiff(repo, 'pr-7');
+
+    expect(await readVerifyDiff(repo, 'pr-7')).toBeNull();
+    expect(await readVerifyDiff(repo, 'pr-8')).not.toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Pure diff — matched by obligation key, stable across regenerated ids
 // ---------------------------------------------------------------------------
@@ -89,6 +142,93 @@ describe('diffDrifts', () => {
     const { added, unchangedCount } = diffDrifts([], current);
     expect(added).toHaveLength(1);
     expect(unchangedCount).toBe(0);
+  });
+
+  it('counts unchanged by UNIQUE key — two current drifts on one baseline key count once', () => {
+    // Two current drifts collapse to the same key as one baseline drift.
+    // unchangedCount must be key-deduped (1), consistent with added/resolved
+    // — not 2 (the raw-current-drift count that caused the "44 vs 43" bug).
+    const baseline = [drift('GET /a', 'k1')];
+    const current = [drift('GET /a', 'k1'), drift('GET /a', 'k1')];
+    const { added, resolved, unchangedCount } = diffDrifts(baseline, current);
+    expect(added).toEqual([]);
+    expect(resolved).toEqual([]);
+    expect(unchangedCount).toBe(1);
+  });
+
+  it('occurrence-level: same artifact+obligation, different enclosingSymbol ⇒ distinct keys', () => {
+    // A per-query drift attributed to `ordersRepo.list` and a second one to
+    // `ordersRepo.recentlyTouched` share artifactRef + obligationKey but sit
+    // at different code sites. They must NOT collapse: the head-only one is
+    // `added`, and the matching-symbol one stays `unchanged`.
+    const listDrift = (): ContractDrift => ({
+      ...drift('QueryRule', 'query.predicate.forbidden-present.deletedAt.is-null'),
+      enclosingSymbol: 'ordersRepo.list',
+      occurrenceIndex: 0,
+    });
+    const recentDrift = (): ContractDrift => ({
+      ...drift('QueryRule', 'query.predicate.forbidden-present.deletedAt.is-null'),
+      enclosingSymbol: 'ordersRepo.recentlyTouched',
+      occurrenceIndex: 0,
+    });
+
+    // Distinct driftKeys despite identical artifact + obligation.
+    expect(driftKey(listDrift())).not.toBe(driftKey(recentDrift()));
+
+    // Baseline has only `list`; current adds `recentlyTouched` at a new site.
+    const baseline = [listDrift()];
+    const current = [listDrift(), recentDrift()];
+    const { added, resolved, unchangedCount } = diffDrifts(baseline, current);
+    expect(added.map((d) => d.enclosingSymbol)).toEqual(['ordersRepo.recentlyTouched']);
+    expect(resolved).toEqual([]);
+    expect(unchangedCount).toBe(1); // the `list` site is unchanged
+  });
+
+  it('occurrence-level: same symbol + index ⇒ same key ⇒ unchanged', () => {
+    const make = (): ContractDrift => ({
+      ...drift('QueryRule', 'query.predicate.forbidden-present.deletedAt.is-null'),
+      enclosingSymbol: 'ordersRepo.list',
+      occurrenceIndex: 0,
+    });
+    expect(driftKey(make())).toBe(driftKey(make()));
+    const { added, resolved, unchangedCount } = diffDrifts([make()], [make()]);
+    expect(added).toEqual([]);
+    expect(resolved).toEqual([]);
+    expect(unchangedCount).toBe(1);
+  });
+
+  it('occurrence-level: same symbol, different occurrenceIndex ⇒ distinct keys', () => {
+    // Two violations of the SAME obligation INSIDE THE SAME enclosing symbol
+    // (e.g. two offending `.filter()` calls in one repo method). The symbol
+    // alone can't separate them; `occurrenceIndex` does. Adding a second
+    // occurrence in the same symbol must show up as `added`, not collapse.
+    const occ = (occurrenceIndex: number): ContractDrift => ({
+      ...drift('QueryRule', 'query.predicate.forbidden-present.deletedAt.is-null'),
+      enclosingSymbol: 'ordersRepo.list',
+      occurrenceIndex,
+    });
+    expect(driftKey(occ(0))).not.toBe(driftKey(occ(1)));
+
+    const baseline = [occ(0)];
+    const current = [occ(0), occ(1)];
+    const { added, resolved, unchangedCount } = diffDrifts(baseline, current);
+    expect(added.map((d) => d.occurrenceIndex)).toEqual([1]);
+    expect(resolved).toEqual([]);
+    expect(unchangedCount).toBe(1); // the #0 occurrence is unchanged
+  });
+
+  it('occurrence-level: no enclosingSymbol ⇒ obligation-level key (index ignored)', () => {
+    // A site-bearing kind that resolved to no enclosing function (top-level
+    // forbidden import) stays obligation-level: the key omits the `@ …`
+    // anchor entirely, so a stray occurrenceIndex never leaks into it.
+    const bare = (): ContractDrift =>
+      drift('QueryRule', 'query.predicate.forbidden-present.deletedAt.is-null');
+    // The `drift()` helper builds `Operation:<identity> / <obligationKey>`;
+    // with no enclosingSymbol the key carries no site anchor.
+    expect(driftKey(bare())).toBe(
+      'Operation:QueryRule / query.predicate.forbidden-present.deletedAt.is-null',
+    );
+    expect(driftKey(bare())).not.toContain('@');
   });
 });
 

@@ -42,14 +42,14 @@ export interface ArchitectureDecisionCompareInput {
 }
 
 export function compareArchitectureDecision(input: ArchitectureDecisionCompareInput): ContractDrift[] {
-  const { ref, contract, detected, codeDir } = input;
+  const { ref, origin, contract, detected, codeDir } = input;
   const { category, chosen, reason } = contract;
   const why = reason ? ` Rationale: ${reason}` : '';
 
   // Inconclusive — no signal either way. Info, never a false positive.
   if (detected.confidence === 'inconclusive') {
     return [
-      mk(ref, `architecture.${category}.inconclusive`, 'info', codeDir, 0,
+      mk(ref, origin, `architecture.${category}.inconclusive`, 'info', codeDir, 0,
         `Spec asserts ${category} = \`${chosen}\`, but no ${category} signals were found in the code — the claim is not testable from current signals.${why}`,
         `${category}: ${chosen}`, '<no signals>'),
     ];
@@ -65,7 +65,7 @@ export function compareArchitectureDecision(input: ArchitectureDecisionCompareIn
         ? detected.observed.map((o) => o.value).join(', ')
         : 'nothing';
     drifts.push(
-      mk(ref, `architecture.${category}.unmet-choice`, 'critical', codeDir, 0,
+      mk(ref, origin, `architecture.${category}.unmet-choice`, 'critical', codeDir, 0,
         `Spec asserts ${category} = \`${chosen}\`, but it was not detected in the code (observed: ${observedDesc}).${why}`,
         `${category}: ${chosen}`, observedDesc),
     );
@@ -78,7 +78,7 @@ export function compareArchitectureDecision(input: ArchitectureDecisionCompareIn
     if (o.signals.length === 0) continue; // absence sentinel, not an alternative
     const sig = o.signals[0];
     drifts.push(
-      mk(ref, `architecture.${category}.forbidden-alternative`, 'critical', sig.source.filePath, sig.source.lineStart,
+      mk(ref, origin, `architecture.${category}.forbidden-alternative`, 'critical', sig.source.filePath, sig.source.lineStart,
         `Spec asserts ${category} = \`${chosen}\`, but \`${o.value}\` is also in use (${sig.detail})${rejected.has(o.value) ? ' — explicitly rejected by the spec' : ''}.${why}`,
         `${category}: ${chosen}`, `${o.value} (${sig.detail})`),
     );
@@ -89,6 +89,7 @@ export function compareArchitectureDecision(input: ArchitectureDecisionCompareIn
 
 function mk(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   obligationKey: string,
   severity: Severity,
   filePath: string,
@@ -109,6 +110,7 @@ function mk(
     message,
     specSide,
     codeSide,
+    specOrigin: origin ?? undefined,
   };
 }
 

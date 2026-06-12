@@ -8,6 +8,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { log } from '@truecourse/core/lib/logger';
+import {
+  enrichDrifts,
+  type EnrichedDrift,
+} from '@truecourse/core/lib/drift-enrichment';
 import type { GateStore } from './store/types.js';
 import type { GithubAuth } from './github.js';
 import type { PullRequestPayload } from './webhook.js';
@@ -19,8 +23,11 @@ import {
   findComment,
   createComment,
   updateComment,
+  listPrFiles,
+  listOpenPrs,
   type OctokitClient,
 } from './octokit.js';
+import { detectSpecDocChanges } from './spec-detect.js';
 import { decideGate, type GateSeverity } from './gate.js';
 import {
   GATE_MARKER,
@@ -68,6 +75,7 @@ export interface GateHandlerDeps {
 export async function handlePullRequestGate(
   deps: GateHandlerDeps,
   payload: PullRequestPayload,
+  opts: { force?: boolean } = {},
 ): Promise<void> {
   if (!GATE_ACTIONS.includes(payload.action)) return;
   if (!payload.installation) return;
@@ -83,14 +91,24 @@ export async function handlePullRequestGate(
   const baseBranch = payload.pull_request.base.ref || link.defaultBranch;
 
   // Idempotency: skip a head sha we already gated (webhook redelivery), and
-  // guard concurrent deliveries of the same sha.
+  // guard concurrent deliveries of the same sha. `force` (a post-resolution
+  // re-verify) intentionally re-gates the SAME head against the now-regenerated
+  // contracts, so it bypasses the redelivery skip — the concurrent guard stays.
   const flightKey = `${repoFullName}#${eventHeadSha}`;
   if (deps.gateInFlight?.has(flightKey)) return;
-  const priorRuns = await deps.store.listRuns(repoFullName, 50);
-  if (priorRuns.some((r) => r.headSha === eventHeadSha)) return;
+  if (!opts.force) {
+    const priorRuns = await deps.store.listRuns(repoFullName, 50);
+    if (priorRuns.some((r) => r.headSha === eventHeadSha)) return;
+  }
   deps.gateInFlight?.add(flightKey);
 
   try {
+    // Did the PR touch any spec docs? If not, the gate verifies the head's code
+    // against the base's resolved contracts (no re-scan). If so, it scans the
+    // head for its own contracts (the cold path).
+    const specChanged =
+      detectSpecDocChanges(await listPrFiles(octokit, coords, prNumber)).length > 0;
+
     const runVerify = deps.runVerify ?? runGateVerify;
     let output: GateVerifyOutput;
     try {
@@ -104,11 +122,13 @@ export async function handlePullRequestGate(
           defaultBranch: link.defaultBranch,
           // The repo's linked workspace → verify against EFFECTIVE contracts.
           workspaceOrgId: link.workspaceOrgId,
+          specChanged,
         },
       );
     } catch (err) {
       log.error(
         `[github-app] gate verify failed for ${repoFullName} PR#${prNumber}: ${(err as Error).message}`,
+        err,
       );
       await postCheck(octokit, coords, GATE_CHECK_NAME, eventHeadSha, 'neutral', {
         title: 'TrueCourse drift gate error',
@@ -156,8 +176,12 @@ export async function handlePullRequestGate(
       });
       recorded = true;
     } catch (e) {
-      log.error(`[github-app] recordRun failed: ${(e as Error).message}`);
+      log.error(`[github-app] recordRun failed: ${(e as Error).message}`, e);
     }
+
+    // No PR-diff write: the transient verify already stored the PR head's
+    // per-commit snapshot (verify_snapshots), and the dashboard derives the diff
+    // against the baseline snapshot on read — nothing diff-specific is persisted.
 
     // Email — only once the run is recorded, so a webhook redelivery (deduped by
     // the recorded head sha) can't re-send. A blocking failure notifies of the
@@ -187,9 +211,25 @@ export async function handlePullRequestGate(
       }
     }
 
+    // Best-effort LLM enrichment of the new drifts into human-readable prose for
+    // the cosmetic surfaces. On-demand + cached; degrades to structured rendering
+    // when no transport is configured or a call fails. Wrapped so it can NEVER
+    // downgrade or block the Check (already posted above) — an empty map just
+    // renders the structured snippets, exactly as before.
+    let enriched: Map<string, EnrichedDrift> = new Map();
+    if (decision.added.length > 0) {
+      try {
+        enriched = await enrichDrifts(decision.added);
+      } catch (err) {
+        log.warn(
+          `[github-app] drift enrichment failed for ${repoFullName} PR#${prNumber}: ${(err as Error).message}`,
+        );
+      }
+    }
+
     // Cosmetic surfaces — isolated so failures never affect the Check.
     try {
-      const body = renderGateComment(decision, { conflictsUrl });
+      const body = renderGateComment(decision, { conflictsUrl, enriched });
       const existing = await findComment(octokit, coords, prNumber, GATE_MARKER);
       if (existing) await updateComment(octokit, coords, existing.id, body);
       else await createComment(octokit, coords, prNumber, body);
@@ -207,7 +247,7 @@ export async function handlePullRequestGate(
               commitId: headSha,
               path: d.filePath,
               line: d.lineStart,
-              body: inlineDriftBody(d),
+              body: inlineDriftBody(d, enriched),
             });
           } catch (e) {
             const status = (e as { status?: number }).status;
@@ -224,9 +264,67 @@ export async function handlePullRequestGate(
     } catch (err) {
       log.error(
         `[github-app] gate post-processing failed for ${repoFullName} PR#${prNumber}: ${(err as Error).message}`,
+        err,
       );
     }
   } finally {
     deps.gateInFlight?.delete(flightKey);
   }
+}
+
+/**
+ * Re-verify every OPEN PR for a repo against its CURRENT contracts. Called after
+ * a dashboard conflict-resolution + contract regeneration (the repo.contracts
+ * job): the head's contracts changed, so each open PR's gate verdict may have too
+ * — a PR that was paused on `unresolved-conflicts` now gets a real verdict. Each
+ * PR re-gates with `force` (the head was gated before) so the verdict + comment
+ * refresh WITHOUT waiting for a new push. Per-PR failures are isolated.
+ */
+export async function reverifyOpenPrs(
+  deps: GateHandlerDeps,
+  repoFullName: string,
+): Promise<void> {
+  const link = await deps.store.getRepo(repoFullName);
+  if (!link || !link.enabled) return;
+  const coords = splitRepo(repoFullName);
+  const octokit = deps.octokitFor(link.installationId);
+  const prs = await listOpenPrs(octokit, coords);
+  for (const pr of prs) {
+    const payload: PullRequestPayload = {
+      action: 'synchronize',
+      number: pr.number,
+      pull_request: {
+        head: {
+          sha: pr.headSha,
+          ref: pr.headRef,
+          repo: pr.headRepoFullName
+            ? { full_name: pr.headRepoFullName, fork: pr.headRepoIsFork }
+            : null,
+        },
+        base: { sha: pr.baseSha, ref: pr.baseRef },
+      },
+      repository: { full_name: repoFullName, default_branch: link.defaultBranch },
+      installation: { id: link.installationId },
+    };
+    await handlePullRequestGate(deps, payload, { force: true }).catch((err) =>
+      log.error(
+        `[github-app] re-verify failed for ${repoFullName} PR#${pr.number}: ${(err as Error).message}`,
+        err,
+      ),
+    );
+  }
+}
+
+// Settable seam so the EE jobs layer can trigger a PR re-verify after the
+// repo.contracts job regenerates contracts, without ee-server reaching into the
+// gate's deps. `registerGithubApp` sets it (closing over the gate deps); the jobs
+// layer reads it. Null when the GitHub App isn't configured → a no-op.
+let prReverifier: ((repoFullName: string) => Promise<void>) | null = null;
+export function setPrReverifier(
+  fn: ((repoFullName: string) => Promise<void>) | null,
+): void {
+  prReverifier = fn;
+}
+export function getPrReverifier(): ((repoFullName: string) => Promise<void>) | null {
+  return prReverifier;
 }

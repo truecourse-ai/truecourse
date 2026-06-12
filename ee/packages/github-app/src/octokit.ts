@@ -175,6 +175,39 @@ export async function createReviewComment(
   });
 }
 
+/** Open PRs targeting this repo, with the fields the gate needs to re-verify. */
+export async function listOpenPrs(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+): Promise<
+  Array<{
+    number: number;
+    headSha: string;
+    headRef: string;
+    /** Head repo full name; null/differs from base on a fork PR. */
+    headRepoFullName: string | null;
+    headRepoIsFork: boolean;
+    baseSha: string;
+    baseRef: string;
+  }>
+> {
+  const prs = await octokit.paginate(octokit.pulls.list, {
+    owner,
+    repo,
+    state: 'open',
+    per_page: 100,
+  });
+  return prs.map((p) => ({
+    number: p.number,
+    headSha: p.head.sha,
+    headRef: p.head.ref,
+    headRepoFullName: p.head.repo?.full_name ?? null,
+    headRepoIsFork: p.head.repo?.fork ?? false,
+    baseSha: p.base.sha,
+    baseRef: p.base.ref,
+  }));
+}
+
 export async function getPullRequest(
   octokit: Octokit,
   { owner, repo }: RepoCoords,

@@ -421,9 +421,12 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     const repos = await deps.store.listReposForWorkspace(orgId);
     const all: WorkspaceRunItem[] = [];
     for (const repo of repos) {
+      // The registered slug (lossy slugify with collision suffixes), so the feed
+      // can deep-link each run to /repos/:slug?pr=N. Resolved once per repo.
+      const slug = (await getProjectByPath(repo.repoFullName))?.slug ?? null;
       const runs = await deps.store.listRuns(repo.repoFullName, limit);
       for (const r of runs) {
-        all.push({ ...toRunSummary(r), repoFullName: repo.repoFullName });
+        all.push({ ...toRunSummary(r), repoFullName: repo.repoFullName, slug });
       }
     }
     all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

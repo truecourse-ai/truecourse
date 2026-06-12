@@ -4,11 +4,18 @@
  * (no checkbox), so this is a plain status comment kept fresh each run.
  */
 
+import {
+  driftContentKey,
+  type EnrichedDrift,
+} from '@truecourse/core/lib/drift-enrichment';
 import type { GateDrift } from './store/types.js';
 import type { GateDecision } from './gate.js';
 
 export const GATE_MARKER = '<!-- truecourse-gate:result -->';
 export const GATE_CHECK_NAME = 'TrueCourse / drift';
+
+/** Readable prose for the drifts in a decision, keyed by `driftContentKey`. */
+export type DriftEnrichmentMap = Map<string, EnrichedDrift>;
 
 export function isGateComment(body: string | undefined | null): boolean {
   return !!body && body.includes(GATE_MARKER);
@@ -18,8 +25,16 @@ function loc(d: GateDrift): string {
   return `${d.filePath}:${d.lineStart}`;
 }
 
-function driftLine(d: GateDrift): string {
-  return `- **${d.severity}** ${d.message} — \`${loc(d)}\``;
+/**
+ * One summary bullet per drift. When enriched prose is available for the drift
+ * (matched by its content key) the human-facing text is the readable summary;
+ * otherwise it's the structured `message`. The structured `message` stays the
+ * AI/query anchor and is never dropped from the underlying decision.
+ */
+function driftLine(d: GateDrift, enriched?: DriftEnrichmentMap): string {
+  const e = enriched?.get(driftContentKey(d));
+  const text = e ? e.summary : d.message;
+  return `- **${d.severity}** ${text} — \`${loc(d)}\``;
 }
 
 function resolvedNote(d: GateDecision): string {
@@ -36,7 +51,7 @@ function belowNote(d: GateDecision): string {
 
 export function renderGateComment(
   decision: GateDecision,
-  opts: { conflictsUrl?: string } = {},
+  opts: { conflictsUrl?: string; enriched?: DriftEnrichmentMap } = {},
 ): string {
   const head = GATE_MARKER + '\n';
 
@@ -81,7 +96,7 @@ export function renderGateComment(
     );
   }
 
-  const list = decision.added.map(driftLine).join('\n');
+  const list = decision.added.map((d) => driftLine(d, opts.enriched)).join('\n');
   const n = decision.added.length;
   const advisory = decision.conclusion === 'neutral';
   const title = advisory
@@ -127,13 +142,26 @@ export function gateCheckOutput(decision: GateDecision): {
   }
   const n = decision.added.length;
   return {
+    // The Check is authoritative + deterministic — always structured, never enriched.
     title: `${n} new contract drift${n === 1 ? '' : 's'}`,
-    summary: decision.added.map(driftLine).join('\n'),
+    summary: decision.added.map((d) => driftLine(d)).join('\n'),
   };
 }
 
-/** Body for a single inline review comment on a drift's line. */
-export function inlineDriftBody(d: GateDrift): string {
+/**
+ * Body for a single inline review comment on a drift's line. When enriched prose
+ * is available (matched by content key) the spec/code lines read as plain prose
+ * and a one-line summary leads; otherwise the structured `specSide`/`codeSide`
+ * snippets are shown. The terse `message` always leads as the AI/query anchor.
+ */
+export function inlineDriftBody(d: GateDrift, enriched?: DriftEnrichmentMap): string {
+  const e = enriched?.get(driftContentKey(d));
+  if (e) {
+    const summary = `\n\n${e.summary}`;
+    const spec = `\n\n**Spec expectation:** ${e.specReadable}`;
+    const code = `\n\n**Code observation:** ${e.codeReadable}`;
+    return `**TrueCourse drift (${d.severity}):** ${d.message}${summary}${spec}${code}`;
+  }
   const spec = d.specSide ? `\n\n**Spec:** ${d.specSide}` : '';
   const code = d.codeSide ? `\n\n**Code:** ${d.codeSide}` : '';
   return `**TrueCourse drift (${d.severity}):** ${d.message}${spec}${code}`;

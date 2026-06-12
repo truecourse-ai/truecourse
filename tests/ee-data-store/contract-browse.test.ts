@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobContractStore } from '@truecourse/ee-data-store';
+import { PgContractStore } from '@truecourse/ee-data-store';
 import {
   listContractFiles,
   readContractFile,
@@ -68,7 +68,7 @@ describe('contract browse — EE impl (latest stored set, content-addressed)', (
     const db = drizzle(client, { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-browse-blob-'));
-    setContractStore(new PgBlobContractStore(db as unknown as EeDb, new FsBlobStore(blobDir)));
+    setContractStore(new PgContractStore(db as unknown as EeDb, new FsBlobStore(blobDir)));
     srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-browse-src-'));
   });
   afterEach(async () => {

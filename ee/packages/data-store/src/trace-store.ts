@@ -1,9 +1,9 @@
 /**
- * Postgres + Blob implementation of the LLM trace store (enterprise
- * observability). Metadata rows go to `llm_traces`; the heavy prompt/output/
- * reasoning payloads go to the BlobStore, content-addressed by sha256 (an
- * identical prompt across calls — the duplicate-variant case — is stored once,
- * and the rows share its `prompt_blob_key`/`prompt_hash`, which is exactly what
+ * Postgres implementation of the LLM trace store (enterprise observability).
+ * Metadata rows go to `llm_traces`; the heavy prompt/output/reasoning payloads
+ * are content-addressed in `content` (scope = `trace:<org>`), referenced by sha
+ * (an identical prompt across calls — the duplicate-variant case — is stored
+ * once, and the rows share its `prompt_sha`/`prompt_hash`, which is exactly what
  * the same-prompt→divergent-output view groups on).
  *
  * `record` implements `LlmTraceRecorder` (the sink the EE transport writes to).
@@ -15,7 +15,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import { llmTraces, type EeDb } from '@truecourse/ee-db';
-import type { BlobStore } from '@truecourse/ee-storage';
 import type {
   LlmTraceInput,
   LlmTraceRecorder,
@@ -26,11 +25,11 @@ import type {
 } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import { sha256 } from './pack.js';
-import { traceObjectKey, traceObjectPrefix } from './keys.js';
+import { ContentStore, contentScope } from './content-store.js';
 
 type TraceRow = typeof llmTraces.$inferSelect;
 
-/** Org bucket for blob keys — a null-org (context-less) call lands under `_`. */
+/** Org bucket for content scope — a null-org (context-less) call lands under `_`. */
 function orgBucket(org: string | null): string {
   return org ?? '_';
 }
@@ -59,29 +58,24 @@ function toSummary(r: TraceRow): TraceSummary {
   };
 }
 
-export class PgBlobTraceStore implements LlmTraceRecorder {
-  /** Per-instance memo of blob keys known to exist (skip redundant `exists` probes). */
-  private readonly known = new Set<string>();
+export class PgTraceStore implements LlmTraceRecorder {
+  private readonly content: ContentStore;
 
-  constructor(
-    private readonly db: EeDb,
-    private readonly blob: BlobStore,
-  ) {}
+  constructor(private readonly db: EeDb) {
+    this.content = new ContentStore(db);
+  }
 
   async record(input: LlmTraceInput): Promise<void> {
-    const org = orgBucket(input.workspaceOrgId);
+    const scope = contentScope.trace(orgBucket(input.workspaceOrgId));
 
-    // Prompt → one content-addressed JSON blob; its sha doubles as the prompt hash.
-    const promptBytes = Buffer.from(
-      JSON.stringify({ system: input.system, user: input.user }),
-      'utf-8',
-    );
-    const promptHash = sha256(promptBytes);
-    const promptBlobKey = traceObjectKey(org, promptHash);
-    await this.putIfAbsent(promptBlobKey, promptBytes, 'application/json');
+    // Prompt → one content-addressed JSON body; its sha doubles as the prompt hash.
+    const promptBody = JSON.stringify({ system: input.system, user: input.user });
+    const promptHash = sha256(Buffer.from(promptBody, 'utf-8'));
+    await this.content.put(scope, promptHash, promptBody);
 
-    const outputBlobKey = await this.putText(org, input.output);
-    const reasoningBlobKey = await this.putText(org, input.reasoning);
+    const outputSha = input.output == null ? null : await this.content.putText(scope, input.output);
+    const reasoningSha =
+      input.reasoning == null ? null : await this.content.putText(scope, input.reasoning);
 
     await this.db.insert(llmTraces).values({
       id: randomUUID(),
@@ -104,16 +98,16 @@ export class PgBlobTraceStore implements LlmTraceRecorder {
       totalTokens: input.totalTokens,
       reasoningTokens: input.reasoningTokens,
       latencyMs: input.latencyMs,
-      promptBlobKey,
-      outputBlobKey,
-      reasoningBlobKey,
+      promptSha: promptHash,
+      outputSha,
+      reasoningSha,
       metadata: input.metadata,
       createdAt: new Date().toISOString(),
     });
   }
 
   /**
-   * Newest-first metadata page (no payloads — those stay in the blob). `org` is
+   * Newest-first metadata page (no payloads — those stay in `content`). `org` is
    * an OPTIONAL filter: omit it (operator only) for a cross-org read; set it to
    * scope to one tenant.
    */
@@ -153,27 +147,28 @@ export class PgBlobTraceStore implements LlmTraceRecorder {
       .sort();
   }
 
-  /** One trace with its payloads hydrated from the blob. `org`, if set, scopes it. */
+  /** One trace with its payloads hydrated from `content`. `org`, if set, scopes it. */
   async get(id: string, org?: string): Promise<TraceDetail | null> {
     const conds = [eq(llmTraces.id, id)];
     if (org) conds.push(eq(llmTraces.workspaceOrgId, org));
     const [row] = await this.db.select().from(llmTraces).where(and(...conds)).limit(1);
     if (!row) return null;
 
+    const scope = contentScope.trace(orgBucket(row.workspaceOrgId));
     let system: string | null = null;
     let user: string | null = null;
-    const promptBytes = await this.blob.get(row.promptBlobKey);
-    if (promptBytes) {
+    const promptBody = await this.content.get(scope, row.promptSha);
+    if (promptBody) {
       try {
-        const p = JSON.parse(promptBytes.toString('utf-8')) as { system?: string; user?: string };
+        const p = JSON.parse(promptBody) as { system?: string; user?: string };
         system = p.system ?? null;
         user = p.user ?? null;
       } catch {
-        // A non-JSON prompt blob (shouldn't happen) — leave the fields null.
+        // A non-JSON prompt body (shouldn't happen) — leave the fields null.
       }
     }
-    const output = await this.getText(row.outputBlobKey);
-    const reasoning = await this.getText(row.reasoningBlobKey);
+    const output = row.outputSha ? await this.content.get(scope, row.outputSha) : null;
+    const reasoning = row.reasoningSha ? await this.content.get(scope, row.reasoningSha) : null;
 
     return {
       ...toSummary(row),
@@ -219,7 +214,7 @@ export class PgBlobTraceStore implements LlmTraceRecorder {
 
   /**
    * Retention: delete rows older than `olderThanDays` and/or beyond `maxRows`
-   * (keeping the newest), then mark-sweep now-orphaned blob objects for the org.
+   * (keeping the newest), then mark-sweep now-orphaned content objects for the org.
    */
   async gc(input: { org: string; olderThanDays?: number; maxRows?: number }): Promise<{
     deletedRows: number;
@@ -256,57 +251,26 @@ export class PgBlobTraceStore implements LlmTraceRecorder {
       }
     }
 
-    // mark: every blob key any surviving row still points at.
+    // mark: every content sha any surviving row still points at.
     const live = new Set<string>();
     const rows = await this.db
       .select({
-        p: llmTraces.promptBlobKey,
-        o: llmTraces.outputBlobKey,
-        r: llmTraces.reasoningBlobKey,
+        p: llmTraces.promptSha,
+        o: llmTraces.outputSha,
+        r: llmTraces.reasoningSha,
       })
       .from(llmTraces)
       .where(eq(llmTraces.workspaceOrgId, org));
     for (const row of rows) {
-      for (const k of [row.p, row.o, row.r]) if (k) live.add(k);
+      for (const s of [row.p, row.o, row.r]) if (s) live.add(s);
     }
 
-    // sweep: delete org objects no surviving row references.
-    const keys = await this.blob.list(traceObjectPrefix(orgBucket(org)));
-    let deletedObjects = 0;
-    for (const key of keys) {
-      if (live.has(key)) continue;
-      await this.blob.delete(key);
-      this.known.delete(key);
-      deletedObjects += 1;
-    }
+    // sweep: delete org content objects no surviving row references.
+    const deletedObjects = await this.content.gc(contentScope.trace(orgBucket(org)), live);
 
     if (deletedRows > 0 || deletedObjects > 0) {
       log.info(`[ee-data-store] trace gc (org ${org}): ${deletedRows} rows, ${deletedObjects} objects`);
     }
     return { deletedRows, deletedObjects };
-  }
-
-  private async putText(org: string, text: string | null): Promise<string | null> {
-    if (text == null) return null;
-    const bytes = Buffer.from(text, 'utf-8');
-    const key = traceObjectKey(org, sha256(bytes));
-    await this.putIfAbsent(key, bytes, 'text/plain');
-    return key;
-  }
-
-  private async getText(key: string | null): Promise<string | null> {
-    if (!key) return null;
-    const bytes = await this.blob.get(key);
-    return bytes ? bytes.toString('utf-8') : null;
-  }
-
-  private async putIfAbsent(key: string, bytes: Buffer, contentType: string): Promise<void> {
-    if (this.known.has(key)) return;
-    if (await this.blob.exists(key)) {
-      this.known.add(key);
-      return;
-    }
-    await this.blob.put(key, bytes, { contentType });
-    this.known.add(key);
   }
 }

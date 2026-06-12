@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
-import { PgSpecStore, PgKvCacheStore, PgBlobContractStore } from '../../ee/packages/data-store/src/index';
+import { PgSpecStore, PgKvCacheStore, PgContractStore } from '../../ee/packages/data-store/src/index';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
 import { setSpecStore, resetSpecStore, loadLatestSpec } from '../../packages/core/src/lib/spec-store.js';
 import {
@@ -118,7 +118,7 @@ describe('hosted repo conflict resolution — body-free re-merge (no working tre
     const db = await makeDb(client);
     blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-repo-remerge-blob-'));
     setSpecStore(new PgSpecStore(db)); // hosted store → specsMaterializeInPlace() is false
-    setContractStore(new PgBlobContractStore(db, new FsBlobStore(blobDir)));
+    setContractStore(new PgContractStore(db, new FsBlobStore(blobDir)));
     setKvCacheStore(new PgKvCacheStore(db));
     repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-repo-remerge-'));
     fs.mkdirSync(path.join(repoDir, 'docs'), { recursive: true });

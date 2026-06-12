@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobContractStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgContractStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
 import { verifyInProcess } from '../../packages/core/src/commands/spec-in-process.js';
 import {
   setContractStore,
@@ -53,7 +53,7 @@ describe('effective contracts at verify (workspace ∪ repo, repo wins)', () => 
     // An empty (route-less) code tree — a touch file so the walker has something.
     fs.writeFileSync(path.join(codeDir, 'index.ts'), 'export const x = 1;\n');
     const db = await makeDb(client);
-    setContractStore(new PgBlobContractStore(db, new FsBlobStore(blobDir)));
+    setContractStore(new PgContractStore(db, new FsBlobStore(blobDir)));
     // verifyInProcess persists the per-commit `verifyState` via the spec store;
     // install the Postgres one so it lands in the DB (not an `acme/api/.truecourse`
     // tree relative to cwd) — the gate always runs with the EE stores installed.

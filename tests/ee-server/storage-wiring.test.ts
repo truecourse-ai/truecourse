@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDbHandle } from '@truecourse/ee-db';
 import { installEeStores, sweepStaleTempDirs } from '../../ee/packages/server/src/storage';
-import { getAnalysisStore, resetAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { getVerifyStore, resetVerifyStore } from '@truecourse/core/lib/verify-store';
 import { getContractStore, resetContractStore } from '@truecourse/core/lib/contract-store';
 import { getSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
@@ -17,9 +16,8 @@ import { getRegistryStore, resetRegistryStore } from '@truecourse/core/config/re
 import { getAnalyzeLock, resetAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
 import { getKvCacheStore, resetKvCacheStore } from '@truecourse/llm';
 import {
-  PgBlobAnalysisStore,
-  PgBlobVerifyStore,
-  PgBlobContractStore,
+  PgVerifyStore,
+  PgContractStore,
   PgSpecStore,
   PgRepoConfigStore,
   PgUiStateStore,
@@ -35,7 +33,6 @@ const stubLockPool = {
 } as unknown as EeDbHandle['lockPool'];
 
 function resetAll() {
-  resetAnalysisStore();
   resetVerifyStore();
   resetContractStore();
   resetSpecStore();
@@ -66,9 +63,8 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
   });
 
   it('installs every hosted store + the advisory-lock seam', () => {
-    expect(getAnalysisStore()).toBeInstanceOf(PgBlobAnalysisStore);
-    expect(getVerifyStore()).toBeInstanceOf(PgBlobVerifyStore);
-    expect(getContractStore()).toBeInstanceOf(PgBlobContractStore);
+    expect(getVerifyStore()).toBeInstanceOf(PgVerifyStore);
+    expect(getContractStore()).toBeInstanceOf(PgContractStore);
     expect(getSpecStore()).toBeInstanceOf(PgSpecStore);
     expect(getRepoConfigStore()).toBeInstanceOf(PgRepoConfigStore);
     expect(getUiStateStore()).toBeInstanceOf(PgUiStateStore);
@@ -87,7 +83,7 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
 
   it('resetAll restores the OSS file-backed defaults', () => {
     resetAll();
-    expect(getAnalysisStore()).not.toBeInstanceOf(PgBlobAnalysisStore);
+    expect(getVerifyStore()).not.toBeInstanceOf(PgVerifyStore);
     expect(getKvCacheStore()).not.toBeInstanceOf(PgKvCacheStore);
     expect(getAnalyzeLock()).not.toBeInstanceOf(PgAnalyzeLock);
   });

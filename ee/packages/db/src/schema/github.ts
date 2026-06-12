@@ -1,7 +1,7 @@
 /**
- * GitHub App gate tables. `drifts` is loosely typed (`unknown[]`) at this layer
- * so `ee-db` stays a dependency-free leaf; the gate store casts to its
- * `GateDrift[]` domain type at the boundary.
+ * GitHub App gate tables. `gh_baselines` is just the pointer to the repo's
+ * baseline commit — its drifts live in `verify_snapshots[repo_key, commit_sha]`
+ * (the single per-commit snapshot home), not duplicated here.
  */
 
 import {
@@ -38,7 +38,7 @@ export const ghRepos = pgTable('gh_repos', {
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
-  // Per-type email toggles ({ gateFailure, scanOffer, ... }). Loosely typed here
+  // Per-type email toggles ({ gateFailure, inferResult, conflicts }). Loosely typed here
   // (ee-db is a dependency-free leaf); the gate store casts at the boundary.
   // Null = unset → every type on.
   notifications: jsonb('notifications').$type<Record<string, boolean>>(),
@@ -49,7 +49,6 @@ export const ghRepos = pgTable('gh_repos', {
 export const ghBaselines = pgTable('gh_baselines', {
   repoFullName: text('repo_full_name').primaryKey(),
   commitSha: text('commit_sha').notNull(),
-  drifts: jsonb('drifts').$type<unknown[]>(),
   capturedAt: ts('captured_at').notNull(),
 });
 

@@ -6,10 +6,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { eq } from 'drizzle-orm';
-import { schema, MIGRATIONS_DIR, llmTraces, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, llmTraces, content, type EeDb } from '@truecourse/ee-db';
 import type { LlmTraceInput } from '@truecourse/shared';
-import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobTraceStore, keys } from '../../ee/packages/data-store/src/index';
+import { PgTraceStore, contentScope } from '../../ee/packages/data-store/src/index';
 
 async function makeDb(client: PGlite): Promise<EeDb> {
   const db = drizzle(client, { schema });
@@ -47,23 +46,18 @@ function mkInput(over: Partial<LlmTraceInput> = {}): LlmTraceInput {
   };
 }
 
-describe('PgBlobTraceStore (pglite + fs blob)', () => {
+describe('PgTraceStore (pglite + fs blob)', () => {
   let client: PGlite;
-  let blobDir: string;
-  let blob: FsBlobStore;
   let db: EeDb;
-  let store: PgBlobTraceStore;
+  let store: PgTraceStore;
 
   beforeEach(async () => {
     client = new PGlite();
-    blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-blob-'));
-    blob = new FsBlobStore(blobDir);
     db = await makeDb(client);
-    store = new PgBlobTraceStore(db, blob);
+    store = new PgTraceStore(db);
   });
   afterEach(async () => {
     await client.close();
-    fs.rmSync(blobDir, { recursive: true, force: true });
   });
 
   it('round-trips: record → list → get with hydrated payloads', async () => {
@@ -103,7 +97,10 @@ describe('PgBlobTraceStore (pglite + fs blob)', () => {
     expect(byHash).toHaveLength(2);
 
     // identical prompt → one stored object; two distinct outputs → two more.
-    const objs = await blob.list(keys.traceObjectPrefix('org_1'));
+    const objs = await db
+      .select({ sha: content.sha })
+      .from(content)
+      .where(eq(content.scope, contentScope.trace('org_1')));
     expect(objs.length).toBe(3);
 
     const outputs = (await Promise.all(byHash.map((s) => store.get(s.id, 'org_1')))).map(
@@ -172,9 +169,17 @@ describe('PgBlobTraceStore (pglite + fs blob)', () => {
   });
 
   it('gc prunes rows older than the cutoff and sweeps orphaned objects', async () => {
+    const objCount = async (): Promise<number> =>
+      (
+        await db
+          .select({ sha: content.sha })
+          .from(content)
+          .where(eq(content.scope, contentScope.trace('org_1')))
+      ).length;
+
     await store.record(mkInput({ callId: 'a:1', system: 'SYS-A', user: 'U-A', output: 'OUT-A' }));
     await store.record(mkInput({ callId: 'b:1', system: 'SYS-B', user: 'U-B', output: 'OUT-B' }));
-    expect((await blob.list(keys.traceObjectPrefix('org_1'))).length).toBe(4);
+    expect(await objCount()).toBe(4);
 
     // Age the first call into the past, then collect anything older than 30 days.
     await db
@@ -189,6 +194,6 @@ describe('PgBlobTraceStore (pglite + fs blob)', () => {
     const list = await store.list({ org: 'org_1' });
     expect(list).toHaveLength(1);
     expect(list[0]!.callId).toBe('b:1');
-    expect((await blob.list(keys.traceObjectPrefix('org_1'))).length).toBe(2);
+    expect(await objCount()).toBe(2);
   });
 });

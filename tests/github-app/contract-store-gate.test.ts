@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobContractStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgContractStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
 import {
   setContractStore,
   resetContractStore,
@@ -41,7 +41,7 @@ beforeEach(async () => {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-blob-'));
-  setContractStore(new PgBlobContractStore(db as unknown as EeDb, new FsBlobStore(blobDir)));
+  setContractStore(new PgContractStore(db as unknown as EeDb, new FsBlobStore(blobDir)));
   setSpecStore(new PgSpecStore(db as unknown as EeDb));
   fixtureDir = makeFixture();
   checkoutDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-checkout-'));

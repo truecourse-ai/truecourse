@@ -11,7 +11,6 @@ import type { RepoLinkRecord } from './store/types.js';
 /** Every notification type key — for validating/iterating partial updates. */
 export const NOTIFICATION_KEYS: (keyof GithubNotificationPrefs)[] = [
   'gateFailure',
-  'scanOffer',
   'inferResult',
   'conflicts',
 ];

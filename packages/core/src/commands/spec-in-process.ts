@@ -204,6 +204,13 @@ export interface VerifyState {
   drifts: ContractDrift[];
   resolverErrors: string[];
   unresolvedRefs: string[];
+  /**
+   * Commit the drifts were observed at — the baseline commit for the latest
+   * state, the snapshot's commit for a past run. Lets EE deep-link drift sites
+   * to the GitHub blob at the right sha even in the (non-PR) base view. Null
+   * when verify ran outside a git repo.
+   */
+  commitHash?: string | null;
 }
 
 export interface InferInProcessResult {
@@ -255,6 +262,14 @@ export interface SpecInProcessOptions {
     : never;
   /** When true, skip the LLM chain-detection step entirely. */
   disableLlmChainDetection?: boolean;
+  /** When true, skip the LLM chain-recheck step. */
+  disableChainRecheck?: boolean;
+  /** When true, skip the LLM conflict-explanation step. */
+  disableConflictExplanations?: boolean;
+  /** When true, skip the LLM conflict-resolution step (no auto-resolve). */
+  disableConflictResolution?: boolean;
+  /** When true, skip the LLM relevance filter (every doc is in scope). */
+  disableRelevanceFilter?: boolean;
   /** When true, skip git mtime resolution. */
   skipGit?: boolean;
   /**
@@ -445,11 +460,23 @@ export async function scanInProcess(
   tracker?.start('discover');
   const tConsolidateStart = perfNow();
   let result: ConsolidateResult;
+  // A body-having scan into the server-side store (EE: the gate clones a fresh PR
+  // head, which has no decisions.json) must NOT re-open already-resolved conflicts.
+  // The consolidator otherwise falls back to reading decisions from the working
+  // tree; load the repo's decisions from the ACTIVE store (EE: Postgres by repoKey;
+  // OSS: the local file) and inject them, so resolutions hold across the scan —
+  // exactly as the dashboard's body-free remerge does.
+  const priorDecisions = await loadDecisions(options.ref?.repoKey ?? repoRoot);
   try {
     result = await consolidate(repoRoot, {
+      decisions: priorDecisions,
       blockRunner: options.blockRunner,
       chainRunner: options.chainRunner,
       disableLlmChainDetection: options.disableLlmChainDetection,
+      disableChainRecheck: options.disableChainRecheck,
+      disableConflictExplanations: options.disableConflictExplanations,
+      disableConflictResolution: options.disableConflictResolution,
+      disableRelevanceFilter: options.disableRelevanceFilter,
       skipGit: options.skipGit,
       transport: resolveTransport(options),
       models: resolveConsolidateModels(repoRoot),
@@ -1284,6 +1311,7 @@ export async function readVerifyState(repoRoot: string): Promise<VerifyState | n
     drifts: latest.drifts,
     resolverErrors: latest.resolverErrors,
     unresolvedRefs: latest.unresolvedRefs,
+    commitHash: latest.run.commitHash,
   };
 }
 
@@ -1310,6 +1338,7 @@ export async function readVerifyRunState(
     drifts: snap.drifts,
     resolverErrors: snap.resolverErrors,
     unresolvedRefs: snap.unresolvedRefs,
+    commitHash: snap.commitHash,
   };
 }
 
@@ -1342,6 +1371,20 @@ export interface VerifyInProcessOptions {
    * omitted, derived from `repoRoot`'s HEAD; `options.contractsDir` overrides both.
    */
   ref?: RepoRef;
+  /**
+   * Load the CONTRACTS from this ref instead of `ref`. The gate sets it to verify
+   * a PR head's CODE against the BASE's already-resolved contracts when the PR
+   * changes no spec docs — so it never re-scans, while the snapshot still keys by
+   * `ref` (the head). Omitted → contracts come from `ref`.
+   */
+  contractsRef?: RepoRef;
+  /**
+   * Transient verify: record ONLY this commit's per-commit snapshot, and skip the
+   * repo's canonical LATEST/runs/history writes. The EE gate sets it so a PR-head
+   * verify never moves the repo's baseline (the baseline job — non-transient — is
+   * the only writer that does). OSS/local never sets it. Defaults to `false`.
+   */
+  transient?: boolean;
   /** Override the commit SHA when `ref` is omitted. */
   commitOverride?: string;
   /**
@@ -1397,7 +1440,8 @@ async function withContracts<T>(
       repoMat = { dir: options.contractsDir, cleanup: async () => {} };
       recorded = options.contractsDir;
     } else {
-      const ref = options.ref ?? (await repoRef(repoRoot, options.commitOverride));
+      // Contracts come from `contractsRef` when set (gate base-reuse), else `ref`.
+      const ref = options.contractsRef ?? options.ref ?? (await repoRef(repoRoot, options.commitOverride));
       repoMat = await loadContracts(ref, 'contracts');
       recorded = repoMat
         ? contractsMaterializeInPlace()
@@ -1470,6 +1514,21 @@ export async function verifyInProcess(
     `${result.drifts.length} drift${result.drifts.length === 1 ? '' : 's'}`,
   );
 
+  // Stored snapshots must be PORTABLE + repo-relative. The EE gate verifies on an
+  // EPHEMERAL clone (`repoRoot` = a temp dir like /tmp/tc-gate-verify-XXX), so the
+  // verifier's absolute drift paths are meaningless once the clone is deleted —
+  // the dashboard can't render or deep-link them. When persisting by `ref` (EE),
+  // rewrite drift paths to repo-root-relative POSIX form so the dashboard's "Where
+  // in the code" + the GitHub blob deep-link resolve correctly. OSS/local (no ref)
+  // keeps its absolute local paths for the in-app file viewer (unchanged).
+  if (options.ref) {
+    result.drifts = result.drifts.map((d) =>
+      d.filePath && path.isAbsolute(d.filePath)
+        ? { ...d, filePath: path.relative(repoRoot, d.filePath).split(path.sep).join('/') }
+        : d,
+    );
+  }
+
   // Persist mirroring analyze: write a per-run snapshot, materialize LATEST
   // (the diff baseline), append a history summary, and drop any stale diff.
   const verifiedAt = new Date().toISOString();
@@ -1488,39 +1547,45 @@ export async function verifyInProcess(
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
   };
-  // Hosted (EE) stores by repo identity, not files: the gate runs verify on an
-  // ephemeral clone (`repoRoot` = a temp dir), so persist by the ref's repoKey —
-  // otherwise the dashboard Verify tab (which reads by repoKey) never finds it.
-  // Only when the HOSTED store is active, though: the OSS file store must key by
-  // the working-tree path (a repoKey like `owner/repo` would write a bogus
-  // cwd-relative `.truecourse/`). OSS/local has no ref → repoRoot regardless.
-  const storeKey =
-    options.ref && !verifyMaterializeInPlace() ? options.ref.repoKey : repoRoot;
-  const { filename } = await writeVerifyRun(storeKey, snapshot);
-  const summary = summarizeDrifts(result.drifts);
-  const latest: VerifyLatest = {
-    head: filename,
-    run: { id: runId, verifiedAt, branch, commitHash, contractsDir: recordedContractsDir, codeDir },
-    artifactCount: result.artifactCount,
-    extractedOperationCount: result.extractedOperationCount,
-    drifts: result.drifts,
-    resolverErrors: result.resolverErrors,
-    unresolvedRefs: result.unresolvedRefs,
-    summary,
-  };
-  await writeVerifyLatest(storeKey, latest);
-  await appendVerifyHistory(storeKey, {
-    id: runId,
-    filename,
-    verifiedAt,
-    branch,
-    commitHash,
-    artifactCount: result.artifactCount,
-    driftCount: result.drifts.length,
-    bySeverity: summary.bySeverity,
-  });
-  await deleteVerifyDiff(storeKey); // baseline moved — any prior diff is obsolete
-  fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft (file edition)
+  // Canonical persistence — the repo's LATEST + run timeline + history. A
+  // TRANSIENT verify (the gate, on a PR-head clone) SKIPS this so it never moves
+  // the repo's baseline; it records only the per-commit snapshot below. OSS/local
+  // is never transient, so its behaviour is unchanged.
+  if (!options.transient) {
+    // Hosted (EE) stores by repo identity, not files: the gate runs verify on an
+    // ephemeral clone (`repoRoot` = a temp dir), so persist by the ref's repoKey —
+    // otherwise the dashboard Verify tab (which reads by repoKey) never finds it.
+    // Only when the HOSTED store is active, though: the OSS file store must key by
+    // the working-tree path (a repoKey like `owner/repo` would write a bogus
+    // cwd-relative `.truecourse/`). OSS/local has no ref → repoRoot regardless.
+    const storeKey =
+      options.ref && !verifyMaterializeInPlace() ? options.ref.repoKey : repoRoot;
+    const { filename } = await writeVerifyRun(storeKey, snapshot);
+    const summary = summarizeDrifts(result.drifts);
+    const latest: VerifyLatest = {
+      head: filename,
+      run: { id: runId, verifiedAt, branch, commitHash, contractsDir: recordedContractsDir, codeDir },
+      artifactCount: result.artifactCount,
+      extractedOperationCount: result.extractedOperationCount,
+      drifts: result.drifts,
+      resolverErrors: result.resolverErrors,
+      unresolvedRefs: result.unresolvedRefs,
+      summary,
+    };
+    await writeVerifyLatest(storeKey, latest);
+    await appendVerifyHistory(storeKey, {
+      id: runId,
+      filename,
+      verifiedAt,
+      branch,
+      commitHash,
+      artifactCount: result.artifactCount,
+      driftCount: result.drifts.length,
+      bySeverity: summary.bySeverity,
+    });
+    await deleteVerifyDiff(storeKey); // baseline moved — any prior diff is obsolete
+    fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft (file edition)
+  }
 
   const state: VerifyState = {
     verifiedAt,
@@ -1531,6 +1596,7 @@ export async function verifyInProcess(
     drifts: result.drifts,
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
+    commitHash,
   };
 
   if (options.source) {

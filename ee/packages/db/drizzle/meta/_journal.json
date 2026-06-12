@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1780776417320,
-      "tag": "0000_magenta_bloodstorm",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1780785549115,
-      "tag": "0001_purple_donald_blake",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1780801139088,
-      "tag": "0002_flowery_thunderbolts",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1780952495666,
-      "tag": "0003_oval_cloak",
+      "when": 1781118712104,
+      "tag": "0000_init",
       "breakpoints": true
     }
   ]

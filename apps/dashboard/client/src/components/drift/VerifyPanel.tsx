@@ -190,6 +190,25 @@ export function VerifyPanel({
     );
   }
 
+  // Diff mode (PR view / Git Diff) is self-contained — VerifyDiffView reads only
+  // the diff, so render it before the no-state guard: a PR's head snapshot may
+  // still be loading (or absent) while its stored diff is already available.
+  if (mode === 'diff') {
+    return (
+      <div className="flex h-full flex-col">
+        <VerifyDiffView
+          diff={diff}
+          isDiffing={isDiffing}
+          activeDriftId={activeDriftId}
+          filters={filters}
+          onClearFilter={onClearFilter}
+          onOpenDrift={onOpenDrift}
+          hosted={hosted}
+        />
+      </div>
+    );
+  }
+
   if (!state) {
     return (
       <EmptyState
@@ -209,22 +228,6 @@ export function VerifyPanel({
           )
         }
       />
-    );
-  }
-
-  if (mode === 'diff') {
-    return (
-      <div className="flex h-full flex-col">
-        <VerifyDiffView
-          diff={diff}
-          isDiffing={isDiffing}
-          activeDriftId={activeDriftId}
-          filters={filters}
-          onClearFilter={onClearFilter}
-          onOpenDrift={onOpenDrift}
-          hosted={hosted}
-        />
-      </div>
     );
   }
 

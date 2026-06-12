@@ -7,6 +7,10 @@ import {
   inlineDriftBody,
   type GateDecision,
 } from '../../ee/packages/github-app/src/index';
+import {
+  driftContentKey,
+  type EnrichedDrift,
+} from '@truecourse/core/lib/drift-enrichment';
 
 function drift(over: Record<string, unknown> = {}): any {
   return {
@@ -102,5 +106,60 @@ describe('inlineDriftBody', () => {
     expect(body).toContain('response missing field email');
     expect(body).toContain('has email');
     expect(body).toContain('no email');
+  });
+});
+
+describe('enrichment (feat 2)', () => {
+  const enrichedFixture: EnrichedDrift = {
+    specReadable: 'The spec requires the response to include an email field.',
+    codeReadable: 'The handler returns the user without an email field.',
+    summary: 'Spec requires an email field on the response, but the code omits it.',
+  };
+
+  function enrichmentFor(d: ReturnType<typeof drift>): Map<string, EnrichedDrift> {
+    return new Map([[driftContentKey(d as any), enrichedFixture]]);
+  }
+
+  it('renderGateComment uses the readable summary when enrichment is supplied', () => {
+    const d = drift({ specSide: 'has email', codeSide: 'no email' });
+    const decision: GateDecision = { conclusion: 'failure', added: [d], resolved: [], belowThreshold: [] };
+    const body = renderGateComment(decision, { enriched: enrichmentFor(d) });
+    expect(body).toContain(enrichedFixture.summary);
+    // The structured message is replaced in the human line by the summary.
+    expect(body).not.toContain('response missing field email');
+  });
+
+  it('renderGateComment falls back to the structured message without enrichment', () => {
+    const d = drift();
+    const decision: GateDecision = { conclusion: 'failure', added: [d], resolved: [], belowThreshold: [] };
+    const body = renderGateComment(decision);
+    expect(body).toContain('response missing field email');
+    expect(body).not.toContain(enrichedFixture.summary);
+  });
+
+  it('renderGateComment falls back per-drift when the map lacks an entry', () => {
+    const d = drift();
+    const decision: GateDecision = { conclusion: 'failure', added: [d], resolved: [], belowThreshold: [] };
+    // Empty map (e.g. enrichment failed for this drift) → structured.
+    const body = renderGateComment(decision, { enriched: new Map() });
+    expect(body).toContain('response missing field email');
+  });
+
+  it('inlineDriftBody uses readable prose when enriched, keeping the structured message', () => {
+    const d = drift({ specSide: 'has email', codeSide: 'no email' });
+    const body = inlineDriftBody(d, enrichmentFor(d));
+    expect(body).toContain('response missing field email'); // structured message kept as anchor
+    expect(body).toContain(enrichedFixture.summary);
+    expect(body).toContain('Spec expectation:');
+    expect(body).toContain(enrichedFixture.specReadable);
+    expect(body).toContain('Code observation:');
+    expect(body).toContain(enrichedFixture.codeReadable);
+  });
+
+  it('inlineDriftBody falls back to structured snippets without enrichment', () => {
+    const body = inlineDriftBody(drift({ specSide: 'has email', codeSide: 'no email' }));
+    expect(body).toContain('**Spec:** has email');
+    expect(body).toContain('**Code:** no email');
+    expect(body).not.toContain('Spec expectation:');
   });
 });

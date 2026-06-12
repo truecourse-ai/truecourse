@@ -47,8 +47,18 @@ export function verifyLatestPath(repoPath: string): string {
 export function verifyHistoryPath(repoPath: string): string {
   return path.join(verifierDir(repoPath), HISTORY_FILE);
 }
-export function verifyDiffPath(repoPath: string): string {
-  return path.join(verifierDir(repoPath), DIFF_FILE);
+/**
+ * `scope` keys an alternate diff slot alongside the default working-tree diff.
+ * OSS only ever uses the default (one uncommitted-changes diff); EE keys a diff
+ * per pull request (`pr-<N>`) so concurrent PRs don't clobber one another. The
+ * scope is sanitised to a safe filename fragment.
+ */
+export function verifyDiffPath(repoPath: string, scope?: string): string {
+  const file = scope ? `diff-${sanitizeScope(scope)}.json` : DIFF_FILE;
+  return path.join(verifierDir(repoPath), file);
+}
+function sanitizeScope(scope: string): string {
+  return scope.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 /** Filename for a new run snapshot — shares analyze's sortable ISO+uuid format. */
@@ -101,9 +111,11 @@ export interface VerifyStore {
   readVerifyHistory(repoPath: string): Promise<VerifyHistory>;
   appendVerifyHistory(repoPath: string, entry: VerifyHistoryEntry): Promise<void>;
   deleteVerifyRun(repoPath: string, runId: string): Promise<boolean>;
-  readVerifyDiff(repoPath: string): Promise<VerifyDiff | null>;
-  writeVerifyDiff(repoPath: string, diff: VerifyDiff): Promise<void>;
-  deleteVerifyDiff(repoPath: string): Promise<void>;
+  // `scope` (optional) selects a non-default diff slot — EE keys one per PR
+  // (`pr-<N>`). Omitted → the default working-tree diff (OSS).
+  readVerifyDiff(repoPath: string, scope?: string): Promise<VerifyDiff | null>;
+  writeVerifyDiff(repoPath: string, diff: VerifyDiff, scope?: string): Promise<void>;
+  deleteVerifyDiff(repoPath: string, scope?: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,19 +216,19 @@ class FileVerifyStore implements VerifyStore {
     return true;
   }
 
-  async readVerifyDiff(repoPath: string): Promise<VerifyDiff | null> {
-    const file = verifyDiffPath(repoPath);
+  async readVerifyDiff(repoPath: string, scope?: string): Promise<VerifyDiff | null> {
+    const file = verifyDiffPath(repoPath, scope);
     if (!fs.existsSync(file)) return null;
     return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyDiff;
   }
 
-  async writeVerifyDiff(repoPath: string, diff: VerifyDiff): Promise<void> {
-    atomicWriteJson(verifyDiffPath(repoPath), diff);
+  async writeVerifyDiff(repoPath: string, diff: VerifyDiff, scope?: string): Promise<void> {
+    atomicWriteJson(verifyDiffPath(repoPath, scope), diff);
   }
 
-  async deleteVerifyDiff(repoPath: string): Promise<void> {
+  async deleteVerifyDiff(repoPath: string, scope?: string): Promise<void> {
     try {
-      fs.unlinkSync(verifyDiffPath(repoPath));
+      fs.unlinkSync(verifyDiffPath(repoPath, scope));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
@@ -262,12 +274,12 @@ export const appendVerifyHistory = (repoPath: string, entry: VerifyHistoryEntry)
   active.appendVerifyHistory(repoPath, entry);
 export const deleteVerifyRun = (repoPath: string, runId: string): Promise<boolean> =>
   active.deleteVerifyRun(repoPath, runId);
-export const readVerifyDiff = (repoPath: string): Promise<VerifyDiff | null> =>
-  active.readVerifyDiff(repoPath);
-export const writeVerifyDiff = (repoPath: string, diff: VerifyDiff): Promise<void> =>
-  active.writeVerifyDiff(repoPath, diff);
-export const deleteVerifyDiff = (repoPath: string): Promise<void> =>
-  active.deleteVerifyDiff(repoPath);
+export const readVerifyDiff = (repoPath: string, scope?: string): Promise<VerifyDiff | null> =>
+  active.readVerifyDiff(repoPath, scope);
+export const writeVerifyDiff = (repoPath: string, diff: VerifyDiff, scope?: string): Promise<void> =>
+  active.writeVerifyDiff(repoPath, diff, scope);
+export const deleteVerifyDiff = (repoPath: string, scope?: string): Promise<void> =>
+  active.deleteVerifyDiff(repoPath, scope);
 
 /** Test-only: clear the LATEST cache between fixtures. */
 export function clearVerifyLatestCache(): void {

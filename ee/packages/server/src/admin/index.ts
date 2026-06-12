@@ -16,7 +16,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { AuthUser, EeServerRegistry, TraceStatus, JobStatus } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import type { EeDb } from '@truecourse/ee-db';
-import { JobStore, type PgBlobTraceStore } from '@truecourse/ee-data-store';
+import { JobStore, type PgTraceStore } from '@truecourse/ee-data-store';
 import { captureEeException } from '../observability/sentry.js';
 
 function eeUserOf(req: Request): AuthUser | undefined {
@@ -45,7 +45,7 @@ const jobStatus = (v: unknown): JobStatus | undefined =>
 export interface RegisterAdminOptions {
   db: EeDb;
   /** The LLM trace store (built in `installEeStores`, shared with the transport). */
-  traceStore: PgBlobTraceStore;
+  traceStore: PgTraceStore;
 }
 
 /** Build the operator-gated admin router (exported so route tests can mount it). */

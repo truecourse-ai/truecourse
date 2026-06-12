@@ -10,7 +10,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import type { AuthUser, LlmTraceInput } from '@truecourse/shared';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgBlobTraceStore, JobStore } from '../../ee/packages/data-store/src/index';
+import { PgTraceStore, JobStore } from '../../ee/packages/data-store/src/index';
 import { createAdminRouter } from '../../ee/packages/server/src/admin/index';
 
 async function makeDb(client: PGlite): Promise<EeDb> {
@@ -59,7 +59,7 @@ beforeEach(async () => {
   blobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-blob-'));
   const db = await makeDb(client);
   const blob = new FsBlobStore(blobDir);
-  const traceStore = new PgBlobTraceStore(db, blob);
+  const traceStore = new PgTraceStore(db, blob);
   const jobStore = new JobStore(db);
 
   // Seed traces + jobs across two orgs.

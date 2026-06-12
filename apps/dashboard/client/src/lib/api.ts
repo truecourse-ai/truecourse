@@ -862,6 +862,17 @@ export type ContractDrift = {
   lineEnd?: number | null;
   specSide?: unknown;
   codeSide?: unknown;
+  /** Spec-side origin of the requirement this drift came from (source doc +
+   *  section + line range). Absent on old snapshots predating the field.
+   *  `sourceUrl`/`sourceLabel` are attached by the server when the source is a
+   *  synced workspace-KB doc (external link + title), e.g. a Confluence page. */
+  specOrigin?: {
+    source: string;
+    section: string;
+    lines: [number, number];
+    sourceUrl?: string | null;
+    sourceLabel?: string | null;
+  } | null;
 };
 
 export type VerifyState = {
@@ -873,6 +884,12 @@ export type VerifyState = {
   drifts: ContractDrift[];
   resolverErrors: string[];
   unresolvedRefs: string[];
+  /**
+   * Commit the drifts were observed at (baseline commit for the latest state,
+   * the snapshot's commit for a past run / PR head). Lets EE deep-link drift
+   * sites to the GitHub blob at the right sha even in the non-PR base view.
+   */
+  commitHash?: string | null;
 };
 
 /**
@@ -913,10 +930,18 @@ export type VerifyDiff = {
   summary: { added: number; resolved: number; unchanged: number };
 };
 
-/** Read the last-computed verify diff. Null on 404 (none computed yet). */
-export async function getVerifyDiff(repoId: string): Promise<VerifyDiff | null> {
+/**
+ * Read the verify diff. Null on 404 (none computed yet).
+ * `ref` (EE) → that commit's snapshot diffed against the repo's baseline (derived
+ * server-side); omitted → the OSS working-tree diff.
+ */
+export async function getVerifyDiff(
+  repoId: string,
+  opts?: { ref?: string },
+): Promise<VerifyDiff | null> {
   try {
-    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`);
+    const q = opts?.ref ? `?ref=${encodeURIComponent(opts.ref)}` : '';
+    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff${q}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
@@ -928,6 +953,41 @@ export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
   return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
     method: 'POST',
   });
+}
+
+/** Human-readable prose for one drift — never replaces the structured original. */
+export type EnrichedDrift = {
+  /** One plain sentence: what the spec REQUIRES. */
+  specReadable: string;
+  /** One plain sentence: what the code ACTUALLY DOES. */
+  codeReadable: string;
+  /** One sentence combining both ("Spec requires X, but the code does Y."). */
+  summary: string;
+};
+
+/**
+ * On-demand, cached LLM enrichment of one drift into readable prose. Returns
+ * `null` when no LLM transport is configured (204) or the call failed — the
+ * caller then keeps the structured rendering. Repo-agnostic + content-addressed
+ * server-side, so a drift the gate already enriched is a cache hit.
+ *
+ * Send the drift's content fields verbatim (the same string `specSide`/`codeSide`
+ * the snapshot stored) so the server derives the same content key as the gate.
+ */
+export async function postDriftEnrich(
+  repoId: string,
+  drift: Pick<
+    ContractDrift,
+    'artifactRef' | 'obligationKey' | 'message' | 'severity' | 'specSide' | 'codeSide' | 'specOrigin'
+  >,
+): Promise<EnrichedDrift | null> {
+  // 204 → fetchApi returns undefined; normalize to null for "no enrichment".
+  return (
+    (await fetchApi<EnrichedDrift | undefined>(
+      `/api/repos/${repoId}/verify/drift/enrich`,
+      { method: 'POST', body: JSON.stringify(drift) },
+    )) ?? null
+  );
 }
 
 export type VerifyHistoryEntry = {

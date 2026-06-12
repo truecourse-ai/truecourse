@@ -20,7 +20,7 @@ import { JobStore, NotificationStore, ActiveJobExistsError } from '@truecourse/e
 import { log } from '@truecourse/core/lib/logger';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
-import { selectGateStore } from '@truecourse/ee-github-app';
+import { selectGateStore, getPrReverifier } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import { reverifyWorkspaceRepos } from './reverify.js';
@@ -202,16 +202,30 @@ export async function registerJobs(
   // (neutral) baseline saved at connect; getRepo gives the installation/branch.
   const onContractsRegenerated = async (repoKey: string, workspaceOrgId: string): Promise<void> => {
     const repo = await gateStore.getRepo(repoKey);
+    if (!repo) return; // need the link
     const baseline = await gateStore.getBaseline(repoKey);
-    if (!repo || !baseline) return; // need the link + a known head commit
-    await enqueueBaseline({
-      repoFullName: repoKey,
-      installationId: repo.installationId,
-      defaultBranch: repo.defaultBranch,
-      commitSha: baseline.commitSha,
-      workspaceOrgId,
-      force: true,
-    });
+    if (baseline) {
+      await enqueueBaseline({
+        repoFullName: repoKey,
+        installationId: repo.installationId,
+        defaultBranch: repo.defaultBranch,
+        commitSha: baseline.commitSha,
+        workspaceOrgId,
+        force: true,
+      });
+    }
+    // Re-verify every open PR against the freshly regenerated contracts: a PR
+    // paused on `unresolved-conflicts` now gets a real verdict + refreshed comment
+    // without waiting for a new push. Best-effort, isolated from the baseline
+    // chain; a no-op when the GitHub App isn't configured (seam unset).
+    const reverify = getPrReverifier();
+    if (reverify) {
+      await reverify(repoKey).catch((err) =>
+        log.warn(
+          `[ee-jobs] PR re-verify after contracts regen failed for ${repoKey}: ${(err as Error).message}`,
+        ),
+      );
+    }
   };
 
   // When a workspace's contracts change (KB sync / workspace decision), re-verify

@@ -7,7 +7,7 @@
  * Behind the `github-gate` capability.
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Loader2, Settings } from 'lucide-react';
 import type {
@@ -99,7 +99,7 @@ export default function RepositoriesPage() {
   const [error, setError] = useState<string | null>(null);
   // Live scan state: an active baseline job → "Scanning"; survives a refresh
   // (activeJobs is seeded from the server), and flips to Ready on completion.
-  const { activeJobFor } = useJobs();
+  const { activeJobFor, activeJobs } = useJobs();
   // Deep-link from Overview: `/repositories?connect=1` opens the drawer on arrival.
   const [connectOpen, setConnectOpen] = useState(() => searchParams.get('connect') === '1');
 
@@ -121,6 +121,22 @@ export default function RepositoriesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // The status badge derives from the server summary (openConflicts / hasContracts
+  // / slug), but that summary is fetched once on mount. When a baseline or
+  // contract-refresh job FINISHES, the summary changes — and until we re-fetch it,
+  // the just-cleared "Scanning" state leaves the badge reading the stale pre-scan
+  // summary, which renders as "Failed" (a scan that ended in conflicts is really
+  // "Needs review"). Re-fetch the instant the active repo-job count drops so the
+  // badge self-corrects without a manual refresh.
+  const activeRepoJobs = activeJobs.filter(
+    (j) => j.type === REPO_BASELINE_KIND || j.type === REPO_CONTRACTS_KIND,
+  ).length;
+  const prevActiveRepoJobs = useRef(activeRepoJobs);
+  useEffect(() => {
+    if (activeRepoJobs < prevActiveRepoJobs.current) load();
+    prevActiveRepoJobs.current = activeRepoJobs;
+  }, [activeRepoJobs, load]);
 
   const repos = status?.repos ?? [];
 

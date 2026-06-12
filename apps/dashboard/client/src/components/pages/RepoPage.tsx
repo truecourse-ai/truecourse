@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, Navigate, useNavigate } from 'react-router-dom';
+import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -65,6 +65,7 @@ import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
 import { useGraph } from '@/hooks/useGraph';
 import { useContractsTree } from '@/hooks/useContractsTree';
 import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
+import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
@@ -179,8 +180,6 @@ function RepoPageInner() {
     handleOpenDrift,
     handleCloseDrift,
     reconcileDriftTabs,
-    selectedRef,
-    setSelectedRef,
   } = useDriftView();
 
   const currentBranch = repo?.defaultBranch;
@@ -190,22 +189,43 @@ function RepoPageInner() {
   // `runs` are dropped here: PRs live in the header ref selector + the cross-repo
   // sidebar feed, and "Runs" is an OSS-local concept (no local runs in EE).
   const isEe = useEdition() === 'enterprise';
+  // PR view (EE): `?pr=N` re-scopes the page to a pull request — the spec/
+  // contracts tabs key to its head SHA, the verify tab shows the gate's stored PR
+  // diff. Resolved from the repo's gate runs (latest run per PR).
+  const [searchParams] = useSearchParams();
+  const prParam = searchParams.get('pr');
+  const prNumber = isEe && prParam && /^\d+$/.test(prParam) ? Number(prParam) : null;
+  const gateRuns = useRepoGateRuns(isEe ? repo?.name : undefined);
+  const activePrRun = prNumber != null ? gateRuns.find((r) => r.prNumber === prNumber) ?? null : null;
+  // Re-keys the spec/contracts/verify tabs to the PR head (undefined → default branch).
+  const refForTabs = prNumber != null ? activePrRun?.headSha : undefined;
   const driftTabs = useVisibleTabsForSection('drift');
   const navigate = useNavigate();
-  const eeTabs = EE_REPO_TAB_ORDER.map((id) => driftTabs.find((t) => t.id === id)).filter(
-    (t): t is NonNullable<typeof t> => Boolean(t),
-  );
+  const eeTabs = EE_REPO_TAB_ORDER.map((id) => driftTabs.find((t) => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t))
+    // Settings is repo-wide config, not PR-scoped — hide it while viewing a PR.
+    .filter((t) => !(prNumber != null && t.id === 'settings'));
   useEffect(() => {
     if (!isEe) return;
     // Force a coherent EE state: BL-Drift section + one of the curated tabs,
     // defaulting to Analytics. Redirects stale OSS tabs (home/runs/pulls/…).
-    if (dashboardSection === 'drift' && leftTab && EE_REPO_TAB_ORDER.includes(leftTab)) return;
+    // Settings is hidden in PR mode (repo-wide config, not PR-scoped), so a
+    // `?tab=settings&pr=N` deep-link must redirect to a valid PR tab.
+    const settingsInPr = prNumber != null && leftTab === 'settings';
+    if (
+      dashboardSection === 'drift' &&
+      leftTab &&
+      EE_REPO_TAB_ORDER.includes(leftTab) &&
+      !settingsInPr
+    )
+      return;
     const url = new URL(window.location.href);
     url.searchParams.set('section', 'drift');
     const t = url.searchParams.get('tab');
-    if (!t || !EE_REPO_TAB_ORDER.includes(t)) url.searchParams.set('tab', 'driftanalytics');
+    if (!t || !EE_REPO_TAB_ORDER.includes(t) || (prNumber != null && t === 'settings'))
+      url.searchParams.set('tab', 'driftanalytics');
     navigate(url.pathname + url.search, { replace: true });
-  }, [isEe, dashboardSection, leftTab, navigate]);
+  }, [isEe, dashboardSection, leftTab, prNumber, navigate]);
 
   const {
     isConnected,
@@ -309,15 +329,15 @@ function RepoPageInner() {
     isLoading: contractsLoading,
     error: contractsError,
     refetch: refetchContracts,
-  } = useContractsTree(repoId, isEe ? selectedRef : undefined);
+  } = useContractsTree(repoId, refForTabs);
   // The repo-scoped spec data seam — shared by the SpecProvider below and the
   // canonical tree hook so both read the same source (the EE Knowledge page
   // passes a workspace source instead).
   const specSource = useMemo(
     // EE repos are hosted (Postgres store, no working tree) — the source then
     // refreshes via the server's re-merge instead of an on-demand rescan.
-    () => createRepoSpecDataSource(repoId, isEe ? selectedRef : undefined, isEe),
-    [repoId, isEe, selectedRef],
+    () => createRepoSpecDataSource(repoId, refForTabs, isEe),
+    [repoId, isEe, refForTabs],
   );
   const {
     tree: canonicalTree,
@@ -336,7 +356,7 @@ function RepoPageInner() {
     refetch: refetchVerify,
     run: runVerify,
     runDiff: runVerifyDiff,
-  } = useVerifyState(repoId, isEe ? selectedRef : undefined);
+  } = useVerifyState(repoId, refForTabs, prNumber ?? undefined);
   const {
     generating: contractsGenerating,
     result: contractsGenerateResult,
@@ -448,7 +468,50 @@ function RepoPageInner() {
   // What the verify columns actually render: a selected past run, else LATEST.
   const effectiveVerifyState = isViewingVerifyRun ? verifyRunState : verifyState;
   // Diff is latest-only; a past run is always shown in normal mode.
-  const effectiveVerifyDiffMode = isDiffMode && !isViewingVerifyRun;
+  // A PR view IS a diff (the gate's stored added-vs-resolved) — force diff mode.
+  const effectiveVerifyDiffMode = prNumber != null || (isDiffMode && !isViewingVerifyRun);
+  // GitHub blob deep-link for a drift's file/line, used by the drift detail's
+  // "Where in the code" link in the EE / PR context (the local code viewer isn't
+  // reachable there). `repo?.name` is the GitHub owner/repo slug for connected
+  // EE repos; the commit is the PR head SHA in PR mode, else the commit the shown
+  // drifts were observed at — the baseline commit for the base view, the
+  // snapshot's commit for a past run (both carried on the verify state), or the
+  // diffed commit. Returns null (→ in-app onOpenFile fallback) for local/OSS repos
+  // with no GitHub remote or when no commit is known.
+  const verifyCommitSha =
+    refForTabs ??
+    effectiveVerifyState?.commitHash ??
+    verifyDiff?.commitHash ??
+    null;
+  const githubFileUrl = useCallback(
+    (path: string, lineStart?: number | null, lineEnd?: number | null): string | null => {
+      const repoFullName = isEe ? repo?.name : undefined;
+      if (!repoFullName || !verifyCommitSha || !path) return null;
+      // Only a repo-relative path forms a valid blob URL. Pre-fix snapshots stored
+      // an absolute clone path (/tmp/tc-gate-verify-…); fall back rather than emit a
+      // broken link (a re-verify now rewrites stored paths repo-relative).
+      if (path.startsWith('/')) return null;
+      // A spec origin can be an external doc URL (e.g. a workspace Confluence page),
+      // not a repo file — never splice that into a blob path. The caller links it
+      // directly instead.
+      if (/^[a-z][\w+.-]*:\/\//i.test(path)) return null;
+      // Generated spec artifacts (claims.json / decisions.json) and synced workspace
+      // KB docs (knowledge/<connector>/…) are not committed repo files. The server
+      // re-points real claims pointers to their repo doc before we get here; anything
+      // still synthetic is genuinely not in the repo, so emit no link (plain text)
+      // rather than a 404.
+      if (/(^|\/)(claims|decisions)\.json(#|$)/i.test(path)) return null;
+      if (path.startsWith('.truecourse/') || path.startsWith('knowledge/')) return null;
+      const segments = path.split('/').map((s) => encodeURIComponent(s)).join('/');
+      let url = `https://github.com/${repoFullName}/blob/${verifyCommitSha}/${segments}`;
+      if (lineStart != null) {
+        url += `#L${lineStart}`;
+        if (lineEnd != null && lineEnd !== lineStart) url += `-L${lineEnd}`;
+      }
+      return url;
+    },
+    [isEe, repo?.name, verifyCommitSha],
+  );
   // Newest-first run list for the dropdown (history is appended oldest-first).
   const verifyRunItems = useMemo(
     () =>
@@ -967,8 +1030,9 @@ function RepoPageInner() {
           tabs={eeTabs}
           activeTab={leftTab}
           onTabChange={(t) => handleLeftTabChange(t)}
-          selectedRef={selectedRef}
-          onSelectRef={setSelectedRef}
+          prNumber={prNumber}
+          prBranch={verifyDiff?.branch ?? null}
+          prConclusion={activePrRun?.conclusion}
           actions={leftTab === 'spec' ? sectionActionsNode : undefined}
         />
       ) : (
@@ -1061,7 +1125,7 @@ function RepoPageInner() {
           for new results and emits toasts, no layout impact. */}
       <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
-      {leftTab === 'settings' ? (
+      {leftTab === 'settings' && prNumber == null ? (
         <RepoSettings repoFullName={repo?.name} />
       ) : (
       <div className="flex flex-1 overflow-hidden">
@@ -1437,7 +1501,9 @@ function RepoPageInner() {
                     {activeDrift ? (
                       <VerifyDriftDetail
                         drift={activeDrift}
+                        repoId={repoId}
                         onClose={() => handleCloseDrift(activeDrift.id)}
+                        githubFileUrl={githubFileUrl}
                         onOpenFile={(filePath, line) => {
                           // Cross-section navigation: switch to Code Analysis
                           // and open the file viewer at the right line.

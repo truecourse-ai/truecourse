@@ -23,7 +23,6 @@ const NOTIFICATIONS: {
   desc: string;
 }[] = [
   { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new drift.' },
-  { key: 'scanOffer', label: 'Spec-change re-scans', desc: 'Spec documents changed in a PR — offer to re-scan.' },
   { key: 'inferResult', label: 'Undocumented decisions', desc: 'Inference captured new decisions on a PR.' },
   { key: 'conflicts', label: 'Spec conflicts', desc: 'Conflicts need resolving before contracts can regenerate.' },
 ];

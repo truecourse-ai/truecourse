@@ -435,12 +435,21 @@ function mtimeIfExists(file: string): number | null {
 }
 
 /** The latest claim set, or a specific commit's when `?ref=<commit>` is given
- *  (the EE ref switcher — default branch vs a PR head). OSS ignores `ref`. */
-function claimsFor(repoKey: string, req: Request): Promise<ClaimsFile | null> {
+ *  (the EE ref switcher — default branch vs a PR head). OSS ignores `ref`.
+ *
+ *  Ref fallback: a CODE-ONLY PR head has NO stored repo spec at its commit (the
+ *  gate reuses the base's spec for code-only PRs — #64), so the per-commit load
+ *  returns null. Rather than collapse the repo layer to empty (which would make
+ *  the Spec tab show WORKSPACE-only), fall back to the repo's LATEST stored
+ *  claims (the base / main's). Net effect = base ∪ workspace for code-only PRs,
+ *  and the head's OWN spec for spec-changing PRs (which DID get scanned at head).
+ */
+async function claimsFor(repoKey: string, req: Request): Promise<ClaimsFile | null> {
   const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
-  return ref
-    ? loadSpec<ClaimsFile>({ repoKey, commitSha: ref }, 'claims')
-    : loadLatestSpec<ClaimsFile>(repoKey, 'claims');
+  if (!ref) return loadLatestSpec<ClaimsFile>(repoKey, 'claims');
+  const atRef = await loadSpec<ClaimsFile>({ repoKey, commitSha: ref }, 'claims');
+  if (atRef) return atRef;
+  return loadLatestSpec<ClaimsFile>(repoKey, 'claims');
 }
 
 /** The signed-in workspace org (enterprise), set by the auth gate. Absent in OSS. */

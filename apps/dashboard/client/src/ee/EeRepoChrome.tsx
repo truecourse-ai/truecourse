@@ -1,84 +1,63 @@
 /**
  * Enterprise repo chrome — replaces the OSS repo Header (logo + back +
  * Code-Analysis/BL-Drift section switcher + vertical rail) with a clean repo
- * title row, a ref selector (default branch vs a PR), and a horizontal
- * BL-Drift tab bar. The console sidebar already owns the brand + global nav, so
- * this stays repo-scoped.
+ * title row, a ref label (default branch, or the PR being viewed), and a
+ * horizontal BL-Drift tab bar. The console sidebar already owns the brand +
+ * global nav, so this stays repo-scoped.
  *
  * It reuses the same navigation state (leftTab) — only the chrome differs; the
- * panels behind each tab are unchanged.
+ * panels behind each tab are unchanged. Which ref is shown is URL-driven
+ * (`?pr=N`), not a selector here — the Pull requests feed deep-links into it.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronDown, GitBranch } from 'lucide-react';
-import type { GithubRunSummary, GithubRunsResponse } from '@truecourse/shared';
-import { getServerUrl } from '@/lib/server-url';
+import { ExternalLink, GitBranch } from 'lucide-react';
+import type { ReactNode } from 'react';
+import type { GithubRunSummary } from '@truecourse/shared';
 import type { LeftTab, TabDescriptor } from '@/navigation/registry';
 
+const PR_PILL: Record<GithubRunSummary['conclusion'], string> = {
+  success: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/30',
+  failure: 'bg-red-500/10 text-red-400 ring-red-500/30',
+  neutral: 'bg-muted text-muted-foreground ring-border',
+};
+
 /**
- * Ref selector: default branch + each PR the gate has a stored snapshot for
- * (its runs). Selecting a PR re-keys every tab to that head SHA. Hidden when the
- * repo has no PR runs yet (nothing but the default branch to show).
+ * Read-only ref indicator: the default branch, or — when viewing a PR (`?pr=N`)
+ * — a conclusion-coloured "PR #N" pill plus the PR's head branch.
  */
-function RefSelector({
-  repoFullName,
+function RefLabel({
   branch,
-  selectedRef,
-  onSelectRef,
+  prNumber,
+  prBranch,
+  prConclusion,
 }: {
-  repoFullName: string;
   branch?: string;
-  selectedRef: string;
-  onSelectRef: (ref: string) => void;
+  prNumber?: number | null;
+  prBranch?: string | null;
+  prConclusion?: GithubRunSummary['conclusion'];
 }) {
-  const [prs, setPrs] = useState<GithubRunSummary[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`${getServerUrl()}/api/ee/github/repos/${repoFullName}/runs`, {
-      credentials: 'include',
-    })
-      .then((r) => (r.ok ? (r.json() as Promise<GithubRunsResponse>) : { runs: [] }))
-      .then((d) => {
-        if (cancelled) return;
-        // Runs come newest-first; keep the latest run (snapshot) per PR.
-        const byPr = new Map<number, GithubRunSummary>();
-        for (const run of d.runs) if (!byPr.has(run.prNumber)) byPr.set(run.prNumber, run);
-        setPrs([...byPr.values()]);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [repoFullName]);
-
-  const mark = (c: GithubRunSummary['conclusion']) =>
-    c === 'failure' ? '✗' : c === 'success' ? '✓' : '·';
-
-  // Always shown so the ref control is discoverable; PR options appear once the
-  // gate has stored a snapshot for them.
-  return (
-    <div className="relative inline-flex items-center">
-      <GitBranch className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground" />
-      <select
-        value={selectedRef}
-        onChange={(e) => onSelectRef(e.target.value)}
-        title="View the default branch or a pull request"
-        className="appearance-none rounded-md border border-border bg-background py-1 pl-7 pr-7 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-      >
-        <option value="">{branch ? `${branch} (default)` : 'default branch'}</option>
-        {prs.length > 0 && (
-          <optgroup label="Pull requests">
-            {prs.map((pr) => (
-              <option key={pr.headSha} value={pr.headSha}>
-                #{pr.prNumber} {mark(pr.conclusion)}
-              </option>
-            ))}
-          </optgroup>
+  if (prNumber != null) {
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ${PR_PILL[prConclusion ?? 'neutral']}`}
+        >
+          PR #{prNumber}
+        </span>
+        {prBranch && (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <GitBranch className="h-3.5 w-3.5" />
+            <span className="max-w-[16rem] truncate">{prBranch}</span>
+          </span>
         )}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-muted-foreground" />
-    </div>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <GitBranch className="h-3.5 w-3.5" />
+      {branch ?? 'default branch'}
+    </span>
   );
 }
 
@@ -88,8 +67,9 @@ export function EeRepoChrome({
   tabs,
   activeTab,
   onTabChange,
-  selectedRef,
-  onSelectRef,
+  prNumber,
+  prBranch,
+  prConclusion,
   actions,
 }: {
   repoName?: string;
@@ -97,9 +77,12 @@ export function EeRepoChrome({
   tabs: TabDescriptor[];
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab) => void;
-  /** Ref switcher state ('' = default branch). Omit to hide the selector. */
-  selectedRef?: string;
-  onSelectRef?: (ref: string) => void;
+  /** When set, the page is scoped to this pull request (`?pr=N`). */
+  prNumber?: number | null;
+  /** The PR's head branch (from its stored gate diff) — shown next to the pill. */
+  prBranch?: string | null;
+  /** The PR's gate conclusion — colours the pill. */
+  prConclusion?: GithubRunSummary['conclusion'];
   /** Per-tab header actions (e.g. Spec Apply, Verify Run) — reused as-is. */
   actions?: ReactNode;
 }) {
@@ -110,14 +93,25 @@ export function EeRepoChrome({
         <span className="truncate text-sm font-semibold text-foreground">
           {repoName ?? '…'}
         </span>
-        {repoName && onSelectRef ? (
-          <RefSelector
-            repoFullName={repoName}
+        {repoName ? (
+          <RefLabel
             branch={branch}
-            selectedRef={selectedRef ?? ''}
-            onSelectRef={onSelectRef}
+            prNumber={prNumber}
+            prBranch={prBranch}
+            prConclusion={prConclusion}
           />
         ) : null}
+        {repoName && prNumber != null && (
+          <a
+            href={`https://github.com/${repoName}/pull/${prNumber}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            View PR #{prNumber} on GitHub
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
         {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
 
