@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from './parser/index.js';
 import { resolve, type ResolvedArtifact, refKey } from './resolver/index.js';
+import { assignOccurrenceIndices } from './occurrence.js';
+import { buildSymbolIndex, assignEnclosingSymbols } from './extractor/symbol-index.js';
 import {
   extractCodeContracts,
   extractEmissionFacts,
@@ -61,6 +63,14 @@ export interface VerifyOptions {
   /** Directory containing TS/JS source files to verify against. */
   codeDir: string;
   /**
+   * Optional lower-precedence BASE contracts directory (enterprise: the
+   * workspace `.tc` corpus shared by every repo). The repo's `contractsDir`
+   * wins on a `${kind}:${identity}` collision; otherwise the two are unioned, so
+   * a repo is verified against its EFFECTIVE contracts (workspace ∪ repo). Omit
+   * for repo-only verification (OSS/local, and EE repos with no workspace).
+   */
+  baseContractsDir?: string;
+  /**
    * Include the `_inferred/` subtree in verification. Off by default:
    * inferred contracts are descriptive (reverse-engineered from code), not
    * prescriptive obligations, so verifying code against them would just
@@ -89,7 +99,16 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const source = fs.readFileSync(filePath, 'utf-8');
     specFiles.push(parseFile(filePath, source));
   }, opts.includeInferred ?? false);
-  const resolution = resolve(specFiles);
+  // Optional enterprise base layer (workspace contracts). The repo's contracts
+  // win on a key collision; the resolver unions the rest.
+  const baseFiles: ReturnType<typeof parseFile>[] = [];
+  if (opts.baseContractsDir && fs.existsSync(opts.baseContractsDir)) {
+    walkTcFiles(opts.baseContractsDir, (filePath) => {
+      const source = fs.readFileSync(filePath, 'utf-8');
+      baseFiles.push(parseFile(filePath, source));
+    }, opts.includeInferred ?? false);
+  }
+  const resolution = resolve(specFiles, { baseFiles });
 
   // ---- Code side: one shared, lazily-memoized extraction set ----
   // (the same layer `infer` reads — see extractor/code-contracts.ts).
@@ -137,6 +156,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         message:
           `Operation ${refKey(artifact.ref)} declared in spec but no route ` +
           `with this method+path was found in the code under verification.`,
+        specOrigin: artifact.origin ?? undefined,
       });
       continue;
     }
@@ -159,6 +179,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
           `but the code has a matching route. The implementation should not ship.`,
         specSide: `status ${st}`,
         codeSide: `${code.filePath}:${code.declarationLine}`,
+        specOrigin: artifact.origin ?? undefined,
       });
       continue;
     }
@@ -167,6 +188,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         spec: specContract,
         code: code.contract,
         specRef: artifact.ref,
+        origin: artifact.origin,
         codeFilePath: code.filePath,
         codeDeclarationLine: code.declarationLine,
       }),
@@ -192,6 +214,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareErrorEnvelope({
         envelopeRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as ErrorEnvelopeContract,
         extractedOps: recognizedOps,
       }),
@@ -209,6 +232,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...comparePagination({
         paginationRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as PaginationContractC,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -227,6 +251,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareIdempotency({
         idempotencyRef: artifact.ref,
+        origin: artifact.origin,
         contract,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -242,6 +267,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareAuthRequirement({
         authRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as AuthRequirementContract,
         specOps: specOpsByIdentity,
         recognizedOps,
@@ -259,6 +285,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareEntity({
         entityRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as EntityContract,
         facts: entityFacts,
       }),
@@ -275,6 +302,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareStateMachine({
         machineRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as StateMachineContract,
         facts: stateMachineFacts,
       }),
@@ -288,6 +316,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareAuthorizationRule({
         authzRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as AuthorizationRuleContract,
         recognizedOps,
       }),
@@ -305,6 +334,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareEffectGroup({
         effectGroupRef: artifact.ref,
+        origin: artifact.origin,
         contract: artifact.contract as EffectGroupContract,
         emission: emissionFacts,
       }),
@@ -324,6 +354,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     drifts.push(
       ...compareFormula({
         formulaRef: artifact.ref,
+        origin: artifact.origin,
         contract,
         facts,
       }),
@@ -483,6 +514,16 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
       );
     }
   }
+
+  // Resolve the enclosing function symbol for every site-bearing drift in
+  // one general (file,line)→function pass over the codebase, then assign
+  // occurrence indices across the COMPLETE drift set (every comparator's
+  // output), so drifts sharing an enclosing symbol + obligation get stable,
+  // distinct site anchors for the PR gate. The symbol pass is a safe no-op
+  // when no source is parseable — drifts stay obligation-level.
+  const symbolIndex = await buildSymbolIndex(opts.codeDir);
+  assignEnclosingSymbols(drifts, symbolIndex);
+  assignOccurrenceIndices(drifts);
 
   return {
     drifts,

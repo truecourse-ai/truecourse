@@ -54,7 +54,7 @@ export async function setupTestFixture(fixturePath?: string): Promise<TestFixtur
   const truecourseDir = path.join(repoPath, '.truecourse');
   const preexisting = fs.existsSync(truecourseDir);
 
-  const project = registerProject(repoPath);
+  const project = await registerProject(repoPath);
   cleanupPaths.push({
     tmpDir,
     truecourseDir: preexisting ? null : truecourseDir,
@@ -66,7 +66,7 @@ export async function setupTestFixture(fixturePath?: string): Promise<TestFixtur
 
 export async function teardownTestFixture(slug?: string): Promise<void> {
   clearLatestCache();
-  if (slug) unregisterProject(slug);
+  if (slug) await unregisterProject(slug);
   while (cleanupPaths.length > 0) {
     const { tmpDir, truecourseDir } = cleanupPaths.pop()!;
     if (tmpDir) {

@@ -31,8 +31,15 @@ import type { DocKind } from './types.js';
 export interface DocCandidate {
   /** Repo-relative path with forward slashes — stable across platforms. */
   path: string;
-  /** Absolute path, for downstream readers. */
+  /** Absolute path, for downstream readers. `''` when the doc isn't on disk. */
   absPath: string;
+  /**
+   * In-memory body. When set, downstream stages read this instead of `absPath`
+   * — used by sources with no real file on disk (e.g. an EE connector holding a
+   * fetched page in RAM). File-based discovery leaves it undefined and the
+   * extractor reads `absPath` lazily, exactly as before.
+   */
+  content?: string;
   kind: DocKind;
   /** First N lines of the file, for kind-tie-breaking heuristics + UI. */
   preview: string;

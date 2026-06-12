@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CanonicalSpecMissingError,
+  canonicalFromClaims,
   generateContracts,
+  generateContractsInMemory,
   type SliceRunner,
 } from '../../packages/contract-extractor/src/index.js';
 import type { ClaimsFile } from '../../packages/spec-consolidator/src/claims-store.js';
@@ -227,5 +229,61 @@ describe('contract extractor — orchestrator', () => {
     await generateContracts({ repoRoot: tmpRoot, runner: observingRunner, disableRepair: true });
     expect(seen.some((p) => p.startsWith('legacy/'))).toBe(false);
     expect(seen.some((p) => p.startsWith('orders/'))).toBe(true);
+  });
+
+  // --- In-memory generation (the enterprise workspace path) ------------------
+
+  it('generateContractsInMemory yields the SAME corpus as the disk path (no scratch tree)', async () => {
+    writeCanonical({
+      modules: [
+        { name: 'orders', subject: 'POST /api/orders' },
+        { name: 'auth', subject: 'GET /api/auth/me' },
+      ],
+    });
+    const disk = await generateContracts({ repoRoot: tmpRoot, runner: stubRunner(), disableRepair: true });
+
+    const claimsFile = JSON.parse(
+      fs.readFileSync(path.join(tmpRoot, '.truecourse', 'specs', 'claims.json'), 'utf-8'),
+    ) as ClaimsFile;
+    const memScope = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-mem-'));
+    const mem = await generateContractsInMemory({
+      canonical: canonicalFromClaims(claimsFile),
+      cacheScope: memScope,
+      runner: stubRunner(),
+      disableRepair: true,
+    });
+    fs.rmSync(memScope, { recursive: true, force: true });
+
+    const contractsRoot = path.join(tmpRoot, '.truecourse', 'contracts');
+    const diskRel = disk.write.written
+      .map((f) => path.relative(contractsRoot, f).split(path.sep).join('/'))
+      .sort();
+    // Same set of files...
+    expect(Object.keys(mem.files).sort()).toEqual(diskRel);
+    expect(diskRel.length).toBeGreaterThan(0);
+    // ...with byte-identical content.
+    for (const rel of Object.keys(mem.files)) {
+      expect(mem.files[rel]).toBe(fs.readFileSync(path.join(contractsRoot, rel), 'utf-8'));
+    }
+    // No scratch tree was created anywhere outside the explicit cache scope.
+    expect(fs.existsSync(path.join(memScope, '.truecourse', 'contracts'))).toBe(false);
+  });
+
+  it('generateContractsInMemory returns an empty corpus when every module is out-of-scope', async () => {
+    const claimsFile: ClaimsFile = {
+      version: 1,
+      generatedAt: '2026-05-22T00:00:00Z',
+      modules: [{ name: 'legacy', status: 'out-of-scope', sourceDocs: [], scope: { paths: [] } }],
+      claims: [],
+    };
+    const memScope = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-mem-'));
+    const mem = await generateContractsInMemory({
+      canonical: canonicalFromClaims(claimsFile),
+      cacheScope: memScope,
+      runner: stubRunner(),
+      disableRepair: true,
+    });
+    fs.rmSync(memScope, { recursive: true, force: true });
+    expect(mem.files).toEqual({});
   });
 });

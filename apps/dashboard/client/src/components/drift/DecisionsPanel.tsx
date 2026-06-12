@@ -38,7 +38,7 @@ interface DecisionsPanelProps {
 }
 
 export function DecisionsPanel({ activeConflictId, onSelectConflict }: DecisionsPanelProps) {
-  const { scan, hydrating } = useSpec();
+  const { scan, hydrating, supportsRescan } = useSpec();
 
   if (hydrating) {
     return (
@@ -54,10 +54,17 @@ export function DecisionsPanel({ activeConflictId, onSelectConflict }: Decisions
         icon={GitMerge}
         title="No scan yet"
         body={
-          <>
-            Click <strong>Scan</strong> on the Spec tab to start recording
-            decisions.
-          </>
+          supportsRescan ? (
+            <>
+              Click <strong>Scan</strong> on the Spec tab to start recording
+              decisions.
+            </>
+          ) : (
+            <>
+              Decisions are recorded when you resolve a conflict on the Spec tab,
+              which appears once this repository has been scanned.
+            </>
+          )
         }
       />
     );

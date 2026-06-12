@@ -18,8 +18,8 @@ export interface RunListOptions {
 export async function runList({ limit = 20, offset = 0, severity }: RunListOptions = {}): Promise<void> {
   p.intro("Violations");
 
-  const repo = requireRegisteredRepo();
-  const { violations, total } = listViolations(repo.path, {
+  const repo = await requireRegisteredRepo();
+  const { violations, total } = await listViolations(repo.path, {
     limit: isFinite(limit) ? limit : 0,
     offset,
     severity,
@@ -61,8 +61,8 @@ export function parseSeverityFlag(raw: string | undefined): Severity[] | undefin
 export async function runListDiff(): Promise<void> {
   p.intro("Diff check results");
 
-  const repo = requireRegisteredRepo();
-  const result = getDiffResult(repo.path);
+  const repo = await requireRegisteredRepo();
+  const result = await getDiffResult(repo.path);
 
   if (!result) {
     p.log.info("No diff check found. Run `truecourse analyze --diff` first.");

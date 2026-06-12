@@ -8,7 +8,7 @@ def list_eligible_tiers(db, active_filter):
     # The allowed-tier set [bronze, silver, gold] matches the spec, but the
     # interpolated `active_filter` fragment is opaque to the verifier —
     # surfaced as a coverage gap rather than silently dropped.
-    # IL-DRIFT: QueryRule:loyalty-tiers.allowed-tiers / query.unparseable
+    # IL-DRIFT: QueryRule:loyalty-tiers.allowed-tiers / query.unparseable @ list_eligible_tiers#0
     return db.execute(
         f"SELECT code, name, threshold FROM loyalty_tiers "
         f"WHERE code IN ('bronze', 'silver', 'gold') AND {active_filter}"

@@ -18,8 +18,8 @@ router.get(
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-      const repo = resolveProjectForRequest(id);
-      res.json(getTrend(repo.path, branch, limit, analysisId));
+      const repo = await resolveProjectForRequest(id);
+      res.json(await getTrend(repo.path, branch, limit, analysisId));
     } catch (err) {
       next(err);
     }
@@ -34,8 +34,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
-      const repo = resolveProjectForRequest(id);
-      res.json(getBreakdown(repo.path, branch, analysisId));
+      const repo = await resolveProjectForRequest(id);
+      res.json(await getBreakdown(repo.path, branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -50,8 +50,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
-      const repo = resolveProjectForRequest(id);
-      res.json(getTopOffenders(repo.path, branch, analysisId));
+      const repo = await resolveProjectForRequest(id);
+      res.json(await getTopOffenders(repo.path, branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -66,8 +66,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
-      const repo = resolveProjectForRequest(id);
-      res.json(getResolution(repo.path, branch, analysisId));
+      const repo = await resolveProjectForRequest(id);
+      res.json(await getResolution(repo.path, branch, analysisId));
     } catch (err) {
       next(err);
     }

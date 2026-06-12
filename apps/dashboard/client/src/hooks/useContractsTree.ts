@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import type { ContractsTree } from '@/lib/api';
 
-export function useContractsTree(repoId: string | undefined) {
+export function useContractsTree(repoId: string | undefined, ref?: string) {
   const [tree, setTree] = useState<ContractsTree | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,14 +23,14 @@ export function useContractsTree(repoId: string | undefined) {
     setIsLoading(true);
     setError(null);
     try {
-      const t = await api.getContractsTree(repoId);
+      const t = await api.getContractsTree(repoId, ref);
       setTree(t);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load contracts');
     } finally {
       setIsLoading(false);
     }
-  }, [repoId]);
+  }, [repoId, ref]);
 
   useEffect(() => {
     refetch();

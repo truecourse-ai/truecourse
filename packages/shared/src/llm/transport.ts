@@ -49,6 +49,30 @@ export interface LlmRequest {
 /** Returns the model's raw assistant text. The caller strips fences + parses. */
 export type LlmTransport = (req: LlmRequest) => Promise<string>;
 
+// ---------------------------------------------------------------------------
+// process-wide default transport
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional process-installed default transport. The CLI threads `cli`/`agent`
+ * per run, but a long-lived server can't pass a transport through every call
+ * site — so the enterprise edition installs an API-backed transport ONCE at
+ * boot via `setDefaultTransport`. Runners/providers that aren't handed an
+ * explicit transport fall back to this. Unset (OSS) → `undefined`, so callers
+ * use their own `cliTransport()` and behavior is byte-for-byte unchanged.
+ */
+let installedDefault: LlmTransport | undefined;
+
+/** Install (or clear, with `undefined`) the process-wide default transport. */
+export function setDefaultTransport(transport: LlmTransport | undefined): void {
+  installedDefault = transport;
+}
+
+/** The process-installed default transport, or `undefined` when none is set. */
+export function getDefaultTransport(): LlmTransport | undefined {
+  return installedDefault;
+}
+
 /**
  * Strip a single leading ```...``` fence (some models wrap JSON in fences even
  * when told not to). Shared so every runner strips identically.

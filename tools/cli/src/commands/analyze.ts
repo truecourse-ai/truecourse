@@ -14,7 +14,7 @@ import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
 
-function resolveOrInitProject(): RegistryEntry {
+async function resolveOrInitProject(): Promise<RegistryEntry> {
   const repoDir = resolveRepoDir(process.cwd()) ?? process.cwd();
   ensureRepoTruecourseDir(repoDir);
   return registerProject(repoDir);
@@ -222,7 +222,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   p.intro("Analyzing repository");
   showFirstRunNotice();
 
-  const project = resolveOrInitProject();
+  const project = await resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
 
   // First-time setup convenience: offer to install Claude Code skills if
@@ -238,7 +238,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
 
-  const config = readProjectConfig(project.path);
+  const config = await readProjectConfig(project.path);
   const enabledCategories = config.enabledCategories ?? undefined;
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;
@@ -341,7 +341,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   p.intro("Running diff check");
   showFirstRunNotice();
 
-  const project = resolveOrInitProject();
+  const project = await resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
 
   // Same first-run skill convenience as `runAnalyze`.
@@ -351,7 +351,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
 
-  const config = readProjectConfig(project.path);
+  const config = await readProjectConfig(project.path);
   const enabledCategories = config.enabledCategories ?? undefined;
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;

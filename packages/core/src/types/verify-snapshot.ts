@@ -90,11 +90,19 @@ export interface VerifyHistory {
 /**
  * Stable identity for a drift across runs. `ContractDrift.id` is regenerated
  * every run, so diffs key on the obligation — the same
- * `Type:identity / obligationKey` form the `IL-DRIFT` markers use. Stable under
- * line moves (no filePath/line in the key).
+ * `Type:identity / obligationKey` form the `IL-DRIFT` markers use.
+ *
+ * Per-query drifts attributed to a SPECIFIC code query additionally carry a
+ * site anchor (`@ <enclosingSymbol>#<occurrenceIndex>`), so two violations of
+ * the same obligation at two different code sites stay distinct drifts and the
+ * PR gate can flag new violating code. The anchor is the enclosing SYMBOL plus
+ * an occurrence index — still NO raw line number, so it's stable under line
+ * moves. Absence drifts (missing-required) carry no symbol and stay
+ * obligation-level.
  */
 export function driftKey(d: ContractDrift): string {
-  return `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`;
+  const base = `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`;
+  return d.enclosingSymbol ? `${base} @ ${d.enclosingSymbol}#${d.occurrenceIndex ?? 0}` : base;
 }
 
 export function emptySeverityCounts(): DriftSeverityCounts {
@@ -109,9 +117,10 @@ export function summarizeDrifts(drifts: ContractDrift[]): { total: number; bySev
 
 /**
  * Diff a current drift set against a baseline, matched by `driftKey` (stable
- * across runs despite regenerated drift ids). `added`/`resolved` are deduped
- * by key (each obligation counted once); `unchangedCount` counts current
- * drifts whose key is in the baseline.
+ * across runs despite regenerated drift ids). All three counts are key-deduped
+ * so they're mutually consistent: `added`/`resolved` count each unique key
+ * once, and `unchangedCount` counts UNIQUE current keys present in the baseline
+ * (not raw drifts — two current drifts collapsing to one key count once).
  */
 export function diffDrifts(
   baseline: ContractDrift[],
@@ -119,20 +128,18 @@ export function diffDrifts(
 ): { added: ContractDrift[]; resolved: ContractDrift[]; unchangedCount: number } {
   const baselineByKey = new Map<string, ContractDrift>();
   for (const d of baseline) if (!baselineByKey.has(driftKey(d))) baselineByKey.set(driftKey(d), d);
-  const currentKeys = new Set(current.map(driftKey));
+
+  // Dedupe current by key first, then classify each unique key once.
+  const currentByKey = new Map<string, ContractDrift>();
+  for (const d of current) if (!currentByKey.has(driftKey(d))) currentByKey.set(driftKey(d), d);
 
   const added: ContractDrift[] = [];
-  const addedSeen = new Set<string>();
   let unchangedCount = 0;
-  for (const d of current) {
-    const k = driftKey(d);
+  for (const [k, d] of currentByKey) {
     if (baselineByKey.has(k)) unchangedCount++;
-    else if (!addedSeen.has(k)) {
-      addedSeen.add(k);
-      added.push(d);
-    }
+    else added.push(d);
   }
   const resolved: ContractDrift[] = [];
-  for (const [k, d] of baselineByKey) if (!currentKeys.has(k)) resolved.push(d);
+  for (const [k, d] of baselineByKey) if (!currentByKey.has(k)) resolved.push(d);
   return { added, resolved, unchangedCount };
 }

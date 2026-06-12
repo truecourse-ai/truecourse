@@ -19,6 +19,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type FormEvent,
   type ReactNode,
 } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -121,13 +122,78 @@ function FullScreen({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Onboarding for a signed-in user with no workspace yet. Names + creates a
+ * WorkOS org (server re-mints the session into it), then reloads so the auth
+ * gate re-probes `/me` and lets them into the dashboard.
+ */
+function CreateWorkspace() {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${getServerUrl()}${AUTH_BASE}/workspace`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Request failed (${res.status})`);
+      }
+      // Session is now scoped to the new org → full reload re-probes /me.
+      window.location.href = '/';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <FullScreen>
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 text-center">
+        <div className="space-y-1">
+          <h1 className="text-lg font-semibold">Create your workspace</h1>
+          <p className="text-xs text-muted-foreground">
+            Name your TrueCourse workspace to get started.
+          </p>
+        </div>
+        <input
+          autoFocus
+          value={name}
+          maxLength={80}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Acme Inc."
+          className="w-full rounded-md bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <button
+          type="submit"
+          disabled={busy || !name.trim()}
+          className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create workspace'}
+        </button>
+      </form>
+    </FullScreen>
+  );
+}
+
+/**
  * Whole-dashboard auth gate. Community / disabled renders through.
  * Enterprise: shows a spinner while probing, redirects to hosted login
  * when anonymous, and surfaces a retry screen if a callback error came
  * back (so we never redirect-loop).
  */
 export function EnterpriseAuthGate({ children }: { children: ReactNode }) {
-  const { status, signIn } = useEeAuth();
+  const { status, user, signIn } = useEeAuth();
   const authError = new URLSearchParams(window.location.search).get(
     'auth_error',
   );
@@ -136,7 +202,14 @@ export function EnterpriseAuthGate({ children }: { children: ReactNode }) {
     if (status === 'anon' && !authError) signIn();
   }, [status, authError, signIn]);
 
-  if (status === 'disabled' || status === 'authed') return <>{children}</>;
+  if (status === 'disabled') return <>{children}</>;
+
+  if (status === 'authed') {
+    // Signed in but not yet in a workspace (AuthKit signups land org-less) →
+    // self-serve onboarding before the rest of the dashboard.
+    if (user && !user.organizationId) return <CreateWorkspace />;
+    return <>{children}</>;
+  }
 
   if (status === 'anon' && authError) {
     return (

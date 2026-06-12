@@ -32,8 +32,8 @@ export const ordersRepo = {
     // predicate, the window is anchored on `createdAt`, and it filters
     // soft-deleted rows out entirely.
     // IL-DRIFT: QueryRule:order.eq-tenantid / query.predicate.missing.tenantId.eq
-    // IL-DRIFT: QueryRule:order.daterange-placedat / query.date-binding.column-mismatch
-    // IL-DRIFT: QueryRule:order.no-is-null-deletedat / query.predicate.forbidden-present.deletedAt.is-null
+    // IL-DRIFT: QueryRule:order.daterange-placedat / query.date-binding.column-mismatch @ ordersRepo.list#0
+    // IL-DRIFT: QueryRule:order.no-is-null-deletedat / query.predicate.forbidden-present.deletedAt.is-null @ ordersRepo.list#0
     const q = db('orders')
       .where('createdAt', '>=', since)
       .where('createdAt', '<', until)
@@ -49,6 +49,23 @@ export const ordersRepo = {
         ? Buffer.from(String(startIdx + items.length)).toString('base64')
         : null;
     return { items, nextCursor };
+  },
+  /**
+   * Recently-touched feed — same `no-is-null-deletedat` obligation as
+   * `list`, violated again at a DISTINCT code site. Two sites must yield
+   * two distinct drifts (occurrence-level identity), so the gate flags
+   * this newly-added violating code instead of collapsing it onto the
+   * `list` drift. Single-sided date window ⇒ no date-binding drift.
+   */
+  // IL-DRIFT: QueryRule:order.no-is-null-deletedat / query.predicate.forbidden-present.deletedAt.is-null @ ordersRepo.recentlyTouched#0
+  async recentlyTouched(limit: number): Promise<Order[]> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const rows = await db('orders')
+      .where('updatedAt', '>=', cutoff)
+      .whereNull('deletedAt')
+      .orderBy('updatedAt', 'desc')
+      .limit(limit);
+    return rows as Order[];
   },
   /** Lease-recovery hook — used by the background worker to reset crashed in-flight steps. */
   async resetForRecovery(o: Order): Promise<void> {

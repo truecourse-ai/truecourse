@@ -20,14 +20,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
-import { cachePaths, ensureCacheDirs } from './cache.js';
-
-const CACHE_FILE = 'relevance.json';
 
 export interface RelevanceVerdict {
   /** Doc's repo-relative path. */
@@ -155,10 +151,10 @@ async function classifyOne(
   runner: RelevanceRunner,
 ): Promise<RelevanceVerdict> {
   const cacheKey = computeCacheKey(doc);
-  const cached = readCache(repoRoot, cacheKey);
+  const cached = await readCache(repoRoot, cacheKey);
   if (cached) return cached;
   const verdict = await runner({ doc });
-  writeCache(repoRoot, cacheKey, verdict);
+  await writeCache(repoRoot, cacheKey, verdict);
   return verdict;
 }
 
@@ -247,28 +243,14 @@ function spawnRelevanceRunner(
 }
 
 // ---------------------------------------------------------------------------
-// Cache
+// Cache — content-addressed, via the pluggable KV seam (`@truecourse/llm`
+// get/setCacheEntry): Postgres in EE, file in OSS. The cache KEY already folds
+// in the prompt fingerprint + the doc's contentHash, so an unchanged doc is a
+// hit and a prompt change invalidates. No direct fs — so an EE workspace scan
+// (ephemeral scratch scope) still gets hits across syncs.
 // ---------------------------------------------------------------------------
 
-interface RelevanceCacheEntry {
-  cacheKey: string;
-  verdict: RelevanceVerdict;
-  cachedAt: string;
-}
-
-const RelevanceCacheFileSchema = z.object({
-  entries: z.array(
-    z.object({
-      cacheKey: z.string(),
-      verdict: z.object({
-        path: z.string(),
-        include: z.boolean(),
-        reason: z.string(),
-      }),
-      cachedAt: z.string(),
-    }),
-  ),
-});
+const CACHE_NAME = 'consolidator/relevance';
 
 const PROMPT_FINGERPRINT = createHash('sha256')
   .update(RELEVANCE_SYSTEM_PROMPT)
@@ -281,34 +263,19 @@ function computeCacheKey(doc: DocCandidate): string {
     .digest('hex');
 }
 
-function cacheFile(repoRoot: string): string {
-  return path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
+const CachedVerdictSchema = z.object({
+  path: z.string(),
+  include: z.boolean(),
+  reason: z.string(),
+});
+
+async function readCache(scope: string, cacheKey: string): Promise<RelevanceVerdict | null> {
+  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
+  if (raw === null) return null;
+  const parsed = CachedVerdictSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
-function readCache(repoRoot: string, cacheKey: string): RelevanceVerdict | null {
-  const file = cacheFile(repoRoot);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = RelevanceCacheFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')));
-    const entry = raw.entries.find((e) => e.cacheKey === cacheKey);
-    return entry ? entry.verdict : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(repoRoot: string, cacheKey: string, verdict: RelevanceVerdict): void {
-  ensureCacheDirs(repoRoot);
-  const file = cacheFile(repoRoot);
-  let entries: RelevanceCacheEntry[] = [];
-  if (fs.existsSync(file)) {
-    try {
-      entries = RelevanceCacheFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8'))).entries;
-    } catch {
-      entries = [];
-    }
-  }
-  const filtered = entries.filter((e) => e.cacheKey !== cacheKey);
-  filtered.push({ cacheKey, verdict, cachedAt: new Date().toISOString() });
-  fs.writeFileSync(file, JSON.stringify({ entries: filtered }, null, 2) + '\n');
+async function writeCache(scope: string, cacheKey: string, verdict: RelevanceVerdict): Promise<void> {
+  await setCacheEntry(scope, CACHE_NAME, cacheKey, verdict);
 }

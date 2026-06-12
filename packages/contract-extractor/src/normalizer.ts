@@ -345,6 +345,39 @@ function queryRuleIdentity(src: string): string | null {
   return `${slug(entity)}.${sig.join('.')}`;
 }
 
+/**
+ * Collapse artifacts that share a `(kind, identity)` AFTER deterministic
+ * identity assignment. `assignDeterministicIdentities` maps each identity to a
+ * content-derived slug (e.g. `file-glob.<pattern-slug>`); two structurally
+ * DISTINCT artifacts whose slugs coincide therefore arrive here with the SAME
+ * identity — the LLM is fond of emitting one out-of-scope route as both
+ * `orders-export` (glob `**​/orders/**export*`) and `orders-id-export` (glob
+ * `**​/orders/**​/*export*`), which both slug to `orders-export`. `dedupArtifacts`
+ * ran earlier on the finer `(category, exact-pattern)` key and couldn't see the
+ * collision, so without this pass the duplicate reaches the resolver, which
+ * rejects the whole corpus (`duplicate artifact identity`). Keeps the first
+ * artifact per key (deterministic merge order); the dropped ones are redundant
+ * by the verifier's own identity definition.
+ */
+function collapseIdentityCollisions(artifacts: MergedArtifact[]): {
+  artifacts: MergedArtifact[];
+  removed: number;
+} {
+  const seen = new Set<string>();
+  const out: MergedArtifact[] = [];
+  let removed = 0;
+  for (const a of artifacts) {
+    const key = `${a.kind}:${a.identity}`;
+    if (seen.has(key)) {
+      removed++;
+      continue;
+    }
+    seen.add(key);
+    out.push(a);
+  }
+  return { artifacts: out, removed };
+}
+
 /** Rewrite the `<keyword> <oldId> {` header to use the new identity. */
 function renameHeader(src: string, oldId: string, newId: string): string {
   const escaped = oldId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -384,8 +417,20 @@ export function normalizeMergedArtifacts(artifacts: MergedArtifact[]): {
   // Identity is derived from structured predicates, so this runs after
   // raw→structured lifting.
   const { renamed: identitiesAssigned } = assignDeterministicIdentities(deduped);
+  // assignDeterministicIdentities can map structurally-distinct artifacts onto
+  // the SAME identity (different glob spellings / free-form names that slug
+  // alike). dedupArtifacts ran on the finer structural key and missed those, so
+  // collapse the post-assignment collisions here — otherwise the resolver
+  // rejects the corpus on a duplicate identity.
+  const { artifacts: collapsed, removed: collisionsCollapsed } =
+    collapseIdentityCollisions(deduped);
   return {
-    artifacts: deduped,
-    stats: { entityRefsRewritten, rawPredicatesLifted, artifactsDeduplicated, identitiesAssigned },
+    artifacts: collapsed,
+    stats: {
+      entityRefsRewritten,
+      rawPredicatesLifted,
+      artifactsDeduplicated: artifactsDeduplicated + collisionsCollapsed,
+      identitiesAssigned,
+    },
   };
 }

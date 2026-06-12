@@ -29,6 +29,13 @@ interface VerifyPanelProps {
    * preview tab (replaces the existing preview); `pinned=true` pins it
    * as a permanent tab. Mirrors the file / contracts viewer pattern. */
   onOpenDrift: (id: string, pinned: boolean) => void;
+  /** EE: the analytics charts are display-only on a separate tab, so the drift
+   *  list gets its own severity filter here (same severity toggle). Absent in OSS,
+   *  where filtering happens by clicking the adjacent charts. */
+  onSetSeverity?: (s: DriftSeverity) => void;
+  /** Hosted (EE): drift is computed automatically by the server-side scan; there
+   * is no in-dashboard Verify button, so empty-state copy must not point at one. */
+  hosted?: boolean;
 }
 
 /** Apply the analytics-driven filters (severity / kind / file) to a drift set. */
@@ -109,6 +116,49 @@ const SEVERITY_TONE: Record<DriftSeverity, string> = {
   info: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
 };
 
+/**
+ * Severity filter for the drift list — shown in EE, where the analytics charts
+ * live on a separate tab and can't filter this list. Single-select with toggle-
+ * off (re-click clears); reuses the shared severity toggle. Only severities
+ * actually present in the drifts are offered, each with its count.
+ */
+function SeverityFilterBar({
+  drifts,
+  active,
+  onSet,
+}: {
+  drifts: ContractDrift[];
+  active: DriftSeverity | null;
+  onSet: (s: DriftSeverity) => void;
+}) {
+  const present = SEVERITY_ORDER.filter((sev) => drifts.some((d) => d.severity === sev));
+  if (present.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2 text-xs">
+      <span className="shrink-0 text-muted-foreground">Severity:</span>
+      {present.map((sev) => {
+        const isActive = active === sev;
+        const count = drifts.filter((d) => d.severity === sev).length;
+        return (
+          <button
+            key={sev}
+            type="button"
+            onClick={() => onSet(sev)}
+            aria-pressed={isActive}
+            className={`rounded px-1.5 py-0.5 font-medium capitalize transition-colors ${
+              isActive
+                ? `${SEVERITY_TONE[sev]} ring-1 ring-inset ring-current`
+                : 'text-muted-foreground hover:bg-muted/60'
+            }`}
+          >
+            {sev} {count}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function VerifyPanel({
   state,
   diff,
@@ -120,6 +170,8 @@ export function VerifyPanel({
   filters,
   onClearFilter,
   onOpenDrift,
+  onSetSeverity,
+  hosted = false,
 }: VerifyPanelProps) {
   if (isLoading && !state) {
     return (
@@ -138,21 +190,9 @@ export function VerifyPanel({
     );
   }
 
-  if (!state) {
-    return (
-      <EmptyState
-        icon={ShieldCheck}
-        title="No verify run yet"
-        body={
-          <>
-            Click <strong>Verify</strong> in the header to compare your code
-            against the generated TC contracts.
-          </>
-        }
-      />
-    );
-  }
-
+  // Diff mode (PR view / Git Diff) is self-contained — VerifyDiffView reads only
+  // the diff, so render it before the no-state guard: a PR's head snapshot may
+  // still be loading (or absent) while its stored diff is already available.
   if (mode === 'diff') {
     return (
       <div className="flex h-full flex-col">
@@ -163,8 +203,31 @@ export function VerifyPanel({
           filters={filters}
           onClearFilter={onClearFilter}
           onOpenDrift={onOpenDrift}
+          hosted={hosted}
         />
       </div>
+    );
+  }
+
+  if (!state) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="No verify run yet"
+        body={
+          hosted ? (
+            <>
+              Drift is computed automatically when your default branch is scanned.
+              Results will appear here once a scan completes.
+            </>
+          ) : (
+            <>
+              Click <strong>Verify</strong> in the header to compare your code
+              against the generated TC contracts.
+            </>
+          )
+        }
+      />
     );
   }
 
@@ -179,6 +242,9 @@ export function VerifyPanel({
 
   return (
     <div className="flex h-full flex-col">
+      {onSetSeverity && (
+        <SeverityFilterBar drifts={state.drifts} active={filters.severity} onSet={onSetSeverity} />
+      )}
       <FilteredBy filters={filters} onClearFilter={onClearFilter} />
       <div className="flex-1 overflow-auto">
         {state.drifts.length === 0 ? (
@@ -225,6 +291,7 @@ function VerifyDiffView({
   filters,
   onClearFilter,
   onOpenDrift,
+  hosted = false,
 }: {
   diff: VerifyDiff | null;
   isDiffing: boolean;
@@ -232,6 +299,7 @@ function VerifyDiffView({
   filters: DriftFilters;
   onClearFilter: (target: DriftFilterTarget) => void;
   onOpenDrift: (id: string, pinned: boolean) => void;
+  hosted?: boolean;
 }) {
   if (isDiffing && !diff) {
     return (
@@ -245,7 +313,11 @@ function VerifyDiffView({
       <EmptyState
         icon={GitCompare}
         title="No diff computed yet"
-        body="Click Verify to compare the current code's drifts against the committed baseline."
+        body={
+          hosted
+            ? 'Drift is compared against the committed baseline automatically on each scan.'
+            : "Click Verify to compare the current code's drifts against the committed baseline."
+        }
       />
     );
   }

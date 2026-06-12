@@ -52,7 +52,18 @@ describe('navigation registry — pure lookups', () => {
 
   it('tabsForSection returns section tabs (or empty)', () => {
     const tabs = tabsForSection('drift').map((t) => t.id);
-    expect(tabs).toEqual(['spec', 'contracts', 'verify', 'runs', 'decisions']);
+    // `pulls` + `settings` are EE-only (capability-gated; the raw lookup is
+    // unfiltered, so they appear here — visibility filtering happens elsewhere).
+    expect(tabs).toEqual([
+      'pulls',
+      'spec',
+      'contracts',
+      'verify',
+      'driftanalytics',
+      'runs',
+      'decisions',
+      'settings',
+    ]);
     expect(tabsForSection('nope')).toEqual([]);
   });
 
@@ -67,7 +78,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['spec', 'contracts', 'verify', 'runs', 'decisions']) {
+    for (const t of ['pulls', 'spec', 'contracts', 'verify', 'runs', 'decisions']) {
       expect(ids.has(t)).toBe(true);
     }
   });

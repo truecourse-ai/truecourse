@@ -66,15 +66,15 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     if (!parsed.success) throw createAppError('Invalid request body', 400);
     const { mode, skipGit } = parsed.data;
 
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
     // Diff requires a baseline. Fail fast with 400 before the 202 accept
     // so the client doesn't wait on sockets that never come.
-    if (mode === 'diff' && !readLatest(repo.path)) {
+    if (mode === 'diff' && !(await readLatest(repo.path))) {
       throw createAppError('Run a full analysis first before checking a diff.', 400);
     }
 
-    const projectConfig = readProjectConfig(repo.path);
+    const projectConfig = await readProjectConfig(repo.path);
     const effectiveCategories = projectConfig.enabledCategories ?? undefined;
     const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
 
@@ -150,8 +150,8 @@ router.post('/:id/analyses/cancel', async (req: Request, res: Response, next: Ne
 router.get('/:id/analyses', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const repo = resolveProjectForRequest(id);
-    const history = readHistory(repo.path);
+    const repo = await resolveProjectForRequest(id);
+    const history = await readHistory(repo.path);
     const entries = history.analyses
       .filter((e) => !(e.metadata as Record<string, unknown> | null)?.isDiffAnalysis)
       .slice(-20)
@@ -185,8 +185,8 @@ router.get('/:id/analyses', async (req: Request, res: Response, next: NextFuncti
 router.get('/:id/analyses/diff', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const repo = resolveProjectForRequest(id);
-    const result = getDiffResult(repo.path);
+    const repo = await resolveProjectForRequest(id);
+    const result = await getDiffResult(repo.path);
     if (!result) {
       res.json(null);
       return;
@@ -215,22 +215,22 @@ router.get('/:id/analyses/:analysisId/usage', async (req: Request, res: Response
   try {
     const id = req.params.id as string;
     const analysisId = req.params.analysisId as string;
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
-    const latest = readLatest(repo.path);
+    const latest = await readLatest(repo.path);
     if (latest?.analysis.id === analysisId) {
       // Usage records live on the per-analysis file, not LATEST.
-      const snap = readAnalysis(repo.path, latest.head);
+      const snap = await readAnalysis(repo.path, latest.head);
       res.json(snap?.usage ?? []);
       return;
     }
 
-    const filename = findAnalysisFilename(repo.path, analysisId);
+    const filename = await findAnalysisFilename(repo.path, analysisId);
     if (!filename) {
       res.json([]);
       return;
     }
-    const snap = readAnalysis(repo.path, filename);
+    const snap = await readAnalysis(repo.path, filename);
     res.json(snap?.usage ?? []);
   } catch (error) {
     next(error);
@@ -245,20 +245,20 @@ router.delete('/:id/analyses/:analysisId', async (req: Request, res: Response, n
   try {
     const id = req.params.id as string;
     const analysisId = req.params.analysisId as string;
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
-    const filename = findAnalysisFilename(repo.path, analysisId);
+    const filename = await findAnalysisFilename(repo.path, analysisId);
     if (!filename) throw createAppError('Analysis not found', 404);
 
-    deleteAnalysisFile(repo.path, filename);
-    removeFromHistory(repo.path, analysisId);
+    await deleteAnalysisFile(repo.path, filename);
+    await removeFromHistory(repo.path, analysisId);
 
     // If we just deleted the head, rebuild LATEST from the now-most-recent
     // remaining analysis (or clear it + diff.json).
-    const latest = readLatest(repo.path);
+    const latest = await readLatest(repo.path);
     if (latest?.head === filename) {
-      rebuildLatestFromHistory(repo.path);
-      deleteDiff(repo.path);
+      await rebuildLatestFromHistory(repo.path);
+      await deleteDiff(repo.path);
     }
 
     res.json({ ok: true });
@@ -353,23 +353,23 @@ async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartR
 // LATEST rebuild (used by DELETE when the deleted analysis was the head)
 // ---------------------------------------------------------------------------
 
-function rebuildLatestFromHistory(repoPath: string): void {
-  const files = listAnalyses(repoPath);
+async function rebuildLatestFromHistory(repoPath: string): Promise<void> {
+  const files = await listAnalyses(repoPath);
   if (files.length === 0) {
-    deleteLatest(repoPath);
+    await deleteLatest(repoPath);
     return;
   }
   const newest = files[files.length - 1];
-  const snap = readAnalysis(repoPath, newest);
+  const snap = await readAnalysis(repoPath, newest);
   if (!snap) {
-    deleteLatest(repoPath);
+    await deleteLatest(repoPath);
     return;
   }
   // Walk forward through snapshots applying added/resolved to reconstruct
   // the currently-active violation set.
-  const active = new Map<string, ReturnType<typeof readAnalysis>>();
+  const active = new Map<string, Awaited<ReturnType<typeof readAnalysis>>>();
   for (const fname of files) {
-    const s = readAnalysis(repoPath, fname);
+    const s = await readAnalysis(repoPath, fname);
     if (!s) continue;
     for (const r of s.violations.resolved) active.delete(r.id);
     for (const a of s.violations.added) active.set(a.id, s);
@@ -408,7 +408,7 @@ function rebuildLatestFromHistory(repoPath: string): void {
     }
   }
 
-  writeLatest(repoPath, latest);
+  await writeLatest(repoPath, latest);
 }
 
 export default router;

@@ -15,11 +15,13 @@
 
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { ContractDrift, ArtifactRef, EntityContract, FieldContract } from '../types/index.js';
+import type { ContractDrift, ArtifactRef, EntityContract, FieldContract, SpecOrigin } from '../types/index.js';
 import type { EntityFacts, EntityFileFacts } from '../extractor/entity-facts/index.js';
 
 export interface EntityCompareInput {
   entityRef: ArtifactRef;
+  /** Spec-side origin of the entity artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: EntityContract;
   facts: EntityFacts;
 }
@@ -57,6 +59,7 @@ export function compareEntity(input: EntityCompareInput): ContractDrift[] {
           `but a direct assignment mutates it after creation.`,
         specSide: `field ${a.field}: … { immutable }`,
         codeSide: a.snippet,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }
@@ -80,6 +83,7 @@ export function compareEntity(input: EntityCompareInput): ContractDrift[] {
           `but the file that constructs ${entityName} never lowercases the value.`,
         specSide: `field ${fieldName}: string { normalize lowercase }`,
         codeSide: `no lowercase call in ${path.basename(file.filePath)}`,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }

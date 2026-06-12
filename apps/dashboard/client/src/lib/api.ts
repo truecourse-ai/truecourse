@@ -669,6 +669,8 @@ export type SpecClaim = {
   kind?: 'definition' | 'constraint';
   provenance: { file: string; line: number; quote: string };
   metadata: { docKind: string; status?: string; lastTouched: string };
+  /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
+  layer?: 'workspace' | 'repo';
 };
 
 export type SpecConflictCandidate = {
@@ -760,12 +762,16 @@ export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
 export type CanonicalSpecTopic = {
   topic: string;
   claimCount: number;
+  /** Every claim in this topic is inherited from workspace Knowledge (enterprise). */
+  inherited?: boolean;
 };
 
 export type CanonicalSpecModule = {
   name: string;
   manifest: Record<string, unknown>;
   topics: CanonicalSpecTopic[];
+  /** Every topic in this module is entirely workspace-inherited (enterprise). */
+  inherited?: boolean;
 };
 
 export type CanonicalSpecTree = {
@@ -781,16 +787,22 @@ export type CanonicalSpecSection = {
   claims: SpecClaim[];
 };
 
-export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
-  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
+export function getSpecCanonicalTree(
+  repoId: string,
+  ref?: string,
+): Promise<CanonicalSpecTree> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree${q}`);
 }
 
 export function getSpecCanonicalSection(
   repoId: string,
   moduleName: string,
   topic: string,
+  ref?: string,
 ): Promise<CanonicalSpecSection> {
   const params = new URLSearchParams({ module: moduleName, topic });
+  if (ref) params.set('ref', ref);
   return fetchApi<CanonicalSpecSection>(
     `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
   );
@@ -804,7 +816,12 @@ export type ContractsTree = {
   hasContracts: boolean;
   modules: Array<{
     name: string;
-    files: Array<{ name: string; path: string }>;
+    files: Array<{
+      name: string;
+      path: string;
+      /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
+      provenance?: 'workspace' | 'repo';
+    }>;
   }>;
 };
 
@@ -813,14 +830,19 @@ export type ContractsFile = {
   content: string;
 };
 
-export function getContractsTree(repoId: string): Promise<ContractsTree> {
-  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree`);
+export function getContractsTree(repoId: string, ref?: string): Promise<ContractsTree> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree${q}`);
 }
 
-export function getContractsFile(repoId: string, filePath: string): Promise<ContractsFile> {
-  return fetchApi<ContractsFile>(
-    `/api/repos/${repoId}/contracts/file?path=${encodeURIComponent(filePath)}`,
-  );
+export function getContractsFile(
+  repoId: string,
+  filePath: string,
+  ref?: string,
+): Promise<ContractsFile> {
+  const params = new URLSearchParams({ path: filePath });
+  if (ref) params.set('ref', ref);
+  return fetchApi<ContractsFile>(`/api/repos/${repoId}/contracts/file?${params.toString()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +862,17 @@ export type ContractDrift = {
   lineEnd?: number | null;
   specSide?: unknown;
   codeSide?: unknown;
+  /** Spec-side origin of the requirement this drift came from (source doc +
+   *  section + line range). Absent on old snapshots predating the field.
+   *  `sourceUrl`/`sourceLabel` are attached by the server when the source is a
+   *  synced workspace-KB doc (external link + title), e.g. a Confluence page. */
+  specOrigin?: {
+    source: string;
+    section: string;
+    lines: [number, number];
+    sourceUrl?: string | null;
+    sourceLabel?: string | null;
+  } | null;
 };
 
 export type VerifyState = {
@@ -851,15 +884,25 @@ export type VerifyState = {
   drifts: ContractDrift[];
   resolverErrors: string[];
   unresolvedRefs: string[];
+  /**
+   * Commit the drifts were observed at (baseline commit for the latest state,
+   * the snapshot's commit for a past run / PR head). Lets EE deep-link drift
+   * sites to the GitHub blob at the right sha even in the non-PR base view.
+   */
+  commitHash?: string | null;
 };
 
 /**
  * Persisted verify state. Returns null on 404 (no run yet); other
  * errors propagate.
  */
-export async function getVerifyState(repoId: string): Promise<VerifyState | null> {
+export async function getVerifyState(
+  repoId: string,
+  ref?: string,
+): Promise<VerifyState | null> {
   try {
-    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state`);
+    const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state${q}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
@@ -887,10 +930,18 @@ export type VerifyDiff = {
   summary: { added: number; resolved: number; unchanged: number };
 };
 
-/** Read the last-computed verify diff. Null on 404 (none computed yet). */
-export async function getVerifyDiff(repoId: string): Promise<VerifyDiff | null> {
+/**
+ * Read the verify diff. Null on 404 (none computed yet).
+ * `ref` (EE) → that commit's snapshot diffed against the repo's baseline (derived
+ * server-side); omitted → the OSS working-tree diff.
+ */
+export async function getVerifyDiff(
+  repoId: string,
+  opts?: { ref?: string },
+): Promise<VerifyDiff | null> {
   try {
-    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`);
+    const q = opts?.ref ? `?ref=${encodeURIComponent(opts.ref)}` : '';
+    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff${q}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
@@ -902,6 +953,41 @@ export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
   return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
     method: 'POST',
   });
+}
+
+/** Human-readable prose for one drift — never replaces the structured original. */
+export type EnrichedDrift = {
+  /** One plain sentence: what the spec REQUIRES. */
+  specReadable: string;
+  /** One plain sentence: what the code ACTUALLY DOES. */
+  codeReadable: string;
+  /** One sentence combining both ("Spec requires X, but the code does Y."). */
+  summary: string;
+};
+
+/**
+ * On-demand, cached LLM enrichment of one drift into readable prose. Returns
+ * `null` when no LLM transport is configured (204) or the call failed — the
+ * caller then keeps the structured rendering. Repo-agnostic + content-addressed
+ * server-side, so a drift the gate already enriched is a cache hit.
+ *
+ * Send the drift's content fields verbatim (the same string `specSide`/`codeSide`
+ * the snapshot stored) so the server derives the same content key as the gate.
+ */
+export async function postDriftEnrich(
+  repoId: string,
+  drift: Pick<
+    ContractDrift,
+    'artifactRef' | 'obligationKey' | 'message' | 'severity' | 'specSide' | 'codeSide' | 'specOrigin'
+  >,
+): Promise<EnrichedDrift | null> {
+  // 204 → fetchApi returns undefined; normalize to null for "no enrichment".
+  return (
+    (await fetchApi<EnrichedDrift | undefined>(
+      `/api/repos/${repoId}/verify/drift/enrich`,
+      { method: 'POST', body: JSON.stringify(drift) },
+    )) ?? null
+  );
 }
 
 export type VerifyHistoryEntry = {

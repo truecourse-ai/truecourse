@@ -20,27 +20,36 @@
 import {
   candidateFingerprint,
   consolidate,
+  remerge,
   readDecisions,
   writeDecisions,
   writeScanState,
+  type Claim,
+  type ClaimsFile,
+  type DocCandidate,
   type ConsolidateModels,
   type ConsolidateResult,
   type Decision,
   type DecisionsFile,
   type ManualChain,
+  type MergeResult,
   type Resolution,
   type ScanState,
+  type VersionChain,
 } from '@truecourse/spec-consolidator';
 import {
+  canonicalFromClaims,
   defaultConcurrency as defaultExtractorConcurrency,
   generateContracts,
+  generateContractsInMemory,
   hasCanonicalSpec,
   spawnRunner as spawnExtractorRunner,
   type ExtractModels,
   type GenerateResult,
+  type SliceRunner,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
-import { agentTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { agentTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 
 // Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
 function perfNow(): number {
@@ -61,7 +70,8 @@ import {
 } from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import os from 'node:os';
+import { createHash, randomUUID } from 'node:crypto';
 import { getGit, isGitRepo } from '../lib/git.js';
 import {
   writeVerifyRun,
@@ -72,9 +82,30 @@ import {
   appendVerifyHistory,
   deleteVerifyDiff,
   writeVerifyDiff,
+  verifyMaterializeInPlace,
 } from '../lib/verify-store.js';
 export { readVerifyDiff, readVerifyLatest, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
 export type { VerifyDiff, VerifyLatest, VerifyHistory } from '../types/verify-snapshot.js';
+import { repoRef } from '../lib/repo-ref.js';
+import {
+  saveContracts,
+  loadContracts,
+  saveWorkspaceContracts,
+  loadWorkspaceContracts,
+  contractsMaterializeInPlace,
+  type RepoRef,
+  type WorkspaceRef,
+  type MaterializedDir,
+} from '../lib/contract-store.js';
+import {
+  saveSpec,
+  loadSpec,
+  loadLatestSpec,
+  latestSpecCommit,
+  saveWorkspaceSpec,
+  loadWorkspaceSpec,
+  specsMaterializeInPlace,
+} from '../lib/spec-store.js';
 import {
   diffDrifts,
   summarizeDrifts,
@@ -173,6 +204,13 @@ export interface VerifyState {
   drifts: ContractDrift[];
   resolverErrors: string[];
   unresolvedRefs: string[];
+  /**
+   * Commit the drifts were observed at — the baseline commit for the latest
+   * state, the snapshot's commit for a past run. Lets EE deep-link drift sites
+   * to the GitHub blob at the right sha even in the (non-PR) base view. Null
+   * when verify ran outside a git repo.
+   */
+  commitHash?: string | null;
 }
 
 export interface InferInProcessResult {
@@ -202,6 +240,14 @@ export interface SpecResolveAllDefaultsResult {
 export interface SpecInProcessOptions {
   /** Required for progress emission. Build via `new StepTracker(...)`. */
   tracker?: StepTracker;
+  /**
+   * Per-slice contract-generation progress (`done`, `total`) — the headless
+   * analogue of the tracker's "N/M slices" detail, for callers without a
+   * StepTracker (the EE job runner forwards it to its own stepped popup).
+   */
+  onSliceProgress?: (done: number, total: number) => void;
+  /** Repair-pass progress (`done`, `total`) — the silent post-extraction LLM pass. */
+  onRepairProgress?: (done: number, total: number) => void;
   /** Override block extraction runner; tests inject a stub. */
   blockRunner?: Parameters<typeof consolidate>[1] extends infer T
     ? T extends { blockRunner?: infer R }
@@ -216,6 +262,14 @@ export interface SpecInProcessOptions {
     : never;
   /** When true, skip the LLM chain-detection step entirely. */
   disableLlmChainDetection?: boolean;
+  /** When true, skip the LLM chain-recheck step. */
+  disableChainRecheck?: boolean;
+  /** When true, skip the LLM conflict-explanation step. */
+  disableConflictExplanations?: boolean;
+  /** When true, skip the LLM conflict-resolution step (no auto-resolve). */
+  disableConflictResolution?: boolean;
+  /** When true, skip the LLM relevance filter (every doc is in scope). */
+  disableRelevanceFilter?: boolean;
   /** When true, skip git mtime resolution. */
   skipGit?: boolean;
   /**
@@ -224,6 +278,14 @@ export interface SpecInProcessOptions {
    * telemetry (e.g. tests, internal re-scans).
    */
   source?: TelemetrySource;
+  /**
+   * Explicit store identity (opaque repo handle + commit). The EE GitHub App
+   * passes this so persisted sets key off the PR head + `owner/repo`, not the
+   * ephemeral clone path. OSS omits it → derived from `repoRoot`'s HEAD.
+   */
+  ref?: RepoRef;
+  /** Override the commit SHA used to key persisted sets when `ref` is omitted. */
+  commitOverride?: string;
   /**
    * LLM transport mode. `cli` (default) spawns `claude -p`; `agent` uses a
    * filesystem mailbox under `io` so an orchestrating agent answers the
@@ -239,17 +301,20 @@ export interface SpecInProcessOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the LLM transport for a run. `cli` (default) → undefined, so each
- * runner factory falls back to its built-in cli transport (spawn `claude -p`),
- * preserving today's behavior exactly. `agent` → a filesystem-mailbox transport
- * under `options.io` (required).
+ * Build the LLM transport for a run. `agent` → a filesystem-mailbox transport
+ * under `options.io` (required). `cli` (default) → the process-installed default
+ * transport when present (the EE edition installs an API-backed transport at
+ * boot so hosted runs need no `claude` binary), else `undefined` so each runner
+ * falls back to its built-in cli transport — preserving OSS behavior exactly.
  */
-function resolveTransport(options: SpecInProcessOptions): LlmTransport | undefined {
-  if (options.llm !== 'agent') return undefined;
-  if (!options.io) {
-    throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
+function resolveTransport(options: { llm?: 'cli' | 'agent'; io?: string }): LlmTransport | undefined {
+  if (options.llm === 'agent') {
+    if (!options.io) {
+      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
+    }
+    return agentTransport(options.io);
   }
-  return agentTransport(options.io);
+  return getDefaultTransport();
 }
 
 /**
@@ -305,20 +370,33 @@ function resolveExtractModels(repoRoot: string): ExtractModels {
   };
 }
 
-function buildScanState(result: ConsolidateResult): ScanState {
-  const openWithFp = result.merge.openConflicts.map((c) => ({
+interface ScanStateStats {
+  docsScanned: number;
+  blocksAttempted: number;
+  claimsExtracted: number;
+  skippedDocs: Array<{ path: string; reason: string }>;
+}
+
+/**
+ * Build a scan-state from a merge result + extraction stats. Split out from
+ * `buildScanState` so the body-free workspace `remerge` path can produce the
+ * exact same shape from persisted derived state (it carries the doc/block counts
+ * forward from the prior scan-state since it didn't re-extract).
+ */
+function scanStateFromMerge(merge: MergeResult, stats: ScanStateStats): ScanState {
+  const openWithFp = merge.openConflicts.map((c) => ({
     ...c,
     candidateFingerprint: candidateFingerprint(c),
   }));
   return {
     scannedAt: new Date().toISOString(),
-    docsScanned: result.extract.docsScanned,
-    blocksAttempted: result.extract.blocksAttempted,
-    claimsExtracted: result.extract.claims.length,
-    resolved: result.merge.resolvedClaims.length,
-    decided: result.merge.decidedConflicts.length,
+    docsScanned: stats.docsScanned,
+    blocksAttempted: stats.blocksAttempted,
+    claimsExtracted: stats.claimsExtracted,
+    resolved: merge.resolvedClaims.length,
+    decided: merge.decidedConflicts.length,
     openConflicts: openWithFp,
-    decidedConflicts: result.merge.decidedConflicts.map((d) => ({
+    decidedConflicts: merge.decidedConflicts.map((d) => ({
       // Stamp the same fingerprint we surface on open conflicts so the
       // Decisions tab can POST a change-of-mind via the existing
       // upsert endpoint (the server validates that the field is
@@ -326,8 +404,17 @@ function buildScanState(result: ConsolidateResult): ScanState {
       conflict: { ...d.conflict, candidateFingerprint: candidateFingerprint(d.conflict) },
       decision: d.decision,
     })),
-    skippedDocs: result.skippedDocs ?? [],
+    skippedDocs: stats.skippedDocs,
   };
+}
+
+function buildScanState(result: ConsolidateResult): ScanState {
+  return scanStateFromMerge(result.merge, {
+    docsScanned: result.extract.docsScanned,
+    blocksAttempted: result.extract.blocksAttempted,
+    claimsExtracted: result.extract.claims.length,
+    skippedDocs: result.skippedDocs ?? [],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -373,11 +460,23 @@ export async function scanInProcess(
   tracker?.start('discover');
   const tConsolidateStart = perfNow();
   let result: ConsolidateResult;
+  // A body-having scan into the server-side store (EE: the gate clones a fresh PR
+  // head, which has no decisions.json) must NOT re-open already-resolved conflicts.
+  // The consolidator otherwise falls back to reading decisions from the working
+  // tree; load the repo's decisions from the ACTIVE store (EE: Postgres by repoKey;
+  // OSS: the local file) and inject them, so resolutions hold across the scan —
+  // exactly as the dashboard's body-free remerge does.
+  const priorDecisions = await loadDecisions(options.ref?.repoKey ?? repoRoot);
   try {
     result = await consolidate(repoRoot, {
+      decisions: priorDecisions,
       blockRunner: options.blockRunner,
       chainRunner: options.chainRunner,
       disableLlmChainDetection: options.disableLlmChainDetection,
+      disableChainRecheck: options.disableChainRecheck,
+      disableConflictExplanations: options.disableConflictExplanations,
+      disableConflictResolution: options.disableConflictResolution,
+      disableRelevanceFilter: options.disableRelevanceFilter,
       skipGit: options.skipGit,
       transport: resolveTransport(options),
       models: resolveConsolidateModels(repoRoot),
@@ -496,6 +595,269 @@ export async function scanInProcess(
   debugLog(
     `scan: buildScanState=${(tWriteStart - tBuildStart).toFixed(0)}ms writeScanState=${(perfNow() - tWriteStart).toFixed(0)}ms`,
   );
+
+  if (options.source) {
+    await trackEvent('spec_scan', {
+      source: options.source,
+      docsScannedRange: bucketFileCount(result.extract.docsScanned),
+      claimsRange: bucketFileCount(result.extract.claims.length),
+      openConflicts: result.merge.openConflicts.length,
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
+  // Ingest the consolidated spec docs + scan-state into the active store when
+  // the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest
+  // (`consolidate`/`writeScanState` already wrote them in place).
+  if (options.ref) {
+    const specsDir = path.join(repoRoot, '.truecourse', 'specs');
+    const claims = readJsonOrNull(path.join(specsDir, 'claims.json'));
+    if (claims !== null) await saveSpec(options.ref, 'claims', claims);
+    const decisions = readJsonOrNull(path.join(specsDir, 'decisions.json'));
+    if (decisions !== null) await saveSpec(options.ref, 'decisions', decisions);
+    await saveSpec(options.ref, 'scanState', scanState);
+    // Persist the raw (unmerged) claims + version chains too, so a later decision
+    // can re-merge WITHOUT the docs (no re-clone, no git) — the same body-free
+    // remerge the workspace flow uses. Drives hosted dashboard conflict resolution.
+    await saveSpec(options.ref, 'rawClaims', result.extract.claims);
+    await saveSpec(options.ref, 'chains', result.chains);
+  }
+
+  return { consolidate: result, scanState };
+}
+
+/** Parse a JSON file, or `null` when it is absent or unparseable. */
+function readJsonOrNull(file: string): unknown {
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// scanWorkspaceInProcess — workspace Knowledge consolidation (enterprise)
+// ---------------------------------------------------------------------------
+
+/**
+ * One source document handed to the workspace consolidator. The body is
+ * **transient** — materialized to a scratch tree for the duration of the scan
+ * and then deleted; only the derived artifacts (claims/decisions/scan-state)
+ * are persisted. `docPath` is the stable id that seeds the slicer's block hash
+ * (`blockId = sha256(docPath + headingPath + text)`) and the claim's
+ * `provenance.file`, so an unchanged doc re-uploaded under the same `docPath`
+ * yields identical block ids → extraction-cache hits → free incremental sync.
+ */
+export interface WorkspaceDocInput {
+  /** Stable, namespaced relative path, e.g. `knowledge/manual/<externalId>.md`. */
+  docPath: string;
+  /** The transient markdown body. Never persisted. */
+  markdown: string;
+  /**
+   * ISO timestamp used for newest-wins version-chain weighting (manual upload =
+   * upload time; a connector passes the tool's `updatedAt`). Defaults to now.
+   */
+  lastTouched?: string;
+}
+
+/**
+ * Drive a StepTracker through the SCAN_STEPS lifecycle (discover → extract →
+ * merge → explain → resolve) from `consolidate()`'s progress callbacks. Mirrors
+ * the inline wiring in `scanInProcess` so the workspace scan surfaces the
+ * identical numbered sub-phase detail (docs / blocks / conflicts). Returns the
+ * callbacks to spread into `consolidate(...)`.
+ */
+function consolidateProgressCallbacks(tracker: StepTracker) {
+  let docsSeen = 0;
+  let blocksTotal = 0;
+  let blocksDone = 0;
+  let extractStarted = false;
+  let mergeStarted = false;
+  let explainTotal = 0;
+  let explainDone = 0;
+  let explainStarted = false;
+  let resolveTotal = 0;
+  let resolveDone = 0;
+  const renderExtractDetail = (): string =>
+    blocksTotal === 0
+      ? `${docsSeen} docs`
+      : `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
+  return {
+    onRelevanceProgress: (doneCount: number, total: number) => {
+      if (total > 0) tracker.detail('discover', `${doneCount}/${total} docs`);
+    },
+    onDocStart: () => {
+      if (!extractStarted) {
+        tracker.done('discover');
+        tracker.start('extract');
+        extractStarted = true;
+      }
+      docsSeen++;
+      tracker.detail('extract', renderExtractDetail());
+    },
+    onBlocksReady: (total: number) => {
+      blocksTotal = total;
+      tracker.detail('extract', renderExtractDetail());
+    },
+    onBlockDone: () => {
+      blocksDone++;
+      tracker.detail('extract', renderExtractDetail());
+    },
+    onMergeStart: () => {
+      if (!mergeStarted) {
+        if (!extractStarted) {
+          tracker.done('discover');
+          tracker.start('extract');
+        }
+        tracker.done('extract', `${blocksDone} blocks`);
+        tracker.start('merge');
+        mergeStarted = true;
+      }
+    },
+    onExplainStart: (total: number) => {
+      if (mergeStarted) tracker.done('merge');
+      explainTotal = total;
+      explainStarted = true;
+      tracker.start('explain');
+      tracker.detail('explain', total === 0 ? 'no open conflicts' : `0/${total}`);
+    },
+    onExplainDone: () => {
+      explainDone++;
+      tracker.detail('explain', `${explainDone}/${explainTotal}`);
+    },
+    onResolveStart: (total: number) => {
+      if (explainStarted) {
+        tracker.done('explain', explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`);
+      }
+      resolveTotal = total;
+      tracker.start('resolve');
+      tracker.detail('resolve', total === 0 ? 'no open conflicts' : `0/${total}`);
+    },
+    onResolveDone: () => {
+      resolveDone++;
+      tracker.detail('resolve', `${resolveDone}/${resolveTotal}`);
+    },
+  };
+}
+
+export interface WorkspaceScanOptions {
+  /** WorkOS organization id — the workspace Knowledge scope key. */
+  workspaceOrgId: string;
+  /** The source docs to (re)consolidate. */
+  docs: WorkspaceDocInput[];
+  /** Progress tracker — driven through SCAN_STEPS (the EE job forwards it to its popup). */
+  tracker?: StepTracker;
+  /** Adapter that triggered the run (for telemetry). Omit to skip telemetry. */
+  source?: TelemetrySource;
+  /** LLM transport mode (`cli` default / `agent` mailbox). `agent` requires `io`. */
+  llm?: 'cli' | 'agent';
+  /** I/O dir for the agent transport's request/response mailbox. */
+  io?: string;
+  // --- test seams (mirror consolidate(); production passes none) ------------
+  blockRunner?: SpecInProcessOptions['blockRunner'];
+  chainRunner?: SpecInProcessOptions['chainRunner'];
+  disableLlmChainDetection?: boolean;
+  disableRelevanceFilter?: boolean;
+  disableChainRecheck?: boolean;
+  disableConflictExplanations?: boolean;
+  disableConflictResolution?: boolean;
+}
+
+/** A stable per-org cache scope string. The EE Postgres KV cache ignores it
+ *  (content-addressed); it only matters for the OSS file cache, which workspace
+ *  scans never use. */
+function workspaceScopeKey(orgId: string): string {
+  return `workspace:${orgId}`;
+}
+
+/** Build an in-memory DocCandidate from a workspace doc input (no disk). */
+function workspaceDocToCandidate(input: WorkspaceDocInput): DocCandidate {
+  const contentHash = createHash('sha256').update(input.markdown).digest('hex');
+  return {
+    path: input.docPath,
+    absPath: '',
+    content: input.markdown,
+    kind: 'spec',
+    preview: input.markdown.split(/\r?\n/).slice(0, 200).join('\n'),
+    lastTouched: input.lastTouched ?? new Date().toISOString(),
+    contentHash,
+    size: Buffer.byteLength(input.markdown, 'utf-8'),
+  };
+}
+
+/**
+ * Consolidate workspace Knowledge from a set of source docs and persist the
+ * derived artifacts under WORKSPACE scope (keyed by org, always-latest).
+ *
+ * Runs FULLY IN MEMORY — the doc bodies are fed to the consolidator as in-memory
+ * `content` (no temp dir, no local disk). Every cache (block extraction + the
+ * LLM stages) goes through the KV seam (Postgres in EE), so re-running an
+ * unchanged doc set costs **zero LLM**. We persist only derived artifacts; the
+ * bodies are never written anywhere — they live in RAM for the scan and vanish.
+ */
+export async function scanWorkspaceInProcess(
+  options: WorkspaceScanOptions,
+): Promise<SpecScanInProcessResult> {
+  const ref: WorkspaceRef = { workspaceOrgId: options.workspaceOrgId };
+  const startedAt = Date.now();
+
+  const candidates = options.docs.map(workspaceDocToCandidate);
+  const decisions = await loadWorkspaceDecisions(options.workspaceOrgId);
+
+  const { tracker } = options;
+  tracker?.start('discover');
+  // Docs + decisions injected → the consolidator reads/writes no local files.
+  const result = await consolidate(workspaceScopeKey(options.workspaceOrgId), {
+    docSource: () => candidates,
+    decisions,
+    skipClaimsWrite: true,
+    skipGit: true,
+    blockRunner: options.blockRunner,
+    chainRunner: options.chainRunner,
+    disableLlmChainDetection: options.disableLlmChainDetection,
+    disableRelevanceFilter: options.disableRelevanceFilter,
+    disableChainRecheck: options.disableChainRecheck,
+    disableConflictExplanations: options.disableConflictExplanations,
+    disableConflictResolution: options.disableConflictResolution,
+    transport: resolveTransport(options),
+    models: resolveConsolidateModels(process.cwd()),
+    ...(tracker ? consolidateProgressCallbacks(tracker) : {}),
+  });
+
+  // Persist derived artifacts ONLY (never bodies). The raw claim set + detected
+  // chains are what let a later decision re-merge without the docs.
+  await saveWorkspaceSpec(ref, 'rawClaims', result.extract.claims);
+  await saveWorkspaceSpec(ref, 'chains', result.chains);
+
+  // Fold this scan's high-confidence LLM auto-resolutions into the durable
+  // decisions, so a body-free remerge (which skips the LLM) keeps them resolved.
+  // Everything else the merge decides (version chains, etc.) is re-derived
+  // deterministically by remerge from chains + decisions.
+  const autoDecisions = result.merge.decidedConflicts
+    .filter((d) => d.autoResolution?.by === 'llm')
+    .map((d) => d.decision);
+  const nextDecisions: DecisionsFile =
+    autoDecisions.length === 0
+      ? decisions
+      : {
+          ...decisions,
+          decisions: [
+            ...decisions.decisions.filter(
+              (d) => !autoDecisions.some((a) => a.conflictId === d.conflictId),
+            ),
+            ...autoDecisions,
+          ],
+        };
+
+  // Produce + persist claims + decisions + scan-state through the SAME remerge
+  // path the decision mutations use, so the first scan and every later edit are
+  // byte-consistent. Carry this scan's doc/block counts forward.
+  const scanState = await remergeAndPersistWorkspace(options.workspaceOrgId, nextDecisions, {
+    docsScanned: result.extract.docsScanned,
+    blocksAttempted: result.extract.blocksAttempted,
+    skippedDocs: result.skippedDocs ?? [],
+  });
 
   if (options.source) {
     await trackEvent('spec_scan', {
@@ -689,6 +1051,12 @@ export async function generateContractsInProcess(
     if (slicesTotal === 0) return '';
     return `${slicesDone}/${slicesTotal} slices`;
   };
+  // Emit to BOTH the OSS tracker (rendered detail) and the headless callback
+  // (raw counts), so EE shows the identical "N/M slices" the OSS popup does.
+  const reportSlices = (): void => {
+    tracker?.detail('il', renderIlDetail());
+    options.onSliceProgress?.(slicesDone, slicesTotal);
+  };
 
   try {
     const extractModels = resolveExtractModels(repoRoot);
@@ -703,21 +1071,25 @@ export async function generateContractsInProcess(
         fallbackModel: extractModels.fallback,
         onSliceDone: () => {
           slicesDone++;
-          tracker?.detail('il', renderIlDetail());
+          reportSlices();
         },
       }),
       models: extractModels,
       onSlicesReady: (total) => {
         slicesTotal = total;
-        tracker?.detail('il', renderIlDetail());
+        reportSlices();
       },
       onSliceCacheHit: () => {
         slicesDone++;
-        tracker?.detail('il', renderIlDetail());
+        reportSlices();
       },
       onSliceDone: () => {
         slicesDone++;
-        tracker?.detail('il', renderIlDetail());
+        reportSlices();
+      },
+      onRepairProgress: (e) => {
+        tracker?.detail('il', `repairing ${e.done}/${e.total}`);
+        options.onRepairProgress?.(e.done, e.total);
       },
     });
     const issueCount = il.validationIssues.length;
@@ -744,12 +1116,169 @@ export async function generateContractsInProcess(
         durationRange: bucketDuration(Date.now() - startedAt),
       });
     }
+    // Ingest the freshly generated `.tc` tree into the active store, but only
+    // when the caller passes an explicit `ref` (the EE GitHub App, keyed by
+    // `owner/repo` + head SHA). OSS/local omits `ref` → no ingest (the IL
+    // already wrote the tree in place; the file store reads it there).
+    if (options.ref) {
+      await saveContracts(options.ref, 'contracts', path.join(repoRoot, '.truecourse', 'contracts'));
+    }
     return { il: { kind: 'extracted', result: il } };
   } catch (e) {
     tracker?.error('il', (e as Error).message);
     const err = e instanceof Error ? e : new Error(String(e));
     return { il: { kind: 'failed', error: err } };
   }
+}
+
+// ---------------------------------------------------------------------------
+// generateWorkspaceContractsInProcess — the enterprise workspace analog of
+// generateContractsInProcess. Generates the workspace `.tc` corpus from the
+// persisted canonical claims FULLY IN MEMORY (no repo tree, no scratch dir) and
+// stores it under workspace scope. Unchanged claims hit the Postgres slice cache
+// → 0 LLM on re-sync.
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceContractsResult {
+  kind: 'generated' | 'skipped';
+  reason?: string;
+  fileCount?: number;
+  validationIssues?: number;
+}
+
+/**
+ * Build the generateContractsInMemory slice callbacks that report `(done, total)`
+ * to `onSliceProgress` — the same "N/M slices" count the OSS popup shows. Cache
+ * hits and runner completions are mutually exclusive at this level, so they sum
+ * to the total exactly once.
+ */
+function sliceProgressHooks(
+  onSliceProgress?: (done: number, total: number) => void,
+  onRepairProgress?: (done: number, total: number) => void,
+) {
+  let total = 0;
+  let done = 0;
+  const report = () => onSliceProgress?.(done, total);
+  return {
+    onSlicesReady: (t: number) => {
+      total = t;
+      report();
+    },
+    onSliceCacheHit: () => {
+      done++;
+      report();
+    },
+    onSliceDone: () => {
+      done++;
+      report();
+    },
+    // The silent post-extraction repair pass — surfaces "Repairing N/M" after the
+    // slice count maxes out, so the contracts step keeps moving instead of freezing.
+    onRepairProgress: (e: { done: number; total: number }) => onRepairProgress?.(e.done, e.total),
+  };
+}
+
+/**
+ * A blocking resolver-level corpus error (e.g. duplicate/conflicting artifact
+ * identities) means generation produced NO contracts — a failure, not "no
+ * contracts." Return a descriptive error (with the hard issue reasons) so the
+ * caller can throw and surface it, instead of silently saving an empty corpus.
+ */
+function resolverHardError(result: {
+  resolverHard: boolean;
+  validationIssues: Array<{ severity: 'hard' | 'soft'; message: string }>;
+}): Error | null {
+  if (!result.resolverHard) return null;
+  const reasons = result.validationIssues.filter((i) => i.severity === 'hard').map((i) => i.message);
+  const detail = reasons.length ? reasons.slice(0, 3).join('; ') : 'duplicate or conflicting artifact identities';
+  return new Error(`Contract corpus failed to resolve — ${detail}`);
+}
+
+export async function generateWorkspaceContractsInProcess(
+  workspaceOrgId: string,
+  options: {
+    llm?: 'cli' | 'agent';
+    io?: string;
+    source?: TelemetrySource;
+    /** Per-slice progress (`done`, `total`) — the EE job runner forwards it to its popup. */
+    onSliceProgress?: (done: number, total: number) => void;
+    /** Repair-pass progress (`done`, `total`) — the silent post-extraction LLM pass. */
+    onRepairProgress?: (done: number, total: number) => void;
+    // --- test seams (production passes none) ---
+    runner?: SliceRunner;
+    disableRepair?: boolean;
+  } = {},
+): Promise<WorkspaceContractsResult> {
+  const ref: WorkspaceRef = { workspaceOrgId };
+  const claims = await loadWorkspaceSpec<ClaimsFile>(ref, 'claims');
+  if (!claims || claims.claims.length === 0) {
+    return { kind: 'skipped', reason: 'no canonical claims' };
+  }
+
+  // Contracts require a fully-resolved spec: while any conflict is open the
+  // canonical set is ambiguous, so clear the corpus and wait — the resolution
+  // that takes openConflicts → 0 is what triggers the real regen.
+  const scanState = await getWorkspaceScanState(workspaceOrgId);
+  if (scanState && scanState.openConflicts.length > 0) {
+    await saveWorkspaceContracts(ref, 'contracts', {});
+    return { kind: 'skipped', reason: 'open conflicts' };
+  }
+
+  const startedAt = Date.now();
+  const canonical = canonicalFromClaims(claims);
+  // Every claim out-of-scope ⇒ no positive contracts. Persist an empty set so a
+  // stale prior corpus is cleared rather than left dangling.
+  if (canonical.slices.length === 0) {
+    await saveWorkspaceContracts(ref, 'contracts', {});
+    return { kind: 'generated', fileCount: 0, validationIssues: 0 };
+  }
+
+  const extractModels = resolveExtractModels(process.cwd());
+  const transport = resolveTransport(options);
+  const hooks = sliceProgressHooks(options.onSliceProgress, options.onRepairProgress);
+  const result = await generateContractsInMemory({
+    canonical,
+    cacheScope: workspaceScopeKey(workspaceOrgId),
+    transport,
+    runner:
+      options.runner ??
+      spawnExtractorRunner({
+        transport,
+        concurrency: defaultExtractorConcurrency(),
+        model: extractModels.extract,
+        fallbackModel: extractModels.fallback,
+        // Fresh (uncached) slices tick via the RUNNER's onSliceDone — the
+        // generateContractsInMemory option is ignored once a runner is injected.
+        onSliceDone: hooks.onSliceDone,
+      }),
+    models: extractModels,
+    disableRepair: options.disableRepair,
+    onSlicesReady: hooks.onSlicesReady,
+    onSliceCacheHit: hooks.onSliceCacheHit,
+    onRepairProgress: hooks.onRepairProgress,
+  });
+
+  // A resolver-hard corpus error produced NO contracts — fail loudly rather than
+  // overwriting the corpus with an empty set (keep the prior, surface the error).
+  const hard = resolverHardError(result);
+  if (hard) throw hard;
+
+  await saveWorkspaceContracts(ref, 'contracts', result.files);
+
+  if (options.source) {
+    await trackEvent('contracts_generate', {
+      source: options.source,
+      artifactsWrittenRange: bucketFileCount(Object.keys(result.files).length),
+      validationIssues: result.validationIssues.length,
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
+  return {
+    kind: 'generated',
+    fileCount: Object.keys(result.files).length,
+    validationIssues: result.validationIssues.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -770,8 +1299,8 @@ function legacyVerifyStatePath(repoRoot: string): string {
  * Returns null when no run has been recorded — callers show a "Run verify"
  * CTA. (No fallback to the legacy `verify-state.json`.)
  */
-export function readVerifyState(repoRoot: string): VerifyState | null {
-  const latest = readVerifyLatest(repoRoot);
+export async function readVerifyState(repoRoot: string): Promise<VerifyState | null> {
+  const latest = await readVerifyLatest(repoRoot);
   if (!latest) return null;
   return {
     verifiedAt: latest.run.verifiedAt,
@@ -782,6 +1311,7 @@ export function readVerifyState(repoRoot: string): VerifyState | null {
     drifts: latest.drifts,
     resolverErrors: latest.resolverErrors,
     unresolvedRefs: latest.unresolvedRefs,
+    commitHash: latest.run.commitHash,
   };
 }
 
@@ -791,10 +1321,13 @@ export function readVerifyState(repoRoot: string): VerifyState | null {
  * "view a past run" path reuses the live view unchanged. Null if the run
  * (or its snapshot file) is gone.
  */
-export function readVerifyRunState(repoRoot: string, runId: string): VerifyState | null {
-  const entry = readVerifyHistoryStore(repoRoot).runs.find((r) => r.id === runId);
+export async function readVerifyRunState(
+  repoRoot: string,
+  runId: string,
+): Promise<VerifyState | null> {
+  const entry = (await readVerifyHistoryStore(repoRoot)).runs.find((r) => r.id === runId);
   if (!entry) return null;
-  const snap = readVerifyRun(repoRoot, entry.filename);
+  const snap = await readVerifyRun(repoRoot, entry.filename);
   if (!snap) return null;
   return {
     verifiedAt: snap.verifiedAt,
@@ -805,6 +1338,7 @@ export function readVerifyRunState(repoRoot: string, runId: string): VerifyState
     drifts: snap.drifts,
     resolverErrors: snap.resolverErrors,
     unresolvedRefs: snap.unresolvedRefs,
+    commitHash: snap.commitHash,
   };
 }
 
@@ -830,6 +1364,37 @@ export interface VerifyInProcessOptions {
   skipStash?: boolean;
   /** Adapter that triggered this run; auto-emitted in the `verify` telemetry payload. */
   source?: TelemetrySource;
+  /**
+   * Source contracts from the store under this identity instead of deriving
+   * from `repoRoot`. The EE gate sets it to verify the PR head's stored
+   * contracts (`owner/repo` + head SHA) against the cloned working tree. When
+   * omitted, derived from `repoRoot`'s HEAD; `options.contractsDir` overrides both.
+   */
+  ref?: RepoRef;
+  /**
+   * Load the CONTRACTS from this ref instead of `ref`. The gate sets it to verify
+   * a PR head's CODE against the BASE's already-resolved contracts when the PR
+   * changes no spec docs — so it never re-scans, while the snapshot still keys by
+   * `ref` (the head). Omitted → contracts come from `ref`.
+   */
+  contractsRef?: RepoRef;
+  /**
+   * Transient verify: record ONLY this commit's per-commit snapshot, and skip the
+   * repo's canonical LATEST/runs/history writes. The EE gate sets it so a PR-head
+   * verify never moves the repo's baseline (the baseline job — non-transient — is
+   * the only writer that does). OSS/local never sets it. Defaults to `false`.
+   */
+  transient?: boolean;
+  /** Override the commit SHA when `ref` is omitted. */
+  commitOverride?: string;
+  /**
+   * Verify against the repo's EFFECTIVE contracts (enterprise): union the
+   * workspace contracts for this org UNDER the repo's, repo winning on a
+   * `${kind}:${identity}` collision. Omitted (OSS/local, or an EE repo not linked
+   * to a workspace) → repo-only, unchanged. The workspace layer is materialized
+   * transiently and cleaned up after the run.
+   */
+  workspaceOrgId?: string | null;
 }
 
 /**
@@ -839,24 +1404,80 @@ export interface VerifyInProcessOptions {
  * tracker through three phases (load contracts, extract code-side
  * operations, compare).
  */
+/**
+ * Source the authored contract tree (`options.contractsDir` override → store)
+ * and run `fn` with the local dir + the value to record in snapshots, always
+ * cleaning up the materialization afterward. OSS: the store returns the live
+ * `<repo>/.truecourse/contracts` with a no-op cleanup (byte-identical to the old
+ * inline path). EE: a temp dir materialized from the content-addressed store,
+ * `rm -rf`'d in the `finally`; the recorded value is a logical `contracts@<sha>`
+ * descriptor, never the ephemeral temp path.
+ */
+async function withContracts<T>(
+  repoRoot: string,
+  options: VerifyInProcessOptions,
+  tracker: StepTracker | undefined,
+  fn: (contractsDir: string, recordedContractsDir: string, baseContractsDir?: string) => Promise<T>,
+): Promise<T> {
+  const fallbackPath = path.join(repoRoot, '.truecourse', 'contracts');
+  // EFFECTIVE merge (enterprise): the workspace contracts are the BASE layer the
+  // repo's contracts override on a key collision. Absent org / no workspace
+  // corpus / OSS file store → null → repo-only (unchanged).
+  const wsMat = options.workspaceOrgId
+    ? await loadWorkspaceContracts({ workspaceOrgId: options.workspaceOrgId }, 'contracts')
+    : null;
+  let repoMat: MaterializedDir | null = null;
+  try {
+    let recorded: string;
+    if (options.contractsDir) {
+      if (!fs.existsSync(options.contractsDir)) {
+        const err = new Error(
+          `Contracts directory not found at ${options.contractsDir}. Run \`truecourse contracts generate\` first.`,
+        );
+        tracker?.error('load', err.message);
+        throw err;
+      }
+      repoMat = { dir: options.contractsDir, cleanup: async () => {} };
+      recorded = options.contractsDir;
+    } else {
+      // Contracts come from `contractsRef` when set (gate base-reuse), else `ref`.
+      const ref = options.contractsRef ?? options.ref ?? (await repoRef(repoRoot, options.commitOverride));
+      repoMat = await loadContracts(ref, 'contracts');
+      recorded = repoMat
+        ? contractsMaterializeInPlace()
+          ? repoMat.dir
+          : `contracts@${ref.commitSha}`
+        : 'workspace:contracts';
+    }
+
+    // Repo is the PRIMARY layer (wins on collision); workspace is the BASE. When
+    // the repo has NO contracts of its own, the workspace IS the corpus (no base)
+    // — the cross-repo ripple. Neither present → genuinely no spec.
+    if (!repoMat && !wsMat) {
+      const err = new Error(
+        `Contracts directory not found at ${fallbackPath}. Run \`truecourse contracts generate\` first.`,
+      );
+      tracker?.error('load', err.message);
+      throw err;
+    }
+    const primaryDir = (repoMat ?? wsMat!).dir;
+    const baseDir = repoMat ? wsMat?.dir : undefined;
+    return await fn(primaryDir, recorded, baseDir);
+  } finally {
+    await repoMat?.cleanup();
+    await wsMat?.cleanup();
+  }
+}
+
 export async function verifyInProcess(
   repoRoot: string,
   options: VerifyInProcessOptions = {},
 ): Promise<VerifyInProcessResult> {
   const { tracker } = options;
   const startedAt = Date.now();
-  const contractsDir =
-    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
 
-  if (!fs.existsSync(contractsDir)) {
-    const err = new Error(
-      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
-
+  return withContracts(repoRoot, options, tracker, async (contractsDir, recordedContractsDir, baseContractsDir) => {
   // The verifier doesn't expose per-phase hooks today, so we mark
   // each step done as soon as `verify()` returns. The work is
   // synchronous-feeling from the caller's POV (~hundreds of ms on
@@ -870,7 +1491,7 @@ export async function verifyInProcess(
     // Stash dirty changes first (unless opted out) so the baseline reflects
     // the committed state — same model as a full `analyze`.
     result = await runWithStash(repoRoot, options.skipStash ?? false, tracker, () =>
-      verify({ contractsDir, codeDir }),
+      verify({ contractsDir, codeDir, baseContractsDir }),
     );
   } catch (e) {
     tracker?.error('load', (e as Error).message);
@@ -893,6 +1514,21 @@ export async function verifyInProcess(
     `${result.drifts.length} drift${result.drifts.length === 1 ? '' : 's'}`,
   );
 
+  // Stored snapshots must be PORTABLE + repo-relative. The EE gate verifies on an
+  // EPHEMERAL clone (`repoRoot` = a temp dir like /tmp/tc-gate-verify-XXX), so the
+  // verifier's absolute drift paths are meaningless once the clone is deleted —
+  // the dashboard can't render or deep-link them. When persisting by `ref` (EE),
+  // rewrite drift paths to repo-root-relative POSIX form so the dashboard's "Where
+  // in the code" + the GitHub blob deep-link resolve correctly. OSS/local (no ref)
+  // keeps its absolute local paths for the in-app file viewer (unchanged).
+  if (options.ref) {
+    result.drifts = result.drifts.map((d) =>
+      d.filePath && path.isAbsolute(d.filePath)
+        ? { ...d, filePath: path.relative(repoRoot, d.filePath).split(path.sep).join('/') }
+        : d,
+    );
+  }
+
   // Persist mirroring analyze: write a per-run snapshot, materialize LATEST
   // (the diff baseline), append a history summary, and drop any stale diff.
   const verifiedAt = new Date().toISOString();
@@ -903,7 +1539,7 @@ export async function verifyInProcess(
     verifiedAt,
     branch,
     commitHash,
-    contractsDir,
+    contractsDir: recordedContractsDir,
     codeDir,
     artifactCount: result.artifactCount,
     extractedOperationCount: result.extractedOperationCount,
@@ -911,41 +1547,56 @@ export async function verifyInProcess(
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
   };
-  const { filename } = writeVerifyRun(repoRoot, snapshot);
-  const summary = summarizeDrifts(result.drifts);
-  const latest: VerifyLatest = {
-    head: filename,
-    run: { id: runId, verifiedAt, branch, commitHash, contractsDir, codeDir },
-    artifactCount: result.artifactCount,
-    extractedOperationCount: result.extractedOperationCount,
-    drifts: result.drifts,
-    resolverErrors: result.resolverErrors,
-    unresolvedRefs: result.unresolvedRefs,
-    summary,
-  };
-  writeVerifyLatest(repoRoot, latest);
-  appendVerifyHistory(repoRoot, {
-    id: runId,
-    filename,
-    verifiedAt,
-    branch,
-    commitHash,
-    artifactCount: result.artifactCount,
-    driftCount: result.drifts.length,
-    bySeverity: summary.bySeverity,
-  });
-  deleteVerifyDiff(repoRoot); // baseline moved — any prior diff is obsolete
-  fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft
+  // Canonical persistence — the repo's LATEST + run timeline + history. A
+  // TRANSIENT verify (the gate, on a PR-head clone) SKIPS this so it never moves
+  // the repo's baseline; it records only the per-commit snapshot below. OSS/local
+  // is never transient, so its behaviour is unchanged.
+  if (!options.transient) {
+    // Hosted (EE) stores by repo identity, not files: the gate runs verify on an
+    // ephemeral clone (`repoRoot` = a temp dir), so persist by the ref's repoKey —
+    // otherwise the dashboard Verify tab (which reads by repoKey) never finds it.
+    // Only when the HOSTED store is active, though: the OSS file store must key by
+    // the working-tree path (a repoKey like `owner/repo` would write a bogus
+    // cwd-relative `.truecourse/`). OSS/local has no ref → repoRoot regardless.
+    const storeKey =
+      options.ref && !verifyMaterializeInPlace() ? options.ref.repoKey : repoRoot;
+    const { filename } = await writeVerifyRun(storeKey, snapshot);
+    const summary = summarizeDrifts(result.drifts);
+    const latest: VerifyLatest = {
+      head: filename,
+      run: { id: runId, verifiedAt, branch, commitHash, contractsDir: recordedContractsDir, codeDir },
+      artifactCount: result.artifactCount,
+      extractedOperationCount: result.extractedOperationCount,
+      drifts: result.drifts,
+      resolverErrors: result.resolverErrors,
+      unresolvedRefs: result.unresolvedRefs,
+      summary,
+    };
+    await writeVerifyLatest(storeKey, latest);
+    await appendVerifyHistory(storeKey, {
+      id: runId,
+      filename,
+      verifiedAt,
+      branch,
+      commitHash,
+      artifactCount: result.artifactCount,
+      driftCount: result.drifts.length,
+      bySeverity: summary.bySeverity,
+    });
+    await deleteVerifyDiff(storeKey); // baseline moved — any prior diff is obsolete
+    fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft (file edition)
+  }
 
   const state: VerifyState = {
     verifiedAt,
-    contractsDir,
+    contractsDir: recordedContractsDir,
     codeDir,
     artifactCount: result.artifactCount,
     extractedOperationCount: result.extractedOperationCount,
     drifts: result.drifts,
     resolverErrors: result.resolverErrors,
     unresolvedRefs: result.unresolvedRefs,
+    commitHash,
   };
 
   if (options.source) {
@@ -959,7 +1610,15 @@ export async function verifyInProcess(
     });
   }
 
+  // EE: persist this commit's verify snapshot so the dashboard ref switcher can
+  // show a PR's drift (the verify-store's LATEST is per-repo, not per-commit).
+  // OSS omits `ref`, so nothing extra is written.
+  if (options.ref) {
+    await saveSpec(options.ref, 'verifyState', state);
+  }
+
   return { verify: result, state };
+  });
 }
 
 /** Best-effort current branch + commit; null when not a git repo. */
@@ -1049,8 +1708,6 @@ export async function verifyDiffInProcess(
 ): Promise<VerifyDiffInProcessResult> {
   const { tracker } = options;
   const startedAt = Date.now();
-  const contractsDir =
-    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
 
   // The diff is "what do my uncommitted changes do vs the committed baseline",
@@ -1062,7 +1719,7 @@ export async function verifyDiffInProcess(
     tracker?.error('load', err.message);
     throw err;
   }
-  const baseline = readVerifyLatest(repoRoot);
+  const baseline = await readVerifyLatest(repoRoot);
   if (!baseline) {
     const err = new Error(
       'No verify baseline found. Run `truecourse verify` first to establish LATEST.json.',
@@ -1070,14 +1727,8 @@ export async function verifyDiffInProcess(
     tracker?.error('load', err.message);
     throw err;
   }
-  if (!fs.existsSync(contractsDir)) {
-    const err = new Error(
-      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
 
+  return withContracts(repoRoot, options, tracker, async (contractsDir) => {
   tracker?.start('load');
   let result: VerifyResult;
   try {
@@ -1109,7 +1760,7 @@ export async function verifyDiffInProcess(
     changedFiles,
     summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
   };
-  writeVerifyDiff(repoRoot, diff);
+  await writeVerifyDiff(repoRoot, diff);
   tracker?.done('compare', `+${added.length} / -${resolved.length} drift${added.length + resolved.length === 1 ? '' : 's'}`);
 
   if (options.source) {
@@ -1123,6 +1774,7 @@ export async function verifyDiffInProcess(
   }
 
   return { verify: result, diff };
+  });
 }
 
 export interface InferInProcessOptions {
@@ -1137,6 +1789,10 @@ export interface InferInProcessOptions {
   dryRun?: boolean;
   /** Adapter that triggered this run; auto-emitted in the `infer` telemetry payload. */
   source?: TelemetrySource;
+  /** Explicit store identity (EE). When omitted, derived from `repoRoot`'s HEAD. */
+  ref?: RepoRef;
+  /** Override the commit SHA when `ref` is omitted. */
+  commitOverride?: string;
 }
 
 /**
@@ -1193,6 +1849,12 @@ export async function inferInProcess(
     });
   }
 
+  // Ingest the inferred `.tc` subtree into the active store as the split kind,
+  // when the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest.
+  if (!options.dryRun && options.ref) {
+    await saveContracts(options.ref, 'contracts_inferred', path.join(contractsDir, '_inferred'));
+  }
+
   return { infer: result, written, proposed };
 }
 
@@ -1210,29 +1872,401 @@ function autodetectCodeDir(repoRoot: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Decisions-file mutations
+// Decisions + scan-state, routed through the SpecStore seam.
 //
-// Pure read-modify-write helpers around decisions.json. The dashboard
-// server routes and the CLI both call these so the two surfaces agree
-// on update semantics. None of these refresh the scan-state — callers
-// who need a re-merge (CLI write commands) run scanInProcess afterwards.
+// OSS: the on-disk files via the IL (byte-identical). EE: Postgres `spec_sets`.
+// Decisions are the user's accumulated resolutions — a single per-repo "current"
+// document, not a per-commit snapshot. The dashboard read/edit routes use these.
+// ---------------------------------------------------------------------------
+
+const EMPTY_DECISIONS: DecisionsFile = {
+  version: 1,
+  decisions: [],
+  manualChains: [],
+  manualIncludes: [],
+};
+/** Sentinel commit for the per-repo "current" decisions document in EE. */
+const DECISIONS_REF = '_repo';
+
+async function loadDecisions(repoKey: string): Promise<DecisionsFile> {
+  if (specsMaterializeInPlace()) return readDecisions(repoKey);
+  return (
+    (await loadSpec<DecisionsFile>({ repoKey, commitSha: DECISIONS_REF }, 'decisions')) ??
+    EMPTY_DECISIONS
+  );
+}
+
+async function storeDecisions(repoKey: string, next: DecisionsFile): Promise<void> {
+  if (specsMaterializeInPlace()) {
+    writeDecisions(repoKey, next);
+    return;
+  }
+  await saveSpec({ repoKey, commitSha: DECISIONS_REF }, 'decisions', next);
+}
+
+/** The repo's current decisions (dashboard read) — file in OSS, Postgres in EE. */
+export function getDecisions(repoKey: string): Promise<DecisionsFile> {
+  return loadDecisions(repoKey);
+}
+
+/** The repo's current scan-state (dashboard read), or null. Fails closed on a
+ *  malformed/truncated payload (matching the IL `readScanState`). */
+/**
+ * Re-derive a repo's scan-state from its PERSISTED raw claims + chains +
+ * decisions — no docs, no git, no LLM (the same body-free remerge the workspace
+ * uses). Returns null when raw claims were never persisted (OSS file mode, or a
+ * scan predating rawClaims persistence) so the caller falls back to the stored
+ * scan-state.
+ */
+async function remergeRepoScanState(repoKey: string, decisions: DecisionsFile): Promise<ScanState | null> {
+  const rawClaims = await loadLatestSpec<Claim[]>(repoKey, 'rawClaims');
+  if (!rawClaims) return null;
+  const chains = (await loadLatestSpec<VersionChain[]>(repoKey, 'chains')) ?? [];
+  const baseline = await loadLatestSpec<ScanState>(repoKey, 'scanState');
+  const merged = remerge(rawClaims, chains, decisions);
+  return scanStateFromMerge(merged.merge, {
+    docsScanned: baseline?.docsScanned ?? 0,
+    blocksAttempted: baseline?.blocksAttempted ?? 0,
+    claimsExtracted: rawClaims.length,
+    skippedDocs: baseline?.skippedDocs ?? [],
+  });
+}
+
+export async function getScanState(repoKey: string): Promise<ScanState | null> {
+  // Hosted (Postgres store): re-merge the persisted raw claims + chains with the
+  // always-latest decisions, so a dashboard resolution is reflected WITHOUT a
+  // re-scan (no local clone, no git). Falls through when raw claims are absent.
+  if (!specsMaterializeInPlace()) {
+    const remerged = await remergeRepoScanState(repoKey, await loadDecisions(repoKey));
+    if (remerged) return remerged;
+  }
+  const raw = await loadLatestSpec<ScanState>(repoKey, 'scanState');
+  if (!raw || typeof raw.scannedAt !== 'string') return null;
+  if (!Array.isArray(raw.openConflicts) || !Array.isArray(raw.decidedConflicts)) return null;
+  return raw;
+}
+
+/**
+ * Accept the engine default on every open conflict, hosted (body-free) — the
+ * repo analogue of `resolveAllWorkspaceDefaults`. Iterates (resolving a chain can
+ * reveal content conflicts) over the re-merged state, writes the defaults into the
+ * persisted decisions, and returns the final re-merged scan-state.
+ */
+export async function resolveAllDefaultsRemerge(repoKey: string): Promise<ScanState | null> {
+  let decisions = await loadDecisions(repoKey);
+  for (let i = 0; i < 5; i++) {
+    const scan = await remergeRepoScanState(repoKey, decisions);
+    if (!scan) return null;
+    const open = scan.openConflicts as Array<{ id: string; defaultPick: number; candidateFingerprint: string }>;
+    if (open.length === 0) break;
+    for (const c of open) {
+      decisions = applyUpsertDecision(decisions, {
+        conflictId: c.id,
+        resolution: { kind: 'pick', candidateIndex: c.defaultPick },
+        candidateFingerprint: c.candidateFingerprint,
+        note: 'Accepted engine default.',
+      });
+    }
+  }
+  await storeDecisions(repoKey, decisions);
+  return remergeRepoScanState(repoKey, decisions);
+}
+
+/** Stage an in-memory `{relPath → content}` map into the contract store (which
+ *  ingests a directory) under `ref`, via a transient temp dir. */
+async function ingestContractFiles(ref: RepoRef, files: Record<string, string>): Promise<void> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-contracts-'));
+  try {
+    for (const [rel, content] of Object.entries(files)) {
+      const dest = path.join(tmp, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, content, 'utf-8');
+    }
+    await saveContracts(ref, 'contracts', tmp);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Regenerate a HOSTED repo's `.tc` contracts from the re-merged claims (raw
+ * claims + chains + persisted decisions) and persist them — plus the re-merged
+ * canonical `claims` — under the latest commit. The repo analogue of
+ * `generateWorkspaceContractsInProcess`: it makes the Contracts tab + gate
+ * reflect a dashboard conflict resolution immediately. Runs from STORE state
+ * (no working tree); unchanged slices hit the content-addressed EE cache → ~0
+ * LLM. Skipped when raw claims were never persisted (OSS / pre-rawClaims scan)
+ * or no commit is stored.
+ */
+/**
+ * Re-merge a HOSTED repo's persisted raw claims + chains + decisions and persist
+ * the refreshed canonical `claims` + `scanState` under the latest commit — fast
+ * (no docs, no git, no LLM). The repo analogue of the workspace's
+ * remerge-and-persist: it makes the Spec view (canonical claims + conflicts)
+ * reflect a decision IMMEDIATELY, independent of the slower `.tc` contract regen.
+ * Returns the ref + claims, or null when raw claims / a stored commit are absent.
+ */
+export async function refreshRepoCanonicalSpec(
+  repoKey: string,
+): Promise<{ ref: RepoRef; claims: ClaimsFile; scanState: ScanState } | null> {
+  const rawClaims = await loadLatestSpec<Claim[]>(repoKey, 'rawClaims');
+  if (!rawClaims) return null;
+  const commitSha = await latestSpecCommit(repoKey);
+  if (!commitSha) return null;
+
+  const chains = (await loadLatestSpec<VersionChain[]>(repoKey, 'chains')) ?? [];
+  const decisions = await loadDecisions(repoKey);
+  const baseline = await loadLatestSpec<ScanState>(repoKey, 'scanState');
+  const merged = remerge(rawClaims, chains, decisions);
+  const claims: ClaimsFile = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    modules: merged.modules.map((m) => m.manifest),
+    claims: merged.claimEntries,
+  };
+  const scanState = scanStateFromMerge(merged.merge, {
+    docsScanned: baseline?.docsScanned ?? 0,
+    blocksAttempted: baseline?.blocksAttempted ?? 0,
+    claimsExtracted: rawClaims.length,
+    skippedDocs: baseline?.skippedDocs ?? [],
+  });
+  const ref: RepoRef = { repoKey, commitSha };
+  await saveSpec(ref, 'claims', claims);
+  await saveSpec(ref, 'scanState', scanState);
+  return { ref, claims, scanState };
+}
+
+export async function regenerateRepoContractsFromDecisions(
+  repoKey: string,
+  options: {
+    runner?: SliceRunner;
+    disableRepair?: boolean;
+    /** Phase callback for the stepped progress popup (EE jobs). */
+    onPhase?: (phase: 'spec' | 'contracts') => void | Promise<void>;
+    /** Per-slice progress (`done`, `total`) — the EE job runner forwards it to its popup. */
+    onSliceProgress?: (done: number, total: number) => void;
+    /** Repair-pass progress (`done`, `total`) — the silent post-extraction LLM pass. */
+    onRepairProgress?: (done: number, total: number) => void;
+  } = {},
+): Promise<{ kind: 'generated' | 'skipped'; fileCount?: number }> {
+  await options.onPhase?.('spec');
+  const refreshed = await refreshRepoCanonicalSpec(repoKey);
+  if (!refreshed) return { kind: 'skipped' };
+  const { ref, claims: claimsFile, scanState } = refreshed;
+
+  // Contracts are only generated from a fully-resolved spec: while any conflict
+  // is open the canonical set is ambiguous, so we clear the corpus and wait. The
+  // last resolution (openConflicts → 0) is what triggers a real regen. The Spec
+  // re-merge above still ran, so the Spec tab reflects the decision immediately.
+  if (scanState.openConflicts.length > 0) {
+    await ingestContractFiles(ref, {}); // no contracts while conflicts remain
+    return { kind: 'skipped' };
+  }
+
+  const canonical = canonicalFromClaims(claimsFile);
+  if (canonical.slices.length === 0) {
+    await ingestContractFiles(ref, {}); // clear any stale corpus
+    return { kind: 'generated', fileCount: 0 };
+  }
+
+  await options.onPhase?.('contracts');
+
+  const extractModels = resolveExtractModels(process.cwd());
+  const transport = resolveTransport({});
+  const hooks = sliceProgressHooks(options.onSliceProgress, options.onRepairProgress);
+  const result = await generateContractsInMemory({
+    canonical,
+    cacheScope: `repo:${repoKey}`,
+    transport,
+    runner:
+      options.runner ??
+      spawnExtractorRunner({
+        transport,
+        concurrency: defaultExtractorConcurrency(),
+        model: extractModels.extract,
+        fallbackModel: extractModels.fallback,
+        // Fresh (uncached) slices tick via the RUNNER's onSliceDone — the
+        // generateContractsInMemory option is ignored once a runner is injected.
+        onSliceDone: hooks.onSliceDone,
+      }),
+    models: extractModels,
+    disableRepair: options.disableRepair,
+    onSlicesReady: hooks.onSlicesReady,
+    onSliceCacheHit: hooks.onSliceCacheHit,
+    onRepairProgress: hooks.onRepairProgress,
+  });
+  // A resolver-hard corpus error produced NO contracts — fail loudly rather than
+  // clearing the corpus to empty (keep the prior contracts, surface the error).
+  const hard = resolverHardError(result);
+  if (hard) throw hard;
+  await ingestContractFiles(ref, result.files);
+  return { kind: 'generated', fileCount: Object.keys(result.files).length };
+}
+
+// ---------------------------------------------------------------------------
+// Workspace Knowledge reads (enterprise) — the Knowledge surface + future
+// effective-merge consume these. Workspace artifacts are always-latest (no
+// commit), so there is one current row per (org, artifact).
+// ---------------------------------------------------------------------------
+
+/** The workspace's current decisions, or the empty default. */
+async function loadWorkspaceDecisions(workspaceOrgId: string): Promise<DecisionsFile> {
+  return (
+    (await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId }, 'decisions')) ?? EMPTY_DECISIONS
+  );
+}
+
+/** The workspace's current decisions (dashboard read). */
+export function getWorkspaceDecisions(workspaceOrgId: string): Promise<DecisionsFile> {
+  return loadWorkspaceDecisions(workspaceOrgId);
+}
+
+/** The workspace's current consolidated claims set (or null if never scanned). */
+export function getWorkspaceClaims<T = unknown>(workspaceOrgId: string): Promise<T | null> {
+  return loadWorkspaceSpec<T>({ workspaceOrgId }, 'claims');
+}
+
+/** The workspace's current scan-state, or null. Fails closed on a malformed payload. */
+export async function getWorkspaceScanState(workspaceOrgId: string): Promise<ScanState | null> {
+  const raw = await loadWorkspaceSpec<ScanState>({ workspaceOrgId }, 'scanState');
+  if (!raw || typeof raw.scannedAt !== 'string') return null;
+  if (!Array.isArray(raw.openConflicts) || !Array.isArray(raw.decidedConflicts)) return null;
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace Knowledge writes (enterprise) — body-free remerge through the seam.
+//
+// A workspace decision is applied by re-running the deterministic merge over the
+// PERSISTED raw claims + chains (the workspace equivalent of the repo dashboard's
+// "re-scan from files after a decision" — same merge math, sourced from stored
+// derived state because the bodies were never kept). Identical mutation logic to
+// the repo helpers below (the pure `apply*` transforms), only the storage scope
+// and the refresh differ — exactly the OSS-files / EE-Postgres split.
 // ---------------------------------------------------------------------------
 
 /**
- * Upsert a per-conflict decision. Replaces any previous decision for
- * the same conflictId. `manualChains` and `manualIncludes` are
- * preserved untouched.
+ * Re-apply `decisions` to the workspace's persisted raw claims + chains and
+ * persist the refreshed `claims` + `decisions` + `scanState`. No source docs,
+ * no LLM. `stats` carries this run's doc/block counts (the initial scan passes
+ * them; a later decision-only remerge inherits them from the prior scan-state).
  */
-export function upsertDecision(
-  repoRoot: string,
-  input: {
-    conflictId: string;
-    resolution: Resolution;
+async function remergeAndPersistWorkspace(
+  workspaceOrgId: string,
+  decisions: DecisionsFile,
+  stats?: { docsScanned: number; blocksAttempted: number; skippedDocs: Array<{ path: string; reason: string }> },
+): Promise<ScanState> {
+  const ref: WorkspaceRef = { workspaceOrgId };
+  const rawClaims = (await loadWorkspaceSpec<Claim[]>(ref, 'rawClaims')) ?? [];
+  const chains = (await loadWorkspaceSpec<VersionChain[]>(ref, 'chains')) ?? [];
+  const prior = stats ? null : await getWorkspaceScanState(workspaceOrgId);
+  const merged = remerge(rawClaims, chains, decisions);
+  const scanState = scanStateFromMerge(merged.merge, {
+    docsScanned: stats?.docsScanned ?? prior?.docsScanned ?? 0,
+    blocksAttempted: stats?.blocksAttempted ?? prior?.blocksAttempted ?? 0,
+    claimsExtracted: rawClaims.length,
+    skippedDocs: stats?.skippedDocs ?? prior?.skippedDocs ?? [],
+  });
+  const claimsFile: ClaimsFile = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    modules: merged.modules.map((m) => m.manifest),
+    claims: merged.claimEntries,
+  };
+  await saveWorkspaceSpec(ref, 'decisions', decisions);
+  await saveWorkspaceSpec(ref, 'claims', claimsFile);
+  await saveWorkspaceSpec(ref, 'scanState', scanState);
+  return scanState;
+}
+
+/** Mutate the workspace decisions, then remerge + persist; returns the fresh scan-state. */
+async function mutateWorkspaceDecisions(
+  workspaceOrgId: string,
+  mutate: (existing: DecisionsFile) => DecisionsFile,
+): Promise<ScanState> {
+  const existing = await loadWorkspaceDecisions(workspaceOrgId);
+  return remergeAndPersistWorkspace(workspaceOrgId, mutate(existing));
+}
+
+/** Upsert one workspace conflict decision; returns the refreshed scan-state. */
+export function upsertWorkspaceDecision(
+  workspaceOrgId: string,
+  input: { conflictId: string; resolution: Resolution; candidateFingerprint: string; note?: string },
+): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyUpsertDecision(e, input));
+}
+
+/** Revoke one workspace conflict decision; returns the refreshed scan-state. */
+export function revokeWorkspaceDecision(workspaceOrgId: string, conflictId: string): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyRevokeDecision(e, conflictId));
+}
+
+/** Mark a workspace version chain (older superseded by newer); returns the refreshed scan-state. */
+export function addWorkspaceManualChain(
+  workspaceOrgId: string,
+  input: { older: string; newer: string; note?: string },
+): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyAddManualChain(e, input));
+}
+
+/** Remove a workspace manual chain; returns the refreshed scan-state. */
+export function removeWorkspaceManualChain(
+  workspaceOrgId: string,
+  input: { older: string; newer: string },
+): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyRemoveManualChain(e, input));
+}
+
+/** Force-include a workspace doc the relevance filter skipped; returns the refreshed scan-state. */
+export function addWorkspaceManualInclude(workspaceOrgId: string, docPath: string): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyAddManualInclude(e, docPath));
+}
+
+/** Remove a workspace force-include override; returns the refreshed scan-state. */
+export function removeWorkspaceManualInclude(workspaceOrgId: string, docPath: string): Promise<ScanState> {
+  return mutateWorkspaceDecisions(workspaceOrgId, (e) => applyRemoveManualInclude(e, docPath));
+}
+
+/** Accept the engine default on every currently-open workspace conflict. */
+export async function resolveAllWorkspaceDefaults(workspaceOrgId: string): Promise<ScanState> {
+  const scan = await getWorkspaceScanState(workspaceOrgId);
+  const open = (scan?.openConflicts ?? []) as Array<{
+    id: string;
+    defaultPick: number;
     candidateFingerprint: string;
-    note?: string;
-  },
+  }>;
+  return mutateWorkspaceDecisions(workspaceOrgId, (existing) => {
+    let next = existing;
+    for (const c of open) {
+      next = applyUpsertDecision(next, {
+        conflictId: c.id,
+        resolution: { kind: 'pick', candidateIndex: c.defaultPick },
+        candidateFingerprint: c.candidateFingerprint,
+        note: 'Accepted engine default.',
+      });
+    }
+    return next;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Decisions-file mutations
+//
+// Pure read-modify-write helpers around decisions. The dashboard server routes
+// and the CLI both call these so the two surfaces agree on update semantics.
+// None of these refresh the scan-state — callers who need a re-merge (CLI write
+// commands) run scanInProcess afterwards.
+// ---------------------------------------------------------------------------
+
+// Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by
+// the repo (file/Postgres) and workspace (Postgres) helpers so both surfaces
+// agree on update semantics. An `apply*` that makes no change returns the SAME
+// object reference, letting callers skip a redundant store.
+
+function applyUpsertDecision(
+  existing: DecisionsFile,
+  input: { conflictId: string; resolution: Resolution; candidateFingerprint: string; note?: string },
 ): DecisionsFile {
-  const existing = readDecisions(repoRoot);
   const filtered = existing.decisions.filter((d) => d.conflictId !== input.conflictId);
   const decision: Decision = {
     conflictId: input.conflictId,
@@ -1241,47 +2275,32 @@ export function upsertDecision(
     candidateFingerprint: input.candidateFingerprint,
     note: input.note,
   };
-  const next: DecisionsFile = {
+  return {
     version: 1,
     decisions: [...filtered, decision],
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
-  return next;
 }
 
-/**
- * Revoke a per-conflict decision. Idempotent — when the decision is
- * already absent, returns the current state unchanged.
- */
-export function revokeDecision(repoRoot: string, conflictId: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
+function applyRevokeDecision(existing: DecisionsFile, conflictId: string): DecisionsFile {
   const filtered = existing.decisions.filter((d) => d.conflictId !== conflictId);
   if (filtered.length === existing.decisions.length) return existing;
-  const next: DecisionsFile = {
+  return {
     version: 1,
     decisions: filtered,
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
-  return next;
 }
 
-/**
- * Add or replace a manual version chain. When a chain with the same
- * (older, newer) pair already exists, it's replaced (markedAt + note
- * refreshed). Self-pairs (`older === newer`) are rejected.
- */
-export function addManualChain(
-  repoRoot: string,
+function applyAddManualChain(
+  existing: DecisionsFile,
   input: { older: string; newer: string; note?: string },
 ): DecisionsFile {
   if (input.older === input.newer) {
     throw new Error('addManualChain: older and newer must be different docs');
   }
-  const existing = readDecisions(repoRoot);
   const dedup = (existing.manualChains ?? []).filter(
     (c) => !(c.older === input.older && c.newer === input.newer),
   );
@@ -1291,66 +2310,122 @@ export function addManualChain(
     markedAt: new Date().toISOString(),
     note: input.note,
   };
-  const next: DecisionsFile = {
+  return {
     version: 1,
     decisions: existing.decisions,
     manualChains: [...dedup, chain],
     manualIncludes: existing.manualIncludes ?? [],
   };
-  writeDecisions(repoRoot, next);
+}
+
+function applyRemoveManualChain(
+  existing: DecisionsFile,
+  input: { older: string; newer: string },
+): DecisionsFile {
+  return {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: (existing.manualChains ?? []).filter(
+      (c) => !(c.older === input.older && c.newer === input.newer),
+    ),
+    manualIncludes: existing.manualIncludes ?? [],
+  };
+}
+
+function applyAddManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
+  const current = existing.manualIncludes ?? [];
+  if (current.includes(docPath)) return existing;
+  return {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: [...current, docPath],
+  };
+}
+
+function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
+  return {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
+  };
+}
+
+/**
+ * Upsert a per-conflict decision. Replaces any previous decision for
+ * the same conflictId. `manualChains` and `manualIncludes` are
+ * preserved untouched.
+ */
+export async function upsertDecision(
+  repoRoot: string,
+  input: {
+    conflictId: string;
+    resolution: Resolution;
+    candidateFingerprint: string;
+    note?: string;
+  },
+): Promise<DecisionsFile> {
+  const next = applyUpsertDecision(await loadDecisions(repoRoot), input);
+  await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Revoke a per-conflict decision. Idempotent — when the decision is
+ * already absent, returns the current state unchanged.
+ */
+export async function revokeDecision(repoRoot: string, conflictId: string): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
+  const next = applyRevokeDecision(existing, conflictId);
+  if (next !== existing) await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Add or replace a manual version chain. When a chain with the same
+ * (older, newer) pair already exists, it's replaced (markedAt + note
+ * refreshed). Self-pairs (`older === newer`) are rejected.
+ */
+export async function addManualChain(
+  repoRoot: string,
+  input: { older: string; newer: string; note?: string },
+): Promise<DecisionsFile> {
+  const next = applyAddManualChain(await loadDecisions(repoRoot), input);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Remove a manual chain by (older, newer). Idempotent.
  */
-export function removeManualChain(
+export async function removeManualChain(
   repoRoot: string,
   input: { older: string; newer: string },
-): DecisionsFile {
-  const existing = readDecisions(repoRoot);
-  const filtered = (existing.manualChains ?? []).filter(
-    (c) => !(c.older === input.older && c.newer === input.newer),
-  );
-  const next: DecisionsFile = {
-    version: 1,
-    decisions: existing.decisions,
-    manualChains: filtered,
-    manualIncludes: existing.manualIncludes ?? [],
-  };
-  writeDecisions(repoRoot, next);
+): Promise<DecisionsFile> {
+  const next = applyRemoveManualChain(await loadDecisions(repoRoot), input);
+  await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Force-include a doc the relevance filter skipped. Idempotent.
  */
-export function addManualInclude(repoRoot: string, docPath: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
-  const current = existing.manualIncludes ?? [];
-  if (current.includes(docPath)) return existing;
-  const next: DecisionsFile = {
-    version: 1,
-    decisions: existing.decisions,
-    manualChains: existing.manualChains ?? [],
-    manualIncludes: [...current, docPath],
-  };
-  writeDecisions(repoRoot, next);
+export async function addManualInclude(repoRoot: string, docPath: string): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
+  const next = applyAddManualInclude(existing, docPath);
+  if (next !== existing) await storeDecisions(repoRoot, next);
   return next;
 }
 
 /**
  * Remove a force-include override. Idempotent.
  */
-export function removeManualInclude(repoRoot: string, docPath: string): DecisionsFile {
-  const existing = readDecisions(repoRoot);
-  const filtered = (existing.manualIncludes ?? []).filter((p) => p !== docPath);
-  const next: DecisionsFile = {
-    version: 1,
-    decisions: existing.decisions,
-    manualChains: existing.manualChains ?? [],
-    manualIncludes: filtered,
-  };
-  writeDecisions(repoRoot, next);
+export async function removeManualInclude(
+  repoRoot: string,
+  docPath: string,
+): Promise<DecisionsFile> {
+  const next = applyRemoveManualInclude(await loadDecisions(repoRoot), docPath);
+  await storeDecisions(repoRoot, next);
   return next;
 }

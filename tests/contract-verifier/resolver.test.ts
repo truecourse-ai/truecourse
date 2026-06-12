@@ -81,6 +81,60 @@ describe('Contract resolver — fixture corpus', () => {
   });
 });
 
+describe('resolve — effective merge (base ∪ primary; repo wins by key)', () => {
+  const op = (filePath: string, path: string, originSrc: string, extra = '') =>
+    parseFile(filePath, `operation GET "${path}" {\n  origin "${originSrc}" "S" 1..2\n${extra}  tags []\n}\n`);
+
+  it('unions disjoint keys (a repo inherits workspace-only contracts)', () => {
+    const ws = op('ws/a.tc', '/api/ws-only', 'ws.md');
+    const repo = op('repo/b.tc', '/api/repo-only', 'repo.md');
+    const r = resolve([repo], { baseFiles: [ws] });
+    expect(r.errors).toEqual([]);
+    expect(r.index.has('Operation:GET /api/ws-only')).toBe(true); // inherited base
+    expect(r.index.has('Operation:GET /api/repo-only')).toBe(true); // primary
+  });
+
+  it('repo wins on a ${kind}:${identity} collision — even from a differently-named file', () => {
+    const ws = op('ws/shared.tc', '/api/orders', 'workspace.md');
+    const repo = op('repo/custom.tc', '/api/orders', 'repo.md');
+    const r = resolve([repo], { baseFiles: [ws] });
+    expect(r.errors).toEqual([]); // an intentional override, NOT a duplicate error
+    const winner = r.index.get('Operation:GET /api/orders')!;
+    expect(winner.declarationLoc.filePath).toBe('repo/custom.tc'); // repo wins
+    expect(winner.origin?.source).toBe('repo.md');
+  });
+
+  it('still flags a genuine duplicate WITHIN the primary layer', () => {
+    const r = resolve([op('a.tc', '/api/x', 'a.md'), op('b.tc', '/api/x', 'b.md')]);
+    expect(r.errors.some((e) => /duplicate artifact identity Operation:GET \/api\/x/.test(e.message))).toBe(true);
+  });
+
+  it('still flags a genuine duplicate WITHIN the base layer', () => {
+    const r = resolve([], { baseFiles: [op('a.tc', '/api/x', 'a.md'), op('b.tc', '/api/x', 'b.md')] });
+    expect(r.errors.some((e) => /duplicate artifact identity/.test(e.message))).toBe(true);
+  });
+
+  it('cross-references resolve across layers (a repo rule → a workspace operation)', () => {
+    const wsOp = op('ws/op.tc', '/api/articles/{slug}', 'ws.md');
+    const repoRule = parseFile(
+      'repo/rule.tc',
+      'authorization-rule article.owner-only {\n' +
+        '  applies-to {\n' +
+        '    operations [Operation:"GET /api/articles/{slug}"]\n' +
+        '  }\n' +
+        '  predicate "true"\n' +
+        '}\n',
+    );
+    const r = resolve([repoRule], { baseFiles: [wsOp] });
+    expect(r.unresolvedRefs.filter((u) => u.ref.type === 'Operation')).toEqual([]);
+  });
+
+  it('with no baseFiles, behaves exactly as the single-layer resolver', () => {
+    const file = op('a.tc', '/api/x', 'a.md');
+    expect(resolve([file], {})).toEqual(resolve([file]));
+  });
+});
+
 describe('canonicalizePathParams', () => {
   it('converts Express colon-form params to RFC 6570 curly-brace form', () => {
     expect(canonicalizePathParams('/api/orders/:id')).toBe('/api/orders/{id}');

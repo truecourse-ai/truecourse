@@ -11,22 +11,20 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
-import * as api from '@/lib/api';
 import type { CanonicalSpecSection, SpecClaim } from '@/lib/api';
 import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
 import { useSpec } from './SpecContext';
 
 interface SpecCanonicalFileProps {
-  repoId: string;
   /** `<module>/<topic>` identifier. */
   filePath: string;
 }
 
-export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) {
+export function SpecCanonicalFile({ filePath }: SpecCanonicalFileProps) {
   const [section, setSection] = useState<CanonicalSpecSection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { canonicalVersion } = useSpec();
+  const { canonicalVersion, loadCanonicalSection } = useSpec();
 
   const [moduleName, topic] = splitPath(filePath);
 
@@ -42,8 +40,7 @@ export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) 
         cancelled = true;
       };
     }
-    api
-      .getSpecCanonicalSection(repoId, moduleName, topic)
+    loadCanonicalSection(moduleName, topic)
       .then((s) => {
         if (!cancelled) setSection(s);
       })
@@ -56,7 +53,7 @@ export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) 
     return () => {
       cancelled = true;
     };
-  }, [repoId, moduleName, topic, canonicalVersion]);
+  }, [loadCanonicalSection, moduleName, topic, canonicalVersion]);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -103,6 +100,8 @@ function SectionView({ section }: { section: CanonicalSpecSection }) {
 }
 
 function ClaimCard({ claim }: { claim: SpecClaim }) {
+  const { docLabel } = useSpec();
+  const label = docLabel(claim.provenance.file);
   return (
     <div className="mb-4 rounded border border-border bg-card/40 p-3">
       <div className="mb-1 flex items-center gap-2">
@@ -117,12 +116,38 @@ function ClaimCard({ claim }: { claim: SpecClaim }) {
             constraint
           </span>
         )}
+        {claim.layer === 'workspace' && (
+          <span
+            className="ml-auto rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary"
+            title="Inherited from workspace Knowledge — shared by every repo"
+          >
+            workspace
+          </span>
+        )}
       </div>
       <pre className="my-2 overflow-auto rounded border border-border/60 bg-muted/30 p-2 font-mono text-[11px] text-foreground">
         {JSON.stringify(claim.content, null, 2)}
       </pre>
       <div className="text-[11px] text-muted-foreground">
-        Source: <span className="font-mono">{claim.provenance.file}:{claim.provenance.line}</span>
+        Source:{' '}
+        {label ? (
+          label.url ? (
+            <a
+              href={label.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-foreground hover:text-primary hover:underline"
+            >
+              {label.title}
+            </a>
+          ) : (
+            <span className="text-foreground">{label.title}</span>
+          )
+        ) : (
+          <span className="font-mono">
+            {claim.provenance.file}:{claim.provenance.line}
+          </span>
+        )}
       </div>
     </div>
   );

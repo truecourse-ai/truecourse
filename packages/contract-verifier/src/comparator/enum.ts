@@ -42,7 +42,7 @@ export interface EnumCompareInput {
 }
 
 export function compareEnum(input: EnumCompareInput): ContractDrift[] {
-  const { ref, contract, codeEnums } = input;
+  const { ref, origin, contract, codeEnums } = input;
   const drifts: ContractDrift[] = [];
 
   // ---- Main value set ----
@@ -72,6 +72,7 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       message: `Spec declares Enum ${ref.identity} with ${contract.values.length} value(s), but no code-side enum matches by name.`,
       specSide: `values: [${contract.values.join(', ')}]`,
       codeSide: '<no match>',
+      specOrigin: origin ?? undefined,
     });
   } else {
     const specNorm = new Map(contract.values.map((v) => [normalizeValue(v), v]));
@@ -116,7 +117,7 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
         (v) => !g.values.has(normalizeValue(v)) && !cloudOnlyValues.has(normalizeValue(v)),
       );
       for (const v of missing) {
-        drifts.push(mkValueDrift(ref, 'missing-value', v, g.repr, contract.values));
+        drifts.push(mkValueDrift(ref, origin, 'missing-value', v, g.repr, contract.values));
       }
     }
     // `extra-value` (code has a value the spec omits) is only meaningful for an
@@ -128,7 +129,7 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       if (isSynthesizedEnumShape(m.shape)) continue;
       const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of extra) {
-        drifts.push(mkValueDrift(ref, 'extra-value', v, m, contract.values));
+        drifts.push(mkValueDrift(ref, origin, 'extra-value', v, m, contract.values));
       }
     }
   }
@@ -149,6 +150,7 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
         message: `Spec declares trigger subset \`${subset.name}\` for Enum ${ref.identity}, but no code-side set/array matches by name.`,
         specSide: `subset ${subset.name}: [${subset.values.join(', ')}]`,
         codeSide: '<no match>',
+        specOrigin: origin ?? undefined,
       });
       continue;
     }
@@ -158,10 +160,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
       const missing = subset.values.filter((v) => !codeNorm.has(normalizeValue(v)));
       const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
       for (const v of missing) {
-        drifts.push(mkSubsetDrift(ref, subset.name, 'missing-value', v, m, subset.values));
+        drifts.push(mkSubsetDrift(ref, origin, subset.name, 'missing-value', v, m, subset.values));
       }
       for (const v of extra) {
-        drifts.push(mkSubsetDrift(ref, subset.name, 'extra-value', v, m, subset.values));
+        drifts.push(mkSubsetDrift(ref, origin, subset.name, 'extra-value', v, m, subset.values));
       }
     }
   }
@@ -354,6 +356,7 @@ function countOverlap<T>(a: T[], b: T[]): number {
 
 function mkValueDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   kind: 'missing-value' | 'extra-value',
   value: string,
   codeEnum: ExtractedEnum,
@@ -375,11 +378,13 @@ function mkValueDrift(
         : `Code enum ${codeEnum.name} includes value \`${value}\` not declared in spec enum ${ref.identity}.`,
     specSide: `values: [${specValues.join(', ')}]`,
     codeSide: `values: [${codeEnum.values.join(', ')}]`,
+    specOrigin: origin ?? undefined,
   };
 }
 
 function mkSubsetDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   subsetName: string,
   kind: 'missing-value' | 'extra-value',
   value: string,
@@ -402,6 +407,7 @@ function mkSubsetDrift(
         : `Code constant ${codeEnum.name} (subset \`${subsetName}\`) includes \`${value}\` not declared in spec subset.`,
     specSide: `subset ${subsetName}: [${specValues.join(', ')}]`,
     codeSide: `${codeEnum.name}: [${codeEnum.values.join(', ')}]`,
+    specOrigin: origin ?? undefined,
   };
 }
 

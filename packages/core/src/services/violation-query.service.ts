@@ -33,15 +33,15 @@ import { readProjectConfig } from '../config/project-config.js';
  * stored snapshot — they just don't surface in views. Re-enabling brings
  * them back without re-running analysis.
  */
-function getDisabledRuleKeys(repoPath: string): Set<string> {
-  return new Set<string>(readProjectConfig(repoPath).disabledRules ?? []);
+async function getDisabledRuleKeys(repoPath: string): Promise<Set<string>> {
+  return new Set<string>((await readProjectConfig(repoPath)).disabledRules ?? []);
 }
 
-function filterDisabled<T extends { ruleKey: string }>(
+async function filterDisabled<T extends { ruleKey: string }>(
   repoPath: string,
   violations: T[],
-): T[] {
-  const disabled = getDisabledRuleKeys(repoPath);
+): Promise<T[]> {
+  const disabled = await getDisabledRuleKeys(repoPath);
   if (disabled.size === 0) return violations;
   return violations.filter((v) => !disabled.has(v.ruleKey));
 }
@@ -86,23 +86,23 @@ export interface ListViolationsResult {
  * in `analyses/*.json` from oldest to target (O(n analyses up to target),
  * each file sub-ms on typical projects).
  */
-export function listViolations(
+export async function listViolations(
   repoPath: string,
   options: ListViolationsOptions = {},
-): ListViolationsResult {
-  const latest = readLatest(repoPath);
+): Promise<ListViolationsResult> {
+  const latest = await readLatest(repoPath);
   if (!latest) return { violations: [], total: 0 };
 
   let violations: ViolationWithNames[];
   if (!options.analysisId || latest.analysis.id === options.analysisId) {
     violations = latest.violations;
   } else {
-    const historical = readActiveViolationsAt(repoPath, options.analysisId);
+    const historical = await readActiveViolationsAt(repoPath, options.analysisId);
     if (!historical) return { violations: [], total: 0 };
     violations = historical;
   }
 
-  violations = filterDisabled(repoPath, violations);
+  violations = await filterDisabled(repoPath, violations);
 
   const statusMode = options.status ?? 'active';
   let filtered: ViolationWithNames[];
@@ -151,23 +151,23 @@ export function listViolations(
  * including the target. Target's own graph is used to denormalize target
  * names. Returns null if the analysisId isn't found.
  */
-export function readActiveViolationsAt(
+export async function readActiveViolationsAt(
   repoPath: string,
   analysisId: string,
-): ViolationWithNames[] | null {
-  const targetFile = findAnalysisFilename(repoPath, analysisId);
+): Promise<ViolationWithNames[] | null> {
+  const targetFile = await findAnalysisFilename(repoPath, analysisId);
   if (!targetFile) return null;
-  const targetSnap = readAnalysis(repoPath, targetFile);
+  const targetSnap = await readAnalysis(repoPath, targetFile);
   if (!targetSnap) return null;
 
-  const files = listAnalyses(repoPath);
+  const files = await listAnalyses(repoPath);
   const targetIdx = files.indexOf(targetFile);
   if (targetIdx === -1) return null;
 
   // Walk oldest → target, apply added + resolved refs.
   const active = new Map<string, ViolationRecord>();
   for (let i = 0; i <= targetIdx; i++) {
-    const snap = readAnalysis(repoPath, files[i]);
+    const snap = await readAnalysis(repoPath, files[i]);
     if (!snap) continue;
     for (const r of snap.violations.resolved) active.delete(r.id);
     for (const a of snap.violations.added) active.set(a.id, a);
@@ -197,11 +197,11 @@ function denormalizeAgainst(graph: Graph): (v: ViolationRecord) => ViolationWith
 // and flow severities. Undefined id is treated as LATEST.
 // ---------------------------------------------------------------------------
 
-export function readActiveViolationsForAnalysisId(
+export async function readActiveViolationsForAnalysisId(
   repoPath: string,
   analysisId?: string,
-): ViolationWithNames[] | null {
-  const latest = readLatest(repoPath);
+): Promise<ViolationWithNames[] | null> {
+  const latest = await readLatest(repoPath);
 
   // LATEST (default or explicit match).
   if (!analysisId || (latest && latest.analysis.id === analysisId)) {
@@ -215,7 +215,7 @@ export function readActiveViolationsForAnalysisId(
   // Diff — compose "active set if committed" from the LATEST baseline plus
   // the diff's delta. resolvedRefs carry ids from LATEST (remove them);
   // newViolations carry fresh ids against diff.graph (add them).
-  const diff = readDiff(repoPath);
+  const diff = await readDiff(repoPath);
   if (diff && diff.id === analysisId) {
     if (!latest) return null;
     const resolvedIds = new Set(diff.resolvedViolations.map((v) => v.id));
@@ -226,7 +226,7 @@ export function readActiveViolationsForAnalysisId(
   }
 
   // Historical — replay the delta chain up to and including target analysis.
-  const historical = readActiveViolationsAt(repoPath, analysisId);
+  const historical = await readActiveViolationsAt(repoPath, analysisId);
   return historical ? filterDisabled(repoPath, historical) : null;
 }
 
@@ -245,11 +245,11 @@ export interface ResolvedGraph {
   analysisId: string;
 }
 
-export function resolveGraphForAnalysisId(
+export async function resolveGraphForAnalysisId(
   repoPath: string,
   analysisId?: string,
-): ResolvedGraph | null {
-  const latest = readLatest(repoPath);
+): Promise<ResolvedGraph | null> {
+  const latest = await readLatest(repoPath);
 
   // No param, or explicitly pointing at LATEST → serve LATEST.
   if (!analysisId || (latest && latest.analysis.id === analysisId)) {
@@ -258,15 +258,15 @@ export function resolveGraphForAnalysisId(
   }
 
   // Diff: id matches the current diff.json.
-  const diff = readDiff(repoPath);
+  const diff = await readDiff(repoPath);
   if (diff && diff.id === analysisId) {
     return { graph: diff.graph, source: 'diff', analysisId: diff.id };
   }
 
   // Historical per-analysis file.
-  const filename = findAnalysisFilename(repoPath, analysisId);
+  const filename = await findAnalysisFilename(repoPath, analysisId);
   if (!filename) return null;
-  const snap = readAnalysis(repoPath, filename);
+  const snap = await readAnalysis(repoPath, filename);
   if (!snap) return null;
   return { graph: snap.graph, source: 'historical', analysisId: snap.id };
 }
@@ -278,12 +278,12 @@ export interface DiffResultWithStale {
 }
 
 /** Read the current diff snapshot and compute stale-vs-LATEST. */
-export function getDiffResult(repoPath: string): DiffResultWithStale | null {
-  const diff = readDiff(repoPath);
+export async function getDiffResult(repoPath: string): Promise<DiffResultWithStale | null> {
+  const diff = await readDiff(repoPath);
   if (!diff) return null;
-  const latest = readLatest(repoPath);
+  const latest = await readLatest(repoPath);
   const isStale = latest ? latest.analysis.id !== diff.baseAnalysisId : false;
-  const disabled = getDisabledRuleKeys(repoPath);
+  const disabled = await getDisabledRuleKeys(repoPath);
   if (disabled.size === 0) return { diff, isStale };
 
   // Filter both new + resolved by disabled rules; recompute counts so the
