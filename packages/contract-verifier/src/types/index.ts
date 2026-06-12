@@ -228,6 +228,16 @@ export interface EnumContract {
   closed: boolean;
   values: string[];
   /**
+   * Human-facing label per value, when the spec states one — e.g. an
+   * enum whose values carry product meaning:
+   * `{ SMS: "Text message", PUSH: "Push notification" }`. Preserves the
+   * value↔meaning mapping the spec asserts so it survives into any spec
+   * reconstructed from the contract (a bare `values [...]` list loses the
+   * meaning a fresh reader would otherwise have to guess). Values whose
+   * meaning the spec doesn't give are simply absent from the map.
+   */
+  valueLabels?: Record<string, string>;
+  /**
    * Named subsets of `values` that trigger downstream behaviour. For a
    * signature-classification enum a `flagging` subset might be
    * `["MISSING","INVALID","SUSPECT","OUTLIER"]` — anything in this

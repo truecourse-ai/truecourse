@@ -48,6 +48,34 @@ responsive"), produce an \`UnenforceableObligation\` fragment with a
 \`reason\` field — never force-fit it into another artifact kind, and
 never silently drop it.
 
+# Completeness — every claim must be captured
+
+The slice is a set of \`## <subject>\` claim blocks. EVERY claim block must
+end up in at least one fragment. Faithfulness (above) governs HOW MUCH each
+fragment says; completeness governs THAT every claim is represented. The two
+never conflict: capture every claim, but make each fragment say only what
+its claim states.
+
+- Prefer a structural kind. Reach for \`unenforceable-obligation\` only when
+  no kind in the catalog fits the claim.
+- Never silently omit a claim. If a claim states a genuine requirement with
+  no structural encoding — a behavioral rule, a conditional/contextual
+  validation, a default/fallback behaviour, a design decision — emit an
+  \`unenforceable-obligation\` for it. Do NOT drop it as "obvious" or
+  "already implied by another contract".
+- A related contract existing does NOT cover a claim. In particular, an
+  entity field \`default X\` does NOT capture a *behavioral fallback* such as
+  "when the column is null, behave as X" or "when no <id> is present,
+  default to X" — those are SEPARATE obligations. Emit one per behaviour.
+- Multi-item claims expand to multiple fragments. A claim whose content is
+  an edge-case list, a matrix, or a \`validation\` object with several keys
+  becomes ONE fragment PER item — never collapse them into a single fragment
+  and drop the remainder.
+- The only claims you may leave with no fragment are purely non-verifiable
+  implementation notes: specific source-file paths, prop/wiring threading
+  between files, exact UI copy strings. Everything that states a verifiable
+  requirement MUST produce a fragment.
+
 # Output
 
 Return ONE JSON object matching this shape — no prose, no code fences:
@@ -737,6 +765,28 @@ Trigger-subset prose markers — emit when you see any of:
 - "X, Y, Z are flagged / count as / trigger …" → subset name from the effect
 - "X is excluded from the <action> set"
 - "any value other than <terminal-value> …"
+
+# Enum — value labels (preserve stated value meanings)
+
+When the spec gives a human-facing label or meaning for each enum value —
+a dropdown's option text, a table mapping VALUE → description, prose like
+"\`SMS\` (Text message)" — attach it with a \`value\` line so the meaning
+isn't lost (a bare \`values [...]\` list forces a later reader to guess what
+each value means):
+
+  enum NotificationChannel {
+    origin SPEC.md "Notifications" 40..48
+    values [EMAIL, SMS, PUSH, NONE]
+    value EMAIL "Email"
+    value SMS "Text message"
+    value PUSH "Push notification"
+    value NONE "Do not notify"
+  }
+
+Only add labels the spec states; omit the \`value\` line for values whose
+meaning the spec doesn't give. Labels are descriptive metadata — they never
+replace the \`values [...]\` list, and you still emit \`trigger-subset\` lines
+when a subset of values drives downstream behaviour.
 
 # Forbids clauses — REQUIRED whenever spec uses "forbidden" / "must not" / "no X on Y"
 

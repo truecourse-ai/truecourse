@@ -21,13 +21,18 @@
 
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { MergedArtifact } from './merger.js';
-import type { Fragment, SpecSlice } from './types.js';
+import type { Fragment, SpecSlice, SpecSliceClaim } from './types.js';
 import { ExtractionResultSchema } from './types.js';
+import {
+  detectUncoveredClaims,
+  fragmentCoversClaim,
+  synthesizeObligationFragment,
+} from './coverage.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 
 export interface RepairIssue {
   artifactKey: string;
-  kind: 'missing' | 'incomplete';
+  kind: 'missing' | 'incomplete' | 'uncovered';
   detail: string;
 }
 
@@ -379,6 +384,79 @@ function buildFixUserPrompt(req: FixRequest): string {
 }
 
 // ---------------------------------------------------------------------------
+// Coverage re-prompt (Pass 3)
+// ---------------------------------------------------------------------------
+
+const COVERAGE_FIX_SYSTEM_PROMPT = `You are the contract-extraction coverage reviewer. One or more CLAIMS from the spec slice below were NOT captured by any contract during the first extraction pass. Capture each listed claim now.
+
+For EACH listed claim, choose exactly one:
+
+  1. PREFERRED — emit the structural contract kind that encodes it (Operation, Entity, Enum, StateMachine, EffectGroup, QueryRule, NamedConstant, ForbiddenArtifact, ArchitectureDecision, …) whenever the claim states a requirement that can be checked against code.
+  2. OTHERWISE — emit an \`unenforceable-obligation\` fragment (with a \`reason\`) when the claim is a genuine requirement that has no structural encoding: a behavioral rule, a conditional/contextual validation, a default/fallback behaviour, a design decision.
+  3. SKIP — emit NO fragment for a listed claim ONLY when it is purely non-verifiable implementation guidance: specific source-file paths, prop/wiring threading between files, or exact UI copy strings. Those are not contracts.
+
+Critical rules:
+
+  - A related contract already existing does NOT mean a claim is covered. An entity field \`default X\` does NOT capture a behavioral fallback like "when the column is null, behave as X" or "when no <id> is present, behave as X" — that is a SEPARATE obligation. Emit it.
+  - A multi-item claim (an edge-case list, a \`validation\` object with several keys, a matrix) needs ONE fragment per item — never collapse several items into one and drop the rest.
+  - Do NOT re-emit contracts that already exist for the unlisted claims; produce only what's needed to cover the listed ones.
+
+Output ONLY the JSON object — { "fragments": [ … ] } — matching the extraction schema, using the .tc grammar from the system prompt above. No prose, no fences.`;
+
+function buildCoverageUserPrompt(slice: SpecSlice, claims: SpecSliceClaim[]): string {
+  const parts: string[] = [];
+  parts.push('Uncovered claims to capture:');
+  for (const c of claims) {
+    parts.push(`  - "${c.subject}" — ${c.file}:${c.line} [topic: ${c.topic}]`);
+  }
+  parts.push('');
+  parts.push(
+    `Source spec slice — ${slice.specPath}, lines ${slice.lineRange[0]}..${slice.lineRange[1]} (${slice.headingPath.join(' → ')}):`,
+  );
+  parts.push('', '--- slice ---', slice.text, '--- end slice ---', '');
+  parts.push('Produce the JSON object as specified by the system prompt.');
+  return parts.join('\n');
+}
+
+async function runCoverageFix(
+  slice: SpecSlice,
+  claims: SpecSliceClaim[],
+  transport: LlmTransport,
+  timeoutMs: number,
+  model?: string,
+  fallbackModel?: string,
+): Promise<Fragment[] | null> {
+  const system = `${SYSTEM_PROMPT}\n\n${COVERAGE_FIX_SYSTEM_PROMPT}`;
+  try {
+    const raw = await transport({
+      id: `contract.coverage:${slice.id}`,
+      stage: 'contract.repair',
+      model,
+      fallbackModel,
+      system,
+      user: buildCoverageUserPrompt(slice, claims),
+      responseFormat: 'json',
+      timeoutMs,
+    });
+    const inner = JSON.parse(stripCodeFences(raw));
+    return ExtractionResultSchema.parse(inner).fragments;
+  } catch {
+    return null;
+  }
+}
+
+function toMergedArtifact(fragment: Fragment): MergedArtifact {
+  return {
+    kind: fragment.kind,
+    identity: fragment.identity,
+    winning: fragment,
+    winningRank: 0,
+    overridden: [],
+    sameRankConflicts: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -495,6 +573,77 @@ export async function repair(
     }
     const replacement = fragments.find((f) => `${f.kind}:${f.identity}` === k) ?? fragments[0];
     artifact.winning = replacement;
+  }
+
+  // Pass 3 — uncovered claims. Every claim that fed a slice must end up in
+  // ≥1 contract; the deterministic gate (coverage.ts) finds the ones that
+  // didn't. Re-prompt once per slice (batching its uncovered claims) to
+  // capture them structurally (preferred) or as obligations. If the
+  // transport hard-fails, fall back to a synthesized obligation so the
+  // requirement is never silently dropped; claims the model consciously
+  // classifies as non-contractual trivia are left out but logged.
+  const uncovered = detectUncoveredClaims(artifacts, slices);
+  if (uncovered.length > 0) {
+    const bySlice = new Map<string, { slice: SpecSlice; claims: SpecSliceClaim[] }>();
+    for (const u of uncovered) {
+      const entry = bySlice.get(u.slice.id) ?? { slice: u.slice, claims: [] };
+      entry.claims.push(u.claim);
+      bySlice.set(u.slice.id, entry);
+      allIssues.push({
+        artifactKey: `${u.claim.file}:${u.claim.line}`,
+        kind: 'uncovered',
+        detail: `Claim "${u.claim.subject}" produced no contract.`,
+      });
+    }
+    total += bySlice.size;
+    const existingIds = new Set(artifacts.map((a) => a.identity));
+
+    for (const { slice, claims } of bySlice.values()) {
+      done += 1;
+      const message = `uncovered ${claims.length} claim${claims.length === 1 ? '' : 's'} in "${slice.headingPath.join(' → ')}" — re-prompting`;
+      log.push(`repair: ${message}.`);
+      opts.onProgress?.({ done, total, message });
+
+      const fragments = await runCoverageFix(
+        slice,
+        claims,
+        transport,
+        timeoutMs,
+        opts.model,
+        opts.fallbackModel,
+      );
+
+      if (!fragments) {
+        // Transport failure — preserve every claim as a synthesized
+        // obligation so nothing is dropped on an infrastructure error.
+        for (const c of claims) {
+          const fallback = synthesizeObligationFragment(c, existingIds);
+          artifacts.push(toMergedArtifact(fallback));
+          log.push(
+            `repair: coverage-fallback obligation for "${c.subject}" (${c.file}:${c.line}) — re-prompt failed.`,
+          );
+        }
+        continue;
+      }
+
+      for (const fragment of fragments) {
+        if (artifacts.some((a) => key(a.kind, a.identity) === key(fragment.kind, fragment.identity))) {
+          continue;
+        }
+        artifacts.push(toMergedArtifact(fragment));
+        existingIds.add(fragment.identity);
+      }
+
+      // Claims still uncovered after the re-prompt were a conscious model
+      // skip (classified non-contractual) — surface them, don't synthesize.
+      for (const c of claims) {
+        if (!artifacts.some((a) => fragmentCoversClaim(a.winning, c))) {
+          log.push(
+            `repair: claim "${c.subject}" (${c.file}:${c.line}) left uncovered — model classified it non-contractual or produced no match.`,
+          );
+        }
+      }
+    }
   }
 
   return { issues: allIssues, artifacts, log };

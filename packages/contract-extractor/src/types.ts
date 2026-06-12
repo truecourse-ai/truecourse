@@ -14,6 +14,30 @@ import { z } from 'zod';
 // Slice — input to the LLM
 // ---------------------------------------------------------------------------
 
+/**
+ * One claim (from `claims.json`) that contributed to a slice. Threaded
+ * onto the slice so the coverage gate (see `coverage.ts`) can verify that
+ * every claim was captured by ≥1 contract fragment — the deterministic
+ * backstop against the extraction LLM silently dropping a requirement it
+ * judged "redundant" or implementation-only.
+ */
+export interface SpecSliceClaim {
+  /** Claim id (sha256) from claims.json — stable across runs. */
+  id: string;
+  /** The claim's subject, e.g. "Order / status" or "POST /api/orders". */
+  subject: string;
+  /** The claim's topic, e.g. "data" | "endpoints" | "overview". */
+  topic: string;
+  /** `definition` (authoritative) vs `constraint` (a refinement). */
+  kind?: 'definition' | 'constraint';
+  /** Source doc the claim was extracted from (`provenance.file`). */
+  file: string;
+  /** 1-based line in `file` where the claim starts (`provenance.line`). */
+  line: number;
+  /** Extra (file, line) sources auto-merged into this claim. */
+  additionalSources?: Array<{ file: string; line: number }>;
+}
+
 export interface SpecSlice {
   /** sha256(spec_path + heading_path + slice_text) — content-addressed. */
   id: string;
@@ -30,6 +54,13 @@ export interface SpecSlice {
   text: string;
   /** Heading level of the slice's own heading (1 for H1, 2 for H2, …). */
   headingLevel: number;
+  /**
+   * The claims this slice was rendered from (claims-driven flow only).
+   * Optional so legacy/markdown slice producers and test fixtures need
+   * not populate it; when absent, the coverage gate is a no-op for the
+   * slice.
+   */
+  claims?: SpecSliceClaim[];
 }
 
 // ---------------------------------------------------------------------------

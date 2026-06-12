@@ -45,4 +45,50 @@ describe('Enum lifter', () => {
     const c = lift(`enum S { values ["with space", "another"] }`);
     expect(c.values).toEqual(['with space', 'another']);
   });
+
+  it('lifts per-value labels', () => {
+    const c = lift(`enum CancellationReasonRequirement {
+      values [MANDATORY_BOTH, MANDATORY_HOST_ONLY, MANDATORY_ATTENDEE_ONLY, OPTIONAL_BOTH]
+      value MANDATORY_BOTH "Mandatory for both"
+      value MANDATORY_HOST_ONLY "Mandatory for host only"
+      value MANDATORY_ATTENDEE_ONLY "Mandatory for attendee only"
+      value OPTIONAL_BOTH "Optional for both"
+    }`);
+    expect(c.values).toEqual([
+      'MANDATORY_BOTH',
+      'MANDATORY_HOST_ONLY',
+      'MANDATORY_ATTENDEE_ONLY',
+      'OPTIONAL_BOTH',
+    ]);
+    expect(c.valueLabels).toEqual({
+      MANDATORY_BOTH: 'Mandatory for both',
+      MANDATORY_HOST_ONLY: 'Mandatory for host only',
+      MANDATORY_ATTENDEE_ONLY: 'Mandatory for attendee only',
+      OPTIONAL_BOTH: 'Optional for both',
+    });
+  });
+
+  it('adds a labeled value missing from the values list', () => {
+    const c = lift(`enum X {
+      values [a]
+      value b "Bee"
+    }`);
+    expect(c.values).toEqual(['a', 'b']);
+    expect(c.valueLabels).toEqual({ b: 'Bee' });
+  });
+
+  it('omits valueLabels when no value clause is present', () => {
+    const c = lift(`enum X { values [a, b] }`);
+    expect(c.valueLabels).toBeUndefined();
+  });
+
+  it('coexists with trigger-subset declarations', () => {
+    const c = lift(`enum S {
+      values [PASS, MISSING]
+      value MISSING "Signature missing"
+      trigger-subset flagging [MISSING]
+    }`);
+    expect(c.valueLabels).toEqual({ MISSING: 'Signature missing' });
+    expect(c.triggerSubsets).toEqual([{ name: 'flagging', values: ['MISSING'] }]);
+  });
 });

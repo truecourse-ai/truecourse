@@ -27,7 +27,7 @@ import {
   type ClaimsFileEntry,
   type ClaimsFileModule,
 } from '@truecourse/spec-consolidator';
-import type { SpecSlice } from './types.js';
+import type { SpecSlice, SpecSliceClaim } from './types.js';
 
 export interface CanonicalModuleInfo {
   /** Module slug. `_shared` for cross-cutting. */
@@ -182,6 +182,25 @@ function renderGroupSlice(
 
   const id = sliceHash(specPath, headingPath, text);
 
+  // Thread the contributing claims onto the slice so the coverage gate can
+  // verify each one ends up in ≥1 contract fragment (see `coverage.ts`).
+  const sliceClaims: SpecSliceClaim[] = claims.map((c) => ({
+    id: c.id,
+    subject: c.subject,
+    topic,
+    ...(c.kind ? { kind: c.kind } : {}),
+    file: c.provenance.file,
+    line: c.provenance.line,
+    ...(c.provenance.additionalSources && c.provenance.additionalSources.length > 0
+      ? {
+          additionalSources: c.provenance.additionalSources.map((a) => ({
+            file: a.file,
+            line: a.line,
+          })),
+        }
+      : {}),
+  }));
+
   return {
     id,
     specPath,
@@ -189,6 +208,7 @@ function renderGroupSlice(
     lineRange,
     text,
     headingLevel: 1,
+    claims: sliceClaims,
   };
 }
 
