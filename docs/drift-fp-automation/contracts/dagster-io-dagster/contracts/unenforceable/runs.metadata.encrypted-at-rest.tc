@@ -1,0 +1,6 @@
+unenforceable-obligation runs.metadata.encrypted-at-rest {
+  origin "docs/docs/deployment/dagster-plus/hybrid/architecture.md" "Runs" 1..26
+  spec-text "Structured metadata is stored in Amazon RDS, encrypted at rest."
+  category compliance
+  rationale "storage-layer encryption-at-rest has no structural encoding in the contract grammar"
+}

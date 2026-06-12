@@ -1,0 +1,6 @@
+unenforceable-obligation ingress.outbound-only {
+  origin "docs/docs/deployment/dagster-plus/hybrid/architecture.md" "ingress → overview" 1..22
+  spec-text "No ingress is required from Dagster+ to user environments. All network requests are outbound from user environments to Dagster+."
+  category network
+  rationale "network ingress/egress direction is a deployment/architecture property with no structural encoding in the contract grammar"
+}

@@ -1,0 +1,11 @@
+operation POST "/[deployment]/report_asset_materialization/" {
+  origin "docs/docs/guides/build/assets/external-assets.md" "https → endpoints" 1..71
+  request {
+    header content-type required value "application/json"
+    header dagster-cloud-api-token required
+    body {
+      asset_key: string
+      metadata: object
+    }
+  }
+}

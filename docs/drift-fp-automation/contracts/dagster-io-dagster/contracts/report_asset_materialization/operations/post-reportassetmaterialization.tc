@@ -1,0 +1,10 @@
+operation POST "/report_asset_materialization/" {
+  origin "docs/docs/guides/build/assets/external-assets.md" "POST /report_asset_materialization/ (OSS)" 1..70
+  request {
+    header content-type value "application/json"
+    body {
+      asset_key: string
+      metadata: object
+    }
+  }
+}

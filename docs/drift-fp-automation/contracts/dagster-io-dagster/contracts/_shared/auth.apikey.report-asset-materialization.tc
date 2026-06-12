@@ -1,0 +1,9 @@
+auth-requirement auth.apikey.report-asset-materialization {
+  origin "docs/docs/guides/build/assets/external-assets.md" "report_asset_materialization auth (Dagster+ vs OSS)" 1229..1239
+  scheme ApiKey
+  selector path-glob "/report_asset_materialization/"
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}
