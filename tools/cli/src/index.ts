@@ -440,6 +440,7 @@ rulesCmd
   .option("--enabled", "Only show enabled rules")
   .option("--disabled", "Only show disabled rules")
   .option("--search <text>", "Filter by key, name, or description")
+  .option("--language <lang>", "Show per-language support status (javascript, python, csharp)")
   .action(async (options) => {
     await runRulesList(options);
   });

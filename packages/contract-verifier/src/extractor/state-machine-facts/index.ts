@@ -15,6 +15,8 @@
 
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { eachParsedSource, type ParsedSource, type SupportedLanguage } from '../source-walker.js';
+import { csColumnMap, type CsColumnMap } from '../shared/cs-column-map.js';
+import { readCsTransitionMap, readCsFieldAssignment } from './cs-state-machine.js';
 
 export interface TransitionMapFact {
   /** (from, to) pairs flattened from the map. */
@@ -53,15 +55,15 @@ export interface StateMachineFacts {
   assignments: StateAssignmentFact[];
 }
 
-function matchFile(s: ParsedSource): StateMachineFacts {
+function matchFile(s: ParsedSource, columnMap: CsColumnMap): StateMachineFacts {
   const transitionMaps: TransitionMapFact[] = [];
   const assignments: StateAssignmentFact[] = [];
 
   visitAll(s.tree.rootNode, (node) => {
-    const map = readTransitionMap(node, s);
+    const map = s.lang === 'csharp' ? readCsTransitionMap(node, s) : readTransitionMap(node, s);
     if (map) transitionMaps.push(map);
 
-    const assign = readFieldAssignment(node, s);
+    const assign = s.lang === 'csharp' ? readCsFieldAssignment(node, s, columnMap) : readFieldAssignment(node, s);
     if (assign) {
       assignments.push({
         ...assign,
@@ -276,8 +278,9 @@ function visitAll(root: SyntaxNode, fn: (n: SyntaxNode) => void): void {
 export async function extractStateMachineFacts(rootDir: string): Promise<StateMachineFacts> {
   const transitionMaps: TransitionMapFact[] = [];
   const assignments: StateAssignmentFact[] = [];
+  const columnMap = await csColumnMap(rootDir);
   await eachParsedSource(rootDir, (s) => {
-    const f = matchFile(s);
+    const f = matchFile(s, columnMap);
     transitionMaps.push(...f.transitionMaps);
     assignments.push(...f.assignments);
   });

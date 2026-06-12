@@ -3,7 +3,7 @@ import { join, basename, dirname } from 'path'
 import type { ServiceType } from '@truecourse/shared'
 import { serviceDetectionPatterns } from './patterns/service-patterns.js'
 import { getAllPackageIndicatorFiles } from './language-config.js'
-import { readAllDependencies, isLanguageLibrary } from './service-detectors/registry.js'
+import { readAllDependencies, isLanguageLibrary, detectLanguageServiceType } from './service-detectors/registry.js'
 
 /**
  * Service detection result
@@ -93,10 +93,19 @@ function detectMonorepoServices(rootPath: string, allFiles: string[]): Service[]
 
         if (!stats.isDirectory()) continue
 
-        // Check if this directory has any known package indicator file
-        const hasPackageFile = getAllPackageIndicatorFiles().some(
-          (f) => existsSync(join(servicePath, f))
-        )
+        // Check if this directory has any known package indicator file.
+        // Supports exact filenames (package.json) and extension globs (*.csproj).
+        const hasPackageFile = getAllPackageIndicatorFiles().some((f) => {
+          if (f.startsWith('*.')) {
+            const ext = f.slice(1)
+            try {
+              return readdirSync(servicePath).some((e) => e.endsWith(ext))
+            } catch {
+              return false
+            }
+          }
+          return existsSync(join(servicePath, f))
+        })
 
         if (hasPackageFile) {
           const serviceFiles = allFiles.filter(f => f.startsWith(servicePath))
@@ -274,19 +283,28 @@ function detectServiceType(
     }
   }
 
-  // Check for API frameworks
-  const hasApiIndicators = files.some(f =>
-    patterns.apiServer.fileIndicators.some(indicator => f.includes(indicator))
-  )
+  // Authoritative type from language manifests (e.g. .NET project SDK)
+  // beats directory-name heuristics
+  const manifestType = detectLanguageServiceType(servicePath)
+  if (manifestType) {
+    return manifestType
+  }
+
+  // Check for API frameworks (case-insensitive — C# uses PascalCase directories like Controllers/)
+  const hasApiIndicators = files.some(f => {
+    const lower = f.toLowerCase()
+    return patterns.apiServer.fileIndicators.some(indicator => lower.includes(indicator))
+  })
 
   if (hasApiIndicators) {
     return 'api-server'
   }
 
-  // Check for worker/background job patterns
-  const hasWorkerIndicators = files.some(f =>
-    patterns.worker.fileIndicators.some(indicator => f.includes(indicator))
-  )
+  // Check for worker/background job patterns (case-insensitive)
+  const hasWorkerIndicators = files.some(f => {
+    const lower = f.toLowerCase()
+    return patterns.worker.fileIndicators.some(indicator => lower.includes(indicator))
+  })
 
   if (hasWorkerIndicators) {
     return 'worker'

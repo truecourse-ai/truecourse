@@ -30,6 +30,7 @@ const GRAMMAR_WASM: Record<SupportedLanguage, string> = {
   tsx:        'tree-sitter-typescript/tree-sitter-tsx.wasm',
   javascript: 'tree-sitter-javascript/tree-sitter-javascript.wasm',
   python:     'tree-sitter-python/tree-sitter-python.wasm',
+  csharp:     'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm',
 }
 
 function resolveWasmPath(subpath: string): string {

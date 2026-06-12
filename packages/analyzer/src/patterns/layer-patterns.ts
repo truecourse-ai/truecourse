@@ -33,18 +33,23 @@ export const dataLayerPatterns = {
     'peewee',
     'mongoengine',
     'sqlmodel',
+    // C#
+    'microsoft.entityframeworkcore',
+    'dapper',
+    'nhibernate',
+    'system.data',
   ],
 
   drivers: {
-    postgresql: ['pg', 'pg-promise', 'postgres', 'psycopg2', 'asyncpg', 'psycopg'],
-    mysql: ['mysql', 'mysql2', 'pymysql'],
-    sqlite: ['better-sqlite3', 'sqlite', 'sqlite3'],
-    redis: ['redis', 'ioredis', '@redis/client', 'aioredis'],
-    mongodb: ['mongodb', 'pymongo', 'motor'],
+    postgresql: ['pg', 'pg-promise', 'postgres', 'psycopg2', 'asyncpg', 'psycopg', 'npgsql'],
+    mysql: ['mysql', 'mysql2', 'pymysql', 'mysqlconnector'],
+    sqlite: ['better-sqlite3', 'sqlite', 'sqlite3', 'microsoft.data.sqlite'],
+    redis: ['redis', 'ioredis', '@redis/client', 'aioredis', 'stackexchange.redis'],
+    mongodb: ['mongodb', 'pymongo', 'motor', 'mongodb.driver'],
     cassandra: ['cassandra-driver'],
     elasticsearch: ['@elastic/elasticsearch'],
     neo4j: ['neo4j-driver'],
-    sqlserver: ['mssql', 'tedious'],
+    sqlserver: ['mssql', 'tedious', 'microsoft.data.sqlclient', 'system.data.sqlclient'],
   } as Record<string, string[]>,
 
   queryBuilders: [
@@ -56,10 +61,11 @@ export const dataLayerPatterns = {
   ],
 
   filePatterns: [
-    '**/*model*.{ts,js}',
-    '**/*schema*.{ts,js}',
-    '**/*entity*.{ts,js}',
-    '**/*repository*.{ts,js}',
+    '**/*model*.{ts,js,cs}',
+    '**/*schema*.{ts,js,cs}',
+    '**/*entity*.{ts,js,cs}',
+    '**/*repository*.{ts,js,cs}',
+    '**/*DbContext*.cs',
     '**/models/**',
     '**/schemas/**',
     '**/entities/**',
@@ -68,6 +74,7 @@ export const dataLayerPatterns = {
     '**/db/**',
     '**/database/**',
     '**/persistence/**',
+    '**/data/**/*.cs',
   ],
 }
 
@@ -104,6 +111,10 @@ export const apiLayerPatterns = {
     'sanic',
     'falcon',
     'pyramid',
+    // C#
+    'microsoft.aspnetcore',
+    'microsoft.aspnetcore.mvc',
+    'microsoft.aspnetcore.builder',
   ],
 
   graphql: [
@@ -147,12 +158,14 @@ export const apiLayerPatterns = {
     '**/api/**',
     '**/endpoints/**',
     '**/views/**',
-    '**/*route*.{ts,js}',
-    '**/*router*.{ts,js}',
-    '**/*controller*.{ts,js}',
-    '**/*handler*.{ts,js}',
-    '**/*endpoint*.{ts,js}',
-    '**/*view*.{ts,js}',
+    '**/middleware/**/*.cs',
+    '**/*route*.{ts,js,cs}',
+    '**/*router*.{ts,js,cs}',
+    '**/*controller*.{ts,js,cs}',
+    '**/*handler*.{ts,js,cs}',
+    '**/*endpoint*.{ts,js,cs}',
+    '**/*view*.{ts,js,cs}',
+    '**/*middleware*.cs',
     '**/app/api/**',
     '**/pages/api/**',
     '*.graphql',
@@ -191,12 +204,17 @@ export const externalLayerPatterns = {
     'httpx',
     'aiohttp',
     'urllib3',
+    // C#
+    'system.net.http',
+    'restsharp',
+    'refit',
+    'flurl',
   ],
 
   cloudServices: {
-    aws: ['@aws-sdk/*', 'aws-sdk', 'boto3', 'botocore'],
+    aws: ['@aws-sdk/*', 'aws-sdk', 'boto3', 'botocore', 'awssdk.*'],
     gcp: ['@google-cloud/*', 'google-cloud-*'],
-    azure: ['@azure/*', 'azure-*'],
+    azure: ['@azure/*', 'azure-*', 'azure.storage.*', 'azure.messaging.*', 'microsoft.azure.*'],
   } as Record<string, string[]>,
 
   paymentServices: {
@@ -282,8 +300,8 @@ export const externalLayerPatterns = {
     '**/clients/**',
     '**/services/external/**',
     '**/third-party/**',
-    '**/*client*.{ts,js}',
-    '**/*integration*.{ts,js}',
-    '**/*sdk*.{ts,js}',
+    '**/*client*.{ts,js,cs}',
+    '**/*integration*.{ts,js,cs}',
+    '**/*sdk*.{ts,js,cs}',
   ],
 }

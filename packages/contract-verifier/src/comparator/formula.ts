@@ -57,8 +57,13 @@ export function compareFormula(input: FormulaCompareInput): ContractDrift[] {
   // ---- Check 2: unused input ----
   for (const declared of input.contract.inputs) {
     const inputName = declared.field;
+    // Match a parameter to a spec input field. The trailing clause snake-/case-
+    // normalizes both sides so a C# camelCase param (`_discountCents`) matches a
+    // snake_case input field (`discount_cents`); the leading-underscore + read
+    // flags below still gate which suffix (.unused / .unread) fires.
     const matched = facts.params.find(
-      (p) => p.name === inputName || p.name === `_${inputName}` || p.name.endsWith(`.${inputName}`),
+      (p) => p.name === inputName || p.name === `_${inputName}` || p.name.endsWith(`.${inputName}`)
+        || normalizeParamName(p.name) === normalizeParamName(inputName),
     );
     if (!matched) continue;
 
@@ -137,4 +142,10 @@ function operatorMatches(specOp: string, codeOp: string): boolean {
   if (specOp === '==' && (codeOp === '==' || codeOp === '===')) return true;
   if (specOp === '!=' && (codeOp === '!=' || codeOp === '!==')) return true;
   return specOp === codeOp;
+}
+
+/** Strip a leading-underscore and all separators, lowercase — so `_discountCents`
+ *  ≡ `discount_cents` ≡ `discountCents`. */
+function normalizeParamName(name: string): string {
+  return name.replace(/^_/, '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
 }

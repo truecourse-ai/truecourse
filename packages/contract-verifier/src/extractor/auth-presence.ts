@@ -27,6 +27,7 @@ import { initParsers, parseFile } from '@truecourse/analyzer';
 import { loadTcIgnore } from '@truecourse/shared';
 import { eachParsedSource } from './source-walker.js';
 import { fastApiFileHasAuthRouter } from './operation-fastapi.js';
+import { aspNetFileHasAuthRouter } from './operation-aspnet.js';
 
 const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
 
@@ -160,6 +161,14 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
     if (s.lang !== 'python') return;
     scanned.push(s.filePath);
     if (fastApiFileHasAuthRouter(s.source, s.tree)) protectedFiles.add(s.filePath);
+  });
+
+  // C# (ASP.NET): a file is auth-protected when it declares `[Authorize]` (on a
+  // controller class/action) or `.RequireAuthorization()` on a minimal-API group.
+  await eachParsedSource(rootDir, (s) => {
+    if (s.lang !== 'csharp') return;
+    scanned.push(s.filePath);
+    if (aspNetFileHasAuthRouter(s.source, s.tree)) protectedFiles.add(s.filePath);
   });
 
   return { protectedFiles, scannedFiles: scanned };

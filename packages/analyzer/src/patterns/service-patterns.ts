@@ -36,6 +36,9 @@ export const entryPointPatterns = [
   'manage.py',
   'wsgi.py',
   'asgi.py',
+  // C#
+  'Program.cs',
+  'Startup.cs',
 ]
 
 export const commonSourceDirectories = [
@@ -109,6 +112,11 @@ export const apiFrameworks = [
   'sanic',
   'falcon',
   'pyramid',
+  // C#
+  'microsoft.aspnetcore',
+  'microsoft.aspnetcore.mvc',
+  'microsoft.aspnetcore.app',
+  'swashbuckle.aspnetcore',
 ]
 
 export const apiServerFileIndicators = [
@@ -133,6 +141,10 @@ export const workerFrameworks = [
   'dramatiq',
   'rq',
   'huey',
+  // C#
+  'microsoft.extensions.hosting',
+  'hangfire',
+  'quartz',
 ]
 
 export const workerFileIndicators = [

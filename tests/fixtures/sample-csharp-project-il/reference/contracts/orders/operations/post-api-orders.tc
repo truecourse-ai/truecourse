@@ -1,0 +1,7 @@
+operation POST "/api/orders" {
+  origin "reference/specs/modules/orders/endpoints.md" "POST /api/orders" 3..22
+  response 201 on success {
+    body Entity:Order
+  }
+  tags [idempotent]
+}

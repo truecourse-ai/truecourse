@@ -1,6 +1,10 @@
 import type { FileAnalysis, Layer, LayerDetectionResult } from '@truecourse/shared'
 import { dataLayerPatterns, apiLayerPatterns, externalLayerPatterns } from './patterns/layer-patterns.js'
 import { matchesPattern } from './patterns/index.js'
+// minimatch options: `dot: true` because file paths are absolute and may
+// contain dot-directories (e.g. a repo analyzed inside .claude/worktrees/) —
+// without it `**` silently refuses to cross those segments. `nocase: true`
+// because C# uses PascalCase directories (Controllers/, Models/).
 import { minimatch } from 'minimatch'
 
 /** Framework imports that are utilities, not route-defining symbols.
@@ -129,7 +133,7 @@ function hasDataLayerPatterns(
 
   // Check file patterns
   for (const pattern of dataLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { nocase: true, dot: true })) {
       reasons.push(`File path matches data layer pattern: ${pattern}`)
       return { match: true, reasons }
     }
@@ -184,7 +188,7 @@ function hasAPILayerPatterns(
   const hasRoutes = (analysis.routeRegistrations?.length ?? 0) > 0
 
   for (const pattern of apiLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { nocase: true, dot: true })) {
       // Broad patterns require evidence of actual route handling
       if (broadDirPatterns.has(pattern) && !hasRoutes) continue
       reasons.push(`File path matches API layer pattern: ${pattern}`)
@@ -243,7 +247,7 @@ function hasExternalLayerPatterns(
 
   // Check file patterns
   for (const pattern of externalLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { nocase: true, dot: true })) {
       reasons.push(`File path matches external layer pattern: ${pattern}`)
       return { match: true, reasons }
     }

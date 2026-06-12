@@ -74,8 +74,11 @@ describe('detectLanguage', () => {
     expect(detectLanguage('app.py')).toBe('python');
   });
 
+  it("returns 'csharp' for .cs files", () => {
+    expect(detectLanguage('Program.cs')).toBe('csharp');
+  });
+
   it('returns null for unsupported extensions', () => {
-    expect(detectLanguage('Program.cs')).toBeNull();
     expect(detectLanguage('main.go')).toBeNull();
     expect(detectLanguage('README.md')).toBeNull();
     expect(detectLanguage('config.json')).toBeNull();

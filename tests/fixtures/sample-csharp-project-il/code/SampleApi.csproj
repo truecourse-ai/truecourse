@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SampleApi</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Data store: Postgres is the system of record (ADR-001). -->
+    <PackageReference Include="Npgsql" Version="8.0.3" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.6" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <!-- Leftover from the abandoned Mongo migration — a forbidden data-store alternative. -->
+    <PackageReference Include="MongoDB.Driver" Version="2.25.0" />
+    <!-- Deprecated HTTP client; spec mandates migrating to IHttpClientFactory/HttpClient. -->
+    <PackageReference Include="RestSharp" Version="110.2.0" />
+    <!-- REST API surface signal. -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+</Project>

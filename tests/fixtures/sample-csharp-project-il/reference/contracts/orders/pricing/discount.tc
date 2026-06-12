@@ -1,0 +1,15 @@
+formula order.discount-cents {
+  origin "reference/specs/modules/orders/data.md" "Pricing" 32..38
+  output Entity:Order field discount_cents
+  inputs [
+    Entity:Order.subtotal_cents,
+    Entity:Customer.loyalty_tier,
+  ]
+  expression {
+    when "(customer.loyalty_tier == \"gold\") and (subtotal_cents > 10000)"
+    then "round(subtotal_cents * 0.10)"
+    else "0"
+  }
+  computed-at order-creation
+  immutable-after-creation
+}

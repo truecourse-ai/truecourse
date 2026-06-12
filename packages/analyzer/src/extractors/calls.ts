@@ -75,11 +75,15 @@ function extractCallExpression(
   let calleeName = ''
 
   // Check if it's a method call (obj.method()) or function call (func())
-  const MEMBER_ACCESS_TYPES = new Set(['member_expression', 'attribute'])
+  // member_expression = JS/TS, attribute = Python, member_access_expression = C#
+  const MEMBER_ACCESS_TYPES = new Set(['member_expression', 'attribute', 'member_access_expression'])
   if (MEMBER_ACCESS_TYPES.has(functionNode.type)) {
     // Method call: obj.method()
-    const objectNode = functionNode.childForFieldName('object')
-    const propertyNode = functionNode.childForFieldName('property') || functionNode.childForFieldName('attribute')
+    const objectNode = functionNode.childForFieldName('object') || functionNode.childForFieldName('expression')
+    const propertyNode =
+      functionNode.childForFieldName('property') ||
+      functionNode.childForFieldName('attribute') ||
+      functionNode.childForFieldName('name')
 
     if (objectNode && propertyNode) {
       const receiver = sourceCode.slice(objectNode.startIndex, objectNode.endIndex)

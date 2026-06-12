@@ -1,0 +1,755 @@
+{
+  "services": [
+    {
+      "name": "ApiGateway",
+      "type": "api-server"
+    },
+    {
+      "name": "UserService",
+      "type": "api-server"
+    },
+    {
+      "name": "Utils",
+      "type": "library"
+    }
+  ],
+  "modules": [
+    {
+      "name": "AuthMiddleware",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "CorsCookiesAndDebug",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "CredentialHandling",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DiagnosticsProbe",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EnvironmentSettingsLoader",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileSystemAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GatewayProxyController",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "HealthRoutes",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "HealthService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Helpers",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "IntegrationClients",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "ITelemetryLogger",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "JwtAuthentication",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LegacyDeserialization",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LocaleArtifacts",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NetworkBinding",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PasswordHashing",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PayloadKind",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PayloadValidator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ProbeResult",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ProcessExecution",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Program",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "QueueMaintenance",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RedisClient",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "RouteTokenScanner",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "ScheduleFormatter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SqlAndScriptInjection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "StatusController",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "SyncRetryWorker",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TelemetryDispatcher",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TokenGenerator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserController",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "UserRoutes",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "UserService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WeakCryptoService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "XmlProcessing",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "AccountMaintenanceRepository",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "AppDbContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "AuditContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BaseNotification",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "BatchLoops",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BillingPlan",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CartItem",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Comment",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "ConditionalCleanup",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ConfigurationLoader",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CustomerAddress",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CustomerProfile",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DbConnection",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "DiagnosticsToolbox",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DispatchTables",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ExceptionShapes",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileCacheRefresher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GuardExpressions",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ImportJob",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LegacyOrderProcessor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MaintenanceTasks",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MemberHygiene",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MessageComposer",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricsAggregator",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Notification",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "NotificationChannel",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "NotificationPriority",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "OrderBatch",
+      "service": "UserService",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "OrderCore",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "OrderFacade",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "OutboxFlusher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "PatternValidators",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PaymentRelay",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Post",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "PostTag",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "PriceTier",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PricingContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Program",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RateAuditor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RefundFlow",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RefundLine",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RetryPolicyFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SessionTracker",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StaleSnapshotError",
+      "service": "UserService",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "StockContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SyncCursor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TenantResolver",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TenantSnapshot",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Token",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "TokenService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TokenServiceModule",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "User",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "UserDirectoryService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "UserHandler",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "UserRepository",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "UserService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WebhookDispatcher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "Formatters",
+      "service": "Utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Logger",
+      "service": "Utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Validators",
+      "service": "Utils",
+      "kind": "standalone",
+      "layer": "service"
+    }
+  ],
+  "fileDependencies": [
+    {
+      "source": "services/ApiGateway/Controllers/StatusController.cs",
+      "target": "services/ApiGateway/Services/HealthService.cs"
+    },
+    {
+      "source": "services/ApiGateway/Controllers/UserController.cs",
+      "target": "services/ApiGateway/Services/UserService.cs"
+    },
+    {
+      "source": "services/ApiGateway/Program.cs",
+      "target": "services/ApiGateway/Routes/HealthRoutes.cs"
+    },
+    {
+      "source": "services/ApiGateway/Program.cs",
+      "target": "services/ApiGateway/Routes/UserRoutes.cs"
+    },
+    {
+      "source": "services/ApiGateway/Routes/HealthRoutes.cs",
+      "target": "services/ApiGateway/Services/HealthService.cs"
+    },
+    {
+      "source": "services/ApiGateway/Routes/UserRoutes.cs",
+      "target": "services/ApiGateway/Controllers/UserController.cs"
+    },
+    {
+      "source": "services/ApiGateway/Services/UserService.cs",
+      "target": "shared/Utils/Formatters.cs"
+    },
+    {
+      "source": "services/UserService/Handlers/UserHandler.cs",
+      "target": "services/UserService/Services/UserService.cs"
+    },
+    {
+      "source": "services/UserService/Handlers/UserHandler.cs",
+      "target": "shared/Utils/Validators.cs"
+    },
+    {
+      "source": "services/UserService/Models/TokenModel.cs",
+      "target": "services/UserService/Models/UserModel.cs"
+    },
+    {
+      "source": "services/UserService/Program.cs",
+      "target": "services/UserService/Db/DbConnection.cs"
+    },
+    {
+      "source": "services/UserService/Program.cs",
+      "target": "services/UserService/Handlers/UserHandler.cs"
+    },
+    {
+      "source": "services/UserService/Repositories/UserRepository.cs",
+      "target": "services/UserService/Handlers/UserHandler.cs"
+    },
+    {
+      "source": "services/UserService/Repositories/UserRepository.cs",
+      "target": "services/UserService/Models/UserModel.cs"
+    },
+    {
+      "source": "services/UserService/Services/UserService.cs",
+      "target": "services/UserService/Repositories/UserRepository.cs"
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/status",
+      "file": "services/ApiGateway/Controllers/StatusController.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status/{component}",
+      "file": "services/ApiGateway/Controllers/StatusController.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "file": "services/ApiGateway/Routes/HealthRoutes.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "file": "services/ApiGateway/Routes/UserRoutes.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "file": "services/ApiGateway/Routes/UserRoutes.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/{userId}",
+      "file": "services/ApiGateway/Routes/UserRoutes.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/{userId}",
+      "file": "services/ApiGateway/Routes/UserRoutes.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/",
+      "file": "services/ApiGateway/Violations/Security/GatewayProxyController.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/",
+      "file": "services/ApiGateway/Violations/Security/GatewayProxyController.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/users",
+      "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/users/{userId}",
+      "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/users/{userId}",
+      "file": "services/UserService/Program.cs"
+    }
+  ],
+  "databases": [
+    {
+      "type": "postgres",
+      "driver": "efcore-npgsql",
+      "connectedServices": [
+        "UserService"
+      ],
+      "tables": [
+        "Comments",
+        "PostTags",
+        "Posts",
+        "Users",
+        "token"
+      ]
+    },
+    {
+      "type": "redis",
+      "driver": "stackexchange-redis",
+      "connectedServices": [
+        "ApiGateway"
+      ],
+      "tables": []
+    },
+    {
+      "type": "sqlserver",
+      "driver": "sqlclient",
+      "connectedServices": [
+        "UserService"
+      ],
+      "tables": []
+    }
+  ]
+}

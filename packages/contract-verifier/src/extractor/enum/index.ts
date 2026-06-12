@@ -12,12 +12,14 @@ import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-w
 import type { ExtractedEnum } from './types.js';
 import { extractEnumsFromFile, extractIdLiteralFromExport } from './ts-enums.js';
 import { extractPyEnumsFromFile } from './py-enums.js';
+import { extractCsEnumsFromFile } from './cs-enums.js';
 
 export type { ExtractedEnum, EnumShape } from './types.js';
 
 const MATCHERS: LanguageMatchers<ExtractedEnum> = {
   ...jsMatchers((s) => extractEnumsFromFile(s.filePath, s.source, s.tree)),
   python: (s) => extractPyEnumsFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsEnumsFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractEnumsFromDir(rootDir: string): Promise<ExtractedEnum[]> {

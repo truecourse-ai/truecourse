@@ -137,11 +137,24 @@ Export your extractor functions and any new registries.
 | Language | LSP Server | Install |
 |---|---|---|
 | Python | Pyright | `pnpm add pyright` |
-| C# | OmniSharp | binary download |
+| C# | none — symbol index (see below) | n/a |
 | Go | gopls | `go install golang.org/x/tools/gopls@latest` |
 | Java | Eclipse JDT | binary download |
 | Rust | rust-analyzer | binary download |
 | PHP | Intelephense | `pnpm add intelephense` |
+
+**When NOT to use an LSP — the symbol-index path.** The LSP layer's only
+production job is correcting `isExported` flags. A language whose visibility
+is explicit syntax (C#'s `public`/`internal`) gets nothing from an LSP — and
+languages whose cross-file references don't go through import statements
+(C#: same-namespace references need no `using` at all) can't be resolved by
+the per-import resolver seam either. For these, build a symbol index instead
+(see `packages/analyzer/src/symbol-index/`): a repo-wide declaration index +
+visibility-aware reference resolver, registered as a dependency-graph **edge
+contributor** in `resolvers/registry.ts`. It feeds the dependency graph
+(including edges invisible to imports), interface→implementation maps, and
+DI bindings — no language server, no build step, works on a fresh clone.
+The same design fits any namespace-import language (Java, PHP).
 
 ### 8. Add import resolver
 

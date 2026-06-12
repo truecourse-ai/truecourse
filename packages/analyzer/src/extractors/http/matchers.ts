@@ -48,11 +48,33 @@ const pythonMatcher: HttpMatcher = {
   },
 }
 
+const csharpMatcher: HttpMatcher = {
+  isHttpCall(calleeName) {
+    // HttpClient / IHttpClientFactory clients
+    const httpClientMethods = [
+      'GetAsync', 'PostAsync', 'PutAsync', 'DeleteAsync', 'PatchAsync', 'SendAsync',
+      'GetStringAsync', 'GetStreamAsync', 'GetByteArrayAsync',
+      'GetFromJsonAsync', 'PostAsJsonAsync', 'PutAsJsonAsync',
+    ]
+    // RestSharp
+    const restSharpMethods = ['ExecuteAsync', 'ExecuteGetAsync', 'ExecutePostAsync', 'ExecutePutAsync', 'ExecuteDeleteAsync']
+    return [...httpClientMethods, ...restSharpMethods].some(
+      (method) => calleeName === method || calleeName.endsWith('.' + method),
+    )
+  },
+  getClientType(calleeName) {
+    // HttpClient is method-based like axios
+    if (calleeName.includes('Execute')) return 'http' // RestSharp
+    return 'http'
+  },
+}
+
 const MATCHERS: Partial<Record<SupportedLanguage, HttpMatcher>> = {
   typescript: jsMatcher,
   tsx: jsMatcher,
   javascript: jsMatcher,
   python: pythonMatcher,
+  csharp: csharpMatcher,
 }
 
 export function getHttpMatcher(language: SupportedLanguage): HttpMatcher | null {

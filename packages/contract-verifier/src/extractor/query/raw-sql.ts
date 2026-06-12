@@ -35,7 +35,7 @@
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { LiteralValue, Predicate, QualifiedColumn } from '../../types/index.js';
-import type { ExtractedQuery } from './types.js';
+import type { ExtractedQuery, QueryAdapterName } from './types.js';
 
 const SQL_HOST_METHODS = new Set(['raw', 'query', 'unsafe']);
 const SQL_TAG_NAMES = new Set(['sql', 'SQL']);
@@ -207,6 +207,7 @@ export function buildQueriesFromSqlText(
   text: string,
   hasInterpolation: boolean,
   loc: { filePath: string; lineStart: number; lineEnd: number },
+  adapterName: QueryAdapterName = 'raw-sql',
 ): ExtractedQuery[] {
   if (!text || !/\bSELECT\b/i.test(text)) return [];
 
@@ -233,7 +234,7 @@ export function buildQueriesFromSqlText(
       predicates,
       unparseable,
       source: { filePath: loc.filePath, lineStart: loc.lineStart, lineEnd: loc.lineEnd },
-      adapter: 'raw-sql',
+      adapter: adapterName,
       dateRangeBinding: detectDateRangeBinding(predicates),
     });
   }
@@ -540,7 +541,7 @@ function parseSqlListLiteral(body: string): LiteralValue[] {
 // Date-range heuristic (shared shape)
 // ---------------------------------------------------------------------------
 
-function detectDateRangeBinding(predicates: Predicate[]): { column: QualifiedColumn } | undefined {
+export function detectDateRangeBinding(predicates: Predicate[]): { column: QualifiedColumn } | undefined {
   const lowers = new Map<string, QualifiedColumn>();
   const uppers = new Map<string, QualifiedColumn>();
   for (const p of predicates) {

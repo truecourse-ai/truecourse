@@ -1151,11 +1151,14 @@ Merged into **Phase 23: Custom Rules**. The `truecourse rules generate` command 
 
 ---
 
-## Phase 12: Multi-Language Support `STATUS: BACKLOG`
+## Phase 12: Multi-Language Support `STATUS: IN PROGRESS`
 
-- Re-enable Python, C# extractors from SpecMind
-- Language-specific import resolution and pattern detection
-- Incremental analysis (content-hash cache, only re-analyze changed files)
+- Python: `STATUS: DONE` (Pyright LSP, extractor, resolvers, rules)
+- C#: `STATUS: DONE` — full analyze treatment, no language server (see `docs/CSHARP_ANALYZE_PLAN.md`):
+  tree-sitter extractor, repo-wide symbol index (same-namespace dependency edges, csproj/project
+  scoping, DI bindings), ASP.NET routes, EF Core schema parsing, manifest-based database detection,
+  219 C# rule visitors with a CI-enforced per-language rule-support matrix
+- Incremental analysis (content-hash cache, only re-analyze changed files): `STATUS: BACKLOG`
 
 ### Test Plan (Phase 12) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)

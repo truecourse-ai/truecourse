@@ -62,6 +62,31 @@ export const ContextRequirementSchema = z.object({
 export type ContextRequirement = z.infer<typeof ContextRequirementSchema>
 
 // ---------------------------------------------------------------------------
+// Language support — which analysis languages a rule covers
+// ---------------------------------------------------------------------------
+
+/** Language families analyze supports (javascript covers TS/TSX/JS). */
+export const AnalysisLanguageSchema = z.enum(['javascript', 'python', 'csharp'])
+export type AnalysisLanguage = z.infer<typeof AnalysisLanguageSchema>
+
+export const ANALYSIS_LANGUAGES: readonly AnalysisLanguage[] = AnalysisLanguageSchema.options
+
+export const RuleLanguageStatusSchema = z.enum([
+  'supported',       // full-fidelity implementation
+  'partial',         // implemented with a documented recall limitation
+  'not-applicable',  // the defect is inexpressible in this language
+  'unsupported',     // applicable in principle, not implemented
+])
+export type RuleLanguageStatus = z.infer<typeof RuleLanguageStatusSchema>
+
+export const RuleLanguageSupportSchema = z.object({
+  status: RuleLanguageStatusSchema,
+  // Required for partial / not-applicable / unsupported (enforced by test)
+  reason: z.string().optional(),
+})
+export type RuleLanguageSupport = z.infer<typeof RuleLanguageSupportSchema>
+
+// ---------------------------------------------------------------------------
 // Analysis Rule
 // ---------------------------------------------------------------------------
 
@@ -76,6 +101,12 @@ export const AnalysisRuleSchema = z.object({
   severity: RuleSeveritySchema,
   type: RuleTypeSchema,
   contextRequirement: ContextRequirementSchema.optional(),
+  /**
+   * Per-language support status. Populated by the analyzer's rule registry
+   * (derived from visitor coverage plus curated dispositions) — every rule
+   * carries an entry for every AnalysisLanguage.
+   */
+  languageSupport: z.record(AnalysisLanguageSchema, RuleLanguageSupportSchema).optional(),
 })
 
 export type AnalysisRule = z.infer<typeof AnalysisRuleSchema>

@@ -10,6 +10,7 @@ import type { FileAnalysis, DatabaseType, TableInfo, RelationInfo } from '@truec
 import { parsePrismaSchema } from './prisma.js'
 import { parseDrizzleSchema } from './drizzle.js'
 import { parseSqlAlchemySchema } from './sqlalchemy.js'
+import { parseEfCoreSchema } from './efcore.js'
 
 interface SchemaParserEntry {
   /** Name for logging */
@@ -44,6 +45,26 @@ export const SCHEMA_PARSERS: SchemaParserEntry[] = [
     validateContent: (content) => content.includes('__tablename__'),
     parse: parseSqlAlchemySchema,
     detectDbType: () => 'postgres', // SQLAlchemy default; could parse engine URL for others
+  },
+  {
+    name: 'EFCore',
+    // Entity POCOs often import only DataAnnotations, not EF itself
+    matchesImport: (fa) =>
+      fa.language === 'csharp' &&
+      fa.imports.some(
+        (imp) =>
+          imp.source.startsWith('Microsoft.EntityFrameworkCore') ||
+          imp.source.startsWith('System.ComponentModel.DataAnnotations'),
+      ),
+    validateContent: (content) =>
+      /DbSet</.test(content) || /\[Table\(/.test(content) || /\[Key\]/.test(content),
+    parse: parseEfCoreSchema,
+    detectDbType: (content) => {
+      if (content.includes('UseSqlServer')) return 'sqlserver'
+      if (content.includes('UseSqlite')) return 'sqlite'
+      if (content.includes('UseMySql')) return 'mysql'
+      return 'postgres' // UseNpgsql and the most common default
+    },
   },
   // Prisma is handled separately (file-based, not import-based) — see database-detector.ts
 ]

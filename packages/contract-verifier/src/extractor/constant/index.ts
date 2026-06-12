@@ -11,12 +11,14 @@ import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-w
 import type { ExtractedConstant } from './types.js';
 import { extractConstantsFromFile } from './ts-constants.js';
 import { extractPyConstantsFromFile } from './py-constants.js';
+import { extractCsConstantsFromFile } from './cs-constants.js';
 
 export type { ExtractedConstant, ConstantShape } from './types.js';
 
 const MATCHERS: LanguageMatchers<ExtractedConstant> = {
   ...jsMatchers((s) => extractConstantsFromFile(s.filePath, s.source, s.tree)),
   python: (s) => extractPyConstantsFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsConstantsFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractConstantsFromDir(rootDir: string): Promise<ExtractedConstant[]> {

@@ -4,8 +4,8 @@ import { detectByChoiceSpecs, type ChoiceSpec } from './shared/detect.js';
 const SPECS: ChoiceSpec[] = [
   {
     value: 'rest',
-    packages: ['express', 'fastify', 'koa', '@hapi/hapi', 'hapi', '@nestjs/core', 'fastapi', 'flask', 'django', 'djangorestframework', 'starlette', 'sanic', 'aiohttp', 'bottle', 'falcon'],
-    imports: ['express', 'fastify', 'koa', 'fastapi', 'flask', 'django', 'starlette'],
+    packages: ['express', 'fastify', 'koa', '@hapi/hapi', 'hapi', '@nestjs/core', 'fastapi', 'flask', 'django', 'djangorestframework', 'starlette', 'sanic', 'aiohttp', 'bottle', 'falcon', 'Swashbuckle.AspNetCore', 'Microsoft.AspNetCore.Mvc.Core', 'Microsoft.AspNetCore.OpenApi'],
+    imports: ['express', 'fastify', 'koa', 'fastapi', 'flask', 'django', 'starlette', 'Microsoft.AspNetCore.Mvc'],
   },
   {
     value: 'grpc',
