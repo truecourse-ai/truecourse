@@ -1,0 +1,6 @@
+forbidden-artifact file-glob.cc-ustom-cc-ancellationreason {
+  origin "docs/design.md" "Out of Scope" 75..79
+  category file-glob
+  pattern "**/*[Cc]ustom[Cc]ancellationReason*"
+  reason "Custom reason dropdown options are explicitly out of scope"
+}

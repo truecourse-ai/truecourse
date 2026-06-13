@@ -1,0 +1,6 @@
+unenforceable-obligation cancellation-reason.edge-cases {
+  origin "docs/design.md" "Edge Cases" 68..73
+  spec-text "Platform users respect the setting; the setting applies to team bookings regardless of team context; a null column value defaults to MANDATORY_HOST_ONLY behavior; default event types (no eventTypeId) use default MANDATORY_HOST_ONLY."
+  category business-logic
+  rationale "edge-case fallback rules (null/absent eventTypeId default to MANDATORY_HOST_ONLY, platform/team applicability) are runtime branching, not a single structural contract"
+}

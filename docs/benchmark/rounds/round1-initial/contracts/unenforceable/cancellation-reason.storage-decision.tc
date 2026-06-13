@@ -1,0 +1,6 @@
+unenforceable-obligation cancellation-reason.storage-decision {
+  origin "docs/decisions.md" "ADR-001 / Decision" 14..23
+  spec-text "Use a dedicated database column with a Prisma enum (CancellationReasonRequirement), not a metadata JSON field."
+  category persistence
+  rationale "ADR records a column-vs-metadata-JSON storage choice; the data-store category value-set does not include 'dedicated-column vs metadata-json', so it cannot be encoded as an architecture-decision"
+}

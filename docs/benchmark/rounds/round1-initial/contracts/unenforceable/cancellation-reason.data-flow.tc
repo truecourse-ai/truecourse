@@ -1,0 +1,6 @@
+unenforceable-obligation cancellation-reason.data-flow {
+  origin "docs/design.md" "Data Flow" 56..66
+  spec-text "requiresCancellationReason flows from the EventType DB column through getEventTypesFromDB (apps/web/lib/booking.ts), which must include the field in its select, then through page props to booking views where CancelBooking uses it for validation; prop threading is required through apps/web/lib/booking.ts, apps/web/modules/bookings/views/bookings-single-view.tsx, and apps/web/components/dialog/CancelBookingDialog.tsx."
+  category data-flow
+  rationale "prop-threading / select-inclusion across specific frontend files is an implementation wiring requirement with no structural artifact kind"
+}

@@ -1,0 +1,12 @@
+// Runtime null/absent → default coalescing: a customer with no recorded
+// loyalty tier is billed as `standard`. This is a code-side fallback (read at
+// use time), distinct from the schema column default. The default is the
+// named constant `DEFAULT_LOYALTY_TIER` in
+// code/src/services/customers.preferences.service.ts (readPreferences).
+
+fallback customer.loyalty-tier-default {
+  origin "reference/specs/modules/customers/data.md" "Loyalty tier fallback" 25..29
+  target loyaltyTier
+  when null-or-absent
+  default DEFAULT_LOYALTY_TIER
+}

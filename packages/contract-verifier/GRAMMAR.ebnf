@@ -1,0 +1,942 @@
+/* ===========================================================================
+   TrueCourse `.tc` contract DSL — grammar reference (EBNF)
+   ===========================================================================
+
+   The `.tc` DSL is the intermediate language (IL) that the contract extractor
+   emits and the contract verifier parses. Until now its shape lived only
+   implicitly in three places: the hand-written lexer/parser
+   (`src/parser/`), the per-kind lifters (`src/resolver/lifters/`), and the
+   by-example block in the extractor prompt. This file is the explicit,
+   authoritative grammar reverse-engineered from those sources.
+
+   ---------------------------------------------------------------------------
+   HOW TO READ THIS GRAMMAR — the `.tc` pipeline has TWO layers, and so does
+   this file. Conflating them is the main source of confusion.
+
+     LAYER A — the PARSER (`src/parser/lexer.ts`, `src/parser/parser.ts`) is
+       artifact-AGNOSTIC. It tokenizes, then builds a generic tree of
+       statements (head-tokens + an optional `{ }` block). It imposes NO
+       keyword or clause rules; almost any brace-and-token soup parses.
+       Sections 1 (LEXICAL) and 2 (GENERIC STRUCTURE) describe exactly this.
+
+     LAYER B — the RESOLVER + LIFTERS (`src/resolver/`) walk that generic tree
+       and enforce the REAL per-kind shape: which keyword opens an artifact,
+       which clauses each kind reads, their value grammar, and what is
+       required vs optional vs ignored. Section 3 (ARTIFACTS) describes this —
+       the language a contract AUTHOR actually writes.
+
+   Because Layer B is "dispatch on a keyword, silently skip anything you don't
+   recognize", this grammar is DELIBERATELY DESCRIPTIVE, not a minimal
+   unambiguous CFG:
+
+     * Every artifact body lists its recognized clauses explicitly (for the
+       reader) AND ends with `IgnoredStmt` — a catch-all for any other
+       statement the generic parser accepts and the lifter skips. The
+       recognized clauses are therefore a readable subset of `IgnoredStmt`;
+       the overlap is intentional and faithful to the implementation.
+     * Value-set restrictions the PARSER does not enforce (e.g. an HTTP method,
+       a pagination `scheme`) are written as `Ident` with the canonical values
+       named in a comment or a `(* semantic *)` note — because the lifter
+       accepts any ident there and only ASSIGNS MEANING to specific values.
+     * Constraints EBNF cannot express (required-exactly-once, mutually-
+       exclusive clauses, list-item filtering, defaults) are stated in
+       `(* semantic: ... *)` comments next to the production.
+
+   ---------------------------------------------------------------------------
+   NOTATION (W3C/ISO-style EBNF):
+     Name ::= ...       production
+     A B                sequence (A then B)
+     A | B              alternation
+     A?                 optional (zero or one)
+     A*                 zero or more
+     A+                 one or more
+     ( ... )            grouping
+     'literal'          a terminal: a keyword ident or punctuation token
+     Name               a non-terminal (bare PascalCase)
+     (* semantic: ... *) an inline note for a constraint the lifter enforces
+                        but EBNF cannot express
+     Comments are C-style block comments. Their delimiters are never written
+     literally inside a comment, since C-style block comments do not nest.
+
+   SOURCE OF TRUTH (verify against these when the grammar drifts):
+     src/parser/lexer.ts          — tokens (Section 1)
+     src/parser/parser.ts         — generic structure (Section 2)
+     src/parser/ast.ts            — HeadToken kinds
+     src/resolver/index.ts        — keyword dispatch, identity, provenance
+     src/resolver/lifters/*.ts    — per-kind clause grammar (Section 3)
+   =========================================================================== */
+
+
+/* ===========================================================================
+   SECTION 1 — LEXICAL GRAMMAR
+   Tokens emitted by `tokenize()` (src/parser/lexer.ts). Whitespace and BOTH
+   comment forms are consumed and produce NO token (see end of section).
+   These are the SHARED LEAF non-terminals reused everywhere below.
+   =========================================================================== */
+
+/* -- character classes (the lexer is precise about these) -- */
+Letter       ::= [a-z] | [A-Z]
+UpperLetter  ::= [A-Z]
+Digit        ::= [0-9]
+
+/* isIdentStart(c): [A-Za-z_$] ; isIdentCont(c): IdentStart | Digit | '-' | '.' */
+IdentStart   ::= Letter | '_' | '$'
+IdentCont    ::= IdentStart | Digit | '-' | '.'
+
+/* Ident — one IdentStart then zero+ IdentCont. Covers kebab-case
+   (`required-role`), dot-paths (`auth.bearer.api`), leading `_`/`$`, primitive
+   type names (`uuid`, `string`, `integer`), and PascalCase entity names. `-`
+   and `.` are CONTINUATION-only; a token may legally end in `-` or `.`. */
+Ident        ::= IdentStart IdentCont*
+
+/* StatusClass — a digit run immediately followed by literal `xx` (e.g. 4xx,
+   5xx, 2xx). Emitted as an `ident` token (NOT a number) so list parsers pick
+   it up. The `xx` is consumed only when it directly follows the digit run. */
+StatusClass  ::= Digit+ 'xx'
+
+/* Number — a single `number` token. A digit run is a number unless the `xx`
+   StatusClass rule fires first. A decimal fraction is taken only when `.` is
+   followed by a digit (this is what lets `a..b` lex as `number .. number`
+   instead of swallowing the dot). A leading `-` is fused only when directly
+   followed by a digit. There is NO exponent and NO `+` form. The parser uses
+   parseFloat; there is no distinct integer token — `Number` is the only
+   numeric terminal (where a value is conventionally an integer, e.g. an HTTP
+   status, it is noted (* semantic *), not enforced lexically). */
+Number       ::= '-'? Digit+ ( '.' Digit+ )?
+
+/* Range — NOT a single character sequence but ONE folded `range` HeadToken:
+   two `number` tokens around the `..` (dotdot) operator. Either endpoint may
+   be negative (e.g. inferred `0..0`, unenforceable `-1..-1`). */
+Range        ::= Number '..' Number
+
+/* String — double-quoted; backslash escapes (\n \t \r \" \\) are DECODED into
+   the token text; the surrounding quotes are not part of the value; any other
+   \x yields bare x. Newlines inside the quotes are allowed. Unterminated => a
+   LexError. */
+String       ::= '"' StringChar* '"'
+StringChar   ::= /* any source char except an unescaped '"' */
+               | '\' EscapeChar          /* decoded: \n \t \r \" \\ or bare x */
+EscapeChar   ::= 'n' | 't' | 'r' | '"' | '\' | /* any other char => itself */
+
+/* Reference — recognized at LEX time: a PascalCase ident whose first char is
+   uppercase, immediately followed by `:` immediately followed by either `"`
+   (quoted identity) or an IdentStart (bare identity). No whitespace is allowed
+   between the type, the `:`, and the identity. The quoted identity is captured
+   RAW (escapes are NOT decoded inside a reference). parseReference splits on
+   the first `:`.
+     bare:    Entity:Order              Field:user.email
+     quoted:  Operation:"POST /api/orders" */
+Reference    ::= PascalIdent ':' ( '"' RefRawChar* '"' | Ident )
+PascalIdent  ::= UpperLetter IdentCont*
+RefRawChar   ::= /* any source char except '"' — no escape processing */
+
+/* -- single-char punctuation (SINGLE table) -- */
+/* '{' '}' '[' ']' '(' ')' ',' ':' '=' '|' */
+
+/* -- operators (maximal-munch: two-char forms beat the '>' / '<' fallbacks) --
+   '..'  '->'  '>='  '<='  '=='  '!='  '>'  '<'  ('=' standalone is the
+   equals token; '==' is its own token). */
+
+/* -- skipped (produce NO token) --
+   Whitespace : ( ' ' | '\t' | '\n' | '\r' )+
+   LineComment: '//' up to (not incl.) newline
+   BlockComment: C-style block comment; if unterminated, consumed to EOF with
+                 no error. */
+
+/* The lexer appends exactly one synthetic `eof` token at the end of input. */
+
+
+/* ===========================================================================
+   SECTION 2 — GENERIC STRUCTURE (the parser, Layer A)
+   Built by parseFile/parseStatement/parseHeadToken (src/parser/parser.ts).
+   Artifact-kind-agnostic: any head-tokens followed by an optional block.
+   Section 3 is a REFINEMENT of this, enforced by the lifters.
+   =========================================================================== */
+
+/* A source file is a sequence of statements. parseStatement requires
+   head.length >= 1 (an empty head is a parse error). NOTE: the parser accepts
+   ANY statement here; the resolver additionally requires each top-level
+   statement to be an Artifact (Section 3) — see GenericFile vs File. */
+GenericFile  ::= Statement*
+
+/* A statement is one-or-more head tokens then an optional brace block. The
+   block is present iff a `{` immediately follows the head. */
+Statement    ::= HeadToken+ Block?
+
+Block        ::= '{' Statement* '}'
+
+/* HeadToken — the full set parseHeadToken can emit. Each alternative is one
+   lexer token kind (or the folded IdentPrecision form). No other terminals
+   are producible. */
+HeadToken    ::= Ident
+               | IdentPrecision    /* numeric(4,3), decimal(15,2), char(2) */
+               | String
+               | Number
+               | Range             /* number '..' number folded to one token */
+               | Reference
+               | List
+               | Operator
+
+/* Type-precision folding: an `ident` immediately followed by `(` consumes
+   every token up to the matching `)` and concatenates their TEXT onto the
+   ident value, e.g. numeric(4,3), decimal(15,2), char(2). The fold triggers
+   whenever `(` is the next token after an ident (parseHeadToken checks the
+   next token unconditionally); the closing `)` is optional at EOF.
+   (* semantic: the .text of ANY token inside the parens is concatenated, not
+      only numbers/idents/commas; real precision args are numeric *) */
+IdentPrecision ::= Ident '(' PrecisionArg* ')'
+PrecisionArg   ::= HeadToken | ','
+
+/* The operator head-tokens — the ONLY operator terminals the lexer produces. */
+Operator     ::= ':' | '=' | '|' | '->' | '>=' | '<=' | '==' | '!=' | '>' | '<'
+
+/* A bracketed list of head items. The comma after each item is OPTIONAL and
+   consumed if present, so `[a b c]`, `[a, b, c]`, and a trailing comma
+   `[a, b,]` all parse (the parser consumes an optional comma AFTER each item,
+   then loops until `]`). Items are parsed by parseHeadToken, so an item may be
+   any HeadToken, INCLUDING a nested List. Newlines inside `[ ... ]` do NOT
+   terminate the enclosing statement (the list is consumed eagerly), so list
+   elements may span lines. */
+List         ::= '[' ( HeadItem ','? )* ']'
+HeadItem     ::= HeadToken
+
+/* STATEMENT TERMINATION (precise): a statement's head grows until (a) EOF, or
+   (b) the next token is `{` or `}`, or (c) head.length > 0 AND the next token
+   sits on a HIGHER line than the statement's first token (a newline ends the
+   statement). Guard (c) runs only at brace-depth 0 and never inside a list.
+   => statements within a block are newline-separated; list items are
+   comma-(optionally-)separated. */
+
+
+/* ===========================================================================
+   SECTION 3 — ARTIFACTS (the resolver + lifters, Layer B)
+   The real language an author writes. liftArtifact (src/resolver/index.ts)
+   accepts a top-level statement only when head[0] is an ident in
+   KEYWORD_TO_KIND (16 keywords); every artifact requires a `{ }` body.
+   =========================================================================== */
+
+/* The validated view of a file: each top-level statement MUST be an artifact
+   (a non-artifact top-level statement is a resolver error, not a parse error). */
+File     ::= Artifact*
+
+Artifact ::= OperationArtifact
+           | EntityArtifact
+           | EnumArtifact
+           | StateMachineArtifact
+           | AuthRequirementArtifact
+           | AuthorizationRuleArtifact
+           | ErrorEnvelopeArtifact
+           | PaginationContractArtifact
+           | IdempotencyContractArtifact
+           | EffectGroupArtifact
+           | FormulaArtifact
+           | QueryRuleArtifact
+           | ForbiddenArtifactArtifact
+           | ConstantArtifact
+           | ArchitectureDecisionArtifact
+           | UnenforceableObligationArtifact
+
+/* -- Identity headers. Two shapes, each followed by a REQUIRED kind-specific
+      body block (Section 3.x). The Operation header is `keyword METHOD "path"`;
+      every other header is `keyword <Ident>`. */
+OperationArtifact               ::= 'operation' Method String OperationBody
+EntityArtifact                  ::= 'entity' Ident EntityBody
+EnumArtifact                    ::= 'enum' Ident EnumBody
+StateMachineArtifact            ::= 'state-machine' Ident StateMachineBody
+AuthRequirementArtifact         ::= 'auth-requirement' Ident AuthReqBody
+AuthorizationRuleArtifact       ::= 'authorization-rule' Ident AuthzBody
+ErrorEnvelopeArtifact           ::= 'error-envelope' Ident EnvBody
+PaginationContractArtifact      ::= 'pagination-contract' Ident PagBody
+IdempotencyContractArtifact     ::= 'idempotency-contract' Ident IdemBody
+EffectGroupArtifact             ::= 'effect-group' Ident EffBody
+FormulaArtifact                 ::= 'formula' Ident FmlBody
+QueryRuleArtifact               ::= 'query-rule' Ident QrBody
+ForbiddenArtifactArtifact       ::= 'forbidden-artifact' Ident FbdBody
+ConstantArtifact                ::= 'constant' Ident ConstBody
+ArchitectureDecisionArtifact    ::= 'architecture-decision' Ident ArchBody
+UnenforceableObligationArtifact ::= 'unenforceable-obligation' Ident UnenfBody
+
+/* Method — the HTTP verb of an operation header. Grammatically an Ident; the
+   lifter does not enforce a value set.
+   (* semantic: conventionally GET | POST | PUT | PATCH | DELETE *) */
+Method ::= Ident
+
+/* -- SHARED provenance clauses (read by the RESOLVER from inside ANY artifact
+      body, via extractProvenance/extractOrigin/extractConfidence — NOT by the
+      per-kind lifters). All optional. If an `inferred-from` line is present the
+      artifact is `inferred` (and may carry `confidence`); otherwise an `origin`
+      line marks it `authored`. They appear as ordinary body statements, so
+      every kind's body admits them.
+      (* semantic: origin requires BOTH source and section to be captured; the
+         trailing Range is optional (defaults to -1..-1). inferred-from wins
+         over origin if both appear. confidence is only meaningful alongside
+         inferred-from. *) */
+ProvenanceClause   ::= OriginClause | InferredFromClause | ConfidenceClause
+OriginClause       ::= 'origin' ( Ident | String ) String Range?
+InferredFromClause ::= 'inferred-from' String Range?
+ConfidenceClause   ::= 'confidence' ( 'high' | 'medium' | 'low' )
+
+/* -- SHARED catch-all. Every lifter iterates its body and silently skips any
+      statement whose head keyword it does not recognize (and any statement
+      whose head[0] is not an ident). `IgnoredStmt` is therefore just a generic
+      Statement (Section 2). Each body below ends with it; the named clauses
+      above it are the recognized subset, listed for readability. */
+IgnoredStmt ::= Statement
+
+
+/* ---------------------------------------------------------------------------
+   3.1  operation        (lifter: lifters/operation.ts)
+   identity = `METHOD <canonicalized-path>`; path params are canonicalized to
+   RFC-6570 `{name}` form for both the path and Operation cross-references.
+   --------------------------------------------------------------------------- */
+OperationBody ::= '{' OperationStmt* '}'
+
+OperationStmt ::= ProvenanceClause     /* parsed; read by resolver, not the lifter */
+                | OpStatusStmt          /* read by lifter (VALID_STATUSES only)     */
+                | OpTagsStmt            /* read by lifter                            */
+                | OpResponseStmt        /* read by lifter (liftResponse)             */
+                | OpRequestStmt         /* parsed; not lifted in v1                  */
+                | OpPreconditionsStmt   /* parsed; not lifted in v1                  */
+                | IgnoredStmt
+
+/* `status shipped` — only the enumerated values are honored; any other ident
+   leaves the default. */
+OpStatusStmt   ::= 'status' OpStatus
+OpStatus       ::= 'shipped' | 'planned' | 'deferred' | 'deprecated' | 'out-of-scope'
+
+/* `tags [a, b]` — lifter keeps only the ident items of the first List. Empty
+   list allowed. */
+OpTagsStmt     ::= 'tags' List
+
+/* Two response forms (lifter prefers `inherits` when present):
+     response 401 inherits AuthRequirement:auth.bearer.api      (no block)
+     response 201 on success { ... }                            (block form) */
+OpResponseStmt ::= 'response' OpRespStatus ( OpRespInherits | OpRespOn? ) OpRespBlock?
+OpRespStatus   ::= Number | StatusClass            /* e.g. 200, 404, 2xx, 4xx
+   (* semantic: liftResponse honors a status class only when it matches
+      /^[1-5]xx$/; any other Digit+'xx' ident is rejected and the response dropped *) */
+OpRespInherits ::= 'inherits' Reference
+OpRespOn       ::= 'on' Ident
+   /* (* semantic: condition stored verbatim; the comparator recognizes
+         success | validation_failure | not_found | conflict |
+         state_precondition_violated | auth_required | auth_role_failed |
+         idempotency_replay | rate_limited | internal_error;
+         fixtures also use illegal_transition *) */
+OpRespBlock    ::= '{' OpRespInner* '}'            /* empty block `{ }` allowed */
+OpRespInner    ::= OpHeaderStmt | OpEffectStmt | OpForbidStmt | OpBodyStmt | IgnoredStmt
+
+/* `header <name> [required|optional] [value "..."] [format "..."] ...`
+   Modifiers may appear in any order; unknown ones are skipped; `format` is
+   consumed but not diffed. */
+OpHeaderStmt   ::= 'header' Ident OpHeaderMod*
+OpHeaderMod    ::= 'required' | 'optional' | 'idempotent-under'
+                 | 'value' String | 'format' String
+
+/* `effect emits Ref` | `effect persist Ref` | `effect state-transition Ref to <state>` */
+OpEffectStmt   ::= 'effect' OpEffectVerb Reference ( 'to' Ident )?
+OpEffectVerb   ::= 'emits' | 'persist' | 'state-transition'
+
+/* `forbid status NUM [when <state>]` | `forbid query-param <name>` | `forbid emission <x>`
+   (* semantic: parseForbid requires >= 3 head tokens, so each lifted form needs
+      a token after the kind word. A bare 2-token `forbid emission` is NOT lifted
+      (it falls through to IgnoredStmt); `forbid emission` is honored only with a
+      trailing — and then ignored — token. No operation fixture uses any
+      `forbid emission` form; emission forbids appear in effect-group bodies. *) */
+OpForbidStmt   ::= 'forbid' 'status' Number ( 'when' Ident )?
+                 | 'forbid' 'query-param' Ident
+                 | 'forbid' 'emission' HeadToken+
+
+/* Three body forms, checked in this order by the lifter:
+     body envelope Ref { error-code ... }   — wrapped error envelope
+     body Ref                               — shape is an entity/enum ref
+     body { field: type, ... }              — inline structural shape */
+OpBodyStmt     ::= 'body' ( OpBodyEnvelope | Reference | OpBodyInline )
+OpBodyEnvelope ::= 'envelope' Reference '{' OpErrorCodeStmt* '}'
+OpErrorCodeStmt ::= 'error-code' 'one-of' List | 'error-code' Ident
+OpBodyInline   ::= '{' OpFieldDecl* '}'
+
+/* `name: type [modifiers]` — the lifter records only the field NAME (the
+   leading ident); the type and modifiers parse generically but are not lifted
+   in v1. */
+OpFieldDecl    ::= Ident ':' OpFieldType OpFieldMod*
+OpFieldType    ::= Ident
+                 | Reference
+                 | OpFieldType '|' OpFieldType            /* union, e.g. string|null */
+                 | 'array' 'element' ( Reference | Ident )
+OpFieldMod     ::= 'required' | 'optional'
+                 | 'references' Reference
+                 | 'constraint' Ident                     /* e.g. constraint non-empty */
+                 | ( '>=' | '<=' | '>' | '<' | '==' ) Number   /* e.g. integer >= 0 */
+                 | 'default' ( Number | String | Ident )
+                 | 'min' Number | 'max' Number
+                 | 'format' Ident | 'semantics' Ident
+
+/* request block — parsed by the generic parser; NOT read by the v1 lifter. */
+OpRequestStmt  ::= 'request' '{' OpReqInner* '}'
+OpReqInner     ::= OpHeaderStmt | OpPathParamStmt | OpQueryStmt | OpBodyStmt | IgnoredStmt
+OpPathParamStmt ::= 'path-param' Ident ':' OpFieldType OpFieldMod* OpOnInvalidBlock?
+OpOnInvalidBlock ::= '{' OpOnInvalidStmt* '}'
+OpOnInvalidStmt ::= 'on-invalid' 'status' Number 'error-code' Ident
+OpQueryStmt    ::= 'query' '{' OpQueryParam* '}'
+OpQueryParam   ::= Ident ':' OpFieldType OpFieldMod* OpQueryParamBlock?
+OpQueryParamBlock ::= '{' OpQueryParamConstraint* '}'
+OpQueryParamConstraint ::= 'default' ( Number | String | Ident )
+                 | 'min' Number | 'max' Number
+                 | 'on-above-max' Ident | 'semantics' Ident
+
+/* preconditions block — parsed; NOT read by the v1 lifter. */
+OpPreconditionsStmt ::= 'preconditions' '{' OpPreInner* '}'
+OpPreInner     ::= 'state-transition' Reference '{' OpTransitionEdge* '}'
+OpTransitionEdge ::= 'from' ( List | Ident ) | 'to' ( List | Ident )
+
+
+/* ---------------------------------------------------------------------------
+   3.2  entity        (lifter: lifters/entity.ts)
+   liftEntity reads ONLY `field` statements; everything else (provenance, any
+   unknown statement) parses generically and is ignored.
+   --------------------------------------------------------------------------- */
+EntityBody ::= '{' EntityStmt* '}'
+
+EntityStmt ::= EntFieldDecl
+             | ProvenanceClause     /* present in every fixture; ignored by lifter */
+             | IgnoredStmt
+
+/* `field <name> : <type> [inline modifiers] [ { modifier-line* } ]`
+   Head must be >= 4 tokens: `field` Ident `:` Type...  Inline modifiers follow
+   the type on the same line; the optional block holds one modifier per line. */
+EntFieldDecl ::= 'field' Ident ':' EntFieldType EntFieldMod* ( '{' EntFieldMod* '}' )?
+
+/* parseTypeRef reads only the leading token: a Reference, one of the
+   format-sugar idents, or one of the bare primitives. The type set is CLOSED.
+   (* semantic: ANY other leading type ident returns null and drops the WHOLE
+      `field` statement — not just the type. The `<prim>|<ident>` union is
+      detected ONLY after a bare primitive (the format-sugar branch returns
+      first), so e.g. `uuid|null` lifts as plain uuid. A trailing numeric
+      constraint (`integer >= 0`) occupies the type slot positionally and is
+      skipped (op + 1 operand of any kind), NOT recorded. *) */
+EntFieldType ::= Reference
+               | EntFormat EntTypeConstraint*
+               | EntPrimitive EntTypeUnion? EntTypeConstraint*
+EntFormat    ::= 'uuid' | 'email' | 'iso-8601'
+EntPrimitive ::= 'string' | 'integer' | 'number' | 'boolean' | 'object' | 'array'
+EntTypeUnion ::= '|' Ident                              /* 2nd member lifts as 'string' */
+EntTypeConstraint ::= ( '>=' | '<=' | '>' | '<' ) ( Number | Ident )
+
+/* Field modifiers — same grammar inline (after the type) and in the block (one
+   per line). consume() reads positionally; a lone Reference or any
+   unrecognized ident is accepted-and-skipped (EntIgnoredMod). */
+EntFieldMod  ::= 'immutable' | 'mutable' | 'unique' | 'optional' | 'required'
+               | 'origin' Ident          /* server-assigned | derived | client-supplied */
+               | 'mutability' Ident       /* immutable | mutable | state-machine | refreshed-on-mutation */
+               | 'normalize' Ident        /* e.g. lowercase */
+               | 'format' Ident           /* e.g. email | uuid | iso-8601 */
+               | 'references' Reference
+               | 'bound-to' Reference
+               | 'derived-by' Reference
+               | 'default' ( Ident | String | Number )
+               | 'constraint' ( Ident | String )
+               | EntIgnoredMod
+EntIgnoredMod ::= Reference | Ident        /* tolerated & skipped by consume() */
+
+
+/* ---------------------------------------------------------------------------
+   3.3  enum        (lifter: lifters/enum.ts)
+   --------------------------------------------------------------------------- */
+EnumBody ::= '{' EnumStmt* '}'
+
+EnumStmt ::= EnumRepresentation      /* optional; default 'string-literal' */
+           | EnumClosed              /* bare flag; default closed=true     */
+           | EnumOpen                /* bare flag; sets closed=false       */
+           | EnumValues              /* the value set                      */
+           | EnumTriggerSubset       /* optional, repeatable               */
+           | ProvenanceClause
+           | IgnoredStmt
+
+/* `representation <ident>` — the lifter ONLY flips representation to 'integer'
+   when the operand ident is literally `integer`; any other ident (or a bare
+   `representation`) leaves the default.
+   (* semantic: operand is a general Ident, only 'integer' is meaningful *) */
+EnumRepresentation ::= 'representation' Ident?
+EnumClosed   ::= 'closed'
+EnumOpen     ::= 'open'
+
+/* `values [a, b, c]` — the shared (comma-optional, mixed-kind) List.
+   (* semantic: lifter keeps only ident/string items; numbers/ops/ranges/refs
+      are dropped. `[NO ACTION]` lexes as two idents; `null` is a bare ident *) */
+EnumValues   ::= 'values' List
+
+/* `trigger-subset <name> [v1, v2, ...]` — name ident then a List; repeatable.
+   (* semantic: requires head[1] ident AND head[2] list, else ignored *) */
+EnumTriggerSubset ::= 'trigger-subset' Ident List
+
+
+/* ---------------------------------------------------------------------------
+   3.4  state-machine        (lifter: lifters/state-machine.ts)
+   header identity = `Type.field` (e.g. Order.status); scope is synthesized
+   from it, so a `scope` block in the body is ignored.
+   --------------------------------------------------------------------------- */
+StateMachineBody ::= '{' StateMachineStmt* '}'
+
+StateMachineStmt ::= SmStates
+                   | SmInitial
+                   | SmTerminal
+                   | SmTransitions
+                   | SmScope            /* in fixtures; ignored (scope from header) */
+                   | ProvenanceClause
+                   | IgnoredStmt
+
+/* `states Enum:OrderStatus` — head[1] must be a Reference; default Enum:Unknown. */
+SmStates    ::= 'states' Reference
+
+/* `initial [placed]` / `terminal [delivered, cancelled]` — value MUST be a List;
+   lifter collects only ident items; repeated statements accumulate. */
+SmInitial   ::= 'initial' List
+SmTerminal  ::= 'terminal' List
+
+/* `transitions { from -> to ... }` — repeated blocks accumulate. */
+SmTransitions ::= 'transitions' '{' SmTransition* '}'
+
+/* `from -> to` — from is the token immediately before the arrow; to is
+   immediately after and may be a single ident OR a List (cartesian product).
+   (* semantic: lifter requires >= 3 head tokens and head[0] to be an ident, so
+      the realistic from-side is a bare Ident *) */
+SmTransition ::= Ident '->' ( Ident | List )
+
+/* scope block — present in fixtures, NOT read by the lifter. */
+SmScope     ::= 'scope' '{' SmScopeStmt* '}'
+SmScopeStmt ::= 'entity' Reference | 'field' Ident | IgnoredStmt
+
+
+/* ---------------------------------------------------------------------------
+   3.5  auth-requirement        (lifter: lifters/auth-requirement.ts)
+   --------------------------------------------------------------------------- */
+AuthReqBody ::= '{' AuthReqStmt* '}'
+
+AuthReqStmt ::= AuthScheme           /* optional; default 'Bearer'         */
+              | AuthRequiredRole      /* optional                           */
+              | AuthSelector          /* optional; default path-glob "/**"  */
+              | AuthExcept            /* optional                           */
+              | AuthOnViolation       /* optional; has defaults             */
+              | ProvenanceClause
+              | IgnoredStmt
+
+/* `scheme Bearer` — any ident accepted (contract.scheme is a string).
+   (* semantic: conventionally Bearer | Cookie | ApiKey | Role *) */
+AuthScheme       ::= 'scheme' Ident
+AuthRequiredRole ::= 'required-role' Ident
+
+/* `selector <expr>` — parseSelector reads exactly the forms below; an
+   unrecognized form leaves the default. */
+AuthSelector ::= 'selector' AuthSelectorExpr
+AuthSelectorExpr ::= 'path-glob' String
+                   | 'path-exact' String
+                   | 'path-regex' String
+                   | 'tag' Ident
+                   | 'method' Ident
+                   | 'operations' List      /* lifter keeps only Reference items */
+
+/* `except { <selector>* }` — each inner statement's head is a selector;
+   unparseable inner lines are skipped. */
+AuthExcept ::= 'except' '{' AuthExceptInner* '}'
+AuthExceptInner ::= AuthSelectorExpr | IgnoredStmt
+
+/* `on-violation { status NUM  error-code <ident>  [body Ref] }` — `body` is
+   parsed but ignored; any other inner line is ignored.
+   (* semantic: the recognized inner forms assume one clause per LINE. The
+      infer serializer emits the whole block on one line — `{ status 401
+      error-code unauthenticated }` — which parses as a SINGLE statement
+      (matched by IgnoredStmt), and the lifter then reads only its leading
+      `status 401`, dropping error-code *) */
+AuthOnViolation ::= 'on-violation' '{' AuthOnViolationInner* '}'
+AuthOnViolationInner ::= 'status' Number          /* (* semantic: not validated as integer *) */
+                       | 'error-code' Ident
+                       | 'body' Reference          /* parsed, ignored */
+                       | IgnoredStmt
+
+
+/* ---------------------------------------------------------------------------
+   3.6  authorization-rule        (lifter: lifters/authorization-rule.ts)
+   --------------------------------------------------------------------------- */
+AuthzBody ::= '{' AuthzStmt* '}'
+
+AuthzStmt ::= AuthzAppliesTo
+            | AuthzPredicate
+            | AuthzExcept
+            | AuthzOnViolation
+            | ProvenanceClause
+            | IgnoredStmt
+
+/* `applies-to { operations [Operation:"...", ...] }` — lifter collects
+   operations only from an `operations <list>` inner statement; other inner
+   statements are ignored. List items that are not References are skipped. */
+AuthzAppliesTo ::= 'applies-to' '{' AuthzAppliesToInner* '}'
+AuthzAppliesToInner ::= AuthzOperations | IgnoredStmt
+AuthzOperations ::= 'operations' List
+
+/* `predicate "expr"` — read only when the 2nd head token is a string.
+   Optional; defaults to an empty predicate when absent. */
+AuthzPredicate ::= 'predicate' String
+
+/* `except { role <ident> ... }` — lifter recognizes only `role`. */
+AuthzExcept ::= 'except' '{' AuthzExceptInner* '}'
+AuthzExceptInner ::= 'role' Ident | IgnoredStmt
+
+/* `on-violation { status NUM  error-code <ident>  [body Ref] }` — defaults
+   status 403 / error-code forbidden; `body` parsed but not lifted.
+   (* semantic: as in 3.5, the recognized inner forms assume one clause per
+      LINE; a single-line `{ status N error-code X }` parses as one statement
+      (IgnoredStmt) and only the leading `status N` is honored *) */
+AuthzOnViolation ::= 'on-violation' '{' AuthzOnViolationInner* '}'
+AuthzOnViolationInner ::= 'status' Number          /* (* semantic: token kind number, int or decimal *) */
+                        | 'error-code' Ident
+                        | 'body' Reference          /* parsed, ignored */
+                        | IgnoredStmt
+
+
+/* ---------------------------------------------------------------------------
+   3.7  error-envelope        (lifter: lifters/error-envelope.ts)
+   The lifter reads only `applies-to` and `known-codes` (first List token of
+   each). `shape` is stored verbatim ({}), so its inner grammar is descriptive.
+   --------------------------------------------------------------------------- */
+EnvBody ::= '{' EnvStmt* '}'
+
+EnvStmt ::= EnvAppliesTo
+          | EnvKnownCodes
+          | EnvShape
+          | ProvenanceClause
+          | IgnoredStmt
+
+/* `applies-to status-class [4xx, 5xx]` — lifter keys on `applies-to`, then
+   takes the first List and keeps ident items. `status-class` is conventional,
+   not required (the lifter keys on `applies-to` and takes the first List
+   token). Absent/empty => default ['4xx','5xx']. */
+EnvAppliesTo  ::= 'applies-to' 'status-class'? List
+
+/* `known-codes [validation_failed, ...]` — first List token; ident items kept. */
+EnvKnownCodes ::= 'known-codes' List
+
+/* `shape { error { field ... } }` — accepted and stored verbatim; inner form
+   below is DESCRIPTIVE of real fixtures, not enforced. */
+EnvShape       ::= 'shape' '{' EnvShapeMember* '}'
+EnvShapeMember ::= EnvShapeObject | EnvFieldDecl | IgnoredStmt
+EnvShapeObject ::= Ident '{' EnvShapeMember* '}'
+EnvFieldDecl   ::= 'field' Ident ':' Ident EnvFieldMod*
+EnvFieldMod    ::= 'format' Ident | 'required' | 'optional'
+
+
+/* ---------------------------------------------------------------------------
+   3.8  pagination-contract        (lifter: lifters/pagination.ts)
+   The lifter acts on scheme/query/forbids/selector; response-shape is stored
+   as {}; provenance is read by the resolver.
+   --------------------------------------------------------------------------- */
+PagBody ::= '{' PagStmt* '}'
+
+PagStmt ::= PagScheme
+          | PagQuery
+          | PagForbids
+          | PagSelector
+          | PagResponseShape      /* parsed, NOT lifted (stored {}) */
+          | ProvenanceClause
+          | IgnoredStmt
+
+/* `scheme cursor` — head[1] cast to the scheme type with NO validation.
+   (* semantic: canonical values cursor | offset | page *) */
+PagScheme ::= 'scheme' Ident
+
+/* `query { <param>* }` — each param `<name> : <type> [modifiers] [ { lines } ]`.
+   The type token is read but discarded (always primitive 'string' in v1). */
+PagQuery     ::= 'query' '{' PagParam* '}'
+PagParam     ::= Ident ':' Ident PagModifier* ( '{' PagModifier* '}' )?
+PagModifier  ::= 'optional' | 'required'
+               | 'min' Number | 'max' Number
+               | 'default' ( Number | String )
+               | Ident ( Ident | Number | String )*   /* e.g. semantics opaque; on-above-max clamp — accepted, not lifted */
+
+/* `forbids { forbid query-param <name> ... }` — only this form is lifted. */
+PagForbids   ::= 'forbids' '{' PagForbidLine* '}'
+PagForbidLine ::= 'forbid' 'query-param' Ident
+
+/* `selector tag paginated` — only the `tag <ident>` shape is lifted; other
+   shapes (e.g. `selector path-glob "..."` from the infer producer) are
+   tolerated and leave the default. */
+PagSelector  ::= 'selector' Ident ( Ident | String | Number )*
+
+/* `response-shape { <field> : <type> }` — accepted, IGNORED (stored {}). */
+PagResponseShape ::= 'response-shape' '{' PagShapeField* '}'
+PagShapeField ::= Ident ':' PagShapeType
+PagShapeType  ::= PagTypeAtom ( '|' PagTypeAtom )*
+PagTypeAtom   ::= Ident | Reference        /* array | string | null | Enum:OrderStatus */
+
+
+/* ---------------------------------------------------------------------------
+   3.9  idempotency-contract        (lifter: lifters/idempotency-contract.ts)
+   All three recognized clauses have defaults; all optional and order-free.
+   --------------------------------------------------------------------------- */
+IdemBody ::= '{' IdemStmt* '}'
+
+IdemStmt ::= IdemRequestHeader     /* default "Idempotency-Key"        */
+           | IdemSemantics          /* default "short-circuit-on-repeat" */
+           | IdemSelector           /* default { tag idempotent }        */
+           | ProvenanceClause
+           | IgnoredStmt
+
+/* `request-header Idempotency-Key` — first token after keyword (ident). */
+IdemRequestHeader ::= 'request-header' Ident
+
+/* `semantics short-circuit-on-repeat` — any ident accepted. */
+IdemSemantics ::= 'semantics' Ident
+
+/* `selector <expr>` — parseSelector recognizes the forms below; any other tail
+   (path-exact, protocol, all-of/any-of/none-of/not, or a missing value) is
+   accepted but leaves the default. */
+IdemSelector ::= 'selector' ( IdemSelectorExpr | HeadToken* )
+IdemSelectorExpr ::= 'path-glob' String
+                   | 'path-regex' String
+                   | 'tag' Ident
+                   | 'method' Ident
+                   | 'operations' List      /* only Reference items kept */
+
+
+/* ---------------------------------------------------------------------------
+   3.10  effect-group        (lifter: lifters/effect-group.ts)
+   `payload-shape` is parse-only (payloadShape hard-coded to {}).
+   --------------------------------------------------------------------------- */
+EffBody ::= '{' EffStmt* '}'
+
+EffStmt ::= EffChannel
+          | EffPayloadShape       /* parsed, IGNORED (stored {}) */
+          | EffEffect
+          | EffForbids
+          | ProvenanceClause
+          | IgnoredStmt
+
+/* `channel event-bus` — first ident after keyword; default 'event-bus'; last wins. */
+EffChannel ::= 'channel' Ident
+
+EffPayloadShape ::= 'payload-shape' '{' EffPayloadField* '}'
+EffPayloadField ::= Ident ':' ( Reference | Ident )
+
+/* `effect <name> { emit-when { ... } [payload-constraint ...] }`
+   (* semantic: an effect is emitted only with both an operation-ref and a
+      non-empty on-status *) */
+EffEffect    ::= 'effect' Ident '{' EffEffectInner* '}'
+EffEffectInner ::= EffEmitWhen | EffPayloadConstraint | IgnoredStmt
+EffEmitWhen  ::= 'emit-when' '{' EffEmitWhenStmt* '}'
+EffEmitWhenStmt ::= 'operation' Reference          /* an Operation: ref */
+                  | 'on-status' ( String | Number | Ident )   /* number stringified */
+                  | IgnoredStmt
+EffPayloadConstraint ::= 'payload-constraint' Ident '=' ( String | Number | Ident )
+
+/* `forbids { forbid emission [when-response-status [4xx, 5xx]] }` — only
+   `forbid emission` is recognized; the tail is parsed but discarded. */
+EffForbids   ::= 'forbids' '{' EffForbidStmt* '}'
+EffForbidStmt ::= 'forbid' 'emission' ( 'when-response-status' List )?
+                | IgnoredStmt
+
+
+/* ---------------------------------------------------------------------------
+   3.11  formula        (lifter: lifters/formula.ts)
+   --------------------------------------------------------------------------- */
+FmlBody ::= '{' FmlStmt* '}'
+
+FmlStmt ::= FmlOutput               /* (* semantic: expected exactly once *) */
+          | FmlInputs               /* optional, at most once */
+          | FmlExpression           /* (* semantic: expected exactly once *) */
+          | FmlComputedAt           /* optional; default "order-creation" */
+          | FmlImmutableAfter       /* optional flag */
+          | FmlDependsOn            /* optional, repeatable & accumulative */
+          | ProvenanceClause
+          | IgnoredStmt
+
+/* `output Entity:Order field discountCents` — exact head shape:
+   `output` Reference `field` Ident. */
+FmlOutput ::= 'output' Reference 'field' Ident
+
+/* `inputs [ Entity:Order.subtotalCents, ... ]`
+   (* semantic: lifter keeps only references whose identity contains '.', split
+      on the LAST dot; non-refs and dot-less refs dropped *) */
+FmlInputs ::= 'inputs' List
+
+/* `expression "..."` OR `expression { when "..." then "..." else "..." }`.
+   The value is OPTIONAL — a bare `expression` leaves the default. If a string
+   is present it WINS even when a block is also attached. */
+FmlExpression ::= 'expression' ( String FmlConditional? | FmlConditional )?
+FmlConditional ::= '{' FmlConditionalStmt* '}'
+FmlConditionalStmt ::= 'when' String | 'then' String | 'else' String | IgnoredStmt
+
+/* `computed-at order-creation` — any ident; default "order-creation". */
+FmlComputedAt ::= 'computed-at' Ident
+FmlImmutableAfter ::= 'immutable-after-creation'
+
+/* `depends-on Formula:x` / `depends-on [ Formula:x, Formula:y ]` — zero+ head
+   tokens after the keyword; only References (recursing into lists) are kept;
+   repeatable and accumulative; a bare `depends-on` is a no-op. */
+FmlDependsOn ::= 'depends-on' HeadToken*
+
+
+/* ---------------------------------------------------------------------------
+   3.12  query-rule        (lifter: lifters/query-rule.ts)
+   Recognizes bound-to/entity/required/forbidden/date-range-binding.
+   --------------------------------------------------------------------------- */
+QrBody ::= '{' QrStmt* '}'
+
+QrStmt ::= QrBoundTo             /* optional, last-wins */
+         | QrEntity              /* optional; defaulted by lifter */
+         | QrRequired            /* optional; repeated blocks accumulate */
+         | QrForbidden           /* optional; repeated blocks accumulate */
+         | QrDateRangeBinding    /* optional, last-wins */
+         | ProvenanceClause
+         | IgnoredStmt
+
+/* `bound-to Operation:"METHOD /path"` / `entity Entity:<id>` — head[1] a Reference. */
+QrBoundTo ::= 'bound-to' Reference
+QrEntity  ::= 'entity' Reference
+
+/* `date-range-binding column <table.column>` */
+QrDateRangeBinding ::= 'date-range-binding' 'column' QrColumn
+
+/* `required { <predicate>* }` / `forbidden { <predicate>* }` — each inner line
+   is one predicate; an unrecognized line whose head BEGINS WITH AN IDENT is
+   preserved verbatim as a `raw` predicate. A predicate line that does not begin
+   with an ident is parsed generically but dropped (neither lifted nor
+   raw-preserved). */
+QrRequired  ::= 'required' '{' QrPredicate* '}'
+QrForbidden ::= 'forbidden' '{' QrPredicate* '}'
+
+QrPredicate ::= 'raw' String                                       /* opaque escape hatch */
+              | ( 'is-null' | 'is-not-null' ) QrColumn             /* nullary */
+              | ( 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' ) QrColumn QrValue
+              | ( 'in' | 'not-in' ) QrColumn List                  /* list of literals */
+              | 'between' QrColumn QrValue QrValue
+              | ( 'like' | 'ilike' ) QrColumn String
+              | ( 'eq-col' | 'neq-col' | 'gt-col' | 'gte-col' | 'lt-col' | 'lte-col' ) QrColumn QrColumn
+              | 'col-cmp' QrColumn QrCompareOp QrColumn
+              | Ident QrPredHeadToken*                             /* unrecognized -> raw */
+
+/* A predicate scalar. true/false/null map to boolean/null; any other ident
+   (incl. folded `NOW()`) is an identifier literal. */
+QrValue     ::= String | Number | 'true' | 'false' | 'null' | Ident
+
+/* `table.column` / `schema.table.column` / bare `column` — one Ident; the dot
+   split (on the LAST dot) is semantic. */
+QrColumn    ::= Ident
+
+/* col-cmp infix operators (opTokenToCompare); '=' and '==' both mean eq. */
+QrCompareOp ::= '=' | '==' | '!=' | '>' | '>=' | '<' | '<='
+
+/* Tail of an unrecognized predicate, re-serialized verbatim as `raw` — the
+   FULL operator set is preserved (`:` `|` `->` included). */
+QrPredHeadToken ::= Ident | String | Number | Range | Reference | List | Operator
+
+
+/* ---------------------------------------------------------------------------
+   3.13  forbidden-artifact        (lifter: lifters/forbidden-artifact.ts)
+   --------------------------------------------------------------------------- */
+FbdBody ::= '{' FbdStmt* '}'
+
+FbdStmt ::= FbdCategory
+          | FbdPattern
+          | FbdReason
+          | ProvenanceClause
+          | IgnoredStmt
+
+/* `category file-glob` — h[1] must be an ident; an invalid value leaves the
+   default 'file-glob'.
+   (* semantic: valid values file-glob | env-var | dependency | feature-flag *) */
+FbdCategory ::= 'category' Ident
+
+/* `pattern "..."` / `reason "..."` — h[1] must be a string; a bare ident value
+   leaves the default empty. */
+FbdPattern  ::= 'pattern' String
+FbdReason   ::= 'reason' String
+
+
+/* ---------------------------------------------------------------------------
+   3.14  constant        (lifter: lifters/named-constant.ts)
+   --------------------------------------------------------------------------- */
+ConstBody ::= '{' ConstStmt* '}'
+
+ConstStmt ::= ConstType
+            | ConstExpectedValue
+            | ProvenanceClause
+            | IgnoredStmt
+
+/* `type number` — only the enum below is honored; any other ident falls back
+   to the default 'string'. */
+ConstType ::= 'type' ( 'string' | 'number' | 'boolean' | 'object' | 'array' )
+
+/* `expected-value <inline>` OR `expected-value { key: value ... }` — inline
+   wins if both an inline value and a block are present. */
+ConstExpectedValue ::= 'expected-value' ConstInlineValue
+                     | 'expected-value' ConstObjectBlock
+ConstInlineValue ::= String | Number | 'true' | 'false' | 'null'
+                   | List               /* items are themselves ConstInlineValue */
+                   | Ident              /* bare ident -> string value */
+ConstObjectBlock ::= '{' ConstObjectEntry* '}'    /* flat; one entry per line */
+ConstObjectEntry ::= ( Ident | String ) ':' ConstInlineValue
+
+
+/* ---------------------------------------------------------------------------
+   3.15  architecture-decision        (lifter: lifters/architecture-decision.ts)
+   --------------------------------------------------------------------------- */
+ArchBody ::= '{' ArchStmt* '}'
+
+ArchStmt ::= ArchCategory
+           | ArchChosen
+           | ArchReason
+           | ArchRejectedAlternatives
+           | ArchScope
+           | ProvenanceClause
+           | IgnoredStmt            /* e.g. the prose `decision "..."` head in the
+                                       description-only fixture — parsed, not lifted */
+
+/* `category data-store` — value must be a single ident; an unrecognized value
+   keeps the default 'data-store'.
+   (* semantic: known values data-store | communication-pattern | messaging |
+      architecture-style | auth-strategy | frontend-framework | runtime |
+      deployment-platform | package-manager | build-system *) */
+ArchCategory ::= 'category' Ident
+
+/* `chosen postgres` — lifter only checks head[1] exists, then scalarText(h[1]):
+   ident/string pass through, number stringifies, anything else (Range, List,
+   Reference) lifts to ''. So ANY single head token is accepted. */
+ArchChosen ::= 'chosen' HeadToken
+
+/* `reason "..."` — only a STRING is read; otherwise reason stays ''. */
+ArchReason ::= 'reason' String
+
+/* `rejected-alternatives [mongodb, mysql]` — must be a List; ident/string items
+   kept; omitted from output when empty. */
+ArchRejectedAlternatives ::= 'rejected-alternatives' List
+
+/* `scope { path-glob "..." }` — only lifted when a block is present; returns
+   the first path-glob string. */
+ArchScope ::= 'scope' '{' ArchScopeStmt* '}'
+ArchScopeStmt ::= 'path-glob' String | IgnoredStmt
+
+
+/* ---------------------------------------------------------------------------
+   3.16  unenforceable-obligation        (NO lifter)
+   The resolver maps the keyword to ArtifactKind 'UnenforceableObligation' but
+   lifts NO typed contract (the kind is absent from the dispatch and the
+   contract union). The body parses generically; only the shared provenance
+   line is read. The inference engine treats this kind as SPEC-ONLY, so
+   authored artifacts always carry `origin` and never inferred-from/confidence.
+   The clause grammar below is the on-disk shape implied by the contract type
+   and the prompt example; it is NOT enforced by any lifter.
+   --------------------------------------------------------------------------- */
+UnenfBody ::= '{' UnenfStmt* '}'
+
+UnenfStmt ::= UnenfSpecText                  /* (* type: contract.specText *) */
+            | UnenfCategory                  /* (* type: contract.category *) */
+            | UnenfRationale                 /* (* type: contract.rationale *) */
+            | UnenfCouldBecomeEnforceableVia /* (* type: optional pointer *) */
+            | ProvenanceClause               /* in practice always `origin` */
+            | IgnoredStmt
+
+UnenfSpecText  ::= 'spec-text' String
+UnenfCategory  ::= 'category' ( Ident | String )    /* type is string; prompt writes a bare ident */
+UnenfRationale ::= 'rationale' String
+UnenfCouldBecomeEnforceableVia ::= 'could-become-enforceable-via' Reference
+
+/* === end of grammar === */

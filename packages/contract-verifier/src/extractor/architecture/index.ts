@@ -31,7 +31,11 @@ export type {
   ObservedChoice,
 } from './types.js';
 
-const DETECTORS: Record<ArchitectureCategory, ArchitectureDetector> = {
+// Partial: not every architecture category resolves through a single
+// category-level detector. `persistence-strategy` is field-keyed (one decision
+// per stored field) and is derived by `extractPersistenceStrategiesFromDir`
+// instead, so it has no entry here.
+const DETECTORS: Partial<Record<ArchitectureCategory, ArchitectureDetector>> = {
   'data-store': dataStoreDetector,
   'communication-pattern': communicationPatternDetector,
   'messaging': messagingDetector,

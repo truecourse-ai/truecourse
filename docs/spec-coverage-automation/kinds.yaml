@@ -1,0 +1,58 @@
+# Contract-kind catalog — every candidate kind the spec-coverage loop has proposed,
+# its lifecycle status, the group(s) that motivated it, and the deterministic code
+# signal that makes it code-derivable.
+#
+# Owned by the spec-coverage-automation routines. spec-kind-propose adds/updates an
+# entry (status: proposed→planned); spec-kind-implement flips it (building→built→done);
+# a closed (unmerged) intent PR marks it `rejected`. Always read the latest from `main`.
+#
+# Lifecycle:
+#   proposed  — new-kind issue filed by spec-coverage-measure.
+#   planned   — spec-kind-propose opened the INTENT PR (plan only, no engine code).
+#   approved  — intent PR merged (you approved building it).
+#   building  — spec-kind-implement is constructing it.
+#   built     — implementation PR open (engine code + fixtures + tests).
+#   done      — implementation PR merged; kind is live.
+#   rejected  — intent PR closed unmerged (idea declined); note explains why.
+#
+# A kind is only advanced past `proposed` if it is GENERAL (no domain vocabulary in
+# grammar/types) AND has a deterministic code extractor proven on a fixture. Otherwise
+# the underlying requirement is `narrative` and stays uncaptured (never an obligation).
+#
+# Per-kind fields:
+#   kind              — the .tc keyword
+#   status            — lifecycle above
+#   motivating_groups — group name(s) whose coverage gap proposed it
+#   requirement_class — the general requirement shape it captures
+#   code_signal       — how the deterministic extractor derives it from code
+#   issue / intent_pr / impl_pr — tracking links
+
+kinds:
+  # ---- Kinds discovered + built via the worked benchmark group (all live on this branch). ----
+  - kind: validation-rule
+    status: done
+    motivating_groups: [cancellation-reason-requirement]
+    requirement_class: "a field/input is required|optional|forbidden WHEN a predicate over a setting holds and/or an actor matches"
+    code_signal: "a guard/throw that reads the setting field + actor and rejects a missing input (read-setting → branch → require/throw)"
+    notes: "when-clause reuses the query-rule predicate vocabulary; two rules express a setting×actor matrix via `in` value-sets."
+
+  - kind: fallback
+    status: done
+    motivating_groups: [cancellation-reason-requirement]
+    requirement_class: "a null/absent value coalesces to a default at runtime (distinct from a schema default)"
+    code_signal: "x ?? DEFAULT / if x is None: x = DEFAULT / default params"
+
+  - kind: field-exposure
+    status: done
+    motivating_groups: [cancellation-reason-requirement]
+    requirement_class: "a field is included on a read path — ORM projection/select or API response"
+    code_signal: "field present in a Prisma `select` / .values()/.only() / a returned response shape (NOT prop-threading wiring)"
+
+  - kind: architecture-decision   # EXTENSION of the existing kind, not new
+    status: done
+    motivating_groups: [cancellation-reason-requirement]
+    requirement_class: "a storage/persistence choice with rationale, rejected alternative(s), and consequences"
+    code_signal: "field is a real DB column vs a key inside a `metadata` JSON blob (category persistence-strategy: dedicated-column|metadata-json)"
+    notes: "extended the existing architecture-decision kind: added persistence-strategy category + optional consequences[] (rationale rides on the existing reason/rejected-alternatives)."
+
+  # ---- New proposals land below (status: proposed) as spec-coverage-measure files new-kind issues. ----

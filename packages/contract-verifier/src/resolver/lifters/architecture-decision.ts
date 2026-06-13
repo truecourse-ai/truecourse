@@ -35,6 +35,7 @@ const VALID_CATEGORIES = new Set<ArchitectureCategory>([
   'deployment-platform',
   'package-manager',
   'build-system',
+  'persistence-strategy',
 ]);
 
 export function liftArchitectureDecision(body: StatementNode[]): ArchitectureDecisionContract {
@@ -42,6 +43,7 @@ export function liftArchitectureDecision(body: StatementNode[]): ArchitectureDec
   let chosen = '';
   let reason = '';
   let rejectedAlternatives: string[] | undefined;
+  let consequences: string[] | undefined;
   let scope: ArchitectureDecisionContract['scope'];
 
   for (const stmt of body) {
@@ -67,6 +69,10 @@ export function liftArchitectureDecision(body: StatementNode[]): ArchitectureDec
       rejectedAlternatives = listIdents(h[1]);
       continue;
     }
+    if (k === 'consequences' && h[1]?.kind === 'list') {
+      consequences = listIdents(h[1]);
+      continue;
+    }
     if (k === 'scope' && stmt.block) {
       scope = liftScope(stmt.block);
       continue;
@@ -78,6 +84,7 @@ export function liftArchitectureDecision(body: StatementNode[]): ArchitectureDec
     chosen,
     reason,
     ...(rejectedAlternatives && rejectedAlternatives.length > 0 ? { rejectedAlternatives } : {}),
+    ...(consequences && consequences.length > 0 ? { consequences } : {}),
     ...(scope ? { scope } : {}),
   };
 }

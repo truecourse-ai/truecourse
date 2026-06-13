@@ -20,6 +20,7 @@
  */
 
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { parserOhm, resolver, conformance } from '@truecourse/contract-verifier';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
@@ -73,164 +74,96 @@ export interface RepairOutcome {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-reference scanner
+// Corpus resolution
+//
+// The grammar/resolver is the single source of truth for both cross-reference
+// completeness (`unresolvedRefs`) and per-kind structural completeness (the
+// conformance linter). We parse every merged artifact's `tcSource` and resolve
+// the whole corpus once; artifacts whose `tcSource` doesn't parse are skipped
+// (the downstream `validateMerged` reports those as hard issues).
 // ---------------------------------------------------------------------------
-
-const CROSS_REF_PATTERNS: Array<{ refLabel: string; targetKind: string; regex: RegExp }> = [
-  { refLabel: 'AuthRequirement', targetKind: 'auth-requirement', regex: /\bAuthRequirement:([\w.\-]+)/g },
-  { refLabel: 'AuthorizationRule', targetKind: 'authorization-rule', regex: /\bAuthorizationRule:([\w.\-]+)/g },
-  { refLabel: 'Entity', targetKind: 'entity', regex: /\bEntity:(\w+)/g },
-  { refLabel: 'Enum', targetKind: 'enum', regex: /\bEnum:(\w+)/g },
-  { refLabel: 'Effect', targetKind: 'effect-group', regex: /\bEffect:([\w.\-]+)/g },
-  { refLabel: 'Formula', targetKind: 'formula', regex: /\bFormula:([\w.\-]+)/g },
-  { refLabel: 'ErrorEnvelope', targetKind: 'error-envelope', regex: /\bErrorEnvelope:([\w.\-]+)/g },
-  { refLabel: 'StateMachine', targetKind: 'state-machine', regex: /\bStateMachine:([\w.\-]+)/g },
-  { refLabel: 'IdempotencyContract', targetKind: 'idempotency-contract', regex: /\bIdempotencyContract:([\w.\-]+)/g },
-  { refLabel: 'PaginationContract', targetKind: 'pagination-contract', regex: /\bPaginationContract:([\w.\-]+)/g },
-];
 
 function key(kind: string, identity: string): string {
   return `${kind}:${identity}`;
 }
 
-function buildPresentSet(artifacts: MergedArtifact[]): Set<string> {
-  const present = new Set<string>();
+/** PascalCase `ArtifactKind` (resolver/`ref.type`) → the lowercase extractor
+ *  kind keyword (`MergedArtifact.kind`, the `.tc` declaration keyword). */
+const KIND_TO_KEYWORD: Record<string, string> = {
+  Operation: 'operation',
+  Entity: 'entity',
+  Enum: 'enum',
+  StateMachine: 'state-machine',
+  AuthRequirement: 'auth-requirement',
+  AuthorizationRule: 'authorization-rule',
+  ErrorEnvelope: 'error-envelope',
+  PaginationContract: 'pagination-contract',
+  IdempotencyContract: 'idempotency-contract',
+  EffectGroup: 'effect-group',
+  Effect: 'effect-group',
+  Formula: 'formula',
+  QueryRule: 'query-rule',
+  ForbiddenArtifact: 'forbidden-artifact',
+  NamedConstant: 'constant',
+  ArchitectureDecision: 'architecture-decision',
+};
+
+function resolveCorpus(artifacts: MergedArtifact[]): resolver.ResolveResult {
+  const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   for (const a of artifacts) {
-    present.add(key(a.kind, a.identity));
-    // Effects are nested inside effect-groups; index them under the same
-    // effect-group kind so `Effect:order.paid` resolves to its parent.
-    if (a.kind === 'effect-group') {
-      for (const m of a.winning.tcSource.matchAll(/^\s*effect\s+([\w.\-]+)\s*\{/gm)) {
-        present.add(key('effect-group', m[1]));
-      }
+    try {
+      fileNodes.push(parserOhm.parseTcFile(`<llm:${key(a.kind, a.identity)}>`, a.winning.tcSource));
+    } catch {
+      // Unparseable artifacts can't contribute refs or be linted; the writer's
+      // validation pass surfaces them as hard issues separately.
     }
   }
-  return present;
+  return resolver.resolve(fileNodes);
 }
 
-function detectMissingArtifacts(artifacts: MergedArtifact[]): RepairIssue[] {
-  const present = buildPresentSet(artifacts);
+// ---------------------------------------------------------------------------
+// Cross-reference / missing-artifact detection (driven by the resolver)
+// ---------------------------------------------------------------------------
+
+function detectMissingArtifacts(resolution: resolver.ResolveResult): RepairIssue[] {
   const seen = new Set<string>();
   const out: RepairIssue[] = [];
-  for (const a of artifacts) {
-    for (const pattern of CROSS_REF_PATTERNS) {
-      pattern.regex.lastIndex = 0;
-      for (const m of a.winning.tcSource.matchAll(pattern.regex)) {
-        const id = m[1];
-        const targetKey = key(pattern.targetKind, id);
-        if (present.has(targetKey)) continue;
-        if (seen.has(targetKey)) continue;
-        seen.add(targetKey);
-        out.push({
-          artifactKey: targetKey,
-          kind: 'missing',
-          detail: `Referenced as ${pattern.refLabel}:${id} but no matching ${pattern.targetKind} artifact was generated.`,
-        });
-      }
-    }
+  for (const { ref } of resolution.unresolvedRefs) {
+    // Forward refs to artifact kinds the verifier doesn't implement
+    // (`ref.type === 'Unknown'`, e.g. `PerformanceSLA`) aren't repairable.
+    const keyword = KIND_TO_KEYWORD[ref.type];
+    if (!keyword) continue;
+    const targetKey = key(keyword, ref.identity);
+    if (seen.has(targetKey)) continue;
+    seen.add(targetKey);
+    out.push({
+      artifactKey: targetKey,
+      kind: 'missing',
+      detail: `Referenced as ${ref.type}:${ref.identity} but no matching ${keyword} artifact was generated.`,
+    });
   }
   return out;
 }
 
 // ---------------------------------------------------------------------------
-// Per-kind structural rules
+// Per-kind structural completeness (driven by the conformance linter)
 // ---------------------------------------------------------------------------
 
-function detectIncompleteArtifacts(artifacts: MergedArtifact[]): RepairIssue[] {
-  const out: RepairIssue[] = [];
-  for (const a of artifacts) {
-    const details = rulesFor(a);
-    for (const detail of details) {
-      out.push({ artifactKey: key(a.kind, a.identity), kind: 'incomplete', detail });
-    }
-  }
-  return out;
-}
-
-function rulesFor(a: MergedArtifact): string[] {
-  const src = a.winning.tcSource;
-  const out: string[] = [];
-
-  if (a.kind === 'authorization-rule') {
-    const usesTagOnly =
-      /applies-to\s*\{\s*tag\s+/.test(src) &&
-      !/applies-to\s*\{[\s\S]*?operations\s*\[/.test(src);
-    if (usesTagOnly) {
-      out.push(
-        'applies-to uses `tag <slug>` only. Rewrite as ' +
-          '`applies-to { operations [Operation:"METHOD /path", ...] }` enumerating ' +
-          'the routes this rule applies to. The comparator binds drifts per-operation; ' +
-          'tag-only selectors silently no-op.',
-      );
-    }
-    if (!/\bpredicate\b/.test(src)) {
-      out.push('missing `predicate "..."` — the rule has no logical condition to evaluate.');
-    }
-    if (!/\bon-violation\s*\{/.test(src)) {
-      out.push('missing `on-violation { status ... }` — the comparator needs to know what response a violation produces.');
-    }
-  }
-
-  if (a.kind === 'auth-requirement') {
-    if (!/\bon-violation\s*\{/.test(src)) {
-      out.push('missing `on-violation { status ... error-code ... body ErrorEnvelope:... }`.');
-    }
-    if (/\brequired-role\b/.test(src)) {
-      const hasBroadGlob = /selector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src);
-      const hasAnySelector = /\bselector\s+(operations|path-glob|path-exact|tag)\b/.test(src);
-      if (hasBroadGlob) {
-        out.push(
-          'role-based auth-requirement uses a broad `path-glob "/api/**"` selector. ' +
-            'Rewrite as `selector operations [Operation:"..."]` enumerating only the routes that require the role — ' +
-            'broad globs cascade false-positive drifts to every matched operation.',
-        );
-      } else if (!hasAnySelector) {
-        // Without a selector, the verifier matches the role requirement
-        // against every operation in the corpus and fires
-        // "missing-auth" on routes that legitimately don't require this
-        // role. Repair must add an enumerated operations selector.
-        out.push(
-          'role-based auth-requirement is missing a `selector`. ' +
-            'Without one the verifier matches it against every operation, ' +
-            'cascading false-positive drifts onto routes that do not require this role. ' +
-            'Add `selector operations [Operation:"METHOD /path", ...]` enumerating only the routes that require it; ' +
-            'consult the rest of the corpus for the operations whose spec text marks them as admin/role-gated.',
-        );
-      }
-    }
-  }
-
-  if (a.kind === 'operation') {
-    // Any operation declaring `response 404 on not_found` MUST explicitly
-    // state its silent-200 stance. The forbid clause is the only way the
-    // comparator can catch silent-no-op drifts.
-    const block404 = src.match(/response\s+404\s+on\s+not_found\s*\{([\s\S]*?)\n\s*\}/);
-    if (block404 && !/\bforbid\s+status\s+200\s+when\s+resource-missing\b/.test(block404[1])) {
-      out.push(
-        'response 404 on not_found is declared but the response block lacks ' +
-          '`forbid status 200 when resource-missing`. Any 404-emitting operation ' +
-          'must take an explicit stance on silent-200 so the comparator can catch ' +
-          'silent-no-op drifts.',
-      );
-    }
-  }
-
-  if (a.kind === 'effect-group') {
-    // Lifecycle effect-groups (≥ 2 effects) should declare what they forbid
-    // — typically `forbid emission when-response-status [4xx, 5xx]` so the
-    // comparator catches events emitted from failure paths.
-    const effectCount = [...src.matchAll(/^\s*effect\s+[\w.\-]+\s*\{/gm)].length;
-    if (effectCount >= 2 && !/\bforbids\s*\{/.test(src)) {
-      out.push(
-        `effect-group has ${effectCount} effects but no \`forbids { ... }\` block. ` +
-          'Lifecycle effect-groups must declare what they forbid — typically ' +
-          '`forbids { forbid emission when-response-status [4xx, 5xx] }` so the ' +
-          'comparator catches events emitted from failure paths.',
-      );
-    }
-  }
-
-  return out;
+function detectIncompleteArtifacts(resolution: resolver.ResolveResult): RepairIssue[] {
+  const findings = conformance.lintConformance(resolution.index.values());
+  // The conformance linter keys findings by the resolver's PascalCase
+  // `Type:identity`. Re-key to the lowercase extractor kind so the rest of
+  // repair (slice lookup, fragment matching) keeps operating on
+  // `MergedArtifact.kind`.
+  return findings.map((f) => {
+    const [pascalKind, ...idParts] = f.artifactKey.split(':');
+    const keyword = KIND_TO_KEYWORD[pascalKind] ?? pascalKind;
+    return {
+      artifactKey: key(keyword, idParts.join(':')),
+      kind: 'incomplete' as const,
+      detail: f.detail,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -398,8 +331,9 @@ export async function repair(
   let done = 0;
   let total = 0;
 
-  // Pass 1 — missing artifacts
-  const missing = detectMissingArtifacts(artifacts);
+  // Pass 1 — missing artifacts. Resolve the merged corpus once; the
+  // resolver enumerates every unresolved cross-reference.
+  const missing = detectMissingArtifacts(resolveCorpus(artifacts));
   allIssues.push(...missing);
   const missingTasks = missing.map((issue) => ({
     issue,
@@ -455,8 +389,9 @@ export async function repair(
     }
   }
 
-  // Pass 2 — incomplete artifacts (recomputed against the updated corpus)
-  const incomplete = detectIncompleteArtifacts(artifacts);
+  // Pass 2 — incomplete artifacts. Re-resolve against the corpus pass 1
+  // mutated, then run the grammar-driven conformance linter over it.
+  const incomplete = detectIncompleteArtifacts(resolveCorpus(artifacts));
   const grouped = new Map<string, RepairIssue[]>();
   for (const issue of incomplete) {
     const arr = grouped.get(issue.artifactKey) ?? [];

@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { infer, writeInferred } from '../../packages/contract-verifier/src/infer/index.js';
 import { renderDecision } from '../../packages/contract-verifier/src/infer/serialize.js';
-import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
+import { parseTcFile as parseFile } from '../../packages/contract-verifier/src/parser-ohm/index.js';
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 
 const JS_FIXTURE = path.resolve(__dirname, '../fixtures/sample-js-project-il');

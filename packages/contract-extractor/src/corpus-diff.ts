@@ -22,7 +22,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parser, resolver, types } from '@truecourse/contract-verifier';
+import { parserOhm, resolver, types } from '@truecourse/contract-verifier';
 import type { ArtifactRef } from '@truecourse/contract-verifier';
 type AuthRequirementContract = types.AuthRequirementContract;
 type AuthorizationRuleContract = types.AuthorizationRuleContract;
@@ -140,14 +140,14 @@ export function diffCorpora(
 // ---------------------------------------------------------------------------
 
 export function loadCorpus(contractsDir: string): Map<string, resolver.ResolvedArtifact> {
-  const files: ReturnType<typeof parser.parseFile>[] = [];
+  const files: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   const visit = (dir: string): void => {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile() && entry.name.endsWith('.tc')) {
-        files.push(parser.parseFile(full, fs.readFileSync(full, 'utf-8')));
+        files.push(parserOhm.parseTcFile(full, fs.readFileSync(full, 'utf-8')));
       }
     }
   };

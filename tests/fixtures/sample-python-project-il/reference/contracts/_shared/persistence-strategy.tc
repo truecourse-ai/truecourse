@@ -1,0 +1,19 @@
+// Storage-strategy decision: the per-customer `marketing_opt_in` preference is
+// kept inside the customer `metadata` JSON blob rather than promoted to a
+// dedicated column. Read through `metadata.get("marketing_opt_in")` in
+// code/app/services/customers_preferences.py.
+//
+// `beta_features` is the same shape (a metadata-json key) but is deliberately
+// left undocumented here, so `infer` surfaces it as a reverse-engineered
+// decision (see reference/contracts/_inferred/_shared/persistence.betafeatures.tc).
+
+architecture-decision persistence.marketing_opt_in {
+  origin "reference/specs/modules/customers/data.md" "Preference storage" 31..35
+  category persistence-strategy
+  chosen metadata-json
+  reason "Read-mostly preference flag, never filtered in a hot path — not worth a dedicated column"
+  consequences [
+    "Cannot index or filter customers by marketing opt-in at the database level",
+    "Schema migrations are unnecessary when adding sibling preference flags"
+  ]
+}

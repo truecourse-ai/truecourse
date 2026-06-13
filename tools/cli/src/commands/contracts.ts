@@ -203,9 +203,9 @@ export async function runContractsList(
 
   // Parse + resolve every `.tc` so we can show kind / identity / confidence /
   // location (like `infer`'s output) and filter by provenance — not just bare
-  // file paths. Reuses the verifier's parser + resolver, same as `validate`.
-  const { parser, resolver } = await import("@truecourse/contract-verifier");
-  const fileNodes: ReturnType<typeof parser.parseFile>[] = [];
+  // file paths. Reuses the verifier's ohm parser + resolver, same as `validate`.
+  const { parserOhm, resolver } = await import("@truecourse/contract-verifier");
+  const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   let parseErrors = 0;
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -213,7 +213,7 @@ export async function runContractsList(
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile() && entry.name.endsWith(".tc")) {
         try {
-          fileNodes.push(parser.parseFile(full, fs.readFileSync(full, "utf-8")));
+          fileNodes.push(parserOhm.parseTcFile(full, fs.readFileSync(full, "utf-8")));
         } catch {
           parseErrors += 1;
         }
@@ -287,9 +287,9 @@ export async function runContractsValidate(
     process.exit(1);
   }
 
-  // Reuse the verifier's parser + resolver for validation.
-  const { parser, resolver } = await import("@truecourse/contract-verifier");
-  const fileNodes: ReturnType<typeof parser.parseFile>[] = [];
+  // Reuse the verifier's ohm parser + resolver for validation.
+  const { parserOhm, resolver } = await import("@truecourse/contract-verifier");
+  const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   const issues: string[] = [];
 
   const visit = (dir: string): void => {
@@ -298,7 +298,7 @@ export async function runContractsValidate(
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile() && entry.name.endsWith(".tc")) {
         try {
-          fileNodes.push(parser.parseFile(full, fs.readFileSync(full, "utf-8")));
+          fileNodes.push(parserOhm.parseTcFile(full, fs.readFileSync(full, "utf-8")));
         } catch (e) {
           issues.push(`${path.relative(repoRoot, full)}: parse error: ${e instanceof Error ? e.message : e}`);
         }

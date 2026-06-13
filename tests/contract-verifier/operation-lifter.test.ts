@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
+import { parseTcFile as parseFile } from '../../packages/contract-verifier/src/parser-ohm/index.js';
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 import type { OperationContract } from '../../packages/contract-verifier/src/types/index.js';
 

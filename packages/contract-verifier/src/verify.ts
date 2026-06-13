@@ -11,8 +11,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseFile } from './parser/index.js';
-import { resolve, type ResolvedArtifact, refKey } from './resolver/index.js';
+import { parseAndResolve } from './parser-ohm/index.js';
+import { refKey } from './resolver/index.js';
 import {
   extractCodeContracts,
   extractEmissionFacts,
@@ -83,13 +83,12 @@ export interface VerifyResult {
 }
 
 export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
-  // ---- Spec side: parse + resolve every .tc file ----
-  const specFiles: ReturnType<typeof parseFile>[] = [];
+  // ---- Spec side: parse + resolve every .tc file (ohm front-end) ----
+  const specFiles: { path: string; source: string }[] = [];
   walkTcFiles(opts.contractsDir, (filePath) => {
-    const source = fs.readFileSync(filePath, 'utf-8');
-    specFiles.push(parseFile(filePath, source));
+    specFiles.push({ path: filePath, source: fs.readFileSync(filePath, 'utf-8') });
   }, opts.includeInferred ?? false);
-  const resolution = resolve(specFiles);
+  const resolution = parseAndResolve(specFiles);
 
   // ---- Code side: one shared, lazily-memoized extraction set ----
   // (the same layer `infer` reads — see extractor/code-contracts.ts).

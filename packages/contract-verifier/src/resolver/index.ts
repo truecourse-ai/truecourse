@@ -21,6 +21,8 @@ import type {
   EntityContract,
   EnumContract,
   ErrorEnvelopeContract,
+  FallbackContract,
+  FieldExposureContract,
   ForbiddenArtifactContract,
   FormulaContract,
   IdempotencyContractC,
@@ -31,6 +33,7 @@ import type {
   SourceLocation,
   SpecOrigin,
   StateMachineContract,
+  ValidationRuleContract,
 } from '../types/index.js';
 import type { FileNode, HeadToken, StatementNode } from '../parser/index.js';
 import { liftOperation } from './lifters/operation.js';
@@ -48,6 +51,9 @@ import { liftQueryRule } from './lifters/query-rule.js';
 import { liftForbiddenArtifact } from './lifters/forbidden-artifact.js';
 import { liftNamedConstant } from './lifters/named-constant.js';
 import { liftArchitectureDecision } from './lifters/architecture-decision.js';
+import { liftValidationRule } from './lifters/validation-rule.js';
+import { liftFallback } from './lifters/fallback.js';
+import { liftFieldExposure } from './lifters/field-exposure.js';
 
 // ---------------------------------------------------------------------------
 // Artifact-keyword → ArtifactKind map. Closed enum; lookup-only.
@@ -69,6 +75,9 @@ const KEYWORD_TO_KIND: Record<string, ArtifactKind> = {
   'forbidden-artifact': 'ForbiddenArtifact',
   'constant': 'NamedConstant',
   'architecture-decision': 'ArchitectureDecision',
+  'validation-rule': 'ValidationRule',
+  'fallback': 'Fallback',
+  'field-exposure': 'FieldExposure',
   'unenforceable-obligation': 'UnenforceableObligation',
 };
 
@@ -113,7 +122,10 @@ export interface ResolvedArtifact {
     | QueryRuleContract
     | ForbiddenArtifactContract
     | NamedConstantContract
-    | ArchitectureDecisionContract;
+    | ArchitectureDecisionContract
+    | ValidationRuleContract
+    | FallbackContract
+    | FieldExposureContract;
 }
 
 export interface ResolveError {
@@ -315,6 +327,9 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | ForbiddenArtifactContract
     | NamedConstantContract
     | ArchitectureDecisionContract
+    | ValidationRuleContract
+    | FallbackContract
+    | FieldExposureContract
     | undefined;
   if (kind === 'Operation' && head[1].kind === 'ident' && head[2].kind === 'string') {
     // Pass the normalized path so OperationContract.path matches the
@@ -351,6 +366,12 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     contract = liftNamedConstant(stmt.block);
   } else if (kind === 'ArchitectureDecision') {
     contract = liftArchitectureDecision(stmt.block);
+  } else if (kind === 'ValidationRule') {
+    contract = liftValidationRule(stmt.block);
+  } else if (kind === 'Fallback') {
+    contract = liftFallback(stmt.block);
+  } else if (kind === 'FieldExposure') {
+    contract = liftFieldExposure(stmt.block);
   }
 
   return {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
+import { parseTcFile as parseFile } from '../../packages/contract-verifier/src/parser-ohm/index.js';
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 import type { ArchitectureDecisionContract } from '../../packages/contract-verifier/src/types/index.js';
 
@@ -61,5 +61,50 @@ describe('ArchitectureDecision lifter', () => {
       reason "r"
     }`);
     expect(c.category).toBe('data-store');
+  });
+
+  it('lifts a persistence-strategy storage decision (dedicated-column)', () => {
+    const c = lift(`architecture-decision persistence.requiresReason {
+      origin "docs/adr/ADR-012.md" "Storage" 1..20
+      category persistence-strategy
+      chosen dedicated-column
+      reason "Hot-path validation needs an indexable column"
+      rejected-alternatives [metadata-json]
+    }`);
+    expect(c.category).toBe('persistence-strategy');
+    expect(c.chosen).toBe('dedicated-column');
+    expect(c.rejectedAlternatives).toEqual(['metadata-json']);
+  });
+
+  it('lifts an optional consequences clause as a structured list', () => {
+    const c = lift(`architecture-decision persistence.requiresReason {
+      category persistence-strategy
+      chosen dedicated-column
+      reason "r"
+      consequences ["A schema migration is required", "Old rows backfill to the default"]
+    }`);
+    expect(c.consequences).toEqual([
+      'A schema migration is required',
+      'Old rows backfill to the default',
+    ]);
+  });
+
+  it('omits consequences entirely when the clause is absent', () => {
+    const c = lift(`architecture-decision data-store.postgres {
+      category data-store
+      chosen postgres
+      reason "r"
+    }`);
+    expect(c).not.toHaveProperty('consequences');
+  });
+
+  it('accepts the metadata-json chosen value for persistence-strategy', () => {
+    const c = lift(`architecture-decision persistence.disableGuests {
+      category persistence-strategy
+      chosen metadata-json
+      reason "Niche per-event toggle, kept in the metadata blob"
+    }`);
+    expect(c.category).toBe('persistence-strategy');
+    expect(c.chosen).toBe('metadata-json');
   });
 });

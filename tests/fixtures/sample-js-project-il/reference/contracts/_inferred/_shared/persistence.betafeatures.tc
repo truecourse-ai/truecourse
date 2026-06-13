@@ -1,0 +1,8 @@
+architecture-decision persistence.betaFeatures {
+  // inferred — field `betaFeatures` is persisted as metadata-json (read from a JSON metadata blob (no dedicated column)) but no ADR records this storage choice
+  inferred-from "src/services/customers.preferences.service.ts" 54..54
+  confidence medium
+  category persistence-strategy
+  chosen metadata-json
+  reason "field `betaFeatures` is persisted as metadata-json (read from a JSON metadata blob (no dedicated column)) but no ADR records this storage choice"
+}

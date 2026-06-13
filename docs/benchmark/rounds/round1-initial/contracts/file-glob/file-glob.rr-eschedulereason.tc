@@ -1,0 +1,6 @@
+forbidden-artifact file-glob.rr-eschedulereason {
+  origin "docs/design.md" "Out of Scope" 75..79
+  category file-glob
+  pattern "**/*[Rr]escheduleReason*"
+  reason "Reschedule reason configuration is explicitly out of scope (separate feature)"
+}

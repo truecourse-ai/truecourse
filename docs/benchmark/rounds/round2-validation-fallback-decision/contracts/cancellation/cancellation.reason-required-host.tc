@@ -1,0 +1,7 @@
+validation-rule cancellation.reason-required-host {
+  origin "docs/design.md" "Cancellation Reason Requirement Design / Technical Design / API Changes" 31..36
+  target cancellationReason
+  when in eventType.requiresCancellationReason [MANDATORY_BOTH, MANDATORY_HOST_ONLY]
+  actor host
+  effect required
+}

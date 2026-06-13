@@ -1,0 +1,6 @@
+fallback eventType.requires-cancellation-reason-default {
+  origin "docs/design.md" "Edge Cases" 68..73
+  target Entity:EventType.requiresCancellationReason
+  when null-or-absent
+  default MANDATORY_HOST_ONLY
+}

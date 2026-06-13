@@ -32,8 +32,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseFile } from '../parser/index.js';
-import { resolve, canonicalizePathParams, type ResolvedArtifact } from '../resolver/index.js';
+import { parseAndResolve } from '../parser-ohm/index.js';
+import { canonicalizePathParams, type ResolvedArtifact } from '../resolver/index.js';
 import {
   extractCodeContracts,
   getArchitectureDetector,
@@ -105,6 +105,7 @@ export async function infer(opts: InferOptions): Promise<InferResult> {
   decisions.push(...(await inferStateMachines(code, coverage)));
   decisions.push(...(await inferCrossCutting(ops, code, coverage)));
   decisions.push(...(await inferArchitecture(code, coverage)));
+  decisions.push(...(await inferPersistenceStrategies(code, coverage)));
 
   // Stable order so output is deterministic across runs (and diffable in tests).
   decisions.sort((a, b) => `${a.kind}:${a.identity}`.localeCompare(`${b.kind}:${b.identity}`));
@@ -128,6 +129,9 @@ interface Coverage {
   /** Columns already constrained by an authored query-rule: `table.col` + bare `col`. */
   queryColumns: Set<string>;
   architectureCategories: Set<string>;
+  /** Fields already covered by an authored persistence-strategy decision
+   *  (identity `persistence.<field>` / `<anything>.<field>`), normalized. */
+  persistenceFields: Set<string>;
   /** Event identities already declared by an authored effect-group. */
   effects: Set<string>;
   /** Normalized output-field names already covered by an authored formula. */
@@ -143,11 +147,11 @@ interface Coverage {
 }
 
 function loadAuthored(contractsDir: string): Map<string, ResolvedArtifact> {
-  const files: ReturnType<typeof parseFile>[] = [];
+  const files: { path: string; source: string }[] = [];
   walkAuthoredTcFiles(contractsDir, (filePath) => {
-    files.push(parseFile(filePath, fs.readFileSync(filePath, 'utf-8')));
+    files.push({ path: filePath, source: fs.readFileSync(filePath, 'utf-8') });
   });
-  return resolve(files).index;
+  return parseAndResolve(files).index;
 }
 
 function buildCoverage(authored: Map<string, ResolvedArtifact>): Coverage {
@@ -159,6 +163,7 @@ function buildCoverage(authored: Map<string, ResolvedArtifact>): Coverage {
     enumValueSets: new Set(),
     queryColumns: new Set(),
     architectureCategories: new Set(),
+    persistenceFields: new Set(),
     effects: new Set(),
     formulaFields: new Set(),
     stateMachineFields: new Set(),
@@ -212,7 +217,16 @@ function buildCoverage(authored: Map<string, ResolvedArtifact>): Coverage {
       }
       case 'ArchitectureDecision': {
         const c = a.contract as ArchitectureDecisionContract | undefined;
-        if (c) cov.architectureCategories.add(c.category);
+        if (c) {
+          // persistence-strategy is field-keyed (one decision per stored
+          // field), so it's covered per-field by identity — never by the
+          // whole category, which would suppress every other field.
+          if (c.category === 'persistence-strategy') {
+            cov.persistenceFields.add(identityField(a.ref.identity));
+          } else {
+            cov.architectureCategories.add(c.category);
+          }
+        }
         break;
       }
       case 'Formula': {
@@ -737,6 +751,43 @@ async function inferArchitecture(code: CodeContractSet, cov: Coverage): Promise<
     }
   }
   return out;
+}
+
+/**
+ * Per-field storage-strategy decisions. Infer ONLY the non-obvious,
+ * documentable choice: a setting kept inside a JSON `metadata` blob
+ * (`metadata-json`). A dedicated schema column is just ordinary schema —
+ * already surfaced by Entity inference — so inferring a "decision" for every
+ * column would be pure noise; we don't. Skip fields an authored
+ * persistence decision already covers (by field name).
+ */
+async function inferPersistenceStrategies(code: CodeContractSet, cov: Coverage): Promise<InferredDecision[]> {
+  const codeDir = code.codeDir;
+  const strategies = await code.persistenceStrategies();
+  const out: InferredDecision[] = [];
+  for (const s of strategies) {
+    if (s.chosen !== 'metadata-json') continue;
+    if (cov.persistenceFields.has(s.field.toLowerCase())) continue;
+    out.push({
+      kind: 'ArchitectureDecision',
+      identity: `persistence.${s.field}`,
+      category: 'persistence-strategy',
+      chosen: s.chosen,
+      // A usage pattern (blob access), not a declarative schema fact — medium
+      // confidence, since a JSON-blob read is easier to confuse than a column.
+      confidence: 'medium',
+      codeLoc: { path: toRelCode(codeDir, s.source.filePath), lines: [s.source.lineStart, s.source.lineEnd] },
+      reason: `field \`${s.field}\` is persisted as metadata-json (${s.detail}) but no ADR records this storage choice`,
+    });
+  }
+  return out;
+}
+
+/** Right-most `.field` segment of an artifact identity, lower-cased. For a
+ *  bare identity (no dot) the whole identity is the field. */
+function identityField(identity: string): string {
+  const dot = identity.lastIndexOf('.');
+  return (dot >= 0 ? identity.slice(dot + 1) : identity).toLowerCase();
 }
 
 // ---------------------------------------------------------------------------

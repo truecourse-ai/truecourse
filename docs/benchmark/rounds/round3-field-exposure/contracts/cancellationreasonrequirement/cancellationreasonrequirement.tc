@@ -1,0 +1,4 @@
+enum CancellationReasonRequirement {
+  origin "docs/design.md" "Technical Design / Database Changes" 21..27
+  values [MANDATORY_BOTH, MANDATORY_HOST_ONLY, MANDATORY_ATTENDEE_ONLY, OPTIONAL_BOTH]
+}
