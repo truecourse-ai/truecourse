@@ -1,0 +1,17 @@
+// Conditional field-requiredness (DIVERGENT case): when an account is moved to
+// `suspended`, the actor must record a `suspension_reason` -- the reason feeds
+// the audit trail and the customer-facing notice. The guard SHOULD live in
+// code/app/services/customers_account.py (apply_account_status), but that code
+// applies the status change with NO reason check, so the rule is not enforced.
+
+validation-rule customer.suspension-reason-required-when-suspended {
+  origin "reference/specs/modules/customers/data.md" "Account suspension" 31..37
+  target suspension_reason
+  when eq customer.account_status "suspended"
+  actor admin
+  effect required
+  on-violation {
+    status 400
+    error-code suspension_reason_required
+  }
+}
