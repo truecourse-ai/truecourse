@@ -34,6 +34,22 @@ export async function extractFieldExposuresFromDir(
     if (matcher) raw.push(...matcher(s));
   });
 
+  // The walk visits files in filesystem (readdir) order, which is not stable
+  // across machines. Sort the raw records by (filePath, line, identity) FIRST
+  // so the "first location wins" dedup below is deterministic — the source
+  // location attributed to a field is always its lexicographically-smallest
+  // occurrence, never an artifact of the walk order. This makes both verify and
+  // infer output reproducible (a prerequisite for byte-exact inferred goldens).
+  raw.sort((a, b) =>
+    a.source.filePath !== b.source.filePath
+      ? (a.source.filePath < b.source.filePath ? -1 : 1)
+      : a.source.lineStart !== b.source.lineStart
+        ? a.source.lineStart - b.source.lineStart
+        : a.source.lineEnd !== b.source.lineEnd
+          ? a.source.lineEnd - b.source.lineEnd
+          : (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0),
+  );
+
   const seen = new Map<string, ExtractedFieldExposure>();
   for (const r of raw) {
     const existing = seen.get(r.identity);
@@ -57,5 +73,8 @@ export async function extractFieldExposuresFromDir(
   for (const rec of seen.values()) {
     rec.contract.exposedVia.sort((a, b) => order[a] - order[b]);
   }
-  return Array.from(seen.values());
+  // Stable identity order so the returned set never depends on insertion order.
+  return Array.from(seen.values()).sort((a, b) =>
+    a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
+  );
 }

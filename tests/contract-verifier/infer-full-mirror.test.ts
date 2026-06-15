@@ -33,7 +33,8 @@ describe('full-mirror inference — empty corpus surfaces every kind', () => {
     for (const k of [
       'Operation', 'NamedConstant', 'Enum', 'QueryRule', 'ArchitectureDecision',
       'EffectGroup', 'Entity', 'PaginationContract', 'ErrorEnvelope',
-      'AuthRequirement', 'IdempotencyContract', 'Formula',
+      'AuthRequirement', 'IdempotencyContract', 'Formula', 'ValidationRule',
+      'Fallback', 'FieldExposure',
     ]) {
       expect(kinds, `expected ${k} to be inferred`).toContain(k);
     }
@@ -47,6 +48,7 @@ describe('full-mirror inference — empty corpus surfaces every kind', () => {
     for (const k of [
       'Operation', 'NamedConstant', 'Enum', 'QueryRule', 'EffectGroup',
       'PaginationContract', 'ErrorEnvelope', 'AuthRequirement', 'Formula',
+      'ValidationRule', 'Fallback', 'FieldExposure',
     ]) {
       expect(kinds, `expected ${k} to be inferred`).toContain(k);
     }
@@ -70,11 +72,13 @@ describe('full-mirror inference — empty corpus surfaces every kind', () => {
     const res = await infer({ contractsDir: path.join(root, 'reference/contracts'), codeDir: path.join(root, 'code') });
     const kinds = kindsOf(res.decisions);
     // The fixture documents auth, error-envelope, pagination, idempotency,
-    // the order effect-group, the pricing formulas, and its entities — so none
-    // of those should be inferred against the full authored corpus.
+    // the order effect-group, the pricing formulas, its entities, the
+    // loyalty-downgrade validation rule, and the loyalty-tier fallback — so
+    // none of those should be inferred against the full authored corpus.
     for (const k of [
       'EffectGroup', 'Entity', 'PaginationContract', 'ErrorEnvelope',
       'AuthRequirement', 'IdempotencyContract', 'Formula', 'StateMachine',
+      'ValidationRule', 'Fallback',
     ]) {
       expect(kinds, `${k} should be covered (silent) against full contracts`).not.toContain(k);
     }

@@ -35,6 +35,9 @@ import {
   compareForbiddenArtifact,
   compareNamedConstant,
   compareArchitectureDecision,
+  compareValidationRule,
+  compareFallback,
+  compareFieldExposure,
 } from './comparator/index.js';
 import type {
   ContractDrift,
@@ -53,6 +56,9 @@ import type {
   FormulaContract,
   QueryRuleContract,
   StateMachineContract,
+  ValidationRuleContract,
+  FallbackContract,
+  FieldExposureContract,
 } from './types/index.js';
 
 export interface VerifyOptions {
@@ -476,6 +482,91 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         }),
       );
     }
+  }
+
+  // ---- Business rules: ValidationRule (conditional field-requiredness) ----
+  // Every ValidationRule sees every extracted code guard; the comparator does
+  // its own structural (target + when-column) match — name-independent — so a
+  // rule's author-chosen identity never constrains which guard it diffs
+  // against. Same extract-once / dispatch-each / dedupe orchestrator shape as
+  // queries and enums.
+  const validationRules = await code.validationRules();
+  const validationDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'ValidationRule') continue;
+    if (!artifact.contract) continue;
+    validationDriftCollector.push(
+      ...compareValidationRule({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract: artifact.contract as ValidationRuleContract,
+        codeRules: validationRules,
+      }),
+    );
+  }
+  const seenValidationDrift = new Set<string>();
+  for (const d of validationDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenValidationDrift.has(key)) continue;
+    seenValidationDrift.add(key);
+    drifts.push(d);
+  }
+
+  // ---- Business rules: Fallback (null/absent → default RUNTIME coalescing) ----
+  // Every Fallback sees every extracted code coalescing site; the comparator
+  // does its own structural (target-field) match — name-independent — so a
+  // fallback's author-chosen identity never constrains which site it diffs
+  // against. Same extract-once / dispatch-each / dedupe orchestrator shape as
+  // queries, enums, and validation rules.
+  const codeFallbacks = await code.fallbacks();
+  const fallbackDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'Fallback') continue;
+    if (!artifact.contract) continue;
+    fallbackDriftCollector.push(
+      ...compareFallback({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract: artifact.contract as FallbackContract,
+        codeFallbacks,
+      }),
+    );
+  }
+  const seenFallbackDrift = new Set<string>();
+  for (const d of fallbackDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenFallbackDrift.has(key)) continue;
+    seenFallbackDrift.add(key);
+    drifts.push(d);
+  }
+
+  // ---- Business rules: FieldExposure (a field on the read path) ----
+  // Every FieldExposure sees every extracted code exposure (projection +
+  // response sites, deduped per field with channels unioned); the comparator
+  // does its own structural (target-field) match — name-independent — so a
+  // field-exposure's author-chosen identity never constrains which exposure it
+  // diffs against. Same extract-once / dispatch-each / dedupe orchestrator
+  // shape as queries, enums, validation rules, and fallbacks.
+  const codeExposures = await code.fieldExposures();
+  const fieldExposureDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'FieldExposure') continue;
+    if (!artifact.contract) continue;
+    fieldExposureDriftCollector.push(
+      ...compareFieldExposure({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract: artifact.contract as FieldExposureContract,
+        codeExposures,
+      }),
+    );
+  }
+  const seenFieldExposureDrift = new Set<string>();
+  for (const d of fieldExposureDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenFieldExposureDrift.has(key)) continue;
+    seenFieldExposureDrift.add(key);
+    drifts.push(d);
   }
 
   return {

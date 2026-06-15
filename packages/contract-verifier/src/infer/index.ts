@@ -22,6 +22,10 @@
  *                        entity, on a column no authored query-rule constrains
  *   ArchitectureDecision — a category the detectors resolve determinately, with
  *                        no authored architecture-decision for that category
+ *   ValidationRule     — a determinate read-setting → branch → require/throw
+ *                        guard no authored validation-rule covers
+ *   Fallback           — a null/absent → named-constant default coalescing no
+ *                        authored fallback covers
  *
  * Kinds whose only extraction path is spec-anchored (Entity, StateMachine,
  * Formula, EffectGroup, and the cross-cutting Auth/Error/Pagination/Idempotency
@@ -46,10 +50,13 @@ import type {
   ArchitectureDecisionContract,
   EffectGroupContract,
   EnumContract,
+  FallbackContract,
+  FieldExposureContract,
   FormulaContract,
   Predicate,
   QueryRuleContract,
   StateMachineContract,
+  ValidationRuleContract,
 } from '../types/index.js';
 import { renderDecision, type Confidence, type InferredDecision, type RenderedArtifact } from './serialize.js';
 
@@ -106,6 +113,9 @@ export async function infer(opts: InferOptions): Promise<InferResult> {
   decisions.push(...(await inferCrossCutting(ops, code, coverage)));
   decisions.push(...(await inferArchitecture(code, coverage)));
   decisions.push(...(await inferPersistenceStrategies(code, coverage)));
+  decisions.push(...(await inferValidationRules(code, coverage)));
+  decisions.push(...(await inferFallbacks(code, coverage)));
+  decisions.push(...(await inferFieldExposures(code, coverage)));
 
   // Stable order so output is deterministic across runs (and diffable in tests).
   decisions.sort((a, b) => `${a.kind}:${a.identity}`.localeCompare(`${b.kind}:${b.identity}`));
@@ -138,6 +148,26 @@ interface Coverage {
   formulaFields: Set<string>;
   /** Normalized field names already covered by an authored state-machine. */
   stateMachineFields: Set<string>;
+  /**
+   * Conditional field-requiredness rules already authored, keyed structurally
+   * (`<normalized-target>::<normalized-when-column>`) so an authored rule
+   * covers the code guard regardless of the author-chosen artifact name.
+   */
+  validationRules: Set<string>;
+  /**
+   * Normalized target fields already covered by an authored fallback —
+   * `normalizeField(target.field)`, so an authored fallback covers the
+   * equivalent code coalescing whatever artifact name the author chose and
+   * regardless of snake/camel convention.
+   */
+  fallbacks: Set<string>;
+  /**
+   * Normalized field names already covered by an authored field-exposure —
+   * `normalizeField(target.field)`, so an authored exposure covers the
+   * equivalent code projection/response site whatever artifact name the author
+   * chose and regardless of snake/camel convention.
+   */
+  fieldExposures: Set<string>;
   /** Cross-cutting singletons: does the spec already declare ANY of this kind? */
   hasPagination: boolean;
   hasIdempotency: boolean;
@@ -167,6 +197,9 @@ function buildCoverage(authored: Map<string, ResolvedArtifact>): Coverage {
     effects: new Set(),
     formulaFields: new Set(),
     stateMachineFields: new Set(),
+    validationRules: new Set(),
+    fallbacks: new Set(),
+    fieldExposures: new Set(),
     hasPagination: false,
     hasIdempotency: false,
     hasAuth: false,
@@ -239,6 +272,21 @@ function buildCoverage(authored: Map<string, ResolvedArtifact>): Coverage {
         if (c?.scope?.field) cov.stateMachineFields.add(normalizeField(c.scope.field));
         break;
       }
+      case 'ValidationRule': {
+        const c = a.contract as ValidationRuleContract | undefined;
+        if (c) cov.validationRules.add(validationRuleKey(c.target, c.when));
+        break;
+      }
+      case 'Fallback': {
+        const c = a.contract as FallbackContract | undefined;
+        if (c) cov.fallbacks.add(normalizeField(c.target.field));
+        break;
+      }
+      case 'FieldExposure': {
+        const c = a.contract as FieldExposureContract | undefined;
+        if (c) cov.fieldExposures.add(normalizeField(c.target.field));
+        break;
+      }
       default:
         break;
     }
@@ -255,6 +303,20 @@ function valueSetKey(values: string[]): string {
  *  and `discountCents` collapse to the same key). */
 function normalizeField(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Structural key for a conditional field-requiredness rule:
+ * `<normalized-target>::<normalized-when-column>`. Name-independent, so an
+ * authored `validation-rule` covers the equivalent code guard whatever
+ * artifact name the author chose. A `raw`/columnless `when` contributes only
+ * its target (the predicate carries no comparable column).
+ */
+function validationRuleKey(target: string, when: Predicate): string {
+  let col = '';
+  if (when.kind === 'column-compare') col = when.left.column;
+  else if ('column' in when) col = when.column.column;
+  return `${normalizeField(target)}::${normalizeField(col)}`;
 }
 
 function addPredicateColumns(p: Predicate, out: Set<string>): void {
@@ -778,6 +840,144 @@ async function inferPersistenceStrategies(code: CodeContractSet, cov: Coverage):
       confidence: 'medium',
       codeLoc: { path: toRelCode(codeDir, s.source.filePath), lines: [s.source.lineStart, s.source.lineEnd] },
       reason: `field \`${s.field}\` is persisted as metadata-json (${s.detail}) but no ADR records this storage choice`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Conditional field-requiredness rules the code enforces. The extractor
+ * recognizes the read-setting → branch → require/throw guard shape and emits a
+ * typed `ValidationRuleContract`; here we subtract any authored rule that
+ * already documents the same target + condition (structural key, name-
+ * independent) and emit the remainder as inferred decisions.
+ */
+async function inferValidationRules(code: CodeContractSet, cov: Coverage): Promise<InferredDecision[]> {
+  const codeDir = code.codeDir;
+  const rules = await code.validationRules();
+  const out: InferredDecision[] = [];
+  const seen = new Set<string>();
+  for (const r of rules) {
+    const key = validationRuleKey(r.contract.target, r.contract.when);
+    if (cov.validationRules.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      kind: 'ValidationRule',
+      identity: r.identity,
+      target: r.contract.target,
+      when: r.contract.when,
+      actor: r.contract.actor,
+      effect: r.contract.effect,
+      onViolation: r.contract.onViolation,
+      // High: the guard is a determinate read-setting → branch → throw shape,
+      // not a heuristic — the same fidelity bar as constants/enums/operations.
+      confidence: 'high',
+      codeLoc: { path: toRelCode(codeDir, r.source.filePath), lines: [r.source.lineStart, r.source.lineEnd] },
+      reason: `code enforces \`${r.contract.target}\` ${r.contract.effect}-when this condition holds but no spec records this validation rule`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Null/absent → default RUNTIME coalescing rules the code applies. The
+ * extractor recognizes the `x ?? D` / `x or D` / `(x = D)` / guarded-assignment
+ * shapes and emits a typed `FallbackContract` per site.
+ *
+ * Inference applies a fidelity bar consistent with the other inferers (which
+ * surface only the documentable, policy-grade decision and skip incidental
+ * ones — cf. constants emitting only SCREAMING_SNAKE policy literals,
+ * persistence emitting only `metadata-json`): infer ONLY a fallback whose
+ * default is a NAMED CONSTANT (an `identifier`). A coalescing to a named
+ * constant references a value that carries a name and meaning
+ * (`x ?? DEFAULT_LOYALTY_TIER`) — a deliberate policy default worth recording.
+ * An inline-literal fallback (`limit ?? 20`, `port ?? 3000`, `ip ?? "unknown"`)
+ * is an incidental default baked at the call site, not a documentable decision,
+ * so it is skipped — inferring one per literal coalescing would be pure noise.
+ *
+ * Coverage subtraction is by normalized target field (name- and
+ * convention-independent), so the moment an authored fallback documents the
+ * same target it drops out.
+ */
+async function inferFallbacks(code: CodeContractSet, cov: Coverage): Promise<InferredDecision[]> {
+  const codeDir = code.codeDir;
+  const fallbacks = await code.fallbacks();
+  const out: InferredDecision[] = [];
+  const seen = new Set<string>();
+  for (const f of fallbacks) {
+    if (f.contract.defaultValue.kind !== 'identifier') continue;
+    const key = normalizeField(f.contract.target.field);
+    if (cov.fallbacks.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      kind: 'Fallback',
+      identity: f.identity,
+      field: f.contract.target.field,
+      trigger: f.contract.trigger,
+      defaultValue: f.contract.defaultValue,
+      // High: the coalescing is a determinate AST shape (not a heuristic) and
+      // its default is a named policy constant — the same fidelity bar as
+      // constants / enums / validation rules.
+      confidence: 'high',
+      codeLoc: { path: toRelCode(codeDir, f.source.filePath), lines: [f.source.lineStart, f.source.lineEnd] },
+      reason: `code falls back \`${f.contract.target.field}\` to \`${f.contract.defaultValue.ref}\` when ${f.contract.trigger} but no spec records this default`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Read-path field exposures the code exhibits. The extractor recognizes the
+ * projection (ORM `select` / `.values(...)`) and response-serializer
+ * (`res.json({...})` / `jsonify({...})`) shapes and emits one typed
+ * `FieldExposureContract` per field, with the channels it is exposed on
+ * unioned.
+ *
+ * Inference applies a fidelity bar consistent with the other inferers (which
+ * surface only the documentable, policy-grade decision and skip incidental
+ * ones — cf. constants emitting only SCREAMING_SNAKE policy literals, fallbacks
+ * emitting only named-constant defaults, persistence emitting only
+ * `metadata-json`): infer ONLY a field exposed on BOTH channels — it is both
+ * SELECTED from the data store (`query-select`) AND RETURNED to the consumer
+ * (`api-response`). A field on both channels is the deliberate "this value
+ * deterministically travels the full read path to the consumer" decision worth
+ * recording (exactly the shape the authored `loyalty-tier-exposure` contract
+ * takes). A single-channel exposure is an incidental response key (an error
+ * envelope's `error`/`message`, a list's `items`/`next_cursor`) or a bare
+ * projection with no observed serialization — not a documentable read-path
+ * obligation, so it is skipped; inferring one per response key would be pure
+ * noise.
+ *
+ * Coverage subtraction is by normalized target field (name- and
+ * convention-independent), so the moment an authored field-exposure documents
+ * the same field it drops out of the next run.
+ */
+async function inferFieldExposures(code: CodeContractSet, cov: Coverage): Promise<InferredDecision[]> {
+  const codeDir = code.codeDir;
+  const exposures = await code.fieldExposures();
+  const out: InferredDecision[] = [];
+  const seen = new Set<string>();
+  for (const e of exposures) {
+    if (
+      !e.contract.exposedVia.includes('query-select') ||
+      !e.contract.exposedVia.includes('api-response')
+    ) {
+      continue;
+    }
+    const key = normalizeField(e.contract.target.field);
+    if (cov.fieldExposures.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      kind: 'FieldExposure',
+      identity: e.identity,
+      field: e.contract.target.field,
+      exposedVia: [...e.contract.exposedVia],
+      // High: both the projection and the response sites are determinate AST
+      // shapes (not heuristics) and the field crosses both — the same fidelity
+      // bar as constants / enums / validation rules / fallbacks.
+      confidence: 'high',
+      codeLoc: { path: toRelCode(codeDir, e.source.filePath), lines: [e.source.lineStart, e.source.lineEnd] },
+      reason: `code exposes \`${e.contract.target.field}\` on a read path (${e.contract.exposedVia.join(' + ')}) but no spec records this exposure`,
     });
   }
   return out;
