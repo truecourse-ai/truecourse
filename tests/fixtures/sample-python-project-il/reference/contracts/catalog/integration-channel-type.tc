@@ -1,0 +1,5 @@
+enum IntegrationChannelType {
+  origin "reference/specs/modules/orders/integrations.md" "Integration channel types" 1..1
+  values [webhook, email, slack, pagerduty, datadog]
+  trigger-subset cloud-only [datadog, pagerduty]
+}

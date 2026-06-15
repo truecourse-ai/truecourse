@@ -1,6 +1,0 @@
-entity EventType {
-  origin "docs/design.md" "Technical Design / Database Changes" 19..29
-  field requiresCancellationReason: Enum:CancellationReasonRequirement {
-    default MANDATORY_HOST_ONLY
-  }
-}

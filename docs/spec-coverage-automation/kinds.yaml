@@ -28,7 +28,7 @@
 #   issue / intent_pr / impl_pr — tracking links
 
 kinds:
-  # ---- Kinds discovered + built via the worked benchmark group (all live on this branch). ----
+  # ---- Kinds discovered + built via the initial worked example (all live on this branch). ----
   - kind: validation-rule
     status: done
     motivating_groups: [cancellation-reason-requirement]

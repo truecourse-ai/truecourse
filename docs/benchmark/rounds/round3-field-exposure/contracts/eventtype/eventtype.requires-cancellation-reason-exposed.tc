@@ -1,6 +1,0 @@
-field-exposure eventType.requires-cancellation-reason-exposed {
-  origin "docs/design.md" "Data Flow" 56..63
-  field Entity:EventType.requiresCancellationReason
-  via query-select
-  in getEventTypesFromDB
-}

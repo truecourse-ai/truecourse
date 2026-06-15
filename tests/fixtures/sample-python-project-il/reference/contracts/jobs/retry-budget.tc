@@ -1,0 +1,5 @@
+constant APP_JOBS_RETRY_BUDGET_SECONDS {
+  origin "docs/operations/jobs.md" "Retry configuration" 10..15
+  type number
+  expected-value 45
+}

@@ -16,6 +16,22 @@ function isDirectCallbackArg(fn: SyntaxNode): SyntaxNode | null {
   return p?.type === 'arguments' ? p : null
 }
 
+/**
+ * A trivial callback is not "callback hell": a concise expression-bodied arrow
+ * (`xs.map((x) => x.id)`, `arr.map((p) => ({ ...p }))`) or an empty callback
+ * (`fs.unlink(p, () => {})`). These are one-liners / no-ops, not the sequential
+ * nested control flow the rule targets, so they should never be the flagged
+ * innermost callback.
+ */
+function isTrivialCallback(fn: SyntaxNode): boolean {
+  const body = fn.childForFieldName('body')
+  if (!body) return false
+  // Expression-bodied arrow (no statement block) — a concise transform.
+  if (body.type !== 'statement_block') return true
+  // Empty block body — a no-op callback.
+  return body.namedChildren.length === 0
+}
+
 function findEnclosingFn(start: SyntaxNode | null): SyntaxNode | null {
   let n = start
   while (n) {
@@ -31,6 +47,10 @@ export const deepCallbackNestingVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['function_expression', 'arrow_function'],
   visit(node, filePath, sourceCode) {
+    // A trivial leaf callback (concise transform or no-op) is not the deepest
+    // level of real callback nesting — don't flag it.
+    if (isTrivialCallback(node)) return null
+
     let depth = 0
     let current: SyntaxNode = node
 

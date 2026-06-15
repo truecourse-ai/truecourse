@@ -1,0 +1,4 @@
+operation POST "/catalog/export" {
+  origin "reference/specs/modules/catalog/endpoints.md" "POST /catalog/export" 21..30
+  response 200 on success
+}

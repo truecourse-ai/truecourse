@@ -16,7 +16,15 @@ on:
   pull_request:
     types: [opened]
   issues:
-    types: [opened]
+    # `opened` covers first-time issue creation. `reopened` lets the
+    # drift-fp-next-fix queue-empty path notify on a material state
+    # change of an existing [drift-fp-campaign-stuck] tracker — the
+    # routine closes + reopens the tracker (with a "State change since
+    # last run" delta header) instead of spawning a new issue every run.
+    # Silent re-runs (no state change) edit the body in place and don't
+    # trigger this workflow. See drift-fp-next-fix.md
+    # "Notify-on-change protocol".
+    types: [opened, reopened]
 
 permissions:
   issues: read

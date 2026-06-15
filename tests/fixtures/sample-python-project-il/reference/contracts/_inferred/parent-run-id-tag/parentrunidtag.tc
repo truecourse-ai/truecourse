@@ -1,0 +1,7 @@
+constant PARENT_RUN_ID_TAG {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/tag_keys.py" 28..28
+  confidence high
+  type string
+  expected-value "sample-app/parent_run_id"
+}

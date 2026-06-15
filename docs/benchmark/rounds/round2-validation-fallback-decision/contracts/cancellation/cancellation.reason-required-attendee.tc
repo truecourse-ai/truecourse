@@ -1,7 +1,0 @@
-validation-rule cancellation.reason-required-attendee {
-  origin "docs/design.md" "Cancellation Reason Requirement Design / Technical Design / API Changes" 31..36
-  target cancellationReason
-  when in eventType.requiresCancellationReason [MANDATORY_BOTH, MANDATORY_ATTENDEE_ONLY]
-  actor attendee
-  effect required
-}

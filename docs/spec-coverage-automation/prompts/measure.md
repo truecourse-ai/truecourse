@@ -100,8 +100,7 @@ is written and committed.
 - Write a single Markdown reconstruction to `/tmp/reconstructed.md`: a clean spec document that says
   **everything the contracts encode and nothing they don't**. Group by data model / behavior /
   data access / decisions, mirror the structured fields faithfully, and cite each section's `origin`
-  the way the benchmark reconstructions do (see `docs/benchmark/rounds/*/spec-reconstructed*.md` for
-  the format and tone). Two hard rules:
+  (the doc / section / line-range carried on the contract). Two hard rules:
   1. **Anything you only know because an `unenforceable-obligation` stored it as `spec-text` is NOT
      structural.** Render obligation prose in a clearly-marked separate "Unenforceable obligations
      (prose only)" section, verbatim — it is the round-trip cheat this loop drives to zero, and step

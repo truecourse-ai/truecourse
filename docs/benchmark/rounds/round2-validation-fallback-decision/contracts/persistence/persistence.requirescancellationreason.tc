@@ -1,8 +1,0 @@
-architecture-decision persistence.requiresCancellationReason {
-  origin "docs/decisions.md" "Cancellation Reason Requirement Decisions / ADR-001: Store in Database Column vs Metadata JSON / Decision" 14..28
-  category persistence-strategy
-  chosen dedicated-column
-  reason "Core booking flow setting (like disableCancelling/requiresConfirmation); type-safe at the database level, cleaner to query in cancellation validation logic, and consistent with how similar settings (disableCancelling, disableRescheduling) are stored"
-  rejected-alternatives [metadata-json]
-  consequences ["Requires a database migration", "Type-safe enum values", "Direct column access in queries (no JSON parsing)"]
-}

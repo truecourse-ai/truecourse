@@ -33,21 +33,11 @@
 #     (code_derivable_pct = structural / (total_reqs - narrative);
 #      `obligations` = count of unenforceable-obligation artifacts — target 0)
 
-groups:
-  # ---- Seed / worked example: the docs/benchmark round-trip (see docs/benchmark/rounds/). ----
-  # This group was run by hand across 3 rounds and motivated the validation-rule, fallback,
-  # field-exposure, and architecture-decision(persistence-strategy) kinds. Recorded here as the
-  # template; its contracts live in docs/benchmark/rounds/ rather than a storage branch.
-  - name: cancellation-reason-requirement
-    docs_path: docs/benchmark            # decisions.md + design.md + future-work.md
-    target_pct: 90
-    priority: 0
-    status: done
-    baseline: { measured_at: "2026-06-12", total_reqs: 58, structural: 16, obligation_only: 0, narrative: 25, missed: 17, code_derivable_pct: 28, obligations: 6 }
-    final:    { measured_at: "2026-06-12", total_reqs: 57, structural: 26, obligation_only: 0, narrative: 25, missed: 6,  code_derivable_pct: 81, obligations: 0 }
-    notes:
-      - "Round-trip across 3 iterations (see docs/benchmark/rounds/README.md). Round 1: data model + out-of-scope captured; everything behavioral fell into 6 unenforceable-obligations (~28% structural). Round 2: added validation-rule + fallback + architecture-decision(persistence-strategy) → 0 obligations, ~76% of code-derivable subset. Round 3: added field-exposure → 81% of code-derivable subset, 0 obligations."
-      - "Remaining misses are pure narrative (problem statement, user stories, UI copy, file paths, future-work) + a few fragile wiring items (prop-threading) — no code signal, correctly uncaptured. Hit the close gate on the code-derivable subset."
-
-  # ---- Add new groups below. Commit the folder under docs/spec-coverage/groups/<name>/, ----
+groups: []
+  # Roster starts empty. The loop was first validated by hand on a worked example
+  # (a feature spec → the validation-rule / fallback / field-exposure /
+  # architecture-decision(persistence-strategy) kinds, driving structural coverage
+  # ~28% → ~81% of the code-derivable subset with 0 unenforceable-obligation).
+  #
+  # ---- Add groups below. Commit the folder under docs/spec-coverage/groups/<name>/, ----
   # ---- add an entry with status: pending, then push (or Run now on spec-coverage-generate). ----

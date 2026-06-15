@@ -1,0 +1,7 @@
+constant SENSOR_NAME_TAG {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/tag_keys.py" 29..29
+  confidence high
+  type string
+  expected-value "sample-app/sensor_name"
+}

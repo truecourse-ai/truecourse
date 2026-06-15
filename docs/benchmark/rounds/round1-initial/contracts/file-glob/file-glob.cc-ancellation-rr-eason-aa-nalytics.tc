@@ -1,6 +1,0 @@
-forbidden-artifact file-glob.cc-ancellation-rr-eason-aa-nalytics {
-  origin "docs/design.md" "Out of Scope" 75..79
-  category file-glob
-  pattern "**/*[Cc]ancellation[Rr]eason*[Aa]nalytics*"
-  reason "Reason analytics/reporting is explicitly out of scope"
-}

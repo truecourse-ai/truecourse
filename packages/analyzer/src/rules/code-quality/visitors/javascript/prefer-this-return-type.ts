@@ -47,6 +47,27 @@ export const preferThisReturnTypeVisitor: CodeRuleVisitor = {
 
     // Check if the return type annotation is exactly the class name
     if (typeText === className) {
+      // Only flag methods that actually return `this`. A method that returns a
+      // freshly-constructed instance (a child, a clone, ...) genuinely returns a
+      // different object, so declaring the concrete class is correct — not a
+      // candidate for a `this` return type.
+      const body = node.childForFieldName('body')
+      if (!body) return null
+      const returns = collectMethodReturns(body)
+      if (returns.length === 0) return null
+      let returnsThis = false
+      for (const ret of returns) {
+        const arg = ret.namedChildren[0]
+        if (arg && arg.type === 'this') {
+          returnsThis = true
+        } else {
+          // Returns something other than `this` (a new instance, a property, a
+          // bare `return`) — the class-name return type is appropriate.
+          return null
+        }
+      }
+      if (!returnsThis) return null
+
       return makeViolation(
         this.ruleKey,
         returnTypeNode,
@@ -61,6 +82,38 @@ export const preferThisReturnTypeVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+/**
+ * Collect every `return_statement` that belongs to this method body, without
+ * descending into nested function-like scopes (arrow functions, inner function
+ * declarations, etc.) whose returns belong to a different callable.
+ */
+function collectMethodReturns(body: SyntaxNode): SyntaxNode[] {
+  const returns: SyntaxNode[] = []
+  const NESTED_SCOPES = new Set([
+    'function_declaration',
+    'function_expression',
+    'function',
+    'arrow_function',
+    'generator_function',
+    'generator_function_declaration',
+    'method_definition',
+    'class_declaration',
+    'class',
+  ])
+  const walk = (n: SyntaxNode): void => {
+    for (const child of n.namedChildren) {
+      if (child.type === 'return_statement') {
+        returns.push(child)
+      }
+      if (!NESTED_SCOPES.has(child.type)) {
+        walk(child)
+      }
+    }
+  }
+  walk(body)
+  return returns
 }
 
 function findEnclosingClass(node: SyntaxNode): SyntaxNode | null {

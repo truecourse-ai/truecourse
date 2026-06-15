@@ -1,3 +1,4 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { isInsideLoop } from './_helpers.js'
@@ -18,71 +19,13 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
 
     if (!isInsideLoop(node)) return null
 
-    // Skip when parsing different data each iteration — only flag when the same
-    // static value is parsed repeatedly. Dynamic arguments: variables that are
-    // loop iterators, array element access, or function call results.
-    //
-    // Identifier matching uses containsIdentifierExact (real AST) instead of
-    // text.includes(varName), which leaked across substrings (varName "i"
-    // matched "iterator", "valid", etc.).
+    // Skip when the argument is dynamic per iteration — only flag when the same
+    // static value is parsed/stringified repeatedly. The walk handles unwrapping
+    // ternary / parenthesized / binary expressions so a per-iteration value
+    // wrapped in `cond ? x : {}` is still recognised as dynamic.
     const args = node.childForFieldName('arguments')
-    if (args) {
-      const firstArg = args.namedChildren[0]
-      if (firstArg) {
-        // Function call result: JSON.parse(getData()) — different each iteration
-        if (firstArg.type === 'call_expression') return null
-        // Array/object element access: JSON.parse(items[i]) — different each iteration
-        if (firstArg.type === 'subscript_expression') return null
-        // Template literal: JSON.parse(`${x}`) — likely dynamic
-        if (firstArg.type === 'template_string') return null
-        // Variable that is a loop parameter (for-of/for-in variable, or for-loop index)
-        if (firstArg.type === 'identifier') {
-          const varName = firstArg.text
-          let current = node.parent
-          while (current) {
-            if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
-              const left = current.childForFieldName('left')
-              if (left && containsIdentifierExact(left, varName)) return null
-            }
-            if (current.type === 'for_statement') {
-              const init = current.childForFieldName('initializer')
-              if (init && containsIdentifierExact(init, varName)) return null
-            }
-            // .forEach / .map callback parameter
-            if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
-              const params = current.childForFieldName('parameters')
-              if (params && containsIdentifierExact(params, varName)) {
-                const callParent = current.parent?.parent
-                if (callParent?.type === 'call_expression') return null
-              }
-            }
-            current = current.parent
-          }
-        }
-        // Member expression like item.data — likely different per iteration
-        if (firstArg.type === 'member_expression') {
-          const innerObj = firstArg.childForFieldName('object')
-          if (innerObj?.type === 'identifier') {
-            // Check if the object is a loop variable
-            let current = node.parent
-            while (current) {
-              if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
-                const left = current.childForFieldName('left')
-                if (left && containsIdentifierExact(left, innerObj.text)) return null
-              }
-              if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
-                const params = current.childForFieldName('parameters')
-                if (params && containsIdentifierExact(params, innerObj.text)) {
-                  const callParent = current.parent?.parent
-                  if (callParent?.type === 'call_expression') return null
-                }
-              }
-              current = current.parent
-            }
-          }
-        }
-      }
-    }
+    const firstArg = args?.namedChildren[0]
+    if (firstArg && isDynamicPerIteration(firstArg, node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
@@ -92,4 +35,107 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
       `Cache the result of JSON.${prop.text}() outside the loop.`,
     )
   },
+}
+
+function isDynamicPerIteration(arg: SyntaxNode, callNode: SyntaxNode): boolean {
+  switch (arg.type) {
+    case 'parenthesized_expression': {
+      const inner = arg.namedChildren[0]
+      return inner ? isDynamicPerIteration(inner, callNode) : false
+    }
+    case 'call_expression':
+    case 'subscript_expression':
+    case 'template_string':
+      return true
+    case 'ternary_expression': {
+      const cons = arg.childForFieldName('consequence')
+      const alt = arg.childForFieldName('alternative')
+      return (!!cons && isDynamicPerIteration(cons, callNode)) ||
+             (!!alt && isDynamicPerIteration(alt, callNode))
+    }
+    case 'binary_expression': {
+      const left = arg.childForFieldName('left')
+      const right = arg.childForFieldName('right')
+      return (!!left && isDynamicPerIteration(left, callNode)) ||
+             (!!right && isDynamicPerIteration(right, callNode))
+    }
+    case 'identifier':
+      return isLoopBoundIdentifier(arg.text, callNode)
+    case 'member_expression': {
+      const inner = arg.childForFieldName('object')
+      if (!inner) return false
+      if (inner.type === 'identifier') return isLoopBoundIdentifier(inner.text, callNode)
+      return isDynamicPerIteration(inner, callNode)
+    }
+    default:
+      return false
+  }
+}
+
+function isLoopBoundIdentifier(varName: string, callNode: SyntaxNode): boolean {
+  let current: SyntaxNode | null = callNode.parent
+  let innermostLoop: SyntaxNode | null = null
+  while (current) {
+    if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
+      const left = current.childForFieldName('left')
+      if (left && containsIdentifierExact(left, varName)) return true
+      if (!innermostLoop) innermostLoop = current
+    }
+    if (current.type === 'for_statement') {
+      const init = current.childForFieldName('initializer')
+      if (init && containsIdentifierExact(init, varName)) return true
+      if (!innermostLoop) innermostLoop = current
+    }
+    if (current.type === 'while_statement' || current.type === 'do_statement') {
+      if (!innermostLoop) innermostLoop = current
+    }
+    // .forEach / .map callback parameter (matches the original behaviour:
+    // a callback param of a chained collection method counts as a loop var).
+    if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
+      const params = current.childForFieldName('parameters')
+      if (params && containsIdentifierExact(params, varName)) {
+        const callParent = current.parent?.parent
+        if (callParent?.type === 'call_expression') return true
+      }
+    }
+    current = current.parent
+  }
+  if (innermostLoop) {
+    const body = innermostLoop.childForFieldName('body')
+    if (body && containsBindingInBlock(body, varName)) return true
+  }
+  return false
+}
+
+/**
+ * Walk a block looking for a `let`/`const`/`var` binding of `varName`.
+ * Stops at nested function / class boundaries (those introduce their own
+ * scope, so a binding inside a closure is not the same variable as one
+ * referenced from outside that closure).
+ */
+function containsBindingInBlock(node: SyntaxNode, varName: string): boolean {
+  if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+    for (const decl of node.namedChildren) {
+      if (decl.type === 'variable_declarator') {
+        const name = decl.childForFieldName('name')
+        if (name && containsIdentifierExact(name, varName)) return true
+      }
+    }
+    return false
+  }
+  if (
+    node.type === 'function_declaration' ||
+    node.type === 'arrow_function' ||
+    node.type === 'function' ||
+    node.type === 'function_expression' ||
+    node.type === 'method_definition' ||
+    node.type === 'class_declaration'
+  ) {
+    return false
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i)
+    if (child && containsBindingInBlock(child, varName)) return true
+  }
+  return false
 }

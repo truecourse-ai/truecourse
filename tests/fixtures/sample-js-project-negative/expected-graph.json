@@ -49,6 +49,12 @@
   ],
   "modules": [
     {
+      "name": "applyDefaultBudget",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "assertEverything",
       "service": "api-gateway",
       "kind": "standalone",
@@ -1057,6 +1063,12 @@
       "layer": "service"
     },
     {
+      "name": "HealthcheckService",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "http-call-no-timeout-external",
       "service": "utils",
       "kind": "standalone",
@@ -1423,6 +1435,12 @@
       "layer": "service"
     },
     {
+      "name": "totalScore",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "totalSummaryBytes",
       "service": "utils",
       "kind": "standalone",
@@ -1513,6 +1531,12 @@
       "layer": "service"
     },
     {
+      "name": "WidgetWriter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "wireResize",
       "service": "utils",
       "kind": "standalone",
@@ -1540,6 +1564,12 @@
       "name": "BillingDashboard",
       "service": "web",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BucketRanking",
+      "service": "web",
+      "kind": "standalone",
       "layer": "service"
     },
     {

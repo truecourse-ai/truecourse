@@ -1,6 +1,0 @@
-unenforceable-obligation cancellation-reason.settings-ui {
-  origin "docs/design.md" "Technical Design / UI Changes" 37..54
-  spec-text "Event Type Settings: add a dropdown in EventAdvancedTab (apps/web/modules/event-types/components/tabs/advanced/EventAdvancedTab.tsx) after the Booking Questions section and before RequiresConfirmationController, labelled 'Require cancellation reason' with description 'Ask for a reason when someone cancels a booking' and options Mandatory for both / Mandatory for host only (default) / Mandatory for attendee only / Optional for both. Cancel Booking (apps/web/components/booking/CancelBooking.tsx): add a requiresCancellationReason prop, replace the hardcoded hostMissingCancellationReason logic with configurable validation based on the setting, and show a required indicator on the textarea when a reason is required."
-  category ui
-  rationale "UI placement, copy, dropdown options, and component-prop/required-indicator behavior have no structural artifact encoding in the contract grammar"
-}

@@ -1,6 +1,0 @@
-unenforceable-obligation cancellation-reason.validation-rule {
-  origin "docs/design.md" "Technical Design / API Changes" 31..35
-  spec-text "handleCancelBooking (packages/features/bookings/lib/handleCancelBooking.ts) must validate the cancellation reason based on the event type's requiresCancellationReason setting and who is cancelling (host vs attendee)."
-  category business-logic
-  rationale "conditional cancellation-reason-required validation keyed on enum value and actor role; no structural artifact kind encodes this server-side branching rule"
-}

@@ -1,0 +1,5 @@
+operation GET "https://api.partner.io/notifications/{id}" {
+  origin "reference/specs/shared/endpoints.md" "External Partner Delivery Endpoint" 1..3
+  response 200 on success {}
+  response 404 on not_found {}
+}

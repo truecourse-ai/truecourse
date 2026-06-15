@@ -1,6 +1,0 @@
-unenforceable-obligation cancellation-reason.feature-overview {
-  origin "docs/design.md" "Overview" 3..5
-  spec-text "Add a dropdown setting in Event Type Advanced settings that allows hosts to configure when cancellation reasons are required from hosts and/or attendees."
-  category product-scope
-  rationale "product overview describing the feature's intent; no single structural artifact encodes the whole feature"
-}

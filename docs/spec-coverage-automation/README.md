@@ -212,6 +212,7 @@ a **re-baselined snapshot** (existing fixtures still byte-identical; new artifac
 4. **Contracts are scaffolding** (storage branch, never merged, deleted at close); **kinds merge to `main`**.
 5. **Only generate/measure/remeasure use the LLM** (agent transport); propose/implement are
    mechanical/build.
-6. **The seed corpus is `docs/benchmark/`** — the worked round-trip example (3 docs → the
-   `validation-rule` / `fallback` / `field-exposure` / `architecture-decision` persistence kinds);
-   see `docs/benchmark/rounds/` for the version history this loop generalizes.
+6. **The loop was first validated by hand on a worked example** — a feature spec run across three
+   rounds, which is what produced the initial `validation-rule` / `fallback` / `field-exposure` /
+   `architecture-decision`(persistence-strategy) kinds (structural coverage ~28% → ~81% of the
+   code-derivable subset, 0 `unenforceable-obligation`). This automation generalizes that loop.

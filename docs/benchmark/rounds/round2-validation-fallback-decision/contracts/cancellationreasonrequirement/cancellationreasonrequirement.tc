@@ -1,4 +1,0 @@
-enum CancellationReasonRequirement {
-  origin "docs/design.md" "Cancellation Reason Requirement Design / Technical Design / Database Changes" 19..29
-  values [MANDATORY_BOTH, MANDATORY_HOST_ONLY, MANDATORY_ATTENDEE_ONLY, OPTIONAL_BOTH]
-}
