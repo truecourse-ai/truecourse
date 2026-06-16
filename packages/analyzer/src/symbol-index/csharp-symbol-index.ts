@@ -15,7 +15,7 @@
 import { readFileSync } from 'fs'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { FileAnalysis, ModuleDependency } from '@truecourse/shared'
-import { parseFile } from '../parser.js'
+import { parseFile, type Tree } from '../parser.js'
 import { discoverProjects, buildFileProjectMap, type CsprojInfo } from './csproj.js'
 
 // ---------------------------------------------------------------------------
@@ -424,16 +424,20 @@ export function buildCSharpSymbolIndex(files: FileAnalysis[], rootPath: string):
   const globalUsings = new Map<string, Set<string>>()
 
   // ---- Pass 1: declarations, namespaces, usings, DI registrations ----
-  const trees = new Map<string, SyntaxNode>()
+  // Retain the parsed Tree handles (not just rootNodes) so the WASM-backed
+  // trees can be released once both passes finish — nothing escapes in the
+  // returned index, which is plain data.
+  const trees = new Map<string, Tree>()
   for (const file of csFiles) {
     let root: SyntaxNode
     try {
       const content = readFileSync(file.filePath, 'utf-8')
-      root = parseFile(file.filePath, content, 'csharp').rootNode
+      const tree = parseFile(file.filePath, content, 'csharp')
+      trees.set(file.filePath, tree)
+      root = tree.rootNode
     } catch {
       continue
     }
-    trees.set(file.filePath, root)
 
     const declaredNamespaces: string[] = []
     collectDeclsAndNamespaces(root, file.filePath, declarations, declaredNamespaces)
@@ -524,8 +528,9 @@ export function buildCSharpSymbolIndex(files: FileAnalysis[], rootPath: string):
   const edges: ModuleDependency[] = []
 
   for (const ctx of fileContexts) {
-    const root = trees.get(ctx.filePath)
-    if (!root) continue
+    const tree = trees.get(ctx.filePath)
+    if (!tree) continue
+    const root = tree.rootNode
 
     // Visible namespaces: own namespaces + all their ancestors (C# name
     // lookup walks outward), plus using directives, plus the project's
@@ -576,6 +581,10 @@ export function buildCSharpSymbolIndex(files: FileAnalysis[], rootPath: string):
       })
     }
   }
+
+  // Both passes are done with the parse trees; release the WASM memory now —
+  // everything below works on plain data (declarations, edges, stats).
+  for (const tree of trees.values()) tree.delete()
 
   // ---- Interface implementations (repo-local, from base lists) ----
   const interfaceImplementations = new Map<string, Set<string>>()
