@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
+import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -401,8 +401,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         const fc = fileContents.get(key);
         if (!fc) continue;
 
-        const tree = parseFile(changedFileSet ? filePath : filePath, fc.content, lang);
-        const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery, schemaIndex);
+        const codeRuleViolations = withParsedTree(filePath, fc.content, lang, (tree) =>
+          checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery, schemaIndex),
+        );
         allCodeViolations.push(...codeRuleViolations);
       } catch {
         // Skip files that fail to parse

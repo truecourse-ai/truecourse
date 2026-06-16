@@ -146,3 +146,28 @@ export function parseFile(
     )
   }
 }
+
+/**
+ * Parse `code` and hand the resulting {@link Tree} to `use`, releasing the
+ * tree's WASM-heap allocation with `tree.delete()` once `use` returns — or
+ * throws. web-tree-sitter trees are NOT reclaimed by JS GC, so every parse
+ * not paired with a delete leaks heap until the WASM runtime aborts. Route
+ * every analyzer parse site through this helper instead of holding a Tree by
+ * hand.
+ *
+ * `use` MUST reduce the tree to plain data before returning — no SyntaxNode
+ * may escape into the result, or it will point into freed memory.
+ */
+export function withParsedTree<T>(
+  filePath: string,
+  code: string,
+  language: SupportedLanguage,
+  use: (tree: Tree) => T,
+): T {
+  const tree = parseFile(filePath, code, language)
+  try {
+    return use(tree)
+  } finally {
+    tree.delete()
+  }
+}
