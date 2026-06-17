@@ -113,8 +113,8 @@ are the freshest, fully-worked examples; the closest analog depends on your kind
      (predicate / value-set / selector / literal) wherever the shape matches.
    - Ohm **semantics usually need no change** (the resolver lifts from the generic statement tree,
      not from an ohm semantics action) — only touch the semantics file if your body needs a token
-     shape the generic parser doesn't already produce. Keep `GRAMMAR.ebnf` (the doc) in sync with
-     the ohm source if you add rules.
+     shape the generic parser doesn't already produce. The ohm `grammar.ts` is the single source of
+     truth for `.tc` syntax (there is no separate EBNF doc to keep in sync).
 3. **Keyword + dispatch — `packages/contract-verifier/src/resolver/index.ts`:**
    - Add `'<kind>': '<Kind>'` to `KEYWORD_TO_KIND`.
    - `import { lift<Kind> } from './lifters/<kind>.js';`

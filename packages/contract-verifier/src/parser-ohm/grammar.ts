@@ -1,9 +1,8 @@
 /**
  * ohm-js grammar for the TrueCourse `.tc` contract DSL.
  *
- * This is a STRICT, per-kind grammar translated from Section 3 of
- * `packages/contract-verifier/GRAMMAR.ebnf` (the 16 artifact kinds), layered
- * on the Section 1 lexical rules. Unlike the hand-written parser (which is
+ * This is the STRICT, per-kind grammar for the `.tc` DSL and the single source of
+ * truth for its syntax (lexical rules + per-kind artifact bodies). Unlike the hand-written parser (which is
  * artifact-agnostic and accepts almost any brace-and-token soup), this grammar
  * recognizes exactly the clauses each artifact kind admits and rejects unknown
  * top-level/clause constructs.
@@ -13,7 +12,7 @@
  *     extends that to both comment forms, so newlines are NOT statement
  *     terminators. Every clause is therefore STRUCTURALLY bounded — no
  *     unbounded `HeadToken*` tail that would run into the next statement.
- *     (The few clauses the EBNF gives a genuine `HeadToken*` tail —
+ *     (The few clauses with a genuine `HeadToken*` tail —
  *     `depends-on`, the query-rule raw-predicate tail, `forbid emission` — are
  *     bounded to the specific shapes that occur, per the gotchas.)
  *   - `kw<k> = k ~identCont` keyword guard so `field` never matches the prefix
@@ -28,7 +27,7 @@ import * as ohm from 'ohm-js';
 export const TC_GRAMMAR_SOURCE = String.raw`
 Tc {
   /* ======================================================================
-     File / artifact dispatch (GRAMMAR.ebnf Section 3 top)
+     File / artifact dispatch
      ====================================================================== */
   File = Artifact*
 
@@ -548,7 +547,7 @@ Tc {
   HeadToken = reference | range | statusClass | number | string | List | ident | op
 
   /* ======================================================================
-     Lexical (GRAMMAR.ebnf Section 1). Lowercase rules — no implicit
+     Lexical rules. Lowercase rules — no implicit
      whitespace skipping; these are the leaf tokens.
      ====================================================================== */
   kw<k> = k ~identCont
