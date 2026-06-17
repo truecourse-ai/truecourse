@@ -142,9 +142,8 @@ are the freshest, fully-worked examples; the closest analog depends on your kind
 
 The IL end-to-end tests (`tests/contract-verifier/verify-end-to-end.test.ts` (JS) /
 `verify-python-end-to-end.test.ts` (Python)) assert the verifier's drift set equals the
-`// IL-DRIFT:` (`# IL-DRIFT:` in Python) marker set **exactly** — no missing, no extras. This marker
-corpus is the **tc-snapshot harness**: an unmarked case that drifts, or a marked case that doesn't,
-fails the test. Add fixtures to **both** `tests/fixtures/sample-js-project-il/` and
+`// IL-DRIFT:` (`# IL-DRIFT:` in Python) marker set **exactly** — no missing, no extras. That marker-equality IS the regression gate: an
+unmarked case that drifts, or a marked case that doesn't, fails the test. Add fixtures to **both** `tests/fixtures/sample-js-project-il/` and
 `tests/fixtures/sample-python-project-il/`:
 
 For each language, add:

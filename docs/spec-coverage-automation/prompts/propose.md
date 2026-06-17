@@ -162,15 +162,14 @@ Write `/tmp/intent-pr-body.md`. It **is** the plan the human approves — be con
 6. **Fixture plan** — exactly what sample-IL will prove it: the JS code snippet + its `.tc`
    contract that goes under `tests/fixtures/sample-js-project-il/`, **and** the Python code snippet
    + `.tc` that goes under `tests/fixtures/sample-python-project-il/`. Note that the implementation
-   must keep all existing fixtures byte-identical (tc-snapshot harness) and only add new artifacts.
+   must keep all existing fixtures' verify behavior unchanged (the IL marker tests) and only add new artifacts.
 7. **Engine touch-points** (a checklist for the implementer, not work done here):
    `packages/contract-verifier/src/types/index.ts` (`ArtifactKind` + `<X>Contract` + union),
    `resolver/index.ts` (`KEYWORD_TO_KIND` + dispatch), `resolver/lifters/<kind>.ts`,
    `parser-ohm/grammar.ts` (artifact + body rules; ohm semantics often need none),
    `packages/contract-extractor/src/prompt.ts` (kind catalog + a by-example entry), a
    cross-language extractor under `packages/contract-verifier/src/extractor/<kind>/`, sample-IL
-   fixtures in **both** `tests/fixtures/sample-{js,python}-project-il/`, tests, and a re-baselined
-   snapshot.
+   fixtures in **both** `tests/fixtures/sample-{js,python}-project-il/`, tests, and full `pnpm test` green.
 8. `Refs #<issue>`. End with `cc @mushgev`.
 
 ### 6. End
