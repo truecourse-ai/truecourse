@@ -1,0 +1,8 @@
+field-exposure email.exposure {
+  // inferred — code exposes `email` on a read path (query-select + api-response) but no spec records this exposure
+  inferred-from "app/services/customers_profile.py" 29..29
+  confidence high
+  field email
+  via query-select
+  via api-response
+}

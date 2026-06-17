@@ -14,7 +14,7 @@ export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
 // Parser utilities
-export { parseCode, parseFile, getParser, initParsers } from './parser.js'
+export { parseCode, parseFile, withParsedTree, getParser, initParsers } from './parser.js'
 
 // Language configuration
 export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, getMaxParameters, type LanguageConfig } from './language-config.js'

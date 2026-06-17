@@ -27,6 +27,7 @@
   "dependencies": {
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "ohm-js": "^17.5.0",
     "web-tree-sitter": "^0.26.0",
     "zod": "^3.23.8"
   },

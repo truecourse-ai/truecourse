@@ -136,10 +136,10 @@ campaigns:
       - docs/docs/deployment         # 19 — deployment behavior (kubernetes, dagster-plus)
       - docs/docs/integrations/libraries  # 36 — integration adapters (aws/gcp/snowflake/dbt/…)
     priority: 6
-    status: discovering
+    status: pending
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
-    notes: ["Probe 2026-06-06: rich in-repo docs at docs/docs/guides/build/assets (12), build/external-resources (11), deployment/dagster-plus/management (12), integrations/libraries/aws (12). Python monorepo (python_modules/dagster/, python_modules/libraries/*); narrow code_dir if generate runs hot, but start with `.` like the other monorepos."]
+    notes: ["Probe 2026-06-06: rich in-repo docs at docs/docs/guides/build/assets (12), build/external-resources (11), deployment/dagster-plus/management (12), integrations/libraries/aws (12). Python monorepo (python_modules/dagster/, python_modules/libraries/*); narrow code_dir if generate runs hot, but start with `.` like the other monorepos.", "Reset to pending 2026-06-12: first discovery (storage branch claude/drift-fp-store/dagster-io-dagster) produced contract-quality enum FPs — the generator formalized plugin-class / API-function / troubleshooting-excerpt doc lists into closed enums (run-launchers, compute-log-managers, asset-decorators, step-event-types). PR #581 fixed the generator grounding (no enums from code-symbol lists); PR #582 fixed the verifier to resolve f-string constants + cluster string constants by value prefix (binds the genuine data-value sets: automatic-run-tags, standard-metadata-keys). Storage branch deleted to force regeneration with the fixed engine; issues #576 (blocked) + #579 (stuck) superseded and closed."]
 
   # ---- TS framework — redwoodjs/redwood (full-stack TS framework, auth/graphql/deploy docs) ----
   - target_repo: redwoodjs/redwood

@@ -18,6 +18,7 @@
 
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { ExtractedConstant } from './types.js';
+import { collectStringConstantTable, stringValue } from '../py-string-resolver.js';
 
 const UNPARSEABLE = Symbol('unparseable');
 
@@ -28,6 +29,12 @@ export function extractPyConstantsFromFile(
 ): ExtractedConstant[] {
   const out: ExtractedConstant[] = [];
 
+  // Module-level string-constant table used to resolve f-strings like
+  // `SCHEDULE_NAME_TAG = f"{SYSTEM_TAG_PREFIX}/schedule_name"`. Built once per
+  // file; passed through `parseLiteral` so any string-typed literal (including
+  // dict values + Field defaults) gets the same resolution.
+  const stringTable = collectStringConstantTable(tree.rootNode, source);
+
   // Pass A: Pydantic settings-class fields. A class whose `model_config`
   // declares an env scope (`build_settings_config(("server",))` or
   // `SettingsConfigDict(env_prefix="...")`) exposes each `field = Field(default=v)`
@@ -36,7 +43,7 @@ export function extractPyConstantsFromFile(
   // identity via a value-gated suffix match (shape `settings-field`).
   walk(tree.rootNode, (node) => {
     if (node.type === 'class_definition') {
-      out.push(...extractSettingsFields(node, source, filePath));
+      out.push(...extractSettingsFields(node, source, filePath, stringTable));
     }
     return true;
   });
@@ -52,7 +59,7 @@ export function extractPyConstantsFromFile(
     const pos = { filePath, lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1 };
 
     // Case 1: plain literal RHS (existing behavior for both bare and typed assignments)
-    const value = parseLiteral(right, source);
+    const value = parseLiteral(right, source, stringTable);
     if (value !== UNPARSEABLE) {
       out.push({ name, value, shape: 'const-literal', source: pos });
       return true;
@@ -80,9 +87,9 @@ export function extractPyConstantsFromFile(
       if (!kwName || !kwVal) continue;
       const kw = source.slice(kwName.startIndex, kwName.endIndex);
       if (kw === 'default' && defaultVal === UNPARSEABLE) {
-        defaultVal = parseLiteral(kwVal, source);
+        defaultVal = parseLiteral(kwVal, source, stringTable);
       } else if (kw === 'validation_alias') {
-        aliasStrings.push(...extractAliasChoiceStrings(kwVal, source));
+        aliasStrings.push(...extractAliasChoiceStrings(kwVal, source, stringTable));
       }
     }
 
@@ -119,11 +126,12 @@ function extractSettingsFields(
   classNode: SyntaxNode,
   source: string,
   filePath: string,
+  stringTable: Map<string, SyntaxNode>,
 ): ExtractedConstant[] {
   const body = classNode.childForFieldName('body');
   if (!body) return [];
 
-  const scope = deriveSettingsScope(body, source);
+  const scope = deriveSettingsScope(body, source, stringTable);
   if (scope === null) return [];
 
   const out: ExtractedConstant[] = [];
@@ -141,7 +149,7 @@ function extractSettingsFields(
 
     const right = assign.childForFieldName('right');
     if (!right) continue;
-    const value = fieldDefaultValue(right, source);
+    const value = fieldDefaultValue(right, source, stringTable);
     if (value === UNPARSEABLE) continue;
 
     const name = `${scope}_${fieldName}`.toUpperCase();
@@ -158,7 +166,11 @@ function extractSettingsFields(
 /** The scope string for a settings class, or null if the class is not a
  *  recognizable settings class. `("worker","webserver")` → `"worker_webserver"`;
  *  `env_prefix="SERVER_"` → `"server"`. */
-function deriveSettingsScope(body: SyntaxNode, source: string): string | null {
+function deriveSettingsScope(
+  body: SyntaxNode,
+  source: string,
+  stringTable: Map<string, SyntaxNode>,
+): string | null {
   for (let i = 0; i < body.namedChildCount; i++) {
     const stmt = body.namedChild(i);
     if (stmt?.type !== 'expression_statement') continue;
@@ -179,7 +191,7 @@ function deriveSettingsScope(body: SyntaxNode, source: string): string | null {
       const kw = arg.childForFieldName('name');
       const val = arg.childForFieldName('value');
       if (kw && val && source.slice(kw.startIndex, kw.endIndex) === 'env_prefix' && val.type === 'string') {
-        const prefix = stringValue(val, source);
+        const prefix = stringValue(val, source, stringTable);
         if (prefix) return prefix.replace(/_+$/, '').toLowerCase();
       }
     }
@@ -192,7 +204,7 @@ function deriveSettingsScope(body: SyntaxNode, source: string): string | null {
       for (let k = 0; k < arg.namedChildCount; k++) {
         const el = arg.namedChild(k);
         if (el?.type === 'string') {
-          const v = stringValue(el, source);
+          const v = stringValue(el, source, stringTable);
           if (v) parts.push(v);
         }
       }
@@ -205,8 +217,12 @@ function deriveSettingsScope(body: SyntaxNode, source: string): string | null {
 /** Value of a settings field's RHS: a bare literal, or the `default=` of a
  *  `Field(...)` / `Field(default_factory=...)` call. Returns UNPARSEABLE when
  *  there's no static literal default. */
-function fieldDefaultValue(right: SyntaxNode, source: string): unknown {
-  const direct = parseLiteral(right, source);
+function fieldDefaultValue(
+  right: SyntaxNode,
+  source: string,
+  stringTable: Map<string, SyntaxNode>,
+): unknown {
+  const direct = parseLiteral(right, source, stringTable);
   if (direct !== UNPARSEABLE) return direct;
   if (right.type !== 'call') return UNPARSEABLE;
   const fn = right.childForFieldName('function');
@@ -219,16 +235,20 @@ function fieldDefaultValue(right: SyntaxNode, source: string): unknown {
     const kw = arg.childForFieldName('name');
     const val = arg.childForFieldName('value');
     if (kw && val && source.slice(kw.startIndex, kw.endIndex) === 'default') {
-      return parseLiteral(val, source);
+      return parseLiteral(val, source, stringTable);
     }
   }
   return UNPARSEABLE;
 }
 
-function parseLiteral(node: SyntaxNode, source: string): unknown {
+function parseLiteral(
+  node: SyntaxNode,
+  source: string,
+  stringTable?: Map<string, SyntaxNode>,
+): unknown {
   switch (node.type) {
     case 'string': {
-      const v = stringValue(node, source);
+      const v = stringValue(node, source, stringTable);
       return v === null ? UNPARSEABLE : v;
     }
     case 'integer':
@@ -251,7 +271,7 @@ function parseLiteral(node: SyntaxNode, source: string): unknown {
       for (let i = 0; i < node.namedChildCount; i++) {
         const c = node.namedChild(i);
         if (!c) continue;
-        const v = parseLiteral(c, source);
+        const v = parseLiteral(c, source, stringTable);
         if (v === UNPARSEABLE) return UNPARSEABLE;
         items.push(v);
       }
@@ -266,10 +286,10 @@ function parseLiteral(node: SyntaxNode, source: string): unknown {
         const valNode = pair.childForFieldName('value');
         if (!keyNode || !valNode) continue;
         let key: string | null = null;
-        if (keyNode.type === 'string') key = stringValue(keyNode, source);
+        if (keyNode.type === 'string') key = stringValue(keyNode, source, stringTable);
         else if (keyNode.type === 'identifier') key = source.slice(keyNode.startIndex, keyNode.endIndex);
         if (key === null) return UNPARSEABLE;
-        const v = parseLiteral(valNode, source);
+        const v = parseLiteral(valNode, source, stringTable);
         if (v === UNPARSEABLE) return UNPARSEABLE;
         obj[key] = v;
       }
@@ -283,7 +303,11 @@ function parseLiteral(node: SyntaxNode, source: string): unknown {
 
 // Extracts plain string literals from AliasChoices(AliasPath("x"), "alias1", "alias2").
 // AliasPath calls are skipped — only flat string aliases are returned.
-function extractAliasChoiceStrings(node: SyntaxNode, source: string): string[] {
+function extractAliasChoiceStrings(
+  node: SyntaxNode,
+  source: string,
+  stringTable: Map<string, SyntaxNode>,
+): string[] {
   if (node.type !== 'call') return [];
   const fn = node.childForFieldName('function');
   if (!fn) return [];
@@ -295,29 +319,11 @@ function extractAliasChoiceStrings(node: SyntaxNode, source: string): string[] {
   for (let i = 0; i < args.namedChildCount; i++) {
     const c = args.namedChild(i);
     if (c?.type === 'string') {
-      const v = stringValue(c, source);
+      const v = stringValue(c, source, stringTable);
       if (v !== null) result.push(v);
     }
   }
   return result;
-}
-
-function stringValue(node: SyntaxNode, source: string): string | null {
-  let content = '';
-  let sawContent = false;
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const c = node.namedChild(i);
-    if (c?.type === 'string_content') {
-      content += source.slice(c.startIndex, c.endIndex);
-      sawContent = true;
-    } else if (c?.type === 'interpolation') {
-      return null;
-    }
-  }
-  if (sawContent) return content;
-  const raw = source.slice(node.startIndex, node.endIndex);
-  const m = raw.match(/^[a-zA-Z]*('''|"""|'|")([\s\S]*)\1$/);
-  return m ? m[2] : null;
 }
 
 function walk(node: SyntaxNode, visit: (n: SyntaxNode) => boolean | void): void {

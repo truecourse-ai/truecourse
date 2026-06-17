@@ -1,0 +1,7 @@
+constant DEFAULT_CURRENCY {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "src/services/orders.settlement.service.ts" 17..17
+  confidence high
+  type string
+  expected-value "USD"
+}

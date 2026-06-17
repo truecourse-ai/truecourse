@@ -1,0 +1,8 @@
+field-exposure email.exposure {
+  // inferred — code exposes `email` on a read path (query-select + api-response) but no spec records this exposure
+  inferred-from "src/services/customers.profile.service.ts" 38..38
+  confidence high
+  field email
+  via query-select
+  via api-response
+}

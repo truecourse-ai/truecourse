@@ -92,7 +92,32 @@ Return ONE JSON object matching this shape — no prose, no code fences:
                         weights/coefficients, threshold constants, default values
 - ArchitectureDecision: a system-wide platform/framework/data choice the spec
                         asserts (Postgres, REST-not-GraphQL, Kafka) — usually
-                        from an ADR or a "Tech Stack" section
+                        from an ADR or a "Tech Stack" section. ALSO covers
+                        data-modeling / STORAGE-STRATEGY decisions: "store
+                        setting X as a dedicated column vs. in the metadata
+                        JSON blob" (category persistence-strategy). Do NOT
+                        send storage/data-modeling decisions to
+                        UnenforceableObligation — they ARE structural
+- ValidationRule:       a conditional field-requiredness rule — "input X is
+                        REQUIRED | OPTIONAL | FORBIDDEN WHEN <some setting field>
+                        equals/matches <value> [and the actor/role is <Y>]". Use
+                        it for setting-gated input requirements that aren't tied
+                        to a single endpoint
+- Fallback:             a RUNTIME null/absent → default rule — "when input/field
+                        X is missing, fall back to <value>". This is the code
+                        that coalesces a missing value at read/use time
+                        (\`x ?? DEFAULT\`, a default parameter, an
+                        \`if (x == null) x = DEFAULT\` guard). Distinct from a
+                        SCHEMA default (a persisted column default → that's a
+                        \`field … default\` on an Entity, NOT a Fallback)
+- FieldExposure:        a field that MUST be EXPOSED on a read path — included
+                        in a data-access projection (ORM \`select\`) and/or
+                        returned in an API response shape. Use it for "field
+                        <Entity>.<field> is returned by / visible on the read
+                        API". \`via\` is one or more of query-select |
+                        api-response. NOT for a field's existence (that's an
+                        Entity field) and NOT for prop-threading through UI
+                        files — only the projection/response site
 - UnenforceableObligation: spec sentence with no structural encoding
 
 # .tc grammar (essentials)
@@ -360,6 +385,18 @@ architecture-decision messaging.kafka {
   reason "Strict ordering per partition + replay required for audit"
 }
 
+// Storage-strategy decision: how a per-feature setting is persisted.
+// consequences is OPTIONAL and rides as structured ADR context — it is NOT
+// an obligation the verifier enforces.
+architecture-decision persistence.requiresReason {
+  origin "docs/adr/ADR-012.md" "Storage" 1..20
+  category persistence-strategy
+  chosen dedicated-column
+  reason "The setting gates a hot-path validation; needs to be indexable"
+  rejected-alternatives [metadata-json]
+  consequences ["A schema migration is required to add the column", "Old rows backfill to the column default"]
+}
+
 query-rule active-customers.tenant-scoped {
   origin SPEC.md "Tenant scoping" 35..40
   // Bind to a specific endpoint OR leave unbound to apply to any query
@@ -392,6 +429,66 @@ query-rule active-customers.tenant-scoped {
     // code that filters them out is the drift. Same predicate vocabulary.
     is-not-null  customers.deletedAt
   }
+}
+
+// validation-rule — a field is required/optional/forbidden CONDITIONALLY,
+// gated on some setting/entity field (and optionally an actor/role). The
+// 'when' clause uses the SAME predicate keywords as query-rule
+// (eq/neq/in/not-in/is-null/is-not-null/gt/gte/lt/lte/between/like/ilike).
+// The condition column is 'settingObject.field' (split on the last dot).
+validation-rule booking.reason-required-when-mandatory {
+  origin SPEC.md "Cancellation policy" 40..52
+  target cancellationReason
+  when eq eventType.requiresCancellationReason "MANDATORY"
+  actor host
+  effect required
+  on-violation {
+    status 400
+    error-code reason_required
+  }
+}
+
+// fallback — a RUNTIME null/absent → default. The 'target' is an entity
+// field (Entity:E.field) OR a bare input ident; 'when' is one of
+// absent | null | null-or-absent (use null-or-absent for the common
+// nullish '??' / '== null' case); 'default' is the substituted value
+// (string | number | true | false | null | a bare identifier naming a
+// constant/enum member). Do NOT use this for a persisted SCHEMA default —
+// that's a 'field … default' on an Entity.
+fallback reservation.currency-default {
+  origin SPEC.md "Reservation defaults" 30..36
+  target Entity:Reservation.currency
+  when null-or-absent
+  default "USD"
+}
+
+fallback reservation.timezone-default {
+  origin SPEC.md "Reservation defaults" 37..40
+  target timezone
+  when null-or-absent
+  default DEFAULT_TIMEZONE
+}
+
+// field-exposure — a field that MUST be EXPOSED on a read path. 'field' is
+// an entity field (Entity:E.field) OR a bare field ident; 'via' repeats once
+// per channel (query-select = the field is in an ORM select/projection;
+// api-response = the field is a key on a returned response object) — emit
+// BOTH when the spec says the field is both queried and returned. 'in' is
+// OPTIONAL: the Operation/QueryRule it is exposed through (a Reference when
+// the spec names one, a bare ident otherwise). Do NOT use this for a field's
+// mere existence (that's an Entity field) nor for UI prop-threading.
+field-exposure order.total-cents-exposed {
+  origin SPEC.md "Order read API" 40..48
+  field Entity:Order.totalCents
+  via query-select
+  via api-response
+  in Operation:"GET /api/orders/{id}"
+}
+
+field-exposure order.status-exposed {
+  origin SPEC.md "Order read API" 49..52
+  field Entity:Order.status
+  via api-response
 }
 
 unenforceable-obligation encryption.at-rest {
@@ -705,6 +802,27 @@ data document. If \`Entity:Customer\` references \`Enum:LoyaltyTier\` and the sa
 slice contains "LoyaltyTier values: standard, silver, gold", emit BOTH the entity
 fragment AND the enum fragment.
 
+**An enum is a closed set of DATA VALUES the code compares against** (the
+string/number literals a field is set to or checked against) — NOT a catalog of
+code symbols a caller picks between. Before emitting, check what the listed items
+ARE. Emit nothing when the list is:
+
+- **Implementation / plugin classes** — e.g. "run launchers: \`DefaultRunLauncher\`,
+  \`DockerRunLauncher\`, \`K8sRunLauncher\`", storage backends, compute-log managers.
+  These are swappable extension points (a user can add their own); the items are
+  class names, not a closed value set.
+- **API functions, decorators, or methods** — e.g. "asset decorators: \`asset\`,
+  \`multi_asset\`, \`graph_asset\`". These are symbols a user calls, not values.
+- **An incidental excerpt** — a few items quoted inside a troubleshooting,
+  example, or how-to passage ("relevant event types: …") rather than a
+  definitional "the valid values of X are …". A subset mentioned in passing is
+  not an enum definition.
+
+Discriminator: if the items are **names of code symbols** (classes / functions a
+caller selects), do NOT emit an enum. Only emit when the items are **literal data
+values** the code stores or compares against (config keys, status strings, tag
+keys, numeric codes).
+
 **Never reference an enum without defining it.** Every \`Enum:X\` identifier you
 emit (in \`field: Enum:X\` or \`states Enum:X\`) MUST have a matching \`enum X { … }\`
 artifact somewhere in the same slice (or you must assume another slice provides
@@ -987,10 +1105,22 @@ exactly the listed forbidden-artifact. Don't classify as
     \`}\`
 
 - Bullet list under "Out of Scope" / "Not in V1" / "Future Enhancements" →
-    one forbidden-artifact PER bullet. Translate to file-glob when the
-    bullet names a UI feature or module ("Date range filtering" →
-    file-glob \`**/DateRange*\` plus \`**/date-range*\`), or to dependency
-    when it names a library, env-var when it names a config var.
+    judge EACH bullet by whether it names a CONCRETE artifact:
+    * Names a concrete FILE/MODULE/path → forbidden-artifact, category
+      file-glob, pattern = the actual module path or a tight glob around it
+      (\`modules/**/legacy_uploader.*\`).
+    * Names a concrete DEPENDENCY / library / package → forbidden-artifact,
+      category dependency, pattern = the package name (\`stripe\`).
+    * Names a concrete ENV-VAR or FEATURE-FLAG → forbidden-artifact,
+      category env-var / feature-flag, pattern = the var/flag name verbatim.
+    * Names ONLY a separate or future FEATURE / capability in prose, with no
+      concrete file, dependency, or flag attached ("Date range filtering",
+      "Bulk export — future", "Multi-currency support later") → emit NOTHING.
+      Do NOT invent a file-glob from the feature's words (no
+      \`**/DateRange*\`, no \`**/date-range*\`); a fabricated glob matches the
+      wrong files and produces drift false positives. A future feature with
+      no physical artifact to forbid is simply out of the verifier's reach —
+      drop it rather than guess.
 
 - "Bypass" / "skip auth" / "disable auth" env-var phrasings (e.g.
   "tests may set <FLAG>=true; never in production") →
@@ -1079,22 +1209,35 @@ per recorded decision.
 
 - \`category\` is one of: data-store, communication-pattern, messaging,
   architecture-style, auth-strategy, frontend-framework, runtime,
-  deployment-platform, package-manager, build-system.
+  deployment-platform, package-manager, build-system, persistence-strategy.
 - \`chosen\` is the positive choice, mapped to the category's known value
   set (data-store → postgres | mysql | mongodb | sqlite | dynamodb |
   redis-primary | bigquery | cassandra | cockroachdb; messaging → kafka |
   rabbitmq | sqs | nats | eventbridge | gcp-pubsub | azure-servicebus |
   redis-pubsub | none; communication-pattern → rest | grpc | graphql |
   trpc; build-system → vite | webpack | turbopack | esbuild | rollup |
-  parcel | tsc-only).
+  parcel | tsc-only; persistence-strategy → dedicated-column |
+  metadata-json).
 - \`reason\` captures the WHY verbatim from the ADR's context /
   consequences. The verifier surfaces it in drift messages.
 - \`rejected-alternatives\` (optional) lists alternatives the spec
   explicitly rejected; they compound with the alternative set the
   detector already derives from the category.
+- \`consequences\` (optional) is a list of the trade-offs / implications
+  the decision carries (one quoted string per consequence). It rides as
+  structured ADR context for drift messages — it is NOT an obligation the
+  verifier checks, so put a verifiable assertion in its own artifact, not
+  here.
+- STORAGE / DATA-MODELING decisions use \`category persistence-strategy\`:
+  "store setting X as its own column (dedicated-column) vs. inside the
+  metadata JSON blob (metadata-json)". Use the field name in the identity
+  (\`persistence.<field>\`). These are STRUCTURAL — emit them as an
+  architecture-decision, never as an \`unenforceable-obligation\`. (The
+  value set is dedicated-column | metadata-json, NOT postgres/mysql/etc.)
 - Trigger headings: ADR files, "Decision", "Tech Stack", "Stack",
-  "Architecture", "Data Store". Recognise "we chose X", "decision: use
-  Y", "rejected: Z because".
+  "Architecture", "Data Store", "Storage", "Data Model". Recognise "we
+  chose X", "decision: use Y", "rejected: Z because", "store … as a
+  column", "keep … in metadata".
 - If the prose names a choice OUTSIDE the category's known value set,
   emit an \`unenforceable-obligation\` instead — the detector can only
   verify known values.

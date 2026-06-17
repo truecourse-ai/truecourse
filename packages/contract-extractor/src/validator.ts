@@ -13,7 +13,7 @@
  * so the user can re-run, edit the spec, or fall back to a manual `.tc`.
  */
 
-import { parser, resolver } from '@truecourse/contract-verifier';
+import { parserOhm, resolver } from '@truecourse/contract-verifier';
 import type { MergedArtifact } from './merger.js';
 
 export interface ValidationIssue {
@@ -44,12 +44,14 @@ export function validateMerged(artifacts: MergedArtifact[]): ValidationResult {
   const issues: ValidationIssue[] = [];
 
   // Pass 1: parse each artifact's tcSource individually so we can
-  // attribute parse errors to the exact LLM output.
-  const fileNodes: ReturnType<typeof parser.parseFile>[] = [];
+  // attribute parse errors to the exact LLM output. The strict ohm parser
+  // throws on any unrecognized clause, so a malformed slice surfaces here as
+  // a HARD issue attributed to the exact artifact key.
+  const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   for (const a of artifacts) {
     const key = `${a.kind}:${a.identity}`;
     try {
-      const node = parser.parseFile(`<llm:${key}>`, a.winning.tcSource);
+      const node = parserOhm.parseTcFile(`<llm:${key}>`, a.winning.tcSource);
       if (node.statements.length === 0) {
         issues.push({
           artifactKey: key,

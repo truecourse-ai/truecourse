@@ -1,9 +1,14 @@
-// Top-level barrel — for now exports just the parser so consumers can
-// load `.tc` files. Resolver, lifters, extractors, comparator, reporter
-// follow in subsequent phases.
+// Top-level barrel for the contract verifier.
+//
+// `parser` surfaces the generic statement-tree AST *types* (FileNode /
+// StatementNode / HeadToken / …) shared across the pipeline. `parserOhm` is
+// the strict ohm front-end that turns `.tc` source into that tree
+// (`parseTcFile` / `parseAndResolve`) — the only `.tc` parser in the codebase.
 
-export * as parser from './parser/index.js';
+export type * as parser from './parser/index.js';
+export * as parserOhm from './parser-ohm/index.js';
 export * as resolver from './resolver/index.js';
+export * as conformance from './conformance/index.js';
 export * as extractor from './extractor/index.js';
 export * as comparator from './comparator/index.js';
 export * as types from './types/index.js';

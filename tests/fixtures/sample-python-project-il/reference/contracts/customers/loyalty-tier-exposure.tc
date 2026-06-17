@@ -1,0 +1,15 @@
+// Read-path field exposure: a customer's `loyalty_tier` must travel on the
+// public-profile read path -- it is included in the read projection (the
+// `.values(...)` column set the profile query asks for) AND returned in the
+// API response shape. The exposure site is `read_public_profile` /
+// `render_public_profile` in code/app/services/customers_profile.py. This is
+// the reliably code-derivable core of "the tier reaches the consumer" -- a
+// projection + response SITE, not prop threading through named files.
+
+field-exposure customer.loyalty-tier-exposed {
+  origin "reference/specs/modules/customers/data.md" "Customer read projection" 43..50
+  field Entity:Customer.loyalty_tier
+  via query-select
+  via api-response
+  in read_public_profile
+}

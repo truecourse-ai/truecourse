@@ -60,6 +60,31 @@ const SKIP_DIRS = new Set([
   '.cache', '.truecourse', '__pycache__', '.venv', 'venv', '.mypy_cache',
 ]);
 
+/**
+ * True for a test/spec source file. Test files carry MOCKS — a stubbed
+ * `HttpResponse.json({ id })` handler, a fake `select`, a throwaway constant —
+ * that masquerade as real implementation and produce false code-side artifacts
+ * (a mock response read as a real field exposure, a test double read as a real
+ * route). Every code-side extractor reads production code only; the operation
+ * extractor already excludes these (see `extractor/index.ts`), and this shared
+ * walker applies the same rule to every extractor built on it. Covers the
+ * JS/TS (`*.test.ts`, `*.spec.tsx`, `__tests__/`) and Python (`test_*.py`,
+ * `*_test.py`, `__tests__/`) conventions — matched on the file's BASENAME and a
+ * `__tests__` path segment (matching the operation extractor's `isTestFile`).
+ * A bare `tests/` directory is intentionally NOT matched: it is too broad (a
+ * project — or this repo's own fixture tree — may legitimately keep production
+ * sources under a `tests/` ancestor), and the convention the codebase already
+ * enforces keys on `__tests__` + the test/spec basename.
+ */
+function isTestFile(filePath: string): boolean {
+  const parts = filePath.replace(/\\/g, '/').split('/');
+  const fileName = parts[parts.length - 1] ?? '';
+  if (/\.(test|spec)\.[mc]?[jt]sx?$/.test(fileName)) return true;
+  if (/^test_.*\.py$/.test(fileName) || /_test\.py$/.test(fileName)) return true;
+  if (parts.includes('__tests__')) return true;
+  return false;
+}
+
 export function languageForFile(filePath: string): SupportedLanguage | null {
   return EXT_TO_LANG[path.extname(filePath)] ?? null;
 }
@@ -94,6 +119,9 @@ export async function eachParsedSource(
         continue;
       }
       if (!entry.isFile()) continue;
+      // Test/spec files carry mocks that masquerade as real implementation —
+      // every code-side extractor reads production code only.
+      if (isTestFile(full)) continue;
       const lang = EXT_TO_LANG[path.extname(entry.name)];
       if (!lang) continue;
       let source: string;

@@ -78,6 +78,9 @@ export type ArtifactKind =
   | 'ForbiddenArtifact'
   | 'NamedConstant'
   | 'ArchitectureDecision'
+  | 'ValidationRule'
+  | 'Fallback'
+  | 'FieldExposure'
   | 'UnenforceableObligation'
   // Forward references that resolve to artifacts we don't yet implement
   // (e.g. `PerformanceSLA`); kept open so unresolved references type-check.
@@ -378,7 +381,14 @@ export type ArchitectureCategory =
   | 'runtime'
   | 'deployment-platform'
   | 'package-manager'
-  | 'build-system';
+  | 'build-system'
+  // How a per-feature setting/field is persisted: as a first-class schema
+  // column vs. a key inside a JSON `metadata` blob. Captures a
+  // data-modeling/storage-strategy decision (an ADR-grade choice) without
+  // being specialized to any one feature. Canonical `chosen` values are
+  // `dedicated-column` | `metadata-json`, though the category accepts any
+  // ident the same way every other architecture category does.
+  | 'persistence-strategy';
 
 export interface ArchitectureDecisionContract {
   category: ArchitectureCategory;
@@ -390,6 +400,14 @@ export interface ArchitectureDecisionContract {
   /** Alternatives the spec explicitly rejected. Compounded with the
    *  detector's auto-derived alternative set. */
   rejectedAlternatives?: string[];
+  /**
+   * ADR consequences — the trade-offs/implications the decision carries
+   * ("queries on this field can't use an index", "schema migration
+   * required to add it"). A structured field, NOT an enforceable
+   * obligation: it rides along for documentation/drift-message context and
+   * is never diffed against code. Empty/absent when the ADR records none.
+   */
+  consequences?: string[];
   /** Narrows where the detector runs when the claim is repo-partial. */
   scope?: { pathGlob: string };
 }
@@ -487,6 +505,131 @@ export type LiteralValue =
   | { kind: 'parameter';  index?: number; name?: string };
 
 // ---------------------------------------------------------------------------
+// ValidationRule — conditional field-requiredness ("required-when")
+// ---------------------------------------------------------------------------
+//
+// Models a standalone, reusable input-validation rule of the shape
+// "field <target> is REQUIRED | OPTIONAL | FORBIDDEN WHEN <predicate over
+// some setting/entity field> [and the actor/role is <X>]". It generalizes
+// an operation precondition into a free-standing rule not tied to one HTTP
+// operation — the same setting-gated requiredness can govern many handlers.
+//
+// The `when` predicate reuses the QueryRule `Predicate` vocabulary so a
+// setting condition like `eq eventType.requiresReason "MANDATORY"` is
+// expressed with the same algebra as a query filter — no new comparison
+// grammar. The code-side extractor recognizes the
+// read-setting → branch → require/throw shape and emits this contract.
+
+export interface ValidationRuleContract {
+  /** The input/field identifier that becomes required/optional/forbidden. */
+  target: string;
+  /**
+   * The condition under which `effect` applies — a predicate over a
+   * setting/entity field. Reuses the QueryRule predicate algebra
+   * (`eq`/`neq`/`in`/`is-null`/…). `column` carries the setting field
+   * (`{table?, column}`); for an `Entity:E.field` predicate the entity is
+   * the table and the field is the column.
+   */
+  when: Predicate;
+  /** Optional actor/role scope (e.g. `host`, `attendee`, `any`). */
+  actor?: string;
+  /** What the rule asserts about `target` when `when` holds. */
+  effect: 'required' | 'optional' | 'forbidden';
+  /** Optional error contract emitted when the rule is violated. */
+  onViolation?: { status: number; errorCode: string };
+}
+
+// ---------------------------------------------------------------------------
+// Fallback — a null/absent → default RUNTIME coalescing rule
+// ---------------------------------------------------------------------------
+//
+// Models the GENERAL "when <target> is null/absent, fall back to
+// <default-value>" rule that lives in CODE, not in a schema. It captures
+// the runtime coalescing site — `x ?? DEFAULT`, `const v = x ?? DEFAULT`,
+// `if (x == null) x = DEFAULT`, a default parameter `(x = DEFAULT)` — as
+// distinct from a schema/DB column default (which is a FieldContract.default
+// on an Entity). The difference matters: a schema default is applied at
+// persistence; a fallback is applied at read/use time and is the thing that
+// silently changes behaviour when the coalescing literal drifts.
+//
+// `target` is either an entity field (`{ entity, field }`) or a bare input
+// identifier (`{ field }`, entity undefined) — the same dual shape the
+// validation-rule target admits, kept general across features/ORMs.
+//
+// `defaultValue` reuses the QueryRule `LiteralValue` vocabulary so a
+// string/number/boolean/null/identifier default is expressed with one
+// literal algebra shared across kinds — no new value grammar. The code-side
+// extractor recognizes the null-coalescing / guarded-default shapes and
+// emits this contract; the comparator diffs the default literal so drifts of
+// the "fallback flipped from FREE to PAID" shape get caught.
+
+export interface FallbackContract {
+  /**
+   * What gets coalesced. `field` is the field/input identifier; `entity` is
+   * set only when the target is an entity field (`Entity:E.field`), left
+   * undefined for a bare input ident.
+   */
+  target: { entity?: ArtifactRef; field: string };
+  /**
+   * The condition that triggers the fallback. `absent` covers the
+   * undefined/missing-key/optional-chaining case; `null` covers an explicit
+   * null. `null-or-absent` is the nullish case (`?? ` / `== null`) that
+   * matches either — the most common in practice.
+   */
+  trigger: 'absent' | 'null' | 'null-or-absent';
+  /** The value substituted when `trigger` holds. */
+  defaultValue: LiteralValue;
+}
+
+// ---------------------------------------------------------------------------
+// FieldExposure — a field that MUST be exposed on a read path
+// ---------------------------------------------------------------------------
+//
+// Models the GENERAL "field <Entity>.<field> is included on the read path"
+// obligation — the clean, reliably code-derivable core of "this value reaches
+// the consumer". Two exposure channels, either or both:
+//
+//   - query-select  — the field appears in a data-access PROJECTION: an ORM
+//                      select/column set the read query asks for
+//                      (`select: { <field>: true }`, a returned column list).
+//   - api-response  — the field appears in an API RESPONSE shape: a key on the
+//                      object a handler serializes back to the caller
+//                      (`res.json({ <field> })`, a returned response literal).
+//
+// This is deliberately bounded to what a deterministic extractor can prove
+// from a projection/response site. It does NOT attempt to trace a prop being
+// threaded through named files or rendered in a component — that signal is
+// fragile and out of scope.
+//
+// `target` reuses the dual shape `Fallback`/`ValidationRule` use: an entity
+// field (`{ entity, field }` from `Entity:E.field`) or a bare field ident
+// (`{ field }`). `exposedVia` is the set of channels (order-insensitive,
+// deduped). `through` is the optional operation/query the field is exposed
+// in — a cross-reference when the spec names one, a bare ident otherwise.
+
+export interface FieldExposureContract {
+  /**
+   * The field that must be exposed. `field` is the field name; `entity` is
+   * set only when the target is an entity field (`Entity:E.field`), left
+   * undefined for a bare field ident.
+   */
+  target: { entity?: ArtifactRef; field: string };
+  /**
+   * How the field is exposed — one or more channels. `query-select` is an
+   * ORM projection / selected column set; `api-response` is an API response
+   * shape. Kept as a set so a field exposed on both paths carries both.
+   */
+  exposedVia: ('query-select' | 'api-response')[];
+  /**
+   * Optional: the operation/query the field is exposed through. An
+   * `ArtifactRef` when the spec binds it to a named Operation/QueryRule, a
+   * bare ident (the handler/query name) otherwise. Absent when the exposure
+   * is not tied to one named site.
+   */
+  through?: ArtifactRef | { ident: string };
+}
+
+// ---------------------------------------------------------------------------
 // Selector expressions (for cross-cutting `applies-to` / selectors)
 // ---------------------------------------------------------------------------
 
@@ -530,6 +673,9 @@ export type Artifact =
   | (ArtifactBase & { kind: 'ForbiddenArtifact';        contract: ForbiddenArtifactContract })
   | (ArtifactBase & { kind: 'NamedConstant';            contract: NamedConstantContract })
   | (ArtifactBase & { kind: 'ArchitectureDecision';     contract: ArchitectureDecisionContract })
+  | (ArtifactBase & { kind: 'ValidationRule';           contract: ValidationRuleContract })
+  | (ArtifactBase & { kind: 'Fallback';                 contract: FallbackContract })
+  | (ArtifactBase & { kind: 'FieldExposure';            contract: FieldExposureContract })
   | (ArtifactBase & { kind: 'UnenforceableObligation';  contract: UnenforceableObligationContract });
 
 // ---------------------------------------------------------------------------

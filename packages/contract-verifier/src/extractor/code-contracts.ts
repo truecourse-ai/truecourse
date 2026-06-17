@@ -13,9 +13,13 @@ import {
   extractOperationsFromDir,
   extractEnumsFromDir,
   extractConstantsFromDir,
+  extractValidationRulesFromDir,
+  extractFallbacksFromDir,
+  extractFieldExposuresFromDir,
   extractQueriesFromDir,
   extractEffectsFromDir,
   extractEntitiesFromDir,
+  extractPersistenceStrategiesFromDir,
   extractComputedFieldsFromDir,
   extractStateFieldsFromDir,
   extractStateMachineFacts,
@@ -27,9 +31,13 @@ import {
   type ExtractedOperation,
   type ExtractedEnum,
   type ExtractedConstant,
+  type ExtractedValidationRule,
+  type ExtractedFallback,
+  type ExtractedFieldExposure,
   type ExtractedQuery,
   type ExtractedEffect,
   type ExtractedEntity,
+  type ExtractedPersistenceStrategy,
   type ExtractedComputedField,
   type ExtractedStateField,
   type StateMachineFacts,
@@ -45,9 +53,16 @@ export interface CodeContractSet {
   operations(): Promise<ExtractedOperation[]>;
   enums(): Promise<ExtractedEnum[]>;
   constants(): Promise<ExtractedConstant[]>;
+  validationRules(): Promise<ExtractedValidationRule[]>;
+  fallbacks(): Promise<ExtractedFallback[]>;
+  /** Fields exposed on a read path — included in an ORM select projection
+   *  and/or returned in an API response shape. */
+  fieldExposures(): Promise<ExtractedFieldExposure[]>;
   queries(): Promise<ExtractedQuery[]>;
   effects(): Promise<ExtractedEffect[]>;
   entities(): Promise<ExtractedEntity[]>;
+  /** Per-field storage strategy: dedicated schema column vs. metadata-JSON key. */
+  persistenceStrategies(): Promise<ExtractedPersistenceStrategy[]>;
   /** Per-file entity facts (assignments, constructions, lowercase calls). */
   entityFacts(): Promise<EntityFacts>;
   computedFields(): Promise<ExtractedComputedField[]>;
@@ -75,9 +90,13 @@ export function extractCodeContracts(codeDir: string): CodeContractSet {
     operations: memo(() => extractOperationsFromDir(codeDir)),
     enums: memo(() => extractEnumsFromDir(codeDir)),
     constants: memo(() => extractConstantsFromDir(codeDir)),
+    validationRules: memo(() => extractValidationRulesFromDir(codeDir)),
+    fallbacks: memo(() => extractFallbacksFromDir(codeDir)),
+    fieldExposures: memo(() => extractFieldExposuresFromDir(codeDir)),
     queries: memo(() => extractQueriesFromDir(codeDir)),
     effects: memo(() => extractEffectsFromDir(codeDir)),
     entities: memo(() => extractEntitiesFromDir(codeDir)),
+    persistenceStrategies: memo(() => extractPersistenceStrategiesFromDir(codeDir)),
     entityFacts: memo(() => extractEntityFacts(codeDir)),
     computedFields: memo(() => extractComputedFieldsFromDir(codeDir)),
     stateFields: memo(() => extractStateFieldsFromDir(codeDir)),
