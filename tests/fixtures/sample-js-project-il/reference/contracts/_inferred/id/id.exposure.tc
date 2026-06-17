@@ -1,0 +1,8 @@
+field-exposure id.exposure {
+  // inferred — code exposes `id` on a read path (query-select + api-response) but no spec records this exposure
+  inferred-from "src/handlers/widget-handler.ts" 22..22
+  confidence high
+  field id
+  via query-select
+  via api-response
+}

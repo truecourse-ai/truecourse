@@ -98,6 +98,16 @@ function liftPredicateBlock(stmts: StatementNode[]): Predicate[] {
   return out;
 }
 
+/**
+ * Lift a single predicate statement into a typed `Predicate`. Exported so
+ * other kinds that reuse the predicate algebra (e.g. ValidationRule's
+ * `when` clause) parse conditions with the exact same vocabulary. Returns
+ * null when the statement head isn't a predicate keyword.
+ */
+export function liftPredicateStmt(stmt: StatementNode): Predicate | null {
+  return liftPredicate(stmt);
+}
+
 function liftPredicate(stmt: StatementNode): Predicate | null {
   const h = stmt.head;
   if (h.length === 0 || h[0].kind !== 'ident') return null;

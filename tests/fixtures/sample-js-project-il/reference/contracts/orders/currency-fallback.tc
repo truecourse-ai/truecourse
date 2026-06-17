@@ -1,0 +1,13 @@
+// Runtime null/absent -> default coalescing (DIVERGENT case): an order with no
+// recorded settlement currency is billed in USD. This is a code-side fallback
+// read at use time. The default SHOULD be the named constant
+// `DEFAULT_CURRENCY` in code/src/services/orders.settlement.service.ts
+// (resolveSettlementCurrency), but that code reads `order.currency` straight
+// through with no coalescing, so the fallback is never applied.
+
+fallback order.currency-default {
+  origin "reference/specs/modules/orders/data.md" "Settlement currency fallback" 12..16
+  target currency
+  when null-or-absent
+  default DEFAULT_CURRENCY
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
+import { parseTcFile as parseFile } from '../../packages/contract-verifier/src/parser-ohm/index.js';
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 import type { QueryRuleContract } from '../../packages/contract-verifier/src/types/index.js';
 

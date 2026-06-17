@@ -1,0 +1,16 @@
+// Conditional field-requiredness: a gold customer downgrading their own
+// loyalty tier must supply a reason. The `when` clause reuses the query-rule
+// predicate vocabulary (`eq <table.col> <value>`); the guard lives in
+// code/app/services/customers_preferences.py (validate_downgrade).
+
+validation-rule customer.downgrade-reason-required-when-gold {
+  origin "reference/specs/modules/customers/data.md" "Loyalty downgrade" 17..23
+  target downgrade_reason
+  when eq customer.loyalty_tier "gold"
+  actor customer
+  effect required
+  on-violation {
+    status 400
+    error-code downgrade_reason_required
+  }
+}

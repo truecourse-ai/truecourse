@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
-import { parseFile as parseTc } from '../../packages/contract-verifier/src/parser/index.js';
+import { parseTcFile as parseTc } from '../../packages/contract-verifier/src/parser-ohm/index.js';
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 import { extractRawSqlQueriesFromFile } from '../../packages/contract-verifier/src/extractor/query/raw-sql.js';
 import { extractKnexQueriesFromFile } from '../../packages/contract-verifier/src/extractor/query/knex.js';

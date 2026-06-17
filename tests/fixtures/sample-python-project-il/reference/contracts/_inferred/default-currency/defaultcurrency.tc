@@ -1,0 +1,7 @@
+constant DEFAULT_CURRENCY {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/services/orders_settlement.py" 14..14
+  confidence high
+  type string
+  expected-value "USD"
+}

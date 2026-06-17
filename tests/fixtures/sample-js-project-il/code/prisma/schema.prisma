@@ -15,5 +15,9 @@ model Customer {
   name        String
   loyaltyTier String   @default("standard")
   status      String   @default("active")
+  // Per-customer preference flags that don't (yet) warrant their own
+  // first-class column live as keys inside this free-form JSON blob — read
+  // through `customer.metadata.<key>` in customers.preferences.service.ts.
+  metadata    Json?
   createdAt   DateTime @default(now())
 }

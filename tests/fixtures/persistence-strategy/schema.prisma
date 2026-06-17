@@ -1,0 +1,25 @@
+// Realistic event-type model. Some per-event settings are first-class
+// columns; others are kept inside a free-form `metadata` JSON blob (see
+// event-type-service.ts) rather than promoted to their own column.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model EventType {
+  id                         String   @id @default(cuid())
+  title                      String
+  // requiresCancellationReason is a first-class column: it gates a hot-path
+  // validation and needs to be queryable/indexable.
+  requiresCancellationReason Boolean  @default(false)
+  slug                       String   @unique
+  // Free-form per-event settings that don't (yet) warrant their own column
+  // live here as JSON keys.
+  metadata                   Json?
+  createdAt                  DateTime @default(now())
+}

@@ -16,7 +16,15 @@
  */
 
 import path from 'node:path';
-import type { ArchitectureCategory, ArtifactKind, LiteralValue, Predicate } from '../types/index.js';
+import type {
+  ArchitectureCategory,
+  ArtifactKind,
+  FallbackContract,
+  FieldExposureContract,
+  LiteralValue,
+  Predicate,
+  ValidationRuleContract,
+} from '../types/index.js';
 
 export type Confidence = 'high' | 'medium' | 'low';
 
@@ -96,6 +104,35 @@ export type InferredDecision =
       statesEnum: string;
       states: string[];
       entity: string | null;
+    })
+  | (InferredBase & {
+      kind: 'ValidationRule';
+      target: string;
+      /** The condition under which `effect` applies — the QueryRule predicate
+       *  algebra, reused verbatim (`when eq <table.col> <value>`). */
+      when: Predicate;
+      actor?: string;
+      effect: ValidationRuleContract['effect'];
+      onViolation?: ValidationRuleContract['onViolation'];
+    })
+  | (InferredBase & {
+      kind: 'Fallback';
+      /** The coalesced field/input identifier (bare — the inferer does not
+       *  reconstruct an entity binding from a runtime coalescing site). */
+      field: string;
+      trigger: FallbackContract['trigger'];
+      /** The default value substituted when `trigger` holds — the QueryRule
+       *  LiteralValue vocabulary, reused verbatim. */
+      defaultValue: LiteralValue;
+    })
+  | (InferredBase & {
+      kind: 'FieldExposure';
+      /** The exposed field identifier (bare — the inferer does not reconstruct
+       *  an entity binding from a projection/response site). */
+      field: string;
+      /** The channels the field is exposed on (`query-select`/`api-response`),
+       *  deduped and ordered by the extractor. */
+      exposedVia: FieldExposureContract['exposedVia'];
     });
 
 export interface RenderedArtifact {
@@ -222,6 +259,62 @@ function renderBody(d: InferredDecision): string {
         `  observed-states [${d.states.join(', ')}]\n}\n`
       );
     }
+    case 'ValidationRule': {
+      // `when` reuses the QueryRule predicate algebra verbatim — the same
+      // `renderPredicate` used for query-rule `required`/`forbidden`, here on
+      // one line (`when eq <table.col> <value>`).
+      const actor = d.actor ? `  actor ${d.actor}\n` : '';
+      const onViolation = d.onViolation
+        ? `  on-violation {\n    status ${d.onViolation.status}\n    error-code ${d.onViolation.errorCode}\n  }\n`
+        : '';
+      return (
+        `validation-rule ${d.identity} {\n${provenanceLines(d)}` +
+        `  target ${d.target}\n` +
+        `  when ${renderPredicate(d.when)}\n` +
+        actor +
+        `  effect ${d.effect}\n` +
+        onViolation +
+        `}\n`
+      );
+    }
+    case 'Fallback': {
+      // `default` reuses the constant inline-value forms (string/number/bool/
+      // null/ident) — the same grammar a `fallback`'s `default` accepts. The
+      // target is a bare field ident (no entity binding recovered from a
+      // runtime coalescing site).
+      return (
+        `fallback ${d.identity} {\n${provenanceLines(d)}` +
+        `  target ${d.field}\n` +
+        `  when ${d.trigger}\n` +
+        `  default ${renderFallbackDefault(d.defaultValue)}\n}\n`
+      );
+    }
+    case 'FieldExposure': {
+      // `field` is a bare field ident (no entity binding recovered from a
+      // projection/response site). `via` repeats once per channel, in the
+      // extractor's deterministic order (query-select before api-response).
+      const via = d.exposedVia.map((ch) => `  via ${ch}\n`).join('');
+      return (
+        `field-exposure ${d.identity} {\n${provenanceLines(d)}` +
+        `  field ${d.field}\n` +
+        via +
+        `}\n`
+      );
+    }
+  }
+}
+
+/** Render a fallback default per the `FbkValue` grammar
+ *  (string/number/true/false/null/ident). An identifier default is the bare
+ *  named constant; a parameter is degenerate here and falls back to null. */
+function renderFallbackDefault(v: LiteralValue): string {
+  switch (v.kind) {
+    case 'string':     return `"${escapeStr(v.value)}"`;
+    case 'number':     return String(v.value);
+    case 'boolean':    return String(v.value);
+    case 'null':       return 'null';
+    case 'identifier': return v.ref;
+    case 'parameter':  return 'null';
   }
 }
 

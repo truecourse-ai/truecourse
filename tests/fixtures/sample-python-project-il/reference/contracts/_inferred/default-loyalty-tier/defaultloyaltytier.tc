@@ -1,0 +1,7 @@
+constant DEFAULT_LOYALTY_TIER {
+  // inferred — policy constant defined in code but documented in no spec
+  inferred-from "app/services/customers_preferences.py" 14..14
+  confidence high
+  type string
+  expected-value "standard"
+}
