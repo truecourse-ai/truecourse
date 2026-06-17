@@ -72,7 +72,7 @@ export function propagateCrossCuttingTags(
   }
 
   return artifacts.map((artifact) => {
-    if (artifact.kind !== 'operation') return artifact;
+    if (artifact.kind !== 'Operation') return artifact;
     const slice = findSliceForFragment(artifact, sliceLookup, slices);
     if (!slice) return artifact;
 

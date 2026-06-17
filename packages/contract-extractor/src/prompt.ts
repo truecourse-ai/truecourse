@@ -161,6 +161,20 @@ operation GET "/api/orders/export" {
   }
 }
 
+// Path parameters use a FLAT \`path-param <name>: <type>\` statement inside
+// request{} — NOT a nested \`path { … }\` block. Only \`query\` and \`body\` are
+// nested blocks; \`path-param\` and \`header\` are flat one-line statements.
+operation POST "/api/orders/{id}/pay" {
+  origin SPEC.md "POST /api/orders/{id}/pay" 130..140
+  request {
+    path-param id: uuid
+    header Idempotency-Key required
+  }
+  response 2xx on success {
+    effect emits Effect:order.paid
+  }
+}
+
 entity Order {
   origin SPEC.md "Entities/Order" 60..67
   field id: uuid {
