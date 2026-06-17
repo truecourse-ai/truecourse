@@ -20,6 +20,3 @@ assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
 .claude/
-
-# Internal EE planning docs — kept locally, never committed
-docs/EE_*.md
