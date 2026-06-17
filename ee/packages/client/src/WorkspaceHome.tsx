@@ -12,19 +12,9 @@ import type {
   WorkspaceRunsResponse,
   WorkspaceRunItem,
 } from '@truecourse/shared';
+import { formatRelativeTime } from '@truecourse/shared';
 import { getJson } from './api';
 
-function timeAgo(iso: string | null): string {
-  if (!iso) return 'never';
-  const ms = Date.now() - Date.parse(iso);
-  if (Number.isNaN(ms)) return '—';
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 const DOT: Record<WorkspaceRunItem['conclusion'], string> = {
   success: 'bg-emerald-500',
@@ -79,7 +69,7 @@ export default function WorkspaceHome() {
       kind: 'blocked',
       text: `${r.repoFullName} · PR #${r.prNumber} blocked — ${r.addedCount} new drift`,
       href: `https://github.com/${r.repoFullName}/pull/${r.prNumber}`,
-      when: timeAgo(r.createdAt),
+      when: formatRelativeTime(r.createdAt),
     })),
     ...(data?.repos ?? [])
       .filter((r) => r.drift > 0)
@@ -184,7 +174,7 @@ export default function WorkspaceHome() {
                         {r.repoFullName} <span className="text-muted-foreground">#{r.prNumber}</span>
                       </span>
                       <span className="text-[11px] text-muted-foreground">
-                        +{r.addedCount}/-{r.resolvedCount} · {timeAgo(r.createdAt)}
+                        +{r.addedCount}/-{r.resolvedCount} · {formatRelativeTime(r.createdAt)}
                       </span>
                     </a>
                   </li>
@@ -220,7 +210,7 @@ export default function WorkspaceHome() {
                   <span className="flex items-center gap-4 text-xs text-muted-foreground">
                     <span>{r.violations} viol</span>
                     <span>{r.drift ? `${r.drift} drift` : '—'}</span>
-                    <span>{timeAgo(r.lastAnalyzed)}</span>
+                    <span>{formatRelativeTime(r.lastAnalyzed)}</span>
                     <span aria-hidden>→</span>
                   </span>
                 </Link>

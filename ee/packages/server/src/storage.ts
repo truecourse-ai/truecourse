@@ -5,8 +5,9 @@
  * project registry, contracts, specs, and the LLM-stage caches — reads and
  * writes server-side instead of the customer's `.truecourse/` tree.
  *
- * Called once at boot when `DATABASE_URL` is set (the shared `ee-db`). The blob
- * backend is selected from `BLOB_STORE` (azure | s3 | postgres | fs).
+ * Called once at boot when `DATABASE_URL` is set (the shared `ee-db`). All
+ * content — including bulky artifacts — is content-addressed in Postgres; there
+ * is no separate blob backend.
  */
 
 import fs from 'node:fs';

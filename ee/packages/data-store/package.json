@@ -19,7 +19,6 @@
   "dependencies": {
     "@truecourse/core": "workspace:*",
     "@truecourse/ee-db": "workspace:*",
-    "@truecourse/ee-storage": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "drizzle-orm": "^0.45.2"

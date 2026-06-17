@@ -8,19 +8,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { WorkspaceRunItem, WorkspaceRunsResponse } from '@truecourse/shared';
+import { formatRelativeTime } from '@truecourse/shared';
 import { getJson } from './api';
 
-function timeAgo(iso: string | null): string {
-  if (!iso) return 'never';
-  const ms = Date.now() - Date.parse(iso);
-  if (Number.isNaN(ms)) return '—';
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 const DOT: Record<WorkspaceRunItem['conclusion'], string> = {
   success: 'bg-emerald-500',
@@ -96,7 +86,7 @@ export default function PullRequestsPage() {
                     {LABEL[r.conclusion]}
                   </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {timeAgo(r.createdAt)}
+                    {formatRelativeTime(r.createdAt)}
                   </span>
                 </>
               );

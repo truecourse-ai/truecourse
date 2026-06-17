@@ -138,7 +138,9 @@ export function initSentry(): void {
   }
   Sentry.init({
     dsn,
-    environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? 'production',
+    environment:
+      process.env.SENTRY_ENVIRONMENT ??
+      (process.env.TRUECOURSE_DEV ? 'development' : process.env.NODE_ENV ?? 'production'),
     release: process.env.SENTRY_RELEASE,
     sendDefaultPii: false,
     maxValueLength: 4096,
