@@ -82,6 +82,7 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
     expect(forA.map((x) => x.repoFullName)).toEqual(['acme/api', 'acme/web']);
   });
 
+
   it('baseline pointer + drifts from the baseline commit snapshot; null otherwise', async () => {
     const drift: any = {
       id: 'd1',

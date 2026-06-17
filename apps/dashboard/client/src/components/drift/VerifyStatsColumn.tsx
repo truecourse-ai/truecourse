@@ -35,6 +35,11 @@ interface Props {
    * the charts are display-only and filtering lives in the Verify tab instead.
    */
   interactive?: boolean;
+  /**
+   * Wide standalone Analytics tab (vs the narrow Verify aside): lay the kind donut
+   * and severity bars side-by-side in one row at ~2× height.
+   */
+  wide?: boolean;
 }
 
 const tooltipClass =
@@ -87,6 +92,7 @@ export function VerifyStatsColumn({
   onToggleKind,
   onToggleFile,
   interactive = true,
+  wide = false,
 }: Props) {
   if (!state) {
     return (
@@ -166,12 +172,26 @@ export function VerifyStatsColumn({
           </div>
 
           {!diffMode && <DriftTrendChart history={history} />}
-          <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={interactive ? onToggleKind : undefined} />
-          <SeverityBarChart
-            data={{ byCategory: {}, bySeverity, total: source.length }}
-            activeSeverity={filters.severity}
-            onSeverityClick={interactive ? onToggleSeverity : undefined}
-          />
+          {wide ? (
+            <div className="grid grid-cols-2 gap-3">
+              <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={interactive ? onToggleKind : undefined} tall />
+              <SeverityBarChart
+                data={{ byCategory: {}, bySeverity, total: source.length }}
+                activeSeverity={filters.severity}
+                onSeverityClick={interactive ? onToggleSeverity : undefined}
+                tall
+              />
+            </div>
+          ) : (
+            <>
+              <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={interactive ? onToggleKind : undefined} />
+              <SeverityBarChart
+                data={{ byCategory: {}, bySeverity, total: source.length }}
+                activeSeverity={filters.severity}
+                onSeverityClick={interactive ? onToggleSeverity : undefined}
+              />
+            </>
+          )}
           <DriftTopFiles byFile={byFile} activeFile={filters.file} onFileClick={interactive ? onToggleFile : undefined} />
         </>
       </div>

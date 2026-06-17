@@ -24,18 +24,28 @@ import type { DecisionSummary } from './infer-comment.js';
 /** The expensive inference pipeline, abstracted for injection in tests. */
 export interface InferPipeline {
   /** Infer undocumented decisions and persist them under `ref` (`saveContracts`). */
-  infer(repoRoot: string, ref: RepoRef): Promise<DecisionSummary[]>;
+  infer(
+    repoRoot: string,
+    ref: RepoRef,
+    opts?: { reapplyPromotions?: boolean; contractsRef?: RepoRef },
+  ): Promise<DecisionSummary[]>;
 }
 
-const defaultPipeline: InferPipeline = {
-  async infer(repoRoot, ref) {
-    const { infer } = await inferInProcess(repoRoot, { ref });
-    return infer.decisions.map((d) => ({
+export const defaultInferPipeline: InferPipeline = {
+  async infer(repoRoot, ref, opts) {
+    const { infer, decisionPaths } = await inferInProcess(repoRoot, {
+      ref,
+      contractsRef: opts?.contractsRef,
+      reapplyPromotions: opts?.reapplyPromotions,
+    });
+    return infer.decisions.map((d, i) => ({
       kind: d.kind,
       identity: d.identity,
       path: d.codeLoc?.path,
       line: d.codeLoc?.lines?.[0],
       reason: d.reason,
+      // The decision's `.tc` path in `contracts_inferred` — used to promote it.
+      contractPath: decisionPaths[i],
     }));
   },
 };
@@ -52,6 +62,12 @@ export interface InferRequest {
   /** PR head commit — the inferred set is keyed by it. */
   headSha: string;
   prNumber: number;
+  /**
+   * Baseline ref whose authored contracts cover the head when the head stored none
+   * of its own (the warm path — a PR that changed no spec). Lets infer subtract the
+   * same effective contracts the gate verified against.
+   */
+  contractsRef?: RepoRef;
 }
 
 export interface InferResultSummary {
@@ -64,7 +80,7 @@ export async function runInfer(
   deps: InferDeps,
   req: InferRequest,
 ): Promise<InferResultSummary> {
-  const pipeline = deps.pipeline ?? defaultPipeline;
+  const pipeline = deps.pipeline ?? defaultInferPipeline;
   const ref: RepoRef = { repoKey: req.repoFullName, commitSha: req.headSha };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-infer-'));
   try {
@@ -78,7 +94,13 @@ export async function runInfer(
     ]);
     await stripEmbeddedAuth(simpleGit(tmp));
 
-    const decisions = await pipeline.infer(tmp, ref);
+    // PR-head infer: don't re-apply promotions — that would write a partial authored
+    // `contracts` manifest at the head and break the contracts tree/diff. `contractsRef`
+    // (the baseline) supplies coverage when the head stored no contracts of its own.
+    const decisions = await pipeline.infer(tmp, ref, {
+      reapplyPromotions: false,
+      contractsRef: req.contractsRef,
+    });
     return { decisions, commitSha: req.headSha };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

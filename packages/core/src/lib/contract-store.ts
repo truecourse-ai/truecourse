@@ -103,6 +103,19 @@ export interface ContractStore {
     relPath: string,
     commitSha?: string,
   ): Promise<string | null>;
+  /**
+   * Write/overwrite ONE `.tc` in a set (by relative path). The single-file
+   * counterpart to `saveContracts` — used to promote an inferred decision into
+   * the authored `contracts` set without re-snapshotting the whole tree.
+   */
+  putContractFile(
+    ref: RepoRef,
+    kind: ContractKind,
+    relPath: string,
+    content: string,
+  ): Promise<void>;
+  /** Remove ONE `.tc` from a set (by relative path). No-op when absent. */
+  deleteContractFile(ref: RepoRef, kind: ContractKind, relPath: string): Promise<void>;
 
   // --- Workspace scope (enterprise only; always-latest, keyed by org) --------
   // Workspace contracts are generated IN MEMORY from the workspace's canonical
@@ -242,6 +255,23 @@ class FileContractStore implements ContractStore {
     return fs.readFileSync(dest, 'utf-8');
   }
 
+  async putContractFile(
+    ref: RepoRef,
+    kind: ContractKind,
+    relPath: string,
+    content: string,
+  ): Promise<void> {
+    const dest = safeResolve(path.join(ref.repoKey, ...KIND_REL[kind]), relPath);
+    if (!dest) throw new Error(`[contract-store] unsafe contract path: ${relPath}`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, content);
+  }
+
+  async deleteContractFile(ref: RepoRef, kind: ContractKind, relPath: string): Promise<void> {
+    const dest = safeResolve(path.join(ref.repoKey, ...KIND_REL[kind]), relPath);
+    if (dest) fs.rmSync(dest, { force: true });
+  }
+
   // OSS/local has no workspace concept (mirrors the spec store). Writing throws
   // (fail loud — a caller that reached here is mis-wired); reads are empty so an
   // effective-contracts read degrades cleanly to repo-only without special-casing.
@@ -300,6 +330,17 @@ export const readContractFile = (
   relPath: string,
   commitSha?: string,
 ): Promise<string | null> => active.readContractFile(repoKey, kind, relPath, commitSha);
+export const putContractFile = (
+  ref: RepoRef,
+  kind: ContractKind,
+  relPath: string,
+  content: string,
+): Promise<void> => active.putContractFile(ref, kind, relPath, content);
+export const deleteContractFile = (
+  ref: RepoRef,
+  kind: ContractKind,
+  relPath: string,
+): Promise<void> => active.deleteContractFile(ref, kind, relPath);
 
 export const saveWorkspaceContracts = (
   ref: WorkspaceRef,

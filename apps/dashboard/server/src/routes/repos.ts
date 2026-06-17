@@ -5,6 +5,7 @@ import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
+import { readLatest } from '@truecourse/core/lib/analysis-store';
 import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
@@ -68,29 +69,43 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// GET /api/repos/:id - Project details. Uses the same registry-backed
-// `lastAnalyzed` as the list endpoint — both views stay consistent and
-// neither opens PGlite just to read a timestamp.
+// GET /api/repos/:id - Project details. Prefers the registry's cached
+// `lastAnalyzed`, falling back to the persisted analysis timestamp when the
+// registry doesn't track one (the hosted gh_repos-derived registry).
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const entry = await requireRegistryEntry(req.params.id as string);
     let branches: string[] = [];
-    let defaultBranch: string | undefined;
+    // The hosted registry tracks the default branch from gh_repos and has no local
+    // checkout, so only shell out to git when a registry didn't supply it (OSS
+    // local repos). Otherwise simple-git fails on the non-path repo identity and
+    // logs "git unavailable" on every load.
+    let defaultBranch = entry.defaultBranch;
     let isGitRepo = true;
-    try {
-      const git = await getGit(entry.path);
-      const branchSummary = await git.branch();
-      branches = branchSummary.all;
-      defaultBranch = branchSummary.current;
-    } catch (err) {
-      isGitRepo = false;
-      console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
+    if (!defaultBranch) {
+      try {
+        const git = await getGit(entry.path);
+        const branchSummary = await git.branch();
+        branches = branchSummary.all;
+        defaultBranch = branchSummary.current;
+      } catch (err) {
+        isGitRepo = false;
+        console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
+      }
     }
+    // `lastAnalyzed` drives the dashboard's `hasAnalysis` gate (the Violations /
+    // Analytics views render an empty "No analysis yet" state when it's null).
+    // OSS file registries cache it on the entry; the hosted registry (a derived
+    // view of gh_repos) doesn't, so fall back to the timestamp of the actual
+    // persisted analysis — the source of truth — otherwise an analyzed hosted
+    // repo looks "never analyzed" and hides its violations.
+    const lastAnalyzed =
+      entry.lastAnalyzed ?? (await readLatest(entry.path))?.analysis.createdAt ?? null;
     res.json({
       id: entry.slug,
       name: entry.name,
       path: entry.path,
-      lastAnalyzed: entry.lastAnalyzed ?? null,
+      lastAnalyzed,
       branches,
       defaultBranch,
       isGitRepo,

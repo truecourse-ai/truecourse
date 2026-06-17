@@ -34,7 +34,11 @@ export type SpecArtifact =
   | 'scanState'
   | 'verifyState'
   | 'rawClaims'
-  | 'chains';
+  | 'chains'
+  // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
+  // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
+  // (file) and EE (Postgres).
+  | 'inferredDecisions';
 
 /** Pluggable spec store. File-backed by default; EE injects Postgres. */
 export interface SpecStore {

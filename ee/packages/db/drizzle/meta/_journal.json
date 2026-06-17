@@ -8,6 +8,48 @@
       "when": 1781118712104,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781287418095,
+      "tag": "0001_code_quality_analyses",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781293307043,
+      "tag": "0002_code_quality_gate_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781567634807,
+      "tag": "0003_workspace_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781580905895,
+      "tag": "0004_infer_baseline_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781633731621,
+      "tag": "0005_inferred_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781637745484,
+      "tag": "0006_drop_baseline_inferred",
+      "breakpoints": true
     }
   ]
 }

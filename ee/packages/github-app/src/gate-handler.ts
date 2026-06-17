@@ -18,6 +18,7 @@ import type { PullRequestPayload } from './webhook.js';
 import {
   splitRepo,
   postCheck,
+  startCheck,
   createReviewComment,
   listReviewComments,
   findComment,
@@ -28,12 +29,14 @@ import {
   type OctokitClient,
 } from './octokit.js';
 import { detectSpecDocChanges } from './spec-detect.js';
-import { decideGate, type GateSeverity } from './gate.js';
+import { decideGate, decideCodeQuality, type GateSeverity } from './gate.js';
 import {
   GATE_MARKER,
   GATE_CHECK_NAME,
+  CODE_QUALITY_CHECK_NAME,
   renderGateComment,
   gateCheckOutput,
+  cqCheckOutput,
   inlineDriftBody,
 } from './gate-comment.js';
 import {
@@ -46,7 +49,7 @@ import {
 import type { SpecScanPipeline } from './spec-scan.js';
 import type { EmailNotifier } from './email.js';
 import { wantsNotification } from './notifications.js';
-import { contractsDashboardUrl } from './links.js';
+import { contractsDashboardUrl, prSectionUrl } from './links.js';
 
 const GATE_ACTIONS = ['opened', 'synchronize', 'reopened'];
 const MAX_INLINE = 25;
@@ -70,6 +73,8 @@ export interface GateHandlerDeps {
   gateInFlight?: Set<string>;
   /** Email notifier (Resend); set when RESEND_API_KEY is configured. */
   notifier?: EmailNotifier;
+  /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
+  codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
 
 export async function handlePullRequestGate(
@@ -102,12 +107,24 @@ export async function handlePullRequestGate(
   }
   deps.gateInFlight?.add(flightKey);
 
+  // Open both Checks as "in progress" so the PR shows them running while the gate
+  // works (verify + cold contract-gen can take minutes). Completed in the paths
+  // below; the `finally` is a safety net so a crash never leaves a Check running.
+  const gateCheckId = await startCheck(octokit, coords, GATE_CHECK_NAME, eventHeadSha);
+  const cqCheckId = await startCheck(octokit, coords, CODE_QUALITY_CHECK_NAME, eventHeadSha);
+  let gateDone = false;
+  let cqDone = false;
+
   try {
     // Did the PR touch any spec docs? If not, the gate verifies the head's code
     // against the base's resolved contracts (no re-scan). If so, it scans the
     // head for its own contracts (the cold path).
     const specChanged =
       detectSpecDocChanges(await listPrFiles(octokit, coords, prNumber)).length > 0;
+
+    const enableLlmAnalysis = link.workspaceOrgId
+      ? (await deps.codeAnalysisLlm?.(link.workspaceOrgId)) ?? false
+      : false;
 
     const runVerify = deps.runVerify ?? runGateVerify;
     let output: GateVerifyOutput;
@@ -123,6 +140,7 @@ export async function handlePullRequestGate(
           // The repo's linked workspace → verify against EFFECTIVE contracts.
           workspaceOrgId: link.workspaceOrgId,
           specChanged,
+          enableLlmAnalysis,
         },
       );
     } catch (err) {
@@ -133,7 +151,8 @@ export async function handlePullRequestGate(
       await postCheck(octokit, coords, GATE_CHECK_NAME, eventHeadSha, 'neutral', {
         title: 'TrueCourse drift gate error',
         summary: 'The gate could not verify this PR. See server logs.',
-      }).catch(() => undefined);
+      }, gateCheckId).catch(() => undefined);
+      gateDone = true;
       return;
     }
 
@@ -146,7 +165,7 @@ export async function handlePullRequestGate(
     // Where humans go to resolve the head's spec conflicts (neutral case).
     const conflictsUrl =
       decision.neutralReason === 'unresolved-conflicts'
-        ? await contractsDashboardUrl(deps.appUrl, repoFullName, headSha)
+        ? await contractsDashboardUrl(deps.appUrl, repoFullName, prNumber)
         : undefined;
 
     // Authoritative: post the completed Check (anchored to the sha we verified)
@@ -158,7 +177,30 @@ export async function handlePullRequestGate(
       headSha,
       decision.conclusion,
       gateCheckOutput(decision),
+      gateCheckId,
     );
+    gateDone = true;
+
+    // Code Quality: a SECOND independent Check from the PR-head analyze delta,
+    // per the repo's own blocking/threshold config (default block on new high+).
+    const cqDecision = decideCodeQuality(output.codeQualityAdded, {
+      blocking: link.codeQualityBlocking ?? true,
+      minSeverity: link.codeQualityMinSeverity ?? 'high',
+    });
+    try {
+      await postCheck(
+        octokit,
+        coords,
+        CODE_QUALITY_CHECK_NAME,
+        headSha,
+        cqDecision.conclusion,
+        cqCheckOutput(cqDecision),
+        cqCheckId,
+      );
+      cqDone = true;
+    } catch (e) {
+      log.error(`[github-app] code quality check post failed: ${(e as Error).message}`, e);
+    }
 
     // Record the run (idempotency anchor) regardless of comment success.
     let recorded = false;
@@ -184,21 +226,14 @@ export async function handlePullRequestGate(
     // against the baseline snapshot on read — nothing diff-specific is persisted.
 
     // Email — only once the run is recorded, so a webhook redelivery (deduped by
-    // the recorded head sha) can't re-send. A blocking failure notifies of the
-    // new drift; an unresolved-conflicts pause asks the team to resolve the spec.
+    // the recorded head sha) can't re-send. Unresolved conflicts get the
+    // resolve-the-spec notice even when blocking makes the Check fail (its `added`
+    // list is empty — the helpful conflict notice beats a generic drift failure);
+    // otherwise a blocking failure notifies of the new drift.
     const notifyEmails = link.notifyEmails ?? [];
     const prUrl = `https://github.com/${repoFullName}/pull/${prNumber}`;
     if (recorded && notifyEmails.length > 0 && deps.notifier) {
-      if (decision.conclusion === 'failure') {
-        if (wantsNotification(link, 'gateFailure')) {
-          void deps.notifier.sendGateFailure(notifyEmails, {
-            repoFullName,
-            prNumber,
-            prUrl,
-            added: decision.added,
-          });
-        }
-      } else if (decision.neutralReason === 'unresolved-conflicts') {
+      if (decision.neutralReason === 'unresolved-conflicts') {
         if (wantsNotification(link, 'conflicts')) {
           void deps.notifier.sendConflictsNeedResolution(notifyEmails, {
             repoFullName,
@@ -206,6 +241,15 @@ export async function handlePullRequestGate(
             prUrl,
             openConflicts: decision.unresolvedConflicts ?? 0,
             dashboardUrl: conflictsUrl,
+          });
+        }
+      } else if (decision.conclusion === 'failure') {
+        if (wantsNotification(link, 'gateFailure')) {
+          void deps.notifier.sendGateFailure(notifyEmails, {
+            repoFullName,
+            prNumber,
+            prUrl,
+            added: decision.added,
           });
         }
       }
@@ -229,7 +273,17 @@ export async function handlePullRequestGate(
 
     // Cosmetic surfaces — isolated so failures never affect the Check.
     try {
-      const body = renderGateComment(decision, { conflictsUrl, enriched });
+      const [codeQualityUrl, verifyUrl] = await Promise.all([
+        prSectionUrl(deps.appUrl, repoFullName, prNumber, 'codequality'),
+        prSectionUrl(deps.appUrl, repoFullName, prNumber, 'verification'),
+      ]);
+      const body = renderGateComment(decision, {
+        conflictsUrl,
+        enriched,
+        codeQuality: cqDecision,
+        codeQualityUrl,
+        verifyUrl,
+      });
       const existing = await findComment(octokit, coords, prNumber, GATE_MARKER);
       if (existing) await updateComment(octokit, coords, existing.id, body);
       else await createComment(octokit, coords, prNumber, body);
@@ -268,6 +322,20 @@ export async function handlePullRequestGate(
       );
     }
   } finally {
+    // Safety net: never leave a Check stuck "in progress" if an unexpected error
+    // skipped its completion above.
+    if (gateCheckId != null && !gateDone) {
+      await postCheck(octokit, coords, GATE_CHECK_NAME, eventHeadSha, 'neutral', {
+        title: 'TrueCourse drift gate',
+        summary: 'The gate did not complete. See server logs.',
+      }, gateCheckId).catch(() => undefined);
+    }
+    if (cqCheckId != null && !cqDone) {
+      await postCheck(octokit, coords, CODE_QUALITY_CHECK_NAME, eventHeadSha, 'neutral', {
+        title: 'TrueCourse Code Quality',
+        summary: 'The check did not complete. See server logs.',
+      }, cqCheckId).catch(() => undefined);
+    }
     deps.gateInFlight?.delete(flightKey);
   }
 }

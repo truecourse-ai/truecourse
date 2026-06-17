@@ -313,4 +313,48 @@ describe('connect router', () => {
       .expect(200);
     expect(res2.body.runs).toEqual([]);
   });
+
+  it('workspace runs feed shows one row per PR — newest run wins', async () => {
+    await seedInstallation('org_A');
+    await store.linkRepo({
+      repoFullName: 'acme/api',
+      installationId: 100,
+      workspaceOrgId: 'org_A',
+      defaultBranch: 'main',
+      blocking: true,
+      enabled: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    // Two gate runs on the SAME PR (one per pushed commit).
+    await store.recordRun({
+      id: 'run-old',
+      repoFullName: 'acme/api',
+      prNumber: 7,
+      headSha: 'aaaaaaa',
+      baseSha: 'base',
+      conclusion: 'failure',
+      addedCount: 2,
+      resolvedCount: 0,
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.recordRun({
+      id: 'run-new',
+      repoFullName: 'acme/api',
+      prNumber: 7,
+      headSha: 'bbbbbbb',
+      baseSha: 'base',
+      conclusion: 'success',
+      addedCount: 0,
+      resolvedCount: 2,
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    const res = await request(app).get('/api/ee/github/runs').expect(200);
+    // One row for the PR, carrying the latest run's verdict + head.
+    expect(res.body.runs).toHaveLength(1);
+    expect(res.body.runs[0].prNumber).toBe(7);
+    expect(res.body.runs[0].id).toBe('run-new');
+    expect(res.body.runs[0].conclusion).toBe('success');
+  });
 });

@@ -79,9 +79,9 @@ describe('renderGateComment', () => {
 
   it('unresolved-conflicts links to the dashboard when a url is provided', () => {
     const body = renderGateComment(conflicts, {
-      conflictsUrl: 'https://app.tc.dev/repos/acme-api/contracts?commit=abc',
+      conflictsUrl: 'https://app.tc.dev/repos/acme-api?pr=7&section=verification&tab=contracts',
     });
-    expect(body).toContain('[resolve them in the dashboard](https://app.tc.dev/repos/acme-api/contracts?commit=abc)');
+    expect(body).toContain('[resolve them in the dashboard](https://app.tc.dev/repos/acme-api?pr=7&section=verification&tab=contracts)');
   });
 
   it('surfaces below-threshold drift on a passing gate', () => {

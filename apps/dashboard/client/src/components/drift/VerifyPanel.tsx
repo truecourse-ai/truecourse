@@ -8,6 +8,7 @@
 import { ShieldCheck, AlertCircle, Loader2, GitCompare, X } from 'lucide-react';
 import { DriftTypeBadge, driftType, humanizeKind } from './driftType';
 import { EmptyState } from '@/components/ui/empty-state';
+import { FilterBar } from '@/components/ui/filter-bar';
 import type { DriftFilters } from './VerifyStatsColumn';
 import type { ContractDrift, DriftSeverity, VerifyState, VerifyDiff } from '@/lib/api';
 
@@ -131,32 +132,13 @@ function SeverityFilterBar({
   active: DriftSeverity | null;
   onSet: (s: DriftSeverity) => void;
 }) {
-  const present = SEVERITY_ORDER.filter((sev) => drifts.some((d) => d.severity === sev));
-  if (present.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2 text-xs">
-      <span className="shrink-0 text-muted-foreground">Severity:</span>
-      {present.map((sev) => {
-        const isActive = active === sev;
-        const count = drifts.filter((d) => d.severity === sev).length;
-        return (
-          <button
-            key={sev}
-            type="button"
-            onClick={() => onSet(sev)}
-            aria-pressed={isActive}
-            className={`rounded px-1.5 py-0.5 font-medium capitalize transition-colors ${
-              isActive
-                ? `${SEVERITY_TONE[sev]} ring-1 ring-inset ring-current`
-                : 'text-muted-foreground hover:bg-muted/60'
-            }`}
-          >
-            {sev} {count}
-          </button>
-        );
-      })}
-    </div>
-  );
+  const options = SEVERITY_ORDER.filter((sev) => drifts.some((d) => d.severity === sev)).map((sev) => ({
+    key: sev,
+    label: sev,
+    count: drifts.filter((d) => d.severity === sev).length,
+    tone: SEVERITY_TONE[sev],
+  }));
+  return <FilterBar label="Severity" options={options} active={active} onSelect={(k) => onSet(k as DriftSeverity)} />;
 }
 
 export function VerifyPanel({
@@ -203,6 +185,7 @@ export function VerifyPanel({
           filters={filters}
           onClearFilter={onClearFilter}
           onOpenDrift={onOpenDrift}
+          onSetSeverity={onSetSeverity}
           hosted={hosted}
         />
       </div>
@@ -291,6 +274,7 @@ function VerifyDiffView({
   filters,
   onClearFilter,
   onOpenDrift,
+  onSetSeverity,
   hosted = false,
 }: {
   diff: VerifyDiff | null;
@@ -299,6 +283,7 @@ function VerifyDiffView({
   filters: DriftFilters;
   onClearFilter: (target: DriftFilterTarget) => void;
   onOpenDrift: (id: string, pinned: boolean) => void;
+  onSetSeverity?: (s: DriftSeverity) => void;
   hosted?: boolean;
 }) {
   if (isDiffing && !diff) {
@@ -321,13 +306,32 @@ function VerifyDiffView({
       />
     );
   }
-  const added = applyFilters(diff.added, filters);
-  const resolved = applyFilters(diff.resolved, filters);
+  const addedFiltered = applyFilters(diff.added, filters);
+  const resolvedFiltered = applyFilters(diff.resolved, filters);
   const totalChanges = diff.added.length + diff.resolved.length;
-  const shownChanges = added.length + resolved.length;
+  const shownChanges = addedFiltered.length + resolvedFiltered.length;
+
+  // Group the changed drifts by severity — exactly like the normal list — rather
+  // than splitting into added/resolved sections. The section headers always mean
+  // severity; everything here is "added vs baseline" except the resolved set,
+  // which is rendered struck through inline.
+  const combined: Array<{ drift: ContractDrift; isResolved: boolean }> = [
+    ...addedFiltered.map((d) => ({ drift: d, isResolved: false })),
+    ...resolvedFiltered.map((d) => ({ drift: d, isResolved: true })),
+  ];
+  const bySeverity = new Map<DriftSeverity, Array<{ drift: ContractDrift; isResolved: boolean }>>();
+  for (const sev of SEVERITY_ORDER) bySeverity.set(sev, []);
+  for (const item of combined) bySeverity.get(item.drift.severity)?.push(item);
 
   return (
     <div className="flex h-full flex-col">
+      {onSetSeverity && (
+        <SeverityFilterBar
+          drifts={[...diff.added, ...diff.resolved]}
+          active={filters.severity}
+          onSet={onSetSeverity}
+        />
+      )}
       <FilteredBy filters={filters} onClearFilter={onClearFilter} />
       <div className="flex-1 overflow-auto">
         {totalChanges === 0 ? (
@@ -343,58 +347,40 @@ function VerifyDiffView({
             body="Clear the filters to see all added and resolved drifts."
           />
         ) : (
-          <>
-            <DiffSection title="added" count={added.length} tone="bg-red-500/15 text-red-700 dark:text-red-300">
-              {added.map((d) => (
+          SEVERITY_ORDER.filter((sev) => (bySeverity.get(sev) ?? []).length > 0).map((sev) => (
+            <Section
+              key={sev}
+              title={sev}
+              count={(bySeverity.get(sev) ?? []).length}
+              tone={SEVERITY_TONE[sev]}
+            >
+              {(bySeverity.get(sev) ?? []).map(({ drift, isResolved }) => (
                 <DiffRow
-                  key={d.id}
-                  drift={d}
-                  active={d.id === activeDriftId}
-                  onPreview={() => onOpenDrift(d.id, false)}
-                  onPin={() => onOpenDrift(d.id, true)}
+                  key={drift.id}
+                  drift={drift}
+                  isResolved={isResolved}
+                  active={drift.id === activeDriftId}
+                  onPreview={() => onOpenDrift(drift.id, false)}
+                  onPin={() => onOpenDrift(drift.id, true)}
                 />
               ))}
-            </DiffSection>
-            <DiffSection title="resolved" count={resolved.length} tone="bg-green-500/15 text-green-700 dark:text-green-300">
-              {resolved.map((d) => (
-                <DiffRow
-                  key={d.id}
-                  drift={d}
-                  active={d.id === activeDriftId}
-                  onPreview={() => onOpenDrift(d.id, false)}
-                  onPin={() => onOpenDrift(d.id, true)}
-                />
-              ))}
-            </DiffSection>
-          </>
+            </Section>
+          ))
         )}
       </div>
     </div>
   );
 }
 
-function DiffSection({ title, count, tone, children }: { title: string; count: number; tone: string; children: React.ReactNode }) {
-  if (count === 0) return null;
-  return (
-    <div>
-      <div className="sticky top-0 z-10 bg-background">
-        <div className={`flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${tone}`}>
-          <span>{title}</span>
-          <span>{count}</span>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
 function DiffRow({
   drift,
+  isResolved = false,
   active,
   onPreview,
   onPin,
 }: {
   drift: ContractDrift;
+  isResolved?: boolean;
   active: boolean;
   onPreview: () => void;
   onPin: () => void;
@@ -412,14 +398,14 @@ function DiffRow({
       title="Click to preview, double-click to pin"
       className={`flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-4 py-2 text-left text-xs transition-colors ${
         active ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/40'
-      }`}
+      } ${isResolved ? 'opacity-60' : ''}`}
     >
       <div className="flex w-full items-center gap-2">
         <DriftTypeBadge kind={driftType(drift)} />
         <span className="font-mono text-[11px] text-muted-foreground truncate min-w-0 flex-1">{identity}</span>
         {loc && <span className="shrink-0 text-[10px] text-muted-foreground">{loc}</span>}
       </div>
-      <div className="text-foreground line-clamp-2 leading-snug">{drift.obligationKey}</div>
+      <div className={`text-foreground line-clamp-2 leading-snug ${isResolved ? 'line-through' : ''}`}>{drift.obligationKey}</div>
     </button>
   );
 }

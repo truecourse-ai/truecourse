@@ -68,10 +68,10 @@ export function useDiffCheck(repoId: string, onEvent?: OnEvent) {
   }, [repoId, onEvent]);
 
   /** GET — load the persisted diff.json without re-running. */
-  const load = useCallback(async () => {
+  const load = useCallback(async (prNumber?: number) => {
     setError(null);
     try {
-      const result = await api.getDiffCheck(repoId);
+      const result = await api.getDiffCheck(repoId, prNumber);
       setDiffResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load diff check');

@@ -7,8 +7,22 @@
 
 import { useSpec } from './SpecContext';
 
-export function SpecStats() {
+export function SpecStats({
+  diff,
+}: {
+  /** PR / Git-Diff mode: show the delta counts in the same strip instead of base totals. */
+  diff?: { added: number; removed: number; conflicts: number };
+} = {}) {
   const { scan } = useSpec();
+  if (diff) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+        <Stat label="Added" value={diff.added} />
+        <Stat label="Removed" value={diff.removed} />
+        {diff.conflicts > 0 && <Stat label="New conflicts" value={diff.conflicts} highlight />}
+      </div>
+    );
+  }
   if (!scan) return null;
   const hasOpen = scan.openConflicts.length > 0;
   const scannedAt = scan.scannedAt;

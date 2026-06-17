@@ -35,10 +35,24 @@ function compareTopics(a: string, b: string): number {
 interface DecisionsPanelProps {
   activeConflictId: string | null;
   onSelectConflict: (id: string | null) => void;
+  /** PR / Git-Diff mode: decisions aren't per-commit, so there's no PR delta. */
+  diffMode?: boolean;
 }
 
-export function DecisionsPanel({ activeConflictId, onSelectConflict }: DecisionsPanelProps) {
+export function DecisionsPanel({ activeConflictId, onSelectConflict, diffMode = false }: DecisionsPanelProps) {
   const { scan, hydrating, supportsRescan } = useSpec();
+
+  // Decisions are a repo-wide ledger (resolved in the dashboard), not per-commit —
+  // so a PR has no decisions delta. Don't show the full ledger as if it were the PR's.
+  if (diffMode) {
+    return (
+      <EmptyState
+        icon={GitMerge}
+        title="No decisions diff"
+        body="Decisions are repo-wide conflict resolutions made in the dashboard, not changes carried by a PR — so there's nothing to diff here. View them on the base branch."
+      />
+    );
+  }
 
   if (hydrating) {
     return (

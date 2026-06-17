@@ -26,10 +26,17 @@ export interface DecisionSummary {
   path?: string;
   line?: number;
   reason?: string;
+  /** The decision's `.tc` path in the `contracts_inferred` set (for promotion). */
+  contractPath?: string;
 }
 
 export interface InferCommentData {
-  decisions?: DecisionSummary[];
+  /** New decisions the PR introduced — or the full set when there's no baseline (see fellBack). */
+  added?: DecisionSummary[];
+  /** Previously-inferred decisions that no longer appear (the PR documented/removed them). */
+  resolved?: DecisionSummary[];
+  /** No default-branch baseline yet → `added` is the full set, not a true delta. */
+  fellBack?: boolean;
   commitSha?: string;
   /** Deep link to the stored inferred contracts in the dashboard (success). */
   dashboardUrl?: string;
@@ -67,9 +74,10 @@ export function renderInferComment(
     case 'running':
       return head + `### ⏳ Inferring undocumented decisions…`;
     case 'done': {
-      const ds = data.decisions ?? [];
+      const added = data.added ?? [];
+      const resolved = data.resolved ?? [];
       const sha = data.commitSha ? ` (\`${data.commitSha.slice(0, 7)}\`)` : '';
-      const list = ds
+      const list = added
         .slice(0, 10)
         .map(
           (d) =>
@@ -78,15 +86,27 @@ export function renderInferComment(
             (d.reason ? ` — ${d.reason}` : ''),
         )
         .join('\n');
-      const more = ds.length > 10 ? `\n\n…and ${ds.length - 10} more.` : '';
+      const more = added.length > 10 ? `\n\n…and ${added.length - 10} more.` : '';
       const view = data.dashboardUrl
         ? `[view them in the dashboard](${data.dashboardUrl})`
         : 'view them in the dashboard';
+      const heading = data.fellBack
+        ? `### 🔎 ${added.length} undocumented decision${added.length === 1 ? '' : 's'} found`
+        : `### 🔎 ${added.length} new undocumented decision${added.length === 1 ? '' : 's'} on this PR`;
+      const baselineNote = data.fellBack
+        ? `\n\n_No default-branch baseline yet — showing all undocumented decisions._`
+        : '';
+      const resolvedNote =
+        resolved.length > 0
+          ? `\n\n_${resolved.length} previously inferred decision${
+              resolved.length === 1 ? '' : 's'
+            } no longer appear${resolved.length === 1 ? 's' : ''} (resolved)._`
+          : '';
       return (
         head +
-        `### 🔎 ${ds.length} undocumented decision${ds.length === 1 ? '' : 's'} found\n\n` +
+        `${heading}\n\n` +
         `Stored inferred contracts in TrueCourse${sha} — ${view} and ` +
-        `promote them into the spec as appropriate. Nothing was committed to this branch.\n\n${list}${more}`
+        `promote them into the spec as appropriate. Nothing was committed to this branch.${baselineNote}${resolvedNote}\n\n${list}${more}`
       );
     }
     case 'nochange':

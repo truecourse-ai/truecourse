@@ -7,12 +7,25 @@ import {
   handlePullRequestInferOffer,
   handleCommentEditedInfer,
   renderInferComment,
-  INFER_MARKER,
   type InferOfferDeps,
 } from '../../ee/packages/github-app/src/index';
+import { setSpecStore, resetSpecStore, type SpecStore } from '@truecourse/core/lib/spec-store';
 
 let dir: string;
 let store: FileGateStore;
+
+/** Minimal spec store seeded with the baseline commit's inferred decisions. */
+function seedSpecStore(seed: Record<string, unknown>): void {
+  setSpecStore({
+    loadSpec: async (ref, artifact) => seed[`${ref.repoKey}@${ref.commitSha}:${artifact}`] ?? null,
+    loadLatest: async () => null,
+    latestCommit: async () => null,
+    saveSpec: async () => {},
+    saveWorkspaceSpec: async () => {},
+    loadWorkspaceSpec: async () => null,
+    materializesInPlace: false,
+  } as unknown as SpecStore);
+}
 
 beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-infer-'));
@@ -30,6 +43,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  resetSpecStore();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -116,36 +130,57 @@ async function setNotifyEmails(s: FileGateStore, emails: string[]) {
   });
 }
 
-describe('handlePullRequestInferOffer', () => {
-  it('offers inference when the PR changes code', async () => {
+describe('handlePullRequestInferOffer (always auto-runs)', () => {
+  // Stub runInfer so the auto-run path never hits the network.
+  function autoDeps(octokit: any, decisions: any[] = [{ kind: 'Operation', identity: 'GET /x' }]) {
+    let count = 0;
+    const deps = {
+      store,
+      auth: {},
+      octokitFor: () => octokit,
+      runInfer: async () => {
+        count++;
+        return { decisions, commitSha: 'deadbeef' };
+      },
+    } as unknown as InferOfferDeps;
+    return { deps, inferCalls: () => count };
+  }
+
+  it('auto-runs inference when the PR changes code (no checkbox)', async () => {
     const { octokit, calls } = makeOctokit({ files: ['src/app.ts', 'README.md'] });
-    const deps = { store, octokitFor: () => octokit } as unknown as InferOfferDeps;
+    const { deps, inferCalls } = autoDeps(octokit);
     await handlePullRequestInferOffer(deps, prPayload());
-    expect(calls.create).toHaveLength(1);
-    expect(calls.create[0].body).toContain(INFER_MARKER);
+    expect(inferCalls()).toBe(1);
+    const bodies = [...calls.create, ...calls.update].map((c) => c.body);
+    expect(bodies.some((b) => b.includes('undocumented decision') && b.includes('GET /x'))).toBe(true);
+    // No offer checkbox is ever posted.
+    expect(bodies.some((b) => b.includes('- [ ]'))).toBe(false);
   });
 
   it('does nothing when only docs changed', async () => {
     const { octokit, calls } = makeOctokit({ files: ['docs/spec.md'] });
-    const deps = { store, octokitFor: () => octokit } as unknown as InferOfferDeps;
+    const { deps, inferCalls } = autoDeps(octokit);
     await handlePullRequestInferOffer(deps, prPayload());
+    expect(inferCalls()).toBe(0);
     expect(calls.create).toHaveLength(0);
   });
 
-  it('does not clobber a done infer comment on synchronize', async () => {
+  it('re-runs on synchronize, reusing the existing comment', async () => {
     const { octokit, calls } = makeOctokit({
       files: ['src/app.ts'],
-      comments: [botComment(99, renderInferComment('done', { decisions: [] }))],
+      comments: [botComment(99, renderInferComment('done', { added: [] }))],
     });
-    const deps = { store, octokitFor: () => octokit } as unknown as InferOfferDeps;
+    const { deps, inferCalls } = autoDeps(octokit);
     await handlePullRequestInferOffer(deps, prPayload({ action: 'synchronize' }));
+    expect(inferCalls()).toBe(1);
+    // Reuses comment 99 — no new comment created.
     expect(calls.create).toHaveLength(0);
-    expect(calls.update).toHaveLength(0);
+    expect(calls.update.every((u: any) => u.comment_id === 99)).toBe(true);
   });
 
-  it('posts a fork comment for fork PRs', async () => {
+  it('posts a fork comment for fork PRs (no inference)', async () => {
     const { octokit, calls } = makeOctokit({ files: ['src/app.ts'] });
-    const deps = { store, octokitFor: () => octokit } as unknown as InferOfferDeps;
+    const { deps, inferCalls } = autoDeps(octokit);
     await handlePullRequestInferOffer(
       deps,
       prPayload({
@@ -155,18 +190,18 @@ describe('handlePullRequestInferOffer', () => {
         },
       }),
     );
+    expect(inferCalls()).toBe(0);
     expect(calls.create[0].body).toContain('Fork PR');
   });
 
-  it('drops a concurrent offer delivery already in flight', async () => {
+  it('drops a concurrent delivery already in flight', async () => {
     const { octokit, calls } = makeOctokit({ files: ['src/app.ts'] });
-    const deps = {
-      store,
-      octokitFor: () => octokit,
-      offerInFlight: new Set<string>(['acme/api#7#infer']),
-    } as unknown as InferOfferDeps;
+    const { deps, inferCalls } = autoDeps(octokit);
+    (deps as any).offerInFlight = new Set<string>(['acme/api#7#infer']);
     await handlePullRequestInferOffer(deps, prPayload());
+    expect(inferCalls()).toBe(0);
     expect(calls.create).toHaveLength(0);
+    expect(calls.update).toHaveLength(0);
   });
 });
 
@@ -331,5 +366,63 @@ describe('handleCommentEditedInfer', () => {
     );
     await handleCommentEditedInfer(deps, commentPayload());
     expect(calls.infer).toHaveLength(0);
+  });
+
+  it('diffs against the baseline ⇒ only NEW decisions are listed and emailed', async () => {
+    await setNotifyEmails(store, ['a@x.com']);
+    await store.saveBaseline({
+      repoFullName: 'acme/api',
+      commitSha: 'basesha',
+      drifts: null,
+      capturedAt: '2026-01-02T00:00:00.000Z',
+    });
+    // The baseline's inferred set lives in the spec store (at the baseline commit).
+    seedSpecStore({ 'acme/api@basesha:inferredDecisions': [{ kind: 'Operation', identity: 'GET /x' }] });
+    const { octokit, calls } = makeOctokit({ permission: 'write' });
+    const { notifier, calls: notifyCalls } = makeNotifier();
+    const deps = depsWith(
+      octokit,
+      // Head re-infers GET /x (already in baseline) plus a NEW POST /y.
+      async () => ({
+        decisions: [
+          { kind: 'Operation', identity: 'GET /x' },
+          { kind: 'Operation', identity: 'POST /y' },
+        ],
+        commitSha: 'deadbeef',
+      }),
+      { notifier },
+    );
+    await handleCommentEditedInfer(deps, commentPayload());
+    const body = calls.update[1].body;
+    expect(body).toContain('1 new undocumented decision on this PR');
+    expect(body).toContain('POST /y');
+    expect(body).not.toContain('GET /x');
+    expect(body).not.toContain('No default-branch baseline yet');
+    // Email carries only the added decision.
+    expect(notifyCalls.infer).toHaveLength(1);
+    expect(notifyCalls.infer[0].email.decisions).toEqual([
+      { kind: 'Operation', identity: 'POST /y' },
+    ]);
+  });
+
+  it('all head decisions already in baseline ⇒ no-change, no email', async () => {
+    await setNotifyEmails(store, ['a@x.com']);
+    await store.saveBaseline({
+      repoFullName: 'acme/api',
+      commitSha: 'basesha',
+      drifts: null,
+      capturedAt: '2026-01-02T00:00:00.000Z',
+    });
+    seedSpecStore({ 'acme/api@basesha:inferredDecisions': [{ kind: 'Operation', identity: 'GET /x' }] });
+    const { octokit, calls } = makeOctokit({ permission: 'write' });
+    const { notifier, calls: notifyCalls } = makeNotifier();
+    const deps = depsWith(
+      octokit,
+      async () => ({ decisions: [{ kind: 'Operation', identity: 'GET /x' }], commitSha: 'deadbeef' }),
+      { notifier },
+    );
+    await handleCommentEditedInfer(deps, commentPayload());
+    expect(calls.update[1].body).toContain('No undocumented decisions');
+    expect(notifyCalls.infer).toHaveLength(0);
   });
 });

@@ -23,7 +23,14 @@ type GhRepoRow = typeof ghRepos.$inferSelect;
 
 function toEntry(r: GhRepoRow): RegistryEntry {
   // `path` is the opaque repo identity every per-repo store keys by (repoKey).
-  return { slug: slugify(r.repoFullName, []), name: r.repoFullName, path: r.repoFullName };
+  // `defaultBranch` comes from gh_repos so the repo route never has to shell out
+  // to git on a non-path identity (there's no local checkout in hosted mode).
+  return {
+    slug: slugify(r.repoFullName, []),
+    name: r.repoFullName,
+    path: r.repoFullName,
+    defaultBranch: r.defaultBranch,
+  };
 }
 
 export class GhReposRegistryStore implements RegistryStore {

@@ -35,6 +35,11 @@ export interface RepoLinkRecord {
   defaultBranch: string;
   /** When true (default) a PR with new drift fails a required Check; false = advisory. */
   blocking: boolean;
+  /** Code Quality gate: when true (default) new violations at/above
+   *  `codeQualityMinSeverity` fail a required Check; false = advisory. */
+  codeQualityBlocking?: boolean;
+  /** Min new-violation severity that fails the Code Quality Check (default `high`). */
+  codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical';
   enabled: boolean;
   /** Addresses notified (via Resend) when the gate fails. */
   notifyEmails?: string[];

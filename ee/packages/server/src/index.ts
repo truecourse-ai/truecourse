@@ -12,6 +12,7 @@
 import { WorkOS } from '@workos-inc/node';
 import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
+import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore } from '@truecourse/ee-github-app';
 import { loadWorkosConfig } from './config.js';
@@ -78,8 +79,10 @@ const plugin: EePlugin = {
     const gateStore = selectGateStore(eeDb);
     registry.registerRouter(
       '/api/ee/workspace',
-      createWorkspaceRouter(workos, async (org) =>
-        (await gateStore.listReposForWorkspace(org)).map((r) => r.repoFullName),
+      createWorkspaceRouter(
+        workos,
+        async (org) => (await gateStore.listReposForWorkspace(org)).map((r) => r.repoFullName),
+        new WorkspaceSettingsStore(eeDb),
       ),
     );
 
@@ -116,6 +119,7 @@ const plugin: EePlugin = {
       appUrl: cfg.appUrl,
       db: eeDb,
       enqueueBaseline: jobs.enqueueBaseline,
+      codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     if (githubEnabled) plugin.capabilities.push('github-gate');
 

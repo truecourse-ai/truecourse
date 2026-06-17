@@ -24,6 +24,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveClaudeBinary } from '../claude-binary.js';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import type { ZodTypeAny } from 'zod';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `spec.claimExtract:<block.id>`).
@@ -81,6 +83,23 @@ export function stripCodeFences(text: string): string {
   const trimmed = text.trim();
   const fence = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence ? fence[1] : trimmed;
+}
+
+/**
+ * Render a Zod schema as a JSON-schema STRING for `LlmRequest.schema`. The EE AI
+ * SDK transport feeds this to `generateObject` (structured output, schema-
+ * enforced); the OSS cli transport ignores it (it relies on the schema being
+ * described in the prompt + `stripCodeFences`).
+ *
+ * `$refStrategy: 'none'` INLINES every reused sub-schema rather than emitting a
+ * `$ref`. zod-to-json-schema's default refs a reused sub-schema by its first
+ * path (e.g. `#/properties/topics/items`), but provider structured-output
+ * validators require `$ref`s under `$defs`/`definitions` and reject the rest
+ * ("References must be defined under '$defs'…") — which fails the whole call.
+ * Inlining sidesteps it; these extraction schemas are flat DTOs, not recursive.
+ */
+export function jsonSchemaHint(schema: ZodTypeAny): string {
+  return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'none' }));
 }
 
 // ---------------------------------------------------------------------------

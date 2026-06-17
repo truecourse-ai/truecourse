@@ -18,6 +18,7 @@ import type {
   EePlugin,
   EeServerRegistry,
 } from '@truecourse/shared';
+import { COMMUNITY_CAPABILITIES } from '@truecourse/shared';
 import type { Router } from 'express';
 import { isEnterprise } from './edition.js';
 import { log } from '@truecourse/core/lib/logger';
@@ -30,7 +31,11 @@ export interface RegisteredRouter {
 
 class Registry implements EeServerRegistry {
   readonly routers: RegisteredRouter[] = [];
-  capabilities: Capability[] = [];
+  // Seeded with the OSS base capabilities. EE's `loadEnterprise()` OVERWRITES this
+  // with the plugin's own set (which omits `local-filesystem`), so the inverse gate
+  // holds: OSS advertises it, EE doesn't. In community mode `loadEnterprise()`
+  // early-returns, so this seed is what `getCapabilities()` reports.
+  capabilities: Capability[] = [...COMMUNITY_CAPABILITIES];
   authVerifier: EeAuthVerifier | null = null;
   loaded = false;
 

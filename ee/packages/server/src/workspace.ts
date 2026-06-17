@@ -15,6 +15,7 @@ import type {
   SsoStatusResponse,
   WorkspaceMembersResponse,
   WorkspaceOverviewResponse,
+  WorkspaceSettingsResponse,
 } from '@truecourse/shared';
 import { slugify } from '@truecourse/core/config/registry';
 import { listViolations } from '@truecourse/core/services/violation-query';
@@ -43,6 +44,13 @@ const defaultReaders: WorkspaceDataReaders = {
  */
 export type ReposForWorkspace = (orgId: string) => Promise<string[]>;
 
+/** Minimal workspace-settings store the settings routes need — the concrete
+ *  `WorkspaceSettingsStore` satisfies it structurally; tests stub it. */
+export interface WorkspaceSettingsReader {
+  get(orgId: string): Promise<{ codeAnalysisLlm: boolean }>;
+  setCodeAnalysisLlm(orgId: string, enabled: boolean): Promise<void>;
+}
+
 // The OSS auth gate attaches the resolved user; read it without
 // depending on the OSS type augmentation.
 function orgIdOf(req: Request): string | null {
@@ -53,9 +61,32 @@ function orgIdOf(req: Request): string | null {
 export function createWorkspaceRouter(
   workos: WorkOS,
   reposForWorkspace: ReposForWorkspace,
+  settings: WorkspaceSettingsReader,
   readers: WorkspaceDataReaders = defaultReaders,
 ): Router {
   const router = Router();
+
+  // Per-workspace feature settings (currently the LLM code-analysis toggle).
+  router.get('/settings', async (req, res) => {
+    const orgId = orgIdOf(req);
+    const codeAnalysisLlm = orgId ? (await settings.get(orgId)).codeAnalysisLlm : false;
+    res.json({ codeAnalysisLlm } satisfies WorkspaceSettingsResponse);
+  });
+
+  router.patch('/settings', async (req, res) => {
+    const orgId = orgIdOf(req);
+    if (!orgId) {
+      res.status(401).json({ error: 'unauthenticated' });
+      return;
+    }
+    const next = (req.body as Partial<WorkspaceSettingsResponse> | undefined)?.codeAnalysisLlm;
+    if (typeof next !== 'boolean') {
+      res.status(400).json({ error: 'codeAnalysisLlm (boolean) is required' });
+      return;
+    }
+    await settings.setCodeAnalysisLlm(orgId, next);
+    res.json({ codeAnalysisLlm: next } satisfies WorkspaceSettingsResponse);
+  });
 
   router.get('/sso-status', async (req, res) => {
     const organizationId = orgIdOf(req);

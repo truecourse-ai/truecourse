@@ -60,17 +60,33 @@ function makeOctokit(opts: {
   openPrs?: any[]; // pulls.list payload (reverifyOpenPrs)
 } = {}) {
   const calls = {
-    check: [] as any[],
+    check: [] as any[], // completed Check results (the authoritative verdict)
+    checkStart: [] as any[], // in-progress Checks opened at the start
     create: [] as any[],
     update: [] as any[],
     review: [] as any[],
   };
+  // Model the create(in_progress) → update(completed) lifecycle: a started check is
+  // recorded by id, and its completion (via update) carries the original head_sha/name.
+  const checkRuns = new Map<number, any>();
+  let nextCheckId = 1000;
   const octokit: any = {
     paginate: async (m: any, p: any) => (await m(p)).data,
     checks: {
       create: async (p: any) => {
-        calls.check.push(p);
-        return { data: { id: 555 } };
+        const id = ++nextCheckId;
+        if (p.status === 'in_progress') {
+          calls.checkStart.push(p);
+          checkRuns.set(id, p);
+        } else {
+          calls.check.push(p);
+        }
+        return { data: { id } };
+      },
+      update: async (p: any) => {
+        const created = checkRuns.get(p.check_run_id) ?? {};
+        calls.check.push({ ...p, head_sha: created.head_sha, name: created.name });
+        return { data: { id: p.check_run_id } };
       },
     },
     issues: {
@@ -129,7 +145,9 @@ describe('handlePullRequestGate', () => {
 
     await handlePullRequestGate(deps, prPayload());
 
-    expect(calls.check).toHaveLength(1);
+    // Two Checks now: drift (posted first) + Code Quality (neutral here — the test
+    // runner provides no analysis, so codeQualityAdded is absent → no-baseline).
+    expect(calls.check).toHaveLength(2);
     expect(calls.check[0].status).toBe('completed');
     expect(calls.check[0].conclusion).toBe('failure');
     expect(calls.check[0].head_sha).toBe('headsha');
@@ -142,6 +160,21 @@ describe('handlePullRequestGate', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0].conclusion).toBe('failure');
     expect(runs[0].addedCount).toBe(1);
+  });
+
+  it('opens both Checks as in-progress before completing them', async () => {
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
+
+    await handlePullRequestGate(deps, prPayload());
+
+    // Two Checks (drift + Code Quality) start as in-progress at the head sha so the
+    // PR shows them running, then transition to completed.
+    expect(calls.checkStart).toHaveLength(2);
+    expect(calls.checkStart.every((c: any) => c.status === 'in_progress')).toBe(true);
+    expect(calls.checkStart.every((c: any) => c.head_sha === 'headsha')).toBe(true);
+    expect(calls.check).toHaveLength(2);
+    expect(calls.check.every((c: any) => c.status === 'completed')).toBe(true);
   });
 
   it('passes and posts no inline comments when there is no new drift', async () => {
@@ -205,7 +238,8 @@ describe('handlePullRequestGate', () => {
     const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
     await handlePullRequestGate(deps, prPayload(), { force: true });
     // The prior run no longer blocks: the head re-gates against fresh contracts.
-    expect(calls.check).toHaveLength(1);
+    // Two Checks now (drift + Code Quality); the drift Check is posted first.
+    expect(calls.check).toHaveLength(2);
     expect(calls.check[0].conclusion).toBe('failure');
     const runs = await store.listRuns('acme/api');
     expect(runs).toHaveLength(2);
@@ -262,7 +296,7 @@ describe('handlePullRequestGate', () => {
     expect(sentCount).toBe(0);
   });
 
-  it('stays neutral and emails for resolution when the head spec has unresolved conflicts', async () => {
+  it('FAILS (blocking) and emails for resolution when the head spec has unresolved conflicts', async () => {
     const r = (await store.getRepo('acme/api'))!;
     await store.linkRepo({ ...r, notifyEmails: ['a@x.com'] });
     const { octokit, calls } = makeOctokit();
@@ -271,8 +305,9 @@ describe('handlePullRequestGate', () => {
     const deps = {
       store,
       octokitFor: () => octokit,
-      // Drift IS present, but the head's scan auto-defaulted 2 conflicts → the
-      // gate must NOT fail on a guessed spec; it goes neutral and asks for help.
+      // Drift IS present and the head's scan auto-defaulted 2 conflicts → on a
+      // BLOCKING repo the Check fails (unresolved conflicts block the PR), but the
+      // failure is "resolve the spec", not the drift list.
       runVerify: async () => ({
         baseSha: 'b',
         headSha: 'headsha',
@@ -288,20 +323,20 @@ describe('handlePullRequestGate', () => {
 
     await handlePullRequestGate(deps, prPayload());
 
-    // Neutral Check — not a failure, despite the new drift.
-    expect(calls.check[0].conclusion).toBe('neutral');
+    // Blocking Check failure — the PR must resolve its conflicts before merge.
+    expect(calls.check[0].conclusion).toBe('failure');
     // No inline drift comments on an untrustworthy (conflicted) spec.
     expect(calls.review).toHaveLength(0);
-    // Summary comment explains the spec needs resolution.
-    expect(calls.create[0].body).toMatch(/unresolved conflict/i);
-    // Emailed the conflict notice, NOT the failure notice.
+    // Summary comment explains the spec needs resolution (not a drift list).
+    expect(calls.create[0].body).toMatch(/unresolved (spec )?conflict/i);
+    // Emailed the conflict notice, NOT the generic failure notice.
     expect(failures).toHaveLength(0);
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].to).toEqual(['a@x.com']);
     expect(conflicts[0].e.openConflicts).toBe(2);
 
     const runs = await store.listRuns('acme/api');
-    expect(runs[0].conclusion).toBe('neutral');
+    expect(runs[0].conclusion).toBe('failure');
   });
 });
 
@@ -338,7 +373,8 @@ describe('reverifyOpenPrs', () => {
     const { octokit, calls } = makeOctokit({ openPrs: [openPr(7), openPr(8)] });
     await reverifyOpenPrs(echoDeps(octokit), 'acme/api');
 
-    expect(calls.check.map((c: any) => c.head_sha).sort()).toEqual(['h7', 'h8']);
+    // Two Checks per PR now (drift + Code Quality).
+    expect(calls.check.map((c: any) => c.head_sha).sort()).toEqual(['h7', 'h7', 'h8', 'h8']);
     const prNums = (await store.listRuns('acme/api')).map((r) => r.prNumber).sort();
     expect(prNums).toEqual([7, 7, 8]); // PR 7's original neutral run + both re-verifies
   });

@@ -19,6 +19,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { verifyInProcess } from '@truecourse/core/commands/spec-in-process';
+import { analyzeCore } from '@truecourse/core/commands/analyze-core';
+import { persistDiffAnalysis } from '@truecourse/core/commands/analyze-persist';
+import { log } from '@truecourse/core/lib/logger';
+import type { ViolationRecord } from '@truecourse/core/types/snapshot';
 import { hasContracts, listWorkspaceContractFiles, type RepoRef } from '@truecourse/core/lib/contract-store';
 import { loadSpec } from '@truecourse/core/lib/spec-store';
 import type { GateStore, GateDrift } from './store/types.js';
@@ -107,6 +111,8 @@ export interface GateVerifyRequest {
    * the head is scanned for its own contracts (the cold path).
    */
   specChanged: boolean;
+  /** Run the LLM (semantic) code-analysis rules; off by default — deterministic rules always run. */
+  enableLlmAnalysis?: boolean;
 }
 
 export interface GateVerifyOutput {
@@ -123,6 +129,13 @@ export interface GateVerifyOutput {
    * the gate verified against an auto-defaulted spec and should stay neutral.
    */
   headConflicts: number;
+  /**
+   * Code Quality signal: NEW violations the PR head introduces vs the baseline
+   * analysis (analyzeCore's lifecycle `added`). `null` when there's no baseline
+   * analysis to diff against (or analyze failed) — the gate then leaves the Code
+   * Quality Check neutral.
+   */
+  codeQualityAdded: ViolationRecord[] | null;
 }
 
 /** A commit's drifts plus the open-conflict count from any cold-gen scan. */
@@ -250,12 +263,40 @@ export async function runGateVerify(
         ? { repoKey: req.repoFullName, commitSha: baselineCommit }
         : undefined;
     const head = await driftsAt(headSha, headContractsRef);
+
+    // Code Quality signal — run the OSS analyze pass on the SAME PR-head checkout,
+    // diffed against the baseline analysis. analyzeCore is STATELESS (no persist,
+    // so it never moves the repo's baseline LATEST) and its full-mode lifecycle
+    // returns `added` = new violations vs the baseline. Best-effort: a failure or
+    // a missing baseline yields null → the gate leaves the CQ Check neutral.
+    let codeQualityAdded: ViolationRecord[] | null = null;
+    try {
+      const cq = await analyzeCore(
+        { slug: req.repoFullName, name: req.repoFullName, path: req.repoFullName },
+        { codeDir: tmp, mode: 'full', enableLlmRulesOverride: req.enableLlmAnalysis ?? false },
+      );
+      codeQualityAdded = cq.latestBaseline ? cq.pipelineResult.added : null;
+      // Persist the PR head's Code Quality DIFF (new/resolved vs the baseline) under
+      // a PR-scoped key, so the dashboard's PR view can show new/resolved — the
+      // analyze-equivalent of OSS `?view=diff`. `writeDiff` only; the repo's baseline
+      // LATEST is never touched. Skipped when there's no baseline (nothing to diff).
+      if (cq.latestBaseline) {
+        const prKey = `${req.repoFullName}::pr/${req.prNumber}`;
+        await persistDiffAnalysis({ slug: prKey, name: req.repoFullName, path: prKey }, cq);
+      }
+    } catch (err) {
+      log.warn(
+        `[github-app] code quality analyze failed for ${req.repoFullName} PR#${req.prNumber}: ${(err as Error).message}`,
+      );
+    }
+
     return {
       headDrifts: head.drifts,
       baseDrifts,
       baseSha,
       headSha,
       headConflicts: head.openConflicts,
+      codeQualityAdded,
     };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

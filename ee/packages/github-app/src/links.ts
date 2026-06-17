@@ -14,17 +14,32 @@ async function repoSlug(repoFullName: string): Promise<string | null> {
   return entry?.slug ?? null;
 }
 
-/** Deep link to a repo's stored contracts (optionally pinned to a commit). */
+/** Deep link to a PR's Contracts tab (head ref → surfaces its inferred contracts). */
 export async function contractsDashboardUrl(
   appUrl: string | undefined,
   repoFullName: string,
-  commitSha?: string,
+  prNumber: number,
 ): Promise<string | undefined> {
   if (!appUrl) return undefined;
   const slug = await repoSlug(repoFullName);
   if (!slug) return undefined;
-  const base = `${appUrl.replace(/\/$/, '')}/repos/${slug}/contracts`;
-  return commitSha ? `${base}?commit=${commitSha}` : base;
+  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=verification&tab=contracts`;
+}
+
+/** Deep link to a repo's PR view, scoped to a lens (Code Quality / Verification). */
+export async function prSectionUrl(
+  appUrl: string | undefined,
+  repoFullName: string,
+  prNumber: number,
+  section: 'codequality' | 'verification',
+): Promise<string | undefined> {
+  if (!appUrl) return undefined;
+  const slug = await repoSlug(repoFullName);
+  if (!slug) return undefined;
+  // Land directly on each lens's analytics tab so the PR opens on the overview
+  // rather than the section default (which would flash before redirecting).
+  const tab = section === 'codequality' ? 'analytics' : 'driftanalytics';
+  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=${section}&tab=${tab}`;
 }
 
 /** Link to a repo's dashboard page (drift/overview). */

@@ -13,7 +13,8 @@
 import { ExternalLink, GitBranch } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { GithubRunSummary } from '@truecourse/shared';
-import type { LeftTab, TabDescriptor } from '@/navigation/registry';
+import type { DashboardSection, LeftTab, TabDescriptor } from '@/navigation/registry';
+import { EeSectionSwitch } from '@/ee/EeSectionSwitch';
 
 const PR_PILL: Record<GithubRunSummary['conclusion'], string> = {
   success: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/30',
@@ -23,27 +24,40 @@ const PR_PILL: Record<GithubRunSummary['conclusion'], string> = {
 
 /**
  * Read-only ref indicator: the default branch, or — when viewing a PR (`?pr=N`)
- * — a conclusion-coloured "PR #N" pill plus the PR's head branch.
+ * — a conclusion-coloured "PR #N" pill plus the PR's head branch. The pill is
+ * itself the link to the PR on GitHub (when `repoName` is known).
  */
 function RefLabel({
+  repoName,
   branch,
   prNumber,
   prBranch,
   prConclusion,
 }: {
+  repoName?: string;
   branch?: string;
   prNumber?: number | null;
   prBranch?: string | null;
   prConclusion?: GithubRunSummary['conclusion'];
 }) {
   if (prNumber != null) {
+    const pillClass = `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1 ${PR_PILL[prConclusion ?? 'neutral']}`;
     return (
       <span className="inline-flex items-center gap-2">
-        <span
-          className={`rounded-full px-2 py-0.5 text-[11px] ring-1 ${PR_PILL[prConclusion ?? 'neutral']}`}
-        >
-          PR #{prNumber}
-        </span>
+        {repoName ? (
+          <a
+            href={`https://github.com/${repoName}/pull/${prNumber}`}
+            target="_blank"
+            rel="noreferrer"
+            title="View pull request on GitHub"
+            className={`${pillClass} transition-opacity hover:opacity-80`}
+          >
+            PR #{prNumber}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : (
+          <span className={pillClass}>PR #{prNumber}</span>
+        )}
         {prBranch && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <GitBranch className="h-3.5 w-3.5" />
@@ -67,6 +81,8 @@ export function EeRepoChrome({
   tabs,
   activeTab,
   onTabChange,
+  section,
+  onSectionChange,
   prNumber,
   prBranch,
   prConclusion,
@@ -77,6 +93,9 @@ export function EeRepoChrome({
   tabs: TabDescriptor[];
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab) => void;
+  /** Active lens (Code Quality / Verification) — drives the segmented switch. */
+  section?: DashboardSection;
+  onSectionChange?: (next: DashboardSection) => void;
   /** When set, the page is scoped to this pull request (`?pr=N`). */
   prNumber?: number | null;
   /** The PR's head branch (from its stored gate diff) — shown next to the pill. */
@@ -95,22 +114,17 @@ export function EeRepoChrome({
         </span>
         {repoName ? (
           <RefLabel
+            repoName={repoName}
             branch={branch}
             prNumber={prNumber}
             prBranch={prBranch}
             prConclusion={prConclusion}
           />
         ) : null}
-        {repoName && prNumber != null && (
-          <a
-            href={`https://github.com/${repoName}/pull/${prNumber}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            View PR #{prNumber} on GitHub
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+        {/* Mode switch — LEFT-anchored, so the per-tab actions (right-anchored
+            below) can appear/disappear without shoving it sideways. */}
+        {section && onSectionChange && (
+          <EeSectionSwitch section={section} onSectionChange={onSectionChange} />
         )}
         {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>

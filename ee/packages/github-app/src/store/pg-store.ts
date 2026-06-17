@@ -14,7 +14,13 @@ import type {
   BaselineRecord,
   GateRunRecord,
 } from './types.js';
-import { ghInstallations, ghRepos, ghBaselines, ghRuns, verifySnapshots } from '@truecourse/ee-db';
+import {
+  ghInstallations,
+  ghRepos,
+  ghBaselines,
+  ghRuns,
+  verifySnapshots,
+} from '@truecourse/ee-db';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
 export type GateDb = PgDatabase<any, any, any>;
@@ -47,6 +53,8 @@ function toRepo(r: RepoRow): RepoLinkRecord {
     workspaceOrgId: r.workspaceOrgId,
     defaultBranch: r.defaultBranch,
     blocking: r.blocking,
+    codeQualityBlocking: r.codeQualityBlocking,
+    codeQualityMinSeverity: r.codeQualityMinSeverity as RepoLinkRecord['codeQualityMinSeverity'],
     enabled: r.enabled,
     notifyEmails: r.notifyEmails,
     notifications: (r.notifications as unknown as RepoLinkRecord['notifications']) ?? undefined,
@@ -158,6 +166,8 @@ export class PostgresGateStore implements GateStore {
         ...rec,
         notifyEmails: rec.notifyEmails ?? [],
         notifications: (rec.notifications ?? null) as Record<string, boolean> | null,
+        codeQualityBlocking: rec.codeQualityBlocking ?? true,
+        codeQualityMinSeverity: rec.codeQualityMinSeverity ?? 'high',
       })
       .onConflictDoUpdate({
         target: ghRepos.repoFullName,
@@ -166,6 +176,8 @@ export class PostgresGateStore implements GateStore {
           workspaceOrgId: sql`excluded.workspace_org_id`,
           defaultBranch: sql`excluded.default_branch`,
           blocking: sql`excluded.blocking`,
+          codeQualityBlocking: sql`excluded.code_quality_blocking`,
+          codeQualityMinSeverity: sql`excluded.code_quality_min_severity`,
           enabled: sql`excluded.enabled`,
           notifyEmails: sql`excluded.notify_emails`,
           notifications: sql`excluded.notifications`,
@@ -206,7 +218,11 @@ export class PostgresGateStore implements GateStore {
     // verify, which marks it is_baseline). So we persist only the pointer here.
     await this.db
       .insert(ghBaselines)
-      .values({ repoFullName: rec.repoFullName, commitSha: rec.commitSha, capturedAt: rec.capturedAt })
+      .values({
+        repoFullName: rec.repoFullName,
+        commitSha: rec.commitSha,
+        capturedAt: rec.capturedAt,
+      })
       .onConflictDoUpdate({
         target: ghBaselines.repoFullName,
         set: {

@@ -34,6 +34,12 @@ export interface RegistryEntry {
    * means "never analyzed".
    */
   lastAnalyzed?: string;
+  /**
+   * Default branch (e.g. `main`). Set by registries that track it without a
+   * local checkout — the hosted `gh_repos`-derived registry. OSS leaves it
+   * unset, and the repo route reads the branch from the on-disk git repo.
+   */
+  defaultBranch?: string;
 }
 
 interface RegistryFile {

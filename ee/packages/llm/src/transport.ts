@@ -18,7 +18,7 @@
  * telemetry`), so the same calls stay OTel-standard for a future exporter.
  */
 
-import { generateText, type LanguageModel } from 'ai';
+import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
 import type { LlmRequest, LlmTransport } from '@truecourse/shared/llm';
 import type { LlmTraceInput, LlmTraceRecorder, TraceStatus } from '@truecourse/shared';
 import { buildModel } from './model.js';
@@ -41,6 +41,23 @@ interface CapturedResult {
     totalTokens?: number;
     reasoningTokens?: number;
   };
+}
+
+/**
+ * Does this JSON-schema contain an "open" sub-schema — an empty `{}` that accepts
+ * any JSON value (what `z.unknown()` / `z.any()` / `z.record(z.unknown())` become)?
+ * Strict provider structured output rejects those ("Empty schema … not supported"),
+ * so such schemas can't use schema-enforced `generateObject` — they fall back to
+ * JSON mode (still valid JSON, validated by the caller's Zod afterwards) instead.
+ */
+function schemaHasOpenAny(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(schemaHasOpenAny);
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if (Object.keys(obj).length === 0) return true;
+    return Object.values(obj).some(schemaHasOpenAny);
+  }
+  return false;
 }
 
 /**
@@ -184,18 +201,64 @@ export function createAiSdkTransport(
     const { signal, cleanup } = deadline(req.timeoutMs);
     const ctx = currentTrace();
     const startedAt = Date.now();
-    const run = (model: LanguageModel) =>
-      generateText({
+    // Omit an empty/whitespace system prompt — the AI SDK would otherwise send it
+    // as an empty text block, which the Anthropic API rejects ("text content blocks
+    // must be non-empty"). Callers that pack everything into `user` legitimately
+    // pass system: ''.
+    const system = req.system?.trim() ? req.system : undefined;
+    // Structured output. A caller-supplied JSON-schema is ENFORCED via
+    // `generateObject` (the model returns a schema-valid object — no prose/markdown
+    // to strip) when the schema is strict-compatible. Schemas with an "open" `{}`
+    // sub-schema (z.unknown()/z.any() — e.g. a claim's free-form `content`) can't be
+    // schema-enforced by strict providers, so they use JSON mode: still valid JSON
+    // (no prose), with the caller's Zod doing the validation. Schema-less calls
+    // (free-text answers) stay on `generateText`.
+    const rawSchema = req.schema ? JSON.parse(req.schema) : undefined;
+    const strictSchema =
+      rawSchema && !schemaHasOpenAny(rawSchema) ? jsonSchema(rawSchema) : undefined;
+    const jsonMode = Boolean(rawSchema) && !strictSchema;
+    const telemetry = {
+      isEnabled: true as const,
+      functionId: req.stage ?? 'llm.call',
+      metadata: telemetryMeta(req, ctx),
+    };
+    const run = async (model: LanguageModel): Promise<CapturedResult> => {
+      if (strictSchema) {
+        const r = await generateObject({
+          model,
+          schema: strictSchema,
+          system,
+          prompt: req.user,
+          abortSignal: signal,
+          experimental_telemetry: telemetry,
+        });
+        return { text: JSON.stringify(r.object), finishReason: r.finishReason, usage: r.usage };
+      }
+      if (jsonMode) {
+        const r = await generateObject({
+          model,
+          output: 'no-schema',
+          system,
+          prompt: req.user,
+          abortSignal: signal,
+          experimental_telemetry: telemetry,
+        });
+        return { text: JSON.stringify(r.object), finishReason: r.finishReason, usage: r.usage };
+      }
+      const r = await generateText({
         model,
-        system: req.system,
+        system,
         prompt: req.user,
         abortSignal: signal,
-        experimental_telemetry: {
-          isEnabled: true,
-          functionId: req.stage ?? 'llm.call',
-          metadata: telemetryMeta(req, ctx),
-        },
+        experimental_telemetry: telemetry,
       });
+      return {
+        text: r.text,
+        finishReason: r.finishReason,
+        reasoningText: r.reasoningText,
+        usage: r.usage,
+      };
+    };
 
     try {
       let result: Awaited<ReturnType<typeof run>>;

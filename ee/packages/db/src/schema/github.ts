@@ -13,6 +13,7 @@ import {
   timestamp,
   jsonb,
   index,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -33,6 +34,11 @@ export const ghRepos = pgTable('gh_repos', {
   workspaceOrgId: text('workspace_org_id').notNull(),
   defaultBranch: text('default_branch').notNull(),
   blocking: boolean('blocking').notNull().default(true),
+  // Code Quality (analyze) gate: whether new violations at/above the min severity
+  // fail a required Check (default block on `high`+). Separate from `blocking`
+  // (drift). `min severity` is loosely typed text here (ee-db is a leaf).
+  codeQualityBlocking: boolean('code_quality_blocking').notNull().default(true),
+  codeQualityMinSeverity: text('code_quality_min_severity').notNull().default('high'),
   enabled: boolean('enabled').notNull().default(true),
   notifyEmails: text('notify_emails')
     .array()
@@ -51,6 +57,22 @@ export const ghBaselines = pgTable('gh_baselines', {
   commitSha: text('commit_sha').notNull(),
   capturedAt: ts('captured_at').notNull(),
 });
+
+// Persistent per-repo overlay of user actions on inferred decisions. Applied by
+// the baseline AFTER inference, so a dismiss/promote survives a re-baseline (which
+// re-infers from scratch). One row per decision, keyed by (repo, kind, identity).
+export const ghInferredActions = pgTable(
+  'gh_inferred_actions',
+  {
+    repoFullName: text('repo_full_name').notNull(),
+    kind: text('kind').notNull(),
+    identity: text('identity').notNull(),
+    // 'dismissed' | 'promoted' — loosely typed (ee-db is a leaf).
+    status: text('status').notNull(),
+    createdAt: ts('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.repoFullName, t.kind, t.identity] })],
+);
 
 export const ghRuns = pgTable(
   'gh_runs',

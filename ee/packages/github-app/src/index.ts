@@ -49,6 +49,8 @@ export interface RegisterGithubAppOptions {
   db?: EeDb | null;
   /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
   enqueueBaseline?: EnqueueBaseline;
+  /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
+  codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
 
 /**
@@ -89,6 +91,7 @@ export async function registerGithubApp(
     offerInFlight: new Set<string>(),
     gateInFlight: new Set<string>(),
     notifier,
+    codeAnalysisLlm: opts.codeAnalysisLlm,
   };
 
   // Let the EE jobs layer re-verify open PRs after the repo.contracts job
@@ -122,12 +125,20 @@ export async function registerGithubApp(
       // automatically when the PR changes them — and offer an infer run (Phase 3).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
-        void handlePullRequestGate(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'gate failed', ctx, err),
-        );
-        void handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'infer offer failed', ctx, err),
-        );
+        // Run the gate FIRST, then infer — never concurrently. The gate generates
+        // the head's contracts (the cold path, when the PR changed a spec); infer
+        // subtracts those contracts to decide what's still undocumented. Racing them
+        // means infer reads before the contracts exist and re-offers decisions the PR
+        // just documented. A gate failure still lets infer run — it falls back to the
+        // baseline contracts (see InferInProcessOptions.contractsRef).
+        void (async () => {
+          await handlePullRequestGate(offerDeps, payload).catch((err) =>
+            reportGithubError(store, 'gate failed', ctx, err),
+          );
+          await handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
+            reportGithubError(store, 'infer offer failed', ctx, err),
+          );
+        })();
       },
       // On comment edit: the matching handler (by marker) runs its checkbox flow.
       onCommentEdited: (payload) => {
@@ -195,7 +206,8 @@ export {
   type InferCommentStatus,
   type DecisionSummary,
 } from './infer-comment.js';
-export { runInfer, type InferPipeline } from './infer-scan.js';
+export { runInfer, defaultInferPipeline, type InferPipeline } from './infer-scan.js';
+export { diffDecisions, type InferDiff } from '@truecourse/core/lib/inferred-decisions';
 export {
   handlePullRequestInferOffer,
   handleCommentEditedInfer,
@@ -205,17 +217,22 @@ export {
 // Phase 4: drift gate
 export {
   decideGate,
+  decideCodeQuality,
   type GateConclusion,
   type GateDecision,
   type GateOptions,
   type GateSeverity,
+  type CodeQualityDecision,
+  type CodeQualityOptions,
 } from './gate.js';
 export {
   GATE_MARKER,
   GATE_CHECK_NAME,
+  CODE_QUALITY_CHECK_NAME,
   isGateComment,
   renderGateComment,
   gateCheckOutput,
+  cqCheckOutput,
   inlineDriftBody,
   type DriftEnrichmentMap,
 } from './gate-comment.js';

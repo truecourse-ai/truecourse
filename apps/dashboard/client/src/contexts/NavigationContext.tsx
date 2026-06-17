@@ -37,18 +37,15 @@ import {
 const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'canonical', 'contract', 'drift'];
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
-  return searchParams?.get('section') === 'drift' ? 'drift' : 'analysis';
+  return searchParams?.get('section') === 'verification' ? 'verification' : 'codequality';
 }
 
 /**
- * Derive the active tab from the URL, honouring two legacy aliases
- * (?tab=violations → graphs, ?tab=analytics → home) and the
- * file/flow deep-link shortcuts, falling back to the section default.
+ * Derive the active tab from the URL, honouring the file/flow deep-link
+ * shortcuts, falling back to the section default.
  */
 function resolveTab(searchParams: URLSearchParams | null): LeftTab {
   const tabParam = searchParams?.get('tab') ?? null;
-  if (tabParam === 'violations') return 'graphs';
-  if (tabParam === 'analytics') return 'home';
   if (tabParam && allTabIds().has(tabParam)) return tabParam;
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
@@ -61,8 +58,12 @@ function resolveTab(searchParams: URLSearchParams | null): LeftTab {
 export interface NavigationContextValue {
   section: DashboardSection;
   leftTab: LeftTab | null;
-  /** Switch sections; resets the active tab to the section's default. */
-  setSection: (next: DashboardSection) => void;
+  /**
+   * Switch sections. Lands on `tab` when given, else the section's registry
+   * default. (EE passes its lens's first curated tab — the OSS default would
+   * open Spec for Verification instead of its Analytics tab.)
+   */
+  setSection: (next: DashboardSection, tab?: LeftTab) => void;
   /** Set (or clear, with null → home) the active left tab. */
   setLeftTab: (tab: LeftTab | null) => void;
 }
@@ -81,15 +82,19 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   );
 
   const setSection = useCallback(
-    (next: DashboardSection) => {
+    (next: DashboardSection, tab?: LeftTab) => {
       setSectionState(next);
-      // Reset to the section's default tab; the URL captures both so
-      // reloads stay coherent.
-      const nextTab = defaultTabForSection(next);
+      // Land on the requested tab, else the section's default tab; the URL
+      // captures both so reloads stay coherent.
+      const nextTab = tab ?? defaultTabForSection(next);
       setLeftTabState(nextTab);
       const url = new URL(window.location.href);
-      if (next === 'drift') url.searchParams.set('section', 'drift');
-      else url.searchParams.delete('section');
+      // Write the section explicitly (both values). EE's repo view defaults to
+      // Verification (drift) and must be able to tell "user picked Code Quality"
+      // (?section=codequality) apart from "no choice yet" (no param) — clearing the
+      // param for analysis would conflate them. The initial no-param load still
+      // resolves to the OSS default (analysis); EE redirects it to drift.
+      url.searchParams.set('section', next);
       for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
       // Diff mode (?view=diff) is shared by analyze + verify but is
       // section-specific in meaning, so don't carry it across sections.
@@ -123,7 +128,9 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const resolvedSection = resolveSection(searchParams);
     const derivedTab = resolveTab(searchParams);
-    const belongs = sectionForTab(derivedTab) === resolvedSection;
+    // `settings` is section-neutral (repo-wide config), reachable from either lens
+    // in EE — don't reset it when the active section doesn't "own" it.
+    const belongs = derivedTab === 'settings' || sectionForTab(derivedTab) === resolvedSection;
     const finalTab = belongs
       ? derivedTab
       : defaultTabForSection(resolvedSection);

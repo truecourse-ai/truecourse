@@ -60,6 +60,8 @@ function toRepoSummary(
     installationId: r.installationId,
     defaultBranch: r.defaultBranch,
     blocking: r.blocking,
+    codeQualityBlocking: r.codeQualityBlocking ?? true,
+    codeQualityMinSeverity: r.codeQualityMinSeverity ?? 'high',
     enabled: r.enabled,
     notifyEmails: r.notifyEmails ?? [],
     notifications: resolveNotificationPrefs(r),
@@ -271,6 +273,9 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       workspaceOrgId: orgId,
       defaultBranch,
       blocking: typeof blocking === 'boolean' ? blocking : existing?.blocking ?? true,
+      // Code Quality config is set via the settings PATCH, not connect — preserve it.
+      codeQualityBlocking: existing?.codeQualityBlocking ?? true,
+      codeQualityMinSeverity: existing?.codeQualityMinSeverity ?? 'high',
       enabled: true,
       notifyEmails: existing?.notifyEmails ?? [],
       createdAt: existing?.createdAt ?? now,
@@ -365,10 +370,28 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       notifications = merged;
     }
 
+    let codeQualityMinSeverity = existing.codeQualityMinSeverity ?? 'high';
+    if (body.codeQualityMinSeverity !== undefined) {
+      const valid = ['info', 'low', 'medium', 'high', 'critical'];
+      if (
+        typeof body.codeQualityMinSeverity !== 'string' ||
+        !valid.includes(body.codeQualityMinSeverity)
+      ) {
+        res.status(400).json({ error: 'invalid codeQualityMinSeverity' });
+        return;
+      }
+      codeQualityMinSeverity = body.codeQualityMinSeverity as typeof codeQualityMinSeverity;
+    }
+
     await deps.store.linkRepo({
       ...existing,
       blocking:
         typeof body.blocking === 'boolean' ? body.blocking : existing.blocking,
+      codeQualityBlocking:
+        typeof body.codeQualityBlocking === 'boolean'
+          ? body.codeQualityBlocking
+          : existing.codeQualityBlocking,
+      codeQualityMinSeverity,
       enabled:
         typeof body.enabled === 'boolean' ? body.enabled : existing.enabled,
       notifyEmails,
@@ -430,7 +453,16 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       }
     }
     all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    res.json({ runs: all.slice(0, limit) });
+    // One row per PR: keep only the newest run per (repo, PR). A PR with several
+    // gate runs (one per pushed commit) collapses to a single row. `all` is already
+    // newest-first, so the first run seen per key is the latest — and the limit now
+    // counts PRs, not commits.
+    const byPr = new Map<string, WorkspaceRunItem>();
+    for (const r of all) {
+      const k = `${r.repoFullName}#${r.prNumber}`;
+      if (!byPr.has(k)) byPr.set(k, r);
+    }
+    res.json({ runs: [...byPr.values()].slice(0, limit) });
   });
 
   return router;

@@ -153,6 +153,59 @@ export class PgContractStore implements ContractStore {
     return this.content.get(contentScope.contract(repoKey), sha);
   }
 
+  async putContractFile(
+    ref: RepoRef,
+    kind: ContractKind,
+    relPath: string,
+    content: string,
+  ): Promise<void> {
+    assertSafeRel(relPath);
+    const sha = sha256(Buffer.from(content, 'utf-8'));
+    await this.content.put(contentScope.contract(ref.repoKey), sha, content);
+    const row = await this.row(ref, kind);
+    const files = { ...((row?.manifest as Manifest | undefined)?.files ?? {}) };
+    files[relPath] = sha;
+    await this.writeManifest(ref, kind, files);
+  }
+
+  async deleteContractFile(ref: RepoRef, kind: ContractKind, relPath: string): Promise<void> {
+    const row = await this.row(ref, kind);
+    if (!row) return;
+    const files = { ...((row.manifest as Manifest).files ?? {}) };
+    if (!(relPath in files)) return;
+    delete files[relPath];
+    await this.writeManifest(ref, kind, files);
+  }
+
+  /** Re-write a set's manifest row from a `{ relPath → sha }` map (content rows are shared). */
+  private async writeManifest(
+    ref: RepoRef,
+    kind: ContractKind,
+    files: Record<string, string>,
+  ): Promise<void> {
+    const sortedFiles = sortKeys(files);
+    const manifestHash = sha256(Buffer.from(JSON.stringify(sortedFiles)));
+    const payload: Manifest = { v: 1, files: sortedFiles };
+    const fileCount = Object.keys(sortedFiles).length;
+    const now = new Date().toISOString();
+    await this.db
+      .insert(contractSets)
+      .values({
+        repoKey: ref.repoKey,
+        commitSha: ref.commitSha,
+        kind,
+        manifest: payload,
+        manifestHash,
+        fileCount,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [contractSets.repoKey, contractSets.commitSha, contractSets.kind],
+        set: { manifest: payload, manifestHash, fileCount, updatedAt: now },
+      });
+  }
+
   /** Manifest of a specific commit's set (the ref switcher), or the latest. */
   private async manifestFor(
     repoKey: string,

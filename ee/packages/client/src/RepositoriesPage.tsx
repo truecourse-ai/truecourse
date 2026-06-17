@@ -419,7 +419,7 @@ function ConnectDrawer({
                 onChange={(e) => setBlocking(e.target.checked)}
                 className="h-4 w-4 rounded border-border"
               />
-              Block merges on new drift (a required Check)
+              Block merges on new findings (a required Check)
             </label>
             <button
               type="submit"

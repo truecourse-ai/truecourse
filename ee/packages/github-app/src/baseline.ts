@@ -16,8 +16,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { verifyInProcess } from '@truecourse/core/commands/spec-in-process';
+import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
+import { readLatest } from '@truecourse/core/lib/analysis-store';
 import type { StepTracker } from '@truecourse/core/progress';
-import { hasContracts, listWorkspaceContractFiles, type RepoRef } from '@truecourse/core/lib/contract-store';
+import {
+  hasContracts,
+  listWorkspaceContractFiles,
+  type RepoRef,
+} from '@truecourse/core/lib/contract-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { GateStore, GateDrift } from './store/types.js';
 import {
@@ -28,14 +34,17 @@ import {
   type GithubAuth,
 } from './github.js';
 import { defaultSpecScanPipeline, type SpecScanPipeline } from './spec-scan.js';
+import { defaultInferPipeline, type InferPipeline } from './infer-scan.js';
 
 export interface BaselineDeps {
   store: GateStore;
   auth: GithubAuth;
   /** Scan+generate pipeline for the cold path (injected in tests). */
   scanPipeline?: SpecScanPipeline;
+  /** Infer pipeline for the baseline inferred-decisions set (injected in tests). */
+  inferPipeline?: InferPipeline;
   /** Phase callback for the stepped progress popup (EE jobs). */
-  onPhase?: (phase: 'clone' | 'spec' | 'contracts' | 'drift') => void | Promise<void>;
+  onPhase?: (phase: 'clone' | 'spec' | 'contracts' | 'drift' | 'analyze') => void | Promise<void>;
   /** Per-slice contract-gen progress (`done`, `total`) for the popup's "N/M slices". */
   onSliceProgress?: (done: number, total: number) => void;
   /** Repair-pass progress (`done`, `total`) for the popup's "repairing N/M". */
@@ -56,6 +65,12 @@ export interface BaselineRequest {
    * so a redelivered push doesn't re-clone.
    */
   force?: boolean;
+  /**
+   * Run the LLM (semantic) code-analysis rules in the Code Quality pass. Off by
+   * default (deterministic rules always run); the caller reads the workspace's
+   * `codeAnalysisLlm` setting and passes it through.
+   */
+  enableLlmAnalysis?: boolean;
 }
 
 /** What the baseline run produced — lets the caller word an accurate notification. */
@@ -138,6 +153,51 @@ export async function runBaseline(
       await deps.onPhase?.('drift');
       const { verify } = await verifyInProcess(tmp, { skipStash: true, ref, workspaceOrgId });
       drifts = verify.drifts;
+    }
+
+    // Code Quality: run the OSS analyze pass on the same clone, persisted under the
+    // repo identity by the EE PgAnalysisStore (codeDir = clone; project.path = the
+    // repoKey storage key). Independent of spec/drift — a spec-less repo still has
+    // an architecture + violations. Best-effort: an analyze failure (e.g. no LLM
+    // provider configured yet) must not block the drift baseline.
+    try {
+      // Code analyze depends on the CODE, not the spec/contracts — so skip it when
+      // this commit already has a persisted analysis. A contract-regeneration
+      // re-baseline (post-conflict-resolve) fires at the SAME commit purely to
+      // refresh the drift baseline; re-analyzing unchanged code would reproduce the
+      // same result and waste an LLM pass. A real code change is a different commit
+      // (so it still analyzes), and a never-analyzed commit reads null (also analyzes).
+      const analyzedCommit = (await readLatest(req.repoFullName))?.analysis.commitHash;
+      if (analyzedCommit === req.commitSha) {
+        log.info(
+          `[github-app] Code Quality analyze skipped for ${req.repoFullName}@${req.commitSha.slice(0, 7)} — code already analyzed`,
+        );
+      } else {
+        await deps.onPhase?.('analyze');
+        // LLM (semantic) rules run only when the workspace opted in; deterministic
+        // rules always run. They use the AI SDK transport's structured-output path.
+        await analyzeInProcess(
+          { slug: req.repoFullName, name: req.repoFullName, path: req.repoFullName },
+          { codeDir: tmp, skipStash: true, enableLlmRulesOverride: req.enableLlmAnalysis ?? false },
+        );
+      }
+    } catch (err) {
+      log.warn(
+        `[github-app] baseline analyze failed for ${req.repoFullName}@${req.commitSha.slice(0, 7)}: ${(err as Error).message}`,
+      );
+    }
+
+    // Infer baseline: reverse-engineer undocumented decisions across the default
+    // branch and persist them (to the spec store, keyed by this commit) so the
+    // dashboard's Inferred tab and the PR infer-diff can read them. Best-effort — a
+    // failure must not block the drift/analyze baseline. `inferInProcess` persists
+    // the set and re-applies any user promotions into the authored contracts.
+    try {
+      await (deps.inferPipeline ?? defaultInferPipeline).infer(tmp, ref);
+    } catch (err) {
+      log.warn(
+        `[github-app] baseline infer failed for ${req.repoFullName}@${req.commitSha.slice(0, 7)}: ${(err as Error).message}`,
+      );
     }
 
     await deps.store.saveBaseline({

@@ -17,7 +17,7 @@
 import { run, type Runner, type Task } from 'graphile-worker';
 import { and, eq } from 'drizzle-orm';
 import { workspaceContractSets, type EeDb } from '@truecourse/ee-db';
-import { JobStore, NotificationStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
+import { JobStore, NotificationStore, PgKnowledgeStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { runWithTrace, type TraceContext } from '@truecourse/ee-llm';
 import { log } from '@truecourse/core/lib/logger';
 import {
@@ -282,11 +282,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
-  // Initial / refresh scan of a connected repo: generate its spec + contracts and
-  // the gate drift baseline (runBaseline). Triggered on connect AND on
-  // default-branch push, off the request path. EE is gate + Knowledge only — it
-  // does NOT run the OSS code-analysis pass (graph/violations). The gate store +
-  // GitHub auth are rebuilt from db + env config (cheap).
+  // Initial / refresh scan of a connected repo: generate its spec + contracts, the
+  // gate drift baseline, AND the Code Quality analyze pass (architecture graph +
+  // violations) — all via runBaseline. Triggered on connect AND on default-branch
+  // push, off the request path. The gate store + GitHub auth are rebuilt from db +
+  // env config (cheap).
   const repoBaseline: Task = async (rawPayload) => {
     const { jobId, repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
       rawPayload as BaselineJobPayload;
@@ -300,6 +300,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
         { key: 'spec', label: 'Extracting spec' },
         { key: 'contracts', label: 'Generating contracts' },
         { key: 'drift', label: 'Computing drift baseline' },
+        { key: 'analyze', label: 'Analyzing code' },
       ],
       stepEmit(jobId, workspaceOrgId),
     );
@@ -309,7 +310,9 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       if (!cfg) throw new Error('the GitHub App is not configured');
       const auth = createGithubAuth(cfg);
       const store = selectGateStore(db);
-      const req = { repoFullName, installationId, defaultBranch, commitSha, force };
+      // Per-workspace toggle: LLM code-analysis rules run only when opted in.
+      const enableLlmAnalysis = await new WorkspaceSettingsStore(db).codeAnalysisLlm(workspaceOrgId);
+      const req = { repoFullName, installationId, defaultBranch, commitSha, force, enableLlmAnalysis };
 
       const result = await runBaseline(
         {

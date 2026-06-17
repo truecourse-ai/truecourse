@@ -15,8 +15,10 @@ import path from 'node:path';
 import type { EeDbHandle } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
 import { setVerifyStore } from '@truecourse/core/lib/verify-store';
+import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setContractStore } from '@truecourse/core/lib/contract-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
+import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
 import { setRegistryStore } from '@truecourse/core/config/registry';
@@ -27,8 +29,10 @@ import { eq } from 'drizzle-orm';
 import { ghRepos } from '@truecourse/ee-db';
 import {
   PgVerifyStore,
+  PgAnalysisStore,
   PgContractStore,
   PgSpecStore,
+  PgInferredActionStore,
   PgRepoConfigStore,
   PgUiStateStore,
   GhReposRegistryStore,
@@ -49,11 +53,14 @@ export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   // All hosted content lives in Postgres — bulky bodies (contracts, spec
   // artifacts, verify snapshots, trace payloads) are content-addressed in the
   // `content` table; metadata + manifests are their own rows. No blob store.
-  // (Analyze is not part of the hosted edition — drift-only — so its seam stays
-  // the OSS default and is simply never exercised here.)
   setVerifyStore(new PgVerifyStore(db));
+  // Analyze ("Code Quality") snapshots — the EE baseline runs the OSS analyze pass
+  // server-side and persists here (per-analysis + LATEST/diff + history as jsonb).
+  setAnalysisStore(new PgAnalysisStore(db));
   setContractStore(new PgContractStore(db));
   setSpecStore(new PgSpecStore(db));
+  // The dismiss/promote overlay for inferred decisions (shared dashboard logic).
+  setInferredActionStore(new PgInferredActionStore(db));
   setRepoConfigStore(new PgRepoConfigStore(db));
   setUiStateStore(new PgUiStateStore(db));
   // The "registry" is a derived view of the gate's gh_repos — no separate table,

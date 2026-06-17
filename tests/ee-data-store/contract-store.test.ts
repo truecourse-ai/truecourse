@@ -10,6 +10,7 @@ import { schema, MIGRATIONS_DIR, contractSets, content, type EeDb } from '@truec
 import {
   PgContractStore,
   PgSpecStore,
+  PgInferredActionStore,
   gcContractObjects,
   contentScope,
 } from '../../ee/packages/data-store/src/index';
@@ -128,6 +129,33 @@ describe('PgContractStore (pglite + Postgres content)', () => {
 
   it('loadContracts returns null for an unknown set', async () => {
     expect(await store.loadContracts(refAt('missing'), 'contracts')).toBeNull();
+  });
+
+  it('putContractFile adds one file; deleteContractFile removes it (promote/dismiss primitive)', async () => {
+    const contracts = seedCorpus(srcDir);
+    await store.saveContracts(refAt('c1'), 'contracts', contracts);
+
+    // Promote: add one .tc to the authored set without re-snapshotting the tree.
+    await store.putContractFile(refAt('c1'), 'contracts', 'order/promoted.tc', 'promoted contract');
+    expect(await store.readContractFile(REPO, 'contracts', 'order/promoted.tc', 'c1')).toBe('promoted contract');
+    // Existing files untouched, and it materializes with the addition.
+    expect(await store.readContractFile(REPO, 'contracts', '_shared/auth.tc', 'c1')).toBe('auth requirement');
+    const mat = await store.loadContracts(refAt('c1'), 'contracts');
+    expect(listFilesRel(mat!.dir)).toContain('order/promoted.tc');
+    await mat!.cleanup();
+
+    // Delete it back out; deleting an absent file is a no-op.
+    await store.deleteContractFile(refAt('c1'), 'contracts', 'order/promoted.tc');
+    expect(await store.listContractFiles(REPO, 'contracts', 'c1')).not.toContain('order/promoted.tc');
+    await store.deleteContractFile(refAt('c1'), 'contracts', 'order/promoted.tc');
+  });
+
+  it('putContractFile creates the set when absent and shares content rows', async () => {
+    await store.putContractFile(refAt('c9'), 'contracts', 'a/x.tc', 'shared body');
+    expect(await store.listContractFiles(REPO, 'contracts', 'c9')).toEqual(['a/x.tc']);
+    // Byte-identical content at another path dedupes to one stored object.
+    await store.putContractFile(refAt('c9'), 'contracts', 'b/y.tc', 'shared body');
+    expect(await objCount(db)).toBe(1);
   });
 
   it('rejects an empty commit SHA on save', async () => {
@@ -278,6 +306,33 @@ describe('PgContractStore — workspace scope (pglite + Postgres content)', () =
     await expect(
       store.saveWorkspaceContracts(wref, 'contracts', { '../escape.tc': 'x' }),
     ).rejects.toThrow(/unsafe|escape|absolute/i);
+  });
+});
+
+describe('PgInferredActionStore (pglite)', () => {
+  let client: PGlite;
+  let store: PgInferredActionStore;
+  beforeEach(async () => {
+    client = new PGlite();
+    store = new PgInferredActionStore(await makeDb(client));
+  });
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it('round-trips actions; upsert replaces status; remove deletes', async () => {
+    await store.setAction(REPO, { kind: 'Operation', identity: 'GET /x', status: 'dismissed', createdAt: '2026-01-01T00:00:00.000Z' });
+    await store.setAction(REPO, { kind: 'Entity', identity: 'Order', status: 'promoted', createdAt: '2026-01-02T00:00:00.000Z' });
+    expect((await store.listActions(REPO)).map((a) => `${a.kind}:${a.identity}:${a.status}`).sort()).toEqual([
+      'Entity:Order:promoted',
+      'Operation:GET /x:dismissed',
+    ]);
+    await store.setAction(REPO, { kind: 'Operation', identity: 'GET /x', status: 'promoted', createdAt: '2026-01-03T00:00:00.000Z' });
+    expect((await store.listActions(REPO)).find((a) => a.identity === 'GET /x')?.status).toBe('promoted');
+    await store.removeAction(REPO, 'Operation', 'GET /x');
+    expect((await store.listActions(REPO)).map((a) => a.identity)).toEqual(['Order']);
+    // Isolated by repoKey.
+    expect(await store.listActions('other/repo')).toEqual([]);
   });
 });
 

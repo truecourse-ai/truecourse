@@ -22,7 +22,7 @@ const NOTIFICATIONS: {
   label: string;
   desc: string;
 }[] = [
-  { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new drift.' },
+  { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new findings.' },
   { key: 'inferResult', label: 'Undocumented decisions', desc: 'Inference captured new decisions on a PR.' },
   { key: 'conflicts', label: 'Spec conflicts', desc: 'Conflicts need resolving before contracts can regenerate.' },
 ];
@@ -167,9 +167,9 @@ export function RepoSettings({ repoFullName }: { repoFullName?: string }) {
         </div>
       )}
 
-      {/* Gate mode */}
+      {/* Verification gate — one of two independent gate signals (drift). */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Gate</h2>
+        <h2 className="text-sm font-semibold text-foreground">Verification gate</h2>
         <div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
           <div>
             <div className="text-sm font-medium text-foreground">Block merges on new drift</div>
@@ -181,6 +181,48 @@ export function RepoSettings({ repoFullName }: { repoFullName?: string }) {
           </div>
           <Toggle on={repo.blocking} disabled={busy} onClick={() => patch({ blocking: !repo.blocking })} />
         </div>
+      </section>
+
+      {/* Code Quality gate */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Code Quality gate</h2>
+        <div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">Block merges on new violations</div>
+            <div className="text-xs text-muted-foreground">
+              {(repo.codeQualityBlocking ?? true)
+                ? `New ${repo.codeQualityMinSeverity ?? 'high'}+ violations fail a required Check.`
+                : 'Advisory only — the Check reports but never blocks.'}
+            </div>
+          </div>
+          <Toggle
+            on={repo.codeQualityBlocking ?? true}
+            disabled={busy}
+            onClick={() => patch({ codeQualityBlocking: !(repo.codeQualityBlocking ?? true) })}
+          />
+        </div>
+        {(repo.codeQualityBlocking ?? true) && (
+          <div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-foreground">Minimum severity</div>
+              <div className="text-xs text-muted-foreground">
+                Only new violations at or above this level fail the Check.
+              </div>
+            </div>
+            <select
+              value={repo.codeQualityMinSeverity ?? 'high'}
+              disabled={busy}
+              onChange={(e) => patch({ codeQualityMinSeverity: e.target.value })}
+              className="rounded-md bg-background px-3 py-1.5 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+          </div>
+        )}
       </section>
 
       {/* Notify emails */}

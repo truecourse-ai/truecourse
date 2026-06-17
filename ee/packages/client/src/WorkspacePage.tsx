@@ -8,12 +8,15 @@ import { useEffect, useState } from 'react';
 import type {
   SsoStatusResponse,
   WorkspaceMembersResponse,
+  WorkspaceSettingsResponse,
 } from '@truecourse/shared';
-import { getJson } from './api';
+import { getJson, patchJson } from './api';
 
 export default function WorkspacePage() {
   const [sso, setSso] = useState<SsoStatusResponse | null>(null);
   const [members, setMembers] = useState<WorkspaceMembersResponse | null>(null);
+  const [codeAnalysisLlm, setCodeAnalysisLlm] = useState(false);
+  const [savingSetting, setSavingSetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,10 +33,32 @@ export default function WorkspacePage() {
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       });
+    getJson<WorkspaceSettingsResponse>('/api/ee/workspace/settings')
+      .then((s) => !cancelled && setCodeAnalysisLlm(s.codeAnalysisLlm))
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
+
+  async function toggleCodeAnalysisLlm() {
+    if (savingSetting) return;
+    const next = !codeAnalysisLlm;
+    setSavingSetting(true);
+    setCodeAnalysisLlm(next);
+    try {
+      const s = await patchJson<WorkspaceSettingsResponse>(
+        '/api/ee/workspace/settings',
+        { codeAnalysisLlm: next },
+      );
+      setCodeAnalysisLlm(s.codeAnalysisLlm);
+    } catch (e) {
+      setCodeAnalysisLlm(!next); // revert on failure
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingSetting(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-3xl p-8">
@@ -115,6 +140,40 @@ export default function WorkspacePage() {
             })}
           </ul>
         )}
+      </section>
+
+      {/* Settings */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold text-foreground">Settings</h2>
+        <div className="mt-2 flex items-start justify-between gap-4 rounded-md border border-border bg-card px-3 py-2.5">
+          <div>
+            <div className="text-sm font-medium text-foreground">
+              LLM code-analysis rules
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Run the semantic (LLM) rules in Code Quality, in addition to the
+              always-on deterministic rules. Off by default — adds analysis
+              latency and LLM cost.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={codeAnalysisLlm}
+            aria-label="LLM code-analysis rules"
+            disabled={savingSetting}
+            onClick={toggleCodeAnalysisLlm}
+            className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+              codeAnalysisLlm ? 'bg-primary' : 'bg-muted'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                codeAnalysisLlm ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
       </section>
     </div>
   );

@@ -43,7 +43,9 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
 import { readVerifyLatest } from '@truecourse/core/lib/verify-store';
-import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
+import { diffByKey } from '@truecourse/core/lib/artifact-diff';
+import { baselineCommit } from './diff-base.js';
+import { isGitRepo, getGit, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addManualChain,
   addManualInclude,
@@ -512,6 +514,78 @@ export async function effectiveClaims(
     claims,
   };
 }
+
+// PR diff (EE): claims the PR adds/removes + the new spec conflicts it introduces
+// (the gate-blocking signal). Head at `?ref=<headSha>` vs the default-branch baseline.
+router.get(
+  '/:id/spec/diff',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+      if (!ref) {
+        res.json({ added: [], removed: [], openConflicts: [], newConflictCount: 0 });
+        return;
+      }
+      const baseCommit = await baselineCommit(repo.path);
+      const claimsAt = async (commit: string): Promise<ClaimEntry[]> =>
+        (await loadSpec<ClaimsFile>({ repoKey: repo.path, commitSha: commit }, 'claims'))?.claims ?? [];
+      const conflictsAt = async (commit: string): Promise<Array<{ id: string; topic: string; subject: string }>> =>
+        (
+          await loadSpec<{ openConflicts?: Array<{ id: string; topic: string; subject: string }> }>(
+            { repoKey: repo.path, commitSha: commit },
+            'scanState',
+          )
+        )?.openConflicts ?? [];
+
+      const baseClaims = baseCommit ? await claimsAt(baseCommit) : [];
+      // Code-only PR: the gate reuses the base spec, so nothing is stored at the head
+      // commit → fall back to the base (head == base → empty delta, not "all removed").
+      let headClaims = await claimsAt(ref);
+      if (headClaims.length === 0) headClaims = baseClaims;
+      const { added, removed } = diffByKey(baseClaims, headClaims, claimKey);
+      const toRef = (c: ClaimEntry) => ({ id: claimKey(c), module: c.module, topic: c.topic, subject: c.subject });
+
+      const headConflicts = await conflictsAt(ref);
+      const baseConflictIds = new Set((baseCommit ? await conflictsAt(baseCommit) : []).map((c) => c.id));
+
+      res.json({
+        added: added.map(toRef),
+        removed: removed.map(toRef),
+        openConflicts: headConflicts.map((c) => ({ id: c.id, topic: c.topic, subject: c.subject })),
+        newConflictCount: headConflicts.filter((c) => !baseConflictIds.has(c.id)).length,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// OSS Git-Diff: the claims the working tree adds/removes vs the committed
+// `specs/claims.json` (read from git HEAD). EE uses GET above with `?ref`.
+router.post(
+  '/:id/spec/diff',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const current = (await loadLatestSpec<ClaimsFile>(repo.path, 'claims'))?.claims ?? [];
+      let base: ClaimEntry[] = [];
+      try {
+        const git = await getGit(repo.path);
+        const raw = await git.show(['HEAD:.truecourse/specs/claims.json']);
+        base = (JSON.parse(raw) as ClaimsFile).claims ?? [];
+      } catch {
+        // No committed claims.json (or not a git repo) → baseline empty.
+      }
+      const { added, removed } = diffByKey(base, current, claimKey);
+      const toRef = (c: ClaimEntry) => ({ id: claimKey(c), module: c.module, topic: c.topic, subject: c.subject });
+      // OSS has no committed scan-state baseline, so no per-PR "new conflicts" count.
+      res.json({ added: added.map(toRef), removed: removed.map(toRef), openConflicts: [], newConflictCount: 0 });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/canonical/tree

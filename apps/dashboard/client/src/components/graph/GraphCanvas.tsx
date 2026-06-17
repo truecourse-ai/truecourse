@@ -64,6 +64,12 @@ type GraphCanvasProps = {
   scopedModuleId?: string | null;
   onScopedServiceChange?: (id: string | null) => void;
   onScopedModuleChange?: (id: string | null) => void;
+  /**
+   * Navigate-only mode (hosted EE Code Quality): keep pan/zoom/depth/collapse/
+   * drag/filter/hover, but a node CLICK selects nothing and doesn't zoom. The
+   * graph is an architecture picture you explore, not drill into.
+   */
+  readonly?: boolean;
 };
 
 const nodeTypes: NodeTypes = {
@@ -108,6 +114,7 @@ function GraphCanvasInner({
   scopedModuleId,
   onScopedServiceChange,
   onScopedModuleChange,
+  readonly = false,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(() => {
@@ -340,6 +347,9 @@ function GraphCanvasInner({
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
+      // Navigate-only (EE Code Quality): a node click selects nothing and doesn't
+      // zoom — the graph is explored via pan/zoom/depth/hover, not drill-down.
+      if (readonly) return;
       onNodeSelect?.(node.id);
 
       if (depthLevel === 'services') {
@@ -369,7 +379,7 @@ function GraphCanvasInner({
         }, 50);
       }
     },
-    [onNodeSelect, depthLevel, fitView, animDuration],
+    [readonly, onNodeSelect, depthLevel, fitView, animDuration],
   );
 
   // Hover-filter-edges is only useful at services depth where the node-to-node

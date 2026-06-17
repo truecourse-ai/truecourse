@@ -116,7 +116,37 @@ export async function updateComment(
   });
 }
 
-/** Post a completed Check run for a head sha (the conclusion is authoritative). */
+/**
+ * Open an in-progress Check run for a head sha so the PR shows "running" while the
+ * gate works; returns its id to complete later with {@link postCheck}. Best-effort:
+ * a failure just means no live "running" pill (the completed Check is still posted).
+ */
+export async function startCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+): Promise<number | null> {
+  try {
+    const { data } = await octokit.checks.create({
+      owner,
+      repo,
+      name,
+      head_sha: headSha,
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+    });
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Post a Check run's result (the conclusion is authoritative). When `checkRunId` is
+ * given, UPDATES that in-progress run (from {@link startCheck}) to completed instead
+ * of creating a fresh one — so a single Check transitions running → done.
+ */
 export async function postCheck(
   octokit: Octokit,
   { owner, repo }: RepoCoords,
@@ -124,7 +154,20 @@ export async function postCheck(
   headSha: string,
   conclusion: 'success' | 'failure' | 'neutral',
   output: { title: string; summary: string },
+  checkRunId?: number | null,
 ): Promise<void> {
+  if (checkRunId != null) {
+    await octokit.checks.update({
+      owner,
+      repo,
+      check_run_id: checkRunId,
+      status: 'completed',
+      conclusion,
+      completed_at: new Date().toISOString(),
+      output,
+    });
+    return;
+  }
   await octokit.checks.create({
     owner,
     repo,

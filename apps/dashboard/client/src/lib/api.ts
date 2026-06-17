@@ -413,6 +413,7 @@ export type DiffViolationItem = {
   fixPrompt: string | null;
   filePath?: string;
   lineStart?: number;
+  ruleKey?: string;
 };
 
 export type DiffCheckResponse = {
@@ -444,8 +445,11 @@ export function runDiffCheck(repoId: string): Promise<{ message: string; repoId:
   });
 }
 
-export function getDiffCheck(repoId: string): Promise<DiffCheckResponse | null> {
-  return fetchApi<DiffCheckResponse | null>(`/api/repos/${repoId}/analyses/diff`);
+export function getDiffCheck(repoId: string, prNumber?: number): Promise<DiffCheckResponse | null> {
+  const path = prNumber != null
+    ? `/api/repos/${repoId}/analyses/diff?pr=${prNumber}`
+    : `/api/repos/${repoId}/analyses/diff`;
+  return fetchApi<DiffCheckResponse | null>(path);
 }
 
 // Code Violations
@@ -821,6 +825,8 @@ export type ContractsTree = {
       path: string;
       /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
       provenance?: 'workspace' | 'repo';
+      /** True when this authored contract was promoted from an inferred decision. */
+      inferred?: boolean;
     }>;
   }>;
 };
@@ -833,6 +839,33 @@ export type ContractsFile = {
 export function getContractsTree(repoId: string, ref?: string): Promise<ContractsTree> {
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
   return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree${q}`);
+}
+
+export type ContractsDiff = { added: string[]; removed: string[]; modified: string[] };
+
+export function getContractsDiff(repoId: string, ref: string): Promise<ContractsDiff> {
+  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff?ref=${encodeURIComponent(ref)}`);
+}
+
+/** OSS Git-Diff: run the working-tree-vs-committed contracts diff. */
+export function postContractsDiff(repoId: string): Promise<ContractsDiff> {
+  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff`, { method: 'POST' });
+}
+
+export type SpecDiff = {
+  added: Array<{ id: string; module: string; topic: string; subject: string }>;
+  removed: Array<{ id: string; module: string; topic: string; subject: string }>;
+  openConflicts: Array<{ id: string; topic: string; subject: string }>;
+  newConflictCount: number;
+};
+
+export function getSpecDiff(repoId: string, ref: string): Promise<SpecDiff> {
+  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff?ref=${encodeURIComponent(ref)}`);
+}
+
+/** OSS Git-Diff: run the working-tree-vs-committed spec (claims) diff. */
+export function postSpecDiff(repoId: string): Promise<SpecDiff> {
+  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff`, { method: 'POST' });
 }
 
 export function getContractsFile(

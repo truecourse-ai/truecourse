@@ -1,7 +1,7 @@
 /**
  * Pull requests (enterprise) — the PR gate's runs for this repo, shown as a
  * repo-detail tab (BL Drift section, gated on the `github-gate` capability).
- * Each row is one gate run: pass/fail/neutral, the PR, and drift added/resolved.
+ * Each row is one PR (its latest gate run): pass/fail/neutral and drift added/resolved.
  * Data comes from the protected connect router; `repoFullName` is the repo's
  * registered `owner/repo` identity.
  */
@@ -56,7 +56,15 @@ export function PullRequestsView({ repoFullName }: { repoFullName?: string }) {
       credentials: 'include',
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Request failed (${r.status})`))))
-      .then((d: GithubRunsResponse) => !cancelled && setRuns(d.runs))
+      .then((d: GithubRunsResponse) => {
+        if (cancelled) return;
+        // One row per PR — the feed is newest-first (listRuns orders by createdAt
+        // desc), so the first run seen per PR is its latest. A PR with several gate
+        // runs (one per pushed commit) collapses to a single row instead of N.
+        const byPr = new Map<number, GithubRunSummary>();
+        for (const run of d.runs) if (!byPr.has(run.prNumber)) byPr.set(run.prNumber, run);
+        setRuns([...byPr.values()]);
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
     return () => {
       cancelled = true;

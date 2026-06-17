@@ -9,10 +9,76 @@ import {
   type EnrichedDrift,
 } from '@truecourse/core/lib/drift-enrichment';
 import type { GateDrift } from './store/types.js';
-import type { GateDecision } from './gate.js';
+import type { GateConclusion, GateDecision, CodeQualityDecision } from './gate.js';
 
 export const GATE_MARKER = '<!-- truecourse-gate:result -->';
 export const GATE_CHECK_NAME = 'TrueCourse / drift';
+export const CODE_QUALITY_CHECK_NAME = 'TrueCourse / Code Quality';
+
+const STATUS_EMOJI: Record<GateConclusion, string> = {
+  success: '✅',
+  failure: '❌',
+  neutral: '⚪',
+};
+
+/** One-line Code Quality summary for the Check + combined comment. */
+function codeQualitySummary(cq: CodeQualityDecision): string {
+  if (cq.neutralReason === 'no-baseline') return 'no baseline analysis yet';
+  if (cq.added.length > 0) {
+    const n = cq.added.length;
+    return `${n} new violation${n === 1 ? '' : 's'} at/above threshold`;
+  }
+  if (cq.total > 0) return `${cq.total} new violation${cq.total === 1 ? '' : 's'} (below threshold)`;
+  return 'no new violations';
+}
+
+/** Output for the standalone "TrueCourse / Code Quality" GitHub Check. */
+export function cqCheckOutput(cq: CodeQualityDecision): { title: string; summary: string } {
+  if (cq.neutralReason === 'no-baseline') {
+    return {
+      title: 'No baseline analysis yet',
+      summary: 'Code Quality compares against the default branch analysis; none is stored yet.',
+    };
+  }
+  if (cq.added.length === 0) {
+    const below = cq.total > 0 ? ` ${cq.total} new below threshold.` : '';
+    return { title: 'No new violations', summary: `No new code-quality violations at/above the threshold.${below}` };
+  }
+  const n = cq.added.length;
+  return {
+    title: `${n} new code-quality violation${n === 1 ? '' : 's'}`,
+    summary: cq.added.map((v) => `- **${v.severity}** ${v.title}${v.filePath ? ` (${v.filePath})` : ''}`).join('\n'),
+  };
+}
+
+/**
+ * Combined two-signal header prepended to the gate comment when a Code Quality
+ * result is present — one status line each for Code Quality + Verification, with
+ * deep-links. The Verification drift detail still follows below.
+ */
+function combinedHeader(
+  decision: GateDecision,
+  cq: CodeQualityDecision,
+  opts: { codeQualityUrl?: string; verifyUrl?: string },
+): string {
+  const cqLine = `- ${STATUS_EMOJI[cq.conclusion]} **Code Quality** — ${codeQualitySummary(cq)}`;
+  const drift =
+    decision.added.length > 0
+      ? `${decision.added.length} new drift${decision.added.length === 1 ? '' : 's'}`
+      : decision.neutralReason
+        ? decision.neutralReason.replace(/-/g, ' ')
+        : 'no new drift';
+  const vLine = `- ${STATUS_EMOJI[decision.conclusion]} **Verification** — ${drift}`;
+  const links = [
+    opts.codeQualityUrl ? `[View Code Quality →](${opts.codeQualityUrl})` : null,
+    opts.verifyUrl ? `[View Verification →](${opts.verifyUrl})` : null,
+  ].filter(Boolean);
+  return (
+    `### TrueCourse gate\n\n${cqLine}\n${vLine}\n` +
+    (links.length ? `\n${links.join(' · ')}\n` : '') +
+    `\n---\n\n`
+  );
+}
 
 /** Readable prose for the drifts in a decision, keyed by `driftContentKey`. */
 export type DriftEnrichmentMap = Map<string, EnrichedDrift>;
@@ -51,22 +117,37 @@ function belowNote(d: GateDecision): string {
 
 export function renderGateComment(
   decision: GateDecision,
-  opts: { conflictsUrl?: string; enriched?: DriftEnrichmentMap } = {},
+  opts: {
+    conflictsUrl?: string;
+    enriched?: DriftEnrichmentMap;
+    /** When set, prepend a combined two-signal header (Code Quality + Verification). */
+    codeQuality?: CodeQualityDecision;
+    codeQualityUrl?: string;
+    verifyUrl?: string;
+  } = {},
 ): string {
-  const head = GATE_MARKER + '\n';
+  const head =
+    GATE_MARKER +
+    '\n' +
+    (opts.codeQuality ? combinedHeader(decision, opts.codeQuality, opts) : '');
 
   if (decision.neutralReason === 'unresolved-conflicts') {
     const n = decision.unresolvedConflicts ?? 0;
     const where = opts.conflictsUrl
       ? `[resolve them in the dashboard](${opts.conflictsUrl})`
       : 'resolve them in the dashboard';
+    const blocking = decision.conclusion === 'failure';
+    const title = blocking
+      ? `### ❌ TrueCourse drift gate — ${n} unresolved spec conflict${n === 1 ? '' : 's'}`
+      : `### ⚪ TrueCourse drift gate — spec needs resolution`;
+    const footer = blocking ? ` This blocks the merge until resolved.` : '';
     return (
       head +
-      `### ⚪ TrueCourse drift gate — spec needs resolution\n\n` +
+      `${title}\n\n` +
       `This PR's spec has ${n} unresolved conflict${n === 1 ? '' : 's'}. ` +
       `The contracts were generated with an auto-chosen default, so the gate ` +
       `can't reliably check drift yet. Please ${where}; the gate re-runs on the ` +
-      `next push.`
+      `next push.${footer}`
     );
   }
 
@@ -118,7 +199,7 @@ export function gateCheckOutput(decision: GateDecision): {
   if (decision.neutralReason === 'unresolved-conflicts') {
     const n = decision.unresolvedConflicts ?? 0;
     return {
-      title: 'Spec conflicts need resolution',
+      title: decision.conclusion === 'failure' ? 'Unresolved spec conflicts block this PR' : 'Spec conflicts need resolution',
       summary: `The head spec has ${n} unresolved conflict${n === 1 ? '' : 's'}; resolve them in the dashboard, then push again.`,
     };
   }

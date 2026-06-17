@@ -64,6 +64,7 @@ import {
   verify,
   infer,
   writeInferred,
+  renderDecision,
   type ContractDrift,
   type VerifyResult,
   type InferResult,
@@ -106,6 +107,14 @@ import {
   loadWorkspaceSpec,
   specsMaterializeInPlace,
 } from '../lib/spec-store.js';
+import {
+  reapplyPromoted,
+  applyInferredActions,
+  diffDecisions,
+  type InferredDecisionSummary,
+  type InferDiff,
+} from '../lib/inferred-decisions.js';
+import { listInferredActions } from '../lib/inferred-action-store.js';
 import {
   diffDrifts,
   summarizeDrifts,
@@ -220,6 +229,15 @@ export interface InferInProcessResult {
   written: string[];
   /** Files that would be written, on a dry run. */
   proposed: string[];
+  /**
+   * The `.tc` rel path (relative to the `_inferred/` root, e.g. `order/x.tc` —
+   * which is also the path in the `contracts_inferred` set) for each decision,
+   * PARALLEL to `infer.decisions`. Lets the gate promote a decision by reading its
+   * `.tc` from `contracts_inferred` and writing it into authored `contracts`.
+   */
+  decisionPaths: string[];
+  /** The structured summaries the dashboard reads (built even on a dry run). */
+  summaries: InferredDecisionSummary[];
 }
 
 export interface SpecResolveAllDefaultsResult {
@@ -1791,8 +1809,22 @@ export interface InferInProcessOptions {
   source?: TelemetrySource;
   /** Explicit store identity (EE). When omitted, derived from `repoRoot`'s HEAD. */
   ref?: RepoRef;
+  /**
+   * Fallback contracts source when `ref` has no authored contracts of its own. In
+   * the gate's warm path (a PR that changed no spec) the head commit stores no
+   * `contracts` — the head's code was verified against the BASELINE's contracts —
+   * so coverage must subtract those. Pass the baseline ref here; `ref` (the head)
+   * is still tried first (the cold path, where the PR generated its own contracts).
+   */
+  contractsRef?: RepoRef;
   /** Override the commit SHA when `ref` is omitted. */
   commitOverride?: string;
+  /**
+   * Re-apply promoted decisions into authored `contracts` (default true). Set false
+   * for a transient PR-head infer, where it would write a partial `contracts`
+   * manifest at the head and pollute the contracts tree/diff.
+   */
+  reapplyPromotions?: boolean;
 }
 
 /**
@@ -1806,11 +1838,52 @@ export async function inferInProcess(
   repoRoot: string,
   options: InferInProcessOptions = {},
 ): Promise<InferInProcessResult> {
-  const { tracker } = options;
   const startedAt = Date.now();
-  const contractsDir =
-    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
   const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
+
+  // Resolve the authored-contract coverage dir (also where the inferred `.tc` output
+  // is written). EE runs on an ephemeral clone with no committed `.truecourse/contracts`
+  // — its contracts live in the store — so when a `ref` is set we materialize them from
+  // the store, the same source `verify` reads. Reading the clone's disk would see zero
+  // contracts and re-infer everything already documented. OSS (no `ref`) uses the
+  // working-tree dir; an explicit `contractsDir` overrides both.
+  let contractsDir = options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
+  let releaseContracts: () => Promise<void> = async () => {};
+  if (!options.contractsDir && options.ref) {
+    // Prefer the head ref's own authored contracts (the cold path — the PR changed
+    // the spec and the gate generated contracts at the head). When the head has none
+    // (the warm path), fall back to `contractsRef` (the baseline) so coverage matches
+    // the contracts the gate verified against — otherwise infer sees nothing and
+    // re-offers everything already documented.
+    const mat =
+      (await loadContracts(options.ref, 'contracts')) ??
+      (options.contractsRef ? await loadContracts(options.contractsRef, 'contracts') : null);
+    if (mat) {
+      contractsDir = mat.dir;
+      releaseContracts = mat.cleanup;
+    }
+  }
+
+  try {
+    return await persistInferred(repoRoot, options, contractsDir, codeDir, startedAt);
+  } finally {
+    await releaseContracts();
+  }
+}
+
+/**
+ * Run inference against the resolved `contractsDir` and persist the results. Split
+ * from {@link inferInProcess} only so a store-materialized `contractsDir` can be
+ * released in a `finally`.
+ */
+async function persistInferred(
+  repoRoot: string,
+  options: InferInProcessOptions,
+  contractsDir: string,
+  codeDir: string,
+  startedAt: number,
+): Promise<InferInProcessResult> {
+  const { tracker } = options;
 
   tracker?.start('load');
   let result: InferResult;
@@ -1855,7 +1928,58 @@ export async function inferInProcess(
     await saveContracts(options.ref, 'contracts_inferred', path.join(contractsDir, '_inferred'));
   }
 
-  return { infer: result, written, proposed };
+  // Render each decision once — its `.tc` rel path keys the contracts_inferred set
+  // (so the gate/promote can locate it) and its source is the detail-view body.
+  const rendered = result.decisions.map((d) => renderDecision(d));
+  const decisionPaths = rendered.map((r) => r.relPath);
+
+  // The structured summaries the dashboard's Inferred tab reads — built regardless
+  // of dryRun so the OSS diff run (dryRun: true) can compute the working-tree set
+  // without overwriting the committed baseline.
+  const summaries: InferredDecisionSummary[] = result.decisions.map((d, i) => ({
+    kind: d.kind,
+    identity: d.identity,
+    path: d.codeLoc?.path,
+    line: d.codeLoc?.lines?.[0],
+    reason: d.reason,
+    confidence: d.confidence,
+    contractPath: decisionPaths[i],
+    tc: rendered[i].tcSource,
+  }));
+
+  // Persist them — OSS (file under `specs/`) and EE (Postgres) alike. The store ref
+  // is the PR head / baseline commit in EE; in OSS the repo tree (commit unused).
+  if (!options.dryRun) {
+    const specRef = options.ref ?? { repoKey: repoRoot, commitSha: options.commitOverride ?? '' };
+    await saveSpec(specRef, 'inferredDecisions', summaries);
+    // Re-apply user promotions: writing the `.tc` files regenerated the inferred
+    // tree, so each promoted decision's `.tc` is rewritten into authored contracts.
+    // Skipped for a transient PR-head infer (`reapplyPromotions: false`) — there it
+    // would write a PARTIAL `contracts` manifest at the head (just the promotions),
+    // polluting the contracts tree/diff into showing the whole base as removed.
+    if (options.reapplyPromotions ?? true) await reapplyPromoted(specRef, summaries);
+  }
+
+  return { infer: result, written, proposed, decisionPaths, summaries };
+}
+
+/**
+ * OSS Git-Diff: the inferred decisions the WORKING TREE adds/changes vs the
+ * committed baseline (`specs/inferredDecisions.json`, committed like the analyze
+ * `LATEST.json`). Re-runs inference on the working tree with `dryRun` so the
+ * baseline file is untouched, then diffs against it. Mirrors `verifyDiffInProcess`.
+ * EE uses the per-commit `/inferred/diff?ref=` route instead.
+ */
+export async function inferDiffInProcess(
+  repoRoot: string,
+  options: InferInProcessOptions = {},
+): Promise<InferDiff> {
+  const { summaries: current } = await inferInProcess(repoRoot, { ...options, dryRun: true });
+  const baseRaw = await loadLatestSpec<InferredDecisionSummary[]>(repoRoot, 'inferredDecisions');
+  const actions = await listInferredActions(repoRoot);
+  const head = applyInferredActions(current, actions);
+  const base = baseRaw ? applyInferredActions(baseRaw, actions) : null;
+  return diffDecisions(head, base);
 }
 
 /**

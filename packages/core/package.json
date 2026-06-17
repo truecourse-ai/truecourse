@@ -8,6 +8,14 @@
       "types": "./dist/commands/analyze-in-process.d.ts",
       "import": "./dist/commands/analyze-in-process.js"
     },
+    "./commands/analyze-core": {
+      "types": "./dist/commands/analyze-core.d.ts",
+      "import": "./dist/commands/analyze-core.js"
+    },
+    "./commands/analyze-persist": {
+      "types": "./dist/commands/analyze-persist.d.ts",
+      "import": "./dist/commands/analyze-persist.js"
+    },
     "./commands/diff-in-process": {
       "types": "./dist/commands/diff-in-process.d.ts",
       "import": "./dist/commands/diff-in-process.js"
@@ -75,6 +83,18 @@
     "./lib/spec-store": {
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
+    },
+    "./lib/inferred-action-store": {
+      "types": "./dist/lib/inferred-action-store.d.ts",
+      "import": "./dist/lib/inferred-action-store.js"
+    },
+    "./lib/inferred-decisions": {
+      "types": "./dist/lib/inferred-decisions.d.ts",
+      "import": "./dist/lib/inferred-decisions.js"
+    },
+    "./lib/artifact-diff": {
+      "types": "./dist/lib/artifact-diff.d.ts",
+      "import": "./dist/lib/artifact-diff.js"
     },
     "./lib/spec-origin-resolver": {
       "types": "./dist/lib/spec-origin-resolver.d.ts",

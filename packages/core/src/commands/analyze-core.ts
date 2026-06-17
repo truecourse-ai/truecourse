@@ -33,6 +33,27 @@ import { acquireAnalyzeLock, releaseAnalyzeLock } from '../lib/atomic-write.js';
 import type { Graph, LatestSnapshot, UsageRecord, ViolationRecord } from '../types/snapshot.js';
 import type { StepTracker } from '../progress.js';
 
+/**
+ * Rewrite an absolute scan-root filePath to a repo-relative POSIX path. The
+ * analyzer records paths under the scan root (`codeDir`) — which in EE is an
+ * ephemeral clone temp dir — so persisting them would leak machine paths and
+ * break file links, GitHub deep-links, and cross-run violation identity. Paths
+ * outside `codeDir` (already-relative, or external) pass through untouched.
+ * Mirrors the verify path, which already relativizes (see spec-in-process).
+ */
+export function toRepoRelative(filePath: string, codeDir: string): string {
+  if (path.isAbsolute(filePath) && (filePath === codeDir || filePath.startsWith(codeDir + path.sep))) {
+    return path.relative(codeDir, filePath).split(path.sep).join('/');
+  }
+  return filePath;
+}
+
+export function relativizeViolationPaths(violations: ViolationRecord[], codeDir: string): void {
+  for (const v of violations) {
+    if (v.filePath) v.filePath = toRepoRelative(v.filePath, codeDir);
+  }
+}
+
 export type AnalysisMode = 'full' | 'diff';
 
 export interface LlmEstimate {
@@ -294,6 +315,16 @@ export async function analyzeCore(
       : [];
     const previousAnalysisId = latestBaseline?.analysis.id ?? null;
 
+    // The stored baseline carries repo-relative paths; this run's violations are
+    // scan-root-absolute. Re-absolutize the baseline against this run's `codeDir`
+    // so the lifecycle matches by identity (ruleKey + filePath) no matter which
+    // temp dir this clone landed in.
+    const previousForDiff = previousActiveViolations.map((v) =>
+      v.filePath && !path.isAbsolute(v.filePath)
+        ? { ...v, filePath: path.resolve(codeDir, v.filePath) }
+        : v,
+    );
+
     // ------------------------------------------------------------
     // Violation pipeline
     // ------------------------------------------------------------
@@ -317,7 +348,7 @@ export async function analyzeCore(
       moduleIdMap,
       methodIdMap,
       dbIdMap,
-      previousActiveViolations,
+      previousActiveViolations: previousForDiff,
       changedFileSet,
       tracker: options.tracker,
       enabledCategories: effectiveCategories,
@@ -359,6 +390,12 @@ export async function analyzeCore(
     enforceLocationInvariant(pipelineResult.added);
     enforceLocationInvariant(pipelineResult.unchanged);
     enforceLocationInvariant(pipelineResult.resolved);
+
+    // Persist repo-relative paths (the analyzer recorded scan-root-absolute
+    // ones). Done after the pipeline so type-aware rules saw real absolute paths.
+    relativizeViolationPaths(pipelineResult.added, codeDir);
+    relativizeViolationPaths(pipelineResult.unchanged, codeDir);
+    relativizeViolationPaths(pipelineResult.resolved, codeDir);
 
     log.info(
       `[${isDiff ? 'Diff' : 'Analysis'}] core complete in ${Date.now() - start}ms — ${pipelineResult.added.length} added, ${pipelineResult.unchanged.length} unchanged, ${pipelineResult.resolvedRefs.length} resolved`,

@@ -110,13 +110,14 @@ describe('createEmailNotifier', () => {
       prNumber: 7,
       prUrl: 'https://github.com/acme/api/pull/7',
       openConflicts: 2,
-      dashboardUrl: 'https://app.tc.dev/repos/acme-api/contracts?commit=deadbeef',
+      dashboardUrl: 'https://app.tc.dev/repos/acme-api?pr=7&section=verification&tab=contracts',
     });
     expect(sends.map((s) => s.to)).toEqual([['a@x.com'], ['b@y.com']]);
     expect(sends[0].subject).toContain('2 spec conflicts need resolution');
     expect(sends[0].subject).toContain('acme/api');
     expect(sends[0].html).toContain('https://github.com/acme/api/pull/7');
-    expect(sends[0].html).toContain('https://app.tc.dev/repos/acme-api/contracts?commit=deadbeef');
+    // `&` is HTML-escaped to `&amp;` in the rendered href (browsers parse it back).
+    expect(sends[0].html).toContain('https://app.tc.dev/repos/acme-api?pr=7&amp;section=verification&amp;tab=contracts');
     expect(sends[0].html).toContain('resolve them in the dashboard');
   });
 

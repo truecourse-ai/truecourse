@@ -51,6 +51,17 @@ import {
   writeLatest,
 } from '@truecourse/core/lib/analysis-store';
 import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
+import {
+  readInferredDecisions,
+  readInferredDecisionsAt,
+  readDismissedDecisions,
+  dismissInferredDecision,
+  undismissInferredDecision,
+  promoteInferredDecision,
+  diffDecisions,
+} from '@truecourse/core/lib/inferred-decisions';
+import { inferDiffInProcess } from '@truecourse/core/commands/spec-in-process';
+import { baselineCommit } from './diff-base.js';
 import { log, popLogger, pushLogger } from '@truecourse/core/lib/logger';
 
 const router: Router = Router();
@@ -186,7 +197,12 @@ router.get('/:id/analyses/diff', async (req: Request, res: Response, next: NextF
   try {
     const id = req.params.id as string;
     const repo = await resolveProjectForRequest(id);
-    const result = await getDiffResult(repo.path);
+    // EE PR view: read the PR-scoped Code Quality diff the gate persisted under
+    // `<repoKey>::pr/<n>` (new/resolved vs the baseline). OSS / no `?pr` → the
+    // repo's own working-tree diff.
+    const prParam = req.query.pr as string | undefined;
+    const diffKey = prParam && /^\d+$/.test(prParam) ? `${repo.path}::pr/${prParam}` : repo.path;
+    const result = await getDiffResult(diffKey);
     if (!result) {
       res.json(null);
       return;
@@ -202,6 +218,123 @@ router.get('/:id/analyses/diff', async (req: Request, res: Response, next: NextF
       isStale,
       diffAnalysisId: diff.id,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Inferred (undocumented) decisions — the Inferred tab (OSS + EE, shared).
+//   GET  /api/repos/:id/inferred           — list (overlay-filtered)
+//   POST /api/repos/:id/inferred/dismiss   — { kind, identity }
+//   POST /api/repos/:id/inferred/promote   — { kind, identity } → authored contract
+// ---------------------------------------------------------------------------
+
+router.get('/:id/inferred', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json(await readInferredDecisions(repo.path));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/inferred/dismissed', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json({ decisions: await readDismissedDecisions(repo.path) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PR diff (EE): undocumented decisions the PR head adds/changes vs the baseline.
+router.get('/:id/inferred/diff', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const ref = typeof req.query.ref === 'string' ? req.query.ref.trim() : '';
+    const head = ref ? await readInferredDecisionsAt({ repoKey: repo.path, commitSha: ref }) : null;
+    if (!ref || head == null) {
+      res.json({ added: [], changed: [], resolved: [], fellBack: false });
+      return;
+    }
+    const baseCommit = await baselineCommit(repo.path);
+    const base = baseCommit
+      ? await readInferredDecisionsAt({ repoKey: repo.path, commitSha: baseCommit })
+      : null;
+    const { added, changed, resolved, fellBack } = diffDecisions(head, base);
+    res.json({ added, changed, resolved, fellBack });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// OSS Git-Diff: re-run inference on the working tree and diff vs the committed
+// `inferredDecisions.json` baseline. (EE uses GET above with a per-commit `?ref`.)
+router.post('/:id/inferred/diff', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const { added, changed, resolved, fellBack } = await inferDiffInProcess(repo.path);
+    res.json({ added, changed, resolved, fellBack });
+  } catch (error) {
+    next(error);
+  }
+});
+
+function decisionKeyFromBody(req: Request): { kind: string; identity: string } | null {
+  const body = (req.body ?? {}) as { kind?: unknown; identity?: unknown };
+  if (typeof body.kind !== 'string' || typeof body.identity !== 'string') return null;
+  return { kind: body.kind, identity: body.identity };
+}
+
+router.post('/:id/inferred/dismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = decisionKeyFromBody(req);
+    if (!key) {
+      res.status(400).json({ error: 'kind and identity required' });
+      return;
+    }
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    await dismissInferredDecision(repo.path, key.kind, key.identity);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/inferred/promote', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = decisionKeyFromBody(req);
+    if (!key) {
+      res.status(400).json({ error: 'kind and identity required' });
+      return;
+    }
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const result = await promoteInferredDecision(repo.path, key.kind, key.identity);
+    if (result === 'not-found') {
+      res.status(404).json({ error: 'inferred decision not found' });
+      return;
+    }
+    if (result === 'unavailable') {
+      res.status(409).json({ error: 'inferred contract unavailable; re-infer and retry' });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/inferred/restore', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = decisionKeyFromBody(req);
+    if (!key) {
+      res.status(400).json({ error: 'kind and identity required' });
+      return;
+    }
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    await undismissInferredDecision(repo.path, key.kind, key.identity);
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }

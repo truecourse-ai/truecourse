@@ -25,7 +25,11 @@ import {
   listWorkspaceContractFiles,
   readWorkspaceContractFile,
 } from '@truecourse/core/lib/contract-store';
-import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
+import { loadSpec } from '@truecourse/core/lib/spec-store';
+import { isGitRepo, getGit, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
+import { promotedContractPaths } from '@truecourse/core/lib/inferred-decisions';
+import { diffContents } from '@truecourse/core/lib/artifact-diff';
+import { baselineCommit } from './diff-base.js';
 import {
   GENERATE_STEPS,
   generateContractsInProcess,
@@ -47,6 +51,8 @@ interface ContractFile {
   path: string;
   /** `workspace` for an inherited contract; `repo` (or absent) for the repo's own. */
   provenance?: Provenance;
+  /** True when this authored contract was promoted from an inferred decision. */
+  inferred?: boolean;
 }
 
 interface ContractModule {
@@ -57,6 +63,7 @@ interface ContractModule {
 interface EffectiveFile {
   path: string;
   provenance: Provenance;
+  inferred?: boolean;
 }
 
 /**
@@ -72,7 +79,7 @@ function groupByModule(files: EffectiveFile[]): ContractModule[] {
     const moduleName = slash === -1 ? p : p.slice(0, slash);
     const name = p.slice(p.lastIndexOf('/') + 1);
     if (!byModule.has(moduleName)) byModule.set(moduleName, []);
-    byModule.get(moduleName)!.push({ name, path: p, provenance: f.provenance });
+    byModule.get(moduleName)!.push({ name, path: p, provenance: f.provenance, inferred: f.inferred });
   }
   const modules: ContractModule[] = [...byModule.entries()].map(([name, files]) => ({
     name,
@@ -88,11 +95,15 @@ function groupByModule(files: EffectiveFile[]): ContractModule[] {
 }
 
 /**
- * The repo's EFFECTIVE contract files = its own (authored + inferred) UNIONed
- * with the workspace corpus it inherits, the repo winning on a relpath collision
- * — mirroring what the gate verifies. Each file is tagged with its layer for the
+ * The repo's EFFECTIVE contract files = its AUTHORED set UNIONed with the
+ * workspace corpus it inherits, the repo winning on a relpath collision —
+ * mirroring what the gate verifies. Each file is tagged with its layer for the
  * provenance badge. In OSS (no workspace org, file store) the workspace list is
- * empty, so this is repo-only and unchanged.
+ * empty, so this is repo-only.
+ *
+ * Inferred (`contracts_inferred`) is deliberately EXCLUDED — undocumented
+ * decisions live on the Inferred tab, and only appear here once promoted into the
+ * authored set. So the Contracts tab shows only documented/enforced contracts.
  *
  * Ref fallback: a CODE-ONLY PR head has NO stored repo contracts at its commit
  * (the gate reuses the base's contracts for code-only PRs — #64), so the
@@ -108,18 +119,20 @@ export async function effectiveContractFiles(
   commitSha?: string,
 ): Promise<EffectiveFile[]> {
   let authored = await listContractFiles(repoKey, 'contracts', commitSha);
-  let inferred = await listContractFiles(repoKey, 'contracts_inferred', commitSha);
-  if (commitSha && authored.length === 0 && inferred.length === 0) {
+  if (commitSha && authored.length === 0) {
     // Head wasn't scanned (code-only PR) — no contracts stored at this commit.
     // Read the repo's latest stored set instead so the effective view is
     // base + workspace, not workspace-only.
     authored = await listContractFiles(repoKey, 'contracts');
-    inferred = await listContractFiles(repoKey, 'contracts_inferred');
   }
-  const repoPaths = [...authored, ...inferred.map((p) => `${INFERRED_PREFIX}${p}`)];
-  const out: EffectiveFile[] = repoPaths.map((path) => ({ path, provenance: 'repo' }));
+  const promoted = new Set(await promotedContractPaths(repoKey));
+  const out: EffectiveFile[] = authored.map((path) => ({
+    path,
+    provenance: 'repo',
+    inferred: promoted.has(path),
+  }));
   if (workspaceOrgId) {
-    const repoSet = new Set(repoPaths);
+    const repoSet = new Set(authored);
     const ws = await listWorkspaceContractFiles({ workspaceOrgId }, 'contracts');
     for (const path of ws) {
       if (!repoSet.has(path)) out.push({ path, provenance: 'workspace' });
@@ -152,6 +165,74 @@ router.get(
       const repo = await resolveProjectForRequest(req.params.id as string);
       const files = await effectiveContractFiles(repo.path, workspaceOrgOf(req), refOf(req));
       res.json({ hasContracts: files.length > 0, modules: groupByModule(files) });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// PR diff (EE): authored contracts the PR head adds / removes / modifies vs the
+// default-branch baseline. Diffs the repo's OWN set by path + `.tc` content.
+router.get(
+  '/:id/contracts/diff',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const ref = refOf(req);
+      if (!ref) {
+        res.json({ added: [], removed: [], modified: [] });
+        return;
+      }
+      const baseCommit = await baselineCommit(repo.path);
+      const toMap = async (commit: string | undefined): Promise<Map<string, string>> => {
+        const paths = commit ? await listContractFiles(repo.path, 'contracts', commit) : [];
+        const entries = await Promise.all(
+          paths.map(async (p) => [p, (await readContractFile(repo.path, 'contracts', p, commit)) ?? ''] as const),
+        );
+        return new Map(entries);
+      };
+      const baseMap = await toMap(baseCommit ?? undefined);
+      // A code-only PR head regenerates NO spec/contracts (the gate reuses the base),
+      // and may even carry a PARTIAL authored-contracts manifest from a reapplied
+      // promotion — which would wrongly report the whole base as "removed". The
+      // presence of a `claims` artifact at the head is the "head regenerated" signal;
+      // without it, use the base (head == base → no contract delta).
+      const headRegenerated = (await loadSpec<unknown>({ repoKey: repo.path, commitSha: ref }, 'claims')) != null;
+      const headMap = headRegenerated ? await toMap(ref) : baseMap;
+      const { added, removed, modified } = diffContents(baseMap, headMap);
+      res.json({ added, removed, modified });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// OSS Git-Diff: which AUTHORED `.tc` files the working tree adds / removes /
+// modifies vs the last commit (git status on `.truecourse/contracts`). EE uses GET.
+router.post(
+  '/:id/contracts/diff',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const git = await getGit(repo.path);
+      const s = await git.status();
+      const PREFIX = '.truecourse/contracts/';
+      const authored = (f: string) =>
+        f.startsWith(PREFIX) && f.endsWith('.tc') && !f.slice(PREFIX.length).startsWith('_inferred/');
+      const rel = (f: string) => f.slice(PREFIX.length);
+      const status = new Map<string, 'added' | 'removed' | 'modified'>();
+      for (const f of s.deleted) if (authored(f)) status.set(rel(f), 'removed');
+      for (const f of [...s.created, ...s.not_added]) if (authored(f)) status.set(rel(f), 'added');
+      for (const f of [...s.modified, ...s.staged]) if (authored(f) && !status.has(rel(f))) status.set(rel(f), 'modified');
+      const added: string[] = [];
+      const removed: string[] = [];
+      const modified: string[] = [];
+      for (const [p, st] of status) (st === 'added' ? added : st === 'removed' ? removed : modified).push(p);
+      res.json({ added, removed, modified });
     } catch (e) {
       next(e);
     }

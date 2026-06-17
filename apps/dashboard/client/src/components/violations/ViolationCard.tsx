@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { setRuleEnabled, type ViolationResponse } from '@/lib/api';
+import { useEdition } from '@/contexts/CapabilityContext';
 
 /**
  * Render a violation string that uses markdown-style backticks around code
@@ -95,6 +96,9 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
   };
 
   const isCodeViolation = violation.type === 'code';
+  // Hosted (EE) has no architecture graph, so every violation with a file links
+  // straight to the code on GitHub — there's no "Locate in graph" to fall back to.
+  const hosted = useEdition() === 'enterprise';
 
   // Most specific target: method > module > database > service
   const locateTargetId = violation.targetMethodId || violation.targetModuleId || violation.targetDatabaseId || violation.targetServiceId;
@@ -105,19 +109,13 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
 
   return (
     <Card
-      className="rounded-sm p-3"
+      className={`rounded-sm p-3 ${isResolved ? 'opacity-60' : ''}`}
     >
       <CardContent className="p-0">
         <div className="mb-1.5 flex items-center gap-2">
-          {diffStatus && (
-            <Badge className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase ${
-              diffStatus === 'new'
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
-            }`}>
-              {diffStatus}
-            </Badge>
-          )}
+          {/* No new/resolved pill — in a diff the severity badges still carry
+              severity, "added" is the default, and resolved rows are struck
+              through (see `isResolved` below). */}
           <Badge
             className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase ${
               severityBadgeColors[violation.severity] || ''
@@ -133,8 +131,10 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
             {violation.severity}
           </Badge>
           <div className="ml-auto flex items-center gap-1">
-            {/* Locate button: open file for code violations, focus graph node for arch violations */}
-            {isCodeViolation && violation.filePath && onOpenFile ? (
+            {/* Open the code for any violation with a file — always in hosted (no
+                graph), or for code violations in OSS. Otherwise OSS arch violations
+                fall back to a "Locate in graph" jump. */}
+            {(isCodeViolation || hosted) && violation.filePath && onOpenFile ? (
               <Button
                 variant="outline"
                 size="xs"
@@ -145,7 +145,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
                 <FileCode className="h-3 w-3" />
                 Open
               </Button>
-            ) : onLocateNode && locateTargetId ? (
+            ) : !hosted && onLocateNode && locateTargetId ? (
               <Button
                 variant="outline"
                 size="xs"

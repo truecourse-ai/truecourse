@@ -23,23 +23,41 @@ describe('infer comment rendering', () => {
     expect(isInferCheckboxChecked(renderInferComment('offered'))).toBe(false);
     expect(hasInferOffer(renderInferComment('running'))).toBe(false);
     expect(
-      hasInferOffer(renderInferComment('done', { decisions: [] })),
+      hasInferOffer(renderInferComment('done', { added: [] })),
     ).toBe(false);
   });
 
-  it('done lists the decisions and count', () => {
+  it('done lists the decisions and count (no baseline ⇒ full set)', () => {
     const body = renderInferComment('done', {
-      decisions: [
+      added: [
         { kind: 'Operation', identity: 'GET /users', path: 'src/users.ts', line: 12 },
         { kind: 'Enum', identity: 'Role', reason: 'inferred from union' },
       ],
+      fellBack: true,
       commitSha: 'abcdef1234',
     });
     expect(body).toContain('2 undocumented decisions found');
+    expect(body).toContain('No default-branch baseline yet');
     expect(body).toContain('GET /users');
     expect(body).toContain('src/users.ts:12');
     expect(body).toContain('inferred from union');
     expect(body).toContain('abcdef1');
+  });
+
+  it('done frames a true diff as new-on-this-PR and notes resolved', () => {
+    const body = renderInferComment('done', {
+      added: [{ kind: 'Operation', identity: 'GET /users' }],
+      resolved: [
+        { kind: 'Enum', identity: 'Role' },
+        { kind: 'Entity', identity: 'Order' },
+      ],
+      fellBack: false,
+      commitSha: 'abcdef1234',
+    });
+    expect(body).toContain('1 new undocumented decision on this PR');
+    expect(body).not.toContain('No default-branch baseline yet');
+    expect(body).toContain('GET /users');
+    expect(body).toContain('2 previously inferred decisions no longer appear');
   });
 
   it('nochange reads cleanly', () => {

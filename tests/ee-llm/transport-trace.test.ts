@@ -147,4 +147,73 @@ describe('createAiSdkTransport — tracing', () => {
     const transport = createAiSdkTransport(cfg);
     await expect(transport({ id: 'a:b', stage: 'a', system: 'S', user: 'U' })).resolves.toBe('OK');
   });
+
+  // Regression: the analyze LLM rules pack everything into `user` and pass
+  // system: ''. Forwarding that to the model emits an empty system text block,
+  // which Anthropic rejects ("text content blocks must be non-empty"). It must
+  // be omitted instead.
+  function capturingModel() {
+    let prompt: unknown;
+    const model = {
+      ...stubModel({ text: 'OK' }),
+      async doGenerate(opts: { prompt: unknown }) {
+        prompt = opts.prompt;
+        return {
+          content: [{ type: 'text', text: 'OK' }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+    return { model, getPrompt: () => prompt };
+  }
+
+  it('omits an empty system prompt (no empty system block reaches the model)', async () => {
+    const { model, getPrompt } = capturingModel();
+    buildModelMock.mockReturnValue(model);
+    await createAiSdkTransport(cfg)({ id: 'a:b', stage: 'a', system: '', user: 'U' });
+    expect(JSON.stringify(getPrompt())).not.toMatch(/"role":\s*"system"/);
+  });
+
+  it('forwards a non-empty system prompt', async () => {
+    const { model, getPrompt } = capturingModel();
+    buildModelMock.mockReturnValue(model);
+    await createAiSdkTransport(cfg)({ id: 'a:b', stage: 'a', system: 'REAL SYSTEM', user: 'U' });
+    expect(JSON.stringify(getPrompt())).toContain('REAL SYSTEM');
+  });
+
+  // Structured output: a JSON-schema request must go through generateObject and
+  // come back as a schema-valid object (no prose/markdown to strip), so analyze's
+  // strict JSON.parse succeeds where free-text generateText fails.
+  it('enforces the schema via structured output and returns the validated object', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: '{"answer":"42"}' }));
+    const out = await createAiSdkTransport(cfg)({
+      id: 'analyze.code:slice_1',
+      stage: 'analyze.code',
+      system: '',
+      user: 'U',
+      responseFormat: 'json',
+      schema:
+        '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}',
+    });
+    expect(JSON.parse(out)).toEqual({ answer: '42' });
+  });
+
+  // A schema with an open `{}` sub-schema (z.unknown() — e.g. a claim's free-form
+  // `content`) can't be strict-enforced by the provider, so it falls back to JSON
+  // mode: still valid JSON, polymorphic content preserved, Zod validates after.
+  it('uses JSON mode for an open `{}` schema and returns the JSON', async () => {
+    buildModelMock.mockReturnValue(stubModel({ text: '{"claims":[{"content":{"x":1}}]}' }));
+    const out = await createAiSdkTransport(cfg)({
+      id: 'spec.claimExtract:blk',
+      stage: 'spec.claimExtract',
+      system: '',
+      user: 'U',
+      responseFormat: 'json',
+      schema:
+        '{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"content":{}},"required":["content"]}}},"required":["claims"]}',
+    });
+    expect(JSON.parse(out)).toEqual({ claims: [{ content: { x: 1 } }] });
+  });
 });

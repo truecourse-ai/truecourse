@@ -196,6 +196,12 @@ export interface WorkspaceMembersResponse {
   members: WorkspaceMember[]
 }
 
+/** Per-workspace feature settings (GET/PATCH /api/ee/workspace/settings). */
+export interface WorkspaceSettingsResponse {
+  /** Run the LLM (semantic) code-analysis rules in Code Quality. Off by default. */
+  codeAnalysisLlm: boolean
+}
+
 // --- Integrations (knowledge connectors) ----------------------------
 // Connector-generic so the settings UI needs no per-connector code: the server
 // describes each connector's fields, the client renders the form + Test button.
@@ -275,6 +281,11 @@ export interface GithubRepoSummary {
   defaultBranch: string
   /** true = new drift fails a required Check; false = advisory only. */
   blocking: boolean
+  /** Code Quality gate: true (default) = new violations at/above
+   *  `codeQualityMinSeverity` fail a required Check; false = advisory only. */
+  codeQualityBlocking?: boolean
+  /** Min new-violation severity that fails the Code Quality Check (default `high`). */
+  codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical'
   enabled: boolean
   /** Addresses emailed when the gate fails. */
   notifyEmails: string[]
@@ -312,6 +323,75 @@ export interface GithubConnectStatusResponse {
 
 export interface GithubRunsResponse {
   runs: GithubRunSummary[]
+}
+
+/** One reverse-engineered undocumented decision (an inferred contract). */
+export interface InferredDecisionView {
+  kind: string
+  identity: string
+  /** Code location the decision was inferred from (repo-relative). */
+  path?: string
+  line?: number
+  /** One-line human rationale. */
+  reason?: string
+  /** Extraction confidence (`high` | `medium` | `low`). */
+  confidence?: string
+  /** Rendered `.tc` — the full reverse-engineered contract, shown in the detail pane. */
+  tc?: string
+  /** PR-diff only: this decision existed at the base but its contract changed. */
+  changed?: boolean
+  /** PR-diff only: undocumented at the base, but the PR documents it → gone at the head. */
+  resolved?: boolean
+}
+
+/** A repo's inferred (undocumented) decisions at its baseline commit. */
+export interface GithubInferredResponse {
+  decisions: InferredDecisionView[]
+  /** Baseline commit the decisions were inferred at; null when no baseline yet. */
+  commitSha: string | null
+}
+
+/** One canonical claim, identified for a PR diff. */
+export interface ClaimRef {
+  /** Stable logical identity `module topic subject`. */
+  id: string
+  module: string
+  topic: string
+  subject: string
+}
+
+/** The PR delta of the spec: claims added/removed + the new conflicts introduced. */
+export interface SpecDiffResponse {
+  /** Claims new on the PR head. */
+  added: ClaimRef[]
+  /** Claims removed on the PR head (shown struck-through). */
+  removed: ClaimRef[]
+  /** All open conflicts at the head (for context). */
+  openConflicts: Array<{ id: string; topic: string; subject: string }>
+  /** Head open conflicts not present at the baseline — the actionable, gate-blocking count. */
+  newConflictCount: number
+}
+
+/** The PR delta of authored contracts (head-at-ref vs the default-branch baseline). */
+export interface ContractsDiffResponse {
+  /** Contract paths new on the PR head. */
+  added: string[]
+  /** Contract paths removed on the PR head (shown struck-through). */
+  removed: string[]
+  /** Contract paths present in both whose `.tc` content changed. */
+  modified: string[]
+}
+
+/** The PR delta of inferred decisions (head-at-ref vs the default-branch baseline). */
+export interface InferredDiffResponse {
+  /** Undocumented decisions new on the PR head. */
+  added: InferredDecisionView[]
+  /** Decisions present in both but whose inferred contract changed. */
+  changed: InferredDecisionView[]
+  /** Undocumented at the base but documented by the PR (gone at the head) — shown struck-through. */
+  resolved: InferredDecisionView[]
+  /** No baseline inferred set existed → `added` is the full head set, not a delta. */
+  fellBack: boolean
 }
 
 /** A repo the installation can access — for the connect drawer's repo picker. */

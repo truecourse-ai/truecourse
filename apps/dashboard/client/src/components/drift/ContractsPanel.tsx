@@ -25,6 +25,10 @@ interface ContractsPanelProps {
   onOpen: (path: string, pinned: boolean) => void;
   /** Hosted (EE): contracts are generated server-side, not via an Apply/Generate button. */
   hosted?: boolean;
+  /** PR view: which contract paths the PR added / removed / modified vs the baseline. */
+  prDiff?: { added: string[]; removed: string[]; modified: string[] } | null;
+  /** PR / Git-Diff mode: show ONLY the changed contracts (no full tree). */
+  diffMode?: boolean;
 }
 
 export function ContractsPanel({
@@ -35,7 +39,12 @@ export function ContractsPanel({
   validationIssues,
   onOpen,
   hosted = false,
+  prDiff,
+  diffMode = false,
 }: ContractsPanelProps) {
+  // Diff mode (PR / Git Diff) shows only the delta, like Verify — no full tree.
+  if (diffMode) return <ContractsDiffOnly diff={prDiff ?? null} activePath={activePath} onOpen={onOpen} />;
+
   if (isLoading && !tree) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -79,12 +88,33 @@ export function ContractsPanel({
   const hardIssues = issues.filter((i) => i.severity === 'hard');
   const softIssues = issues.filter((i) => i.severity === 'soft');
 
+  const added = new Set(prDiff?.added ?? []);
+  const modified = new Set(prDiff?.modified ?? []);
+  const removed = prDiff?.removed ?? [];
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {issues.length > 0 && (
         <ValidationIssuesSection hardIssues={hardIssues} softIssues={softIssues} />
       )}
       <div className="flex-1 overflow-auto">
+        {removed.length > 0 && (
+          <div className="border-b border-border">
+            <div className="sticky top-0 z-10 border-b border-border bg-card px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Removed in this PR · {removed.length}
+            </div>
+            {removed.map((p) => (
+              <div
+                key={p}
+                className="flex items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-[13px] text-muted-foreground line-through"
+                title={`${p} — removed on this PR`}
+              >
+                <FileCode2 className="h-3 w-3 shrink-0" />
+                <span className="truncate">{p.replace(/^[^/]+\//, '')}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {tree.modules.map((m) => (
           <ModuleGroup
             key={m.name}
@@ -92,9 +122,133 @@ export function ContractsPanel({
             files={m.files}
             activePath={activePath}
             onOpen={onOpen}
+            added={added}
+            modified={modified}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** PR / Git-Diff: show ONLY the changed contracts — added/changed (openable) + removed (struck). */
+function ContractsDiffOnly({
+  diff,
+  activePath,
+  onOpen,
+}: {
+  diff: { added: string[]; removed: string[]; modified: string[] } | null;
+  activePath: string | null;
+  onOpen: (path: string, pinned: boolean) => void;
+}) {
+  if (!diff) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  const { added, removed, modified } = diff;
+  if (added.length === 0 && removed.length === 0 && modified.length === 0) {
+    return (
+      <EmptyState
+        icon={FileCode2}
+        title="No contract changes"
+        body="This PR doesn't add, remove, or change any contracts."
+      />
+    );
+  }
+  // Group the changed files by module (top-level segment), like the contracts tree.
+  const moduleOf = (p: string) => {
+    const i = p.indexOf('/');
+    return i === -1 ? p : p.slice(0, i);
+  };
+  const byModule = new Map<string, Array<{ path: string; kind: 'new' | 'changed' | 'removed' }>>();
+  const push = (path: string, kind: 'new' | 'changed' | 'removed') => {
+    if (!byModule.has(moduleOf(path))) byModule.set(moduleOf(path), []);
+    byModule.get(moduleOf(path))!.push({ path, kind });
+  };
+  added.forEach((p) => push(p, 'new'));
+  modified.forEach((p) => push(p, 'changed'));
+  removed.forEach((p) => push(p, 'removed'));
+  const modules = [...byModule.keys()].sort();
+  return (
+    <div className="h-full overflow-auto">
+      {modules.map((m) => (
+        <ContractsDiffModule key={m} name={m} rows={byModule.get(m)!} activePath={activePath} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
+const DIFF_TONE: Record<'new' | 'changed' | 'removed', string> = {
+  new: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
+  changed: 'bg-blue-500/15 text-blue-600 dark:text-blue-300',
+  removed: 'bg-muted text-muted-foreground',
+};
+
+/** One module folder in the contracts diff — mirrors the contracts tree's ModuleGroup. */
+function ContractsDiffModule({
+  name,
+  rows,
+  activePath,
+  onOpen,
+}: {
+  name: string;
+  rows: Array<{ path: string; kind: 'new' | 'changed' | 'removed' }>;
+  activePath: string | null;
+  onOpen: (path: string, pinned: boolean) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const display = (p: string) => p.replace(/^[^/]+\//, '');
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="sticky top-0 z-10 flex w-full items-center justify-between gap-2 border-b border-border bg-card px-4 py-1.5 text-left text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+          <Folder className="h-3 w-3 shrink-0" />
+          <span className="truncate">{name}</span>
+        </div>
+        <span>{rows.length}</span>
+      </button>
+      {open &&
+        rows.map((r) =>
+          r.kind === 'removed' ? (
+            <div
+              key={`r-${r.path}`}
+              className="flex items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-[13px] text-muted-foreground line-through"
+              title={`${r.path} — removed on this PR`}
+            >
+              <FileCode2 className="h-3 w-3 shrink-0" />
+              <span className="truncate">{display(r.path)}</span>
+              <span className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${DIFF_TONE.removed}`}>
+                removed
+              </span>
+            </div>
+          ) : (
+            <button
+              key={`${r.kind}-${r.path}`}
+              type="button"
+              onClick={() => onOpen(r.path, false)}
+              onDoubleClick={() => onOpen(r.path, true)}
+              title={`${r.path} — click to preview, double-click to pin`}
+              className={`flex w-full items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-left text-[13px] transition-colors ${
+                r.path === activePath ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+              }`}
+            >
+              <FileCode2 className="h-3 w-3 shrink-0" />
+              <span className="truncate">{display(r.path)}</span>
+              <span className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${DIFF_TONE[r.kind]}`}>
+                {r.kind}
+              </span>
+            </button>
+          ),
+        )}
     </div>
   );
 }
@@ -104,11 +258,15 @@ function ModuleGroup({
   files,
   activePath,
   onOpen,
+  added,
+  modified,
 }: {
   label: string;
-  files: Array<{ name: string; path: string; provenance?: 'workspace' | 'repo' }>;
+  files: Array<{ name: string; path: string; provenance?: 'workspace' | 'repo'; inferred?: boolean }>;
   activePath: string | null;
   onOpen: (path: string, pinned: boolean) => void;
+  added?: Set<string>;
+  modified?: Set<string>;
 }) {
   const [open, setOpen] = useState(true);
   const childActive = files.some((f) => f.path === activePath);
@@ -163,6 +321,24 @@ function ModuleGroup({
                   title="Inherited from workspace Knowledge — shared by every repo"
                 >
                   workspace
+                </span>
+              )}
+              {f.inferred && (
+                <span
+                  className="ml-auto shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                  title="Promoted from an inferred decision"
+                >
+                  inferred
+                </span>
+              )}
+              {added?.has(f.path) && (
+                <span className="ml-auto shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                  new
+                </span>
+              )}
+              {!added?.has(f.path) && modified?.has(f.path) && (
+                <span className="ml-auto shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                  changed
                 </span>
               )}
             </button>
