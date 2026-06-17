@@ -21,6 +21,7 @@
     "@truecourse/ee-github-app": "workspace:*",
     "@truecourse/ee-llm": "workspace:*",
     "@truecourse/ee-server": "workspace:*",
+    "@truecourse/ee-storage": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",

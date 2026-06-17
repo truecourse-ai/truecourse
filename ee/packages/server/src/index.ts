@@ -59,8 +59,8 @@ const plugin: EePlugin = {
 
     // The enterprise edition stores ALL per-repo state in Postgres — there is
     // no file fallback. DATABASE_URL is therefore REQUIRED; the stores are
-    // always installed (every read/write goes to Postgres, never the customer's
-    // `.truecourse/` tree).
+    // always installed (every read/write goes to Postgres + the BlobStore, never
+    // the customer's `.truecourse/` tree).
     const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
       throw new Error(
