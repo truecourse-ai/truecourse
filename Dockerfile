@@ -42,6 +42,13 @@ RUN cp -r apps/dashboard/client/dist apps/dashboard/server/dist/public
 ############################################
 FROM node:20-bookworm-slim AS runtime
 
+# git: the gate clones the repo at runtime to scan it (`spawn git` in the gate
+# runner). ca-certificates: HTTPS clones. (Builder had the toolchain; runtime is
+# a fresh slim image, so install what runtime actually needs.)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     PORT=3001 \
     TRUECOURSE_LOG_DIR=/data/logs
