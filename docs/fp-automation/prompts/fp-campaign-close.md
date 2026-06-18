@@ -13,6 +13,23 @@ signal, and your only remaining job is tagging.
 `<SCOPE>fp-discover` fires on the same merge event in parallel and starts
 the next pending campaign — you don't chain to it.
 
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/fp-fix/…`, label `fp-fix`, title `[fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-fp-fix/…`, label `cs-fp-fix`, title `[cs-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
+
 ## Inputs
 
 - The repository `truecourse-ai/truecourse` is cloned at `main` at the

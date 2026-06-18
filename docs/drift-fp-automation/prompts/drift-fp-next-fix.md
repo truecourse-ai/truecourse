@@ -20,6 +20,23 @@ Per invocation:
   refactor required) are skipped; they count toward the 10-attempt cap, not the 5-success cap.
 - Open ONE PR at the end with all successful fixes (or end with no PR if zero successes).
 
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/drift-fp-fix/…`, label `drift-fp-fix`, title `[drift-fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-drift-fp-fix/…`, label `cs-drift-fp-fix`, title `[cs-drift-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
+
 ## Inputs
 
 - `truecourse-ai/truecourse` is cloned.
@@ -75,7 +92,7 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 
 ### 1. Pick the next issue
 
-- List open issues with label `<SCOPE>drift-fp-fix`, excluding `drift-fp-in-progress`,
+- List open issues with label `<SCOPE>drift-fp-fix`, excluding `<SCOPE>drift-fp-in-progress`,
   `<SCOPE>drift-fp-blocked`, `<SCOPE>drift-fp-skipped`, and any already in `fixed_issues`.
 - If none (pickable queue empty — **including when all remaining open issues are blocked**):
   - `successes >= 1` → break, go to "Open the batched PR".
@@ -84,7 +101,7 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 
 ### 2. Take the concurrency lock
 
-- Add `drift-fp-in-progress` to the picked issue **before** anything else. Re-fetch; if it was
+- Add `<SCOPE>drift-fp-in-progress` to the picked issue **before** anything else. Re-fetch; if it was
   already present (another session won), skip to the next oldest (max 3 collision retries).
 
 ### 3. Parse the issue
@@ -92,7 +109,7 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 - Parse the YAML block. Extract `target_repo`, `target_ref`, `contracts_branch`, `contracts_path`, `code_dir`,
   `drift_kind`, `comparator`, `samples[]`.
 - Malformed → comment "malformed YAML — needs human review", add `<SCOPE>drift-fp-blocked`, remove
-  `drift-fp-in-progress`, `attempts++`, continue.
+  `<SCOPE>drift-fp-in-progress`, `attempts++`, continue.
 - If `target_repo`/`target_ref`/`contracts_branch` differs from an earlier issue this session,
   comment the mismatch, `<SCOPE>drift-fp-blocked`, unlock, `attempts++`, continue.
 
@@ -223,7 +240,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
 
 - Append `(issue_number, drift_kind, fp_guard_paths, regression_paths, fix_summary)` to
   `fixed_issues` (`fix_summary` = 2–3 sentences on what you changed and why).
-- `successes++` AND `attempts++`. Keep `drift-fp-in-progress` until the batch PR opens.
+- `successes++` AND `attempts++`. Keep `<SCOPE>drift-fp-in-progress` until the batch PR opens.
 - If `successes == 5` or `attempts == 10`: break. Else continue.
 
 ## After the loop: measure the drift-count delta on the target (REQUIRED)
@@ -282,7 +299,7 @@ If step 1/2 throws, still write the section with `unavailable: <concrete reason>
     triggers on the merge of any PR whose head branch starts with `claude/<SCOPE>drift-fp-fix/`, which
     is uniquely owned by this routine. Use whatever PR-creation tool the session has —
     `gh pr create` if `gh` is on PATH, otherwise the GitHub MCP `create_pull_request` tool.
-  - For each fixed issue: comment the PR URL, then remove `drift-fp-in-progress` (merge
+  - For each fixed issue: comment the PR URL, then remove `<SCOPE>drift-fp-in-progress` (merge
     auto-closes via `Closes #N`).
 - End the session.
 

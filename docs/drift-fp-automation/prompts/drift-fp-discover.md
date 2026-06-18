@@ -13,6 +13,23 @@ You run only the **deterministic `verify`** — never `spec scan` or `contracts 
 contracts were generated and committed upstream by `drift-fp-generate` onto the campaign's
 **storage branch** `claude/<SCOPE>drift-fp-store/<owner>-<repo>`; you fetch them and consume them as-is.
 
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/drift-fp-fix/…`, label `drift-fp-fix`, title `[drift-fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-drift-fp-fix/…`, label `cs-drift-fp-fix`, title `[cs-drift-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
+
 ## Inputs
 
 - `truecourse-ai/truecourse` is cloned at the default branch.

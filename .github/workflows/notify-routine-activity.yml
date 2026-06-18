@@ -58,20 +58,29 @@ jobs:
             --data-urlencode "text=${MESSAGE}" \
             > /dev/null
 
-  # Bursts of fp-fix issues (fp-discover initial filing, fp-next-fix
+  # Bursts of *-fp-fix issues (discover initial filing, next-fix
   # re-discovery filing) used to produce one TG message per issue —
-  # 30+ messages in a row. Debounce with concurrency: each new fp-fix
-  # `issues.opened` event cancels the prior in-progress run, so only
-  # the last event's run survives. That run sleeps to let the burst
-  # settle, queries all fp-fix issues opened in the last 10 minutes,
-  # and sends ONE rollup message with the count.
-  notify-fp-fix-burst:
+  # 30+ messages in a row. Debounce with concurrency: each new
+  # `issues.opened` event cancels the prior in-progress run for the same
+  # label, so only the last event's run survives. That run sleeps to let
+  # the burst settle, queries all matching issues opened in the last 10
+  # minutes, and sends ONE rollup message with the count.
+  #
+  # One matrixed job covers every scope+kind fix-label. The job `if`
+  # is evaluated per matrix value, so it fires only for the label the
+  # opened issue actually carries; each label gets its own concurrency
+  # group so the families never cancel each other. Add a new scope by
+  # appending its labels (e.g. `cs-fp-fix`, `cs-drift-fp-fix`).
+  notify-fix-burst:
+    strategy:
+      matrix:
+        label: [fp-fix, cs-fp-fix, drift-fp-fix, cs-drift-fp-fix]
     if: >
       github.event_name == 'issues' &&
-      contains(github.event.issue.labels.*.name, 'fp-fix')
+      contains(github.event.issue.labels.*.name, matrix.label)
     runs-on: ubuntu-latest
     concurrency:
-      group: fp-fix-burst
+      group: fix-burst-${{ matrix.label }}
       cancel-in-progress: true
     steps:
       - name: Wait for burst to settle
@@ -83,6 +92,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          LABEL: ${{ matrix.label }}
         run: |
           if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
             echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
@@ -92,7 +102,7 @@ jobs:
           since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
           issues_json=$(gh issue list \
             --repo "$REPO" \
-            --label fp-fix \
+            --label "$LABEL" \
             --state open \
             --search "created:>${since}" \
             --json number,title \
@@ -100,7 +110,7 @@ jobs:
 
           count=$(echo "$issues_json" | jq 'length')
           if [ "$count" -eq 0 ]; then
-            echo "No fp-fix issues opened in window — nothing to roll up."
+            echo "No $LABEL issues opened in window — nothing to roll up."
             exit 0
           fi
 
@@ -109,70 +119,11 @@ jobs:
           first_url="https://github.com/${REPO}/issues/${first_num}"
 
           if [ "$count" -eq 1 ]; then
-            MESSAGE=$(printf "📋 1 new fp-fix issue filed\n\n%s\n\n%s" \
-              "$sample" "$first_url")
+            MESSAGE=$(printf "📋 1 new %s issue filed\n\n%s\n\n%s" \
+              "$LABEL" "$sample" "$first_url")
           else
-            MESSAGE=$(printf "📋 %s new fp-fix issues filed\n\n%s\n\n%s" \
-              "$count" "$sample" "$first_url")
-          fi
-          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${MESSAGE}" \
-            > /dev/null
-
-  # Same debounce-rollup pattern for drift-fp-fix issues filed by
-  # drift-fp-discover / drift-fp-next-fix. Independent concurrency
-  # group from the analysis fp-fix burst so the two never cancel
-  # each other when both chains happen to be active.
-  notify-drift-fp-fix-burst:
-    if: >
-      github.event_name == 'issues' &&
-      contains(github.event.issue.labels.*.name, 'drift-fp-fix')
-    runs-on: ubuntu-latest
-    concurrency:
-      group: drift-fp-fix-burst
-      cancel-in-progress: true
-    steps:
-      - name: Wait for burst to settle
-        run: sleep 60
-
-      - name: Send rollup Telegram message
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
-            exit 0
-          fi
-
-          since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
-          issues_json=$(gh issue list \
-            --repo "$REPO" \
-            --label drift-fp-fix \
-            --state open \
-            --search "created:>${since}" \
-            --json number,title \
-            --limit 200)
-
-          count=$(echo "$issues_json" | jq 'length')
-          if [ "$count" -eq 0 ]; then
-            echo "No drift-fp-fix issues opened in window — nothing to roll up."
-            exit 0
-          fi
-
-          sample=$(echo "$issues_json" | jq -r '.[0:5][] | "• #\(.number) \(.title)"')
-          first_num=$(echo "$issues_json" | jq -r '.[0].number')
-          first_url="https://github.com/${REPO}/issues/${first_num}"
-
-          if [ "$count" -eq 1 ]; then
-            MESSAGE=$(printf "📋 1 new drift-fp-fix issue filed\n\n%s\n\n%s" \
-              "$sample" "$first_url")
-          else
-            MESSAGE=$(printf "📋 %s new drift-fp-fix issues filed\n\n%s\n\n%s" \
-              "$count" "$sample" "$first_url")
+            MESSAGE=$(printf "📋 %s new %s issues filed\n\n%s\n\n%s" \
+              "$count" "$LABEL" "$sample" "$first_url")
           fi
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
@@ -185,14 +136,16 @@ jobs:
   # can't self-progress" tracking issues ([fp-campaign-stuck] /
   # [drift-fp-campaign-stuck]), and drift campaigns that hit an
   # unrecoverable state in discover/generate ([drift-campaign-broken]).
+  # Scoped accounts prefix the tag (e.g. [cs-drift-fp-campaign-stuck]);
+  # the contains() check matches the tag anywhere in the title so any
+  # SCOPE prefix is caught. The message includes the title, so the scope
+  # is visible in the alert.
   notify-campaign-alert:
     if: >
       github.event_name == 'issues' &&
-      (startsWith(github.event.issue.title, '[fp-campaign-close]') ||
-       startsWith(github.event.issue.title, '[fp-campaign-stuck]') ||
-       startsWith(github.event.issue.title, '[drift-fp-campaign-close]') ||
-       startsWith(github.event.issue.title, '[drift-fp-campaign-stuck]') ||
-       startsWith(github.event.issue.title, '[drift-campaign-broken]'))
+      (contains(github.event.issue.title, 'fp-campaign-close]') ||
+       contains(github.event.issue.title, 'fp-campaign-stuck]') ||
+       contains(github.event.issue.title, 'drift-campaign-broken]'))
     runs-on: ubuntu-latest
     steps:
       - name: Send Telegram message

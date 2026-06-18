@@ -8,6 +8,23 @@ per rule that has FPs so the fp-next-fix routine can consume them.
 
 Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/fp-fix/…`, label `fp-fix`, title `[fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-fp-fix/…`, label `cs-fp-fix`, title `[cs-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
+
 ## Inputs
 
 - The repository `truecourse-ai/truecourse` is cloned at the default
@@ -24,9 +41,11 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 ### 1. Pick the campaign
 
 - Read `docs/fp-automation/campaigns.yaml`.
-- Pick the first campaign with `status: pending` in the file.
+- Pick the first campaign with `status: pending` **whose `tech_stack`
+  intersects `TECH_STACKS`** (skip the `tech_stack` filter entirely when
+  `TECH_STACKS` is empty — the default account considers every stack).
 - If no candidate exists, post a brief end-of-run summary in the
-  session ("no pending campaigns; nothing to do") and stop.
+  session ("no pending campaigns for this scope; nothing to do") and stop.
 
 ### 2. Mark the campaign `discovering`
 
