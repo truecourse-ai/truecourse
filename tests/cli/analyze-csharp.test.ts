@@ -83,7 +83,7 @@ describe('CLI analyze pipeline (e2e, C#)', () => {
     const result = await analyzeInProcess(project, { enableLlmRulesOverride: false });
     expect(result.analysisId).toBeTruthy();
 
-    const latest = readLatest(workDir);
+    const latest = await readLatest(workDir);
     expect(latest).not.toBeNull();
     expect(latest!.analysis.status).toBe('completed');
 
