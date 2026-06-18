@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # TrueCourse server image (dashboard server + EE plugin + built client).
 # Runs on Azure Container Apps. Deliberately cloud-neutral — env vars + a Postgres
 # DATABASE_URL, no cloud SDK at runtime — so it stays portable for later. Boot it
@@ -23,8 +21,10 @@ ENV PATH=$PNPM_HOME:$PATH
 WORKDIR /app
 COPY . .
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+# Plain RUN (no BuildKit cache mount) — ACR Tasks builds with the classic Docker
+# builder, which doesn't support `--mount`, and the cache wouldn't persist between
+# CI builds anyway.
+RUN pnpm install --frozen-lockfile
 
 # Build every workspace package (tsc/turbo) AND the client with the EE overlay.
 # VITE_TC_EE=true is REQUIRED — a production client build excludes @truecourse/ee-client
