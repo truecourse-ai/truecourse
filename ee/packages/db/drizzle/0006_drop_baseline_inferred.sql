@@ -1,1 +1,0 @@
-ALTER TABLE "gh_baselines" DROP COLUMN "inferred_decisions";

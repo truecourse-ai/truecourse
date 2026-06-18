@@ -4,6 +4,15 @@ CREATE TABLE "gh_baselines" (
 	"captured_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "gh_inferred_actions" (
+	"repo_full_name" text NOT NULL,
+	"kind" text NOT NULL,
+	"identity" text NOT NULL,
+	"status" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "gh_inferred_actions_repo_full_name_kind_identity_pk" PRIMARY KEY("repo_full_name","kind","identity")
+);
+--> statement-breakpoint
 CREATE TABLE "gh_installations" (
 	"installation_id" bigint PRIMARY KEY NOT NULL,
 	"account_login" text NOT NULL,
@@ -19,6 +28,8 @@ CREATE TABLE "gh_repos" (
 	"workspace_org_id" text NOT NULL,
 	"default_branch" text NOT NULL,
 	"blocking" boolean DEFAULT true NOT NULL,
+	"code_quality_blocking" boolean DEFAULT true NOT NULL,
+	"code_quality_min_severity" text DEFAULT 'high' NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
 	"notify_emails" text[] DEFAULT '{}'::text[] NOT NULL,
 	"notifications" jsonb,
@@ -70,6 +81,31 @@ CREATE TABLE "verify_snapshots" (
 	"verified_at" timestamp with time zone NOT NULL,
 	"created_at" timestamp with time zone NOT NULL,
 	CONSTRAINT "verify_snapshots_repo_key_commit_sha_pk" PRIMARY KEY("repo_key","commit_sha")
+);
+--> statement-breakpoint
+CREATE TABLE "analyses" (
+	"repo_key" text NOT NULL,
+	"filename" text NOT NULL,
+	"analysis_id" text NOT NULL,
+	"snapshot" jsonb NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "analyses_repo_key_filename_pk" PRIMARY KEY("repo_key","filename")
+);
+--> statement-breakpoint
+CREATE TABLE "analysis_current" (
+	"repo_key" text NOT NULL,
+	"kind" text NOT NULL,
+	"body" jsonb NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "analysis_current_repo_key_kind_pk" PRIMARY KEY("repo_key","kind")
+);
+--> statement-breakpoint
+CREATE TABLE "analysis_history" (
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"repo_key" text NOT NULL,
+	"analysis_id" text NOT NULL,
+	"entry" jsonb NOT NULL,
+	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "decisions" (
@@ -229,9 +265,17 @@ CREATE TABLE "llm_traces" (
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "workspace_settings" (
+	"workspace_org_id" text PRIMARY KEY NOT NULL,
+	"code_analysis_llm" boolean DEFAULT false NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 CREATE INDEX "gh_runs_repo_created_idx" ON "gh_runs" USING btree ("repo_full_name","created_at");--> statement-breakpoint
 CREATE INDEX "verify_snapshots_repo_verified_idx" ON "verify_snapshots" USING btree ("repo_key","verified_at");--> statement-breakpoint
 CREATE INDEX "verify_snapshots_baseline_idx" ON "verify_snapshots" USING btree ("repo_key","is_baseline","verified_at");--> statement-breakpoint
+CREATE INDEX "analyses_repo_analysis_idx" ON "analyses" USING btree ("repo_key","analysis_id");--> statement-breakpoint
+CREATE INDEX "analysis_history_repo_idx" ON "analysis_history" USING btree ("repo_key","id");--> statement-breakpoint
 CREATE INDEX "contract_sets_repo_kind_created_idx" ON "contract_sets" USING btree ("repo_key","kind","created_at");--> statement-breakpoint
 CREATE INDEX "contract_sets_repo_kind_hash_idx" ON "contract_sets" USING btree ("repo_key","kind","manifest_hash");--> statement-breakpoint
 CREATE INDEX "spec_sets_repo_artifact_created_idx" ON "spec_sets" USING btree ("repo_key","artifact","created_at");--> statement-breakpoint

@@ -1,1 +1,0 @@
-ALTER TABLE "gh_baselines" ADD COLUMN "inferred_decisions" jsonb;

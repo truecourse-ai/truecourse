@@ -1,2 +1,0 @@
-ALTER TABLE "gh_repos" ADD COLUMN "code_quality_blocking" boolean DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE "gh_repos" ADD COLUMN "code_quality_min_severity" text DEFAULT 'high' NOT NULL;
