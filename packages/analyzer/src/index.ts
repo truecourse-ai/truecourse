@@ -54,7 +54,8 @@ export {
 } from './extractors/languages/csharp.js'
 export { createSourceLocation, extractDocComment } from './extractors/languages/common.js'
 
-// C# symbol index — the C# semantic layer (no LSP; see docs/CSHARP_ANALYZE_PLAN.md)
+// C# symbol index — the C# semantic layer (no LSP; resolves cross-file
+// dependencies the way the compiler would, via a repo-wide declaration index)
 export {
   buildCSharpSymbolIndex,
   contributeCSharpEdges,

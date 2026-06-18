@@ -2,8 +2,9 @@
  * Per-language tree-sitter node-type table. The inline-ternary fact extractors
  * (entity-facts, state-machine-facts, formula-facts, handler-facts) index this
  * by `s.lang` instead of branching `s.lang === 'python' ? 'attribute' : …`.
- * Adding a language = a new key here, not a third ternary arm (which would
- * silently mis-parse if forgotten — see docs/CSHARP_SUPPORT_PLAN.md §5).
+ * Adding a language = a new key here, not a third ternary arm (a forgotten
+ * two-arm ternary falls through to the JS branch and picks the wrong node
+ * types with no type error).
  */
 
 import type { SupportedLanguage } from '@truecourse/shared';
