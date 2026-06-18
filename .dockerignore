@@ -1,0 +1,29 @@
+# Build artifacts + deps are produced fresh inside the builder stage.
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+# VCS / CI / editor
+.git
+.gitignore
+.github
+.claude
+.vscode
+
+# Local data, logs, secrets — never into the build context
+**/.truecourse
+*.log
+**/coverage
+.env
+**/.env
+.env.*
+
+# Internal docs (kept local, not shipped in the image)
+docs/EE_*.md
+
+# Deploy artifacts (not needed to build the app image)
+infra
+docker-compose.yml
+Dockerfile
+.dockerignore
