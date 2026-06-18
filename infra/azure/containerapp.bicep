@@ -51,6 +51,7 @@ param secretEnv array = [
   'GITHUB_APP_PRIVATE_KEY'
   'GITHUB_APP_WEBHOOK_SECRET'
   'GITHUB_APP_SLUG'
+  'SENTRY_DSN'
 ]
 
 var secrets = map(secretEnv, name => {
@@ -64,10 +65,15 @@ var secretEnvVars = map(secretEnv, name => {
   secretRef: toLower(replace(name, '_', '-'))
 })
 
+// Tag Sentry by env so dev and prod errors are separated — both containers run
+// NODE_ENV=production, so without this they'd both report as "production".
+var sentryEnvironment = contains(toLower(name), 'prod') ? 'production' : 'development'
+
 var plainEnvVars = [
   { name: 'PORT', value: string(targetPort) }
   { name: 'TRUECOURSE_EDITION', value: edition }
   { name: 'TRUECOURSE_LOG_DIR', value: '/data/logs' }
+  { name: 'SENTRY_ENVIRONMENT', value: sentryEnvironment }
 ]
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
