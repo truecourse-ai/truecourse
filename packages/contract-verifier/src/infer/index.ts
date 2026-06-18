@@ -408,6 +408,7 @@ const ENUM_DECLARATION_SHAPES = new Set([
   'as-const-object',
   'py-enum',
   'py-literal',
+  'cs-enum', // C# enum declarations (the `cs-set` value-set shape is excluded, like set-literal/py-set)
 ]);
 
 async function inferEnums(code: CodeContractSet, cov: Coverage): Promise<InferredDecision[]> {

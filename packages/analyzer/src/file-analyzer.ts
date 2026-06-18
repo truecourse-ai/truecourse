@@ -23,6 +23,12 @@ import {
   extractPythonImports,
   extractPythonExports,
 } from './extractors/languages/python.js'
+import {
+  extractCSharpFunctions,
+  extractCSharpClasses,
+  extractCSharpImports,
+  extractCSharpExports,
+} from './extractors/languages/csharp.js'
 
 /**
  * Analyze a single file and extract all code elements
@@ -93,6 +99,12 @@ function buildFileAnalysis(
       classes = extractPythonClasses(tree, filePath)
       imports = extractPythonImports(tree, filePath)
       exports = extractPythonExports(tree, filePath)
+      break
+    case 'csharp':
+      functions = extractCSharpFunctions(tree, filePath)
+      classes = extractCSharpClasses(tree, filePath)
+      imports = extractCSharpImports(tree, filePath)
+      exports = extractCSharpExports(tree, filePath)
       break
     default:
       throw new Error(`Unsupported language: ${language}`)

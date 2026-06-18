@@ -53,11 +53,13 @@ const EXT_TO_LANG: Record<string, SupportedLanguage> = {
   '.mjs': 'javascript',
   '.cjs': 'javascript',
   '.py': 'python',
+  '.cs': 'csharp',
 };
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
   '.cache', '.truecourse', '__pycache__', '.venv', 'venv', '.mypy_cache',
+  'bin', 'obj', '.vs',
 ]);
 
 /**

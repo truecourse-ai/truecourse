@@ -1,0 +1,10 @@
+operation GET "/api/orders" {
+  origin "reference/specs/modules/orders/endpoints.md" "GET /api/orders" 24..31
+  response 200 on success {
+    body {
+      items: array element Entity:Order
+      next_cursor: string|null
+    }
+  }
+  tags [paginated]
+}

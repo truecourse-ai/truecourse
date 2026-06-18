@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount, SupportedLanguage } from '@truecourse/shared'
 import { extractPythonRoutes } from './routes/python.js'
+import { extractCSharpRoutes } from './routes/csharp.js'
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
 
@@ -16,6 +17,8 @@ export function extractRouteRegistrations(
   switch (language) {
     case 'python':
       return extractPythonRoutes(tree, filePath)
+    case 'csharp':
+      return extractCSharpRoutes(tree, filePath)
     case 'typescript':
     case 'tsx':
     case 'javascript':

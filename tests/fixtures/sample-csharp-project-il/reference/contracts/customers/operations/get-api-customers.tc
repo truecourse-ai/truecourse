@@ -1,0 +1,9 @@
+operation GET "/api/customers" {
+  origin "reference/specs/modules/customers/endpoints.md" "GET /api/customers" 16..20
+  response 200 on success {
+    body {
+      items: array element Entity:Customer
+      next_cursor: string|null
+    }
+  }
+}

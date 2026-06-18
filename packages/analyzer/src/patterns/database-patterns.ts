@@ -56,6 +56,21 @@ export const DATABASE_IMPORT_MAP: Record<string, { type: DatabaseType; driver: s
 
   // Python Redis
   'aioredis': { type: 'redis', driver: 'aioredis' },
+
+  // C# — EF Core provider packages determine the engine (the base
+  // Microsoft.EntityFrameworkCore package does not name one)
+  'npgsql.entityframeworkcore.postgresql': { type: 'postgres', driver: 'efcore-npgsql' },
+  'microsoft.entityframeworkcore.sqlserver': { type: 'sqlserver', driver: 'efcore-sqlserver' },
+  'microsoft.entityframeworkcore.sqlite': { type: 'sqlite', driver: 'efcore-sqlite' },
+  'pomelo.entityframeworkcore.mysql': { type: 'mysql', driver: 'efcore-pomelo' },
+  // C# database drivers
+  'npgsql': { type: 'postgres', driver: 'npgsql' },
+  'microsoft.data.sqlclient': { type: 'sqlserver', driver: 'sqlclient' },
+  'system.data.sqlclient': { type: 'sqlserver', driver: 'sqlclient' },
+  'microsoft.data.sqlite': { type: 'sqlite', driver: 'sqlite' },
+  'mysqlconnector': { type: 'mysql', driver: 'mysqlconnector' },
+  'stackexchange.redis': { type: 'redis', driver: 'stackexchange-redis' },
+  'mongodb.driver': { type: 'mongodb', driver: 'mongodb-driver' },
 }
 
 /**
@@ -73,6 +88,8 @@ export const CONNECTION_ENV_VARS: Record<string, DatabaseType> = {
   'MONGO_URI': 'mongodb',
   'MYSQL_URL': 'mysql',
   'MYSQL_HOST': 'mysql',
+  'SQLSERVER_CONNECTION_STRING': 'sqlserver',
+  'MSSQL_CONNECTION_STRING': 'sqlserver',
 }
 
 /**
@@ -98,4 +115,6 @@ export const SCHEMA_FILE_PATTERNS = {
   // Python ORMs
   sqlalchemy: ['**/models/**/*.py', '**/models.py'],
   django: ['**/models.py'],
+  // C# Entity Framework Core
+  efcore: ['**/Entities/**/*.cs', '**/Models/**/*.cs', '**/*DbContext*.cs'],
 }

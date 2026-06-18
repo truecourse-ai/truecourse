@@ -23,7 +23,9 @@ export type EnumShape =
   | 'py-instance-registry'    // NAME = Subclass()  ×N of a common base → enum of NAMEs
   | 'py-discriminated-union'  // Union[A, B, …] of models each with type: Literal["x"]
   | 'py-constant-cluster'     // ≥3 module-level string constants sharing a value prefix
-  | 'py-set-difference';      // NAME = set(X) - Y — transient; resolved in enum/index.ts
+  | 'py-set-difference'       // NAME = set(X) - Y — transient; resolved in enum/index.ts
+  | 'cs-enum'                 // enum X { A, B }  (member names lowercased)
+  | 'cs-set';                 // static readonly HashSet<string> XSet = new() { 'a', 'b' }
 
 export interface ExtractedEnum {
   /** Identifier in code — type name, const name, or property key. */

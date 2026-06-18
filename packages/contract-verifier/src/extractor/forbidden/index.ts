@@ -18,6 +18,7 @@ import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { minimatch } from '../../comparator/minimatch.js';
 import { eachParsedSource, type ParsedSource } from '../source-walker.js';
 import { collectDependencies } from '../manifests.js';
+import { csStringText } from '../shared/cs-nodes.js';
 import { loadTcIgnore } from '@truecourse/shared';
 
 export interface ForbiddenMatch {
@@ -71,7 +72,9 @@ export async function detectForbiddenEnvVar(rootDir: string, name: string): Prom
   const out: ForbiddenMatch[] = [];
   await eachParsedSource(rootDir, (s) => {
     if (!s.source.includes(name)) return; // cheap pre-filter
-    const reads = s.lang === 'python' ? findPyEnvVarReads(s, name) : findJsEnvVarReads(s, name);
+    const reads = s.lang === 'python' ? findPyEnvVarReads(s, name)
+      : s.lang === 'csharp' ? findCsEnvVarReads(s, name)
+      : findJsEnvVarReads(s, name);
     for (const node of reads) {
       out.push({
         filePath: s.filePath,
@@ -202,6 +205,73 @@ function pyStringText(node: SyntaxNode, source: string): string {
     if (c?.type === 'string_content') return source.slice(c.startIndex, c.endIndex);
   }
   return source.slice(node.startIndex, node.endIndex).replace(/^[a-zA-Z]*('''|"""|'|")|('''|"""|'|")$/g, '');
+}
+
+/**
+ * C# env reads: `Environment.GetEnvironmentVariable("NAME")`,
+ * `Configuration["NAME"]` / `builder.Configuration["NAME"]`, and
+ * `*.Configuration.GetValue<T>("NAME")` (the IConfiguration options pattern).
+ */
+function findCsEnvVarReads(s: ParsedSource, name: string): SyntaxNode[] {
+  const out: SyntaxNode[] = [];
+  walk(s.tree.rootNode, (node) => {
+    if (node.type === 'invocation_expression') {
+      const fn = node.childForFieldName('function');
+      if (fn && isCsEnvGetter(fn, s.source) && csCallHasStringArg(node, s.source, name)) {
+        out.push(node);
+        return false;
+      }
+    }
+    if (node.type === 'element_access_expression') {
+      const expr = node.childForFieldName('expression');
+      if (expr && isCsConfigReceiver(expr, s.source) && csBracketIsString(node, s.source, name)) {
+        out.push(node);
+        return false;
+      }
+    }
+    return true;
+  });
+  return out;
+}
+
+/** `Environment.GetEnvironmentVariable` or `*.Configuration.GetValue<…>`. */
+function isCsEnvGetter(fn: SyntaxNode, source: string): boolean {
+  if (fn.type !== 'member_access_expression') return false;
+  const member = fn.childForFieldName('name');
+  const recv = fn.childForFieldName('expression');
+  if (!member || !recv) return false;
+  const memberName = source.slice(member.startIndex, member.endIndex);
+  const recvText = source.slice(recv.startIndex, recv.endIndex);
+  if (memberName === 'GetEnvironmentVariable' && recvText === 'Environment') return true;
+  if (/^GetValue\b/.test(memberName) && /(^|\.)Configuration$/.test(recvText)) return true;
+  return false;
+}
+
+function isCsConfigReceiver(expr: SyntaxNode, source: string): boolean {
+  const text = source.slice(expr.startIndex, expr.endIndex);
+  return text === 'Configuration' || /(^|\.)Configuration$/.test(text);
+}
+
+function csCallHasStringArg(node: SyntaxNode, source: string, name: string): boolean {
+  const args = node.childForFieldName('arguments');
+  return !!args && csHasStringLiteral(args, source, name);
+}
+
+function csBracketIsString(node: SyntaxNode, source: string, name: string): boolean {
+  const sub = node.childForFieldName('subscript') ?? node;
+  return csHasStringLiteral(sub, source, name);
+}
+
+function csHasStringLiteral(root: SyntaxNode, source: string, name: string): boolean {
+  let found = false;
+  walk(root, (n) => {
+    if (n.type === 'string_literal' && csStringText(n, source) === name) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
 }
 
 // ---------------------------------------------------------------------------

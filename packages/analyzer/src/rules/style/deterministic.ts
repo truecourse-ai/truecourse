@@ -102,6 +102,16 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'style/deterministic/csharp-naming-convention',
+    category: 'code',
+    domain: 'style',
+    name: 'C# naming convention violation',
+    description: 'Type/method/property not in PascalCase, interface missing I prefix, or snake_case private field.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
     key: 'style/deterministic/docstring-completeness',
     category: 'code',
     domain: 'style',

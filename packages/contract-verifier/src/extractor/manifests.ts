@@ -5,6 +5,8 @@
  *   - npm:    package.json (dependencies / devDependencies / peer / optional)
  *   - Python: requirements*.txt, pyproject.toml ([project].dependencies +
  *             [tool.poetry.dependencies]), setup.py (install_requires)
+ *   - .NET:   *.csproj / Directory.Packages.props (<PackageReference> /
+ *             <PackageVersion>), packages.config (<package id>)
  *
  * Used by both the ForbiddenArtifact dependency detector and the
  * ArchitectureDecision package-signal collector, so "is package X
@@ -27,7 +29,7 @@ export interface DeclaredDependency {
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache',
-  '.truecourse', '__pycache__', '.venv', 'venv', '.mypy_cache',
+  '.truecourse', '__pycache__', '.venv', 'venv', '.mypy_cache', 'bin', 'obj', '.vs',
 ]);
 
 export function collectDependencies(rootDir: string): DeclaredDependency[] {
@@ -53,6 +55,9 @@ export function collectDependencies(rootDir: string): DeclaredDependency[] {
       else if (/^requirements.*\.txt$/.test(entry.name)) out.push(...readRequirements(full));
       else if (entry.name === 'pyproject.toml') out.push(...readPyproject(full));
       else if (entry.name === 'setup.py') out.push(...readSetupPy(full));
+      else if (/\.csproj$/.test(entry.name)) out.push(...readCsproj(full));
+      else if (entry.name === 'Directory.Packages.props') out.push(...readDirectoryPackagesProps(full));
+      else if (entry.name === 'packages.config') out.push(...readPackagesConfig(full));
     }
   };
   visit(rootDir);
@@ -160,4 +165,47 @@ function readSetupPy(filePath: string): DeclaredDependency[] {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// .NET — *.csproj / Directory.Packages.props / packages.config (regex, the
+// element forms NuGet uses for declared package dependencies)
+// ---------------------------------------------------------------------------
+
+/** Pull `Include="X"` (+ optional `Version="Y"`) from every `<Tag …>` opening. */
+function readXmlPackageTags(
+  filePath: string,
+  tag: RegExp,
+  idAttr: 'Include' | 'id',
+  versionAttr: 'Version' | 'version',
+  field: string,
+): DeclaredDependency[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+  const out: DeclaredDependency[] = [];
+  const idRe = new RegExp(`${idAttr}\\s*=\\s*"([^"]+)"`);
+  const verRe = new RegExp(`${versionAttr}\\s*=\\s*"([^"]+)"`);
+  for (const m of text.matchAll(tag)) {
+    const id = m[0].match(idRe);
+    if (!id) continue;
+    const ver = m[0].match(verRe);
+    out.push({ name: id[1], version: ver ? ver[1] : '', field, filePath });
+  }
+  return out;
+}
+
+function readCsproj(filePath: string): DeclaredDependency[] {
+  return readXmlPackageTags(filePath, /<PackageReference\b[^>]*>/g, 'Include', 'Version', 'PackageReference');
+}
+
+function readDirectoryPackagesProps(filePath: string): DeclaredDependency[] {
+  return readXmlPackageTags(filePath, /<PackageVersion\b[^>]*>/g, 'Include', 'Version', 'Directory.Packages.props');
+}
+
+function readPackagesConfig(filePath: string): DeclaredDependency[] {
+  return readXmlPackageTags(filePath, /<package\b[^>]*>/g, 'id', 'version', 'packages.config');
 }

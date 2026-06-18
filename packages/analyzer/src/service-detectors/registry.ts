@@ -1,10 +1,12 @@
 import type { LanguageServiceDetector } from './types.js'
 import { jsServiceDetector } from './javascript.js'
 import { pythonServiceDetector } from './python.js'
+import { csharpServiceDetector } from './csharp.js'
 
 const ALL_DETECTORS: LanguageServiceDetector[] = [
   jsServiceDetector,
   pythonServiceDetector,
+  csharpServiceDetector,
 ]
 
 /**
@@ -16,6 +18,17 @@ export function readAllDependencies(servicePath: string): string[] {
     if (deps.length > 0) return deps
   }
   return []
+}
+
+/**
+ * Authoritative service type from any language's manifest, or null.
+ */
+export function detectLanguageServiceType(servicePath: string) {
+  for (const detector of ALL_DETECTORS) {
+    const type = detector.detectType?.(servicePath)
+    if (type) return type
+  }
+  return null
 }
 
 /**

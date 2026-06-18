@@ -20,3 +20,7 @@ assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
 .claude/
+
+# .NET build artifacts (fixture projects)
+tests/fixtures/**/bin/
+tests/fixtures/**/obj/

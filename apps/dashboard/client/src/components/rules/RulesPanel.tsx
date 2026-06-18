@@ -4,6 +4,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
 import { getRules, setRuleEnabled, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
+import { HoverPopover } from '@/components/ui/hover-popover';
 
 type DomainFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
 
@@ -47,6 +48,32 @@ function getDomain(rule: RuleResponse): string {
   const slash = key.indexOf('/');
   return slash > 0 ? key.slice(0, slash) : rule.category;
 }
+
+const languageAbbrev: Record<string, string> = {
+  javascript: 'JS',
+  python: 'PY',
+  csharp: 'C#',
+};
+
+const languageLabels: Record<string, string> = {
+  javascript: 'JavaScript/TypeScript',
+  python: 'Python',
+  csharp: 'C#',
+};
+
+const languageStatusLabels: Record<string, string> = {
+  supported: 'Supported',
+  partial: 'Partial',
+  'not-applicable': 'Not applicable',
+  unsupported: 'Unsupported',
+};
+
+const languageStatusColors: Record<string, string> = {
+  supported: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  partial: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  'not-applicable': 'bg-muted/40 text-muted-foreground border-border opacity-60',
+  unsupported: 'bg-muted/40 text-muted-foreground border-border line-through opacity-60',
+};
 
 const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[] = [
   { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
@@ -332,6 +359,29 @@ export function RulesPanel({ repoId, onRuleToggled }: RulesPanelProps = {}) {
                       >
                         {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
                       </span>
+                      {rule.languageSupport && (
+                        <span className="flex items-center gap-1">
+                          {(Object.entries(rule.languageSupport) as [string, { status: string; reason?: string }][]).map(
+                            ([lang, support]) => (
+                              <HoverPopover
+                                key={lang}
+                                content={
+                                  support.reason
+                                    ? `${languageLabels[lang] ?? lang}: ${languageStatusLabels[support.status]} — ${support.reason}`
+                                    : `${languageLabels[lang] ?? lang}: ${languageStatusLabels[support.status]}`
+                                }
+                                width="narrow"
+                              >
+                                <span
+                                  className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${languageStatusColors[support.status] || ''}`}
+                                >
+                                  {languageAbbrev[lang] ?? lang}
+                                </span>
+                              </HoverPopover>
+                            ),
+                          )}
+                        </span>
+                      )}
                       {!rule.enabled && (
                         <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
                           Disabled

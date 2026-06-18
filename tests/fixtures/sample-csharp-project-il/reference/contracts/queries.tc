@@ -1,0 +1,44 @@
+// QueryRule contracts for the orders / customers / loyalty data layer.
+//
+// All query rules live in one file so the engine's cross-rule
+// attribution of `query.unparseable` (a property of a code query, not of
+// a single rule) is deterministic: the first-declared rule wins, so the
+// loyalty rule is declared first.
+
+query-rule loyalty-tiers.allowed-tiers {
+  origin "reference/specs/modules/customers/data.md" "Loyalty tiers" 20..25
+  entity Entity:LoyaltyTier
+  required {
+    in tiers.code ["bronze", "silver", "gold"]
+  }
+}
+
+query-rule orders-list.tenant-scope {
+  origin "reference/specs/modules/orders/data.md" "Tenant scoping" 30..34
+  entity Entity:Order
+  required {
+    eq orders.tenant_id "<param>"
+  }
+}
+
+query-rule orders-list.date-anchor {
+  origin "reference/specs/modules/orders/data.md" "Date scoping" 35..38
+  entity Entity:Order
+  date-range-binding column orders.placed_at
+}
+
+query-rule orders-list.no-soft-deleted-included {
+  origin "reference/specs/modules/orders/data.md" "Soft delete" 39..42
+  entity Entity:Order
+  forbidden {
+    is-null orders.deleted_at
+  }
+}
+
+query-rule customers-list.status-allowlist {
+  origin "reference/specs/modules/customers/data.md" "Status allowlist" 26..29
+  entity Entity:Customer
+  required {
+    in customers.status ["active", "pending"]
+  }
+}

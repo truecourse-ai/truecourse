@@ -26,6 +26,7 @@ function toAnalysisRule(
     severity: rule.severity,
     type: rule.type,
     contextRequirement: rule.contextRequirement,
+    languageSupport: rule.languageSupport,
   };
 }
 

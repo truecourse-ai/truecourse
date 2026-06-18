@@ -1,0 +1,24 @@
+entity Customer {
+  origin "reference/specs/modules/customers/data.md" "Customer" 3..10
+  field id: uuid {
+    origin server-assigned
+    immutable
+  }
+  field email: string {
+    format email
+    normalize lowercase
+    unique
+  }
+  field name: string constraint non-empty
+  field loyalty_tier: string {
+    default standard
+    mutability mutable
+  }
+  field status: string {
+    default active
+  }
+  field created_at: iso-8601 {
+    origin server-assigned
+    immutable
+  }
+}

@@ -1,0 +1,29 @@
+// Architecture-decision contracts — system-wide invariants from docs/adr/.
+
+architecture-decision data-store.postgres {
+  origin "docs/adr/ADR-001-data-store.md" "Decision" 10..15
+  category data-store
+  chosen postgres
+  reason "Full-text search via tsvector is relied on across all queries"
+}
+
+architecture-decision communication.rest {
+  origin "docs/adr/ADR-002-communication.md" "Decision" 10..14
+  category communication-pattern
+  chosen rest
+  reason "Existing REST client library reuse"
+}
+
+architecture-decision messaging.kafka {
+  origin "docs/adr/ADR-003-messaging.md" "Decision" 10..14
+  category messaging
+  chosen kafka
+  reason "Strict ordering per partition + replay required for the audit pipeline"
+}
+
+architecture-decision build-system.vite {
+  origin "docs/adr/ADR-002-communication.md" "Build tooling" 1..3
+  category build-system
+  chosen vite
+  reason "Hot-module replacement required for the dashboard build"
+}

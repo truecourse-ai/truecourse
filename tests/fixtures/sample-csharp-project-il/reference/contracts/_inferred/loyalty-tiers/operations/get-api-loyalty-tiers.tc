@@ -1,0 +1,5 @@
+operation GET "/api/loyalty-tiers" {
+  // inferred — route handled in code but documented in no spec
+  inferred-from "Endpoints/CustomersEndpoints.cs" 49..49
+  confidence high
+}

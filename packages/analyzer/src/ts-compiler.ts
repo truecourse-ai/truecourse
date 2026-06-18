@@ -143,7 +143,12 @@ export function resolveModule(
 export interface SemanticAnalysisResult {
   /** Map of file path → set of exported names */
   exportMap: Map<string, Set<string>>
-  /** Map of interface method name → set of implementing class names */
+  /**
+   * Map of interface method name → set of implementing class names.
+   * TODO: computed but never consumed — callers only read exportMap
+   * (see analyzer.service.ts). Either wire this into flow tracing
+   * (resolve interface calls to implementations) or remove it.
+   */
   interfaceImplementations: Map<string, Set<string>>
 }
 

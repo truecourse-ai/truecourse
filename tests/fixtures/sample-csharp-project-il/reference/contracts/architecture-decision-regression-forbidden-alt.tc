@@ -1,0 +1,6 @@
+architecture-decision arch.regression.forbidden-alt-only {
+  origin "docs/adr/ADR-001-data-store.md" "Decision" 10..15
+  category data-store
+  chosen postgres
+  reason "Primary write path relies on relational consistency guarantees"
+}

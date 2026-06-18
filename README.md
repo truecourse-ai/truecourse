@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <em>1,200+ deterministic rules, 100 LLM rules. JavaScript, TypeScript, Python.</em>
+  <em>1,200+ deterministic rules, 100 LLM rules. JavaScript, TypeScript, Python, C#.</em>
 </p>
 
 <p align="center">
@@ -315,7 +315,7 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 |---|---|
 | JavaScript / TypeScript | Supported |
 | Python | Supported |
-| C# | Planned |
+| C# | Supported |
 | Go | Planned |
 | Rust | Planned |
 | PHP | Planned |

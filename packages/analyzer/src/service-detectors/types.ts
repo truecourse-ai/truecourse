@@ -11,4 +11,10 @@ export interface LanguageServiceDetector {
   readDependencies(servicePath: string): string[]
   /** Check if this directory is a library for this language */
   isLibrary(servicePath: string, files: string[], hasApiIndicators: boolean, hasWorkerIndicators: boolean): boolean
+  /**
+   * Authoritative service type from language manifests (e.g. the .NET project
+   * SDK), checked before directory-name heuristics. Return null when the
+   * manifest doesn't determine a type.
+   */
+  detectType?(servicePath: string): ServiceType | null
 }

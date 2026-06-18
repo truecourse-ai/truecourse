@@ -14,6 +14,7 @@
 
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { eachParsedSource, type ParsedSource } from '../source-walker.js';
+import { csColumnMap, resolveColumn, type CsColumnMap } from '../shared/cs-column-map.js';
 
 export interface EntityAssignment {
   receiver: string;
@@ -49,21 +50,29 @@ export interface EntityFacts {
 
 export async function extractEntityFacts(rootDir: string): Promise<EntityFacts> {
   const files: EntityFileFacts[] = [];
-  await eachParsedSource(rootDir, (s) => files.push(fileFacts(s)));
+  const columnMap = await csColumnMap(rootDir);
+  await eachParsedSource(rootDir, (s) => files.push(fileFacts(s, columnMap)));
   return { files };
 }
 
-function fileFacts(s: ParsedSource): EntityFileFacts {
+function fileFacts(s: ParsedSource, columnMap: CsColumnMap): EntityFileFacts {
   const assignments: EntityAssignment[] = [];
   const newConstructed: string[] = [];
   const typedLiterals: TypedLiteralConstruction[] = [];
   const kwargCalls: KwargConstruction[] = [];
 
   const visit = (node: SyntaxNode): void => {
-    const a = s.lang === 'python' ? pyAssign(node, s.source) : jsAssign(node, s.source);
+    const a = s.lang === 'python' ? pyAssign(node, s.source)
+      : s.lang === 'csharp' ? csAssign(node, s.source, columnMap)
+      : jsAssign(node, s.source);
     if (a) assignments.push(a);
 
-    if (s.lang !== 'python') {
+    if (s.lang === 'csharp') {
+      if (node.type === 'object_creation_expression') {
+        const t = node.childForFieldName('type');
+        if (t?.type === 'identifier') newConstructed.push(s.source.slice(t.startIndex, t.endIndex));
+      }
+    } else if (s.lang !== 'python') {
       if (node.type === 'new_expression') {
         const cons = node.childForFieldName('constructor');
         if (cons?.type === 'identifier') newConstructed.push(s.source.slice(cons.startIndex, cons.endIndex));
@@ -120,6 +129,17 @@ function jsAssign(node: SyntaxNode, source: string): EntityAssignment | null {
   return mkAssign(source.slice(obj.startIndex, obj.endIndex), source.slice(prop.startIndex, prop.endIndex), node, source);
 }
 
+function csAssign(node: SyntaxNode, source: string, columnMap: CsColumnMap): EntityAssignment | null {
+  if (node.type !== 'assignment_expression') return null;
+  const lhs = node.childForFieldName('left');
+  if (lhs?.type !== 'member_access_expression') return null;
+  const obj = lhs.childForFieldName('expression');
+  const prop = lhs.childForFieldName('name');
+  if (obj?.type !== 'identifier' || prop?.type !== 'identifier') return null;
+  const field = resolveColumn(columnMap, source.slice(prop.startIndex, prop.endIndex));
+  return mkAssign(source.slice(obj.startIndex, obj.endIndex), field, node, source);
+}
+
 function pyAssign(node: SyntaxNode, source: string): EntityAssignment | null {
   if (node.type !== 'assignment') return null;
   const lhs = node.childForFieldName('left');
@@ -155,15 +175,17 @@ function objectLiteralKeys(node: SyntaxNode, source: string): string[] {
 }
 
 function hasLowercaseCall(s: ParsedSource): boolean {
-  const method = s.lang === 'python' ? 'lower' : 'toLowerCase';
+  const methods = s.lang === 'python' ? ['lower']
+    : s.lang === 'csharp' ? ['ToLower', 'ToLowerInvariant']
+    : ['toLowerCase'];
   let found = false;
   const visit = (node: SyntaxNode): void => {
     if (found) return;
-    if (node.type === 'call_expression' || node.type === 'call') {
+    if (node.type === 'call_expression' || node.type === 'call' || node.type === 'invocation_expression') {
       const fn = node.childForFieldName('function');
-      if (fn && (fn.type === 'member_expression' || fn.type === 'attribute')) {
-        const prop = fn.childForFieldName('property') ?? fn.childForFieldName('attribute');
-        if (prop && s.source.slice(prop.startIndex, prop.endIndex) === method) { found = true; return; }
+      if (fn && (fn.type === 'member_expression' || fn.type === 'attribute' || fn.type === 'member_access_expression')) {
+        const prop = fn.childForFieldName('property') ?? fn.childForFieldName('attribute') ?? fn.childForFieldName('name');
+        if (prop && methods.includes(s.source.slice(prop.startIndex, prop.endIndex))) { found = true; return; }
       }
     }
     for (const c of node.namedChildren) { visit(c); if (found) return; }
