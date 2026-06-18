@@ -31,10 +31,13 @@ export function SeverityBarChart({
   data,
   activeSeverity,
   onSeverityClick,
+  tall = false,
 }: {
   data: BreakdownResponse;
   activeSeverity?: string | null;
   onSeverityClick?: (severity: string) => void;
+  /** Wide analytics layout: a fixed ~2× height instead of the aspect-capped 250px. */
+  tall?: boolean;
 }) {
   const { bySeverity } = data;
 
@@ -70,7 +73,11 @@ export function SeverityBarChart({
         <CardTitle className="text-sm font-medium">By Severity</CardTitle>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={chartConfig} className="aspect-[2/1] w-full max-h-[250px]">
+        <ChartContainer
+          config={chartConfig}
+          className={`w-full ${tall ? '' : 'aspect-[2/1] max-h-[250px]'}`}
+          style={tall ? { aspectRatio: 'auto', height: 500 } : undefined}
+        >
           <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
             <CartesianGrid vertical={false} />
             <XAxis dataKey="severity" tickLine={false} axisLine={false} tickMargin={8} />

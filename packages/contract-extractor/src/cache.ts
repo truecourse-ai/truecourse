@@ -17,6 +17,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import type { ExtractionResult, Manifest, SliceCacheEntry, SpecSlice } from './types.js';
 import { ManifestSchema, SliceCacheEntrySchema } from './types.js';
 import { SYSTEM_PROMPT } from './prompt.js';
@@ -24,6 +25,8 @@ import { SYSTEM_PROMPT } from './prompt.js';
 const CACHE_DIR = path.join('.truecourse', '.cache', 'extractor');
 const SLICES_SUBDIR = 'slices';
 const MANIFEST_FILE = 'manifest.json';
+/** Cache name (= file subpath under `.truecourse/.cache/`) for slice entries. */
+const SLICE_CACHE_NAME = `extractor/${SLICES_SUBDIR}`;
 
 /**
  * Fingerprint of the extraction prompt. Cached slice entries record
@@ -61,12 +64,15 @@ export function ensureCacheDirs(repoRoot: string): CachePaths {
 // Slice entries
 // ---------------------------------------------------------------------------
 
-export function readSliceEntry(repoRoot: string, sliceId: string): SliceCacheEntry | null {
-  const file = path.join(cachePaths(repoRoot).slicesDir, `${sliceId}.json`);
-  if (!fs.existsSync(file)) return null;
+export async function readSliceEntry(
+  repoRoot: string,
+  sliceId: string,
+): Promise<SliceCacheEntry | null> {
+  const raw = await getCacheEntry(repoRoot, SLICE_CACHE_NAME, sliceId);
+  if (raw === null) return null;
   try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     const entry = SliceCacheEntrySchema.parse(raw);
+    // Prompt edits self-invalidate: a fingerprint mismatch is a miss.
     if (entry.promptFingerprint !== EXTRACTION_PROMPT_FINGERPRINT) return null;
     return entry;
   } catch {
@@ -75,12 +81,11 @@ export function readSliceEntry(repoRoot: string, sliceId: string): SliceCacheEnt
   }
 }
 
-export function writeSliceEntry(
+export async function writeSliceEntry(
   repoRoot: string,
   slice: SpecSlice,
   result: ExtractionResult,
-): SliceCacheEntry {
-  ensureCacheDirs(repoRoot);
+): Promise<SliceCacheEntry> {
   const entry: SliceCacheEntry = {
     id: slice.id,
     specPath: slice.specPath,
@@ -90,8 +95,7 @@ export function writeSliceEntry(
     cachedAt: new Date().toISOString(),
     promptFingerprint: EXTRACTION_PROMPT_FINGERPRINT,
   };
-  const file = path.join(cachePaths(repoRoot).slicesDir, `${slice.id}.json`);
-  fs.writeFileSync(file, JSON.stringify(entry, null, 2));
+  await setCacheEntry(repoRoot, SLICE_CACHE_NAME, slice.id, entry);
   return entry;
 }
 

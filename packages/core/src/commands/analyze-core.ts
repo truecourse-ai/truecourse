@@ -26,16 +26,33 @@ import { buildGraph } from '../services/analysis-persistence.service.js';
 import { detectFlows } from '../services/flow.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import { getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
-import {
-  AnalyzeLockError,
-  acquireAnalyzeLock,
-  releaseAnalyzeLock,
-} from '../lib/atomic-write.js';
+import { acquireAnalyzeLock, releaseAnalyzeLock } from '../lib/atomic-write.js';
 import type { Graph, LatestSnapshot, UsageRecord, ViolationRecord } from '../types/snapshot.js';
 import type { StepTracker } from '../progress.js';
+
+/**
+ * Rewrite an absolute scan-root filePath to a repo-relative POSIX path. The
+ * analyzer records paths under the scan root (`codeDir`) — which in EE is an
+ * ephemeral clone temp dir — so persisting them would leak machine paths and
+ * break file links, GitHub deep-links, and cross-run violation identity. Paths
+ * outside `codeDir` (already-relative, or external) pass through untouched.
+ * Mirrors the verify path, which already relativizes (see spec-in-process).
+ */
+export function toRepoRelative(filePath: string, codeDir: string): string {
+  if (path.isAbsolute(filePath) && (filePath === codeDir || filePath.startsWith(codeDir + path.sep))) {
+    return path.relative(codeDir, filePath).split(path.sep).join('/');
+  }
+  return filePath;
+}
+
+export function relativizeViolationPaths(violations: ViolationRecord[], codeDir: string): void {
+  for (const v of violations) {
+    if (v.filePath) v.filePath = toRepoRelative(v.filePath, codeDir);
+  }
+}
 
 export type AnalysisMode = 'full' | 'diff';
 
@@ -54,6 +71,13 @@ export interface LlmEstimate {
 
 export interface AnalyzeCoreOptions {
   mode: AnalysisMode;
+  /**
+   * Where the CODE to analyze lives (git, parse, the violation pipeline, the
+   * analyze lock). Defaults to `project.path`. The hosted edition sets this to a
+   * clone so it can analyze a repo whose `project.path` is an opaque identity
+   * (e.g. `owner/repo`) that storage keys off, not a filesystem path.
+   */
+  codeDir?: string;
   branch?: string | null;
   commitHash?: string | null;
   /** Full-mode only: skip git branch/commit/diff calls entirely. Ignored in diff mode. */
@@ -104,22 +128,25 @@ export async function analyzeCore(
   project: RegistryEntry,
   options: AnalyzeCoreOptions,
 ): Promise<AnalyzeCoreResult> {
+  // Code lives at `codeDir` (the repo, or a clone in EE); storage keys off
+  // `project.path` (a path in OSS, an opaque identity in EE).
+  const codeDir = options.codeDir ?? project.path;
+
   // Single lock protects both modes. A diff while an analyze is in-flight (or
-  // vice versa) corrupts LATEST / diff.json invariants, so block both.
-  try {
-    acquireAnalyzeLock(project.path);
-  } catch (err) {
-    if (err instanceof AnalyzeLockError) throw err;
-    throw err;
-  }
+  // vice versa) corrupts LATEST / diff.json invariants, so block both. Keyed by
+  // the STORAGE identity (`project.path`) — not the code dir — so in EE two
+  // analyses of the same repo serialize even though each clones into its own
+  // temp dir (the EE impl is a `pg_advisory_lock`). If acquire throws we never
+  // entered the body below, so the lock is not held and needs no release.
+  await acquireAnalyzeLock(project.path);
 
   try {
     const { mode, signal } = options;
     const isDiff = mode === 'diff';
     const skipGit = !isDiff && !!options.skipGit;
-    const projectConfig = readProjectConfig(project.path);
+    const projectConfig = await readProjectConfig(project.path);
 
-    const latestBaseline = readLatest(project.path);
+    const latestBaseline = await readLatest(project.path);
     if (isDiff && !latestBaseline) {
       throw new Error('Run a full analysis first before checking a diff.');
     }
@@ -135,14 +162,14 @@ export async function analyzeCore(
       branch = latestBaseline!.analysis.branch ?? branch;
       if (commitHash === null) {
         try {
-          const git = await getGit(project.path);
+          const git = await getGit(codeDir);
           commitHash = (await git.revparse(['HEAD'])).trim() || null;
         } catch {
           commitHash = null;
         }
       }
     } else if (!skipGit && (branch === null || commitHash === null)) {
-      const git = await getGit(project.path);
+      const git = await getGit(codeDir);
       if (branch === null) branch = (await git.branch()).current || null;
       if (commitHash === null) commitHash = (await git.revparse(['HEAD'])).trim();
     }
@@ -166,14 +193,14 @@ export async function analyzeCore(
     let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
     if (!isDiff && !skipGit && !options.skipStash) {
       try {
-        stashGit = await getGit(project.path);
+        stashGit = await getGit(codeDir);
         const status = await stashGit.status();
         if (!status.isClean()) {
           const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
           // Skip stashing when the repo path is a subdirectory of a larger
           // repo (e.g., test fixtures inside the main repo). Stashing there
           // would touch unrelated parent-repo files.
-          const isSubdirectory = path.resolve(project.path) !== path.resolve(gitRoot);
+          const isSubdirectory = path.resolve(codeDir) !== path.resolve(gitRoot);
           if (!isSubdirectory) {
             options.tracker?.detail('parse', 'Stashing pending changes...');
             options.onProgress?.({ detail: 'Stashing pending changes to analyze committed state...' });
@@ -200,7 +227,7 @@ export async function analyzeCore(
     // ------------------------------------------------------------
     options.tracker?.start('parse', isDiff ? 'Analyzing working tree...' : 'Starting analysis...');
     const result: AnalysisResult = await runAnalysis(
-      project.path,
+      codeDir,
       branch ?? undefined,
       (progress) => {
         options.tracker?.detail('parse', progress.detail ?? 'Analyzing...');
@@ -232,7 +259,7 @@ export async function analyzeCore(
 
     if (isDiff) {
       try {
-        const git = await getGit(project.path);
+        const git = await getGit(codeDir);
         const statusResult = await git.status();
         for (const f of statusResult.not_added) changedFiles.push({ path: f, status: 'new' });
         for (const f of statusResult.created) changedFiles.push({ path: f, status: 'new' });
@@ -248,7 +275,7 @@ export async function analyzeCore(
       }
     } else if (latestBaseline?.analysis.commitHash && !skipGit) {
       try {
-        const git = await getGit(project.path);
+        const git = await getGit(codeDir);
         const diffOutput = await git.diff([latestBaseline.analysis.commitHash, 'HEAD', '--name-only']);
         const files = diffOutput.trim().split('\n').filter(Boolean);
         if (files.length > 0) changedFileSet = new Set(files);
@@ -270,7 +297,7 @@ export async function analyzeCore(
         );
         graph.flows = [];
       }
-      touchProject(project.slug);
+      await touchProject(project.slug);
     }
 
     options.tracker?.done(
@@ -288,18 +315,32 @@ export async function analyzeCore(
       : [];
     const previousAnalysisId = latestBaseline?.analysis.id ?? null;
 
+    // The stored baseline carries repo-relative paths; this run's violations are
+    // scan-root-absolute. Re-absolutize the baseline against this run's `codeDir`
+    // so the lifecycle matches by identity (ruleKey + filePath) no matter which
+    // temp dir this clone landed in.
+    const previousForDiff = previousActiveViolations.map((v) =>
+      v.filePath && !path.isAbsolute(v.filePath)
+        ? { ...v, filePath: path.resolve(codeDir, v.filePath) }
+        : v,
+    );
+
     // ------------------------------------------------------------
     // Violation pipeline
     // ------------------------------------------------------------
-    const provider = options.provider ?? (effectiveLlmRules ? createLLMProvider(options.transport) : undefined);
+    const provider =
+      options.provider ??
+      (effectiveLlmRules
+        ? createLLMProvider(options.transport ?? getDefaultTransport())
+        : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);
-      provider.setRepoPath(project.path);
+      provider.setRepoPath(codeDir);
       if (signal) provider.setAbortSignal(signal);
     }
 
     const pipelineResult = await runViolationPipeline({
-      repoPath: project.path,
+      repoPath: codeDir,
       analysisId,
       now,
       result,
@@ -307,7 +348,7 @@ export async function analyzeCore(
       moduleIdMap,
       methodIdMap,
       dbIdMap,
-      previousActiveViolations,
+      previousActiveViolations: previousForDiff,
       changedFileSet,
       tracker: options.tracker,
       enabledCategories: effectiveCategories,
@@ -350,6 +391,12 @@ export async function analyzeCore(
     enforceLocationInvariant(pipelineResult.unchanged);
     enforceLocationInvariant(pipelineResult.resolved);
 
+    // Persist repo-relative paths (the analyzer recorded scan-root-absolute
+    // ones). Done after the pipeline so type-aware rules saw real absolute paths.
+    relativizeViolationPaths(pipelineResult.added, codeDir);
+    relativizeViolationPaths(pipelineResult.unchanged, codeDir);
+    relativizeViolationPaths(pipelineResult.resolved, codeDir);
+
     log.info(
       `[${isDiff ? 'Diff' : 'Analysis'}] core complete in ${Date.now() - start}ms — ${pipelineResult.added.length} added, ${pipelineResult.unchanged.length} unchanged, ${pipelineResult.resolvedRefs.length} resolved`,
     );
@@ -384,7 +431,7 @@ export async function analyzeCore(
       }
     }
   } finally {
-    releaseAnalyzeLock(project.path);
+    await releaseAnalyzeLock(project.path);
   }
 }
 

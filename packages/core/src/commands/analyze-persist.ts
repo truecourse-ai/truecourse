@@ -50,11 +50,11 @@ export interface PersistFullResult {
   violationsSummary: { total: number; bySeverity: Record<string, number> };
 }
 
-export function persistFullAnalysis(
+export async function persistFullAnalysis(
   project: RegistryEntry,
   core: AnalyzeCoreResult,
   startedAt: number,
-): PersistFullResult {
+): Promise<PersistFullResult> {
   const filename = buildAnalysisFilename(core.analysisId, core.now);
 
   const snapshot: AnalysisSnapshot = {
@@ -83,13 +83,13 @@ export function persistFullAnalysis(
 
   const { bySeverity, total } = summarizeActiveViolations(latest.violations);
 
-  writeAnalysis(project.path, snapshot);
-  writeLatest(project.path, latest);
-  appendHistory(project.path, buildHistoryEntry(snapshot, filename, core.pipelineResult));
+  await writeAnalysis(project.path, snapshot);
+  await writeLatest(project.path, latest);
+  await appendHistory(project.path, buildHistoryEntry(snapshot, filename, core.pipelineResult));
 
   // Baseline moved — any prior diff is obsolete.
-  deleteDiff(project.path);
-  setLastAnalyzed(project.slug, core.now);
+  await deleteDiff(project.path);
+  await setLastAnalyzed(project.slug, core.now);
 
   return {
     analysisId: core.analysisId,
@@ -111,17 +111,17 @@ export interface PersistDiffResult {
   isStale: boolean;
 }
 
-export function persistDiffAnalysis(
+export async function persistDiffAnalysis(
   project: RegistryEntry,
   core: AnalyzeCoreResult,
-): PersistDiffResult {
+): Promise<PersistDiffResult> {
   if (!core.latestBaseline) {
     throw new Error('Diff persist requires a latestBaseline — analyzeCore should have enforced this.');
   }
 
   const diff = buildDiffSnapshot(project.path, core, core.latestBaseline);
 
-  writeDiff(project.path, diff);
+  await writeDiff(project.path, diff);
   log.info(
     `[Diff] Done — ${diff.summary.newCount} new, ${diff.summary.unchangedCount} unchanged, ${diff.summary.resolvedCount} resolved across ${diff.changedFiles.length} changed files`,
   );

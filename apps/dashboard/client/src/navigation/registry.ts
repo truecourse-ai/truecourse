@@ -16,8 +16,8 @@
  *     `useVisibleTabsForSection` hooks below filter the data through
  *     the AppProvider's capability set so the gate lives in one place
  *     instead of being scattered across components.
- *   - Section/tab ids are plain `string`. The OSS ids ('analysis',
- *     'drift', 'home', 'spec', …) remain available as constants for
+ *   - Section/tab ids are plain `string`. The OSS ids ('codequality',
+ *     'verification', 'home', 'spec', …) remain available as constants for
  *     ergonomic narrowing, but the type itself is open so contributed
  *     ids type-check without touching this file.
  */
@@ -33,6 +33,11 @@ import {
   FileCode2,
   ShieldCheck,
   GitMerge,
+  GitPullRequest,
+  Settings,
+  BarChart3,
+  TriangleAlert,
+  Lightbulb,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
 import { useMemo } from 'react';
@@ -84,7 +89,7 @@ export interface SectionDescriptor {
  */
 export const SECTIONS: SectionDescriptor[] = [
   {
-    id: 'analysis',
+    id: 'codequality',
     label: 'Code Analysis',
     description: 'Architecture graphs, files, flows, databases',
     icon: Network,
@@ -92,24 +97,64 @@ export const SECTIONS: SectionDescriptor[] = [
     tabs: [
       { id: 'home', label: 'Home', icon: Home, noPanel: true },
       { id: 'graphs', label: 'Graphs', icon: Network, noPanel: true },
-      { id: 'flows', label: 'Flows', icon: Workflow },
-      { id: 'files', label: 'Files', icon: FolderTree },
-      { id: 'databases', label: 'Databases', icon: Database },
+      // Flows / Files / Databases need the repo on local disk — OSS-only (gated on
+      // the `local-filesystem` capability the hosted edition omits).
+      { id: 'flows', label: 'Flows', icon: Workflow, requiredCapability: 'local-filesystem' },
+      { id: 'files', label: 'Files', icon: FolderTree, requiredCapability: 'local-filesystem' },
+      { id: 'databases', label: 'Databases', icon: Database, requiredCapability: 'local-filesystem' },
       { id: 'analyses', label: 'Analyses', icon: ClipboardList, noPanel: true },
+      // Hosted-only: the EE Code Quality decomposition splits the OSS combined
+      // `home` into separate Analytics / Violations tabs. Gated on `workspace`
+      // (always advertised by the EE plugin, never by OSS), so OSS keeps its
+      // combined `home` view and these never appear there. The EE repo view curates
+      // them via `EE_ANALYSIS_TAB_ORDER`.
+      { id: 'analytics', label: 'Analytics', icon: BarChart3, noPanel: true, requiredCapability: 'workspace' },
+      { id: 'violations', label: 'Violations', icon: TriangleAlert, noPanel: true, requiredCapability: 'workspace' },
     ],
   },
   {
-    id: 'drift',
+    id: 'verification',
     label: 'BL Drift',
     description: 'Spec consolidation, contracts, verification',
     icon: ShieldCheck,
     defaultTab: 'spec',
     tabs: [
+      // EE-only: the PR gate's runs for this repo. OSS filters it out.
+      {
+        id: 'pulls',
+        label: 'Pull requests',
+        icon: GitPullRequest,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
       { id: 'spec', label: 'Spec', icon: BookOpen },
       { id: 'contracts', label: 'Contracts', icon: FileCode2 },
       { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
+      // EE-only: the drift analytics (charts/hotspots/trend) as a standalone tab.
+      // In OSS the same `VerifyStatsColumn` stays as the Verify view's left aside.
+      {
+        // `driftanalytics` (not `analytics`) avoids colliding with the legacy
+        // `?tab=analytics → home` URL alias in NavigationContext.
+        id: 'driftanalytics',
+        label: 'Analytics',
+        icon: BarChart3,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
       { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
       { id: 'decisions', label: 'Decisions', icon: GitMerge },
+      // Reverse-engineered undocumented decisions (OSS + EE). Sidebar list +
+      // main-pane detail tabs, like Contracts; Promote / Dismiss in the detail.
+      { id: 'inferred', label: 'Inferred', icon: Lightbulb },
+      // EE-only: per-repo gate settings (notify emails, blocking, notification
+      // toggles). Rendered as a tab in the EE repo console; OSS filters it out.
+      {
+        id: 'settings',
+        label: 'Settings',
+        icon: Settings,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
     ],
   },
 ];

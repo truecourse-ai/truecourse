@@ -18,12 +18,15 @@ import type {
   OperationContract,
   PaginationContractC,
   SelectorExpr,
+  SpecOrigin,
 } from '../types/index.js';
 import type { ResolvedArtifact } from '../resolver/index.js';
 import type { ExtractedOperation } from '../extractor/index.js';
 
 export interface PaginationCompareInput {
   paginationRef: ArtifactRef;
+  /** Spec-side origin of the pagination artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: PaginationContractC;
   /** Spec-side Operations indexed by their identity. */
   specOps: Map<string, ResolvedArtifact>;
@@ -59,6 +62,7 @@ export function comparePagination(input: PaginationCompareInput): ContractDrift[
             `Implementation reads \`req.query.${name}\`.`,
           specSide: `forbid query-param ${name}`,
           codeSide: `req.query.${name}`,
+          specOrigin: input.origin ?? undefined,
         });
       }
     }
@@ -84,6 +88,7 @@ export function comparePagination(input: PaginationCompareInput): ContractDrift[
           codeSide: op.observed.hasClampCall
             ? `Math.min observed but with different bound (${op.observed.numericClamps.join(', ')})`
             : `no Math.min clamp on the limit value`,
+          specOrigin: input.origin ?? undefined,
         });
       }
     }

@@ -75,7 +75,9 @@ export async function extractClaims(
   const docByBlockId = new Map<string, DocCandidate>();
   for (const doc of docs) {
     opts.onDocStart?.(doc);
-    const blocks = sliceDoc(doc.path, readFileSync(doc.absPath));
+    // In-memory body when present (connector/RAM source); else read the file.
+    const source = doc.content ?? readFileSync(doc.absPath);
+    const blocks = sliceDoc(doc.path, source);
     for (const b of blocks) {
       allBlocks.push(b);
       docByBlockId.set(b.id, doc);

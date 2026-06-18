@@ -348,9 +348,9 @@ export async function runHooksRun(): Promise<void> {
   // would think they were protected when they aren't).
   const repoDir = resolveRepoDir(process.cwd());
   const project = repoDir
-    ? (getProjectByPath(repoDir) ?? registerProject(repoDir))
+    ? ((await getProjectByPath(repoDir)) ?? (await registerProject(repoDir)))
     : null;
-  if (!project || !readLatest(project.path)) {
+  if (!project || !(await readLatest(project.path))) {
     console.log("");
     console.error(
       "No baseline analysis yet. Run `truecourse analyze` once in this repo before\n" +

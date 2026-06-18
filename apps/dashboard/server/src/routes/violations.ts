@@ -19,7 +19,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
 
       const limitParam = parseInt(req.query.limit as string) || 0;
       const offsetParam = parseInt(req.query.offset as string) || 0;
@@ -38,7 +38,7 @@ router.get(
             ))
         : undefined;
 
-      const { violations, total } = listViolations(repo.path, {
+      const { violations, total } = await listViolations(repo.path, {
         analysisId: req.query.analysisId as string | undefined,
         filePath: req.query.file as string | undefined,
         status,
@@ -67,16 +67,16 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
       const analysisIdParam = req.query.analysisId as string | undefined;
-      const latest = readLatest(repo.path);
+      const latest = await readLatest(repo.path);
 
       if (!latest) {
         res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
         return;
       }
 
-      const disabled = new Set<string>(readProjectConfig(repo.path).disabledRules ?? []);
+      const disabled = new Set<string>((await readProjectConfig(repo.path)).disabledRules ?? []);
       const filterDisabled = <T extends { ruleKey: string }>(rows: T[]): T[] =>
         disabled.size === 0 ? rows : rows.filter((v) => !disabled.has(v.ruleKey));
 
@@ -84,7 +84,7 @@ router.get(
         // Historical analysis: reconstruct the active set as of that analysis
         // (replay the delta chain) so the summary matches what the violations
         // list shows for the same analysisId.
-        const historical = readActiveViolationsAt(repo.path, analysisIdParam);
+        const historical = await readActiveViolationsAt(repo.path, analysisIdParam);
         if (!historical) {
           res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
           return;

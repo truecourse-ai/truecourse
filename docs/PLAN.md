@@ -3473,3 +3473,29 @@ has a delete action.
   LATEST re-derivation (delete head ⇒ rebuild from newest remaining; delete last
   ⇒ LATEST cleared; non-head delete ⇒ untouched); navigation-registry test
   updated for the new tab; full suite 4164 passed.
+
+## Phase 44: Enterprise GitHub App PR gate `STATUS: DONE`
+
+Hosted GitHub App (enterprise, `ee/packages/github-app`, capability `github-gate`)
+that runs TrueCourse as a PR gate. Composed by `ee-server`; never in the
+community build. Deterministic detection/gate; LLM only behind explicit checkboxes.
+Runtime order per PR: spec-scan (2) → infer (3) → drift gate (1).
+
+- **44.1 Plumbing** `STATUS: DONE` — package + plugin wiring; HMAC webhook
+  receiver (public); install/connect routes + Connect page; `GateStore`
+  interface with file (default) + Postgres (`DATABASE_URL`) adapters;
+  baseline-on-merge (full verify on default-branch push → saved base).
+- **44.2 Spec-doc scan** `STATUS: DONE` — detect changed spec docs → checkbox
+  comment → scan + contract generation on the PR head → commit contracts back.
+- **44.3 Infer** `STATUS: DONE` — checkbox → infer undocumented decisions →
+  commit `.truecourse/contracts/_inferred/` back; list decisions.
+- **44.4 Drift gate** `STATUS: DONE` — auto-verify head vs base (`diffDrifts`),
+  blocking GitHub Check (advisory configurable per repo), summary comment +
+  inline drift comments; works for fork PRs via `refs/pull/<n>/head`.
+- **44.5 Email + hosted** `STATUS: DONE` — Resend email to per-repo addresses on
+  blocking failure; Postgres adapter validated against in-process Postgres (pglite).
+
+Each sub-phase was hardened by a multi-agent adversarial review (security /
+correctness / runtime / reuse) with per-finding verification. Tests live in
+`tests/github-app/` (120 passing). Requires GitHub App perms: Checks RW,
+Pull requests RW, Contents RO, Metadata RO.

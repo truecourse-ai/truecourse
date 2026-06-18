@@ -62,6 +62,14 @@ export interface DriftViewContextValue {
    * Pass null to clear everything (no verify state).
    */
   reconcileDriftTabs: (validIds: Set<string> | null) => void;
+
+  /**
+   * EE ref switcher: which commit the repo's spec/contracts/drift views read.
+   * '' = the default branch (LATEST). A PR head SHA → that PR's stored snapshot.
+   * URL-synced as `?ref=` so reloads + shared links keep the lens.
+   */
+  selectedRef: string;
+  setSelectedRef: (ref: string) => void;
 }
 
 const DriftViewContext = createContext<DriftViewContextValue | null>(null);
@@ -72,6 +80,21 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
 
   const canonicalFromUrl = searchParams?.get('canonical') || null;
   const contractFromUrl = searchParams?.get('contract') || null;
+
+  // EE ref switcher (default branch vs a PR head), URL-synced as `?ref=`.
+  const [selectedRef, setSelectedRefState] = useState<string>(
+    searchParams?.get('ref') || '',
+  );
+  const setSelectedRef = useCallback(
+    (ref: string) => {
+      setSelectedRefState(ref);
+      const url = new URL(window.location.href);
+      if (ref) url.searchParams.set('ref', ref);
+      else url.searchParams.delete('ref');
+      navigate(url.pathname + url.search);
+    },
+    [navigate],
+  );
 
   const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(
     null,
@@ -269,6 +292,8 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       handleOpenDrift,
       handleCloseDrift,
       reconcileDriftTabs,
+      selectedRef,
+      setSelectedRef,
     }),
     [
       activeSpecConflictId,
@@ -286,6 +311,8 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       handleOpenDrift,
       handleCloseDrift,
       reconcileDriftTabs,
+      selectedRef,
+      setSelectedRef,
     ],
   );
 

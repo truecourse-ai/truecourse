@@ -4,9 +4,15 @@
  * hoist scan + decision state into context so both can read and
  * mutate it.
  *
- * On mount: hydrate from the persisted `scan-state.json` via
- * `GET /spec/scan-state`. Falls back to the "Run scan" CTA when no
- * scan has ever been persisted.
+ * The provider is parameterized by a `SpecDataSource` — the seam that
+ * decides WHERE the spec data lives. A repo source (`createRepoSpecDataSource`)
+ * talks to `/api/repos/:id/spec/*`; the enterprise Knowledge page passes a
+ * workspace source talking to `/api/ee/knowledge/*`. The panels
+ * (`SpecPanel`/`DecisionsPanel`/`SpecConflictDetail`/`SpecCanonicalFile`) are
+ * identical regardless of source — they only read `useSpec()`.
+ *
+ * On mount: hydrate from the persisted scan-state. Falls back to the
+ * "Run scan" empty state when no scan has ever been persisted.
  */
 
 import {
@@ -21,10 +27,83 @@ import {
 import { toast } from 'sonner';
 import * as api from '@/lib/api';
 import type {
+  CanonicalSpecSection,
+  CanonicalSpecTree,
   SpecConflict,
   SpecResolution,
   SpecScanResponse,
 } from '@/lib/api';
+
+/**
+ * A human-facing label for a source doc, resolved from its internal `docPath`.
+ * Workspace (connector) docs have a `docPath` like `knowledge/confluence/98423.md`
+ * — a stable id, not a filename — so the UI shows this title (linked to the
+ * source) instead. Repo docs have no labels; their `provenance.file` IS a real
+ * path, shown as-is.
+ */
+export interface DocLabel {
+  title: string;
+  url?: string;
+}
+
+/**
+ * The storage-agnostic data seam behind the Spec views. Repo and workspace
+ * differ ONLY here — same components, different backend (files vs Postgres).
+ */
+export interface SpecDataSource {
+  /**
+   * Whether an on-demand "Rescan" is possible. Repos re-read the working tree
+   * (cheap, via the block cache); workspace Knowledge has no docs on the server
+   * (re-process by re-uploading), so its Rescan button is hidden.
+   */
+  readonly supportsRescan: boolean;
+  /** Read the persisted scan-state (mount). */
+  hydrate(): Promise<SpecScanResponse | null>;
+  /** Refresh after a change: repo re-scans; workspace re-reads (the server already re-merged). */
+  refresh(): Promise<SpecScanResponse | null>;
+  postDecision(input: {
+    conflictId: string;
+    resolution: SpecResolution;
+    candidateFingerprint: string;
+  }): Promise<void>;
+  acceptAllDefaults(): Promise<void>;
+  revokeDecision(conflictId: string): Promise<void>;
+  markSuperseded(older: string, newer: string, note?: string): Promise<void>;
+  includeDoc(docPath: string): Promise<void>;
+  loadCanonicalTree(): Promise<CanonicalSpecTree>;
+  loadCanonicalSection(moduleName: string, topic: string): Promise<CanonicalSpecSection>;
+  /**
+   * Optional `docPath → {title, url}` map so source docs render by their human
+   * title (workspace/connector docs). Absent for repo sources (paths are real).
+   */
+  loadDocLabels?(): Promise<Record<string, DocLabel>>;
+}
+
+/**
+ * Repo-scoped source: the `/api/repos/:id/spec/*` behavior.
+ *
+ * `hosted` (enterprise) repos have no working tree on the server — the docs were
+ * cloned transiently during the gate scan and discarded. So there's no on-demand
+ * Scan (the server can't re-read docs), and a decision refresh re-reads the
+ * server-re-merged scan-state (`getSpecScanState`) instead of re-consolidating
+ * (`getSpecScan`, which would 400 "not a git repository").
+ */
+export function createRepoSpecDataSource(repoId: string, ref?: string, hosted = false): SpecDataSource {
+  return {
+    supportsRescan: !hosted,
+    hydrate: () => api.getSpecScanState(repoId),
+    refresh: () => (hosted ? api.getSpecScanState(repoId) : api.getSpecScan(repoId)),
+    postDecision: (input) => api.postSpecDecision(repoId, input).then(() => undefined),
+    acceptAllDefaults: () => api.postSpecDecisionsBatch(repoId, 'all-defaults').then(() => undefined),
+    revokeDecision: (conflictId) => api.deleteSpecDecision(repoId, conflictId).then(() => undefined),
+    markSuperseded: (older, newer, note) =>
+      api.postSpecManualChain(repoId, { older, newer, note }).then(() => undefined),
+    includeDoc: (docPath) => api.postSpecManualInclude(repoId, { path: docPath }).then(() => undefined),
+    loadCanonicalTree: () => api.getSpecCanonicalTree(repoId, ref),
+    loadCanonicalSection: (moduleName, topic) =>
+      api.getSpecCanonicalSection(repoId, moduleName, topic, ref),
+  };
+}
 
 export interface SpecContextValue {
   scan: SpecScanResponse | null;
@@ -32,13 +111,15 @@ export interface SpecContextValue {
   loading: boolean;
   error: string | null;
   busyConflictId: string | null;
+  /** Whether the Rescan affordance applies (repo) or is hidden (workspace). */
+  supportsRescan: boolean;
   /**
    * Bumped every time the scan completes. Components that fetch the
    * canonical tree treat this as a cache key in their useEffect deps
    * so they re-fetch automatically.
    */
   canonicalVersion: number;
-  /** Run a fresh scan. */
+  /** Run a fresh scan (repo) / re-read (workspace). */
   refresh: () => Promise<void>;
   /** Pick / customise a single conflict and refresh. */
   resolveConflict: (
@@ -54,15 +135,22 @@ export interface SpecContextValue {
   markSuperseded: (older: string, newer: string, note?: string) => Promise<void>;
   /** Force-include a doc the LLM relevance filter marked as skipped. */
   includeDoc: (docPath: string) => Promise<void>;
+  /** Fetch a canonical `(module, topic)` section from the active source. */
+  loadCanonicalSection: (moduleName: string, topic: string) => Promise<CanonicalSpecSection>;
+  /**
+   * Resolve a source `docPath` to its human title + link, or `undefined` when
+   * there's no mapping (repo docs — show the path as-is).
+   */
+  docLabel: (docPath: string) => DocLabel | undefined;
 }
 
 const SpecContext = createContext<SpecContextValue | null>(null);
 
 export function SpecProvider({
-  repoId,
+  source,
   children,
 }: {
-  repoId: string;
+  source: SpecDataSource;
   children: ReactNode;
 }) {
   const [scan, setScan] = useState<SpecScanResponse | null>(null);
@@ -71,12 +159,33 @@ export function SpecProvider({
   const [error, setError] = useState<string | null>(null);
   const [busyConflictId, setBusyConflictId] = useState<string | null>(null);
   const [canonicalVersion, setCanonicalVersion] = useState(0);
+  const [docLabels, setDocLabels] = useState<Record<string, DocLabel>>({});
+
+  // Source-doc title/link map (workspace only). Re-fetched when the claim set
+  // changes (a sync may have added/removed docs).
+  useEffect(() => {
+    if (!source.loadDocLabels) {
+      setDocLabels({});
+      return;
+    }
+    let cancelled = false;
+    source
+      .loadDocLabels()
+      .then((m) => !cancelled && setDocLabels(m))
+      .catch(() => !cancelled && setDocLabels({}));
+    return () => {
+      cancelled = true;
+    };
+  }, [source, canonicalVersion]);
+
+  const docLabel = useCallback((path: string) => docLabels[path], [docLabels]);
 
   useEffect(() => {
     let cancelled = false;
+    setHydrating(true);
     (async () => {
       try {
-        const persisted = await api.getSpecScanState(repoId);
+        const persisted = await source.hydrate();
         if (!cancelled && persisted) setScan(persisted);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -87,29 +196,29 @@ export function SpecProvider({
     return () => {
       cancelled = true;
     };
-  }, [repoId]);
+  }, [source]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.getSpecScan(repoId);
-      setScan(r);
-      // Scan rewrites claims.json — bump the version so any consumer
-      // of the canonical tree re-fetches.
+      const r = await source.refresh();
+      if (r) setScan(r);
+      // The claim set may have changed — bump the version so any consumer
+      // of the canonical tree/section re-fetches.
       setCanonicalVersion((v) => v + 1);
     } catch (e) {
       reportError('Spec scan failed', e, setError);
     } finally {
       setLoading(false);
     }
-  }, [repoId]);
+  }, [source]);
 
   const resolveConflict = useCallback(
     async (conflict: SpecConflict, resolution: SpecResolution) => {
       setBusyConflictId(conflict.id);
       try {
-        await api.postSpecDecision(repoId, {
+        await source.postDecision({
           conflictId: conflict.id,
           resolution,
           candidateFingerprint: conflict.candidateFingerprint,
@@ -121,26 +230,26 @@ export function SpecProvider({
         setBusyConflictId(null);
       }
     },
-    [repoId, refresh],
+    [source, refresh],
   );
 
   const acceptAllDefaults = useCallback(async () => {
     setLoading(true);
     try {
-      await api.postSpecDecisionsBatch(repoId, 'all-defaults');
+      await source.acceptAllDefaults();
       await refresh();
     } catch (e) {
       reportError('Accept all defaults failed', e, setError);
     } finally {
       setLoading(false);
     }
-  }, [repoId, refresh]);
+  }, [source, refresh]);
 
   const revokeDecision = useCallback(
     async (conflictId: string) => {
       setBusyConflictId(conflictId);
       try {
-        await api.deleteSpecDecision(repoId, conflictId);
+        await source.revokeDecision(conflictId);
         await refresh();
       } catch (e) {
         reportError('Revoking decision failed', e, setError);
@@ -148,14 +257,14 @@ export function SpecProvider({
         setBusyConflictId(null);
       }
     },
-    [repoId, refresh],
+    [source, refresh],
   );
 
   const markSuperseded = useCallback(
     async (older: string, newer: string, note?: string) => {
       setLoading(true);
       try {
-        await api.postSpecManualChain(repoId, { older, newer, note });
+        await source.markSuperseded(older, newer, note);
         await refresh();
       } catch (e) {
         reportError('Marking supersession failed', e, setError);
@@ -163,14 +272,14 @@ export function SpecProvider({
         setLoading(false);
       }
     },
-    [repoId, refresh],
+    [source, refresh],
   );
 
   const includeDoc = useCallback(
     async (docPath: string) => {
       setLoading(true);
       try {
-        await api.postSpecManualInclude(repoId, { path: docPath });
+        await source.includeDoc(docPath);
         await refresh();
       } catch (e) {
         reportError('Including doc failed', e, setError);
@@ -178,7 +287,12 @@ export function SpecProvider({
         setLoading(false);
       }
     },
-    [repoId, refresh],
+    [source, refresh],
+  );
+
+  const loadCanonicalSection = useCallback(
+    (moduleName: string, topic: string) => source.loadCanonicalSection(moduleName, topic),
+    [source],
   );
 
   const value = useMemo<SpecContextValue>(
@@ -188,6 +302,7 @@ export function SpecProvider({
       loading,
       error,
       busyConflictId,
+      supportsRescan: source.supportsRescan,
       canonicalVersion,
       refresh,
       resolveConflict,
@@ -195,6 +310,8 @@ export function SpecProvider({
       revokeDecision,
       markSuperseded,
       includeDoc,
+      loadCanonicalSection,
+      docLabel,
     }),
     [
       scan,
@@ -202,6 +319,7 @@ export function SpecProvider({
       loading,
       error,
       busyConflictId,
+      source,
       canonicalVersion,
       refresh,
       resolveConflict,
@@ -209,6 +327,8 @@ export function SpecProvider({
       revokeDecision,
       markSuperseded,
       includeDoc,
+      loadCanonicalSection,
+      docLabel,
     ],
   );
 

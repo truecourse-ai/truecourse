@@ -30,6 +30,8 @@ interface EeModuleContextValue {
   navItems: EeNavItem[];
   /** Enterprise home override for "/", if the module provides one. */
   homeComponent?: EeClientModule['homeComponent'];
+  /** Persistent console chrome (live-state provider + sidebar widgets). */
+  shell?: EeClientModule['shell'];
   loaded: boolean;
 }
 
@@ -64,6 +66,7 @@ export function EeModuleProvider({ children }: { children: ReactNode }) {
       routes: (mod?.routes ?? []).filter((r) => isOn(r.requiredCapability)),
       navItems: (mod?.navItems ?? []).filter((n) => isOn(n.requiredCapability)),
       homeComponent: mod?.homeComponent,
+      shell: mod?.shell,
       loaded: mod !== null,
     };
   }, [mod, capabilities]);

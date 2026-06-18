@@ -5,6 +5,7 @@ import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
+import { readLatest } from '@truecourse/core/lib/analysis-store';
 import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
@@ -15,8 +16,8 @@ import {
 
 const router: Router = Router();
 
-function requireRegistryEntry(slug: string) {
-  const entry = getProjectBySlug(slug);
+async function requireRegistryEntry(slug: string) {
+  const entry = await getProjectBySlug(slug);
   if (!entry) throw createAppError('Project not found', 404);
   return entry;
 }
@@ -37,7 +38,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       throw createAppError(`Path is not a directory: ${repoPath}`, 400);
     }
 
-    const entry = registerProject(repoPath);
+    const entry = await registerProject(repoPath);
     res.status(201).json({
       id: entry.slug,
       name: entry.name,
@@ -54,7 +55,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 // don't surface a fake date and the list endpoint never opens any DB.
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const entries = readRegistry();
+    const entries = await readRegistry();
     res.json(
       entries.map((e) => ({
         id: e.slug,
@@ -68,29 +69,43 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// GET /api/repos/:id - Project details. Uses the same registry-backed
-// `lastAnalyzed` as the list endpoint — both views stay consistent and
-// neither opens PGlite just to read a timestamp.
+// GET /api/repos/:id - Project details. Prefers the registry's cached
+// `lastAnalyzed`, falling back to the persisted analysis timestamp when the
+// registry doesn't track one (the hosted gh_repos-derived registry).
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     let branches: string[] = [];
-    let defaultBranch: string | undefined;
+    // The hosted registry tracks the default branch from gh_repos and has no local
+    // checkout, so only shell out to git when a registry didn't supply it (OSS
+    // local repos). Otherwise simple-git fails on the non-path repo identity and
+    // logs "git unavailable" on every load.
+    let defaultBranch = entry.defaultBranch;
     let isGitRepo = true;
-    try {
-      const git = await getGit(entry.path);
-      const branchSummary = await git.branch();
-      branches = branchSummary.all;
-      defaultBranch = branchSummary.current;
-    } catch (err) {
-      isGitRepo = false;
-      console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
+    if (!defaultBranch) {
+      try {
+        const git = await getGit(entry.path);
+        const branchSummary = await git.branch();
+        branches = branchSummary.all;
+        defaultBranch = branchSummary.current;
+      } catch (err) {
+        isGitRepo = false;
+        console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
+      }
     }
+    // `lastAnalyzed` drives the dashboard's `hasAnalysis` gate (the Violations /
+    // Analytics views render an empty "No analysis yet" state when it's null).
+    // OSS file registries cache it on the entry; the hosted registry (a derived
+    // view of gh_repos) doesn't, so fall back to the timestamp of the actual
+    // persisted analysis — the source of truth — otherwise an analyzed hosted
+    // repo looks "never analyzed" and hides its violations.
+    const lastAnalyzed =
+      entry.lastAnalyzed ?? (await readLatest(entry.path))?.analysis.createdAt ?? null;
     res.json({
       id: entry.slug,
       name: entry.name,
       path: entry.path,
-      lastAnalyzed: entry.lastAnalyzed ?? null,
+      lastAnalyzed,
       branches,
       defaultBranch,
       isGitRepo,
@@ -103,7 +118,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/repos/:id/branches - List git branches
 router.get('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     const git = await getGit(entry.path);
     const branchSummary = await git.branch();
     res.json({
@@ -121,7 +136,7 @@ router.get('/:id/branches', async (req: Request, res: Response, next: NextFuncti
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.id as string;
-    const entry = getProjectBySlug(slug);
+    const entry = await getProjectBySlug(slug);
     if (!entry) {
       throw createAppError('Project not found', 404);
     }
@@ -131,7 +146,7 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
       fs.rmSync(tcDir, { recursive: true, force: true });
     }
 
-    unregisterProject(slug);
+    await unregisterProject(slug);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -141,9 +156,9 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
 // PUT /api/repos/:id/categories - Update per-repo enabled categories
 router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     const { enabledCategories } = req.body as { enabledCategories: string[] | null };
-    const updated = updateProjectConfig(entry.path, { enabledCategories });
+    const updated = await updateProjectConfig(entry.path, { enabledCategories });
     res.json({ enabledCategories: updated.enabledCategories ?? null });
   } catch (error) {
     next(error);
@@ -153,9 +168,9 @@ router.put('/:id/categories', async (req: Request, res: Response, next: NextFunc
 // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
 router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
-    const updated = updateProjectConfig(entry.path, { enableLlmRules });
+    const updated = await updateProjectConfig(entry.path, { enableLlmRules });
     res.json({ enableLlmRules: updated.enableLlmRules ?? null });
   } catch (error) {
     next(error);
@@ -165,8 +180,8 @@ router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) =
 // GET /api/repos/:id/config - Read per-repo config.json
 router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
-    res.json(readProjectConfig(entry.path));
+    const entry = await requireRegistryEntry(req.params.id as string);
+    res.json(await readProjectConfig(entry.path));
   } catch (error) {
     next(error);
   }
@@ -175,7 +190,7 @@ router.get('/:id/config', async (req: Request, res: Response, next: NextFunction
 // GET /api/repos/:id/rules - Catalog with per-repo enabled overrides applied.
 router.get('/:id/rules', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     res.json(await getRules(entry.path));
   } catch (error) {
     next(error);
@@ -186,7 +201,7 @@ router.get('/:id/rules', async (req: Request, res: Response, next: NextFunction)
 // Rule keys contain slashes so the client must URL-encode the key segment.
 router.patch('/:id/rules/:ruleKey', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const entry = requireRegistryEntry(req.params.id as string);
+    const entry = await requireRegistryEntry(req.params.id as string);
     const ruleKey = req.params.ruleKey as string;
     const { enabled } = req.body as { enabled?: boolean };
     if (typeof enabled !== 'boolean') {
@@ -198,11 +213,11 @@ router.patch('/:id/rules/:ruleKey', async (req: Request, res: Response, next: Ne
       throw createAppError(`Unknown rule: ${ruleKey}`, 404);
     }
 
-    const current = readProjectConfig(entry.path);
+    const current = await readProjectConfig(entry.path);
     const set = new Set<string>(current.disabledRules ?? []);
     if (enabled) set.delete(ruleKey);
     else set.add(ruleKey);
-    updateProjectConfig(entry.path, { disabledRules: [...set].sort() });
+    await updateProjectConfig(entry.path, { disabledRules: [...set].sort() });
 
     res.json({ key: ruleKey, enabled });
   } catch (error) {

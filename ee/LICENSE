@@ -1,0 +1,17 @@
+TrueCourse Enterprise Edition License
+
+Copyright (c) 2026-present TrueCourse AI, Inc.
+
+All content in this directory (the "ee/" directory) and its
+subdirectories is licensed under this commercial license, NOT under the
+MIT License that governs the rest of the repository.
+
+You may read, copy, and modify the contents of this directory for the
+sole purposes of development and testing. Any use in production — or any
+use that provides the functionality herein to third parties, whether as
+a hosted service or otherwise — requires a valid TrueCourse Enterprise
+subscription and license key.
+
+This software is provided "as is", without warranty of any kind. See the
+root LICENSE file for the terms governing everything outside this
+directory.

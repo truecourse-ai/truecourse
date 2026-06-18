@@ -30,13 +30,19 @@ import {
   hasCanonicalSpec,
   readCanonicalSpec,
   type CanonicalModuleInfo,
+  type CanonicalReadResult,
 } from './claims-reader.js';
-import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
+import {
+  mergeRankedFragments,
+  type MergeDiagnostic,
+  type MergedArtifact,
+  type RankedFragment,
+} from './merger.js';
 import { propagateCrossCuttingTags } from './tag-propagator.js';
 import { normalizeMergedArtifacts } from './normalizer.js';
 import { repair, type RepairProgress } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
-import { writeContracts, type WriteResult } from './writer.js';
+import { composeContractFiles, writeContracts, type WriteResult } from './writer.js';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
 import type { Manifest, SpecSlice } from './types.js';
@@ -98,6 +104,8 @@ export interface GenerateResult {
   ran: boolean;
   /** Files written (or that would be written when dryRun). */
   write: WriteResult;
+  /** Blocking resolver-level corpus error — nothing was written; treat as a failure. */
+  resolverHard: boolean;
   /** Per-slice outcome, in the order slices were enumerated. */
   slices: SliceOutcome[];
   /** Validation issues. Empty when the gate passes. */
@@ -119,26 +127,179 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   ensureCacheDirs(repoRoot);
   readManifest(repoRoot); // touch — kept for future incremental invalidation
   const canonical = readCanonicalSpec(repoRoot);
-  const slices = canonical.slices;
-  opts.onSlicesReady?.(slices.length);
-  const models = opts.models ?? {};
-  const runner = opts.runner ?? spawnRunner({
+  // The slice cache is keyed by `repoRoot` (the OSS file cache lives under it; the
+  // EE KV cache ignores it). `dryRun` skips the LLM repair pass, as before.
+  const core = await extractArtifacts({
+    canonical,
+    cacheScope: repoRoot,
     transport: opts.transport,
+    runner: opts.runner,
+    models: opts.models,
+    disableRepair: dryRun || opts.disableRepair,
+    onSlicesReady: opts.onSlicesReady,
+    onSliceCacheHit: opts.onSliceCacheHit,
     onSliceStart: opts.onSliceStart,
     onSliceDone: opts.onSliceDone,
-    model: models.extract,
-    fallbackModel: models.fallback,
+    onRepairProgress: opts.onRepairProgress,
   });
 
-  // ---- Slice cache lookup --------------------------------------------------
+  if (!dryRun) {
+    writeManifest(repoRoot, core.manifest);
+    gcOrphanedSlices(repoRoot, core.manifest);
+  }
+
+  if (core.resolverHard) {
+    return {
+      ran: core.ran,
+      write: { written: [], proposed: [] },
+      resolverHard: true,
+      slices: core.outcomes,
+      validationIssues: core.validationIssues,
+      mergeDiagnostics: core.mergeDiagnostics,
+      manifest: core.manifest,
+    };
+  }
+
+  const write = writeContracts(repoRoot, core.artifactsToWrite, { dryRun, prune: !dryRun });
+  return {
+    ran: core.ran,
+    write,
+    resolverHard: false,
+    slices: core.outcomes,
+    validationIssues: core.validationIssues,
+    mergeDiagnostics: core.mergeDiagnostics,
+    manifest: core.manifest,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// In-memory generation (enterprise workspace) — no disk, no scratch tree.
+// ---------------------------------------------------------------------------
+
+export interface GenerateInMemoryOptions {
+  /**
+   * The canonical claims, injected (no disk read). Build it from a persisted
+   * `claims.json` document with `canonicalFromClaims(claimsFile)`.
+   */
+  canonical: CanonicalReadResult;
+  /**
+   * Scope string for the KV slice cache. Content-addressed in EE (so the scope
+   * is ignored and unchanged claims hit the cache across syncs → 0 LLM); any
+   * stable string is fine.
+   */
+  cacheScope: string;
+  transport?: LlmTransport;
+  runner?: SliceRunner;
+  models?: ExtractModels;
+  disableRepair?: boolean;
+  onSlicesReady?: (total: number) => void;
+  onSliceCacheHit?: (slice: SpecSlice) => void;
+  onSliceStart?: (slice: SpecSlice) => void;
+  onSliceDone?: (slice: SpecSlice, ok: boolean) => void;
+  onRepairProgress?: (e: RepairProgress) => void;
+}
+
+export interface GenerateInMemoryResult {
+  /** `{ posix relPath → .tc content }`. Empty on a resolver-hard corpus error. */
+  files: Record<string, string>;
+  ran: boolean;
+  /** A blocking resolver-level corpus error (e.g. duplicate identities) — `files`
+   *  is empty and the corpus did NOT generate. Callers must treat this as a failure,
+   *  not "no contracts" (see the hard `resolver` issues in `validationIssues`). */
+  resolverHard: boolean;
+  validationIssues: ValidationIssue[];
+  mergeDiagnostics: MergeDiagnostic[];
+}
+
+/**
+ * Generate the `.tc` corpus entirely in memory from injected canonical claims —
+ * the enterprise workspace path, which has no repo tree and must never touch
+ * local disk. Same pipeline as {@link generateContracts}; only the canonical
+ * input and the output sink differ (an in-memory map instead of a `.tc` tree).
+ */
+export async function generateContractsInMemory(
+  opts: GenerateInMemoryOptions,
+): Promise<GenerateInMemoryResult> {
+  const core = await extractArtifacts({
+    canonical: opts.canonical,
+    cacheScope: opts.cacheScope,
+    transport: opts.transport,
+    runner: opts.runner,
+    models: opts.models,
+    disableRepair: opts.disableRepair,
+    onSlicesReady: opts.onSlicesReady,
+    onSliceCacheHit: opts.onSliceCacheHit,
+    onSliceStart: opts.onSliceStart,
+    onSliceDone: opts.onSliceDone,
+    onRepairProgress: opts.onRepairProgress,
+  });
+  return {
+    files: core.resolverHard ? {} : composeContractFiles(core.artifactsToWrite),
+    ran: core.ran,
+    resolverHard: core.resolverHard,
+    validationIssues: core.validationIssues,
+    mergeDiagnostics: core.mergeDiagnostics,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared extraction core — slices → KV cache → run → merge → normalize →
+// repair → validate. Touches NO disk (the slice cache rides the `@truecourse/llm`
+// KV seam, keyed by `cacheScope`); both `generateContracts` (disk) and
+// `generateContractsInMemory` (EE) build on it.
+// ---------------------------------------------------------------------------
+
+interface ExtractCoreInput {
+  canonical: CanonicalReadResult;
+  cacheScope: string;
+  transport?: LlmTransport;
+  runner?: SliceRunner;
+  models?: ExtractModels;
+  disableRepair?: boolean;
+  onSlicesReady?: (total: number) => void;
+  onSliceCacheHit?: (slice: SpecSlice) => void;
+  onSliceStart?: (slice: SpecSlice) => void;
+  onSliceDone?: (slice: SpecSlice, ok: boolean) => void;
+  onRepairProgress?: (e: RepairProgress) => void;
+}
+
+interface ExtractCoreResult {
+  ran: boolean;
+  outcomes: SliceOutcome[];
+  /** Artifacts that survived validation (hard-bad ones dropped), ready to emit. */
+  artifactsToWrite: MergedArtifact[];
+  validationIssues: ValidationIssue[];
+  mergeDiagnostics: MergeDiagnostic[];
+  /** The slice manifest (disk callers persist it; the in-memory path ignores it). */
+  manifest: Manifest;
+  /** Duplicate-identity corpus corruption — callers must abort the write/emit. */
+  resolverHard: boolean;
+}
+
+async function extractArtifacts(input: ExtractCoreInput): Promise<ExtractCoreResult> {
+  const { canonical, cacheScope } = input;
+  const slices = canonical.slices;
+  input.onSlicesReady?.(slices.length);
+  const models = input.models ?? {};
+  const runner =
+    input.runner ??
+    spawnRunner({
+      transport: input.transport,
+      onSliceStart: input.onSliceStart,
+      onSliceDone: input.onSliceDone,
+      model: models.extract,
+      fallbackModel: models.fallback,
+    });
+
+  // ---- Slice cache lookup (KV seam) ---------------------------------------
   const outcomes: SliceOutcome[] = [];
   const misses: SpecSlice[] = [];
   let hitsSinceYield = 0;
   for (const slice of slices) {
-    const cached = readSliceEntry(repoRoot, slice.id);
+    const cached = await readSliceEntry(cacheScope, slice.id);
     if (cached) {
       outcomes.push({ slice, cache: 'hit' });
-      opts.onSliceCacheHit?.(slice);
+      input.onSliceCacheHit?.(slice);
       // Yield every 10 hits so the event loop can flush socket frames and
       // the progress counter visibly increments in the dashboard.
       if (++hitsSinceYield % 10 === 0) {
@@ -160,18 +321,18 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
       if (!r) continue;
       outcome.run = r;
       if (r.result) {
-        writeSliceEntry(repoRoot, outcome.slice, r.result);
+        await writeSliceEntry(cacheScope, outcome.slice, r.result);
       }
     }
   }
 
-  // ---- Collect fragments + write manifest ---------------------------------
+  // ---- Collect fragments + build manifest ---------------------------------
   const ranked: RankedFragment[] = [];
-  const manifest = buildManifest(repoRoot, canonical.modules, slices);
+  const manifest = buildManifest(cacheScope, canonical.modules, slices);
   for (const outcome of outcomes) {
     let result;
     if (outcome.cache === 'hit') {
-      result = readSliceEntry(repoRoot, outcome.slice.id)?.result;
+      result = (await readSliceEntry(cacheScope, outcome.slice.id))?.result;
     } else {
       result = outcome.run?.result;
     }
@@ -179,11 +340,6 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
     // No multi-spec layering anymore — canonical spec is the single
     // source of truth, every fragment shares the same rank.
     for (const fragment of result.fragments) ranked.push({ fragment, rank: 0 });
-  }
-
-  if (!dryRun) {
-    writeManifest(repoRoot, manifest);
-    gcOrphanedSlices(repoRoot, manifest);
   }
 
   // ---- Merge + cross-cutting tag propagation + normalize + repair + validate
@@ -214,12 +370,12 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   // missing cross-ref or violates a per-kind structural rule. Tests
   // opt out via `disableRepair: true` because repair spawns `claude`
   // directly and would bypass any injected stub runner.
-  if (slices.length > 0 && !dryRun && !opts.disableRepair) {
+  if (slices.length > 0 && !input.disableRepair) {
     const repaired = await repair(merged.artifacts, slices, {
-      transport: opts.transport,
+      transport: input.transport,
       model: models.repair,
       fallbackModel: models.fallback,
-      onProgress: opts.onRepairProgress,
+      onProgress: input.onRepairProgress,
     });
     merged.artifacts = repaired.artifacts;
     merged.diagnostics.push(
@@ -232,10 +388,10 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   }
   const validation = validateMerged(merged.artifacts);
 
-  // Drop artifacts with HARD validation issues and write the rest.
+  // Drop artifacts with HARD validation issues and keep the rest.
   // A single bad artifact (a tcSource the LLM mangled, an identifier
   // starting with a digit, etc.) should NOT block every other contract
-  // from reaching disk. The dropped artifacts' diagnostics surface to
+  // from being emitted. The dropped artifacts' diagnostics surface to
   // the user so the spec can be fixed.
   const badKeys = new Set(
     validation.issues
@@ -244,9 +400,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   );
   let artifactsToWrite = merged.artifacts;
   if (badKeys.size > 0) {
-    artifactsToWrite = merged.artifacts.filter(
-      (a) => !badKeys.has(`${a.kind}:${a.identity}`),
-    );
+    artifactsToWrite = merged.artifacts.filter((a) => !badKeys.has(`${a.kind}:${a.identity}`));
   }
 
   // Resolver-level hard errors (duplicate identities) are still
@@ -254,29 +408,15 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   const resolverHard = validation.issues.some(
     (i) => i.severity === 'hard' && i.artifactKey === 'resolver',
   );
-  if (resolverHard) {
-    return {
-      ran: misses.length > 0,
-      write: { written: [], proposed: [] },
-      slices: outcomes,
-      validationIssues: validation.issues,
-      mergeDiagnostics: merged.diagnostics,
-      manifest,
-    };
-  }
-
-  // ---- Write -------------------------------------------------------------
-  const write = writeContracts(repoRoot, artifactsToWrite, { dryRun, prune: !dryRun });
 
   return {
     ran: misses.length > 0,
-    write,
-    slices: outcomes,
-    // Surface the diagnostics even on a successful write — users still
-    // want to know which artifacts were skipped because of LLM errors.
+    outcomes,
+    artifactsToWrite,
     validationIssues: validation.issues,
     mergeDiagnostics: merged.diagnostics,
     manifest,
+    resolverHard,
   };
 }
 
@@ -346,6 +486,7 @@ export type {
 export {
   hasCanonicalSpec,
   readCanonicalSpec,
+  canonicalFromClaims,
   canonicalSpecPath,
   sliceHash,
   fileHash,
@@ -353,6 +494,7 @@ export {
 export type {
   CanonicalReadResult,
   CanonicalModuleInfo,
+  ClaimsFile,
 } from './claims-reader.js';
 export type {
   SpecSlice,

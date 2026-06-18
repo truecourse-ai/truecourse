@@ -98,6 +98,7 @@ export type {
 
 export {
   consolidate,
+  remerge,
   readDecisions,
   writeDecisions,
   decisionsPath,
@@ -107,6 +108,7 @@ export type {
   ConsolidateModels,
   ConsolidateOptions,
   ConsolidateResult,
+  RemergeResult,
 } from './orchestrator.js';
 
 export { detectVersionChains, materializeManualChains } from './version-chain.js';

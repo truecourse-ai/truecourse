@@ -19,15 +19,13 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
-import { cachePaths, ensureCacheDirs } from './cache.js';
 
-const CACHE_FILE = 'chain-detection.json';
+const CACHE_NAME = 'consolidator/chain-detection';
 
 export interface ChainDetectionInput {
   path: string;
@@ -118,7 +116,7 @@ export async function detectVersionChainsViaLlm(
   }));
 
   const cacheKey = computeCacheKey(inputs);
-  const cached = readChainDetectionCache(repoRoot, cacheKey);
+  const cached = await readChainDetectionCache(repoRoot, cacheKey);
   if (cached) return materializeChains(cached, docs);
 
   const runner =
@@ -133,7 +131,7 @@ export async function detectVersionChainsViaLlm(
     return [];
   }
 
-  writeChainDetectionCache(repoRoot, cacheKey, result);
+  await writeChainDetectionCache(repoRoot, cacheKey, result);
   return materializeChains(result, docs);
 }
 
@@ -216,17 +214,12 @@ function spawnChainRunner(opts: ChainRunnerOptions = {}): ChainRunner {
 // Cache
 // ---------------------------------------------------------------------------
 
-interface ChainDetectionCacheEntry {
-  cacheKey: string;
-  result: DetectedChainOutput;
-  cachedAt: string;
-}
-
 /**
  * Cache key includes a fingerprint of the system prompt. When the
  * prompt changes (e.g., we tighten the conservative rule), every
  * cache entry self-invalidates and we re-detect with the new
- * instructions.
+ * instructions. Stored via the pluggable KV seam (Postgres in EE, file in OSS)
+ * — the key IS the content hash, so the KV value is the result directly.
  */
 const PROMPT_FINGERPRINT = createHash('sha256')
   .update(CHAIN_DETECTION_SYSTEM_PROMPT)
@@ -243,31 +236,19 @@ function computeCacheKey(inputs: ChainDetectionInput[]): string {
     .digest('hex');
 }
 
-function readChainDetectionCache(repoRoot: string, cacheKey: string): DetectedChainOutput | null {
-  const file = path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as ChainDetectionCacheEntry;
-    if (raw.cacheKey !== cacheKey) return null;
-    return DetectedChainOutputSchema.parse(raw.result);
-  } catch {
-    return null;
-  }
+async function readChainDetectionCache(scope: string, cacheKey: string): Promise<DetectedChainOutput | null> {
+  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
+  if (raw === null) return null;
+  const parsed = DetectedChainOutputSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
-function writeChainDetectionCache(
-  repoRoot: string,
+async function writeChainDetectionCache(
+  scope: string,
   cacheKey: string,
   result: DetectedChainOutput,
-): void {
-  ensureCacheDirs(repoRoot);
-  const file = path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
-  const entry: ChainDetectionCacheEntry = {
-    cacheKey,
-    result,
-    cachedAt: new Date().toISOString(),
-  };
-  fs.writeFileSync(file, JSON.stringify(entry, null, 2) + '\n');
+): Promise<void> {
+  await setCacheEntry(scope, CACHE_NAME, cacheKey, result);
 }
 
 // ---------------------------------------------------------------------------

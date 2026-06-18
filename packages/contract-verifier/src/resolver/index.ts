@@ -150,49 +150,37 @@ export interface ResolveResult {
   unresolvedRefs: Array<{ ref: ArtifactRef; usedAt: SourceLocation }>;
 }
 
-export function resolve(files: FileNode[]): ResolveResult {
+export interface ResolveOptions {
+  /**
+   * A lower-precedence BASE layer (e.g. enterprise workspace contracts). Its
+   * artifacts are OVERRIDDEN by a same-`${type}:${identity}` artifact in `files`
+   * (the primary/repo layer) — the repo wins on a true key collision, silently —
+   * while a duplicate WITHIN either layer is still genuine corpus corruption.
+   * Cross-references resolve over the merged (base ∪ primary) set.
+   *
+   * Omit it and `resolve` behaves exactly as the single-layer resolver.
+   */
+  baseFiles?: FileNode[];
+}
+
+export function resolve(files: FileNode[], opts: ResolveOptions = {}): ResolveResult {
   const index = new Map<string, ResolvedArtifact>();
   const errors: ResolveError[] = [];
 
-  // Pass 1: lift each file's top-level statements into envelopes.
-  for (const file of files) {
-    for (const stmt of file.statements) {
-      const result = liftArtifact(file.filePath, stmt);
-      if ('error' in result) {
-        errors.push(result.error);
-        continue;
-      }
-      const key = refKey(result.artifact.ref);
-      const existing = index.get(key);
-      if (existing) {
-        errors.push({
-          filePath: file.filePath,
-          line: result.artifact.declarationLoc.lineStart,
-          col: 1,
-          message:
-            `duplicate artifact identity ${key} — also declared at ` +
-            `${existing.declarationLoc.filePath}:${existing.declarationLoc.lineStart}`,
-        });
-        continue;
-      }
-      index.set(key, result.artifact);
+  // Pass 1: lift the BASE layer first, then the PRIMARY layer over it. Keys
+  // claimed by the primary layer are tracked so a primary↔primary collision is
+  // a duplicate error, while primary-over-base is an intentional override.
+  const baseFiles = opts.baseFiles ?? [];
+  const primaryKeys = new Set<string>();
+  liftLayer(baseFiles, index, errors, false, primaryKeys);
+  liftLayer(files, index, errors, true, primaryKeys);
 
-      // EffectGroup contains multiple inner `effect <name> { … }` blocks.
-      // Operations reference those inner effects directly (`emits Effect:order.paid`),
-      // so the index needs entries for each. Each inner effect points at
-      // its own body statement so per-effect lifters can read it.
-      if (result.artifact.ref.type === 'EffectGroup') {
-        indexInnerEffects(file.filePath, stmt, result.artifact, index, errors);
-      }
-    }
-  }
-
-  // Pass 2: walk all statements in all files, collect every reference, and
+  // Pass 2: walk all statements across BOTH layers, collect every reference, and
   // check it resolves. Skip references whose type is `Unknown` — those are
   // forward refs to artifact types we don't yet implement
   // (`PerformanceSLA`, …) and the Phase-1 type catalog will close that.
   const unresolvedRefs: ResolveResult['unresolvedRefs'] = [];
-  for (const file of files) {
+  for (const file of [...baseFiles, ...files]) {
     visitAllStatements(file.statements, (stmt) => {
       for (const t of stmt.head) collectRefs(t, file.filePath, unresolvedRefs);
       // block already visited recursively below
@@ -210,6 +198,56 @@ export function resolve(files: FileNode[]): ResolveResult {
     return true;
   });
   return { index, errors, unresolvedRefs: filtered };
+}
+
+/**
+ * Lift one layer's files into the shared index. `isPrimary` marks the higher-
+ * precedence layer (repo): a primary artifact whose key already exists FROM THE
+ * BASE layer replaces it (repo wins on a `${kind}:${identity}` collision); a
+ * collision within the same layer is reported as duplicate-identity corruption.
+ */
+function liftLayer(
+  files: FileNode[],
+  index: Map<string, ResolvedArtifact>,
+  errors: ResolveError[],
+  isPrimary: boolean,
+  primaryKeys: Set<string>,
+): void {
+  for (const file of files) {
+    for (const stmt of file.statements) {
+      const result = liftArtifact(file.filePath, stmt);
+      if ('error' in result) {
+        errors.push(result.error);
+        continue;
+      }
+      const key = refKey(result.artifact.ref);
+      const existing = index.get(key);
+      if (existing && !(isPrimary && !primaryKeys.has(key))) {
+        // Either a same-layer duplicate, or a second primary artifact for a key
+        // the primary layer already claimed — both are genuine corruption.
+        errors.push({
+          filePath: file.filePath,
+          line: result.artifact.declarationLoc.lineStart,
+          col: 1,
+          message:
+            `duplicate artifact identity ${key} — also declared at ` +
+            `${existing.declarationLoc.filePath}:${existing.declarationLoc.lineStart}`,
+        });
+        continue;
+      }
+      // New key, or a primary artifact overriding a base one (repo wins).
+      index.set(key, result.artifact);
+      if (isPrimary) primaryKeys.add(key);
+
+      // EffectGroup contains multiple inner `effect <name> { … }` blocks.
+      // Operations reference those inner effects directly (`emits Effect:order.paid`),
+      // so the index needs entries for each. Each inner effect points at
+      // its own body statement so per-effect lifters can read it.
+      if (result.artifact.ref.type === 'EffectGroup') {
+        indexInnerEffects(file.filePath, stmt, result.artifact, index, errors);
+      }
+    }
+  }
 }
 
 /**

@@ -59,7 +59,7 @@ export interface QueryRuleCompareInput {
 }
 
 export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] {
-  const { ref, contract, codeQueries } = input;
+  const { ref, origin, contract, codeQueries } = input;
   const drifts: ContractDrift[] = [];
 
   // Aggregate every code-side predicate across all matching queries
@@ -73,7 +73,7 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
     const matches = lookupByKindAndColumn(codePredicates, required.kind, columnOf(required));
 
     if (matches.length === 0) {
-      drifts.push(missingPredicateDrift(ref, required, codeQueries));
+      drifts.push(missingPredicateDrift(ref, origin, required, codeQueries));
       continue;
     }
     // Code has at least one predicate of the same kind+column. Check
@@ -81,7 +81,7 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
     if (predicateHasValue(required)) {
       const valueMatch = matches.find((m) => valuesEqual(required, m.predicate));
       if (!valueMatch) {
-        drifts.push(valueMismatchDrift(ref, required, matches));
+        drifts.push(valueMismatchDrift(ref, origin, required, matches));
       }
     }
   }
@@ -96,7 +96,7 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
       ? matches.filter((m) => valuesEqual(forbidden, m.predicate))
       : matches;
     for (const o of offending) {
-      drifts.push(forbiddenPresentDrift(ref, forbidden, o));
+      drifts.push(forbiddenPresentDrift(ref, origin, forbidden, o));
     }
   }
 
@@ -106,7 +106,7 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
     for (const q of codeQueries) {
       if (!q.dateRangeBinding) continue;
       if (q.dateRangeBinding.column.column !== specCol.column) {
-        drifts.push(dateBindingDrift(ref, contract.dateRangeBinding.column, q));
+        drifts.push(dateBindingDrift(ref, origin, contract.dateRangeBinding.column, q));
       }
     }
   }
@@ -133,6 +133,7 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
         lineEnd: q.source.lineEnd,
         message: `Query contains a clause the ${q.adapter} adapter could not normalize (${u.reason}); predicate set may be incomplete.`,
         codeSide: u.raw,
+        specOrigin: origin ?? undefined,
       });
     }
   }
@@ -277,6 +278,7 @@ function literalKey(v: LiteralValue): string {
 
 function missingPredicateDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   spec: Predicate,
   codeQueries: ExtractedQuery[],
 ): ContractDrift {
@@ -296,11 +298,13 @@ function missingPredicateDrift(
     message: `Spec requires predicate \`${describePredicate(spec)}\` on this query, but no code query against this entity emits it.`,
     specSide: describePredicate(spec),
     codeSide: codeQueries.length === 0 ? '<no queries found>' : '<predicate absent from all matching queries>',
+    specOrigin: origin ?? undefined,
   };
 }
 
 function valueMismatchDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   spec: Predicate,
   codeMatches: IndexedPredicate[],
 ): ContractDrift {
@@ -318,11 +322,13 @@ function valueMismatchDrift(
     message: `Predicate on column \`${columnName(spec)}\` exists in code but with a different value than the spec requires.`,
     specSide: describePredicate(spec),
     codeSide: describePredicate(cite.predicate),
+    specOrigin: origin ?? undefined,
   };
 }
 
 function forbiddenPresentDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   spec: Predicate,
   offending: IndexedPredicate,
 ): ContractDrift {
@@ -338,11 +344,13 @@ function forbiddenPresentDrift(
     message: `Spec forbids predicate \`${describePredicate(spec)}\` on this query, but code emits it.`,
     specSide: `forbidden: ${describePredicate(spec)}`,
     codeSide: describePredicate(offending.predicate),
+    specOrigin: origin ?? undefined,
   };
 }
 
 function dateBindingDrift(
   ref: ArtifactRef,
+  origin: SpecOrigin | null,
   specCol: QualifiedColumn,
   q: ExtractedQuery,
 ): ContractDrift {
@@ -358,6 +366,7 @@ function dateBindingDrift(
     message: `Spec binds the date range to \`${qualifiedColumnText(specCol)}\` but code binds it to \`${qualifiedColumnText(q.dateRangeBinding!.column)}\`.`,
     specSide: qualifiedColumnText(specCol),
     codeSide: qualifiedColumnText(q.dateRangeBinding!.column),
+    specOrigin: origin ?? undefined,
   };
 }
 

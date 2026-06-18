@@ -108,8 +108,10 @@ function refOf(t: Extract<HeadToken, { kind: 'reference' }>): ArtifactRef {
  *   string / integer / number / boolean / object      — bare primitive
  *   Entity:Foo / Enum:Bar                             — reference type
  *
- * Returns null when the leading token doesn't match any primitive or
- * reference. The caller treats null as "couldn't lift, skip the field".
+ * A reference, a format-sugar/primitive ident, OR any other plain ident (a
+ * descriptive scalar like `timestamp`) all lift to a TypeRef. Only a non-ident
+ * leading token returns null — the caller treats null as "couldn't lift, skip
+ * the field".
  */
 function parseTypeRef(tokens: HeadToken[]): TypeRef | null {
   if (tokens.length === 0) return null;
@@ -133,7 +135,14 @@ function parseTypeRef(tokens: HeadToken[]): TypeRef | null {
     }
     return { kind: 'primitive', primitive: v };
   }
-  return null;
+
+  // Any other ident is a descriptive scalar the prose uses but our closed sets
+  // don't name (`timestamp`, `date`, `datetime`, `decimal`, `json`, …). Capture it
+  // as a format on a string primitive — the same shape as the iso-8601 sugar above —
+  // so the field survives with its declared type name. Returning null here would
+  // skip the whole field, silently shrinking the entity and cascading into
+  // unresolved references (the grammar already admits a plain type ident).
+  return { kind: 'format', primitive: 'string', format: v };
 }
 
 /**

@@ -21,13 +21,13 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
       const analysisId = req.query.analysisId as string | undefined;
 
-      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      const resolved = await resolveGraphForAnalysisId(repo.path, analysisId);
       if (!resolved) return res.json({ flows: [], severities: {} });
 
-      const violations = readActiveViolationsForAnalysisId(repo.path, analysisId) ?? [];
+      const violations = (await readActiveViolationsForAnalysisId(repo.path, analysisId)) ?? [];
       res.json({
         flows: resolved.graph.flows,
         severities: computeFlowSeverities(resolved.graph, violations),
@@ -45,10 +45,10 @@ router.get(
     try {
       const id = req.params.id as string;
       const flowId = req.params.flowId as string;
-      const repo = resolveProjectForRequest(id);
+      const repo = await resolveProjectForRequest(id);
       const analysisId = req.query.analysisId as string | undefined;
 
-      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      const resolved = await resolveGraphForAnalysisId(repo.path, analysisId);
       if (!resolved) throw createAppError('Flow not found', 404);
 
       const flow = resolved.graph.flows.find((f) => f.id === flowId);
@@ -69,13 +69,13 @@ router.post(
     try {
       const id = req.params.id as string;
       const flowId = req.params.flowId as string;
-      const repo = resolveProjectForRequest(id);
-      const existing = getFlowFromLatest(repo.path, flowId);
+      const repo = await resolveProjectForRequest(id);
+      const existing = await getFlowFromLatest(repo.path, flowId);
       if (!existing) throw createAppError('Flow not found', 404);
 
       await enrichFlowWithLLM(repo.path, flowId);
 
-      const enriched = getFlowFromLatest(repo.path, flowId);
+      const enriched = await getFlowFromLatest(repo.path, flowId);
       res.json(enriched);
     } catch (err) {
       next(err);

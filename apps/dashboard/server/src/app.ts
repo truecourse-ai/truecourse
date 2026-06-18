@@ -34,7 +34,18 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   // session cookie flows on cross-origin dev requests (client :3000 →
   // server :3001). Same-origin in production, where this is a no-op.
   app.use(cors({ origin: true, credentials: true }));
-  app.use(express.json());
+  // Capture the raw body alongside JSON parsing so webhook receivers (e.g. the
+  // enterprise GitHub App) can verify HMAC signatures over the exact bytes.
+  app.use(
+    express.json({
+      // GitHub webhook payloads (e.g. large pull_request events) can exceed the
+      // 100kb default; raise the cap so signed deliveries still verify.
+      limit: '5mb',
+      verify: (req, _res, buf) => {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+      },
+    }),
+  );
 
   // --- Enterprise (no-ops in community) -----------------------------
   // Public enterprise endpoints (login / callback / logout / me) must

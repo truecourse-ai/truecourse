@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "vite --port 3000",
-    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist"
   },

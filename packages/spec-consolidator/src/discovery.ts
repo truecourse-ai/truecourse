@@ -25,14 +25,21 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadTcIgnore } from '@truecourse/shared';
+import { loadTcIgnore, DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS } from '@truecourse/shared';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
   /** Repo-relative path with forward slashes — stable across platforms. */
   path: string;
-  /** Absolute path, for downstream readers. */
+  /** Absolute path, for downstream readers. `''` when the doc isn't on disk. */
   absPath: string;
+  /**
+   * In-memory body. When set, downstream stages read this instead of `absPath`
+   * — used by sources with no real file on disk (e.g. an EE connector holding a
+   * fetched page in RAM). File-based discovery leaves it undefined and the
+   * extractor reads `absPath` lazily, exactly as before.
+   */
+  content?: string;
   kind: DocKind;
   /** First N lines of the file, for kind-tie-breaking heuristics + UI. */
   preview: string;
@@ -47,18 +54,6 @@ export interface DocCandidate {
   /** Bytes — let UIs decide whether to fetch full content lazily. */
   size: number;
 }
-
-const SKIP_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  '.next',
-  '.turbo',
-  '.truecourse', // consolidator's own outputs — never re-discover
-  '.cache',
-  'coverage',
-]);
 
 // Synthetic markdown child used to ask `.truecourseignore` whether a
 // `SKIP_DIRS` directory has been explicitly re-included. An allow-list

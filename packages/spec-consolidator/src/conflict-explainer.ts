@@ -14,14 +14,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
-import { cachePaths, ensureCacheDirs } from './cache.js';
 
-const CACHE_FILE = 'conflict-explanations.json';
+const CACHE_NAME = 'consolidator/conflict-explanations';
 
 export interface ConflictExplainerInput {
   conflict: Conflict;
@@ -118,7 +116,7 @@ async function explainOne(
   runner: ConflictExplainerRunner,
 ): Promise<void> {
   const cacheKey = computeCacheKey(conflict);
-  const cached = readCache(repoRoot, cacheKey);
+  const cached = await readCache(repoRoot, cacheKey);
   if (cached !== null) {
     conflict.explanation = cached;
     return;
@@ -128,7 +126,7 @@ async function explainOne(
     const trimmed = sanitize(text);
     if (trimmed.length > 0) {
       conflict.explanation = trimmed;
-      writeCache(repoRoot, cacheKey, trimmed);
+      await writeCache(repoRoot, cacheKey, trimmed);
     }
   } catch {
     // Silent — explanation is best-effort enrichment.
@@ -325,22 +323,6 @@ function spawnConflictExplainerRunner(
 // Cache
 // ---------------------------------------------------------------------------
 
-interface ExplanationCacheEntry {
-  cacheKey: string;
-  explanation: string;
-  cachedAt: string;
-}
-
-const ExplanationCacheFileSchema = z.object({
-  entries: z.array(
-    z.object({
-      cacheKey: z.string(),
-      explanation: z.string(),
-      cachedAt: z.string(),
-    }),
-  ),
-});
-
 const CONTENT_PROMPT_FINGERPRINT = createHash('sha256')
   .update(CONFLICT_EXPLAINER_SYSTEM_PROMPT)
   .digest('hex')
@@ -359,38 +341,14 @@ function computeCacheKey(conflict: Conflict): string {
   return createHash('sha256').update(`${fp}::${conflict.id}::${ids}`).digest('hex');
 }
 
-function cacheFile(repoRoot: string): string {
-  return path.join(cachePaths(repoRoot).cacheDir, CACHE_FILE);
+// Cached via the pluggable KV seam (Postgres in EE, file in OSS). The cache key
+// folds in the prompt fingerprint + the conflict's candidate ids, so the stored
+// value is just the explanation string.
+async function readCache(scope: string, cacheKey: string): Promise<string | null> {
+  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
+  return typeof raw === 'string' ? raw : null;
 }
 
-function readCache(repoRoot: string, cacheKey: string): string | null {
-  const file = cacheFile(repoRoot);
-  if (!fs.existsSync(file)) return null;
-  try {
-    const raw = ExplanationCacheFileSchema.parse(
-      JSON.parse(fs.readFileSync(file, 'utf-8')),
-    );
-    const entry = raw.entries.find((e) => e.cacheKey === cacheKey);
-    return entry ? entry.explanation : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCache(repoRoot: string, cacheKey: string, explanation: string): void {
-  ensureCacheDirs(repoRoot);
-  const file = cacheFile(repoRoot);
-  let entries: ExplanationCacheEntry[] = [];
-  if (fs.existsSync(file)) {
-    try {
-      entries = ExplanationCacheFileSchema.parse(
-        JSON.parse(fs.readFileSync(file, 'utf-8')),
-      ).entries;
-    } catch {
-      entries = [];
-    }
-  }
-  const filtered = entries.filter((e) => e.cacheKey !== cacheKey);
-  filtered.push({ cacheKey, explanation, cachedAt: new Date().toISOString() });
-  fs.writeFileSync(file, JSON.stringify({ entries: filtered }, null, 2) + '\n');
+async function writeCache(scope: string, cacheKey: string, explanation: string): Promise<void> {
+  await setCacheEntry(scope, CACHE_NAME, cacheKey, explanation);
 }

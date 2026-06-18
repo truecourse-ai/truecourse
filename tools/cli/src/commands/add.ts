@@ -18,8 +18,8 @@ export async function runAdd(options: AddOptions = {}): Promise<void> {
   p.log.step(repoPath);
 
   ensureRepoTruecourseDir(repoPath);
-  const existing = getProjectByPath(repoPath);
-  const entry = registerProject(repoPath);
+  const existing = await getProjectByPath(repoPath);
+  const entry = await registerProject(repoPath);
 
   if (existing) {
     p.log.info(`Repository "${entry.name}" is already registered.`);

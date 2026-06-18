@@ -31,17 +31,9 @@
 
 import type { MergedArtifact } from './merger.js';
 
-/**
- * Compare an artifact kind against a target kind name, tolerant of the
- * two casings in play: fragments carry the PascalCase `ArtifactKind`
- * (`QueryRule`, `Entity`), while the `.tc` grammar uses kebab-case
- * (`query-rule`, `entity`). Match on the separator-insensitive lowercase
- * form so the normalizer is correct regardless of which the caller used.
- */
-function isKind(kind: string, target: string): boolean {
-  const norm = (s: string): string => s.toLowerCase().replace(/[-_\s]/g, '');
-  return norm(kind) === norm(target);
-}
+// `MergedArtifact.kind` is the resolver's canonical PascalCase `ArtifactKind`
+// (`Entity`, `QueryRule`, `ForbiddenArtifact`) — the same value the LLM emits,
+// the merger carries through, and the writer routes on. Compare it directly.
 
 // ---------------------------------------------------------------------------
 // 1. Entity-ref canonicalization
@@ -55,7 +47,7 @@ function isKind(kind: string, target: string): boolean {
 function buildEntityIndex(artifacts: MergedArtifact[]): Map<string, string> {
   const index = new Map<string, string>();
   for (const a of artifacts) {
-    if (!isKind(a.kind, 'Entity')) continue;
+    if (a.kind !== 'Entity') continue;
     const id = a.identity;
     const norm = normalizeEntityName(id);
     // Map both singular and plural normalized forms back to the canonical
@@ -93,7 +85,7 @@ function pluralize(singular: string): string {
  * already match a declared identity pass through untouched.
  */
 export function normalizeEntityRefs(artifacts: MergedArtifact[]): { rewritten: number } {
-  const declared = new Set(artifacts.filter((a) => isKind(a.kind, 'Entity')).map((a) => a.identity));
+  const declared = new Set(artifacts.filter((a) => a.kind === 'Entity').map((a) => a.identity));
   const index = buildEntityIndex(artifacts);
   let rewritten = 0;
   for (const a of artifacts) {
@@ -181,7 +173,7 @@ function formatValue(rhs: string): string | null {
 export function normalizeRawPredicates(artifacts: MergedArtifact[]): { rewritten: number } {
   let rewritten = 0;
   for (const a of artifacts) {
-    if (!isKind(a.kind, 'QueryRule')) continue;
+    if (a.kind !== 'QueryRule') continue;
     const src = a.winning.tcSource;
     const next = src.replace(/^(\s*)raw\s+"([^"]+)"\s*$/gm, (full, indent: string, expr: string) => {
       const lifted = liftRawExpression(expr);
@@ -252,10 +244,10 @@ export function dedupArtifacts(artifacts: MergedArtifact[]): {
   const groups = new Map<string, MergedArtifact[]>();
   for (const a of artifacts) {
     let key: string | null = null;
-    if (isKind(a.kind, 'QueryRule')) {
+    if (a.kind === 'QueryRule') {
       const k = structuralKey(a.winning.tcSource);
       if (k) key = `QueryRule|${k}`;
-    } else if (isKind(a.kind, 'ForbiddenArtifact')) {
+    } else if (a.kind === 'ForbiddenArtifact') {
       const k = forbiddenStructuralKey(a.winning.tcSource);
       if (k) key = `ForbiddenArtifact|${k}`;
     }
@@ -306,8 +298,8 @@ export function assignDeterministicIdentities(artifacts: MergedArtifact[]): { re
   let renamed = 0;
   for (const a of artifacts) {
     let next: string | null = null;
-    if (isKind(a.kind, 'ForbiddenArtifact')) next = forbiddenIdentity(a.winning.tcSource);
-    else if (isKind(a.kind, 'QueryRule')) next = queryRuleIdentity(a.winning.tcSource);
+    if (a.kind === 'ForbiddenArtifact') next = forbiddenIdentity(a.winning.tcSource);
+    else if (a.kind === 'QueryRule') next = queryRuleIdentity(a.winning.tcSource);
     if (!next || next === a.identity) continue;
     a.winning.tcSource = renameHeader(a.winning.tcSource, a.identity, next);
     a.winning.identity = next;
@@ -343,6 +335,39 @@ function queryRuleIdentity(src: string): string | null {
   if (sig.length === 0) return null;
   sig.sort();
   return `${slug(entity)}.${sig.join('.')}`;
+}
+
+/**
+ * Collapse artifacts that share a `(kind, identity)` AFTER deterministic
+ * identity assignment. `assignDeterministicIdentities` maps each identity to a
+ * content-derived slug (e.g. `file-glob.<pattern-slug>`); two structurally
+ * DISTINCT artifacts whose slugs coincide therefore arrive here with the SAME
+ * identity — the LLM is fond of emitting one out-of-scope route as both
+ * `orders-export` (glob `**​/orders/**export*`) and `orders-id-export` (glob
+ * `**​/orders/**​/*export*`), which both slug to `orders-export`. `dedupArtifacts`
+ * ran earlier on the finer `(category, exact-pattern)` key and couldn't see the
+ * collision, so without this pass the duplicate reaches the resolver, which
+ * rejects the whole corpus (`duplicate artifact identity`). Keeps the first
+ * artifact per key (deterministic merge order); the dropped ones are redundant
+ * by the verifier's own identity definition.
+ */
+function collapseIdentityCollisions(artifacts: MergedArtifact[]): {
+  artifacts: MergedArtifact[];
+  removed: number;
+} {
+  const seen = new Set<string>();
+  const out: MergedArtifact[] = [];
+  let removed = 0;
+  for (const a of artifacts) {
+    const key = `${a.kind}:${a.identity}`;
+    if (seen.has(key)) {
+      removed++;
+      continue;
+    }
+    seen.add(key);
+    out.push(a);
+  }
+  return { artifacts: out, removed };
 }
 
 /** Rewrite the `<keyword> <oldId> {` header to use the new identity. */
@@ -384,8 +409,20 @@ export function normalizeMergedArtifacts(artifacts: MergedArtifact[]): {
   // Identity is derived from structured predicates, so this runs after
   // raw→structured lifting.
   const { renamed: identitiesAssigned } = assignDeterministicIdentities(deduped);
+  // assignDeterministicIdentities can map structurally-distinct artifacts onto
+  // the SAME identity (different glob spellings / free-form names that slug
+  // alike). dedupArtifacts ran on the finer structural key and missed those, so
+  // collapse the post-assignment collisions here — otherwise the resolver
+  // rejects the corpus on a duplicate identity.
+  const { artifacts: collapsed, removed: collisionsCollapsed } =
+    collapseIdentityCollisions(deduped);
   return {
-    artifacts: deduped,
-    stats: { entityRefsRewritten, rawPredicatesLifted, artifactsDeduplicated, identitiesAssigned },
+    artifacts: collapsed,
+    stats: {
+      entityRefsRewritten,
+      rawPredicatesLifted,
+      artifactsDeduplicated: artifactsDeduplicated + collisionsCollapsed,
+      identitiesAssigned,
+    },
   };
 }

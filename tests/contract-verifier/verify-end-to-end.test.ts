@@ -34,8 +34,14 @@ function parseIlDriftMarkers(rootDir: string): string[] {
   return out;
 }
 
-function driftKey(d: { artifactRef: { type: string; identity: string }; obligationKey: string }): string {
-  return `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`;
+function driftKey(d: {
+  artifactRef: { type: string; identity: string };
+  obligationKey: string;
+  enclosingSymbol?: string;
+  occurrenceIndex?: number;
+}): string {
+  const base = `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`;
+  return d.enclosingSymbol ? `${base} @ ${d.enclosingSymbol}#${d.occurrenceIndex ?? 0}` : base;
 }
 
 describe('Contract verifier — end-to-end on fixture (Operation slice only)', () => {

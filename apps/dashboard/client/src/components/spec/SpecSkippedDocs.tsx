@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { useSpec } from './SpecContext';
 
 export function SpecSkippedDocs() {
-  const { scan, includeDoc, loading } = useSpec();
+  const { scan, includeDoc, loading, docLabel } = useSpec();
   const [expanded, setExpanded] = useState(false);
   const skipped = scan?.skippedDocs ?? [];
   if (skipped.length === 0) return null;
@@ -37,15 +37,35 @@ export function SpecSkippedDocs() {
       </button>
       {expanded && (
         <ul className="max-h-[40vh] overflow-y-auto border-t border-border/40">
-          {skipped.map((entry) => (
+          {skipped.map((entry) => {
+            const label = docLabel(entry.path);
+            return (
             <li
               key={entry.path}
               className="flex items-start gap-2 border-b border-border/30 px-3 py-1.5 last:border-0"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-xs text-foreground" title={entry.path}>
-                  {entry.path}
-                </div>
+                {label ? (
+                  label.url ? (
+                    <a
+                      href={label.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={label.title}
+                      className="block truncate text-xs font-medium text-foreground hover:text-primary hover:underline"
+                    >
+                      {label.title}
+                    </a>
+                  ) : (
+                    <div className="truncate text-xs font-medium text-foreground" title={label.title}>
+                      {label.title}
+                    </div>
+                  )
+                ) : (
+                  <div className="truncate font-mono text-xs text-foreground" title={entry.path}>
+                    {entry.path}
+                  </div>
+                )}
                 <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                   {entry.reason || '(no reason provided)'}
                 </div>
@@ -62,7 +82,8 @@ export function SpecSkippedDocs() {
                 Include
               </Button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

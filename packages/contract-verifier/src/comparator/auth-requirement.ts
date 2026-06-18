@@ -16,12 +16,15 @@ import type {
   AuthRequirementContract,
   SelectorExpr,
   OperationContract,
+  SpecOrigin,
 } from '../types/index.js';
 import type { ResolvedArtifact } from '../resolver/index.js';
 import type { ExtractedOperation } from '../extractor/index.js';
 
 export interface AuthRequirementCompareInput {
   authRef: ArtifactRef;
+  /** Spec-side origin of the auth-requirement artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: AuthRequirementContract;
   specOps: Map<string, ResolvedArtifact>;
   recognizedOps: ExtractedOperation[];
@@ -60,6 +63,7 @@ export function compareAuthRequirement(input: AuthRequirementCompareInput): Cont
         `scheme ${input.contract.scheme}` +
         (input.contract.requiredRole ? ` (role ${input.contract.requiredRole})` : ''),
       codeSide: `route declared in ${op.filePath} without auth middleware on the mount chain`,
+      specOrigin: input.origin ?? undefined,
     });
   }
 

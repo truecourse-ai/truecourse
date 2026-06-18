@@ -28,6 +28,14 @@ export interface SpecOrigin {
   section: string;
   /** Optional 1-indexed line range inside `source`. `[-1, -1]` for unknown. */
   lines: [number, number];
+  /**
+   * External deep-link to the real source, attached at read time when `source`
+   * is a synced workspace-KB doc (e.g. its Confluence page URL). Absent for repo
+   * docs, which the dashboard deep-links to GitHub from `source` + the commit.
+   */
+  sourceUrl?: string | null;
+  /** Friendly display label for the source (e.g. the workspace doc title). */
+  sourceLabel?: string | null;
 }
 
 /** Severity tier 1 default; per-instance overrides bump up. */
@@ -696,4 +704,23 @@ export interface ContractDrift {
   /** Optional: spec-side / code-side structural snippets for review UIs. */
   specSide?: string;
   codeSide?: string;
+  /** For per-query drifts attributed to a SPECIFIC code query: the nearest
+   *  enclosing function-like symbol at the query site (`ordersRepo.list`),
+   *  qualified by its container. A STABLE site anchor (not line-based) so
+   *  two violations of the same obligation at two different code sites stay
+   *  distinct drifts. Undefined for ABSENCE drifts (missing-required) and
+   *  any drift not tied to a concrete query site — those stay
+   *  obligation-level. */
+  enclosingSymbol?: string;
+  /** 0-based index disambiguating multiple drifts that share the same
+   *  `(enclosingSymbol, artifact, obligationKey)` tuple, assigned by
+   *  `assignOccurrenceIndices` over the complete drift set. Only set when
+   *  `enclosingSymbol` is set. */
+  occurrenceIndex?: number;
+  /** The spec-side origin of the requirement this drift came from: the
+   *  resolved artifact's `origin` (source doc + section + line range).
+   *  Threaded from the artifact at drift-emit time so review UIs can show
+   *  WHERE the obligation was authored. Undefined for old snapshots and any
+   *  artifact whose origin is null. */
+  specOrigin?: SpecOrigin;
 }

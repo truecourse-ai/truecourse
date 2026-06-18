@@ -46,7 +46,7 @@ export async function runSpecDocsInclude(
 ): Promise<void> {
   const root = repoRoot(opts);
   if (!docPath) return fail('Missing doc path');
-  addManualInclude(root, docPath);
+  await addManualInclude(root, docPath);
   await scanInProcess(root, {});
   emitOk(
     `Force-include ${docPath}`,
@@ -60,7 +60,7 @@ export async function runSpecDocsUninclude(
 ): Promise<void> {
   const root = repoRoot(opts);
   if (!docPath) return fail('Missing doc path');
-  removeManualInclude(root, docPath);
+  await removeManualInclude(root, docPath);
   await scanInProcess(root, {});
   emitOk(
     `Removed force-include for ${docPath}`,

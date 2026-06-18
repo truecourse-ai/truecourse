@@ -52,7 +52,7 @@ export function getServerUrl(): string {
  * Resolve the current directory's registered project from the local registry.
  * Registers the repo on first use. Exits if no `.truecourse/` is found.
  */
-export function requireRegisteredRepo(): { id: string; name: string; path: string } {
+export async function requireRegisteredRepo(): Promise<{ id: string; name: string; path: string }> {
   const repoDir = resolveRepoDir(process.cwd());
   if (!repoDir) {
     p.log.error(
@@ -60,7 +60,7 @@ export function requireRegisteredRepo(): { id: string; name: string; path: strin
     );
     process.exit(1);
   }
-  const entry = getProjectByPath(repoDir) ?? registerProject(repoDir);
+  const entry = (await getProjectByPath(repoDir)) ?? (await registerProject(repoDir));
   return { id: entry.slug, name: entry.name, path: entry.path };
 }
 

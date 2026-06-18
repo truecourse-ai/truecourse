@@ -38,7 +38,7 @@ export async function runDriftsList(opts: RunDriftsListOptions = {}): Promise<vo
   const root = repoRoot(opts);
   p.intro("Drifts");
 
-  const latest = readVerifyLatest(root);
+  const latest = await readVerifyLatest(root);
   if (!latest) {
     p.log.info("No verify results yet. Run `truecourse verify` first.");
     p.outro("Nothing to show.");

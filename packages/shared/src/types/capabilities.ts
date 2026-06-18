@@ -21,5 +21,12 @@ export interface CapabilitiesResponse {
   capabilities: Capability[]
 }
 
-/** OSS ships with no capabilities turned on. */
-export const COMMUNITY_CAPABILITIES: readonly Capability[] = []
+/**
+ * Capabilities the OSS (community) build advertises. `local-filesystem` is an
+ * INVERSE gate: OSS runs against the user's repo on local disk, so it carries
+ * this capability and the hosted (EE) edition — which has no per-user filesystem
+ * — does NOT. Features that need local files (the file explorer, sequence-flow
+ * viewer, database schema viewer) require it, so they appear in OSS and vanish
+ * in EE without any per-edition branching.
+ */
+export const COMMUNITY_CAPABILITIES: readonly Capability[] = ['local-filesystem']

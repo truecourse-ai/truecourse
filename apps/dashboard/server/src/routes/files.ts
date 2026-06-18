@@ -24,7 +24,7 @@ router.get('/:id/files', async (req: Request, res: Response, next: NextFunction)
   try {
     const id = req.params.id as string;
     const ref = req.query.ref as string | undefined;
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
     const git = await getGit(repo.path);
     const result = await git.raw(['ls-files']);
@@ -55,7 +55,7 @@ router.get('/:id/file-content', async (req: Request, res: Response, next: NextFu
     const ref = req.query.ref as string | undefined;
     if (!filePath) throw createAppError('Missing "path" query parameter', 400);
 
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
     const resolved = path.resolve(repo.path, filePath);
     if (
       !resolved.startsWith(path.resolve(repo.path) + path.sep) &&
@@ -106,7 +106,7 @@ router.get('/:id/file-content', async (req: Request, res: Response, next: NextFu
 router.get('/:id/changes', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
     const git = await getGit(repo.path);
     const statusResult = await git.status();
@@ -120,7 +120,7 @@ router.get('/:id/changes', async (req: Request, res: Response, next: NextFunctio
     }
     for (const f of statusResult.deleted) changedFiles.push({ path: f, status: 'deleted' });
 
-    const latest = readLatest(repo.path);
+    const latest = await readLatest(repo.path);
     const affectedServices: string[] = [];
     if (latest) {
       for (const svc of latest.graph.services) {

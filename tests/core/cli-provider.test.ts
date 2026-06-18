@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   ServiceViolationOutputSchema,
   CodeViolationOutputSchema,
@@ -6,122 +6,11 @@ import {
   FlowEnrichmentOutputSchema,
 } from '../../packages/core/src/services/llm/schemas.js';
 
-// ---------------------------------------------------------------------------
-// Test the BaseCLIProvider internals via ClaudeCodeProvider
-// ---------------------------------------------------------------------------
+// The CLI-spawn + envelope-parse internals moved to the shared transport
+// (`@truecourse/llm`); see tests/llm/cli-transport.test.ts for the parse
+// behaviour. What remains here is the provider's own surface.
 
 describe('ClaudeCodeProvider', () => {
-  describe('getCleanEnv', () => {
-    it('strips CLAUDE_CODE_* and CLAUDE_INTERNAL_* env vars', async () => {
-      // Dynamically import to avoid circular issues
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      // Set some env vars
-      process.env.CLAUDE_CODE_TEST = 'should-be-stripped';
-      process.env.CLAUDE_INTERNAL_TEST = 'should-be-stripped';
-      process.env.NORMAL_VAR = 'should-remain';
-
-      // Access via protected method — use any cast for testing
-      const cleanEnv = (provider as any).getCleanEnv();
-
-      expect(cleanEnv.CLAUDE_CODE_TEST).toBeUndefined();
-      expect(cleanEnv.CLAUDE_INTERNAL_TEST).toBeUndefined();
-      expect(cleanEnv.NORMAL_VAR).toBe('should-remain');
-
-      // Cleanup
-      delete process.env.CLAUDE_CODE_TEST;
-      delete process.env.CLAUDE_INTERNAL_TEST;
-      delete process.env.NORMAL_VAR;
-    });
-  });
-
-  describe('parseAndValidate', () => {
-    it('parses structured_output from JSON envelope', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      const structuredOutput = {
-        violations: [{
-          type: 'service',
-          title: 'Test violation',
-          content: 'Test content',
-          severity: 'medium',
-          targetServiceId: 'svc-0',
-          fixPrompt: null,
-          ruleKey: 'test-rule',
-        }],
-        serviceDescriptions: [],
-      };
-
-      // Simulate --output-format json with --json-schema
-      const raw = JSON.stringify({
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        result: '',
-        structured_output: structuredOutput,
-      });
-      const result = (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema);
-
-      expect(result.data.violations).toHaveLength(1);
-      expect(result.data.violations[0].title).toBe('Test violation');
-      expect(result.data.violations[0].severity).toBe('medium');
-    });
-
-    it('falls back to result field as JSON', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      const validOutput = {
-        violations: [],
-        serviceDescriptions: [],
-      };
-
-      const raw = JSON.stringify({
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        result: JSON.stringify(validOutput),
-      });
-      const result = (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema);
-
-      expect(result.data.violations).toHaveLength(0);
-    });
-
-    it('throws on is_error response', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      const raw = JSON.stringify({
-        type: 'result',
-        is_error: true,
-        result: 'Not logged in',
-      });
-      expect(() => (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema)).toThrow('Not logged in');
-    });
-
-    it('throws on invalid JSON', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      expect(() => (provider as any).parseAndValidate('not json', ServiceViolationOutputSchema)).toThrow();
-    });
-
-    it('throws when no structured_output present', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      const raw = JSON.stringify({
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        result: 'Some text response',
-      });
-      expect(() => (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema)).toThrow();
-    });
-  });
-
   describe('toJsonSchema', () => {
     it('converts Zod schemas to valid JSON Schema strings', async () => {
       const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
@@ -136,31 +25,7 @@ describe('ClaudeCodeProvider', () => {
       expect(parsed.properties).toHaveProperty('serviceDescriptions');
     });
   });
-
-  describe('ClaudeCodeProvider configuration', () => {
-    it('has correct binary name', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      expect(provider.binaryName).toBe('claude');
-    });
-
-    it('has correct base args', async () => {
-      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
-      const provider = new ClaudeCodeProvider();
-
-      const args = provider.baseArgs;
-      expect(args).toContain('--print');
-      expect(args).toContain('--dangerously-skip-permissions');
-      expect(args).toContain('--no-session-persistence');
-      expect(args).toContain('json'); // output format
-    });
-  });
 });
-
-// ---------------------------------------------------------------------------
-// Zod schema conversion sanity checks
-// ---------------------------------------------------------------------------
 
 describe('Schema conversion via toJsonSchema', () => {
   it('all output schemas convert to valid JSON Schema via provider', async () => {
@@ -183,18 +48,11 @@ describe('Schema conversion via toJsonSchema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Factory function test
-// ---------------------------------------------------------------------------
-
 describe('createLLMProvider factory', () => {
-  it('returns ClaudeCodeProvider from the factory', async () => {
-    // We can't easily change config at runtime since it's read-only,
-    // so we test the provider class directly
+  it('returns a provider implementing the LLMProvider interface', async () => {
     const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
     const provider = new ClaudeCodeProvider();
 
-    // Verify it implements the expected interface methods
     expect(typeof provider.generateServiceViolations).toBe('function');
     expect(typeof provider.generateDatabaseViolations).toBe('function');
     expect(typeof provider.generateModuleViolations).toBe('function');

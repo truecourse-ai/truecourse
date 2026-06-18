@@ -23,10 +23,10 @@ function drift(obligationKey: string, severity: Severity = 'high'): ContractDrif
   };
 }
 
-function seedLatest(repo: string, drifts: ContractDrift[]): void {
+async function seedLatest(repo: string, drifts: ContractDrift[]): Promise<void> {
   const bySeverity: Record<Severity, number> = { info: 0, low: 0, medium: 0, high: 0, critical: 0 };
   for (const d of drifts) bySeverity[d.severity]++;
-  writeVerifyLatest(repo, {
+  await writeVerifyLatest(repo, {
     head: 'run.json',
     run: {
       id: 'run',
@@ -71,13 +71,13 @@ describe('runDriftsList', () => {
   });
 
   it('reports "no drift detected" on an empty baseline', async () => {
-    seedLatest(repo, []);
+    await seedLatest(repo, []);
     await runDriftsList({ cwd: repo });
     expect(out).toContain('No drift detected');
   });
 
   it('caps at the default limit (20) and prints a "more" hint with the next offset', async () => {
-    seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
+    await seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
     await runDriftsList({ cwd: repo, limit: 20, offset: 0 });
     expect(out).toContain('key0');
     expect(out).toContain('key19');
@@ -88,7 +88,7 @@ describe('runDriftsList', () => {
   });
 
   it('--all shows every drift and no "more" hint', async () => {
-    seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
+    await seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
     await runDriftsList({ cwd: repo, limit: Infinity, offset: 0 });
     expect(out).toContain('key24');
     expect(out).not.toContain('drifts list --offset');
@@ -96,7 +96,7 @@ describe('runDriftsList', () => {
   });
 
   it('--offset pages into the tail', async () => {
-    seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
+    await seedLatest(repo, Array.from({ length: 25 }, (_, i) => drift(`key${i}`)));
     await runDriftsList({ cwd: repo, limit: 20, offset: 20 });
     expect(out).toContain('key20');
     expect(out).toContain('key24');
@@ -105,7 +105,7 @@ describe('runDriftsList', () => {
   });
 
   it('--severity filters to the requested tiers', async () => {
-    seedLatest(repo, [
+    await seedLatest(repo, [
       drift('crit-one', 'critical'),
       drift('high-one', 'high'),
       drift('crit-two', 'critical'),
@@ -118,7 +118,7 @@ describe('runDriftsList', () => {
   });
 
   it('reports the severity filter when nothing matches', async () => {
-    seedLatest(repo, [drift('high-one', 'high')]);
+    await seedLatest(repo, [drift('high-one', 'high')]);
     await runDriftsList({ cwd: repo, severity: ['critical'] });
     expect(out).toContain('No drifts match severity filter: critical');
   });

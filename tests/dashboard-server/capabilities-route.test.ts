@@ -32,6 +32,17 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
+// EE now requires DATABASE_URL and always installs the Postgres stores. Stub the
+// DB layer so register() succeeds without a real Postgres — this test only
+// exercises /api/capabilities, never the stores themselves.
+vi.mock('@truecourse/ee-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@truecourse/ee-db')>();
+  return {
+    ...actual,
+    createEeDb: async () => ({ db: {}, lockPool: {}, close: async () => {} }),
+  };
+});
+
 import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   loadEnterprise,
@@ -43,18 +54,22 @@ const EDITION_ENV = [
   'WORKOS_API_KEY',
   'WORKOS_CLIENT_ID',
   'WORKOS_COOKIE_PASSWORD',
+  'DATABASE_URL',
+  'TRUECOURSE_SECRET_KEY',
 ] as const;
 let saved: Record<string, string | undefined>;
 
-// Fake WorkOS config so the ee plugin's register() succeeds (no network:
-// the WorkOS client is constructed lazily and only hits the API on a
-// request). Without these, register throws and the loader correctly
-// falls back to community.
+// Fake WorkOS config + a DATABASE_URL + a TRUECOURSE_SECRET_KEY (the DB layer is
+// mocked above) so the ee plugin's register() succeeds. Without these, register
+// throws and — for the WorkOS/DB/secret *config* errors — the loader now FAILS
+// HARD (no community fallback).
 function setEnterpriseEnv() {
   process.env.TRUECOURSE_EDITION = 'enterprise';
   process.env.WORKOS_API_KEY = 'sk_test_dummy';
   process.env.WORKOS_CLIENT_ID = 'client_test_dummy';
   process.env.WORKOS_COOKIE_PASSWORD = 'x'.repeat(32);
+  process.env.DATABASE_URL = 'postgres://stub';
+  process.env.TRUECOURSE_SECRET_KEY = 'x'.repeat(32);
 }
 
 beforeEach(() => {
@@ -90,5 +105,22 @@ describe('GET /api/capabilities', () => {
     // No session cookie — capabilities must still answer.
     const res = await request(app).get('/api/capabilities');
     expect(res.status).toBe(200);
+  });
+
+  it('FAILS HARD when enterprise is configured but DATABASE_URL is missing (no community fallback)', async () => {
+    setEnterpriseEnv();
+    delete process.env.DATABASE_URL; // misconfigured enterprise install
+    // The loader must surface the misconfiguration, not silently degrade to a
+    // broken half-community state (the bug: capabilities went empty, sidebar
+    // vanished, but the app kept "running").
+    await expect(loadEnterprise()).rejects.toThrow(/DATABASE_URL/);
+  });
+
+  it('FAILS HARD when enterprise is configured but TRUECOURSE_SECRET_KEY is missing (no CLI/.env LLM fallback)', async () => {
+    setEnterpriseEnv();
+    delete process.env.TRUECOURSE_SECRET_KEY; // no master secret for the provider store
+    // Same rule as DATABASE_URL: a missing secret must fail boot, never silently
+    // fall back to a CLI/.env LLM provider.
+    await expect(loadEnterprise()).rejects.toThrow(/TRUECOURSE_SECRET_KEY/);
   });
 });

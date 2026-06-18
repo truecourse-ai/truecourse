@@ -29,6 +29,9 @@ import {
 } from '@truecourse/spec-consolidator';
 import type { SpecSlice } from './types.js';
 
+/** The parsed `claims.json` document (Module 1's canonical output). */
+export type ClaimsFile = NonNullable<ReturnType<typeof readClaims>>;
+
 export interface CanonicalModuleInfo {
   /** Module slug. `_shared` for cross-cutting. */
   name: string;
@@ -66,7 +69,17 @@ export function hasCanonicalSpec(repoRoot: string): boolean {
 export function readCanonicalSpec(repoRoot: string): CanonicalReadResult {
   const file = readClaims(repoRoot);
   if (!file) return { slices: [], modules: [] };
+  return canonicalFromClaims(file);
+}
 
+/**
+ * Pure variant of {@link readCanonicalSpec}: produce slices + module info from an
+ * IN-MEMORY `claims.json` document (no disk read). The enterprise workspace path
+ * holds its canonical claims in Postgres, not on disk, so it injects them here.
+ * Identical slice ids (content-addressed) ⇒ identical extraction-cache keys ⇒
+ * unchanged claims cost 0 LLM regardless of where the claims came from.
+ */
+export function canonicalFromClaims(file: ClaimsFile): CanonicalReadResult {
   const inScopeManifestByName = new Map<string, ClaimsFileModule>();
   const modules: CanonicalModuleInfo[] = [];
   for (const manifest of file.modules) {

@@ -20,7 +20,7 @@
  */
 
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
-import { parserOhm, resolver, conformance } from '@truecourse/contract-verifier';
+import { parserOhm, resolver, conformance, type ArtifactKind, type ArtifactRef } from '@truecourse/contract-verifier';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
@@ -83,30 +83,27 @@ export interface RepairOutcome {
 // (the downstream `validateMerged` reports those as hard issues).
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonical artifact key. Identical to `resolver.refKey` — the extractor and
+ * the resolver key every artifact the same way: the PascalCase `ArtifactKind`
+ * joined to its identity (`Entity:Order`, `QueryRule:order.eq-tenantid`). There
+ * is one identity per artifact across the whole pipeline; no second casing.
+ */
 function key(kind: string, identity: string): string {
   return `${kind}:${identity}`;
 }
 
-/** PascalCase `ArtifactKind` (resolver/`ref.type`) → the lowercase extractor
- *  kind keyword (`MergedArtifact.kind`, the `.tc` declaration keyword). */
-const KIND_TO_KEYWORD: Record<string, string> = {
-  Operation: 'operation',
-  Entity: 'entity',
-  Enum: 'enum',
-  StateMachine: 'state-machine',
-  AuthRequirement: 'auth-requirement',
-  AuthorizationRule: 'authorization-rule',
-  ErrorEnvelope: 'error-envelope',
-  PaginationContract: 'pagination-contract',
-  IdempotencyContract: 'idempotency-contract',
-  EffectGroup: 'effect-group',
-  Effect: 'effect-group',
-  Formula: 'formula',
-  QueryRule: 'query-rule',
-  ForbiddenArtifact: 'forbidden-artifact',
-  NamedConstant: 'constant',
-  ArchitectureDecision: 'architecture-decision',
-};
+/**
+ * Collapse a reference's kind onto the producible top-level kind. `Effect` is
+ * not a top-level artifact — effects are declared *inside* an `effect-group`,
+ * so a dangling `Effect:x` reference is satisfied by producing an
+ * `EffectGroup`. Every other kind is its own top-level artifact and passes
+ * through unchanged. This is the one genuine kind alias the verifier draws;
+ * it is semantic, not a casing fixup.
+ */
+function topLevelKind(kind: string): string {
+  return kind === 'Effect' ? 'EffectGroup' : kind;
+}
 
 function resolveCorpus(artifacts: MergedArtifact[]): resolver.ResolveResult {
   const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
@@ -121,25 +118,87 @@ function resolveCorpus(artifacts: MergedArtifact[]): resolver.ResolveResult {
   return resolver.resolve(fileNodes);
 }
 
+/**
+ * Artifacts whose `tcSource` doesn't parse under the strict grammar. They never
+ * reach the resolved index, so `validateMerged` would drop them downstream and
+ * every reference to them would re-open — a single unrecognized token cascading
+ * into many unresolved refs. Pass 0 re-prompts each with the parser's own error
+ * so the model corrects the SYNTAX (`path { … }` → `path-param`, an invented
+ * field clause, …). Grammar-grounded: the parser is the oracle, so it's
+ * construct-agnostic — no per-clause grammar patches.
+ */
+function detectUnparseable(
+  artifacts: MergedArtifact[],
+): Array<{ artifact: MergedArtifact; error: string }> {
+  const out: Array<{ artifact: MergedArtifact; error: string }> = [];
+  for (const a of artifacts) {
+    try {
+      const node = parserOhm.parseTcFile(`<llm:${key(a.kind, a.identity)}>`, a.winning.tcSource);
+      if (node.statements.length === 0) {
+        out.push({ artifact: a, error: 'tcSource produced zero statements' });
+      }
+    } catch (e) {
+      out.push({ artifact: a, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return out;
+}
+
+/** True when `tcSource` parses cleanly — used to accept a repair fix only if it
+ *  actually resolves the parse error (never replace bad syntax with more bad
+ *  syntax). */
+function parses(kindAndIdentity: string, tcSource: string): boolean {
+  try {
+    const node = parserOhm.parseTcFile(`<llm:${kindAndIdentity}>`, tcSource);
+    return node.statements.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-reference / missing-artifact detection (driven by the resolver)
 // ---------------------------------------------------------------------------
 
-function detectMissingArtifacts(resolution: resolver.ResolveResult): RepairIssue[] {
+/**
+ * Fold an `Entity` field-path reference (`Entity:Order.subtotalCents`, as a
+ * formula's input / a field-exposure / a validation-rule target produces) onto
+ * the parent entity. A field path is NOT an artifact — the resolver resolves it
+ * by finding the parent entity, so the only producible target is `Entity:Order`,
+ * re-prompted once rather than once per referenced field (each of which would
+ * otherwise waste a re-prompt and add a junk UnenforceableObligation).
+ *
+ * Collapse only when the stripped parent ALSO appears as an unresolved
+ * reference. That co-occurrence is what distinguishes a field path (`Order` is
+ * referenced bare elsewhere too) from a namespaced entity identity
+ * (`Entity:core.customers`, where `Entity:core` is never referenced and must
+ * not be stripped). It mirrors the resolver's own parent-lookup model.
+ */
+function foldFieldPath(ref: ArtifactRef, referenced: Set<string>): string {
+  if (ref.type !== 'Entity') return ref.identity;
+  const lastDot = ref.identity.lastIndexOf('.');
+  if (lastDot < 0) return ref.identity;
+  const parent = ref.identity.slice(0, lastDot);
+  return referenced.has(`Entity:${parent}`) ? parent : ref.identity;
+}
+
+export function detectMissingArtifacts(resolution: resolver.ResolveResult): RepairIssue[] {
+  const referenced = new Set(resolution.unresolvedRefs.map(({ ref }) => resolver.refKey(ref)));
   const seen = new Set<string>();
   const out: RepairIssue[] = [];
   for (const { ref } of resolution.unresolvedRefs) {
     // Forward refs to artifact kinds the verifier doesn't implement
     // (`ref.type === 'Unknown'`, e.g. `PerformanceSLA`) aren't repairable.
-    const keyword = KIND_TO_KEYWORD[ref.type];
-    if (!keyword) continue;
-    const targetKey = key(keyword, ref.identity);
+    if (ref.type === 'Unknown') continue;
+    const kind = topLevelKind(ref.type);
+    const identity = foldFieldPath(ref, referenced);
+    const targetKey = key(kind, identity);
     if (seen.has(targetKey)) continue;
     seen.add(targetKey);
     out.push({
       artifactKey: targetKey,
       kind: 'missing',
-      detail: `Referenced as ${ref.type}:${ref.identity} but no matching ${keyword} artifact was generated.`,
+      detail: `Referenced as ${resolver.refKey(ref)} but no matching ${targetKey} artifact was generated.`,
     });
   }
   return out;
@@ -150,20 +209,14 @@ function detectMissingArtifacts(resolution: resolver.ResolveResult): RepairIssue
 // ---------------------------------------------------------------------------
 
 function detectIncompleteArtifacts(resolution: resolver.ResolveResult): RepairIssue[] {
-  const findings = conformance.lintConformance(resolution.index.values());
-  // The conformance linter keys findings by the resolver's PascalCase
-  // `Type:identity`. Re-key to the lowercase extractor kind so the rest of
-  // repair (slice lookup, fragment matching) keeps operating on
-  // `MergedArtifact.kind`.
-  return findings.map((f) => {
-    const [pascalKind, ...idParts] = f.artifactKey.split(':');
-    const keyword = KIND_TO_KEYWORD[pascalKind] ?? pascalKind;
-    return {
-      artifactKey: key(keyword, idParts.join(':')),
-      kind: 'incomplete' as const,
-      detail: f.detail,
-    };
-  });
+  // The conformance linter already keys findings by the resolver's canonical
+  // PascalCase `Type:identity` — the same key the rest of repair (slice lookup,
+  // fragment matching) uses against `MergedArtifact.kind`. No re-keying.
+  return conformance.lintConformance(resolution.index.values()).map((f) => ({
+    artifactKey: f.artifactKey,
+    kind: 'incomplete' as const,
+    detail: f.detail,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -202,30 +255,56 @@ function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSl
   return best?.slice ?? null;
 }
 
-const SLICE_HINT_KEYWORDS: Record<string, string[]> = {
-  'auth-requirement': ['authentication', 'authorization', 'bearer', 'jwt', 'token', 'admin', 'role'],
-  'authorization-rule': ['ownership', 'authorization', 'role-based', 'admin only', 'bypass'],
-  'entity': ['fields', 'entity', 'data shape', 'record'],
-  'enum': ['enum', 'values', 'one of'],
-  'effect-group': ['events', 'effects', 'emitted', 'event bus'],
-  'formula': ['formula', 'computed', 'calculated', 'derived'],
-  'error-envelope': ['error envelope', 'error shape', 'error response'],
-  'state-machine': ['state', 'transition', 'lifecycle'],
-  'idempotency-contract': ['idempotency', 'idempotency-key', 'idempotent'],
-  'pagination-contract': ['pagination', 'cursor', 'limit'],
+const SLICE_HINT_KEYWORDS: Partial<Record<ArtifactKind, string[]>> = {
+  AuthRequirement: ['authentication', 'authorization', 'bearer', 'jwt', 'token', 'admin', 'role'],
+  AuthorizationRule: ['ownership', 'authorization', 'role-based', 'admin only', 'bypass'],
+  Entity: ['fields', 'entity', 'data shape', 'record'],
+  Enum: ['enum', 'values', 'one of'],
+  EffectGroup: ['events', 'effects', 'emitted', 'event bus'],
+  Formula: ['formula', 'computed', 'calculated', 'derived'],
+  ErrorEnvelope: ['error envelope', 'error shape', 'error response'],
+  StateMachine: ['state', 'transition', 'lifecycle'],
+  IdempotencyContract: ['idempotency', 'idempotency-key', 'idempotent'],
+  PaginationContract: ['pagination', 'cursor', 'limit'],
 };
 
-function findSliceForMissing(missingKey: string, slices: SpecSlice[]): SpecSlice | null {
+export function findSliceForMissing(missingKey: string, slices: SpecSlice[]): SpecSlice | null {
   const [k, id] = missingKey.split(':');
-  const keywords = [...(SLICE_HINT_KEYWORDS[k] ?? []), id.toLowerCase()];
+  const keywords = [...(SLICE_HINT_KEYWORDS[k as ArtifactKind] ?? []), id.toLowerCase()];
   let best: { slice: SpecSlice; score: number } | null = null;
   for (const slice of slices) {
     const lowered = slice.text.toLowerCase();
     let score = 0;
+    // The slice that DEFINES this artifact (its claim subject heading is the
+    // artifact's identity) wins decisively over one that merely mentions the
+    // word — generic keyword density must not let a dense Customer slice
+    // outscore the slice that actually declares Order. Keyword scoring stays
+    // as the fallback when no slice declares the subject (legacy md slices).
+    if (sliceDeclaresSubject(slice, id)) score += 100;
     for (const kw of keywords) if (lowered.includes(kw)) score++;
     if (!best || score > best.score) best = { slice, score };
   }
   return best && best.score > 0 ? best.slice : null;
+}
+
+/**
+ * True when the slice carries a `## <Subject>` heading whose subject declares
+ * `identity` — claims slices render each claim as `## <subject>` (optionally
+ * `## <subject> / <aspect>`, e.g. `## Order / fields`), so the slice whose
+ * subject is the artifact's identity is the one that defines it. Matches the
+ * full identity or its last dotted segment (a namespaced entity such as
+ * `core.customers` appears under its bare name in the subject heading).
+ */
+function sliceDeclaresSubject(slice: SpecSlice, identity: string): boolean {
+  const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]/g, '');
+  const wanted = new Set([norm(identity), norm(identity.split('.').pop() ?? identity)]);
+  for (const line of slice.text.split('\n')) {
+    const m = /^#{1,6}\s+(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    const subject = m[1].split('/')[0].trim();
+    if (wanted.has(norm(subject))) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -326,10 +405,62 @@ export async function repair(
   const allIssues: RepairIssue[] = [];
 
   // Progress accounting — `total` counts re-prompt attempts (issues with a
-  // resolved slice). Pass 2 extends it once its issue set is known, so the
-  // live counter climbs continuously across both passes.
+  // resolved slice). Each pass extends it once its issue set is known, so the
+  // live counter climbs continuously across all passes.
   let done = 0;
   let total = 0;
+
+  // Pass 0 — malformed artifacts. An artifact whose tcSource doesn't parse never
+  // reaches the index: every reference to it would otherwise surface as a missing
+  // artifact, and the artifact itself would be dropped by `validateMerged`. We
+  // re-prompt with the parser's exact error so the model fixes the SYNTAX, and
+  // accept the result only if it now parses (never swap one broken body for
+  // another). Runs first so the corpus is clean before missing/incomplete passes.
+  const malformed = detectUnparseable(artifacts);
+  const malformedTasks = malformed.map((m) => ({ ...m, slice: sliceForArtifact(m.artifact, slices) }));
+  total += malformedTasks.filter((t) => t.slice).length;
+  for (const { artifact, error, slice } of malformedTasks) {
+    const k = key(artifact.kind, artifact.identity);
+    if (!slice) {
+      log.push(`repair: malformed ${k} — could not locate source slice, skipping.`);
+      continue;
+    }
+    done += 1;
+    const message = `malformed ${k} — re-prompting to fix syntax`;
+    log.push(`repair: ${message}.`);
+    opts.onProgress?.({ done, total, message });
+    const fragments = await runFixOne(
+      {
+        previousArtifact: artifact,
+        slice,
+        issues: [
+          `The previous TC SOURCE failed to parse under the grammar. Fix ONLY the syntax so it ` +
+            `parses cleanly — preserve every field, clause, and value it expressed. Parser error:\n${error}`,
+        ],
+      },
+      transport,
+      timeoutMs,
+      opts.model,
+      opts.fallbackModel,
+    );
+    if (!fragments || fragments.length === 0) {
+      log.push(`repair: re-prompt failed for ${k}.`);
+      continue;
+    }
+    // Accept only a fragment that IS this artifact AND now parses; otherwise keep
+    // the original (it'll be dropped downstream exactly as before — no regression).
+    const fixed = fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k);
+    if (!fixed) {
+      log.push(`repair: fix for ${k} returned a different artifact, keeping original.`);
+      continue;
+    }
+    if (!parses(k, fixed.tcSource)) {
+      log.push(`repair: fix for ${k} still doesn't parse, keeping original.`);
+      continue;
+    }
+    artifact.winning = { ...fixed, kind: topLevelKind(fixed.kind) };
+    log.push(`repair: ${k} re-parsed cleanly after fix.`);
+  }
 
   // Pass 1 — missing artifacts. Resolve the merged corpus once; the
   // resolver enumerates every unresolved cross-reference.
@@ -371,20 +502,40 @@ export async function repair(
     const targetKey = issue.artifactKey;
     let addedForMissing = false;
     for (const fragment of fragments) {
-      const fragmentKey = key(fragment.kind, fragment.identity);
+      // The model returns the PascalCase `ArtifactKind` it saw in the re-prompt
+      // ("Referenced as Entity:Order") — the same casing the merged corpus keys
+      // on. `topLevelKind` only collapses the `Effect`→`EffectGroup` alias; no
+      // casing conversion happens, so the produced artifact keys identically to
+      // the missing target and isn't silently discarded.
+      const fragKind = topLevelKind(fragment.kind);
+      const fragmentKey = key(fragKind, fragment.identity);
       const isTarget = fragmentKey === targetKey;
       const isFallback =
         fragment.kind === 'UnenforceableObligation' && !addedForMissing && !isTarget;
       if (!isTarget && !isFallback) continue;
-      if (artifacts.some((a) => key(a.kind, a.identity) === fragmentKey)) continue;
-      artifacts.push({
-        kind: fragment.kind,
+      const replacement: MergedArtifact = {
+        kind: fragKind,
         identity: fragment.identity,
-        winning: fragment,
+        winning: { ...fragment, kind: fragKind },
         winningRank: 0,
         overridden: [],
         sameRankConflicts: [],
-      });
+      };
+      const existingIdx = artifacts.findIndex((a) => key(a.kind, a.identity) === fragmentKey);
+      if (existingIdx >= 0) {
+        // The target already exists — but it was flagged MISSING, which means the
+        // existing copy never reached the resolved index (its tcSource failed to
+        // parse, e.g. one unrecognized field clause). Replace that broken artifact
+        // with the validated repair output. Skipping it (the old behaviour) left
+        // the unparseable copy to be dropped by `validateMerged` downstream, which
+        // re-opened every reference to it — a single bad clause then cascaded into
+        // many unresolved refs. A fallback obligation must never overwrite a real
+        // artifact, so it only fills a genuinely-absent slot.
+        if (!isTarget) continue;
+        artifacts[existingIdx] = replacement;
+      } else {
+        artifacts.push(replacement);
+      }
       if (isTarget) addedForMissing = true;
     }
   }
@@ -428,8 +579,12 @@ export async function repair(
       log.push(`repair: re-prompt failed for ${k}.`);
       continue;
     }
-    const replacement = fragments.find((f) => `${f.kind}:${f.identity}` === k) ?? fragments[0];
-    artifact.winning = replacement;
+    // Match the fix back to the artifact by its canonical PascalCase key
+    // (only the Effect→EffectGroup alias is applied); fall back to the first
+    // returned fragment if the model renamed it.
+    const replacement =
+      fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k) ?? fragments[0];
+    artifact.winning = { ...replacement, kind: topLevelKind(replacement.kind) };
   }
 
   return { issues: allIssues, artifacts, log };
