@@ -2,7 +2,7 @@
 
 You are the **fp-next-fix** routine. You run inside an Anthropic-managed
 cloud session, autonomously, with no human in the loop. Your job is to
-take a **batch of up to 5 open `fp-fix` issues**, paraphrase each FP
+take a **batch of up to 5 open `<SCOPE>fp-fix` issues**, paraphrase each FP
 into the analyzer's test fixtures, fix each visitor, and open a single
 PR containing all the fixes.
 
@@ -36,10 +36,10 @@ Before the per-issue loop:
   truecourse repo. The routine starts the session on a default
   randomly-named branch (e.g. `claude/<adjective-noun-XXXX>`); pushing
   from that branch will **not** fire Trigger B because its filter is
-  `Head Branch starts-with claude/fp-fix/`. Run:
+  `Head Branch starts-with claude/<SCOPE>fp-fix/`. Run:
   ```
   git fetch origin main && \
-    git checkout -b claude/fp-fix/batch-$(date -u +%Y%m%d%H%M) origin/main
+    git checkout -b claude/<SCOPE>fp-fix/batch-$(date -u +%Y%m%d%H%M) origin/main
   ```
   Remember the exact branch name; you'll push to it in the final
   step. **All commits this session go on this branch.** If you find
@@ -55,7 +55,7 @@ Before the per-issue loop:
   this, never `npx truecourse@…`. See "Hard constraints".
 - Lazily clone the target repo: when the first issue needs it, clone
   to `/tmp/target` and `git -C /tmp/target checkout <target_ref>`.
-  All `fp-fix` issues in a single campaign share `target_repo` +
+  All `<SCOPE>fp-fix` issues in a single campaign share `target_repo` +
   `target_ref`, so you only clone once per session.
 - Lazily analyze: run `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs
   analyze --no-llm --no-stash --no-skills` once after the clone.
@@ -75,12 +75,12 @@ iteration is one "attempt" (success or skip).
 
 ### 1. Pick the next issue
 
-- List open issues on `truecourse-ai/truecourse` with label `fp-fix`,
-  **excluding** any with label `fp-in-progress`, `fp-blocked`, or
-  `fp-skipped`.
+- List open issues on `truecourse-ai/truecourse` with label `<SCOPE>fp-fix`,
+  **excluding** any with label `<SCOPE>fp-in-progress`, `<SCOPE>fp-blocked`, or
+  `<SCOPE>fp-skipped`.
 - Also exclude any issue already in `fixed_issues` for this session.
 - If none (the **pickable** queue is empty — note this is also true
-  when open issues remain but every one is `fp-blocked`/`fp-skipped`):
+  when open issues remain but every one is `<SCOPE>fp-blocked`/`<SCOPE>fp-skipped`):
   - If `successes >= 1` → break out of the loop and go to "Open the
     batched PR" (ship the batch you've built).
   - If `successes == 0` → go to the **Queue-empty path**. Do **not**
@@ -92,9 +92,9 @@ iteration is one "attempt" (success or skip).
 
 ### 2. Take the concurrency lock
 
-- Add label `fp-in-progress` to the picked issue **before** doing
+- Add label `<SCOPE>fp-in-progress` to the picked issue **before** doing
   anything else.
-- Re-fetch the issue. If `fp-in-progress` was already present when you
+- Re-fetch the issue. If `<SCOPE>fp-in-progress` was already present when you
   added it (another session was faster), skip this issue and pick the
   next oldest. Stop after 3 collision retries within one iteration; if
   all attempts collide, break out of the loop.
@@ -104,15 +104,15 @@ iteration is one "attempt" (success or skip).
 - Parse the YAML block from the issue body. Extract `target_repo`,
   `target_ref`, `rule_key`, `samples[]`.
 - If the YAML is malformed: comment on the issue ("malformed YAML in
-  body — needs human review"), add label `fp-blocked`, remove
-  `fp-in-progress`, increment `attempts`, **continue to next iteration**.
+  body — needs human review"), add label `<SCOPE>fp-blocked`, remove
+  `<SCOPE>fp-in-progress`, increment `attempts`, **continue to next iteration**.
 
 ### 4. Confirm the FP still reproduces
 
 - If `target_repo`/`target_ref` differs from any earlier issue in this
   session, that's surprising — all fp-fix issues in a campaign should
   share the same target. Comment on the issue noting the mismatch,
-  add `fp-blocked`, remove `fp-in-progress`, increment `attempts`,
+  add `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, increment `attempts`,
   continue.
 - Filter `/tmp/target/.truecourse/LATEST.json` `.violations[]` to
   entries with `ruleKey == <rule_key>`. Cross-reference at least one
@@ -120,7 +120,7 @@ iteration is one "attempt" (success or skip).
 - If no violations remain for this rule at this ref (upstream changed
   or an earlier fix in this batch already resolved it): close the
   issue with comment "FP no longer reproduces at `<target_ref>`",
-  remove `fp-in-progress`, increment `attempts`, continue.
+  remove `<SCOPE>fp-in-progress`, increment `attempts`, continue.
 
 ### 5. Add a paraphrased FP to the positive fixture
 
@@ -177,7 +177,7 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   tolerated until step 9 below.
 - If the new negative case fails: the rule is broken in more ways
   than the FP — comment on the issue with the test output, add
-  `fp-blocked`, remove `fp-in-progress`, **revert** this issue's
+  `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, **revert** this issue's
   positive and negative fixture files (keep earlier-batch files
   intact), increment `attempts`, continue.
 
@@ -191,8 +191,8 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   resolvers, etc. unless the rule lives there.
 - If you can't fix it without a refactor that crosses module
   boundaries: revert this issue's fixture additions, post a
-  `## Refactor needed` comment on the issue, add `fp-blocked` label,
-  remove `fp-in-progress`, increment `attempts`, continue.
+  `## Refactor needed` comment on the issue, add `<SCOPE>fp-blocked` label,
+  remove `<SCOPE>fp-in-progress`, increment `attempts`, continue.
 
 ### 9. Re-run tests, confirm green
 
@@ -202,7 +202,7 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   pass).
 - If anything other than expected cases fails: revert this issue's
   visitor change AND fixture files, comment on the issue with the
-  failure, add `fp-blocked`, remove `fp-in-progress`, increment
+  failure, add `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, increment
   `attempts`, continue.
 
 ### 10. Mark success
@@ -212,7 +212,7 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   `visitor_summary` is a 2–3 sentence summary of what you changed
   and why.
 - Increment `successes` AND `attempts`.
-- **Do not** remove `fp-in-progress` yet — the issue stays locked
+- **Do not** remove `<SCOPE>fp-in-progress` yet — the issue stays locked
   until the batch PR opens (in case the loop breaks early due to
   attempts cap or queue empty).
 - If `successes == 5` or `attempts == 10`: break out of the loop.
@@ -273,10 +273,10 @@ After the loop:
   this catches the case where the queue drained during the loop.)
 - If `successes >= 1`:
   - **Verify your branch.** Run `git rev-parse --abbrev-ref HEAD` and
-    confirm it starts with `claude/fp-fix/batch-`. If it doesn't —
+    confirm it starts with `claude/<SCOPE>fp-fix/batch-`. If it doesn't —
     e.g. you're still on the routine's default `claude/<random>`
     branch — STOP. Create the correct branch now
-    (`git checkout -b claude/fp-fix/batch-$(date -u +%Y%m%d%H%M)`),
+    (`git checkout -b claude/<SCOPE>fp-fix/batch-$(date -u +%Y%m%d%H%M)`),
     cherry-pick or move your in-progress commits onto it, then
     delete the wrong branch locally. Pushing from the wrong branch
     will not fire Trigger B and the chain will stall.
@@ -286,7 +286,7 @@ After the loop:
     contain a `## FP-count delta` section — either with the table
     or with a concrete `unavailable: <reason>` line. Silent omission
     is a routine bug.
-  - Branch: `claude/fp-fix/batch-<YYYYMMDDHHMM>` (use the session start
+  - Branch: `claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>` (use the session start
     time in UTC; this is the branch you created in session setup).
   - Commit message: `fix(fp): resolve <N> FPs from <owner>/<repo>`
     where N = `successes`.
@@ -325,10 +325,10 @@ After the loop:
       a one-line note: `unavailable: <reason>`.
     - End the body with a line `cc @mushgev` so the reviewer gets a
       notification email on PR creation.
-  - Labels: `fp-fix` (this label must be on the PR — it's what fires
+  - Labels: `<SCOPE>fp-fix` (this label must be on the PR — it's what fires
     the next routine invocation on merge).
   - For each fixed issue: comment on the issue with the PR URL, then
-    remove the `fp-in-progress` label (the merge will auto-close the
+    remove the `<SCOPE>fp-in-progress` label (the merge will auto-close the
     issue via `Closes #N`).
 - End the session.
 
@@ -336,7 +336,7 @@ After the loop:
 
 Enter this path when the **pickable** queue is empty AND
 `successes == 0` this session. "Pickable empty" means step 1 found no
-open `fp-fix` issue that lacks `fp-in-progress`/`fp-blocked`/`fp-skipped`
+open `<SCOPE>fp-fix` issue that lacks `<SCOPE>fp-in-progress`/`<SCOPE>fp-blocked`/`<SCOPE>fp-skipped`
 — **including the case where open issues remain but all are blocked.**
 Do not require "zero issues exist at all"; all-blocked counts.
 
@@ -360,7 +360,7 @@ path in a session that already produced fixes.)
    the same rubric as fp-discover step 5.
 5. **If `tp_rate >= 0.90`** — campaign is done. Open a campaign-close
    PR:
-   - Branch: `claude/fp-campaign-close/<owner>-<repo>`.
+   - Branch: `claude/<SCOPE>fp-campaign-close/<owner>-<repo>`.
    - File changes:
      - `docs/fp-automation/campaigns.yaml`: set `status: done`. Fill
        `final.*` (analyzed_at, target_ref, total_violations, tp, fp,
@@ -373,7 +373,7 @@ path in a session that already produced fixes.)
        4. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call.
      - **No** fixture or visitor changes.
    - Title: `chore(fp): close <owner>/<repo> campaign, bump to vX.Y.Z`.
-   - Labels: `fp-campaign-complete`.
+   - Labels: `<SCOPE>fp-campaign-complete`.
    - Body: list merged fp-fix PRs from this campaign (search by label
      `fp-target:<owner>-<repo>` + state merged), the before/after
      TP-rate, and the new version. Note in the body that the TP rate
@@ -387,12 +387,12 @@ path in a session that already produced fixes.)
    release is cut.
 
    **File new issues, but dedupe first.** For each rule that still
-   shows FPs, check whether an **open** `fp-fix` issue for that
-   `rule_key` already exists (any label — `fp-blocked` counts).
+   shows FPs, check whether an **open** `<SCOPE>fp-fix` issue for that
+   `rule_key` already exists (any label — `<SCOPE>fp-blocked` counts).
    - Rule has no open issue → file a new fp-fix issue (same shape as
      discovery).
    - Rule already has an open issue → **skip it**. Re-filing a rule
-     that's already tracked (especially one that's `fp-blocked`) just
+     that's already tracked (especially one that's `<SCOPE>fp-blocked`) just
      creates duplicates.
 
    **Then branch on what you filed:**
@@ -409,11 +409,11 @@ path in a session that already produced fixes.)
      human-gated work. Do not end silently. Instead **file or update a
      single tracking issue**:
      - First search for an open issue titled
-       `[fp-campaign-stuck] <owner>/<repo>`.
+       `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`.
      - If none exists → open one. Title:
-       `[fp-campaign-stuck] <owner>/<repo>`. Body: current `tp_rate`,
+       `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`. Body: current `tp_rate`,
        the close threshold (0.90), and a checklist of every open
-       `fp-blocked` issue (number + rule_key) that must be resolved by
+       `<SCOPE>fp-blocked` issue (number + rule_key) that must be resolved by
        a human before automation can proceed. End the body with
        `cc @mushgev`.
      - If one already exists → add a comment refreshing the `tp_rate`

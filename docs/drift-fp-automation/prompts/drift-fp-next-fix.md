@@ -2,14 +2,14 @@
 
 You are the **drift-fp-next-fix** routine. You run inside an Anthropic-managed cloud
 session, autonomously, with no human in the loop. Your job: take a **batch of up to 5
-open `drift-fp-fix` issues**, paraphrase each FP into the verifier's IL test fixtures, fix
+open `<SCOPE>drift-fp-fix` issues**, paraphrase each FP into the verifier's IL test fixtures, fix
 each comparator/extractor, and open a single PR with all the fixes.
 
 The 15-sessions-per-day routine cap is the binding constraint, so each session does
 batch work. With N = 5, 15 sessions/day = ~75 fixes/day.
 
 You run only the **deterministic `verify`** against the campaign's **frozen contracts** (fetched
-from the storage branch `claude/drift-fp-store/<owner>-<repo>`) —
+from the storage branch `claude/<SCOPE>drift-fp-store/<owner>-<repo>`) —
 never `spec scan` / `contracts generate` / `infer`. The fix always lands in
 `packages/contract-verifier/src/` (comparator / extractor / resolver) — never in the
 contracts and never in the analyzer rules.
@@ -30,10 +30,10 @@ Per invocation:
 
 - **Create the batch branch FIRST.** The session starts on a default `claude/<random>` branch;
   pushing from it will NOT fire the main trigger (filter `Head Branch starts-with
-  claude/drift-fp-fix/`). Run:
+  claude/<SCOPE>drift-fp-fix/`). Run:
   ```
   git fetch origin main && \
-    git checkout -b claude/drift-fp-fix/batch-$(date -u +%Y%m%d%H%M) origin/main
+    git checkout -b claude/<SCOPE>drift-fp-fix/batch-$(date -u +%Y%m%d%H%M) origin/main
   ```
   All commits this session go on this branch.
 - Counters: `successes = 0`, `attempts = 0`, `fixed_issues = []` of
@@ -43,9 +43,9 @@ Per invocation:
   `npx truecourse`.
 - **Lazily** (only after the first issue is picked + parsed in step 3 — these values come from that
   issue's YAML) clone the target and run verify against the frozen contracts on the storage branch.
-  All `drift-fp-fix` issues in a campaign share `target_repo` + `target_ref` + `contracts_branch` +
+  All `<SCOPE>drift-fp-fix` issues in a campaign share `target_repo` + `target_ref` + `contracts_branch` +
   `contracts_path` + `code_dir`, so do this once. **Extract contracts to `/tmp`, never into the
-  truecourse working tree** (you're on the `claude/drift-fp-fix/batch-…` branch and must not commit
+  truecourse working tree** (you're on the `claude/<SCOPE>drift-fp-fix/batch-…` branch and must not commit
   the contracts):
   ```
   # fetch + extract the contracts from the storage branch (they are NOT on main)
@@ -58,7 +58,7 @@ Per invocation:
   cp -R /tmp/extract/<contracts_path>/contracts /tmp/target/.truecourse/contracts
   cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs verify --no-stash --code-dir <code_dir>
   ```
-  (`<contracts_branch>` = `claude/drift-fp-store/<owner>-<repo>`, `<contracts_path>` =
+  (`<contracts_branch>` = `claude/<SCOPE>drift-fp-store/<owner>-<repo>`, `<contracts_path>` =
   `docs/drift-fp-automation/contracts/<owner>-<repo>` — both from the issue YAML. The `git archive
   | tar` extracts to `/tmp` only, so nothing lands in your batch branch / the fix PR.)
 - **Snapshot the before-state**: copy `/tmp/target/.truecourse/verifier/LATEST.json` to
@@ -75,8 +75,8 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 
 ### 1. Pick the next issue
 
-- List open issues with label `drift-fp-fix`, excluding `drift-fp-in-progress`,
-  `drift-fp-blocked`, `drift-fp-skipped`, and any already in `fixed_issues`.
+- List open issues with label `<SCOPE>drift-fp-fix`, excluding `drift-fp-in-progress`,
+  `<SCOPE>drift-fp-blocked`, `<SCOPE>drift-fp-skipped`, and any already in `fixed_issues`.
 - If none (pickable queue empty — **including when all remaining open issues are blocked**):
   - `successes >= 1` → break, go to "Open the batched PR".
   - `successes == 0` → go to the **Queue-empty path** (re-measure the campaign; never end silently).
@@ -91,10 +91,10 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 
 - Parse the YAML block. Extract `target_repo`, `target_ref`, `contracts_branch`, `contracts_path`, `code_dir`,
   `drift_kind`, `comparator`, `samples[]`.
-- Malformed → comment "malformed YAML — needs human review", add `drift-fp-blocked`, remove
+- Malformed → comment "malformed YAML — needs human review", add `<SCOPE>drift-fp-blocked`, remove
   `drift-fp-in-progress`, `attempts++`, continue.
 - If `target_repo`/`target_ref`/`contracts_branch` differs from an earlier issue this session,
-  comment the mismatch, `drift-fp-blocked`, unlock, `attempts++`, continue.
+  comment the mismatch, `<SCOPE>drift-fp-blocked`, unlock, `attempts++`, continue.
 
 ### 4. Confirm the FP still reproduces
 
@@ -106,7 +106,7 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
   resolved it): close the issue ("FP no longer reproduces at `<target_ref>`"), unlock,
   `attempts++`, continue.
 - **If it turns out to be a real divergence (TP) or a bad-contract artifact, not a verifier FP**:
-  comment with the evidence, add `drift-fp-blocked` (and `contract-quality` if it's a bad
+  comment with the evidence, add `<SCOPE>drift-fp-blocked` (and `contract-quality` if it's a bad
   contract), unlock, `attempts++`, continue. Do not bend the verifier to silence a real drift.
 
 ### 5. Add a paraphrased FP-guard case to the IL fixture
@@ -199,7 +199,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   - The **regression** case is detected → its `// IL-DRIFT:` marker matches.
 - Earlier-batch FP-guards may still fail here (their fixes aren't in yet) — tolerated until step 9.
 - If the regression case is NOT detected pre-fix: the contract/code pair doesn't actually
-  exercise the drift-kind — revert **this issue's** fixture files, comment, `drift-fp-blocked`,
+  exercise the drift-kind — revert **this issue's** fixture files, comment, `<SCOPE>drift-fp-blocked`,
   unlock, `attempts++`, continue.
 
 ### 8. Fix the comparator / extractor
@@ -209,7 +209,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
   identity resolution. No unrelated refactors.
 - If you can't fix it without a refactor crossing module boundaries (new mount-graph pass, new
   resolver state, new code-fact channel): revert this issue's fixture additions, post a
-  `## Refactor needed` comment, add `drift-fp-blocked`, unlock, `attempts++`, continue.
+  `## Refactor needed` comment, add `<SCOPE>drift-fp-blocked`, unlock, `attempts++`, continue.
 
 ### 9. Re-run tests, confirm green
 
@@ -217,7 +217,7 @@ The IL end-to-end test (`tests/contract-verifier/verify-end-to-end.test.ts` /
 - Required: full suite green — the FP-guard case now yields **no** drift, the regression case
   **still** drifts, the marker set matches exactly, and all earlier-batch fixes still pass.
 - Any unexpected failure: revert this issue's comparator/extractor change AND its fixture files,
-  comment, `drift-fp-blocked`, unlock, `attempts++`, continue.
+  comment, `<SCOPE>drift-fp-blocked`, unlock, `attempts++`, continue.
 
 ### 10. Mark success
 
@@ -254,7 +254,7 @@ If step 1/2 throws, still write the section with `unavailable: <concrete reason>
 - `successes == 0` → do **not** end here; go to the **Queue-empty path** (the queue drained
   mid-session).
 - `successes >= 1`:
-  - **Verify your branch** starts with `claude/drift-fp-fix/batch-`. If not, create it and move
+  - **Verify your branch** starts with `claude/<SCOPE>drift-fp-fix/batch-`. If not, create it and move
     your commits before pushing (the wrong branch won't fire the trigger).
   - **Verify the drift-count delta was measured** (`after_counts` populated). The PR body MUST
     contain `## Drift-count delta`.
@@ -279,7 +279,7 @@ If step 1/2 throws, still write the section with `unavailable: <concrete reason>
       (or `unavailable: <reason>` if measurement failed).
     - End with `cc @mushgev`.
   - **Open the PR — no label required.** `drift-fp-next-fix` (the next iteration of this routine)
-    triggers on the merge of any PR whose head branch starts with `claude/drift-fp-fix/`, which
+    triggers on the merge of any PR whose head branch starts with `claude/<SCOPE>drift-fp-fix/`, which
     is uniquely owned by this routine. Use whatever PR-creation tool the session has —
     `gh pr create` if `gh` is on PATH, otherwise the GitHub MCP `create_pull_request` tool.
   - For each fixed issue: comment the PR URL, then remove `drift-fp-in-progress` (merge
@@ -295,7 +295,7 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
 2. Rebuild dist if not already this session: `pnpm install && pnpm build:dist`.
 3. Derive the storage-branch coordinates from the campaign (don't assume an issue was parsed — a
    bootstrap session may reach here with zero issues): for the `status: discovering` campaign,
-   `<owner>-<repo>` → `contracts_branch = claude/drift-fp-store/<owner>-<repo>`,
+   `<owner>-<repo>` → `contracts_branch = claude/<SCOPE>drift-fp-store/<owner>-<repo>`,
    `contracts_path = docs/drift-fp-automation/contracts/<owner>-<repo>`. Read `target_ref` +
    `code_dir` from `git show origin/<contracts_branch>:<contracts_path>/meta.yaml` (authoritative;
    if `baseline.target_ref` disagrees, trust meta.yaml). Then fetch + extract the contracts to
@@ -312,7 +312,7 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
 4. Classify and compute final `tp`, `fp`, `info`, `fp_rate` with the discovery/README TP/FP rubric.
 5. **If `fp == 0`** (no false-positive drifts remain — every drift is a genuine TP or a
    human-accepted `info`) — open a campaign-close PR:
-   - Branch `claude/drift-fp-campaign-close/<owner>-<repo>`.
+   - Branch `claude/<SCOPE>drift-fp-campaign-close/<owner>-<repo>`.
    - `campaigns.yaml`: `status: done`, fill `final.*` (verified_at, target_ref, total_drifts,
      tp, fp, info, fp_rate — `fp_rate: 0`, `tp_rate: 1.0` by convention when fp==0).
    - **Patch-bump** the version in all four CLAUDE.md locations:
@@ -321,7 +321,7 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
    - **No** fixture/comparator changes.
    - Title `chore(drift-fp): close <owner>/<repo> campaign, bump to vX.Y.Z`.
    - **No label required.** `drift-fp-campaign-close` + `drift-fp-generate` both trigger on the
-     merge of any PR whose head branch starts with `claude/drift-fp-campaign-close/`, which is
+     merge of any PR whose head branch starts with `claude/<SCOPE>drift-fp-campaign-close/`, which is
      uniquely owned by this routine.
    - Body: merged drift-fp-fix PRs (search label `drift-fp-target:<owner>-<repo>`, state
      merged), baseline→final `fp` (e.g. `fp: 33 → 0`), new version, note that `fp == 0` was
@@ -329,13 +329,13 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
    - End. Merge fires `drift-fp-campaign-close` (closes storage PR, notifies for tag push) +
      `drift-fp-generate` (next campaign).
 6. **If `fp > 0`** — leave `status: discovering`, no close PR. File new issues, **dedupe
-   first**: for each drift-kind still showing FPs, skip if an open `drift-fp-fix` issue
-   (any label, including `drift-fp-blocked`) already exists; else file one (discovery shape).
+   first**: for each drift-kind still showing FPs, skip if an open `<SCOPE>drift-fp-fix` issue
+   (any label, including `<SCOPE>drift-fp-blocked`) already exists; else file one (discovery shape).
    - Filed ≥1 new issue → continue into the per-issue loop this session.
    - Filed 0 (every FP-kind already tracked, all blocked) → maintain a single
-     `[drift-fp-campaign-stuck] <owner>/<repo>` tracking issue with the current state.
+     `[<SCOPE>drift-fp-campaign-stuck] <owner>/<repo>` tracking issue with the current state.
      Body carries: current `fp` count + `fp_rate`, the close gate `fp == 0`, a checklist
-     of open `drift-fp-blocked` issues. End with `cc @mushgev`.
+     of open `<SCOPE>drift-fp-blocked` issues. End with `cc @mushgev`.
 
      **Notify-on-change protocol** — the Telegram alert (`notify-campaign-alert`) only
      fires on `issues.opened` / `issues.reopened`, not on edits/comments. So:
@@ -368,7 +368,7 @@ session that already produced fixes.
 - Never copy-paste OSS code — paraphrase only; link the source by URL in the PR body.
 - **No OSS-project identity in committed code.** Fixture filenames, paths, identifiers, comments
   must look generic.
-- Fix PRs target **`main`** (`claude/drift-fp-fix/batch-…` off `origin/main`). Fix lands ONLY in
+- Fix PRs target **`main`** (`claude/<SCOPE>drift-fp-fix/batch-…` off `origin/main`). Fix lands ONLY in
   `packages/contract-verifier/src/` (comparator / extractor / resolver) and
   `tests/fixtures/sample-*-il/`; the queue-empty path also touches `campaigns.yaml` + the four
   version-bump locations. **Never** commit the fetched contracts into the fix PR (discard them

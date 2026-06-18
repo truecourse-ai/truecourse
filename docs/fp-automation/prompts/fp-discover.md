@@ -30,7 +30,7 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 ### 2. Mark the campaign `discovering`
 
-- On a new branch `claude/fp-discover/<owner>-<repo>` in
+- On a new branch `claude/<SCOPE>fp-discover/<owner>-<repo>` in
   `truecourse-ai/truecourse`, set the campaign's `status: discovering`
   in `docs/fp-automation/campaigns.yaml`.
 - Open a PR titled `chore(fp): start discovery for <owner>/<repo>`
@@ -38,7 +38,7 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 - End the PR body with a line `cc @mushgev` — GitHub fires a
   notification email on @mention regardless of authorship, so the
   reviewer is alerted as soon as the PR appears.
-- **Apply label `fp-discover` to this PR.** This is what fires
+- **Apply label `<SCOPE>fp-discover` to this PR.** This is what fires
   fp-next-fix when the PR merges, kicking off the inner loop. Without
   this label, the chain doesn't start automatically.
 - Do **not** wait for the PR to merge — the user merges it when
@@ -91,8 +91,8 @@ For each rule where FP rate ≥ 10 % (i.e. at least one clear FP out of
 the sample):
 
 - Open a GitHub issue on `truecourse-ai/truecourse` with:
-  - **Title**: `[fp-fix] <rule-key> in <owner>/<repo>`
-  - **Labels**: `fp-fix`, `fp-target:<owner>-<repo>` (replace `/` in
+  - **Title**: `[<SCOPE>fp-fix] <rule-key> in <owner>/<repo>`
+  - **Labels**: `<SCOPE>fp-fix`, `fp-target:<owner>-<repo>` (replace `/` in
     repo name with `-` so the label is valid).
   - **Body**:
 
@@ -140,7 +140,7 @@ listing the rule and the borderline cases for human triage.
   filed, baseline TP rate, target ref. Stop.
 
 The next session in the chain (fp-next-fix) is triggered automatically
-when any `fp-fix`-labelled PR merges. The first fp-fix PR is opened by
+when any `<SCOPE>fp-fix`-labelled PR merges. The first fp-fix PR is opened by
 fp-next-fix; you do not need to fire it yourself.
 
 ## Hard constraints
