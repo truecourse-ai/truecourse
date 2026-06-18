@@ -68,13 +68,13 @@ describe('CLI analyze pipeline (e2e, C#)', () => {
     execSync('git add -A', { cwd: workDir, env });
     execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
 
-    project = registerProject(workDir);
-    updateProjectConfig(workDir, { enableLlmRules: false });
+    project = await registerProject(workDir);
+    await updateProjectConfig(workDir, { enableLlmRules: false });
     clearLatestCache();
   }, 30_000);
 
-  afterAll(() => {
-    if (project) unregisterProject(project.slug);
+  afterAll(async () => {
+    if (project) await unregisterProject(project.slug);
     if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
     clearLatestCache();
   });
@@ -83,7 +83,7 @@ describe('CLI analyze pipeline (e2e, C#)', () => {
     const result = await analyzeInProcess(project, { enableLlmRulesOverride: false });
     expect(result.analysisId).toBeTruthy();
 
-    const latest = readLatest(workDir);
+    const latest = await readLatest(workDir);
     expect(latest).not.toBeNull();
     expect(latest!.analysis.status).toBe('completed');
 
