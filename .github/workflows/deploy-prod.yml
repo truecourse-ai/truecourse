@@ -2,8 +2,8 @@ name: Deploy (prod)
 
 # Merge to main → build, push, and create-or-update the Prod Container App.
 # Same self-discovering pattern as dev; resolves to the `prod` Environment's
-# variables. Requires the prod RG provisioned + the prod Environment configured
-# (see infra/azure/README.md) — until then this job has no AZURE_RG and is skipped.
+# variables (AZURE_RG, APP_NAME). Provision the prod RG + configure the prod
+# Environment first (see infra/azure/README.md).
 on:
   push:
     branches: [main]
@@ -20,7 +20,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: prod
-    if: ${{ vars.AZURE_RG != '' }}
     steps:
       - uses: actions/checkout@v4
 
