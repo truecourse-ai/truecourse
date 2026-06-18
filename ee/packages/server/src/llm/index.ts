@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
-import { setDefaultTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm';
 import type { LlmTraceRecorder } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
 import {
@@ -24,32 +24,10 @@ import { LlmConfigStore } from './store.js';
 
 const PROVIDERS: LlmProviderKind[] = ['anthropic', 'openai', 'bedrock', 'copilot'];
 
-/**
- * The enterprise edition NEVER falls back to the local `claude` CLI. Until a
- * provider is configured we install this transport as the process default, so
- * any LLM work errors loudly instead of silently spawning the CLI (the OSS
- * default when no transport is installed). Replaced by the real AI-SDK transport
- * the moment a provider is saved/loaded.
- */
-const noProviderTransport: LlmTransport = async () => {
-  throw new Error(NO_LLM_PROVIDER_MESSAGE);
-};
-
-/**
- * Whether a REAL provider transport is installed (not the no-provider sentinel
- * above, and not unset). EE entry points that do LLM work check this up front to
- * fail loudly — otherwise the consolidator's fail-open error handling (e.g. the
- * relevance filter defaults to "include" on a transport error) silently swallows
- * the "no provider" failure and the run looks like it succeeded with no output.
- */
-export function isLlmConfigured(): boolean {
-  const t = getDefaultTransport();
-  return t !== undefined && t !== noProviderTransport;
-}
-
-/** The shared user-facing error message for the "no provider configured" failure. */
-export const NO_LLM_PROVIDER_MESSAGE =
-  'No LLM provider is configured. Set one in Settings → Models to enable knowledge sync.';
+// `isLlmConfigured` + `NO_LLM_PROVIDER_MESSAGE` + `noProviderTransport` now live
+// in @truecourse/shared/llm so the gate (which can't import ee-server) can fail
+// loudly up front too. Re-exported for EE consumers that import from this module.
+export { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 
 function orgIdOf(req: Request): string | undefined {
   return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;

@@ -14,6 +14,7 @@ import {
   scanInProcess,
   generateContractsInProcess,
 } from '@truecourse/core/commands/spec-in-process';
+import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
 import {
@@ -50,12 +51,17 @@ export interface SpecScanPipeline {
 
 export const defaultSpecScanPipeline: SpecScanPipeline = {
   async scan(repoRoot, ref, tracker) {
+    // Fail loudly BEFORE any LLM work when no provider is configured — otherwise
+    // the consolidator's fail-open handling swallows it and the gate "completes"
+    // with no contracts (and EE must never fall back to the `claude` CLI).
+    if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). The
     // explicit `ref` makes scan/generate ingest into the server-side store.
     const { scanState } = await scanInProcess(repoRoot, { skipGit: true, ref, tracker });
     return { openConflicts: scanState.openConflicts.length };
   },
   async generate(repoRoot, ref, onSliceProgress, onRepairProgress) {
+    if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
     const res = await generateContractsInProcess(repoRoot, {
       skipGit: true,
       ref,
