@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
 import { extractFieldExposuresFromFile } from '../../packages/contract-verifier/src/extractor/field-exposure/ts-fields.js';
 import { extractPyFieldExposuresFromFile } from '../../packages/contract-verifier/src/extractor/field-exposure/py-fields.js';
+import { extractCsFieldExposuresFromFile } from '../../packages/contract-verifier/src/extractor/field-exposure/cs-fields.js';
 import { extractFieldExposuresFromDir } from '../../packages/contract-verifier/src/extractor/field-exposure/index.js';
 import type { ExtractedFieldExposure } from '../../packages/contract-verifier/src/extractor/field-exposure/index.js';
 
@@ -158,6 +159,50 @@ describe('FieldExposure code extractor — Python', () => {
     // A dict that is neither returned nor passed to a response serializer is
     // not an exposure site.
     const recs = extractPy(`def read():\n    opts = {"retries": 3}\n    return opts.get("retries")`);
+    expect(recs).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C#: the same exposure channels in C# syntax — EF Core `.Select(o => new {…})`
+// projections and ASP.NET `Ok(new {…})` / `Json(new Dto {…})` response shapes.
+// ---------------------------------------------------------------------------
+
+function extractCs(source: string, filePath = "/test/x.cs"): ExtractedFieldExposure[] {
+  const tree = parseFile(filePath, source, "csharp");
+  const recs = extractCsFieldExposuresFromFile(filePath, source, tree);
+  tree.delete();
+  return recs;
+}
+
+describe("FieldExposure code extractor — C#", () => {
+  it("derives query-select exposures from an EF Core projection", () => {
+    const recs = extractCs(`public class R { public object Get() { return db.Orders.Select(o => new { o.Id, o.Status, Total = o.TotalCents }).ToList(); } }`);
+    expect(recs.map((r) => r.contract.target.field).sort()).toEqual(["Id", "Status", "Total"]);
+    expect(byField(recs, "Status")!.contract).toEqual({ target: { field: "Status" }, exposedVia: ["query-select"] });
+  });
+
+  it("derives api-response exposures from an anonymous Ok(new {…}) body", () => {
+    const recs = extractCs(`public class C { public IActionResult Get(Order o) { return Ok(new { o.Id, o.Status }); } }`);
+    expect(recs.map((r) => r.contract.target.field).sort()).toEqual(["Id", "Status"]);
+    expect(byField(recs, "Id")!.contract.exposedVia).toEqual(["api-response"]);
+  });
+
+  it("derives api-response exposures from a named DTO initializer", () => {
+    const recs = extractCs(`public class C { public IActionResult Get(Order o) { return Json(new OrderDto { Id = o.Id, Status = o.Status }); } }`);
+    expect(recs.map((r) => r.contract.target.field).sort()).toEqual(["Id", "Status"]);
+  });
+
+  it("unions channels for a field selected AND returned (via the dispatcher)", async () => {
+    const dir = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "csfe-"));
+    fs.writeFileSync(path.join(dir, "svc.cs"), `public class C { public IActionResult Get() { var q = db.Orders.Select(o => new { o.Status }).First(); return Ok(new { q.Status }); } }`);
+    const recs = await extractFieldExposuresFromDir(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    expect(byField(recs, "Status")!.contract.exposedVia).toEqual(["query-select", "api-response"]);
+  });
+
+  it("ignores a bare `new {…}` not in a Select/response site", () => {
+    const recs = extractCs(`public class C { public void M(Order o) { var internalView = new { o.Secret }; } }`);
     expect(recs).toHaveLength(0);
   });
 });

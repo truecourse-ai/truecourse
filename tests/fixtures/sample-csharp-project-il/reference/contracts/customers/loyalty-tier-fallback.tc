@@ -1,0 +1,11 @@
+// Runtime null/absent → default coalescing (MATCHING): a customer with no
+// recorded loyalty tier is treated as `standard`. The C# read path applies the
+// fallback via `customer.LoyaltyTier ?? DefaultLoyaltyTier` in
+// CustomerPreferencesService.ResolveLoyaltyTier. C# `??` fires on null only.
+
+fallback customer.loyalty-tier-default {
+  origin "reference/specs/modules/customers/data.md" "Loyalty tier fallback" 25..29
+  target loyaltyTier
+  when null
+  default DefaultLoyaltyTier
+}

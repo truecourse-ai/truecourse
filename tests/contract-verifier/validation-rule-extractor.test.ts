@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
 import { extractValidationRulesFromFile } from '../../packages/contract-verifier/src/extractor/validation-rule/ts-validation-rules.js';
 import { extractPyValidationRulesFromFile } from '../../packages/contract-verifier/src/extractor/validation-rule/py-validation-rules.js';
+import { extractCsValidationRulesFromFile } from '../../packages/contract-verifier/src/extractor/validation-rule/cs-validation-rules.js';
 import { extractValidationRulesFromDir } from '../../packages/contract-verifier/src/extractor/validation-rule/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -213,6 +214,83 @@ def no_setting(reason):
     if not reason:
         raise Exception("reason_required")
 `);
+    expect(rules).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C#: the same required-when guard shape in C# syntax — a setting predicate
+// (member truthiness or `==`), an optional actor `== "literal"` check, a
+// `string.IsNullOrEmpty(x)` / `x == null` / `x is null` missing-check, and a
+// `throw new …Exception("code")` enforcement.
+// ---------------------------------------------------------------------------
+
+function extractCs(source: string, filePath = '/test/x.cs') {
+  const tree = parseFile(filePath, source, 'csharp');
+  const rules = extractCsValidationRulesFromFile(filePath, source, tree);
+  tree.delete();
+  return rules;
+}
+
+describe('ValidationRule code extractor — C#', () => {
+  it('derives a required-when contract from a realistic booking validator', () => {
+    const rules = extractCs(`
+public class BookingValidator {
+  public void Validate(EventType eventType, string actor, string cancellationReason) {
+    if (eventType.RequiresCancellationReason == "MANDATORY" && actor == "host" && string.IsNullOrEmpty(cancellationReason)) {
+      throw new ValidationException("cancellation_reason_required");
+    }
+  }
+}`);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].contract).toEqual({
+      target: 'cancellationReason',
+      when: {
+        kind: 'eq',
+        column: { table: 'eventType', column: 'RequiresCancellationReason' },
+        value: { kind: 'string', value: 'MANDATORY' },
+      },
+      actor: 'host',
+      effect: 'required',
+      onViolation: { status: 400, errorCode: 'cancellation_reason_required' },
+    });
+    expect(rules[0].identity).toBe(
+      'eventType.RequiresCancellationReason.required-when.cancellationReason',
+    );
+  });
+
+  it('recognizes a bare member-truthiness setting + `== null` missing-check, no actor', () => {
+    const rules = extractCs(`
+public class V {
+  public void Check(Settings settings, string note) {
+    if (settings.RequiresNote && note == null) { throw new BadRequestException("note_required"); }
+  }
+}`);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].contract).toEqual({
+      target: 'note',
+      when: { kind: 'eq', column: { table: 'settings', column: 'RequiresNote' }, value: { kind: 'boolean', value: true } },
+      effect: 'required',
+      onViolation: { status: 400, errorCode: 'note_required' },
+    });
+  });
+
+  it('recognizes an `is null` missing-check', () => {
+    const rules = extractCs(`
+public class V { public void C(Cfg cfg, string reason) {
+  if (cfg.NeedReason && reason is null) throw new ValidationException("reason_required");
+} }`);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].contract.target).toBe('reason');
+  });
+
+  it('skips a guard with no enforcement (no throw / error return)', () => {
+    const rules = extractCs(`public class V { public void C(Cfg cfg, string r) { if (cfg.Need && string.IsNullOrEmpty(r)) { r = "x"; } } }`);
+    expect(rules).toHaveLength(0);
+  });
+
+  it('skips a guard with no setting predicate', () => {
+    const rules = extractCs(`public class V { public void C(string r) { if (string.IsNullOrEmpty(r)) throw new ValidationException("r"); } }`);
     expect(rules).toHaveLength(0);
   });
 });

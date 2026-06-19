@@ -1,0 +1,10 @@
+// Read-path field exposure (DIVERGENT): storeCredit must travel on the read
+// path (included in the projection), but ProjectCustomers' `.Select(...)` omits
+// it, so it is never selected and never reaches the consumer.
+
+field-exposure customer.store-credit-exposed {
+  origin "reference/specs/modules/customers/data.md" "Billing summary projection" 51..56
+  field Entity:Customer.storeCredit
+  via query-select
+  in ProjectCustomers
+}

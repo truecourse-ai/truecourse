@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
 import { extractPersistenceStrategiesFromDir } from '../../packages/contract-verifier/src/extractor/persistence-strategy/index.js';
 import { extractPyMetadataKeysFromFile } from '../../packages/contract-verifier/src/extractor/persistence-strategy/py-metadata-keys.js';
+import { extractCsMetadataKeysFromFile } from '../../packages/contract-verifier/src/extractor/persistence-strategy/cs-metadata-keys.js';
 import type { ExtractedPersistenceStrategy } from '../../packages/contract-verifier/src/extractor/persistence-strategy/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -119,5 +120,53 @@ def read(customer):
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C#: metadata-blob key hits in C# syntax — member access on a `Metadata`
+// JObject/dynamic, and `Metadata["key"]` dictionary read/write. (The
+// dedicated-column-vs-metadata-json reconciliation is language-agnostic and
+// already covered by the dispatcher test above; here we assert the C# matcher
+// surfaces the right keys.)
+// ---------------------------------------------------------------------------
+
+function csKeys(source: string): string[] {
+  const tree = parseFile('/x.cs', source, 'csharp');
+  const hits = extractCsMetadataKeysFromFile('/x.cs', source, tree);
+  tree.delete();
+  return hits.map((h) => h.key).sort();
+}
+
+describe('persistence-strategy code extractor — C#', () => {
+  it('finds metadata keys via member access and indexer (read + write)', () => {
+    const keys = csKeys(`
+public class Repo {
+  public void Save(Order o, string reason) {
+    var a = o.Metadata.DisableGuests;
+    var b = o.Metadata["hideCalendarNotes"];
+    o.Metadata["refundPolicy"] = reason;
+  }
+}`);
+    expect(keys).toEqual(['DisableGuests', 'hideCalendarNotes', 'refundPolicy']);
+  });
+
+  it('recognizes a bare `metadata` blob identifier', () => {
+    const keys = csKeys(`public class R { public void M(string v) { metadata["cancellationReason"] = v; } }`);
+    expect(keys).toEqual(['cancellationReason']);
+  });
+
+  it('does not treat a normal (non-blob) member/indexer access as metadata', () => {
+    const keys = csKeys(`public class R { public void M(Config config, string[] items) { var x = config.Timeout; var y = items["0"]; } }`);
+    expect(keys).toEqual([]);
+  });
+
+  it('reconciles C# metadata keys to metadata-json end-to-end (no schema column)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cspers-'));
+    fs.writeFileSync(path.join(dir, 'repo.cs'), `public class R { public void M(Order o) { var a = o.Metadata["disableGuests"]; } }`);
+    const rows = await extractPersistenceStrategiesFromDir(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    const m = byField(rows);
+    expect(m.get('disableGuests')?.chosen).toBe('metadata-json');
   });
 });

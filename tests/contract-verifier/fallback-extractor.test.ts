@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
 import { extractFallbacksFromFile } from '../../packages/contract-verifier/src/extractor/fallback/ts-fallbacks.js';
 import { extractPyFallbacksFromFile } from '../../packages/contract-verifier/src/extractor/fallback/py-fallbacks.js';
+import { extractCsFallbacksFromFile } from '../../packages/contract-verifier/src/extractor/fallback/cs-fallbacks.js';
 import { extractFallbacksFromDir } from '../../packages/contract-verifier/src/extractor/fallback/index.js';
 import type { ExtractedFallback } from '../../packages/contract-verifier/src/extractor/fallback/index.js';
 
@@ -209,6 +210,96 @@ def read_preferences(customer):
 
   it('skips a guarded branch that does not assign the guarded target', () => {
     const rules = extractPy(`def f(x, y):\n    if x is None:\n        y = 1`);
+    expect(rules).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C#: the same null/absent -> default coalescing, in C# syntax. C# has no
+// `undefined`, so `??`/`??=`/`== null`/`is null` are pure null checks; a
+// defaulted parameter fires on absence.
+// ---------------------------------------------------------------------------
+
+function extractCs(source: string, filePath = '/test/x.cs'): ExtractedFallback[] {
+  const tree = parseFile(filePath, source, 'csharp');
+  const rules = extractCsFallbacksFromFile(filePath, source, tree);
+  tree.delete();
+  return rules;
+}
+
+describe('Fallback code extractor — C#', () => {
+  it('derives every fallback from a realistic reservation-service method', () => {
+    const rules = extractCs(`
+public class ReservationService {
+  public Reservation Create(ReservationInput input, string locale = "en-US") {
+    var currency = input.Currency ?? "USD";
+    var partySize = input.PartySize ?? 2;
+    var timezone = input.Timezone ?? DefaultTimezone;
+    if (input.NotifyGuest == null) { input.NotifyGuest = true; }
+    return new Reservation();
+  }
+}`);
+    expect(rules.map((r) => r.contract.target.field).sort()).toEqual([
+      'Currency',
+      'NotifyGuest',
+      'PartySize',
+      'Timezone',
+      'locale',
+    ]);
+    // string `??` default — C# `??` fires on null only.
+    expect(byField(rules, 'Currency')!.contract).toEqual({
+      target: { field: 'Currency' },
+      trigger: 'null',
+      defaultValue: { kind: 'string', value: 'USD' },
+    });
+    // numeric `??` default
+    expect(byField(rules, 'PartySize')!.contract.defaultValue).toEqual({ kind: 'number', value: 2 });
+    // identifier `??` default (named constant)
+    expect(byField(rules, 'Timezone')!.contract.defaultValue).toEqual({
+      kind: 'identifier',
+      ref: 'DefaultTimezone',
+    });
+    // default-parameter fallback fires on absence
+    expect(byField(rules, 'locale')!.contract).toEqual({
+      target: { field: 'locale' },
+      trigger: 'absent',
+      defaultValue: { kind: 'string', value: 'en-US' },
+    });
+    // guarded-assignment boolean fallback (`== null`)
+    expect(byField(rules, 'NotifyGuest')!.contract).toEqual({
+      target: { field: 'NotifyGuest' },
+      trigger: 'null',
+      defaultValue: { kind: 'boolean', value: true },
+    });
+  });
+
+  it('recognizes a `??=` coalescing assignment', () => {
+    const rules = extractCs(`class C { void M(string region) { region ??= "us-east"; } }`);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].contract).toEqual({
+      target: { field: 'region' },
+      trigger: 'null',
+      defaultValue: { kind: 'string', value: 'us-east' },
+    });
+  });
+
+  it('recognizes an `is null` guard', () => {
+    const rules = extractCs(`class C { void M(Input input) { if (input.Tier is null) { input.Tier = "bronze"; } } }`);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].contract).toEqual({
+      target: { field: 'Tier' },
+      trigger: 'null',
+      defaultValue: { kind: 'string', value: 'bronze' },
+    });
+  });
+
+  it('skips a non-scalar `??` default (object initializer)', () => {
+    const rules = extractCs(`class C { void M(Opts o) { var x = o ?? new Options { Retries = 3 }; } }`);
+    expect(rules).toHaveLength(0);
+  });
+
+  it('skips a guarded branch that does not assign the guarded target', () => {
+    const rules = extractCs(`class C { void M(string x, string y) { if (x == null) { y = "1"; } } }`);
     expect(rules).toHaveLength(0);
   });
 });
