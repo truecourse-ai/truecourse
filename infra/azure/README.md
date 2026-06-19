@@ -171,12 +171,22 @@ Create the `dev` and `prod` **Environments** (Settings → Environments) — the
 federated subjects above point at them. Add a required reviewer on `prod` for a
 manual gate before production rolls.
 
-> The workflow runs `containerapp.bicep` (create-or-update), so the **first PR
-> creates** the Container App and later PRs roll the image — the manual step 4
-> above is only needed if you'd rather create the app by hand.
+> The workflows run `containerapp.bicep` (create-or-update), so the **first
+> deploy creates** the Container App and later runs roll the image — the manual
+> step 4 above is only needed if you'd rather create the app by hand.
 
-After that: every PR deploys to **dev** (`deploy-dev.yml`), every merge to main
-deploys to **prod** (`deploy-prod.yml`).
+## Deploy triggers (both manual — nothing auto-deploys)
+
+Neither environment deploys on open or merge. You opt in each time:
+
+- **Dev (`deploy-dev.yml`)** — add the **`deploy-dev`** label to a PR. It builds
+  that PR's branch and rolls the shared Dev Container App. Pushing more commits
+  while the label is on re-deploys; remove the label to stop. (Create the label
+  once under the repo's Labels, or just type it when adding it to a PR.)
+- **Prod (`deploy-prod.yml`)** — **Actions → Deploy (prod) → Run workflow**, on
+  the **`main`** branch. It builds main's current HEAD; a `main`-only guard
+  refuses any other branch, and the `prod` Environment's required reviewer still
+  gates the rollout. Prod only ever ships merged code, never a PR branch.
 
 > If dev and prod live in **different subscriptions**, make `AZURE_SUBSCRIPTION_ID`
 > environment-scoped too.

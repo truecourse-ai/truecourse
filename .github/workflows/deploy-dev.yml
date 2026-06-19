@@ -1,6 +1,9 @@
 name: Deploy (dev)
 
-# Every PR builds the image and create-or-updates the shared Dev Container App.
+# Opt-in: add the `deploy-dev` label to a PR to build its branch and
+# create-or-update the shared Dev Container App. Pushing new commits to a
+# still-labeled PR re-deploys; removing the label stops it. Nothing deploys
+# automatically on open/merge.
 # The foundation resources (ACR, Container Apps env, identity, Key Vault) are
 # discovered from the resource group at runtime, so the only variables you set are
 # the OIDC identity + AZURE_RG + APP_NAME. GitHub touches nothing in the runtime
@@ -8,6 +11,7 @@ name: Deploy (dev)
 on:
   pull_request:
     branches: [main]
+    types: [labeled, synchronize]
 
 permissions:
   id-token: write      # OIDC federated login to Azure (no stored secret)
@@ -20,6 +24,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: contains(github.event.pull_request.labels.*.name, 'deploy-dev')
     runs-on: ubuntu-latest
     environment: dev
     steps:
