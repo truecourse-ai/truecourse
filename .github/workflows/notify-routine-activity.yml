@@ -67,26 +67,31 @@ jobs:
   # minutes, and sends ONE rollup message with the count.
   #
   # One matrixed job covers every scope+kind fix-label. The job `if`
-  # is evaluated per matrix value, so it fires only for the label the
-  # opened issue actually carries; each label gets its own concurrency
-  # group so the families never cancel each other. Add a new scope by
-  # appending its labels (e.g. `cs-fp-fix`, `cs-drift-fp-fix`).
+  # only filters on the event type — the `matrix` context is NOT
+  # available in job-level `if` (only in step-level `if`, `runs-on`,
+  # `concurrency`, `env`, `steps`), so referencing `matrix.label` at the
+  # job level rejects the whole workflow at load time. Instead, every
+  # matrix instance spawns on an `issues` event and the **steps** filter
+  # to the one whose label matches; the others no-op. Each label gets
+  # its own concurrency group so the families never cancel each other.
+  # Add a new scope by appending its labels (e.g. `cs-fp-fix`,
+  # `cs-drift-fp-fix`).
   notify-fix-burst:
     strategy:
       matrix:
         label: [fp-fix, cs-fp-fix, drift-fp-fix, cs-drift-fp-fix]
-    if: >
-      github.event_name == 'issues' &&
-      contains(github.event.issue.labels.*.name, matrix.label)
+    if: github.event_name == 'issues'
     runs-on: ubuntu-latest
     concurrency:
       group: fix-burst-${{ matrix.label }}
       cancel-in-progress: true
     steps:
       - name: Wait for burst to settle
+        if: contains(github.event.issue.labels.*.name, matrix.label)
         run: sleep 60
 
       - name: Send rollup Telegram message
+        if: contains(github.event.issue.labels.*.name, matrix.label)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
