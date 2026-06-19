@@ -1,0 +1,16 @@
+// Conditional field-requiredness (DIVERGENT): when an account is moved to
+// `suspended`, an admin must record a suspensionReason. The guard SHOULD live in
+// CustomerReadService.ApplyAccountStatus, but that code applies the status with
+// NO reason check, so the rule is not enforced.
+
+validation-rule customer.suspension-reason-required-when-suspended {
+  origin "reference/specs/modules/customers/data.md" "Account suspension" 31..37
+  target suspensionReason
+  when eq customer.accountStatus "suspended"
+  actor admin
+  effect required
+  on-violation {
+    status 400
+    error-code suspension_reason_required
+  }
+}

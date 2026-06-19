@@ -12,12 +12,14 @@ import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-w
 import type { ExtractedFallback } from './types.js';
 import { extractFallbacksFromFile } from './ts-fallbacks.js';
 import { extractPyFallbacksFromFile } from './py-fallbacks.js';
+import { extractCsFallbacksFromFile } from './cs-fallbacks.js';
 
 export type { ExtractedFallback } from './types.js';
 
 const MATCHERS: LanguageMatchers<ExtractedFallback> = {
   ...jsMatchers((s) => extractFallbacksFromFile(s.filePath, s.source, s.tree)),
   python: (s) => extractPyFallbacksFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsFallbacksFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractFallbacksFromDir(rootDir: string): Promise<ExtractedFallback[]> {

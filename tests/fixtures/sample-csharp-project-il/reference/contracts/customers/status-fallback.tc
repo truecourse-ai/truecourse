@@ -1,0 +1,11 @@
+// Runtime null/absent → default coalescing (DIVERGENT): a customer with no
+// recorded status SHOULD fall back to `DefaultStatus`, but ResolveStatus reads
+// `customer.Status` straight through with no coalescing — the fallback is never
+// applied.
+
+fallback customer.status-default {
+  origin "reference/specs/modules/customers/data.md" "Status fallback" 30..34
+  target status
+  when null
+  default DefaultStatus
+}

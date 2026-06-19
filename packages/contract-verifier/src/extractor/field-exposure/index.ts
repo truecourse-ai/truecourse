@@ -15,6 +15,7 @@ import type { ExtractedFieldExposure } from './types.js';
 import type { FieldExposureContract } from '../../types/index.js';
 import { extractFieldExposuresFromFile } from './ts-fields.js';
 import { extractPyFieldExposuresFromFile } from './py-fields.js';
+import { extractCsFieldExposuresFromFile } from './cs-fields.js';
 
 export type { ExtractedFieldExposure } from './types.js';
 
@@ -23,6 +24,7 @@ type Channel = FieldExposureContract['exposedVia'][number];
 const MATCHERS: LanguageMatchers<ExtractedFieldExposure> = {
   ...jsMatchers((s) => extractFieldExposuresFromFile(s.filePath, s.source, s.tree)),
   python: (s) => extractPyFieldExposuresFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsFieldExposuresFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractFieldExposuresFromDir(

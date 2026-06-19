@@ -12,12 +12,14 @@ import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-w
 import type { ExtractedValidationRule } from './types.js';
 import { extractValidationRulesFromFile } from './ts-validation-rules.js';
 import { extractPyValidationRulesFromFile } from './py-validation-rules.js';
+import { extractCsValidationRulesFromFile } from './cs-validation-rules.js';
 
 export type { ExtractedValidationRule } from './types.js';
 
 const MATCHERS: LanguageMatchers<ExtractedValidationRule> = {
   ...jsMatchers((s) => extractValidationRulesFromFile(s.filePath, s.source, s.tree)),
   python: (s) => extractPyValidationRulesFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsValidationRulesFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractValidationRulesFromDir(

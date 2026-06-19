@@ -24,6 +24,7 @@ import { extractEntitiesFromDir } from '../entity-schema/index.js';
 import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-walker.js';
 import { extractMetadataKeysFromFile, type MetadataKeyHit } from './ts-metadata-keys.js';
 import { extractPyMetadataKeysFromFile } from './py-metadata-keys.js';
+import { extractCsMetadataKeysFromFile } from './cs-metadata-keys.js';
 import type { ExtractedPersistenceStrategy } from './types.js';
 
 export type { ExtractedPersistenceStrategy, PersistenceStrategyChoice } from './types.js';
@@ -31,6 +32,7 @@ export type { ExtractedPersistenceStrategy, PersistenceStrategyChoice } from './
 const MATCHERS: LanguageMatchers<MetadataKeyHit> = {
   ...jsMatchers((s) => extractMetadataKeysFromFile(s.filePath, s.tree)),
   python: (s) => extractPyMetadataKeysFromFile(s.filePath, s.source, s.tree),
+  csharp: (s) => extractCsMetadataKeysFromFile(s.filePath, s.source, s.tree),
 };
 
 export async function extractPersistenceStrategiesFromDir(

@@ -12,6 +12,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { makeDirExtractor, jsMatchers, type ParsedSource } from '../source-walker.js';
 import type { ExtractedEffect } from './types.js';
+import { matchCsEffects } from './cs-effects.js';
 
 export type { ExtractedEffect } from './types.js';
 
@@ -81,6 +82,7 @@ function matchEffects(s: ParsedSource): ExtractedEffect[] {
 const extract = makeDirExtractor<ExtractedEffect>({
   ...jsMatchers(matchEffects),
   python: matchEffects,
+  csharp: matchCsEffects,
 });
 
 export async function extractEffectsFromDir(rootDir: string): Promise<ExtractedEffect[]> {
