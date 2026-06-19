@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "npx turbo-ignore @truecourse/landing --fallback=HEAD^1",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- apps/landing pnpm-lock.yaml",
   "rewrites": [
     {
       "source": "/((?!api/).*)",
