@@ -1,12 +1,12 @@
 name: Deploy (prod)
 
-# Merge to main → build, push, and create-or-update the Prod Container App.
-# Same self-discovering pattern as dev; resolves to the `prod` Environment's
-# variables (AZURE_RG, APP_NAME). Provision the prod RG + configure the prod
-# Environment first (see infra/azure/README.md).
+# Manual only: Actions → Deploy (prod) → Run workflow (on main). Builds main's
+# current HEAD and create-or-updates the Prod Container App. Never deploys on
+# merge, and the main-only guard refuses any other branch. Resolves to the `prod`
+# Environment's variables (AZURE_RG, APP_NAME) + its required-reviewer gate.
+# Provision the prod RG + configure the prod Environment first (see infra/azure/README.md).
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: prod
     steps:
