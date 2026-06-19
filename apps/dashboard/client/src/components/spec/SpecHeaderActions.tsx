@@ -9,35 +9,45 @@ import { Button } from '@/components/ui/button';
 import { useSpec } from './SpecContext';
 
 interface SpecHeaderActionsProps {
-  /** Spec scan/resolve require a git repo (like Analyze); hide actions when absent. */
+  /** On-demand Scan requires a git working tree (OSS); hidden otherwise. */
   isGitRepo?: boolean;
+  /** Hosted (enterprise) repo: no working tree, but conflicts ARE resolvable
+   *  (server re-merges from stored claims) — so keep the resolve actions. */
+  hosted?: boolean;
 }
 
-export function SpecHeaderActions({ isGitRepo = true }: SpecHeaderActionsProps = {}) {
-  const { scan, loading, refresh, acceptAllDefaults } = useSpec();
+export function SpecHeaderActions({ isGitRepo = true, hosted = false }: SpecHeaderActionsProps = {}) {
+  const { scan, loading, refresh, acceptAllDefaults, supportsRescan } = useSpec();
   const hasOpen = (scan?.openConflicts.length ?? 0) > 0;
   const disabled = !scan;
 
-  // Not a git repo → no scan/resolve, matching the hidden Analyze button. The
-  // page-level banner explains why.
-  if (!isGitRepo) return null;
+  // A non-git LOCAL folder has no scan/resolve (matches the hidden Analyze
+  // button). Hosted repos have no working tree either, but still resolve — the
+  // Scan button below is gated on `supportsRescan` (off hosted), while
+  // "Accept all defaults" stays available.
+  if (!isGitRepo && !hosted) return null;
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={refresh}
-        disabled={loading}
-        title="Discover docs, extract claims, surface conflicts"
-      >
-        {loading ? (
-          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Play className="mr-2 h-3.5 w-3.5" />
-        )}
-        {loading ? 'Scanning...' : 'Scan'}
-      </Button>
+      {/* On-demand scan applies only where the docs live on the server (repos).
+          Workspace Knowledge is re-processed by re-uploading, so its Scan
+          button is hidden. */}
+      {supportsRescan && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={refresh}
+          disabled={loading}
+          title="Discover docs, extract claims, surface conflicts"
+        >
+          {loading ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Play className="mr-2 h-3.5 w-3.5" />
+          )}
+          {loading ? 'Scanning...' : 'Scan'}
+        </Button>
+      )}
       <Button
         size="sm"
         variant="outline"

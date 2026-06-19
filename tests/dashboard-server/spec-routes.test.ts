@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import request from 'supertest';
-import type { Express } from 'express';
+import express, { type Express, type Request } from 'express';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import type { AuthUser } from '@truecourse/shared';
+import { PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
+import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
+import specRouter from '../../apps/dashboard/server/src/routes/spec';
 
 /** `spec scan` requires a git repo (like analyze) — init the fixture so the route guard passes. */
 function gitInit(dir: string): void {
@@ -232,6 +241,71 @@ describe('GET /api/repos/:id/spec/decisions', () => {
       .get(`/api/repos/${fixture.project.slug}/spec/decisions`)
       .expect(200);
     expect(res.body).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
+  });
+});
+
+describe('POST /spec/decisions — hosted (enterprise) defers the contract refresh to the queue', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let client: PGlite;
+  let enqueue: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    client = new PGlite();
+    const db = drizzle(client, { schema });
+    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    // Hosted store → specsMaterializeInPlace() is false → the refresh path runs.
+    setSpecStore(new PgSpecStore(db as unknown as EeDb));
+    enqueue = vi.fn().mockResolvedValue(undefined);
+    setBackgroundTaskRunner(enqueue);
+
+    // Mount the spec router with an injected enterprise user (the org scopes the job).
+    app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as Request & { eeUser?: AuthUser }).eeUser = {
+        id: 'u1',
+        email: 'u@acme.test',
+        organizationId: 'org_A',
+      };
+      next();
+    });
+    app.use('/api/repos', specRouter);
+  });
+
+  afterEach(async () => {
+    setBackgroundTaskRunner(null);
+    resetSpecStore();
+    await client.close();
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('enqueues a repo.contracts task (off the request path) rather than regenerating inline', async () => {
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/decisions`)
+      .send({ conflictId: 'c1', resolution: { kind: 'pick', candidateIndex: 0 }, candidateFingerprint: 'fp' })
+      .expect(200);
+
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith({
+      type: 'repo.contracts',
+      workspaceOrgId: 'org_A',
+      repoKey: fixture.project.path,
+    });
+  });
+
+  it('accept-all-defaults also enqueues the refresh (not inline)', async () => {
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/decisions/batch`)
+      .send({ mode: 'all-defaults' })
+      .expect(200);
+
+    expect(enqueue).toHaveBeenCalledWith({
+      type: 'repo.contracts',
+      workspaceOrgId: 'org_A',
+      repoKey: fixture.project.path,
+    });
   });
 });
 

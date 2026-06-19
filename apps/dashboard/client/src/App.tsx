@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, type ComponentType } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import HomePage from './components/pages/HomePage';
@@ -14,6 +14,31 @@ import { EePageShell } from './ee/EePageShell';
  * enterprise client module (capability-filtered, lazy-loaded into their
  * own chunks). ee contributes routes as data — it never edits this file.
  */
+/**
+ * Mounts the ee module's persistent shell provider (e.g. the live-notifications
+ * SSE connection) ONCE around the whole app, so it survives route changes — then
+ * renders children. Until the provider chunk loads (or in community, where there
+ * is none) children render directly, so the app is never blocked on it.
+ */
+function EeShellProvider({ children }: { children: ReactNode }) {
+  const { shell } = useEeModule();
+  const [Provider, setProvider] = useState<ComponentType<{ children: ReactNode }> | null>(null);
+  useEffect(() => {
+    if (!shell?.provider) {
+      setProvider(null);
+      return;
+    }
+    let cancelled = false;
+    void shell.provider().then((m) => {
+      if (!cancelled) setProvider(() => m.default as ComponentType<{ children: ReactNode }>);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shell]);
+  return Provider ? <Provider>{children}</Provider> : <>{children}</>;
+}
+
 function AppRoutes() {
   const { routes: eeRoutes, homeComponent } = useEeModule();
   const eeElements = useMemo(
@@ -55,9 +80,20 @@ function AppRoutes() {
       <Route
         path="/repos/:repoId"
         element={
-          <Suspense>
-            <RepoPage />
-          </Suspense>
+          // Enterprise: keep the console shell (left sidebar) around the repo
+          // detail so it stays part of the governance console, not a drop-out
+          // to the OSS chrome. Community renders the repo page standalone.
+          EeHome ? (
+            <EePageShell>
+              <Suspense>
+                <RepoPage />
+              </Suspense>
+            </EePageShell>
+          ) : (
+            <Suspense>
+              <RepoPage />
+            </Suspense>
+          )
         }
       />
       {eeElements.map(({ path, Component }) => (
@@ -88,6 +124,7 @@ export default function App() {
         <EeAuthProvider>
         <BrowserRouter>
           <EnterpriseAuthGate>
+          <EeShellProvider>
           <AppRoutes />
         <Toaster
           position="bottom-center"
@@ -118,6 +155,7 @@ export default function App() {
             },
           }}
         />
+          </EeShellProvider>
           </EnterpriseAuthGate>
         </BrowserRouter>
         </EeAuthProvider>

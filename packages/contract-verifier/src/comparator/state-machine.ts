@@ -12,18 +12,20 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ContractDrift, ArtifactRef, StateMachineContract } from '../types/index.js';
+import type { ContractDrift, ArtifactRef, StateMachineContract, SpecOrigin } from '../types/index.js';
 import type { StateMachineFacts } from '../extractor/state-machine-facts/index.js';
 
 export interface StateMachineCompareInput {
   machineRef: ArtifactRef;
+  /** Spec-side origin of the state-machine artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: StateMachineContract;
   facts: StateMachineFacts;
 }
 
 export function compareStateMachine(input: StateMachineCompareInput): ContractDrift[] {
   const out: ContractDrift[] = [];
-  const { contract, machineRef, facts } = input;
+  const { contract, machineRef, origin, facts } = input;
 
   const stateValues = new Set<string>();
   for (const t of contract.transitions) { stateValues.add(t.from); stateValues.add(t.to); }
@@ -57,6 +59,7 @@ export function compareStateMachine(input: StateMachineCompareInput): ContractDr
           `\`${from}\`: ${listAllowedFromState(contract, from).join(', ') || '(none)'}.`,
         specSide: `transitions in spec ${machineRef.identity}`,
         codeSide: `${from} → ${to} (illegal)`,
+        specOrigin: origin ?? undefined,
       });
     }
   }
@@ -74,12 +77,12 @@ export function compareStateMachine(input: StateMachineCompareInput): ContractDr
       if (priors !== null) {
         const terminalsHittable = priors.filter((p) => contract.terminal.includes(p) && !allowedSet.has(`${p}|${target}`));
         if (terminalsHittable.length === 0) continue;
-        out.push(makeUnguardedDrift(machineRef, fieldName, target, terminalsHittable, assign, false));
+        out.push(makeUnguardedDrift(machineRef, origin, fieldName, target, terminalsHittable, assign, false));
         continue;
       }
       const offending = contract.terminal.filter((t) => !allowedSet.has(`${t}|${target}`));
       if (offending.length === 0) continue;
-      out.push(makeUnguardedDrift(machineRef, fieldName, target, offending, assign, true));
+      out.push(makeUnguardedDrift(machineRef, origin, fieldName, target, offending, assign, true));
     }
   }
 
@@ -111,6 +114,7 @@ function listAllowedFromState(c: StateMachineContract, from: string): string[] {
 
 function makeUnguardedDrift(
   machineRef: ArtifactRef,
+  origin: SpecOrigin | null,
   field: string,
   target: string,
   terminalsHittable: string[],
@@ -136,5 +140,6 @@ function makeUnguardedDrift(
         `has no transition out of those terminals.`,
     specSide: `terminal: [${terminalsHittable.join(', ')}], no transition to '${target}'`,
     codeSide: unguarded ? `unguarded \`<x>.${field} = '${target}'\`` : `guard does not exclude terminal states`,
+    specOrigin: origin ?? undefined,
   };
 }

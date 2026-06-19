@@ -128,21 +128,21 @@ describe('atomicWriteJson', () => {
 });
 
 describe('analyze lock', () => {
-  it('acquires and releases cleanly', () => {
-    acquireAnalyzeLock(repoPath);
+  it('acquires and releases cleanly', async () => {
+    await acquireAnalyzeLock(repoPath);
     expect(fs.existsSync(path.join(repoPath, '.truecourse/.analyze.lock'))).toBe(true);
-    releaseAnalyzeLock(repoPath);
+    await releaseAnalyzeLock(repoPath);
     expect(fs.existsSync(path.join(repoPath, '.truecourse/.analyze.lock'))).toBe(false);
   });
 
-  it('rejects a second acquire while held', () => {
-    acquireAnalyzeLock(repoPath);
-    expect(() => acquireAnalyzeLock(repoPath)).toThrowError(AnalyzeLockError);
-    releaseAnalyzeLock(repoPath);
+  it('rejects a second acquire while held (file lock fail-fasts)', async () => {
+    await acquireAnalyzeLock(repoPath);
+    await expect(acquireAnalyzeLock(repoPath)).rejects.toThrowError(AnalyzeLockError);
+    await releaseAnalyzeLock(repoPath);
   });
 
-  it('release on a non-existent lock is a no-op', () => {
-    expect(() => releaseAnalyzeLock(repoPath)).not.toThrow();
+  it('release on a non-existent lock is a no-op', async () => {
+    await expect(releaseAnalyzeLock(repoPath)).resolves.toBeUndefined();
   });
 });
 
@@ -173,32 +173,32 @@ describe('buildAnalysisFilename', () => {
 // ---------------------------------------------------------------------------
 
 describe('analysis round-trip', () => {
-  it('writes, reads back, and lists', () => {
+  it('writes, reads back, and lists', async () => {
     const s1 = makeSnapshot();
     const s2 = { ...makeSnapshot(), createdAt: '2026-04-17T14:30:10.000Z' };
-    const { filename: f1 } = writeAnalysis(repoPath, s1);
-    const { filename: f2 } = writeAnalysis(repoPath, s2);
+    const { filename: f1 } = await writeAnalysis(repoPath, s1);
+    const { filename: f2 } = await writeAnalysis(repoPath, s2);
 
-    expect(readAnalysis(repoPath, f1)).toEqual(s1);
-    expect(readAnalysis(repoPath, f2)).toEqual(s2);
-    expect(listAnalyses(repoPath)).toEqual([f1, f2]);   // chronological order
+    expect(await readAnalysis(repoPath, f1)).toEqual(s1);
+    expect(await readAnalysis(repoPath, f2)).toEqual(s2);
+    expect(await listAnalyses(repoPath)).toEqual([f1, f2]);   // chronological order
     expect(fs.existsSync(analysisFilePath(repoPath, f1))).toBe(true);
   });
 
-  it('readAnalysis returns null for missing files', () => {
-    expect(readAnalysis(repoPath, 'does-not-exist.json')).toBeNull();
+  it('readAnalysis returns null for missing files', async () => {
+    expect(await readAnalysis(repoPath, 'does-not-exist.json')).toBeNull();
   });
 
-  it('listAnalyses returns [] when the dir is absent', () => {
-    expect(listAnalyses(repoPath)).toEqual([]);
+  it('listAnalyses returns [] when the dir is absent', async () => {
+    expect(await listAnalyses(repoPath)).toEqual([]);
   });
 
-  it('deleteAnalysis removes the file; double-delete is safe', () => {
+  it('deleteAnalysis removes the file; double-delete is safe', async () => {
     const s = makeSnapshot();
-    const { filename } = writeAnalysis(repoPath, s);
-    deleteAnalysis(repoPath, filename);
-    expect(readAnalysis(repoPath, filename)).toBeNull();
-    expect(() => deleteAnalysis(repoPath, filename)).not.toThrow();
+    const { filename } = await writeAnalysis(repoPath, s);
+    await deleteAnalysis(repoPath, filename);
+    expect(await readAnalysis(repoPath, filename)).toBeNull();
+    await expect(deleteAnalysis(repoPath, filename)).resolves.toBeUndefined();
   });
 });
 
@@ -207,47 +207,47 @@ describe('analysis round-trip', () => {
 // ---------------------------------------------------------------------------
 
 describe('LATEST round-trip', () => {
-  it('returns null before any write', () => {
-    expect(readLatest(repoPath)).toBeNull();
+  it('returns null before any write', async () => {
+    expect(await readLatest(repoPath)).toBeNull();
   });
 
-  it('round-trips', () => {
+  it('round-trips', async () => {
     const s = makeSnapshot();
     const latest = makeLatest(s, 'head.json');
-    writeLatest(repoPath, latest);
-    expect(readLatest(repoPath)).toEqual(latest);
+    await writeLatest(repoPath, latest);
+    expect(await readLatest(repoPath)).toEqual(latest);
   });
 
-  it('invalidates the in-memory cache when the file changes on disk', () => {
+  it('invalidates the in-memory cache when the file changes on disk', async () => {
     const s = makeSnapshot();
     const v1 = makeLatest(s, 'head-1.json');
-    writeLatest(repoPath, v1);
-    expect(readLatest(repoPath)).toEqual(v1);
+    await writeLatest(repoPath, v1);
+    expect(await readLatest(repoPath)).toEqual(v1);
 
     const v2 = makeLatest(s, 'head-2.json');
     // Bump the file mtime forward so cache invalidation triggers even
     // when the two writes land within the same OS-reported millisecond
     // (common on fast tests; Linux's ext4 has sub-ms resolution but macOS APFS reports ms).
     const future = new Date(Date.now() + 1000);
-    writeLatest(repoPath, v2);
+    await writeLatest(repoPath, v2);
     fs.utimesSync(latestPath(repoPath), future, future);
 
-    expect(readLatest(repoPath)).toEqual(v2);
+    expect(await readLatest(repoPath)).toEqual(v2);
   });
 
-  it('deleteLatest clears the file and cache', () => {
-    writeLatest(repoPath, makeLatest(makeSnapshot(), 'h.json'));
+  it('deleteLatest clears the file and cache', async () => {
+    await writeLatest(repoPath, makeLatest(makeSnapshot(), 'h.json'));
     expect(fs.existsSync(latestPath(repoPath))).toBe(true);
-    deleteLatest(repoPath);
+    await deleteLatest(repoPath);
     expect(fs.existsSync(latestPath(repoPath))).toBe(false);
-    expect(readLatest(repoPath)).toBeNull();
+    expect(await readLatest(repoPath)).toBeNull();
   });
 
-  it('recovers from a deleted file on next read', () => {
-    writeLatest(repoPath, makeLatest(makeSnapshot(), 'h.json'));
-    readLatest(repoPath);                     // populate cache
+  it('recovers from a deleted file on next read', async () => {
+    await writeLatest(repoPath, makeLatest(makeSnapshot(), 'h.json'));
+    await readLatest(repoPath);                     // populate cache
     fs.unlinkSync(latestPath(repoPath));       // sneak a delete past the store
-    expect(readLatest(repoPath)).toBeNull();
+    expect(await readLatest(repoPath)).toBeNull();
   });
 });
 
@@ -279,25 +279,25 @@ function makeHistoryEntry(id: string, createdAt: string): HistoryEntry {
 }
 
 describe('history.json round-trip', () => {
-  it('starts empty and appends in order', () => {
-    expect(readHistory(repoPath)).toEqual({ analyses: [] });
+  it('starts empty and appends in order', async () => {
+    expect(await readHistory(repoPath)).toEqual({ analyses: [] });
 
     const e1 = makeHistoryEntry(randomUUID(), '2026-04-17T14:23:45.000Z');
     const e2 = makeHistoryEntry(randomUUID(), '2026-04-17T14:30:10.000Z');
-    appendHistory(repoPath, e1);
-    appendHistory(repoPath, e2);
+    await appendHistory(repoPath, e1);
+    await appendHistory(repoPath, e2);
 
-    expect(readHistory(repoPath).analyses).toEqual([e1, e2]);
+    expect((await readHistory(repoPath)).analyses).toEqual([e1, e2]);
     expect(fs.existsSync(historyPath(repoPath))).toBe(true);
   });
 
-  it('removeFromHistory drops matching entries; no-op if absent', () => {
+  it('removeFromHistory drops matching entries; no-op if absent', async () => {
     const e1 = makeHistoryEntry(randomUUID(), '2026-04-17T14:23:45.000Z');
-    appendHistory(repoPath, e1);
-    removeFromHistory(repoPath, 'not-there');
-    expect(readHistory(repoPath).analyses).toEqual([e1]);
-    removeFromHistory(repoPath, e1.id);
-    expect(readHistory(repoPath).analyses).toEqual([]);
+    await appendHistory(repoPath, e1);
+    await removeFromHistory(repoPath, 'not-there');
+    expect((await readHistory(repoPath)).analyses).toEqual([e1]);
+    await removeFromHistory(repoPath, e1.id);
+    expect((await readHistory(repoPath)).analyses).toEqual([]);
   });
 });
 
@@ -333,14 +333,14 @@ function makeDiff(baseAnalysisId: string): DiffSnapshot {
 }
 
 describe('diff.json lifecycle', () => {
-  it('reads null when absent, round-trips when written, deletes cleanly', () => {
-    expect(readDiff(repoPath)).toBeNull();
+  it('reads null when absent, round-trips when written, deletes cleanly', async () => {
+    expect(await readDiff(repoPath)).toBeNull();
     const d = makeDiff(randomUUID());
-    writeDiff(repoPath, d);
-    expect(readDiff(repoPath)).toEqual(d);
+    await writeDiff(repoPath, d);
+    expect(await readDiff(repoPath)).toEqual(d);
     expect(fs.existsSync(diffPath(repoPath))).toBe(true);
-    deleteDiff(repoPath);
-    expect(readDiff(repoPath)).toBeNull();
-    expect(() => deleteDiff(repoPath)).not.toThrow();   // double-delete safe
+    await deleteDiff(repoPath);
+    expect(await readDiff(repoPath)).toBeNull();
+    await expect(deleteDiff(repoPath)).resolves.toBeUndefined();   // double-delete safe
   });
 });

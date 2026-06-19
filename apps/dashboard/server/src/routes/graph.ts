@@ -40,16 +40,16 @@ const router: Router = Router();
 router.get('/:id/graph', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const repo = resolveProjectForRequest(id);
+    const repo = await resolveProjectForRequest(id);
 
     const analysisIdParam = req.query.analysisId as string | undefined;
     const level = (req.query.level as string) || 'services';
 
-    let snapshot = readLatest(repo.path);
+    let snapshot = await readLatest(repo.path);
     if (analysisIdParam && (!snapshot || snapshot.analysis.id !== analysisIdParam)) {
       // Diff view: serve the working-tree graph from diff.json so newly-added
       // modules/methods render as nodes instead of being missing from the baseline.
-      const diff = readDiff(repo.path);
+      const diff = await readDiff(repo.path);
       if (diff && diff.id === analysisIdParam) {
         snapshot = {
           head: `diff-${diff.id}`,
@@ -66,12 +66,12 @@ router.get('/:id/graph', async (req: Request, res: Response, next: NextFunction)
           violations: diff.newViolations,
         };
       } else {
-        const filename = findAnalysisFilename(repo.path, analysisIdParam);
+        const filename = await findAnalysisFilename(repo.path, analysisIdParam);
         if (!filename) {
           res.json({ nodes: [], edges: [] });
           return;
         }
-        const snap = readAnalysis(repo.path, filename);
+        const snap = await readAnalysis(repo.path, filename);
         if (!snap) {
           res.json({ nodes: [], edges: [] });
           return;
@@ -169,14 +169,14 @@ router.get('/:id/graph', async (req: Request, res: Response, next: NextFunction)
       modules: snapshot.graph.modules,
       methods: snapshot.graph.methods,
     });
-    const savedStablePositions = getScopedPositions(repo.path, snapshot.analysis.branch, level);
+    const savedStablePositions = await getScopedPositions(repo.path, snapshot.analysis.branch, level);
     const savedPositions = positionsToUuid(keyMap, savedStablePositions);
     for (const node of graphData.nodes) {
       const pos = savedPositions[node.id];
       if (pos) node.position = pos;
     }
 
-    const savedStableCollapsed = getScopedCollapsed(repo.path, snapshot.analysis.branch, level);
+    const savedStableCollapsed = await getScopedCollapsed(repo.path, snapshot.analysis.branch, level);
     const collapsedIds = idsToUuid(keyMap, savedStableCollapsed);
 
     res.set('Cache-Control', 'no-store');
@@ -208,13 +208,13 @@ router.put('/:id/graph/positions', async (req: Request, res: Response, next: Nex
       throw createAppError('Invalid positions data', 400);
     }
 
-    const repo = resolveProjectForRequest(id);
-    const latest = readLatest(repo.path);
+    const repo = await resolveProjectForRequest(id);
+    const latest = await readLatest(repo.path);
     if (!latest) throw createAppError('No analysis found', 404);
 
     const keyMap = keyMapFromLatest(latest);
     const stablePositions = positionsToStable(keyMap, positions);
-    setPositions(repo.path, latest.analysis.branch, level, stablePositions);
+    await setPositions(repo.path, latest.analysis.branch, level, stablePositions);
 
     res.json({ ok: true });
   } catch (error) {
@@ -227,8 +227,8 @@ router.delete('/:id/graph/positions', async (req: Request, res: Response, next: 
     const id = req.params.id as string;
     const branch = req.query.branch as string | undefined;
     const level = (req.query.level as string) || 'services';
-    const repo = resolveProjectForRequest(id);
-    clearPositions(repo.path, branch ?? null, level);
+    const repo = await resolveProjectForRequest(id);
+    await clearPositions(repo.path, branch ?? null, level);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -242,13 +242,13 @@ router.put('/:id/graph/collapsed', async (req: Request, res: Response, next: Nex
     const { collapsedIds: ids } = req.body as { collapsedIds: string[] };
     if (!Array.isArray(ids)) throw createAppError('Invalid collapsedIds data', 400);
 
-    const repo = resolveProjectForRequest(id);
-    const latest = readLatest(repo.path);
+    const repo = await resolveProjectForRequest(id);
+    const latest = await readLatest(repo.path);
     if (!latest) throw createAppError('No analysis found', 404);
 
     const keyMap = keyMapFromLatest(latest);
     const stableIds = idsToStable(keyMap, ids);
-    setCollapsed(repo.path, latest.analysis.branch, level, stableIds);
+    await setCollapsed(repo.path, latest.analysis.branch, level, stableIds);
 
     res.json({ ok: true });
   } catch (error) {

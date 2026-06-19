@@ -16,10 +16,10 @@ export interface RulesCategoriesOptions {
 }
 
 export async function runRulesCategories(options: RulesCategoriesOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
 
   if (options.reset) {
-    updateProjectConfig(repo.path, { enabledCategories: null });
+    await updateProjectConfig(repo.path, { enabledCategories: null });
     p.log.success("Reset to global default categories.");
     return;
   }
@@ -31,19 +31,19 @@ export async function runRulesCategories(options: RulesCategoriesOptions): Promi
       process.exit(1);
     }
 
-    const config = readProjectConfig(repo.path);
+    const config = await readProjectConfig(repo.path);
     const hasOverride = config.enabledCategories != null;
     const current = new Set<string>(hasOverride ? config.enabledCategories! : ALL_CATEGORIES);
 
     if (options.enable) current.add(cat);
     else current.delete(cat);
 
-    updateProjectConfig(repo.path, { enabledCategories: [...current] });
+    await updateProjectConfig(repo.path, { enabledCategories: [...current] });
     p.log.success(`${options.enable ? "Enabled" : "Disabled"} ${cat} rules for ${repo.name}.`);
     return;
   }
 
-  const config = readProjectConfig(repo.path);
+  const config = await readProjectConfig(repo.path);
   const isOverride = config.enabledCategories != null;
   const enabled = new Set<string>(isOverride ? config.enabledCategories! : ALL_CATEGORIES);
 
@@ -69,22 +69,22 @@ export interface RulesLlmOptions {
 }
 
 export async function runRulesLlm(options: RulesLlmOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
 
   if (options.reset) {
-    updateProjectConfig(repo.path, { enableLlmRules: null });
+    await updateProjectConfig(repo.path, { enableLlmRules: null });
     p.log.success("Reset LLM rules to global default.");
     return;
   }
 
   if (options.enable || options.disable) {
     const enabled = !!options.enable;
-    updateProjectConfig(repo.path, { enableLlmRules: enabled });
+    await updateProjectConfig(repo.path, { enableLlmRules: enabled });
     p.log.success(`LLM rules ${enabled ? "enabled" : "disabled"} for ${repo.name}.`);
     return;
   }
 
-  const config = readProjectConfig(repo.path);
+  const config = await readProjectConfig(repo.path);
   const isOverride = config.enableLlmRules != null;
   const effective = isOverride ? config.enableLlmRules! : true;
   const status = effective ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
@@ -104,12 +104,12 @@ const COLOR_ENABLED = "\x1b[32menabled\x1b[0m";
 const COLOR_DISABLED = "\x1b[31mdisabled\x1b[0m";
 const COLOR_DIM = (text: string) => `\x1b[2m${text}\x1b[0m`;
 
-function setRuleEnabled(repoPath: string, ruleKey: string, enabled: boolean): void {
-  const current = readProjectConfig(repoPath);
+async function setRuleEnabled(repoPath: string, ruleKey: string, enabled: boolean): Promise<void> {
+  const current = await readProjectConfig(repoPath);
   const set = new Set<string>(current.disabledRules ?? []);
   if (enabled) set.delete(ruleKey);
   else set.add(ruleKey);
-  updateProjectConfig(repoPath, { disabledRules: [...set].sort() });
+  await updateProjectConfig(repoPath, { disabledRules: [...set].sort() });
 }
 
 async function requireRuleKey(ruleKey: string): Promise<void> {
@@ -125,16 +125,16 @@ export interface RulesEnableOptions {
 }
 
 export async function runRulesEnable({ ruleKey }: RulesEnableOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
   await requireRuleKey(ruleKey);
-  setRuleEnabled(repo.path, ruleKey, true);
+  await setRuleEnabled(repo.path, ruleKey, true);
   p.log.success(`Enabled rule '${ruleKey}' for ${repo.name}.`);
 }
 
 export async function runRulesDisable({ ruleKey }: RulesEnableOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
   await requireRuleKey(ruleKey);
-  setRuleEnabled(repo.path, ruleKey, false);
+  await setRuleEnabled(repo.path, ruleKey, false);
   p.log.success(`Disabled rule '${ruleKey}' for ${repo.name}.`);
 }
 
@@ -160,7 +160,7 @@ const LANGUAGE_ABBREV: Record<AnalysisLanguage, string> = {
 };
 
 export async function runRulesList(options: RulesListOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
   const rules = await getRules(repo.path);
 
   const language = options.language as AnalysisLanguage | undefined;
@@ -245,13 +245,13 @@ export interface RulesResetOptions {
 }
 
 export async function runRulesReset({ ruleKey }: RulesResetOptions): Promise<void> {
-  const repo = requireRegisteredRepo();
+  const repo = await requireRegisteredRepo();
   if (ruleKey) {
     await requireRuleKey(ruleKey);
-    setRuleEnabled(repo.path, ruleKey, true);
+    await setRuleEnabled(repo.path, ruleKey, true);
     p.log.success(`Re-enabled '${ruleKey}' for ${repo.name}.`);
     return;
   }
-  updateProjectConfig(repo.path, { disabledRules: [] });
+  await updateProjectConfig(repo.path, { disabledRules: [] });
   p.log.success(`Cleared per-rule overrides for ${repo.name}.`);
 }

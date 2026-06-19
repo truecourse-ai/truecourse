@@ -29,6 +29,17 @@ interface Props {
   onToggleSeverity: (s: string) => void;
   onToggleKind: (k: string) => void;
   onToggleFile: (f: string) => void;
+  /**
+   * Whether the charts filter on click. OSS: true — they filter the adjacent
+   * drift list. EE: false — analytics is its own tab (the list is elsewhere), so
+   * the charts are display-only and filtering lives in the Verify tab instead.
+   */
+  interactive?: boolean;
+  /**
+   * Wide standalone Analytics tab (vs the narrow Verify aside): lay the kind donut
+   * and severity bars side-by-side in one row at ~2× height.
+   */
+  wide?: boolean;
 }
 
 const tooltipClass =
@@ -80,6 +91,8 @@ export function VerifyStatsColumn({
   onToggleSeverity,
   onToggleKind,
   onToggleFile,
+  interactive = true,
+  wide = false,
 }: Props) {
   if (!state) {
     return (
@@ -159,13 +172,27 @@ export function VerifyStatsColumn({
           </div>
 
           {!diffMode && <DriftTrendChart history={history} />}
-          <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={onToggleKind} />
-          <SeverityBarChart
-            data={{ byCategory: {}, bySeverity, total: source.length }}
-            activeSeverity={filters.severity}
-            onSeverityClick={onToggleSeverity}
-          />
-          <DriftTopFiles byFile={byFile} activeFile={filters.file} onFileClick={onToggleFile} />
+          {wide ? (
+            <div className="grid grid-cols-2 gap-3">
+              <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={interactive ? onToggleKind : undefined} tall />
+              <SeverityBarChart
+                data={{ byCategory: {}, bySeverity, total: source.length }}
+                activeSeverity={filters.severity}
+                onSeverityClick={interactive ? onToggleSeverity : undefined}
+                tall
+              />
+            </div>
+          ) : (
+            <>
+              <DriftKindChart byKind={byKind} activeKind={filters.kind} onKindClick={interactive ? onToggleKind : undefined} />
+              <SeverityBarChart
+                data={{ byCategory: {}, bySeverity, total: source.length }}
+                activeSeverity={filters.severity}
+                onSeverityClick={interactive ? onToggleSeverity : undefined}
+              />
+            </>
+          )}
+          <DriftTopFiles byFile={byFile} activeFile={filters.file} onFileClick={interactive ? onToggleFile : undefined} />
         </>
       </div>
     </div>

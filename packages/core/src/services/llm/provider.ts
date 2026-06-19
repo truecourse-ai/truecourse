@@ -1,6 +1,6 @@
 import type { Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import { getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import type { FlowEnrichmentContext } from './prompts.js';
 import type { UsageData } from '../usage.service.js';
 
@@ -266,10 +266,14 @@ export interface LLMProvider {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the LLM provider. Pass an `LlmTransport` to route every LLM call
- * through it (e.g. the agent file-mailbox, for headless/routine runs); omit it
- * to spawn the `claude` CLI (the default).
+ * Build the LLM provider. When no transport is passed it defaults to the
+ * installed transport seam (`getDefaultTransport`) — NOT the `claude` CLI:
+ *  - OSS: the seam is unset (undefined) ⇒ ClaudeCodeProvider spawns the CLI.
+ *  - EE: the seam holds the configured AI-SDK provider, or the loud
+ *    no-provider transport when none is set ⇒ EE never silently spawns the
+ *    (absent) `claude` binary; LLM work errors clearly instead.
+ * Pass an explicit `LlmTransport` to override (e.g. the agent file-mailbox).
  */
 export function createLLMProvider(transport?: LlmTransport): LLMProvider {
-  return new ClaudeCodeProvider(transport);
+  return new ClaudeCodeProvider(transport ?? getDefaultTransport());
 }

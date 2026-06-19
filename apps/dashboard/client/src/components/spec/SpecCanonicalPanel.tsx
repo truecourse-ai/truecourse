@@ -20,9 +20,18 @@ interface SpecCanonicalPanelProps {
   activePath: string | null;
   /** Single-click opens a transient tab; double-click pins it. */
   onOpen: (path: string, pinned: boolean) => void;
+  /** False for hosted (EE): no in-dashboard Scan button — the scan is server-side. */
+  supportsRescan?: boolean;
 }
 
-export function SpecCanonicalPanel({ tree, isLoading, error, activePath, onOpen }: SpecCanonicalPanelProps) {
+export function SpecCanonicalPanel({
+  tree,
+  isLoading,
+  error,
+  activePath,
+  onOpen,
+  supportsRescan = true,
+}: SpecCanonicalPanelProps) {
   if (isLoading && !tree) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -45,8 +54,17 @@ export function SpecCanonicalPanel({ tree, isLoading, error, activePath, onOpen 
         <div>
           <div className="font-semibold">No canonical spec yet</div>
           <div className="mt-1 text-xs">
-            Click <strong>Scan</strong> to discover docs and build the canonical
-            claim set.
+            {supportsRescan ? (
+              <>
+                Click <strong>Scan</strong> to discover docs and build the
+                canonical claim set.
+              </>
+            ) : (
+              <>
+                The canonical claim set is built automatically when this
+                repository is scanned.
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -89,6 +107,14 @@ function ModuleGroup({
         )}
         <Folder className="h-3.5 w-3.5 shrink-0" />
         <span className={`flex-1 truncate ${childActive ? 'text-foreground' : ''}`}>{module.name}</span>
+        {module.inherited && (
+          <span
+            className="shrink-0 rounded bg-primary/15 px-1 py-0.5 text-[8px] font-medium tracking-wider text-primary"
+            title="Every claim here is inherited from workspace Knowledge"
+          >
+            workspace
+          </span>
+        )}
       </button>
       {open && (
         <div>
@@ -111,6 +137,14 @@ function ModuleGroup({
               >
                 <FileText className="h-3 w-3 shrink-0" />
                 <span className="flex-1 truncate">{t.topic}</span>
+                {t.inherited && !isActive && (
+                  <span
+                    className="shrink-0 rounded bg-primary/15 px-1 py-0.5 text-[8px] font-medium tracking-wider text-primary"
+                    title="Inherited from workspace Knowledge"
+                  >
+                    workspace
+                  </span>
+                )}
                 <span className="shrink-0 text-[11px] text-muted-foreground">{t.claimCount}</span>
               </button>
             );

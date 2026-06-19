@@ -201,9 +201,14 @@ Tc {
       reference                                            -- ref
     | EntFormat EntTypeConstraint*                         -- format
     | EntPrimitive EntTypeUnion? EntTypeConstraint*        -- prim
+    | ident EntTypeUnion? EntTypeConstraint*               -- other
   EntFormat = kw<"uuid"> | kw<"email"> | kw<"iso-8601">
   EntPrimitive =
       kw<"string"> | kw<"integer"> | kw<"number"> | kw<"boolean"> | kw<"object"> | kw<"array">
+  // EntFieldType_other: descriptive scalar types the prose uses but the closed
+  // format/primitive sets don't name (timestamp, datetime, decimal, ...). Matched
+  // LAST so known formats/primitives win. Mirrors OpFieldType's ident leniency: an
+  // entity field's type is descriptive, and rejecting it drops the whole entity.
   EntTypeUnion = "|" ident
   EntTypeConstraint = (">=" | "<=" | ">" | "<") (number | ident)
 
@@ -215,6 +220,7 @@ Tc {
     | kw<"required">                           -- required
     | kw<"origin"> ident                       -- origin
     | kw<"mutability"> ident                   -- mutability
+    | kw<"computed-at"> ident                  -- computedAt
     | kw<"normalize"> ident                    -- normalize
     | kw<"format"> ident                       -- format
     | kw<"references"> reference               -- references

@@ -32,8 +32,8 @@ function Probe() {
       <span data-testid="section">{section}</span>
       <span data-testid="tab">{leftTab}</span>
       <span data-testid="search">{loc.search}</span>
-      <button onClick={() => setSection('drift')}>to-drift</button>
-      <button onClick={() => setSection('analysis')}>to-analysis</button>
+      <button onClick={() => setSection('verification')}>to-drift</button>
+      <button onClick={() => setSection('codequality')}>to-analysis</button>
       <button onClick={() => setLeftTab('files')}>tab-files</button>
       <button onClick={() => setLeftTab('home')}>tab-home</button>
     </div>
@@ -51,15 +51,15 @@ function renderAt(initialUrl: string) {
 }
 
 describe('NavigationContext — initial state from URL', () => {
-  it('defaults to analysis/home with no params', () => {
+  it('defaults to codequality/home with no params', () => {
     renderAt('/repos/abc');
-    expect(screen.getByTestId('section')).toHaveTextContent('analysis');
+    expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
   });
 
-  it('reads ?section=drift and defaults its tab to spec', () => {
-    renderAt('/repos/abc?section=drift');
-    expect(screen.getByTestId('section')).toHaveTextContent('drift');
+  it('reads ?section=verification and defaults its tab to spec', () => {
+    renderAt('/repos/abc?section=verification');
+    expect(screen.getByTestId('section')).toHaveTextContent('verification');
     expect(screen.getByTestId('tab')).toHaveTextContent('spec');
   });
 
@@ -68,14 +68,16 @@ describe('NavigationContext — initial state from URL', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('files');
   });
 
-  it('honours the legacy ?tab=violations alias', () => {
+  // The legacy ?tab=violations/?tab=analytics aliases were retired so the EE Code
+  // Quality decomposition could use those clean ids — they now resolve to themselves.
+  it('resolves ?tab=violations to the violations tab', () => {
     renderAt('/repos/abc?tab=violations');
-    expect(screen.getByTestId('tab')).toHaveTextContent('graphs');
+    expect(screen.getByTestId('tab')).toHaveTextContent('violations');
   });
 
-  it('honours the legacy ?tab=analytics alias', () => {
+  it('resolves ?tab=analytics to the analytics tab', () => {
     renderAt('/repos/abc?tab=analytics');
-    expect(screen.getByTestId('tab')).toHaveTextContent('home');
+    expect(screen.getByTestId('tab')).toHaveTextContent('analytics');
   });
 
   it('infers the flows tab from a ?flow deep link', () => {
@@ -85,34 +87,34 @@ describe('NavigationContext — initial state from URL', () => {
 
   it('snaps an out-of-section tab back to the section default', () => {
     // `files` belongs to analysis, not drift → expect the drift default.
-    renderAt('/repos/abc?section=drift&tab=files');
-    expect(screen.getByTestId('section')).toHaveTextContent('drift');
+    renderAt('/repos/abc?section=verification&tab=files');
+    expect(screen.getByTestId('section')).toHaveTextContent('verification');
     expect(screen.getByTestId('tab')).toHaveTextContent('spec');
   });
 });
 
 describe('NavigationContext — setters write the URL', () => {
-  it('setSection(drift) switches section, resets tab, sets ?section=drift&tab=spec', async () => {
+  it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=spec', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc');
     await user.click(screen.getByText('to-drift'));
 
-    expect(screen.getByTestId('section')).toHaveTextContent('drift');
+    expect(screen.getByTestId('section')).toHaveTextContent('verification');
     expect(screen.getByTestId('tab')).toHaveTextContent('spec');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).toContain('section=drift');
+    expect(search).toContain('section=verification');
     expect(search).toContain('tab=spec');
   });
 
-  it('setSection(analysis) clears ?section and lands on home (no ?tab)', async () => {
+  it('setSection(codequality) clears ?section and lands on home (no ?tab)', async () => {
     const user = userEvent.setup();
-    renderAt('/repos/abc?section=drift');
+    renderAt('/repos/abc?section=verification');
     await user.click(screen.getByText('to-analysis'));
 
-    expect(screen.getByTestId('section')).toHaveTextContent('analysis');
+    expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).not.toContain('section=drift');
+    expect(search).not.toContain('section=verification');
     expect(search).not.toContain('tab=');
   });
 

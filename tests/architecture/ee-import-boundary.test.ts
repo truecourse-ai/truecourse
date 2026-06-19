@@ -56,6 +56,12 @@ function walk(dir: string, out: string[]) {
 const STATIC_EE_IMPORT =
   /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"]@truecourse\/ee-|(?:^|\n)\s*import\s*['"]@truecourse\/ee-|require\(\s*['"]@truecourse\/ee-/;
 
+// Enterprise-only vendor SDKs: the AI SDK (`ee/packages/llm`) and the cloud blob
+// SDKs (`ee/packages/storage` — Azure / AWS S3). OSS must never import any of
+// them; OSS uses the CLI transport + the filesystem instead.
+const STATIC_AISDK_IMPORT =
+  /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|require\(\s*['"](?:ai|@ai-sdk\/[^'"]+|@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]/;
+
 describe('open-core import boundary', () => {
   it('no OSS source statically imports @truecourse/ee-*', () => {
     const files: string[] = [];
@@ -72,6 +78,24 @@ describe('open-core import boundary', () => {
     expect(
       offenders,
       `OSS files statically importing ee/ (use a gated dynamic import() instead):\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('no OSS source statically imports an enterprise vendor SDK (ai / @ai-sdk/* / @aws-sdk/* / @azure/*)', () => {
+    const files: string[] = [];
+    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const src = fs.readFileSync(file, 'utf8');
+      if (STATIC_AISDK_IMPORT.test(src)) {
+        offenders.push(path.relative(repoRoot, file));
+      }
+    }
+
+    expect(
+      offenders,
+      `OSS files importing an enterprise-only vendor SDK (AI SDK / cloud blob SDKs live in ee/):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 

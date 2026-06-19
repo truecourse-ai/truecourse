@@ -10,17 +10,25 @@ import { getProjectBySlug, touchProject } from '@truecourse/core/config/registry
  * Resolves the slug against the registry and rejects with 404 if unknown.
  * All per-project data reads happen in the route handlers via the file store.
  */
-export function projectResolver(req: Request, res: Response, next: NextFunction): void {
-  const slug = req.path.split('/').filter(Boolean)[0];
-  if (!slug) {
-    res.status(400).json({ error: 'Missing project slug' });
-    return;
+export async function projectResolver(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const slug = req.path.split('/').filter(Boolean)[0];
+    if (!slug) {
+      res.status(400).json({ error: 'Missing project slug' });
+      return;
+    }
+    const project = await getProjectBySlug(slug);
+    if (!project) {
+      res.status(404).json({ error: `Project "${slug}" not found` });
+      return;
+    }
+    await touchProject(project.slug);
+    next();
+  } catch (err) {
+    next(err);
   }
-  const project = getProjectBySlug(slug);
-  if (!project) {
-    res.status(404).json({ error: `Project "${slug}" not found` });
-    return;
-  }
-  touchProject(project.slug);
-  next();
 }

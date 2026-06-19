@@ -8,6 +8,7 @@
  */
 
 import { GitMerge, Loader2 } from 'lucide-react';
+import { formatRelativeTime } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useSpec } from '@/components/spec/SpecContext';
 import type { SpecConflict, SpecDecision } from '@/lib/api';
@@ -35,10 +36,24 @@ function compareTopics(a: string, b: string): number {
 interface DecisionsPanelProps {
   activeConflictId: string | null;
   onSelectConflict: (id: string | null) => void;
+  /** PR / Git-Diff mode: decisions aren't per-commit, so there's no PR delta. */
+  diffMode?: boolean;
 }
 
-export function DecisionsPanel({ activeConflictId, onSelectConflict }: DecisionsPanelProps) {
-  const { scan, hydrating } = useSpec();
+export function DecisionsPanel({ activeConflictId, onSelectConflict, diffMode = false }: DecisionsPanelProps) {
+  const { scan, hydrating, supportsRescan } = useSpec();
+
+  // Decisions are a repo-wide ledger (resolved in the dashboard), not per-commit —
+  // so a PR has no decisions delta. Don't show the full ledger as if it were the PR's.
+  if (diffMode) {
+    return (
+      <EmptyState
+        icon={GitMerge}
+        title="No decisions diff"
+        body="Decisions are repo-wide conflict resolutions made in the dashboard, not changes carried by a PR — so there's nothing to diff here. View them on the base branch."
+      />
+    );
+  }
 
   if (hydrating) {
     return (
@@ -54,10 +69,17 @@ export function DecisionsPanel({ activeConflictId, onSelectConflict }: Decisions
         icon={GitMerge}
         title="No scan yet"
         body={
-          <>
-            Click <strong>Scan</strong> on the Spec tab to start recording
-            decisions.
-          </>
+          supportsRescan ? (
+            <>
+              Click <strong>Scan</strong> on the Spec tab to start recording
+              decisions.
+            </>
+          ) : (
+            <>
+              Decisions are recorded when you resolve a conflict on the Spec tab,
+              which appears once this repository has been scanned.
+            </>
+          )
         }
       />
     );
@@ -224,16 +246,3 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max - 1).trimEnd() + '…';
 }
 
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  if (diffSec < 5) return 'just now';
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  return `${diffDay}d ago`;
-}

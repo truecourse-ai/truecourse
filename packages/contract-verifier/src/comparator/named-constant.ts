@@ -35,7 +35,7 @@ export interface NamedConstantCompareInput {
 }
 
 export function compareNamedConstant(input: NamedConstantCompareInput): ContractDrift[] {
-  const { ref, contract, codeConstants } = input;
+  const { ref, origin, contract, codeConstants } = input;
   const target = normalizeName(ref.identity);
   let matches = codeConstants.filter((c) => normalizeName(c.name) === target);
 
@@ -97,6 +97,7 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
       message: `Spec declares constant \`${ref.identity}\` but no code-side constant matches by name.`,
       specSide: `expected: ${formatValue(contract.expectedValue)}`,
       codeSide: '<no match>',
+      specOrigin: origin ?? undefined,
     }];
   }
 
@@ -121,6 +122,7 @@ export function compareNamedConstant(input: NamedConstantCompareInput): Contract
       message: `Spec asserts \`${ref.identity} = ${formatValue(contract.expectedValue)}\` but code has \`${formatValue(m.value)}\`.`,
       specSide: formatValue(contract.expectedValue),
       codeSide: formatValue(m.value),
+      specOrigin: origin ?? undefined,
     });
   }
   return drifts;

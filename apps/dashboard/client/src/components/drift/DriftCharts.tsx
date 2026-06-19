@@ -75,10 +75,13 @@ export function DriftKindChart({
   byKind,
   activeKind,
   onKindClick,
+  tall = false,
 }: {
   byKind: Record<string, number>;
   activeKind?: string | null;
   onKindClick?: (kind: string) => void;
+  /** Wide analytics layout: a fixed ~2× height instead of the aspect-capped 250px. */
+  tall?: boolean;
 }) {
   // Stable identity across re-renders that only change `activeKind`, so
   // recharts doesn't replay its mount animation (which hides labels).
@@ -128,7 +131,8 @@ export function DriftKindChart({
       <CardContent>
         <ChartContainer
           config={config}
-          className={`aspect-square w-full max-h-[250px] ${onKindClick ? '[&_.recharts-pie]:cursor-pointer' : ''}`}
+          className={`w-full ${tall ? '' : 'aspect-square max-h-[250px]'} ${onKindClick ? '[&_.recharts-pie]:cursor-pointer' : ''}`}
+          style={tall ? { aspectRatio: 'auto', height: 500 } : undefined}
         >
           <PieChart>
             <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
@@ -249,7 +253,7 @@ export function DriftTrendChart({ history }: { history: VerifyHistory }) {
         {points.length === 1 ? (
           <div className="flex flex-col items-center gap-1 py-6 text-center">
             <p className="text-2xl font-bold">{points[0].drifts}</p>
-            <p className="text-xs text-muted-foreground">Drifts in your first verify run — run more to see the trend.</p>
+            <p className="text-xs text-muted-foreground">Drifts in the first verify run — the trend appears once more runs land.</p>
           </div>
         ) : (
           <ChartContainer config={TREND_CONFIG} className="w-full" style={{ aspectRatio: 'auto', height: 200 }}>

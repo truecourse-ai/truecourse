@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Activity, BarChart3, CheckCircle2, FileText, GitCompare, PlusCircle, Shield } from 'lucide-react';
+import { Activity, BarChart3, CheckCircle2, FileText, GitCompare, PlusCircle, Shield, TriangleAlert } from 'lucide-react';
 import { TrendChart } from '@/components/analytics/TrendChart';
 import { TypePieChart } from '@/components/analytics/TypePieChart';
 import { SeverityBarChart } from '@/components/analytics/SeverityBarChart';
@@ -16,7 +16,9 @@ import { RulesPanel } from '@/components/rules/RulesPanel';
 import type { SeverityFilter } from '@/components/ui/SeverityDropdown';
 import { Sheet, SheetTrigger, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { useEdition } from '@/contexts/CapabilityContext';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
 type HomePanelProps = {
@@ -40,6 +42,9 @@ type HomePanelProps = {
    * refetch alongside, so any "rule disabled" event refreshes both lists
    * and chart numbers in one shot. */
   onRefreshAfterDisable?: () => void;
+  /** Which halves to render. EE Code Quality splits the OSS combined view into
+   *  separate Analytics + Violations tabs; OSS uses the default `full` (both). */
+  mode?: 'full' | 'analytics' | 'violations';
 };
 
 const MIN_PANEL_WIDTH = 300;
@@ -57,6 +62,7 @@ export function HomePanel({
   onLocateNode,
   onOpenFile,
   onRefreshAfterDisable,
+  mode = 'full',
 }: HomePanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
@@ -68,6 +74,8 @@ export function HomePanel({
 
   const [panelWidth, setPanelWidth] = useState(630);
   const isDragging = useRef(false);
+  // Hosted (EE) analysis runs server-side on the default branch; OSS runs locally.
+  const isEe = useEdition() === 'enterprise';
 
   const handleResizeDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -124,16 +132,25 @@ export function HomePanel({
   }, []);
 
   if (!hasAnalysis) {
+    // The empty state is per-tab in EE (Analytics vs Violations); OSS shows both.
+    const EmptyIcon = mode === 'violations' ? TriangleAlert : BarChart3;
+    const subject =
+      mode === 'analytics' ? 'Analytics' : mode === 'violations' ? 'Violations' : 'Violations and analytics';
     return (
       <div className="flex h-full w-full items-center justify-center p-6">
         <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-          <BarChart3 className="h-10 w-10 text-muted-foreground/60" />
-          <p className="text-sm font-medium text-foreground">No analysis data yet</p>
+          <EmptyIcon className="h-10 w-10 text-muted-foreground/60" />
+          <p className="text-sm font-medium text-foreground">No analysis yet</p>
           <p className="text-xs text-muted-foreground">
-            Click <span className="font-medium text-foreground">Analyze</span> above, or run{' '}
-            <code className="rounded bg-muted px-1 font-mono">truecourse analyze</code> from the
-            project directory. Violations and analytics will appear here once the first analysis
-            completes.
+            {isEe ? (
+              <>Code Quality runs automatically when your default branch is analyzed. {subject} appear here after the first run.</>
+            ) : (
+              <>
+                Click <span className="font-medium text-foreground">Analyze</span> above, or run{' '}
+                <code className="rounded bg-muted px-1 font-mono">truecourse analyze</code> from the
+                project directory. {subject} will appear here once the first analysis completes.
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -142,9 +159,12 @@ export function HomePanel({
 
   return (
     <div className="flex h-full w-full">
+      {mode !== 'violations' && (
       <aside
-        style={{ width: panelWidth }}
-        className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-card"
+        style={mode === 'full' ? { width: panelWidth } : undefined}
+        className={`relative flex h-full flex-col overflow-hidden bg-card ${
+          mode === 'full' ? 'shrink-0 border-r border-border' : 'min-w-0 flex-1'
+        }`}
       >
         {isDiffMode ? (
           <DiffAside
@@ -203,24 +223,32 @@ export function HomePanel({
             )}
           </div>
         )}
-        <div
-          className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
-          onMouseDown={handleResizeDown}
-        />
+        {mode === 'full' && (
+          <div
+            className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
+            onMouseDown={handleResizeDown}
+          />
+        )}
       </aside>
+      )}
 
+      {mode !== 'analytics' && (
       <main className="min-w-0 flex-1">
         {isDiffMode && !diffResult ? (
-          <div className="flex h-full w-full items-center justify-center p-6">
-            <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-              <GitCompare className="h-10 w-10 text-muted-foreground/60" />
-              <p className="text-sm font-medium text-foreground">No diff yet</p>
-              <p className="text-xs text-muted-foreground">
-                Click <span className="font-medium text-foreground">Analyze</span> above to
-                compare your uncommitted changes against the last full analysis.
-              </p>
-            </div>
-          </div>
+          <EmptyState
+            icon={GitCompare}
+            title={isEe ? 'No violation changes in this PR' : 'No diff yet'}
+            body={
+              isEe ? (
+                'New and resolved violations introduced by this PR are listed here.'
+              ) : (
+                <>
+                  Click <span className="font-medium text-foreground">Analyze</span> above to
+                  compare your uncommitted changes against the last full analysis.
+                </>
+              )
+            }
+          />
         ) : (
         <ViolationsPanel
           headerRight={
@@ -269,6 +297,7 @@ export function HomePanel({
         />
         )}
       </main>
+      )}
     </div>
   );
 }
@@ -296,14 +325,23 @@ function DiffAside({
   onSeverityClick,
   onOpenFile,
 }: DiffAsideProps) {
+  const isEe = useEdition() === 'enterprise';
   if (!diffResult) {
     return (
-      <div className="flex flex-1 items-center justify-center p-4">
-        <div className="text-center text-xs text-muted-foreground">
-          <GitCompare className="mx-auto mb-2 h-6 w-6 opacity-60" />
-          Click <span className="font-medium text-foreground">Analyze</span> to compute a diff.
-        </div>
-      </div>
+      <EmptyState
+        icon={GitCompare}
+        title={isEe ? 'No analytics for this PR' : 'No diff yet'}
+        body={
+          isEe ? (
+            'Severity and changed-file breakdowns appear here when this PR adds or resolves violations.'
+          ) : (
+            <>
+              Click <span className="font-medium text-foreground">Analyze</span> to see the
+              severity and changed-file breakdown.
+            </>
+          )
+        }
+      />
     );
   }
 

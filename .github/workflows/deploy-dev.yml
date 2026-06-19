@@ -1,0 +1,80 @@
+name: Deploy (dev)
+
+# Every PR builds the image and create-or-updates the shared Dev Container App.
+# The foundation resources (ACR, Container Apps env, identity, Key Vault) are
+# discovered from the resource group at runtime, so the only variables you set are
+# the OIDC identity + AZURE_RG + APP_NAME. GitHub touches nothing in the runtime
+# path: it builds in ACR and deploys via OIDC, no stored secret.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write      # OIDC federated login to Azure (no stored secret)
+  contents: read
+  pull-requests: write # post the Dev URL as a comment
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Discover foundation resources in the RG
+        id: infra
+        run: |
+          RG="${{ vars.AZURE_RG }}"
+          {
+            echo "acr_name=$(az acr list -g "$RG" --query '[0].name' -o tsv)"
+            echo "acr_login=$(az acr list -g "$RG" --query '[0].loginServer' -o tsv)"
+            echo "env_id=$(az containerapp env list -g "$RG" --query '[0].id' -o tsv)"
+            echo "identity_id=$(az identity list -g "$RG" --query '[0].id' -o tsv)"
+            echo "kv_uri=$(az keyvault list -g "$RG" --query '[0].properties.vaultUri' -o tsv)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build & push image (ACR builds it — no local Docker)
+        id: build
+        run: |
+          TAG="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::7}"
+          az acr build --registry "${{ steps.infra.outputs.acr_name }}" \
+            --image "truecourse:${TAG}" --file Dockerfile .
+          echo "image=${{ steps.infra.outputs.acr_login }}/truecourse:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create-or-update the Dev Container App
+        id: deploy
+        run: |
+          URL=$(az deployment group create -g "${{ vars.AZURE_RG }}" -n containerapp-dev \
+            -f infra/azure/containerapp.bicep \
+            -p name="${{ vars.APP_NAME }}" \
+               image="${{ steps.build.outputs.image }}" \
+               environmentId="${{ steps.infra.outputs.env_id }}" \
+               identityId="${{ steps.infra.outputs.identity_id }}" \
+               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+               keyVaultUri="${{ steps.infra.outputs.kv_uri }}" \
+            --query properties.outputs.url.value -o tsv)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Comment the Dev URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            const image = '${{ steps.build.outputs.image }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🚀 Deployed to **Dev**: ${url}\n\nImage: \`${image}\`\n` +
+                `_The Dev environment is shared — the most recent PR push wins._`,
+            });

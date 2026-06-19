@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { LlmExtractionSchema, SYSTEM_PROMPT, type LlmExtraction } from './prompt.js';
 
 /**
@@ -76,11 +77,16 @@ const BlockCacheEntrySchema = z.object({
 });
 export type BlockCacheEntry = z.infer<typeof BlockCacheEntrySchema>;
 
-export function readBlockCache(repoRoot: string, blockId: string): LlmExtraction | null {
-  const file = path.join(cachePaths(repoRoot).blocksDir, `${blockId}.json`);
-  if (!fs.existsSync(file)) return null;
+/** Cache name (= file subpath under `.truecourse/.cache/`) for block entries. */
+const BLOCK_CACHE_NAME = `consolidator/${BLOCKS_SUBDIR}`;
+
+export async function readBlockCache(
+  repoRoot: string,
+  blockId: string,
+): Promise<LlmExtraction | null> {
+  const raw = await getCacheEntry(repoRoot, BLOCK_CACHE_NAME, blockId);
+  if (raw === null) return null;
   try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     const entry = BlockCacheEntrySchema.parse(raw);
     if (entry.promptFingerprint !== EXTRACTION_PROMPT_FINGERPRINT) return null;
     return entry.extraction;
@@ -89,20 +95,18 @@ export function readBlockCache(repoRoot: string, blockId: string): LlmExtraction
   }
 }
 
-export function writeBlockCache(
+export async function writeBlockCache(
   repoRoot: string,
   blockId: string,
   extraction: LlmExtraction,
-): void {
-  ensureCacheDirs(repoRoot);
+): Promise<void> {
   const entry: BlockCacheEntry = {
     blockId,
     extraction,
     cachedAt: new Date().toISOString(),
     promptFingerprint: EXTRACTION_PROMPT_FINGERPRINT,
   };
-  const file = path.join(cachePaths(repoRoot).blocksDir, `${blockId}.json`);
-  fs.writeFileSync(file, JSON.stringify(entry, null, 2));
+  await setCacheEntry(repoRoot, BLOCK_CACHE_NAME, blockId, entry);
 }
 
 // ---------------------------------------------------------------------------

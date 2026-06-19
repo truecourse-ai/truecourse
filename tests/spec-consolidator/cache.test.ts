@@ -27,32 +27,32 @@ afterEach(() => {
 });
 
 describe('block cache', () => {
-  it('returns null for an unknown block id', () => {
-    expect(readBlockCache(repoRoot, 'unknown')).toBeNull();
+  it('returns null for an unknown block id', async () => {
+    expect(await readBlockCache(repoRoot, 'unknown')).toBeNull();
   });
 
-  it('round-trips an extraction', () => {
-    writeBlockCache(repoRoot, 'block-1', {
+  it('round-trips an extraction', async () => {
+    await writeBlockCache(repoRoot, 'block-1', {
       topics: ['endpoints'],
       claims: [{ topic: 'endpoints', subject: 'POST /x', content: { method: 'POST' }, kind: 'definition' }],
     });
-    const out = readBlockCache(repoRoot, 'block-1');
+    const out = await readBlockCache(repoRoot, 'block-1');
     expect(out).not.toBeNull();
     expect(out!.claims[0].subject).toBe('POST /x');
   });
 
-  it('returns null when the on-disk JSON is corrupt', () => {
+  it('returns null when the on-disk JSON is corrupt', async () => {
     const file = path.join(cachePaths(repoRoot).blocksDir, 'block-2.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, '{ not: "valid json"');
-    expect(readBlockCache(repoRoot, 'block-2')).toBeNull();
+    expect(await readBlockCache(repoRoot, 'block-2')).toBeNull();
   });
 
-  it('returns null when the JSON parses but fails the schema (rejects bad shapes)', () => {
+  it('returns null when the JSON parses but fails the schema (rejects bad shapes)', async () => {
     const file = path.join(cachePaths(repoRoot).blocksDir, 'block-3.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ blockId: 'block-3', extraction: { topics: [], claims: 'not-an-array' } }));
-    expect(readBlockCache(repoRoot, 'block-3')).toBeNull();
+    expect(await readBlockCache(repoRoot, 'block-3')).toBeNull();
   });
 });
 

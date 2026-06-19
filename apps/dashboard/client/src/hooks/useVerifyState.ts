@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import * as api from '@/lib/api';
 import type { VerifyState, VerifyDiff, VerifyHistory } from '@/lib/api';
 
-export function useVerifyState(repoId: string | undefined) {
+export function useVerifyState(repoId: string | undefined, ref?: string, pr?: number) {
   const [state, setState] = useState<VerifyState | null>(null);
   const [diff, setDiff] = useState<VerifyDiff | null>(null);
   const [history, setHistory] = useState<VerifyHistory>({ runs: [] });
@@ -29,20 +29,40 @@ export function useVerifyState(repoId: string | undefined) {
     setIsLoading(true);
     setError(null);
     try {
-      const [s, d, h] = await Promise.all([
-        api.getVerifyState(repoId),
-        api.getVerifyDiff(repoId),
-        api.getVerifyHistory(repoId),
-      ]);
-      setState(s);
-      setDiff(d);
-      setHistory(h);
+      if (pr != null) {
+        // PR view (EE) → the PR head's drift snapshot PLUS the diff of that
+        // snapshot against the repo's baseline (derived server-side). Both key off
+        // the head ref; local run history is a default-branch concept.
+        const [d, s] = await Promise.all([
+          ref ? api.getVerifyDiff(repoId, { ref }) : Promise.resolve(null),
+          ref ? api.getVerifyState(repoId, ref) : Promise.resolve(null),
+        ]);
+        setDiff(d);
+        setState(s);
+        setHistory({ runs: [] });
+      } else if (ref) {
+        // A specific ref (a PR head) → that commit's stored snapshot only; the
+        // working-tree diff and local run history are default-branch concepts.
+        const s = await api.getVerifyState(repoId, ref);
+        setState(s);
+        setDiff(null);
+        setHistory({ runs: [] });
+      } else {
+        const [s, d, h] = await Promise.all([
+          api.getVerifyState(repoId),
+          api.getVerifyDiff(repoId),
+          api.getVerifyHistory(repoId),
+        ]);
+        setState(s);
+        setDiff(d);
+        setHistory(h);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load verify state');
     } finally {
       setIsLoading(false);
     }
-  }, [repoId]);
+  }, [repoId, ref, pr]);
 
   const run = useCallback(async () => {
     if (!repoId) return;

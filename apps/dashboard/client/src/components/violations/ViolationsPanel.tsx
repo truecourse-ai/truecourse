@@ -1,11 +1,13 @@
 
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search, GitCompare } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
+import { useEdition } from '@/contexts/CapabilityContext';
+import { EmptyState } from '@/components/ui/empty-state';
 
 export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
 export type TypeFilter = 'all' | 'deterministic' | 'llm';
@@ -108,6 +110,9 @@ export function ViolationsPanel({
 }: ViolationsPanelProps) {
   const normalListRef = useRef<VirtuosoHandle>(null);
   const diffListRef = useRef<VirtuosoHandle>(null);
+  // Hosted (EE) diffs are computed by the PR gate server-side — there's no
+  // local "Analyze" button, so the OSS working-tree wording doesn't apply.
+  const isEe = useEdition() === 'enterprise';
 
   // Rules disabled in-session via the per-card "Disable rule" action. The
   // server has already persisted the change; this set just hides their
@@ -193,6 +198,7 @@ export function ViolationsPanel({
           fixPrompt: item.fixPrompt,
           filePath: item.filePath,
           lineStart: item.lineStart,
+          ruleKey: item.ruleKey,
           createdAt: new Date().toISOString(),
         },
         diffStatus: 'new',
@@ -404,7 +410,7 @@ export function ViolationsPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {isDiffMode && filteredDiffCards !== null ? (
             <>
-              {diffResult?.isStale && (
+              {diffResult?.isStale && !isEe && (
                 <div className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   Baseline analysis has changed. Click Analyze to refresh.
@@ -412,14 +418,23 @@ export function ViolationsPanel({
               )}
 
               {filteredDiffCards.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    {diffViolationCards && diffViolationCards.length > 0
-                      ? `No ${categoryFilter} violations in diff results`
-                      : 'No diff results yet. Click Analyze to compare your working tree against the baseline.'}
-                  </p>
-                </div>
+                diffViolationCards && diffViolationCards.length > 0 ? (
+                  <EmptyState
+                    icon={Search}
+                    title={`No ${categoryFilter} violations`}
+                    body="Clear the active filters to see all changes in this diff."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={GitCompare}
+                    title={isEe ? 'No violation changes in this PR' : 'No diff yet'}
+                    body={
+                      isEe
+                        ? 'New and resolved violations introduced by this PR are listed here.'
+                        : 'Click Analyze to compare your working tree against the baseline.'
+                    }
+                  />
+                )
               ) : (
                 <Virtuoso
                   ref={diffListRef}

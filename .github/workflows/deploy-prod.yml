@@ -1,0 +1,61 @@
+name: Deploy (prod)
+
+# Merge to main → build, push, and create-or-update the Prod Container App.
+# Same self-discovering pattern as dev; resolves to the `prod` Environment's
+# variables (AZURE_RG, APP_NAME). Provision the prod RG + configure the prod
+# Environment first (see infra/azure/README.md).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Discover foundation resources in the RG
+        id: infra
+        run: |
+          RG="${{ vars.AZURE_RG }}"
+          {
+            echo "acr_name=$(az acr list -g "$RG" --query '[0].name' -o tsv)"
+            echo "acr_login=$(az acr list -g "$RG" --query '[0].loginServer' -o tsv)"
+            echo "env_id=$(az containerapp env list -g "$RG" --query '[0].id' -o tsv)"
+            echo "identity_id=$(az identity list -g "$RG" --query '[0].id' -o tsv)"
+            echo "kv_uri=$(az keyvault list -g "$RG" --query '[0].properties.vaultUri' -o tsv)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build & push image
+        id: build
+        run: |
+          TAG="main-${GITHUB_SHA::7}"
+          az acr build --registry "${{ steps.infra.outputs.acr_name }}" \
+            --image "truecourse:${TAG}" --image "truecourse:latest" --file Dockerfile .
+          echo "image=${{ steps.infra.outputs.acr_login }}/truecourse:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create-or-update the Prod Container App
+        run: |
+          az deployment group create -g "${{ vars.AZURE_RG }}" -n containerapp-prod \
+            -f infra/azure/containerapp.bicep \
+            -p name="${{ vars.APP_NAME }}" \
+               image="${{ steps.build.outputs.image }}" \
+               environmentId="${{ steps.infra.outputs.env_id }}" \
+               identityId="${{ steps.infra.outputs.identity_id }}" \
+               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+               keyVaultUri="${{ steps.infra.outputs.kv_uri }}"

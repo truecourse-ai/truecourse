@@ -24,6 +24,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveClaudeBinary } from '../claude-binary.js';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import type { ZodTypeAny } from 'zod';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `spec.claimExtract:<block.id>`).
@@ -49,6 +51,58 @@ export interface LlmRequest {
 /** Returns the model's raw assistant text. The caller strips fences + parses. */
 export type LlmTransport = (req: LlmRequest) => Promise<string>;
 
+// ---------------------------------------------------------------------------
+// process-wide default transport
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional process-installed default transport. The CLI threads `cli`/`agent`
+ * per run, but a long-lived server can't pass a transport through every call
+ * site — so the enterprise edition installs an API-backed transport ONCE at
+ * boot via `setDefaultTransport`. Runners/providers that aren't handed an
+ * explicit transport fall back to this. Unset (OSS) → `undefined`, so callers
+ * use their own `cliTransport()` and behavior is byte-for-byte unchanged.
+ */
+let installedDefault: LlmTransport | undefined;
+
+/** Install (or clear, with `undefined`) the process-wide default transport. */
+export function setDefaultTransport(transport: LlmTransport | undefined): void {
+  installedDefault = transport;
+}
+
+/** The process-installed default transport, or `undefined` when none is set. */
+export function getDefaultTransport(): LlmTransport | undefined {
+  return installedDefault;
+}
+
+/** User-facing error when no LLM provider is configured (enterprise). */
+export const NO_LLM_PROVIDER_MESSAGE =
+  'No LLM provider is configured. Set one in Settings → Models.';
+
+/**
+ * The enterprise edition NEVER falls back to the local `claude` CLI. Until a
+ * provider is configured, EE installs THIS as the process default (via
+ * `setDefaultTransport`), so any LLM work errors loudly instead of silently
+ * spawning the (often-absent) CLI. Replaced by the real AI-SDK transport the
+ * moment a provider is saved/loaded.
+ */
+export const noProviderTransport: LlmTransport = async () => {
+  throw new Error(NO_LLM_PROVIDER_MESSAGE);
+};
+
+/**
+ * Whether a REAL provider transport is installed — not the no-provider sentinel
+ * and not unset. EE entry points that do LLM work (knowledge sync, the gate's
+ * contract generation) check this UP FRONT to fail loudly; otherwise the
+ * consolidator's fail-open handling (e.g. the relevance filter defaults to
+ * "include" on a transport error) silently swallows the "no provider" failure
+ * and the run looks like it succeeded with no output.
+ */
+export function isLlmConfigured(): boolean {
+  const t = getDefaultTransport();
+  return t !== undefined && t !== noProviderTransport;
+}
+
 /**
  * Strip a single leading ```...``` fence (some models wrap JSON in fences even
  * when told not to). Shared so every runner strips identically.
@@ -57,6 +111,23 @@ export function stripCodeFences(text: string): string {
   const trimmed = text.trim();
   const fence = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence ? fence[1] : trimmed;
+}
+
+/**
+ * Render a Zod schema as a JSON-schema STRING for `LlmRequest.schema`. The EE AI
+ * SDK transport feeds this to `generateObject` (structured output, schema-
+ * enforced); the OSS cli transport ignores it (it relies on the schema being
+ * described in the prompt + `stripCodeFences`).
+ *
+ * `$refStrategy: 'none'` INLINES every reused sub-schema rather than emitting a
+ * `$ref`. zod-to-json-schema's default refs a reused sub-schema by its first
+ * path (e.g. `#/properties/topics/items`), but provider structured-output
+ * validators require `$ref`s under `$defs`/`definitions` and reject the rest
+ * ("References must be defined under '$defs'…") — which fails the whole call.
+ * Inlining sidesteps it; these extraction schemas are flat DTOs, not recursive.
+ */
+export function jsonSchemaHint(schema: ZodTypeAny): string {
+  return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'none' }));
 }
 
 // ---------------------------------------------------------------------------

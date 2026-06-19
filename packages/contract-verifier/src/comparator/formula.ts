@@ -11,11 +11,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ContractDrift, ArtifactRef, FormulaContract } from '../types/index.js';
+import type { ContractDrift, ArtifactRef, FormulaContract, SpecOrigin } from '../types/index.js';
 import type { FormulaImplFacts } from '../extractor/formula-facts/index.js';
 
 export interface FormulaCompareInput {
   formulaRef: ArtifactRef;
+  /** Spec-side origin of the formula artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: FormulaContract;
   /** Implementation facts for the contract's output field, or null if none found. */
   facts: FormulaImplFacts | null;
@@ -50,6 +52,7 @@ export function compareFormula(input: FormulaCompareInput): ContractDrift[] {
           `the boundary case (${constraint.literal}) flips between the two.`,
         specSide: `... ${constraint.op} ${constraint.literal} ...`,
         codeSide: `... ${codeOp} ${constraint.literal} ...`,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }
@@ -83,6 +86,7 @@ export function compareFormula(input: FormulaCompareInput): ContractDrift[] {
           `The expression must depend on this input.`,
         specSide: `inputs include ${declared.entityRef.identity}.${inputName}`,
         codeSide: `parameter \`${matched.name}\` (unused)`,
+        specOrigin: input.origin ?? undefined,
       });
       continue;
     }
@@ -102,6 +106,7 @@ export function compareFormula(input: FormulaCompareInput): ContractDrift[] {
           `does not reference \`${matched.name}\` in its body.`,
         specSide: `inputs include ${declared.entityRef.identity}.${inputName}`,
         codeSide: `parameter \`${matched.name}\` declared but not read`,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }

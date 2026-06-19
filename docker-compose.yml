@@ -1,0 +1,58 @@
+# Boot the image locally (app + Postgres) to validate the build before it ships
+# to Azure Container Apps. Every credential comes from the environment — nothing
+# is hardcoded here. Put values in a gitignored .env (compose auto-loads it) or
+# export them inline:
+#
+#   POSTGRES_PASSWORD=$(openssl rand -hex 16) \
+#   TRUECOURSE_SECRET_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))") \
+#   WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=... \
+#   docker compose up --build
+#
+# EE activates when WORKOS_* + TRUECOURSE_SECRET_KEY are present; with WORKOS_*
+# unset it runs the community (file-based) edition.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-truecourse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (e.g. in a .env file)}
+      POSTGRES_DB: ${POSTGRES_DB:-truecourse}
+    volumes:
+      - tc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-truecourse}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    image: truecourse:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      TRUECOURSE_EDITION: enterprise
+      DATABASE_URL: postgres://${POSTGRES_USER:-truecourse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-truecourse}
+      # Required for EE — generate a strong 32+ char value (see header).
+      TRUECOURSE_SECRET_KEY: ${TRUECOURSE_SECRET_KEY:?set a 32+ char secret}
+      # SSO (WorkOS). Leave unset to run the community edition instead.
+      WORKOS_API_KEY: ${WORKOS_API_KEY:-}
+      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
+      WORKOS_COOKIE_PASSWORD: ${WORKOS_COOKIE_PASSWORD:-}
+      WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
+      WORKOS_APP_URL: ${WORKOS_APP_URL:-}
+      # GitHub App PR gate (optional).
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+
+volumes:
+  tc-pgdata:

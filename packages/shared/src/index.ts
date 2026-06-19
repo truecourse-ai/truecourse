@@ -1,4 +1,6 @@
 export * from './types/index.js'
 export * from './schemas/index.js'
 export * from './fs/tcignore.js'
+export * from './fs/skip-dirs.js'
 export * from './claude-binary.js'
+export * from './format/relative-time.js'

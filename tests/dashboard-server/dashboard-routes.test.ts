@@ -228,7 +228,7 @@ interface SeedResult {
   violations: ViolationWithNames[];
 }
 
-function seedStore(repoPath: string): SeedResult {
+async function seedStore(repoPath: string): Promise<SeedResult> {
   const graph = makeGraph();
   const v1 = makeViolation(graph, 'critical');
   const v2 = makeViolation(graph, 'high');
@@ -297,9 +297,9 @@ function seedStore(repoPath: string): SeedResult {
     },
   };
 
-  writeAnalysis(repoPath, snapshot);
-  writeLatest(repoPath, latest);
-  appendHistory(repoPath, historyEntry);
+  await writeAnalysis(repoPath, snapshot);
+  await writeLatest(repoPath, latest);
+  await appendHistory(repoPath, historyEntry);
 
   const diff: DiffSnapshot = {
     id: randomUUID(),
@@ -315,7 +315,7 @@ function seedStore(repoPath: string): SeedResult {
     summary: { newCount: 0, unchangedCount: 2, resolvedCount: 0 },
     usage: [],
   };
-  writeDiff(repoPath, diff);
+  await writeDiff(repoPath, diff);
 
   clearLatestCache();
   return { analysisId, filename, graph, violations };
@@ -332,8 +332,8 @@ describe('dashboard routes (seeded store)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    seed = seedStore(fixture.repoPath);
-    setLastAnalyzed(fixture.project.slug, seed.violations[0].createdAt);
+    seed = await seedStore(fixture.repoPath);
+    await setLastAnalyzed(fixture.project.slug, seed.violations[0].createdAt);
     app = createApp({ serveStatic: false });
   });
 
@@ -375,7 +375,7 @@ describe('dashboard routes (seeded store)', () => {
 
       await request(app).delete(`/api/repos/${fixture.project.slug}`).expect(204);
 
-      expect(getProjectBySlug(fixture.project.slug)).toBeNull();
+      expect(await getProjectBySlug(fixture.project.slug)).toBeNull();
       expect(fs.existsSync(tcDir)).toBe(false);
     });
 
@@ -470,7 +470,7 @@ describe('dashboard routes (seeded store)', () => {
       // Write directly to config — the PATCH endpoint validates against the
       // real rule catalogue, but the seeded violations use a synthetic key.
       // What we want to verify here is the read-side filtering, not PATCH.
-      updateProjectConfig(fixture.repoPath, { disabledRules: [ruleKey] });
+      await updateProjectConfig(fixture.repoPath, { disabledRules: [ruleKey] });
       clearLatestCache();
 
       const list = await request(app)
@@ -485,7 +485,7 @@ describe('dashboard routes (seeded store)', () => {
       expect(summary.body.bySeverity).toEqual({});
 
       // Re-enable restores them without re-running analysis.
-      updateProjectConfig(fixture.repoPath, { disabledRules: [] });
+      await updateProjectConfig(fixture.repoPath, { disabledRules: [] });
       const restored = await request(app)
         .get(`/api/repos/${fixture.project.slug}/violations`)
         .expect(200);

@@ -24,6 +24,7 @@ export type {
 } from './infer/index.js';
 export { driftToViolation, driftsToViolations } from './adapter/violation.js';
 export type { ContractDriftViolation } from './adapter/violation.js';
+export { assignOccurrenceIndices } from './occurrence.js';
 
 // Top-level convenience re-exports for the most common consumer types.
 // Core's analyze pipeline imports these directly when folding contract

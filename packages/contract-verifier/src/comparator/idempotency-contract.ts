@@ -16,6 +16,7 @@ import type {
   IdempotencyContractC,
   SelectorExpr,
   OperationContract,
+  SpecOrigin,
 } from '../types/index.js';
 import type { ResolvedArtifact } from '../resolver/index.js';
 import type { ExtractedOperation } from '../extractor/index.js';
@@ -23,6 +24,8 @@ import { routeKey } from '../extractor/idempotency-presence.js';
 
 export interface IdempotencyCompareInput {
   idempotencyRef: ArtifactRef;
+  /** Spec-side origin of the idempotency artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: IdempotencyContractC;
   specOps: Map<string, ResolvedArtifact>;
   recognizedOps: ExtractedOperation[];
@@ -64,6 +67,7 @@ export function compareIdempotency(input: IdempotencyCompareInput): ContractDrif
         `request-header ${input.contract.requestHeader}, ` +
         `semantics ${input.contract.semantics}`,
       codeSide: `route declared in ${op.filePath} with no idempotency-key handling on the handler chain`,
+      specOrigin: input.origin ?? undefined,
     });
   }
 

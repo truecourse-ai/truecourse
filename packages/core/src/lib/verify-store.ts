@@ -1,16 +1,15 @@
 /**
  * Verifier store — the drift-side mirror of `analysis-store.ts`. Same envelope
- * (per-run snapshots, a committable `LATEST.json` baseline, append-only
- * history, an optional diff), same atomic-write + mtime-cache conventions, but
- * rooted in its own subdir so its `LATEST.json` doesn't collide with analyze's.
+ * (per-run snapshots, a `LATEST.json` baseline, append-only history, an optional
+ * diff) and the same pluggable-store seam: file-backed by default (OSS), with the
+ * enterprise edition injecting a Postgres/Blob impl via `setVerifyStore`. The
+ * interface is async; the file impl wraps the synchronous `fs` calls.
  *
  * <repo>/.truecourse/verifier/
  *   runs/<iso>_<short-uuid>.json   per-run snapshots
- *   LATEST.json                     materialized current verify state (committable, diff baseline)
+ *   LATEST.json                     materialized current verify state (diff baseline)
  *   history.json                    per-run summaries (append-only)
  *   diff.json                       active diff against LATEST (optional)
- *
- * Consumers pass `repoPath` (the repo root, not the `.truecourse` dir).
  */
 
 import fs from 'node:fs';
@@ -48,96 +47,23 @@ export function verifyLatestPath(repoPath: string): string {
 export function verifyHistoryPath(repoPath: string): string {
   return path.join(verifierDir(repoPath), HISTORY_FILE);
 }
-export function verifyDiffPath(repoPath: string): string {
-  return path.join(verifierDir(repoPath), DIFF_FILE);
+/**
+ * `scope` keys an alternate diff slot alongside the default working-tree diff.
+ * OSS only ever uses the default (one uncommitted-changes diff); EE keys a diff
+ * per pull request (`pr-<N>`) so concurrent PRs don't clobber one another. The
+ * scope is sanitised to a safe filename fragment.
+ */
+export function verifyDiffPath(repoPath: string, scope?: string): string {
+  const file = scope ? `diff-${sanitizeScope(scope)}.json` : DIFF_FILE;
+  return path.join(verifierDir(repoPath), file);
+}
+function sanitizeScope(scope: string): string {
+  return scope.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 /** Filename for a new run snapshot — shares analyze's sortable ISO+uuid format. */
 export function buildVerifyRunFilename(runId: string, verifiedAt: string): string {
   return buildAnalysisFilename(runId, verifiedAt);
-}
-
-// ---------------------------------------------------------------------------
-// LATEST.json — mtime-keyed in-memory cache
-// ---------------------------------------------------------------------------
-
-const latestCache = new Map<string, { mtime: number; data: VerifyLatest }>();
-
-export function readVerifyLatest(repoPath: string): VerifyLatest | null {
-  const file = verifyLatestPath(repoPath);
-  let mtime: number;
-  try {
-    mtime = fs.statSync(file).mtimeMs;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      latestCache.delete(repoPath);
-      return null;
-    }
-    throw err;
-  }
-  const cached = latestCache.get(repoPath);
-  if (cached && cached.mtime === mtime) return cached.data;
-  const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyLatest;
-  latestCache.set(repoPath, { mtime, data });
-  return data;
-}
-
-export function writeVerifyLatest(repoPath: string, latest: VerifyLatest): void {
-  atomicWriteJson(verifyLatestPath(repoPath), latest);
-  latestCache.delete(repoPath);
-}
-
-export function deleteVerifyLatest(repoPath: string): void {
-  try {
-    fs.unlinkSync(verifyLatestPath(repoPath));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-  latestCache.delete(repoPath);
-}
-
-// ---------------------------------------------------------------------------
-// Per-run snapshots
-// ---------------------------------------------------------------------------
-
-export interface WrittenVerifyRun {
-  filename: string;
-  snapshot: VerifyRunSnapshot;
-}
-
-export function writeVerifyRun(repoPath: string, snapshot: VerifyRunSnapshot): WrittenVerifyRun {
-  const filename = buildVerifyRunFilename(snapshot.id, snapshot.verifiedAt);
-  atomicWriteJson(verifyRunPath(repoPath, filename), snapshot);
-  return { filename, snapshot };
-}
-
-export function readVerifyRun(repoPath: string, filename: string): VerifyRunSnapshot | null {
-  const file = verifyRunPath(repoPath, filename);
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyRunSnapshot;
-}
-
-/** List run filenames, oldest first (ISO prefix ⇒ chronological). */
-export function listVerifyRuns(repoPath: string): string[] {
-  const dir = runsDir(repoPath);
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
-}
-
-// ---------------------------------------------------------------------------
-// history.json
-// ---------------------------------------------------------------------------
-
-export function readVerifyHistory(repoPath: string): VerifyHistory {
-  const file = verifyHistoryPath(repoPath);
-  if (!fs.existsSync(file)) return { runs: [] };
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyHistory;
-}
-
-export function appendVerifyHistory(repoPath: string, entry: VerifyHistoryEntry): void {
-  const history = readVerifyHistory(repoPath);
-  history.runs.push(entry);
-  atomicWriteJson(verifyHistoryPath(repoPath), history);
 }
 
 /** Build the materialized LATEST view from a full run snapshot. */
@@ -161,58 +87,199 @@ function materializeVerifyLatest(snap: VerifyRunSnapshot, filename: string): Ver
   };
 }
 
-/**
- * Delete a single past run: its snapshot file + history entry. Returns true if
- * a matching run was found. If the deleted run is the one LATEST was built from,
- * LATEST (and any stale diff) are re-derived from the newest remaining run, or
- * removed entirely when no runs remain — so the dashboard's current verify
- * state never outlives its history. (Mirrors analyze's delete-analysis path.)
- */
-export function deleteVerifyRun(repoPath: string, runId: string): boolean {
-  const history = readVerifyHistory(repoPath);
-  const entry = history.runs.find((r) => r.id === runId);
-  if (!entry) return false;
-  try {
-    fs.unlinkSync(verifyRunPath(repoPath, entry.filename));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
-  history.runs = history.runs.filter((r) => r.id !== runId);
-  atomicWriteJson(verifyHistoryPath(repoPath), history);
+// ---------------------------------------------------------------------------
+// Store interface
+// ---------------------------------------------------------------------------
 
-  const latest = readVerifyLatest(repoPath);
-  if (latest && latest.head === entry.filename) {
-    // History is appended oldest-first, so the last entry is the newest.
-    const newest = history.runs[history.runs.length - 1];
-    const snap = newest ? readVerifyRun(repoPath, newest.filename) : null;
-    if (snap && newest) writeVerifyLatest(repoPath, materializeVerifyLatest(snap, newest.filename));
-    else deleteVerifyLatest(repoPath);
-    deleteVerifyDiff(repoPath); // baseline moved (or gone) — any diff is obsolete
-  }
-  return true;
+export interface WrittenVerifyRun {
+  filename: string;
+  snapshot: VerifyRunSnapshot;
+}
+
+/** Pluggable verify store. File-backed by default; EE injects Postgres/Blob. */
+export interface VerifyStore {
+  /** True when keyed by an on-disk working-tree path (OSS file store); false for
+   *  the hosted store, which keys by a stable repo identity. Lets callers choose
+   *  the right key (repoRoot vs repoKey) — see `verifyInProcess`. */
+  readonly materializesInPlace: boolean;
+  readVerifyLatest(repoPath: string): Promise<VerifyLatest | null>;
+  writeVerifyLatest(repoPath: string, latest: VerifyLatest): Promise<void>;
+  deleteVerifyLatest(repoPath: string): Promise<void>;
+  writeVerifyRun(repoPath: string, snapshot: VerifyRunSnapshot): Promise<WrittenVerifyRun>;
+  readVerifyRun(repoPath: string, filename: string): Promise<VerifyRunSnapshot | null>;
+  listVerifyRuns(repoPath: string): Promise<string[]>;
+  readVerifyHistory(repoPath: string): Promise<VerifyHistory>;
+  appendVerifyHistory(repoPath: string, entry: VerifyHistoryEntry): Promise<void>;
+  deleteVerifyRun(repoPath: string, runId: string): Promise<boolean>;
+  // `scope` (optional) selects a non-default diff slot — EE keys one per PR
+  // (`pr-<N>`). Omitted → the default working-tree diff (OSS).
+  readVerifyDiff(repoPath: string, scope?: string): Promise<VerifyDiff | null>;
+  writeVerifyDiff(repoPath: string, diff: VerifyDiff, scope?: string): Promise<void>;
+  deleteVerifyDiff(repoPath: string, scope?: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
-// diff.json
+// File-backed default impl (OSS) — synchronous fs under an async surface.
 // ---------------------------------------------------------------------------
 
-export function readVerifyDiff(repoPath: string): VerifyDiff | null {
-  const file = verifyDiffPath(repoPath);
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyDiff;
-}
+const latestCache = new Map<string, { mtime: number; data: VerifyLatest }>();
 
-export function writeVerifyDiff(repoPath: string, diff: VerifyDiff): void {
-  atomicWriteJson(verifyDiffPath(repoPath), diff);
-}
+class FileVerifyStore implements VerifyStore {
+  readonly materializesInPlace = true;
+  async readVerifyLatest(repoPath: string): Promise<VerifyLatest | null> {
+    const file = verifyLatestPath(repoPath);
+    let mtime: number;
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        latestCache.delete(repoPath);
+        return null;
+      }
+      throw err;
+    }
+    const cached = latestCache.get(repoPath);
+    if (cached && cached.mtime === mtime) return cached.data;
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyLatest;
+    latestCache.set(repoPath, { mtime, data });
+    return data;
+  }
 
-export function deleteVerifyDiff(repoPath: string): void {
-  try {
-    fs.unlinkSync(verifyDiffPath(repoPath));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  async writeVerifyLatest(repoPath: string, latest: VerifyLatest): Promise<void> {
+    atomicWriteJson(verifyLatestPath(repoPath), latest);
+    latestCache.delete(repoPath);
+  }
+
+  async deleteVerifyLatest(repoPath: string): Promise<void> {
+    try {
+      fs.unlinkSync(verifyLatestPath(repoPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    latestCache.delete(repoPath);
+  }
+
+  async writeVerifyRun(repoPath: string, snapshot: VerifyRunSnapshot): Promise<WrittenVerifyRun> {
+    const filename = buildVerifyRunFilename(snapshot.id, snapshot.verifiedAt);
+    atomicWriteJson(verifyRunPath(repoPath, filename), snapshot);
+    return { filename, snapshot };
+  }
+
+  async readVerifyRun(repoPath: string, filename: string): Promise<VerifyRunSnapshot | null> {
+    const file = verifyRunPath(repoPath, filename);
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyRunSnapshot;
+  }
+
+  async listVerifyRuns(repoPath: string): Promise<string[]> {
+    const dir = runsDir(repoPath);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort();
+  }
+
+  async readVerifyHistory(repoPath: string): Promise<VerifyHistory> {
+    const file = verifyHistoryPath(repoPath);
+    if (!fs.existsSync(file)) return { runs: [] };
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyHistory;
+  }
+
+  async appendVerifyHistory(repoPath: string, entry: VerifyHistoryEntry): Promise<void> {
+    const history = await this.readVerifyHistory(repoPath);
+    history.runs.push(entry);
+    atomicWriteJson(verifyHistoryPath(repoPath), history);
+  }
+
+  async deleteVerifyRun(repoPath: string, runId: string): Promise<boolean> {
+    const history = await this.readVerifyHistory(repoPath);
+    const entry = history.runs.find((r) => r.id === runId);
+    if (!entry) return false;
+    try {
+      fs.unlinkSync(verifyRunPath(repoPath, entry.filename));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    history.runs = history.runs.filter((r) => r.id !== runId);
+    atomicWriteJson(verifyHistoryPath(repoPath), history);
+
+    const latest = await this.readVerifyLatest(repoPath);
+    if (latest && latest.head === entry.filename) {
+      // History is appended oldest-first, so the last entry is the newest.
+      const newest = history.runs[history.runs.length - 1];
+      const snap = newest ? await this.readVerifyRun(repoPath, newest.filename) : null;
+      if (snap && newest) {
+        await this.writeVerifyLatest(repoPath, materializeVerifyLatest(snap, newest.filename));
+      } else {
+        await this.deleteVerifyLatest(repoPath);
+      }
+      await this.deleteVerifyDiff(repoPath); // baseline moved (or gone) — any diff is obsolete
+    }
+    return true;
+  }
+
+  async readVerifyDiff(repoPath: string, scope?: string): Promise<VerifyDiff | null> {
+    const file = verifyDiffPath(repoPath, scope);
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyDiff;
+  }
+
+  async writeVerifyDiff(repoPath: string, diff: VerifyDiff, scope?: string): Promise<void> {
+    atomicWriteJson(verifyDiffPath(repoPath, scope), diff);
+  }
+
+  async deleteVerifyDiff(repoPath: string, scope?: string): Promise<void> {
+    try {
+      fs.unlinkSync(verifyDiffPath(repoPath, scope));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Active store registry + public delegators (same names, now async).
+// ---------------------------------------------------------------------------
+
+let active: VerifyStore = new FileVerifyStore();
+
+/** The active verify store (file-backed unless EE installed a Postgres one). */
+export function getVerifyStore(): VerifyStore {
+  return active;
+}
+/** True when the active verify store keys by an on-disk path (OSS file store). */
+export const verifyMaterializeInPlace = (): boolean => active.materializesInPlace;
+/** Install a verify store (e.g. the enterprise Postgres/Blob impl). */
+export function setVerifyStore(store: VerifyStore): void {
+  active = store;
+}
+/** Restore the file-backed default (tests). */
+export function resetVerifyStore(): void {
+  active = new FileVerifyStore();
+}
+
+export const readVerifyLatest = (repoPath: string): Promise<VerifyLatest | null> =>
+  active.readVerifyLatest(repoPath);
+export const writeVerifyLatest = (repoPath: string, latest: VerifyLatest): Promise<void> =>
+  active.writeVerifyLatest(repoPath, latest);
+export const deleteVerifyLatest = (repoPath: string): Promise<void> =>
+  active.deleteVerifyLatest(repoPath);
+export const writeVerifyRun = (repoPath: string, snapshot: VerifyRunSnapshot): Promise<WrittenVerifyRun> =>
+  active.writeVerifyRun(repoPath, snapshot);
+export const readVerifyRun = (repoPath: string, filename: string): Promise<VerifyRunSnapshot | null> =>
+  active.readVerifyRun(repoPath, filename);
+export const listVerifyRuns = (repoPath: string): Promise<string[]> =>
+  active.listVerifyRuns(repoPath);
+export const readVerifyHistory = (repoPath: string): Promise<VerifyHistory> =>
+  active.readVerifyHistory(repoPath);
+export const appendVerifyHistory = (repoPath: string, entry: VerifyHistoryEntry): Promise<void> =>
+  active.appendVerifyHistory(repoPath, entry);
+export const deleteVerifyRun = (repoPath: string, runId: string): Promise<boolean> =>
+  active.deleteVerifyRun(repoPath, runId);
+export const readVerifyDiff = (repoPath: string, scope?: string): Promise<VerifyDiff | null> =>
+  active.readVerifyDiff(repoPath, scope);
+export const writeVerifyDiff = (repoPath: string, diff: VerifyDiff, scope?: string): Promise<void> =>
+  active.writeVerifyDiff(repoPath, diff, scope);
+export const deleteVerifyDiff = (repoPath: string, scope?: string): Promise<void> =>
+  active.deleteVerifyDiff(repoPath, scope);
 
 /** Test-only: clear the LATEST cache between fixtures. */
 export function clearVerifyLatestCache(): void {

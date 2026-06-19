@@ -5,10 +5,25 @@
  * the read-only counters stay inside the left panel.
  */
 
+import { formatRelativeTime } from '@truecourse/shared';
 import { useSpec } from './SpecContext';
 
-export function SpecStats() {
+export function SpecStats({
+  diff,
+}: {
+  /** PR / Git-Diff mode: show the delta counts in the same strip instead of base totals. */
+  diff?: { added: number; removed: number; conflicts: number };
+} = {}) {
   const { scan } = useSpec();
+  if (diff) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+        <Stat label="Added" value={diff.added} />
+        <Stat label="Removed" value={diff.removed} />
+        {diff.conflicts > 0 && <Stat label="New conflicts" value={diff.conflicts} highlight />}
+      </div>
+    );
+  }
   if (!scan) return null;
   const hasOpen = scan.openConflicts.length > 0;
   const scannedAt = scan.scannedAt;
@@ -46,16 +61,3 @@ function Stat({
   );
 }
 
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  if (diffSec < 5) return 'just now';
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  return `${diffDay}d ago`;
-}

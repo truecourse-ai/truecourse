@@ -16,7 +16,7 @@ const STUB_ICON = SECTIONS[0].icon;
 
 describe('SectionSwitcher (harness smoke test)', () => {
   it('renders the active section label', () => {
-    render(<SectionSwitcher value="analysis" onChange={() => {}} />);
+    render(<SectionSwitcher value="codequality" onChange={() => {}} />);
     expect(
       screen.getByRole('button', { name: /Code Analysis/i }),
     ).toBeInTheDocument();
@@ -24,7 +24,7 @@ describe('SectionSwitcher (harness smoke test)', () => {
 
   it('opens the menu and exposes the other section', async () => {
     const user = userEvent.setup();
-    render(<SectionSwitcher value="analysis" onChange={() => {}} />);
+    render(<SectionSwitcher value="codequality" onChange={() => {}} />);
 
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
 
@@ -36,18 +36,18 @@ describe('SectionSwitcher (harness smoke test)', () => {
   it('invokes onChange when a different section is picked', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
-    render(<SectionSwitcher value="analysis" onChange={onChange} />);
+    render(<SectionSwitcher value="codequality" onChange={onChange} />);
 
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
     await user.click(screen.getByRole('menuitemradio', { name: /BL Drift/i }));
 
-    expect(onChange).toHaveBeenCalledExactlyOnceWith('drift');
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('verification');
   });
 
   it('does not invoke onChange when the current section is re-picked', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
-    render(<SectionSwitcher value="analysis" onChange={onChange} />);
+    render(<SectionSwitcher value="codequality" onChange={onChange} />);
 
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
     await user.click(
@@ -82,7 +82,7 @@ describe('SectionSwitcher (capability filtering)', () => {
     const user = userEvent.setup();
     render(
       <AppProvider initial={{ edition: 'community', capabilities: [] }}>
-        <SectionSwitcher value="analysis" onChange={() => {}} />
+        <SectionSwitcher value="codequality" onChange={() => {}} />
       </AppProvider>,
     );
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
@@ -99,7 +99,7 @@ describe('SectionSwitcher (capability filtering)', () => {
       <AppProvider
         initial={{ edition: 'enterprise', capabilities: ['pr-gates'] }}
       >
-        <SectionSwitcher value="analysis" onChange={() => {}} />
+        <SectionSwitcher value="codequality" onChange={() => {}} />
       </AppProvider>,
     );
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));

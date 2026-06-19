@@ -11,11 +11,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ContractDrift, ArtifactRef, EffectGroupContract } from '../types/index.js';
+import type { ContractDrift, ArtifactRef, EffectGroupContract, SpecOrigin } from '../types/index.js';
 import type { EmissionFacts } from '../extractor/effect/emission-facts.js';
 
 export interface EffectGroupCompareInput {
   effectGroupRef: ArtifactRef;
+  /** Spec-side origin of the effect-group artifact (source doc + section). */
+  origin: SpecOrigin | null;
   contract: EffectGroupContract;
   /** Per-operation emission facts for every recognized operation. */
   emission: EmissionFacts;
@@ -60,6 +62,7 @@ export function compareEffectGroup(input: EffectGroupCompareInput): ContractDrif
           : events.length > 0
             ? `handler emits: ${events.join(', ')}`
             : `handler does not emit any tracked event`,
+        specOrigin: input.origin ?? undefined,
       });
     }
   }
@@ -82,6 +85,7 @@ export function compareEffectGroup(input: EffectGroupCompareInput): ContractDrif
             `emission on failure responses.`,
           specSide: `forbid emission when-response-status [4xx, 5xx]`,
           codeSide: `emit \`${site.event}\` co-located with a 4xx/5xx response`,
+          specOrigin: input.origin ?? undefined,
         });
       }
     }

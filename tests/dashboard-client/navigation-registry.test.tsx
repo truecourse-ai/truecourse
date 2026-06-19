@@ -40,25 +40,37 @@ const STUB_ICON = SECTIONS[0].icon;
 describe('navigation registry — pure lookups', () => {
   it('ships OSS analysis and drift sections', () => {
     const ids = SECTIONS.map((s) => s.id);
-    expect(ids).toContain('analysis');
-    expect(ids).toContain('drift');
+    expect(ids).toContain('codequality');
+    expect(ids).toContain('verification');
   });
 
   it('getSection returns descriptor or undefined', () => {
-    expect(getSection('analysis')?.label).toBe('Code Analysis');
-    expect(getSection('drift')?.label).toBe('BL Drift');
+    expect(getSection('codequality')?.label).toBe('Code Analysis');
+    expect(getSection('verification')?.label).toBe('BL Drift');
     expect(getSection('nope')).toBeUndefined();
   });
 
   it('tabsForSection returns section tabs (or empty)', () => {
-    const tabs = tabsForSection('drift').map((t) => t.id);
-    expect(tabs).toEqual(['spec', 'contracts', 'verify', 'runs', 'decisions']);
+    const tabs = tabsForSection('verification').map((t) => t.id);
+    // `pulls` + `settings` are EE-only (capability-gated; the raw lookup is
+    // unfiltered, so they appear here — visibility filtering happens elsewhere).
+    expect(tabs).toEqual([
+      'pulls',
+      'spec',
+      'contracts',
+      'verify',
+      'driftanalytics',
+      'runs',
+      'decisions',
+      'inferred',
+      'settings',
+    ]);
     expect(tabsForSection('nope')).toEqual([]);
   });
 
   it('defaultTabForSection returns the registered default', () => {
-    expect(defaultTabForSection('analysis')).toBe('home');
-    expect(defaultTabForSection('drift')).toBe('spec');
+    expect(defaultTabForSection('codequality')).toBe('home');
+    expect(defaultTabForSection('verification')).toBe('spec');
     expect(defaultTabForSection('nope')).toBe('');
   });
 
@@ -67,7 +79,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['spec', 'contracts', 'verify', 'runs', 'decisions']) {
+    for (const t of ['pulls', 'spec', 'contracts', 'verify', 'runs', 'decisions']) {
       expect(ids.has(t)).toBe(true);
     }
   });
@@ -130,7 +142,7 @@ describe('navigation registry — capability gating', () => {
         <VisibleSectionsProbe />
       </AppProvider>,
     );
-    expect(screen.getByTestId('sections')).toHaveTextContent(/^analysis,drift$/);
+    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,verification$/);
   });
 
   it('enterprise edition with the capability shows the gated section', () => {
@@ -143,7 +155,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('sections')).toHaveTextContent(
-      /^analysis,drift,governance$/,
+      /^codequality,verification,governance$/,
     );
   });
 
@@ -183,5 +195,30 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent('');
+  });
+
+  it('analysis Flows/Files/Databases are an INVERSE gate on local-filesystem (OSS shows them, EE hides them)', () => {
+    // OSS advertises `local-filesystem` → the full analysis tab set is visible.
+    const { unmount } = render(
+      <AppProvider initial={{ edition: 'community', capabilities: ['local-filesystem'] }}>
+        <VisibleTabsProbe section="codequality" />
+      </AppProvider>,
+    );
+    expect(screen.getByTestId('tabs')).toHaveTextContent(
+      /^home,graphs,flows,files,databases,analyses$/,
+    );
+    unmount();
+
+    // Hosted EE omits `local-filesystem` (Flows/Files/Databases vanish) but has
+    // `workspace` → the EE-only Code Quality tabs (analytics/violations) appear.
+    // RepoPage curates which of these the bar shows via EE_ANALYSIS_TAB_ORDER.
+    render(
+      <AppProvider initial={{ edition: 'enterprise', capabilities: ['sso', 'workspace', 'github-gate'] }}>
+        <VisibleTabsProbe section="codequality" />
+      </AppProvider>,
+    );
+    expect(screen.getByTestId('tabs')).toHaveTextContent(
+      /^home,graphs,analyses,analytics,violations$/,
+    );
   });
 });

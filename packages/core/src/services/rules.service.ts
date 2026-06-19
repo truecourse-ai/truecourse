@@ -37,7 +37,7 @@ function toAnalysisRule(
  */
 export async function getRules(repoPath?: string): Promise<AnalysisRule[]> {
   const disabled = repoPath
-    ? new Set<string>(readProjectConfig(repoPath).disabledRules ?? [])
+    ? new Set<string>((await readProjectConfig(repoPath)).disabledRules ?? [])
     : null;
   return getAllDefaultRules().map((r) =>
     toAnalysisRule(r, disabled ? r.enabled && !disabled.has(r.key) : r.enabled),

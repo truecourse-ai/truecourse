@@ -74,6 +74,7 @@ export function VerifyRunsPanel({
   selectedRunId,
   onViewRun,
   onDeleteRun,
+  hosted = false,
 }: {
   history: VerifyHistory;
   /** The run currently being viewed (null = latest). */
@@ -81,6 +82,8 @@ export function VerifyRunsPanel({
   /** Open a run in the Verify tab (null = latest). */
   onViewRun: (runId: string | null) => void;
   onDeleteRun: (runId: string) => Promise<void>;
+  /** Hosted (EE): verify runs are produced server-side, not via a Verify button. */
+  hosted?: boolean;
 }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -91,7 +94,11 @@ export function VerifyRunsPanel({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
         <ShieldCheck className="h-8 w-8 opacity-50" />
-        <p>No verify runs yet. Run Verify to see results here.</p>
+        <p>
+          {hosted
+            ? 'No verify runs yet. Runs appear here automatically after each scan.'
+            : 'No verify runs yet. Run Verify to see results here.'}
+        </p>
       </div>
     );
   }
