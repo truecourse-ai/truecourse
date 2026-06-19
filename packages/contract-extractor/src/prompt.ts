@@ -728,6 +728,49 @@ Concretely: if the slice heading path includes words like "overview", "stack",
 sentences with no exceptions listed, prefer \`UnenforceableObligation\` for that
 statement rather than a duplicate \`auth-requirement\`.
 
+# Auth-requirement: tier/deployment-conditional auth gates the path, not the obligation
+
+When a spec gates an auth requirement on an **environment/tier/deployment context**
+— typical wording: "X authentication is required when using <Hosted/Cloud/Plus>",
+"OSS does not require authentication", "Self-hosted instances may run without an
+API key" — and provides path examples for each variant, the auth requirement
+**applies only to the variant whose path uniquely identifies that tier**, not to
+the bare path that the other tier also serves. Scope the \`selector path-glob\` to
+that variant's path; do NOT use the unconditional/bare path, because that path
+matches the tier the spec said does NOT require auth, producing an artifact that
+asserts authentication on a route the spec explicitly leaves unauthenticated.
+
+Concrete example. The spec for an asset-materialization endpoint says:
+
+  "Authentication headers aren't required if using <Product> OSS"
+  → \`http://localhost:3000/report_asset_materialization/\`
+  "Authentication headers are required if using <Product> Cloud"
+  → \`https://[ORG].<product>.cloud/[DEPLOYMENT]/report_asset_materialization/\`
+
+Two paths describe the SAME endpoint name; only the Cloud path carries a
+deployment-scope segment. Encode this as:
+
+  auth-requirement auth.apikey.report-asset-materialization {
+    origin "<source>" "<section>" <lines>
+    scheme ApiKey
+    // Scope to the Cloud variant — the OSS path serves the same endpoint
+    // unauthenticated, which the spec explicitly states.
+    selector path-glob "/[deployment]/report_asset_materialization/"
+    on-violation { status 401  error-code unauthenticated }
+  }
+
+If both variants share the same bare path (the spec doesn't give a separate
+path-form for the gated tier), the auth obligation isn't structurally encodable
+as a single path-globbed \`auth-requirement\` — emit an \`UnenforceableObligation\`
+carrying the conditional ("ApiKey required on the <tier> deployment"), and do
+NOT emit a bare-path \`auth-requirement\`. A bare-path requirement would assert
+authentication on the tier the spec said does NOT require it.
+
+Discriminator: this rule fires only when the spec **names two tiers** and gives
+each its own path. If the spec uniformly says "all routes require auth," the
+default unconditional \`auth-requirement\` rule above applies — do not invoke this
+exception.
+
 # Parameterized paths that are pattern descriptions, not real endpoints
 
 Sometimes a spec section uses a parameterized path (e.g., \`GET /api/v1/reports/{slug}\`)
