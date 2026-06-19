@@ -153,6 +153,18 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
       // implement them, so an implementation.missing drift here is always a false positive.
       if (/^[A-Z]+ https?:\/\//.test(artifact.ref.identity)) continue;
 
+      // Same root cause, post-relativization: when a spec lifts an absolute
+      // cloud-control-plane URL into a path identity, the host is dropped but a
+      // leading deployment-scope placeholder segment survives — e.g.
+      // "POST /[deployment]/report_asset_materialization/". The square-bracket
+      // segment is doc-placeholder notation; Express/FastAPI route declarations
+      // express path params as ":id"/"{id}", never "[id]", so a leading "/[…]/"
+      // segment marks a per-deployment hosted route served by the managed
+      // control plane, not by the OSS code under verification. Treat it as
+      // out-of-scope (the same family as the absolute-URL guard above), not an
+      // implementation.missing false positive.
+      if (/^[A-Z]+ \/\[[^\]/]+\]\//.test(artifact.ref.identity)) continue;
+
       drifts.push({
         id: cryptoRandomId(),
         type: 'contract-drift',
