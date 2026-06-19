@@ -381,16 +381,21 @@ The Claude session is the only writer. Ordering is "oldest open issue without
 The chain is **generate → storage PR opened → discover → discovery PR merge → fix loop →
 campaign-close PR merge → (close tags + cleans up + generate starts next)**. Every hop is a
 `pull_request.closed` (merged) event, **except** generate→discover which is `pull_request.opened`
-(the storage PR is never merged). All filtered by **head-branch prefix + label**:
+(the storage PR is never merged). Each routine is filtered by **head-branch prefix only** — the
+prefix is unique per routine, so the label is redundant as a trigger. **Labels are not trigger
+filters**; they only organize issues (finding open work, `*-blocked` / `*-skipped` state, the
+Telegram burst rollup). Configure each routine's GitHub trigger on the branch prefix alone.
 
-| PR event | Branch | Label | Fires |
-|---|---|---|---|
-| **opened** | `claude/drift-fp-store/` | `drift-fp-store` | `drift-fp-discover` |
-| merged | `claude/drift-fp-discover/` | `drift-fp-discover` | `drift-fp-next-fix-bootstrap` |
-| merged | `claude/drift-fp-fix/` | `drift-fp-fix` | `drift-fp-next-fix` |
-| merged | `claude/drift-fp-campaign-close/` | `drift-fp-campaign-complete` | `drift-fp-campaign-close` (tag + cleanup) **+** `drift-fp-generate` (next campaign) |
+| PR event | Branch (trigger) | Fires |
+|---|---|---|
+| **opened** | `claude/<SCOPE>drift-fp-store/` | `<SCOPE>drift-fp-discover` |
+| merged | `claude/<SCOPE>drift-fp-discover/` | `<SCOPE>drift-fp-next-fix-bootstrap` |
+| merged | `claude/<SCOPE>drift-fp-fix/` | `<SCOPE>drift-fp-next-fix` |
+| merged | `claude/<SCOPE>drift-fp-campaign-close/` | `<SCOPE>drift-fp-campaign-close` (tag + cleanup) **+** `<SCOPE>drift-fp-generate` (next campaign) |
 
-The very first campaign is bootstrapped with **Run now** on `drift-fp-generate`.
+`<SCOPE>` is the per-account prefix (empty for the default account; `cs-` for the C# account) —
+see [Scopes (multi-account)](#scopes-multi-account). The very first campaign is bootstrapped with
+**Run now** on `drift-fp-generate`.
 
 All run as Anthropic-managed cloud sessions on the **Default** environment. Configured at
 [claude.ai/code/routines](https://claude.ai/code/routines). As in the analysis loop,
@@ -409,12 +414,40 @@ every step exactly. If the file is missing or unreadable, post a short failure n
 session and end.
 ```
 
+For a **scoped** account, append the two parameters the prompt's "Routine parameters" section
+reads (omit them on the default account — empty is the default and behaves identically):
+
+```
+Parameters: SCOPE=cs-  TECH_STACKS=csharp
+```
+
+### Scopes (multi-account)
+
+The same chain can run on more than one account over **disjoint** campaign sets — e.g. the default
+account handles TS/JS + Python while a second account handles **C# only**. Both accounts clone the
+same `truecourse-ai/truecourse` and share one `campaigns.yaml`; isolation comes from two prompt
+parameters (defined in every prompt's "Routine parameters" section):
+
+- **`SCOPE`** prefixes every branch, label, and issue-title tag (default empty; C# uses `cs-`). Since
+  each routine triggers on its branch prefix, a `cs-`-scoped routine only ever wakes on `cs-…`
+  branches and only reads/writes `cs-…` labels + titles — it never collides with the default
+  account, and vice versa.
+- **`TECH_STACKS`** filters campaign selection by each campaign's `tech_stack` (default empty = all;
+  C# uses `csharp`). This is what stops the C# account's `generate`/`discover` from picking a
+  TS/JS/Python campaign.
+
+To stand up the C# account: create the five routines below on it, each with its branch-prefix
+trigger using the `cs-` prefix (e.g. `claude/cs-drift-fp-fix/`), and paste the bootstrap pointer
+with `Parameters: SCOPE=cs-  TECH_STACKS=csharp`. Add C# repos to `campaigns.yaml` with
+`tech_stack: [csharp, …]`. The default account needs **no change** — omitting the parameters keeps
+its behavior byte-identical.
+
 ### 1. `drift-fp-generate` (the only LLM routine)
 
 | Field | Value |
 |---|---|
 | **Trigger** | `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `Is merged` = `true` AND `Head Branch` starts-with `claude/drift-fp-campaign-close/` AND `Labels` is-one-of `drift-fp-campaign-complete` |
+| **Filters** | `Is merged` = `true` AND `Head Branch` starts-with `claude/<SCOPE>drift-fp-campaign-close/` |
 | **Bootstrap** | First-time run is **Run now** (no campaign-close PR has merged yet). |
 | **Environment** | Default |
 | **Prompt** | pointer → `drift-fp-generate.md` |
@@ -431,7 +464,7 @@ specs + contracts to a new `claude/drift-fp-store/…` branch, and opens the sto
 | Field | Value |
 |---|---|
 | **Trigger** | `pull_request.opened` on `truecourse-ai/truecourse` |
-| **Filters** | `Head Branch` starts-with `claude/drift-fp-store/` AND `Labels` is-one-of `drift-fp-store` |
+| **Filters** | `Head Branch` starts-with `claude/<SCOPE>drift-fp-store/` |
 | **Environment** | Default |
 | **Prompt** | pointer → `drift-fp-discover.md` |
 
@@ -445,7 +478,7 @@ discovery PR to `main` (`claude/drift-fp-discover/…`, label `drift-fp-discover
 | Field | `drift-fp-next-fix` | `drift-fp-next-fix-bootstrap` |
 |---|---|---|
 | **Trigger** | `pull_request.closed` | `pull_request.closed` |
-| **Filters** | merged=true AND Head Branch starts-with `claude/drift-fp-fix/` AND Labels is-one-of `drift-fp-fix` | merged=true AND Head Branch starts-with `claude/drift-fp-discover/` AND Labels is-one-of `drift-fp-discover` |
+| **Filters** | merged=true AND Head Branch starts-with `claude/<SCOPE>drift-fp-fix/`  | merged=true AND Head Branch starts-with `claude/<SCOPE>drift-fp-discover/`  |
 | **Environment** | Default | Default |
 | **Prompt** | pointer → `drift-fp-next-fix.md` | pointer → `drift-fp-next-fix.md` |
 
@@ -457,7 +490,7 @@ Batched: up to 5 successful fixes (cap 10 attempts) per session; one PR at the e
 | Field | Value |
 |---|---|
 | **Trigger** | `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | merged=true AND Head Branch starts-with `claude/drift-fp-campaign-close/` AND Labels is-one-of `drift-fp-campaign-complete` |
+| **Filters** | merged=true AND Head Branch starts-with `claude/<SCOPE>drift-fp-campaign-close/`  |
 | **Environment** | Default |
 | **Prompt** | pointer → `drift-fp-campaign-close.md` |
 

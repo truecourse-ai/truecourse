@@ -4,7 +4,7 @@ You are the **drift-fp-generate** routine — the **front of the chain**. You ru
 Anthropic-managed cloud session, autonomously. Your job: for one target repo, run the **LLM
 stages once** (`spec scan` + `contracts generate`) via the **agent LLM transport**, **commit the
 generated specs + `.tc` contracts onto a per-campaign storage branch**, and open a **storage PR
-that is never merged**. Opening that PR fires `drift-fp-discover`; everything downstream runs only
+that is never merged**. Opening that PR fires `<SCOPE>drift-fp-discover`; everything downstream runs only
 deterministic `verify` against the contracts on that branch.
 
 This is the only routine that does LLM work. It uses the **`--llm-transport agent`** transport (the
@@ -14,6 +14,26 @@ deterministic. The contracts **never reach `main`** — the branch is deleted wh
 closes.
 
 Run exactly one campaign per invocation. Do **not** loop across campaigns.
+
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; if it omits either, treat it as empty — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this
+  routine creates **or** searches. Wherever this document shows `<SCOPE>`, substitute this value
+  verbatim. Default **empty**.
+  - Default account: `SCOPE=` → branch `claude/drift-fp-store/…`, label `drift-fp-store`, title `[drift-fp-…] …`.
+  - C# account: `SCOPE=cs-` → branch `claude/cs-drift-fp-store/…`, label `cs-drift-fp-store`, title `[cs-drift-fp-…] …`.
+  - **Never touch another scope's tokens.** A `cs-` routine only ever reads/writes `cs-`-prefixed
+    branches, labels, and titles; an unscoped routine ignores any `cs-…` token. Branch prefix is
+    the unique trigger — labels are not trigger filters — so a correct prefix is what keeps the
+    accounts isolated.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**
+  (all stacks). The C# account sets `TECH_STACKS=csharp`. Applied at campaign selection below.
 
 ## Inputs
 
@@ -26,11 +46,15 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 ### 1. Pick the campaign
 
-- Read `campaigns.yaml`. Pick the first campaign with `status: pending` **whose storage branch
-  doesn't exist yet** — check with `git ls-remote --heads origin
-  claude/drift-fp-store/<owner>-<repo>` (empty = not generated). Branch existence, not a yaml flag,
-  is the "already generated" signal (you can't flip a `main` flag — you never merge to `main`).
-- If none: post "no campaigns need contract generation" and stop.
+- Read `campaigns.yaml`. Pick the first campaign that is **all** of:
+  1. `status: pending`,
+  2. its `tech_stack` intersects `TECH_STACKS` (skip this filter entirely when `TECH_STACKS` is
+     empty — the default account considers every stack), and
+  3. **whose storage branch doesn't exist yet** — check with `git ls-remote --heads origin
+     claude/<SCOPE>drift-fp-store/<owner>-<repo>` (empty = not generated). Branch existence, not a
+     yaml flag, is the "already generated" signal (you can't flip a `main` flag — you never merge
+     to `main`).
+- If none: post "no campaigns need contract generation" (for this scope) and stop.
 
 ### 2. Build truecourse from local source
 
@@ -108,7 +132,7 @@ contracts.
 
 ### 5. Commit specs + contracts onto the storage branch
 
-- Create a fresh branch off `main`: `git checkout -b claude/drift-fp-store/<owner>-<repo> origin/main`.
+- Create a fresh branch off `main`: `git checkout -b claude/<SCOPE>drift-fp-store/<owner>-<repo> origin/main`.
 - Copy the generated **specs and contracts** into the campaign dir:
   ```
   mkdir -p docs/drift-fp-automation/contracts/<owner>-<repo>
@@ -129,19 +153,19 @@ contracts.
   doc_scope: [ <the campaign's doc_scope dirs> ]
   ```
 - Commit and push this branch. (Do **not** touch `campaigns.yaml` — you never merge to `main`;
-  `drift-fp-discover`'s PR is what flips the campaign to `discovering`.)
+  `<SCOPE>drift-fp-discover`'s PR is what flips the campaign to `discovering`.)
 
 ### 6. Open the storage PR (never merged)
 
 - **Verify your branch before pushing.** Run `git rev-parse --abbrev-ref HEAD` and confirm it is
-  exactly `claude/drift-fp-store/<owner>-<repo>`. If it isn't (e.g. you're still on the routine's
+  exactly `claude/<SCOPE>drift-fp-store/<owner>-<repo>`. If it isn't (e.g. you're still on the routine's
   default `claude/<random>` branch), STOP. Recreate the correct branch from `origin/main`,
   cherry-pick or re-stage the commit from step 5, delete the wrong branch, then push. Pushing from
-  the wrong branch produces a PR whose head doesn't match the `drift-fp-discover` trigger filter
-  (`Head Branch starts-with claude/drift-fp-store/`), and the chain stalls before discover fires.
-- **Open the PR — no label required.** The `drift-fp-discover` routine triggers on
+  the wrong branch produces a PR whose head doesn't match the `<SCOPE>drift-fp-discover` trigger filter
+  (`Head Branch starts-with claude/<SCOPE>drift-fp-store/`), and the chain stalls before discover fires.
+- **Open the PR — no label required.** The `<SCOPE>drift-fp-discover` routine triggers on
   `pull_request.opened` filtered **only on head-branch prefix** (`Head Branch starts-with
-  claude/drift-fp-store/`). The branch prefix is uniquely owned by this routine, so it's
+  claude/<SCOPE>drift-fp-store/`). The branch prefix is uniquely owned by this routine, so it's
   sufficient on its own; no label is needed for the trigger to fire. Use whatever PR-creation
   tool your session has — `gh pr create` if `gh` is on PATH, otherwise the GitHub MCP
   `create_pull_request` tool. Either works.
@@ -150,7 +174,7 @@ contracts.
   # Example with gh if available:
   gh pr create \
     --base main \
-    --head claude/drift-fp-store/<owner>-<repo> \
+    --head claude/<SCOPE>drift-fp-store/<owner>-<repo> \
     --title 'chore(drift-fp): contracts store for <owner>/<repo> @ <short-sha>' \
     --body-file /tmp/storage-pr-body.md
   ```
@@ -166,7 +190,7 @@ contracts.
   `drift-fp-campaign-close` closes it when the campaign finishes (the branch is intentionally
   left in place — proxy denies branch deletes, and a closed campaign's branch doesn't block
   anything).
-- Stop. Opening the PR fires `drift-fp-discover`.
+- Stop. Opening the PR fires `<SCOPE>drift-fp-discover`.
 
 ## Hard constraints
 

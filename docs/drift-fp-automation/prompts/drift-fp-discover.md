@@ -11,13 +11,30 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 You run only the **deterministic `verify`** — never `spec scan` or `contracts generate`. The
 contracts were generated and committed upstream by `drift-fp-generate` onto the campaign's
-**storage branch** `claude/drift-fp-store/<owner>-<repo>`; you fetch them and consume them as-is.
+**storage branch** `claude/<SCOPE>drift-fp-store/<owner>-<repo>`; you fetch them and consume them as-is.
+
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/drift-fp-fix/…`, label `drift-fp-fix`, title `[drift-fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-drift-fp-fix/…`, label `cs-drift-fp-fix`, title `[cs-drift-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
 
 ## Inputs
 
 - `truecourse-ai/truecourse` is cloned at the default branch.
 - Fires when a **storage PR is opened** (`pull_request.opened`, head-branch starts-with
-  `claude/drift-fp-store/`) — so the campaign's contracts now exist on that branch. The
+  `claude/<SCOPE>drift-fp-store/`) — so the campaign's contracts now exist on that branch. The
   head-branch prefix is uniquely owned by `drift-fp-generate`, so no label is required for the
   trigger to fire. Derive `<owner>-<repo>` from the head branch name; no human review of the
   contracts.
@@ -26,16 +43,16 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
 
 ### 1. Identify the campaign + fetch its contracts
 
-- The storage branch is the head of the PR that fired you: `claude/drift-fp-store/<owner>-<repo>`.
-  Fetch it: `git fetch origin claude/drift-fp-store/<owner>-<repo>`.
+- The storage branch is the head of the PR that fired you: `claude/<SCOPE>drift-fp-store/<owner>-<repo>`.
+  Fetch it: `git fetch origin claude/<SCOPE>drift-fp-store/<owner>-<repo>`.
 - Read `docs/drift-fp-automation/contracts/<owner>-<repo>/meta.yaml` **from that branch** (e.g.
-  `git show origin/claude/drift-fp-store/<owner>-<repo>:docs/drift-fp-automation/contracts/<owner>-<repo>/meta.yaml`).
+  `git show origin/claude/<SCOPE>drift-fp-store/<owner>-<repo>:docs/drift-fp-automation/contracts/<owner>-<repo>/meta.yaml`).
   It's the **authoritative** source of `target_ref` + `code_dir`.
 - Then branch on state (don't dead-end silently):
-  - **meta.yaml missing/malformed** → comment a `[drift-campaign-broken] <owner>/<repo>` tracking
+  - **meta.yaml missing/malformed** → comment a `[<SCOPE>drift-campaign-broken] <owner>/<repo>` tracking
     issue (`cc @mushgev`) and stop.
   - **campaign absent from `campaigns.yaml`, or `status: done`/`skipped`** → comment the same
-    `[drift-campaign-broken]` issue and stop (a store PR for a finished/unknown campaign is unexpected).
+    `[<SCOPE>drift-campaign-broken]` issue and stop (a store PR for a finished/unknown campaign is unexpected).
   - **`status: pending`** → first legitimate run; proceed.
   - **`status: discovering`** → this is a re-fire (idempotent); proceed, but **update the existing
     discovery PR** instead of opening a second one.
@@ -47,16 +64,16 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
   that branch will **not** match the discovery PR trigger filter, and the chain stalls. Run:
   ```
   git fetch origin main && \
-    git checkout -b claude/drift-fp-discover/<owner>-<repo> origin/main
+    git checkout -b claude/<SCOPE>drift-fp-discover/<owner>-<repo> origin/main
   ```
   All commits this step makes go on this branch.
 - Set the campaign's `status: discovering` in `campaigns.yaml` and commit on that branch.
 - Open a PR titled `chore(drift-fp): start discovery for <owner>/<repo>`. Body explains you're
   starting a drift discovery run. End the body with `cc @mushgev`. **No label is required** —
   `drift-fp-next-fix` triggers on the merge of any PR whose head branch starts with
-  `claude/drift-fp-discover/`, which is uniquely owned by this routine.
+  `claude/<SCOPE>drift-fp-discover/`, which is uniquely owned by this routine.
 - **Verify your branch before pushing.** Run `git rev-parse --abbrev-ref HEAD` and confirm it is
-  exactly `claude/drift-fp-discover/<owner>-<repo>`. If it isn't, STOP, recreate the correct branch
+  exactly `claude/<SCOPE>drift-fp-discover/<owner>-<repo>`. If it isn't, STOP, recreate the correct branch
   from `origin/main`, cherry-pick the commit, delete the wrong branch, then push.
 - Do **not** wait for merge. Continue with verify + issue filing; keep pushing commits to this PR.
 
@@ -74,11 +91,11 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
   `git -C /tmp/target checkout <target_ref>`. (Full clone, not `--depth=1`: `verify` runs inside
   a git repo and the pinned `target_ref` must be checkout-able.)
 - Extract the contracts **from the storage branch into `/tmp`** (never into the truecourse working
-  tree — you're on a `claude/drift-fp-discover/` branch and must not commit the contracts):
+  tree — you're on a `claude/<SCOPE>drift-fp-discover/` branch and must not commit the contracts):
   ```
   P=docs/drift-fp-automation/contracts/<owner>-<repo>
   mkdir -p /tmp/extract /tmp/target/.truecourse
-  git -C $TRUECOURSE_DIR archive origin/claude/drift-fp-store/<owner>-<repo> "$P/contracts" \
+  git -C $TRUECOURSE_DIR archive origin/claude/<SCOPE>drift-fp-store/<owner>-<repo> "$P/contracts" \
       | tar -x -C /tmp/extract
   cp -R /tmp/extract/$P/contracts /tmp/target/.truecourse/contracts
   ```
@@ -99,7 +116,7 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
     code. For `*.no-code-counterpart` drifts the engine sets `filePath` to the spec **symbol
     name** and `lineStart: 0` — there is no code file/line for those (see step 5/6).
 - If verify fails (non-zero exit, or LATEST.json missing): comment the error tail on the
-  discovery PR, file/refresh a `[drift-campaign-broken] <owner>/<repo>` issue (`cc @mushgev`), and
+  discovery PR, file/refresh a `[<SCOPE>drift-campaign-broken] <owner>/<repo>` issue (`cc @mushgev`), and
   end. Leave `status: discovering` — there is no `blocked` status (the only states are pending /
   discovering / done / skipped); the tracking issue is the human signal.
 
@@ -124,7 +141,7 @@ contracts were generated and committed upstream by `drift-fp-generate` onto the 
        borderline: confirm whether the documented symbol exists in code in *some* shape.
   3. **Distinguish FP from a bad contract.** If the drift is wrong because the *pinned contract*
      misread the spec (the LLM extracted a value the doc never stated), that is **not** a
-     verifier FP — it's a contract-generation issue. Do not file a `drift-fp-fix` issue for it;
+     verifier FP — it's a contract-generation issue. Do not file a `<SCOPE>drift-fp-fix` issue for it;
      note it on the discovery PR as a `contract-quality:` bullet for human review.
   4. Compute the FP rate (FP count / sampled count) for the drift-kind.
 
@@ -134,15 +151,15 @@ For each drift-kind with **≥1 clear FP** in the triaged sample (file on any cl
 on a percentage):
 
 - Open a GitHub issue on `truecourse-ai/truecourse`:
-  - **Title**: `[drift-fp-fix] <drift-kind> in <owner>/<repo>`
-  - **Labels**: `drift-fp-fix`, `drift-fp-target:<owner>-<repo>` (replace `/` with `-`).
+  - **Title**: `[<SCOPE>drift-fp-fix] <drift-kind> in <owner>/<repo>`
+  - **Labels**: `<SCOPE>drift-fp-fix`, `drift-fp-target:<owner>-<repo>` (replace `/` with `-`).
   - **Body**:
 
     ````
     ```yaml
     target_repo: <owner>/<repo>
     target_ref: <full-sha>
-    contracts_branch: claude/drift-fp-store/<owner>-<repo>   # storage branch holding the contracts
+    contracts_branch: claude/<SCOPE>drift-fp-store/<owner>-<repo>   # storage branch holding the contracts
     contracts_path: docs/drift-fp-automation/contracts/<owner>-<repo>   # path within that branch
     code_dir: <code_dir>
     drift_kind: <comparator-family>/<obligation-family>

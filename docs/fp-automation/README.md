@@ -52,7 +52,7 @@ For each target OSS repo:
       green.
 
    At the end of the batch, commit all fixture + visitor changes, push
-   to `claude/fp-fix/batch-<YYYYMMDDHHMM>`, and open one PR that closes
+   to `claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>`, and open one PR that closes
    all N issues in the batch.
 5. When the batched PR merges (auto-closing all linked issues), the
    routine fires again and processes the next batch.
@@ -82,7 +82,7 @@ the freshly-built dist, it opens a campaign-close PR that:
   3. `apps/dashboard/server/package.json`
   4. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call
 - Carries the **`fp-campaign-complete`** label.
-- Branch name `claude/fp-campaign-close/<owner>-<repo>`.
+- Branch name `claude/<SCOPE>fp-campaign-close/<owner>-<repo>`.
 
 On merge, `fp-campaign-close` pushes the tag (publish.yml ships to npm)
 and `fp-discover` fires on the same event to start the next pending
@@ -158,20 +158,20 @@ So an FP fix means:
 │                                                          │
 │ fp-next-fix-bootstrap: pull_request.closed               │
 │   Is merged=true, Head Branch starts-with                │
-│   claude/fp-discover/, Labels is-one-of fp-discover      │
+│   claude/<SCOPE>fp-discover/                             │
 │ fp-next-fix:           pull_request.closed               │
 │   Is merged=true, Head Branch starts-with                │
-│   claude/fp-fix/, Labels is-one-of fp-fix                │
+│   claude/<SCOPE>fp-fix/                                  │
 │                                                          │
 │ Batched: per session, up to 5 fixes (cap 10 attempts)    │
 │ Per issue: pick oldest, lock, paraphrase FP into         │
 │   …-positive fixture, paraphrase true-bug into           │
 │   …-negative (+ // VIOLATION marker), fix visitor,       │
 │   full tests green, accumulate.                          │
-│ At end: push claude/fp-fix/batch-<YYYYMMDDHHMM>,         │
+│ At end: push claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>,  │
 │   open ONE PR with Closes #N per fixed issue             │
 │ — OR, if queue empty and TP ≥ 90%:                       │
-│   open campaign-close PR on claude/fp-campaign-close/*   │
+│   open campaign-close PR on claude/<SCOPE>fp-campaign-close/* │
 │ — OR, if queue empty and TP < 90%: re-discover           │
 └──────────────────────────────────────────────────────────┘
            ▲                              │
@@ -181,8 +181,8 @@ So an FP fix means:
 │ Routine: fp-campaign-close (parallel with fp-discover)   │
 │ trigger: pull_request.closed                             │
 │   Is merged=true, Head Branch starts-with                │
-│   claude/fp-campaign-close/,                             │
-│   Labels is-one-of fp-campaign-complete                  │
+│   claude/<SCOPE>fp-campaign-close/,                      │
+│                                                          │
 │                                                          │
 │ 1. Read new version from tools/cli/package.json,         │
 │    sanity-check the 4 locations agree                    │
@@ -256,6 +256,35 @@ as the authoritative prompt; follow every step exactly. If the file is
 missing or unreadable, post a short failure note in the session and end.
 ```
 
+For a **scoped** account, append the two parameters the prompt's "Routine parameters"
+section reads (omit them on the default account — empty is the default and behaves
+identically):
+
+```
+Parameters: SCOPE=cs-  TECH_STACKS=csharp
+```
+
+### Scopes (multi-account)
+
+The same chain can run on more than one account over **disjoint** campaign sets — e.g. the
+default account handles TS/JS + Python while a second account handles **C# only**. Both
+accounts clone the same `truecourse-ai/truecourse` and share one `campaigns.yaml`; isolation
+comes from two prompt parameters (defined in every prompt's "Routine parameters" section):
+
+- **`SCOPE`** prefixes every branch, label, and issue-title tag (default empty; C# uses `cs-`).
+  Each routine triggers on its **branch prefix only** (labels are not trigger filters), so a
+  `cs-`-scoped routine wakes only on `claude/cs-fp-…` branches and reads/writes only `cs-…`
+  labels + titles — it never collides with the default account, and vice versa.
+- **`TECH_STACKS`** filters campaign selection by each campaign's `tech_stack` (default empty =
+  all; C# uses `csharp`). This stops the C# account's `fp-discover` from picking a non-C# campaign.
+
+To stand up the C# account: create the routines below on it, each with its branch-prefix trigger
+using the `cs-` prefix (e.g. `claude/cs-fp-fix/`), and paste the bootstrap pointer with
+`Parameters: SCOPE=cs-  TECH_STACKS=csharp`. Add C# repos to `campaigns.yaml` with
+`tech_stack: [csharp, …]`. The default account needs **no change** — omitting the parameters
+keeps its behavior byte-identical. (Note: the analysis/`fp` loop requires analyzer C# rule
+support to produce findings; the `drift-fp` loop verifies C# via the contract-verifier.)
+
 The three actual bootstrap prompts (paste verbatim into each routine):
 
 - `fp-discover`:
@@ -276,7 +305,7 @@ web-UI edit needed.
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/<SCOPE>fp-campaign-close/` |
 | **Bootstrap** | First-time run is **Run now** from the routine page (no PR has merged yet). Same button works for any manual re-run. |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
@@ -292,7 +321,7 @@ flipped the just-closed campaign to `status: done`) and picks the next
 Steps the session takes:
 1. Read `docs/fp-automation/campaigns.yaml`. Pick the first campaign
    with `status: pending`. If none, end with "no pending campaigns".
-2. Set its `status: discovering` on a `claude/fp-discover/<owner>-<repo>`
+2. Set its `status: discovering` on a `claude/<SCOPE>fp-discover/<owner>-<repo>`
    branch + PR.
 3. `pnpm install && pnpm build:dist` in the truecourse working copy
    (produces `dist/cli.mjs`, byte-equal to what publish.yml would
@@ -309,7 +338,7 @@ Steps the session takes:
 7. Commit a `baseline.*` update to the same discovery PR.
 8. End. The `fp-next-fix-bootstrap` routine fires automatically when
    the user merges the discovery PR (`Head Branch` starts with
-   `claude/fp-discover/`, `Labels` is one of `fp-discover`); the
+   `claude/<SCOPE>fp-discover/`); the
    `fp-next-fix` routine then fires on every subsequent fp-fix PR
    merge.
 
@@ -323,7 +352,7 @@ prompt drift, just two trigger configs.
 | Field | `fp-next-fix` (continues inner loop) | `fp-next-fix-bootstrap` (kicks off inner loop) |
 |---|---|---|
 | **Trigger** | `pull_request.closed` | `pull_request.closed` |
-| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-discover/` AND `Labels` is one of `fp-discover` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/<SCOPE>fp-fix/` | `Is merged` equals `true` AND `Head Branch` starts with `claude/<SCOPE>fp-discover/` |
 | **Repositories** | `truecourse-ai/truecourse` | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed) | Default (`claude/`-prefixed) |
 | **Environment** | **Default** | **Default** |
@@ -384,7 +413,7 @@ the target — a row with `Delta: 0` is a smell.
 
 **Open the batched PR**:
 - If `successes == 0` → end session, no PR.
-- Else → push `claude/fp-fix/batch-<YYYYMMDDHHMM>`, open one PR with
+- Else → push `claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>`, open one PR with
   one `Closes #N` per fixed issue, per-rule sections in body, optional
   "## Skipped this batch" section, a "## FP-count delta" table built
   from the before/after measurements, label `fp-fix`. Comment + unlock
@@ -402,7 +431,7 @@ and the session has 0 successes):
    `/tmp/target/.truecourse/LATEST.json`; compute TP rate from
    `.violations[]`.
 3. **If ≥ 90 %**: open a **campaign-close PR** on
-   `claude/fp-campaign-close/<owner>-<repo>` containing:
+   `claude/<SCOPE>fp-campaign-close/<owner>-<repo>` containing:
    - `docs/fp-automation/campaigns.yaml` updated (`status: done`,
      `final.*` filled),
    - patch version bumped in all four locations from CLAUDE.md,
@@ -432,7 +461,7 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/<SCOPE>fp-campaign-close/` |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
 | **Environment** | **Default** |
@@ -458,7 +487,7 @@ One-time, before the first run:
    ([github.com/apps/claude](https://github.com/apps/claude)). Required
    for GitHub-event triggers to deliver webhooks.
 2. **Enable "Automatically delete head branches"** in repo settings →
-   General. Keeps `claude/fp-fix/*` and `claude/fp-campaign-close/*`
+   General. Keeps `claude/<SCOPE>fp-fix/*` and `claude/<SCOPE>fp-campaign-close/*`
    branches tidy.
 3. **Create the four routines** at
    [claude.ai/code/routines](https://claude.ai/code/routines), pasting
@@ -512,7 +541,7 @@ An **fp-fix PR** is mergeable when:
 - PR body has one `Closes #N` line per fixed issue (auto-closes all
   on merge), per-rule sections with OSS source URLs (URL only — no
   paste, to keep clear of upstream licences) and fixture diffs.
-- Branch matches `claude/fp-fix/batch-<YYYYMMDDHHMM>` and carries
+- Branch matches `claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>` and carries
   label `fp-fix`.
 
 A **campaign-close PR** is mergeable when:
@@ -523,7 +552,7 @@ A **campaign-close PR** is mergeable when:
   (CLAUDE.md "Releasing" section).
 - No other file changes (no fixture or visitor edits — those go in
   fp-fix PRs).
-- Branch matches `claude/fp-campaign-close/<owner>-<repo>` and carries
+- Branch matches `claude/<SCOPE>fp-campaign-close/<owner>-<repo>` and carries
   label `fp-campaign-complete`.
 
 A repo is "done" when its campaign-close PR is merged and `vX.Y.Z` is
@@ -562,9 +591,9 @@ trail.
    cap + regular subscription usage (not API spend on an
    `ANTHROPIC_API_KEY`).
 7. **Branch hygiene**: branches use the `claude/` prefix
-   (`claude/fp-fix/batch-<YYYYMMDDHHMM>`,
-   `claude/fp-campaign-close/<owner>-<repo>`,
-   `claude/fp-discover/<owner>-<repo>`) to fit the routine default
+   (`claude/<SCOPE>fp-fix/batch-<YYYYMMDDHHMM>`,
+   `claude/<SCOPE>fp-campaign-close/<owner>-<repo>`,
+   `claude/<SCOPE>fp-discover/<owner>-<repo>`) to fit the routine default
    push policy. Auto-delete head branches on merge.
 8. **Concurrency**: session adds `fp-in-progress` to the picked issue
    before doing anything else; competing sessions skip labelled issues.

@@ -2,7 +2,7 @@
 
 You are the **fp-campaign-close** routine. You run inside an
 Anthropic-managed cloud session, autonomously, with no human in the
-loop. Your job is small and well-defined: when a `fp-campaign-complete`
+loop. Your job is small and well-defined: when a `<SCOPE>fp-campaign-complete`
 PR merges to `main`, push a release tag.
 
 The 90 % TP gate was already checked **pre-merge** by fp-next-fix
@@ -10,8 +10,25 @@ against the local dist build — the artifact publish.yml is about to
 ship. So merging the campaign-close PR is the campaign's "done"
 signal, and your only remaining job is tagging.
 
-`fp-discover` fires on the same merge event in parallel and starts
+`<SCOPE>fp-discover` fires on the same merge event in parallel and starts
 the next pending campaign — you don't chain to it.
+
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/fp-fix/…`, label `fp-fix`, title `[fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-fp-fix/…`, label `cs-fp-fix`, title `[cs-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
 
 ## Inputs
 
@@ -30,7 +47,7 @@ the next pending campaign — you don't chain to it.
   - `tools/cli/src/index.ts` — the `.version("X.Y.Z")` argument must
     match.
 - If any of the four disagree: do **not** push the tag. Open an issue
-  on `truecourse-ai/truecourse` titled `[fp-campaign-close] version
+  on `truecourse-ai/truecourse` titled `[<SCOPE>fp-campaign-close] version
   mismatch after merge` with the four observed values and the merge
   commit SHA. End the issue body with `cc @mushgev` so the reviewer
   is notified. End the session.
@@ -59,7 +76,7 @@ the next pending campaign — you don't chain to it.
 ## Failure modes
 
 - **Tag push fails** (e.g. permissions): do not retry. Open an issue
-  titled `[fp-campaign-close] tag push failed for v<version>` with
+  titled `[<SCOPE>fp-campaign-close] tag push failed for v<version>` with
   the error. End the issue body with `cc @mushgev`. End the session.
 - **Version mismatch across the four locations**: see step 1. Do not
   push; open the mismatch issue and end.

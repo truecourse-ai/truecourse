@@ -2,7 +2,7 @@
 
 You are the **drift-fp-campaign-close** routine. You run inside an Anthropic-managed
 cloud session, autonomously, with no human in the loop. Your job is small and
-well-defined: when a `drift-fp-campaign-complete` PR merges to `main`, close the
+well-defined: when a `<SCOPE>drift-fp-campaign-complete` PR merges to `main`, close the
 just-closed campaign's storage PR and ask the human to push the release tag.
 
 The **`fp == 0`** gate (no false-positive drifts remain) was already checked **pre-merge** by
@@ -14,7 +14,7 @@ The tag push itself is **manual**: the cloud session's git proxy denies pushes t
 **and to branch deletes** (probed both directly — branches under `claude/*` accept pushes
 that create or update them, but `git push origin v<version>` and `git push origin --delete
 claude/<...>` both return HTTP 403). Rather than fight the proxy on every close, the routine
-opens a `[drift-fp-campaign-close] tag v<version> ready to push` tracking issue that fires
+opens a `[<SCOPE>drift-fp-campaign-close] tag v<version> ready to push` tracking issue that fires
 the Telegram `notify-campaign-alert` hook, and the human runs
 `git tag v<version> && git push origin v<version>` locally; publish.yml takes it from there.
 
@@ -27,6 +27,23 @@ via the GitHub API (which the proxy does not block, unlike git pushes).
 campaign (generate → storage PR → discover → …) — you don't chain to it. The two run on
 **disjoint campaigns** by construction: you close the just-`done` campaign's storage PR;
 generate picks a different, still-`pending` campaign.
+
+## Routine parameters (scope)
+
+This prompt is **scope-parameterized** so more than one account can run the same chain over
+disjoint campaign sets without colliding. The invoking routine prompt (the bootstrap pointer)
+supplies two values; treat either as empty when omitted — the default account's behavior,
+byte-identical to an unscoped run.
+
+- **`SCOPE`** — a prefix applied to **every** branch, issue label, and issue-title tag this routine
+  creates **or** searches. Wherever this document shows `<SCOPE>`, substitute it verbatim. Default
+  **empty** → `claude/drift-fp-fix/…`, label `drift-fp-fix`, title `[drift-fp-…]`. The C# account
+  uses `SCOPE=cs-` → `claude/cs-drift-fp-fix/…`, label `cs-drift-fp-fix`, title `[cs-drift-fp-…]`.
+  **Never touch another scope's tokens** — the branch prefix is the unique trigger (labels are not
+  trigger filters), so the prefix is what isolates the accounts.
+- **`TECH_STACKS`** — a comma-separated allow-list of campaign tech stacks this routine may act on,
+  matched against each campaign's `tech_stack` in `campaigns.yaml`. Default **empty = no filter**;
+  the C# account sets `TECH_STACKS=csharp`. Applied wherever a campaign is selected.
 
 ## Inputs
 
@@ -42,7 +59,7 @@ generate picks a different, still-`pending` campaign.
   - `apps/dashboard/server/package.json`
   - `tools/cli/src/index.ts` — the `.version("X.Y.Z")` argument
 - If any of the four disagree: do **not** open the tag-ready issue. Open an issue titled
-  `[drift-fp-campaign-close] version mismatch after merge` with the four observed values + merge
+  `[<SCOPE>drift-fp-campaign-close] version mismatch after merge` with the four observed values + merge
   SHA, end the body with `cc @mushgev`, end the session. (Closing the storage PR is still
   fine to do — it doesn't depend on the version being right — but the tag notification
   would be misleading, so hold it.)
@@ -53,9 +70,9 @@ generate picks a different, still-`pending` campaign.
 ### 2. Close the campaign's storage PR
 
 - Find the `<owner>/<repo>` for the campaign that just closed: read the merged campaign-close PR's
-  head branch (`claude/drift-fp-campaign-close/<owner>-<repo>`) or `campaigns.yaml` (the entry just
+  head branch (`claude/<SCOPE>drift-fp-campaign-close/<owner>-<repo>`) or `campaigns.yaml` (the entry just
   flipped to `status: done`).
-- **Close the open storage PR** on head `claude/drift-fp-store/<owner>-<repo>` via the GitHub
+- **Close the open storage PR** on head `claude/<SCOPE>drift-fp-store/<owner>-<repo>` via the GitHub
   API (the proxy doesn't block PR-state changes). The branch prefix is unique to this campaign,
   so the head-ref alone identifies the PR — no label lookup needed. The contracts were
   campaign-scaffolding and the campaign is done.
@@ -68,8 +85,8 @@ generate picks a different, still-`pending` campaign.
 ### 3. Open the tag-ready notification
 
 - Open an issue on `truecourse-ai/truecourse`:
-  - **Title**: `[drift-fp-campaign-close] tag v<version> ready to push`
-    (the `[drift-fp-campaign-close]` prefix is what `notify-campaign-alert` matches to fire
+  - **Title**: `[<SCOPE>drift-fp-campaign-close] tag v<version> ready to push`
+    (the `[<SCOPE>drift-fp-campaign-close]` prefix is what `notify-campaign-alert` matches to fire
     Telegram — don't change it).
   - **Body**: short and copy-pasteable — what the human runs and what fires next. Include:
     - The version + the merge SHA of the campaign-close PR.
@@ -83,13 +100,13 @@ generate picks a different, still-`pending` campaign.
 
 ### 4. End
 
-- Post: `Storage PR closed. Filed [drift-fp-campaign-close] tag v<version> ready to push (#<issue>) — Telegram alert fires; push the tag locally to release.` End.
+- Post: `Storage PR closed. Filed [<SCOPE>drift-fp-campaign-close] tag v<version> ready to push (#<issue>) — Telegram alert fires; push the tag locally to release.` End.
 
 ## Failure modes
 
 - **Version mismatch**: see step 1. Open the mismatch issue, end. The storage PR close may have run.
 - **Storage PR close fails**: don't retry. Open an issue
-  `[drift-fp-campaign-close] storage PR close failed for <owner>/<repo>` with the error tail,
+  `[<SCOPE>drift-fp-campaign-close] storage PR close failed for <owner>/<repo>` with the error tail,
   end the body `cc @mushgev`, end. Still proceed to step 3 if the version check passed — the
   tag-ready notification and the storage PR close are independent.
 
