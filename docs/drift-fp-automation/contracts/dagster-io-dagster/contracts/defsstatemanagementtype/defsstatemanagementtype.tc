@@ -1,0 +1,4 @@
+enum DefsStateManagementType {
+  origin "docs/docs/guides/build/components/state-backed-components/configuring-state-backed-components.md" "management_type" 65..65
+  values [LOCAL_FILESYSTEM, VERSIONED_STATE_STORAGE, LEGACY_CODE_SERVER_SNAPSHOTS]
+}

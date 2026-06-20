@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-20T00:04:31.622Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/deployment/execution/run-retries.md",
+        "docs/docs/guides/build/assets/external-assets.md",
+        "docs/docs/guides/build/components/state-backed-components/configuring-state-backed-components.md",
+        "docs/docs/guides/build/projects/workspaces/workspace-yaml.md"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    {
+      "name": "report-asset-materialization",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/guides/build/assets/external-assets.md"
+      ],
+      "scope": {
+        "paths": [
+          "/report_asset_materialization"
+        ]
+      },
+      "description": "report-asset-materialization module — POST /report_asset_materialization/."
+    }
+  ],
+  "claims": [
+    {
+      "id": "17d80791be279092e39a3b51a0c7a406b83fa55c95a0bce3d5bade77069b47d0",
+      "topic": "auth",
+      "subject": "Dagster+ report_asset_materialization authentication",
+      "content": {
+        "scheme": "Dagster-Cloud-Api-Token header (API key)",
+        "scope": "https://<org>.dagster.cloud/<deployment>/report_asset_materialization/",
+        "except": [
+          "Dagster OSS (e.g. http://localhost:3000/report_asset_materialization/) requires no authentication headers"
+        ]
+      },
+      "kind": "constraint",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/external-assets.md",
+        "line": 56,
+        "quote": "### Pushing with the REST API\n\nYou can inform Dagster that an external asset has materialized by pushing the event from an external system to the REST API. The following examples demonstrate how to inform Dagster that a materialization of the `raw_transactions` external asset has occurred.\n\nThe required headers for the REST API depend on whether you're using Dagster+ or OSS. Use the tabs to view an example API request for each Dagster type.\n\n<Tabs>\n<TabItem value=\"dagster-plus\" label=\"Dagster+\">\n\nAuthentication headers are required if using Dagster+. The request should made to your Dagster+ organization and a specific deployment in the organization.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  -H 'Dagster-Cloud-Api-Token: [YOUR API TOKEN]' \\\n  'https://[YOUR ORG NAME].dagster.cloud/[YOUR DEPLOYMENT NAME]/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n    \"file_last_modified_at_ms\": 1724614700266\n  }\n}'\n```\n\n</TabItem>\n<TabItem value=\"oss\" label=\"OSS\">\n\nAuthentication headers aren't required if using Dagster OSS. The request should be pointed at your open source URL, which is `http://localhost:3000` in this example.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  'http://localhost:3000/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n… (+10 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-18T23:20:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8343fe6e980be6e08cc7ba34b5ea998d19aaf4af30479bf9dac49a06b349a7d9",
+      "topic": "data",
+      "subject": "dagster/retry_strategy",
+      "content": {
+        "fields": {
+          "FROM_ASSET_FAILURE": "Uses persisted asset materialization records from the event log to automatically exclude already-materialized assets during retry",
+          "FROM_FAILURE": "Default; re-execute from failure: successful ops are skipped but their output is used for downstream ops",
+          "ALL_STEPS": "All ops run again"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/deployment/execution/run-retries.md",
+        "line": 87,
+        "quote": "[line 87] ### FROM_ASSET_FAILURE strategy\n\nUse the `FROM_ASSET_FAILURE` strategy together with a `dagster/retry_on_asset_or_op_failure` setting value of `false` to use persisted asset materialization records from the event log and automatically exclude already-materialized assets during retry. This can significantly improve recovery times from infrastructure interruptions, such as a Kubernetes node eviction or spot instance loss. It's particularly useful for dbt pipelines, as it enables recovering without requiring persisted dbt artifacts.\n\n<CodeExample\n  path=\"docs_snippets/docs_snippets/deployment/execution/asset_job_from_asset_failure_retries.py\"\n  startAfter=\"start_from_asset_failure_job\"\n  endBefore=\"end_from_asset_failure_job\"\n  title=\"src/my_project/jobs.py\"\n/>\n\n---\n[line 43] ### Retry strategy\n\nThe `dagster/retry_strategy` tag controls which ops the retry will run.\n\nBy default, retries will re-execute from failure (tag value `FROM_FAILURE`). This means that any successful ops will be skipped, but their output will be used for downstream ops. If the `dagster/retry_strategy` tag is set to `ALL_STEPS`, all the ops will run again.\n\n:::note\n\n`FROM_FAILURE` requires an I/O manager that can access outputs from other runs. For example, on Kubernetes the <PyObject section=\"libraries\" integration=\"aws\" object=\"s3.s3_pickle_io_manager\" module=\"dagster_aws\" /> would work but the <PyObject section=\"io-managers\" object=\"FilesystemIOManager\" module=\"dagster\" /> would not, since the new run is in a new Kubernetes job with a separate filesystem.\n\n:::\n",
+        "additionalSources": [
+          {
+            "file": "docs/docs/deployment/execution/run-retries.md",
+            "line": 43,
+            "quote": "### Retry strategy\n\nThe `dagster/retry_strategy` tag controls which ops the retry will run.\n\nBy default, retries will re-execute from failure (tag value `FROM_FAILURE`). This means that any successful ops will be skipped, but their output will be used for downstream ops. If the `dagster/retry_strategy` tag is set to `ALL_STEPS`, all the ops will run again.\n\n:::note\n\n`FROM_FAILURE` requires an I/O manager that can access outputs from other runs. For example, on Kubernetes the <PyObject section=\"libraries\" integration=\"aws\" object=\"s3.s3_pickle_io_manager\" module=\"dagster_aws\" /> would work but the <PyObject section=\"io-managers\" object=\"FilesystemIOManager\" module=\"dagster\" /> would not, since the new run is in a new Kubernetes job with a separate filesystem.\n\n:::\n"
+          }
+        ]
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-18T23:20:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "25ee401df5af4b8e632ca0f6264ca7e327d1f692a7e0a6c0c1497662d5a5e3ed",
+      "topic": "data",
+      "subject": "defs_state management_type",
+      "content": {
+        "fields": {
+          "LOCAL_FILESYSTEM": "Stores state in a .local_defs_state directory inside your project",
+          "VERSIONED_STATE_STORAGE": "Stores state in remote storage with version tracking",
+          "LEGACY_CODE_SERVER_SNAPSHOTS": "Auto-refreshes state on code server load (not recommended)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/components/state-backed-components/configuring-state-backed-components.md",
+        "line": 65,
+        "quote": "### management_type\n\nSpecify which state management strategy to use. See [Choosing a state management strategy](/guides/build/components/state-backed-components#choosing-a-state-management-strategy) for detailed guidance on which strategy to choose for your deployment.\n\nAvailable options:\n\n- `LOCAL_FILESYSTEM` - Stores state in a `.local_defs_state` directory inside your project\n- `VERSIONED_STATE_STORAGE` - Stores state in remote storage with version tracking\n- `LEGACY_CODE_SERVER_SNAPSHOTS` - Auto-refreshes state on code server load (not recommended)\n\n#### Example\n\n```yaml\ndefs_state:\n  management_type: LOCAL_FILESYSTEM\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-18T23:20:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "8daeff6684d00aad731d4e025c56e118f6632dc45b43017ae29662b75c66f819",
+      "topic": "data",
+      "subject": "workspace.yaml load_from method",
+      "content": {
+        "fields": {
+          "python_file": "Load definitions from a Python file",
+          "python_module": "Load definitions from a Python module",
+          "grpc_server": "Load definitions from a running gRPC server"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/projects/workspaces/workspace-yaml.md",
+        "line": 45,
+        "quote": "## File structure\n\nThe `workspace.yaml` file uses the following structure:\n\n```yaml\n# workspace.yaml\nload_from:\n  - <loading_method>: <configuration_options>\n```\n\nWhere `<loading_method>` can be one of:\n\n- `python_file`\n- `python_module`\n- `grpc_server`\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-18T23:20:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "d33b52100014d5978fc0aa9a2dd015a9db895188e84e0787c7f16cd072517b70",
+      "topic": "endpoints",
+      "subject": "POST /report_asset_materialization/",
+      "content": {
+        "method": "POST",
+        "path": "/report_asset_materialization/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "request": {
+          "asset_key": "string (key of the external asset that materialized)",
+          "metadata": "object (optional metadata map, e.g. file_last_modified_at_ms)"
+        },
+        "auth": "none"
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/guides/build/assets/external-assets.md",
+        "line": 56,
+        "quote": "### Pushing with the REST API\n\nYou can inform Dagster that an external asset has materialized by pushing the event from an external system to the REST API. The following examples demonstrate how to inform Dagster that a materialization of the `raw_transactions` external asset has occurred.\n\nThe required headers for the REST API depend on whether you're using Dagster+ or OSS. Use the tabs to view an example API request for each Dagster type.\n\n<Tabs>\n<TabItem value=\"dagster-plus\" label=\"Dagster+\">\n\nAuthentication headers are required if using Dagster+. The request should made to your Dagster+ organization and a specific deployment in the organization.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  -H 'Dagster-Cloud-Api-Token: [YOUR API TOKEN]' \\\n  'https://[YOUR ORG NAME].dagster.cloud/[YOUR DEPLOYMENT NAME]/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n    \"file_last_modified_at_ms\": 1724614700266\n  }\n}'\n```\n\n</TabItem>\n<TabItem value=\"oss\" label=\"OSS\">\n\nAuthentication headers aren't required if using Dagster OSS. The request should be pointed at your open source URL, which is `http://localhost:3000` in this example.\n\n```shell\ncurl \\\n  -X POST \\\n  -H 'Content-Type: application/json' \\\n  'http://localhost:3000/report_asset_materialization/' \\\n  -d '\n{\n  \"asset_key\": \"raw_transactions\",\n  \"metadata\": {\n… (+10 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "status": "shipped",
+        "lastTouched": "2026-06-18T23:20:26+00:00"
+      },
+      "module": "report-asset-materialization",
+      "source": "extracted"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+enum RetryStrategy {
+  origin "docs/docs/deployment/execution/run-retries.md" "Configuration / Retry strategy" 43..43
+  values [FROM_FAILURE, ALL_STEPS, FROM_ASSET_FAILURE]
+}

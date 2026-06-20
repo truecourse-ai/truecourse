@@ -1,0 +1,12 @@
+auth-requirement auth.apikey.report-asset-materialization {
+  origin "docs/docs/guides/build/assets/external-assets.md" "Recording materializations and metadata / Pushing with the REST API" 56..56
+  scheme ApiKey
+  selector path-glob "/[deployment]/report_asset_materialization/"
+  except {
+    path-glob "/report_asset_materialization/"
+  }
+  on-violation {
+    status 401
+    error-code unauthenticated
+  }
+}

@@ -1,0 +1,4 @@
+enum WorkspaceLoadMethod {
+  origin "docs/docs/guides/build/projects/workspaces/workspace-yaml.md" "File structure" 1..1
+  values [python_file, python_module, grpc_server]
+}
