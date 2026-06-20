@@ -72,6 +72,25 @@ export function getCSharpChainRoot(node: SyntaxNode): SyntaxNode {
   }
 }
 
+/**
+ * The receiver's *simple* (rightmost) name for a member call:
+ * `System.Threading.Tasks.Task.WhenAll(...)` → 'Task', `_db.Save()` → '_db'.
+ * Returns '' when the call has no member-access receiver.
+ */
+export function getCSharpReceiverSimpleName(invocation: SyntaxNode): string {
+  const fn = invocation.childForFieldName('function')
+  if (fn?.type !== 'member_access_expression') return ''
+  const receiver = fn.childForFieldName('expression')
+  if (!receiver) return ''
+  if (receiver.type === 'member_access_expression') {
+    return receiver.childForFieldName('name')?.text ?? ''
+  }
+  if (receiver.type === 'qualified_name') {
+    return receiver.childForFieldName('name')?.text ?? ''
+  }
+  return receiver.text
+}
+
 /** Simple name of an object-creation type: `System.Threading.Timer` → 'Timer'. */
 export function getCSharpSimpleTypeName(typeNode: SyntaxNode | null): string {
   if (!typeNode) return ''

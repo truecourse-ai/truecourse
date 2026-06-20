@@ -2055,3 +2055,757 @@ public class S3ClientFactory
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// security/deterministic/use-of-dsa
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/use-of-dsa (C#)', () => {
+  it('detects DSA.Create() and the DSACryptoServiceProvider class', () => {
+    const f1 = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Signer
+{
+    public DSA Build() => DSA.Create();
+}
+`, 'use-of-dsa')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class LegacySigner
+{
+    public DSACryptoServiceProvider Build() => new DSACryptoServiceProvider();
+}
+`, 'use-of-dsa')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag RSA or ECDSA', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Signer
+{
+    public RSA Rsa() => RSA.Create();
+    public ECDsa Ecdsa() => ECDsa.Create();
+}
+`, 'use-of-dsa')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/use-of-xsltransform
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/use-of-xsltransform (C#)', () => {
+  it('detects new XslTransform()', () => {
+    const found = matches(`using System.Xml.Xsl;
+
+namespace App.Xml;
+
+public class Renderer
+{
+    public XslTransform Build() => new XslTransform();
+}
+`, 'use-of-xsltransform')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag XslCompiledTransform', () => {
+    const found = matches(`using System.Xml.Xsl;
+
+namespace App.Xml;
+
+public class Renderer
+{
+    public XslCompiledTransform Build() => new XslCompiledTransform();
+}
+`, 'use-of-xsltransform')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/custom-crypto-algorithm
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/custom-crypto-algorithm (C#)', () => {
+  it('detects a class deriving from HashAlgorithm', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public sealed class MyDigest : HashAlgorithm
+{
+    public override void Initialize() { }
+    protected override void HashCore(byte[] array, int ibStart, int cbSize) { }
+    protected override byte[] HashFinal() => System.Array.Empty<byte>();
+}
+`, 'custom-crypto-algorithm')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('detects a class deriving from SymmetricAlgorithm', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public sealed class MyCipher : SymmetricAlgorithm
+{
+    public override ICryptoTransform CreateEncryptor(byte[] key, byte[] iv) => null;
+    public override ICryptoTransform CreateDecryptor(byte[] key, byte[] iv) => null;
+    public override void GenerateKey() { }
+    public override void GenerateIV() { }
+}
+`, 'custom-crypto-algorithm')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a class using a standard algorithm without deriving from a crypto type', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public sealed class Hasher
+{
+    public byte[] Hash(byte[] data) => SHA256.HashData(data);
+}
+`, 'custom-crypto-algorithm')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/hardcoded-securityprotocoltype
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/hardcoded-securityprotocoltype (C#)', () => {
+  it('detects a pinned SecurityProtocolType value', () => {
+    const found = matches(`using System.Net;
+
+namespace App.Net;
+
+public class HttpSetup
+{
+    public void Configure()
+    {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+    }
+}
+`, 'hardcoded-securityprotocoltype')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag deprecated values (the weak-ssl rule) or comparisons', () => {
+    const found = matches(`using System.Net;
+
+namespace App.Net;
+
+public class HttpSetup
+{
+    public bool IsLegacy(SecurityProtocolType p) => p == SecurityProtocolType.Tls12;
+}
+`, 'hardcoded-securityprotocoltype')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/hardcoded-sslprotocols
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/hardcoded-sslprotocols (C#)', () => {
+  it('detects a pinned SslProtocols value', () => {
+    const found = matches(`using System.Net.Security;
+using System.Security.Authentication;
+
+namespace App.Net;
+
+public class TlsClient
+{
+    public void Connect(SslStream stream, string host)
+    {
+        stream.AuthenticateAsClient(host, null, SslProtocols.Tls13, false);
+    }
+}
+`, 'hardcoded-sslprotocols')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag SslProtocols.None (OS default) or comparisons', () => {
+    const found = matches(`using System.Security.Authentication;
+
+namespace App.Net;
+
+public class TlsClient
+{
+    public SslProtocols Default => SslProtocols.None;
+    public bool Modern(SslProtocols p) => p == SslProtocols.Tls13;
+}
+`, 'hardcoded-sslprotocols')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/predictable-cipher-iv
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/predictable-cipher-iv (C#)', () => {
+  it('detects a zero-filled IV assignment and a constant IV argument', () => {
+    const f1 = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Cipher
+{
+    public void Setup(Aes aes)
+    {
+        aes.IV = new byte[16];
+    }
+}
+`, 'predictable-cipher-iv')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Cipher
+{
+    public ICryptoTransform Make(Aes aes, byte[] key)
+    {
+        return aes.CreateEncryptor(key, new byte[] { 0x00, 0x00, 0x00, 0x00 });
+    }
+}
+`, 'predictable-cipher-iv')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a randomly generated IV', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Cipher
+{
+    public void Setup(Aes aes)
+    {
+        aes.GenerateIV();
+        var freshIv = RandomNumberGenerator.GetBytes(16);
+        aes.IV = freshIv;
+    }
+}
+`, 'predictable-cipher-iv')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/predictable-random-seed
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/predictable-random-seed (C#)', () => {
+  it('detects a constant seed via constructor and SetSeed', () => {
+    const f1 = matches(`using Org.BouncyCastle.Security;
+
+namespace App.Crypto;
+
+public class Tokens
+{
+    public SecureRandom Build() => new SecureRandom(new byte[] { 0x01, 0x02 });
+}
+`, 'predictable-random-seed')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using Org.BouncyCastle.Security;
+
+namespace App.Crypto;
+
+public class Tokens
+{
+    public void Seed(SecureRandom r) => r.SetSeed(424242);
+}
+`, 'predictable-random-seed')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a self-seeded generator', () => {
+    const found = matches(`using Org.BouncyCastle.Security;
+
+namespace App.Crypto;
+
+public class Tokens
+{
+    public SecureRandom Build() => new SecureRandom();
+}
+`, 'predictable-random-seed')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/mutable-public-static-field
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/mutable-public-static-field (C#)', () => {
+  it('detects a public static array and a public static List field', () => {
+    const f1 = matches(`namespace App.Config;
+
+public static class Defaults
+{
+    public static readonly string[] Origins = { "a", "b" };
+}
+`, 'mutable-public-static-field')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.Collections.Generic;
+
+namespace App.Config;
+
+public static class Defaults
+{
+    public static List<string> Allowed = new();
+}
+`, 'mutable-public-static-field')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag const, private, or immutable-typed fields', () => {
+    const found = matches(`using System.Collections.Immutable;
+
+namespace App.Config;
+
+public static class Defaults
+{
+    public const int MaxRetries = 3;
+    private static readonly byte[] Salt = new byte[16];
+    public static readonly ImmutableArray<string> Origins = ImmutableArray<string>.Empty;
+}
+`, 'mutable-public-static-field')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/reflection-bypass-accessibility
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/reflection-bypass-accessibility (C#)', () => {
+  it('detects BindingFlags.NonPublic used to read a private field', () => {
+    const found = matches(`using System;
+using System.Reflection;
+
+namespace App.Reflect;
+
+public class Probe
+{
+    public object? Read(object target, string name)
+    {
+        var f = target.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+        return f?.GetValue(target);
+    }
+}
+`, 'reflection-bypass-accessibility')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag public-only reflection', () => {
+    const found = matches(`using System.Reflection;
+
+namespace App.Reflect;
+
+public class Probe
+{
+    public object? Read(object target, string name)
+    {
+        var f = target.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance);
+        return f?.GetValue(target);
+    }
+}
+`, 'reflection-bypass-accessibility')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/unsafe-code-block
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/unsafe-code-block (C#)', () => {
+  it('detects an unsafe method modifier and an unsafe block', () => {
+    const f1 = matches(`namespace App.Native;
+
+public class Buffers
+{
+    public unsafe int First(byte[] data)
+    {
+        fixed (byte* p = data) { return *p; }
+    }
+}
+`, 'unsafe-code-block')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`namespace App.Native;
+
+public class Buffers
+{
+    public int First(byte[] data)
+    {
+        unsafe
+        {
+            fixed (byte* p = data) { return *p; }
+        }
+    }
+}
+`, 'unsafe-code-block')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag safe code with an unrelated async modifier', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace App.Native;
+
+public class Buffers
+{
+    public async Task<int> FirstAsync(byte[] data)
+    {
+        await Task.Yield();
+        return data.Length;
+    }
+}
+`, 'unsafe-code-block')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/pinvoke-publicly-visible
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/pinvoke-publicly-visible (C#)', () => {
+  it('detects a public [DllImport] method', () => {
+    const found = matches(`using System;
+using System.Runtime.InteropServices;
+
+namespace App.Native;
+
+public static class Win32
+{
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr handle);
+}
+`, 'pinvoke-publicly-visible')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a private/internal P/Invoke', () => {
+    const found = matches(`using System;
+using System.Runtime.InteropServices;
+
+namespace App.Native;
+
+internal static class Win32
+{
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+`, 'pinvoke-publicly-visible')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/visible-event-handler
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/visible-event-handler (C#)', () => {
+  it('detects a public event-handler-signature method', () => {
+    const found = matches(`using System;
+
+namespace App.Ui;
+
+public class Page
+{
+    public void OnLoad(object sender, EventArgs e)
+    {
+        System.Console.WriteLine("loaded");
+    }
+}
+`, 'visible-event-handler')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a private handler or a normal public method', () => {
+    const found = matches(`using System;
+
+namespace App.Ui;
+
+public class Page
+{
+    private void OnLoad(object sender, EventArgs e) { System.Console.WriteLine("x"); }
+    public int Add(object a, object b) => 0;
+}
+`, 'visible-event-handler')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/schannel-strong-crypto-disabled
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/schannel-strong-crypto-disabled (C#)', () => {
+  it('detects the DontEnableSchUseStrongCrypto switch set to true', () => {
+    const found = matches(`using System;
+
+namespace App.Net;
+
+public class Startup
+{
+    public void Configure()
+    {
+        AppContext.SetSwitch("Switch.System.Net.DontEnableSchUseStrongCrypto", true);
+    }
+}
+`, 'schannel-strong-crypto-disabled')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag the switch set to false or an unrelated switch', () => {
+    const found = matches(`using System;
+
+namespace App.Net;
+
+public class Startup
+{
+    public void Configure()
+    {
+        AppContext.SetSwitch("Switch.System.Net.DontEnableSchUseStrongCrypto", false);
+        AppContext.SetSwitch("Switch.System.SomethingElse", true);
+    }
+}
+`, 'schannel-strong-crypto-disabled')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/servicepointmanager-protocols-disabled
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/servicepointmanager-protocols-disabled (C#)', () => {
+  it('detects the DisableUsingServicePointManagerSecurityProtocols switch set to true', () => {
+    const found = matches(`using System;
+
+namespace App.Net;
+
+public class Startup
+{
+    public void Configure()
+    {
+        AppContext.SetSwitch("Switch.System.ServiceModel.DisableUsingServicePointManagerSecurityProtocols", true);
+    }
+}
+`, 'servicepointmanager-protocols-disabled')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag the switch set to false', () => {
+    const found = matches(`using System;
+
+namespace App.Net;
+
+public class Startup
+{
+    public void Configure()
+    {
+        AppContext.SetSwitch("Switch.System.ServiceModel.DisableUsingServicePointManagerSecurityProtocols", false);
+    }
+}
+`, 'servicepointmanager-protocols-disabled')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/http-header-checking-disabled
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/http-header-checking-disabled (C#)', () => {
+  it('detects EnableHeaderChecking = false via assignment and initializer', () => {
+    const f1 = matches(`using System.Web.Configuration;
+
+namespace App.Web;
+
+public class Setup
+{
+    public void Configure(HttpRuntimeSection section)
+    {
+        section.EnableHeaderChecking = false;
+    }
+}
+`, 'http-header-checking-disabled')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.Web.Configuration;
+
+namespace App.Web;
+
+public class Setup
+{
+    public HttpRuntimeSection Build() => new HttpRuntimeSection { EnableHeaderChecking = false };
+}
+`, 'http-header-checking-disabled')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag EnableHeaderChecking left enabled', () => {
+    const found = matches(`using System.Web.Configuration;
+
+namespace App.Web;
+
+public class Setup
+{
+    public void Configure(HttpRuntimeSection section)
+    {
+        section.EnableHeaderChecking = true;
+    }
+}
+`, 'http-header-checking-disabled')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/unmanaged-pointer-visible
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/unmanaged-pointer-visible (C#)', () => {
+  it('detects a public IntPtr field and a public IntPtr property', () => {
+    const f1 = matches(`using System;
+
+namespace App.Native;
+
+public class Handle
+{
+    public IntPtr Raw;
+}
+`, 'unmanaged-pointer-visible')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System;
+
+namespace App.Native;
+
+public class Handle
+{
+    public IntPtr Raw { get; set; }
+}
+`, 'unmanaged-pointer-visible')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a private pointer or a public SafeHandle', () => {
+    const found = matches(`using System;
+using Microsoft.Win32.SafeHandles;
+
+namespace App.Native;
+
+public class Handle
+{
+    private IntPtr _raw;
+    public SafeFileHandle File { get; set; }
+}
+`, 'unmanaged-pointer-visible')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/add-cert-to-root-store
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/add-cert-to-root-store (C#)', () => {
+  it('detects opening the Root store', () => {
+    const found = matches(`using System.Security.Cryptography.X509Certificates;
+
+namespace App.Certs;
+
+public class Trust
+{
+    public X509Store Open() => new X509Store(StoreName.Root, StoreLocation.LocalMachine);
+}
+`, 'add-cert-to-root-store')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag opening the personal (My) store', () => {
+    const found = matches(`using System.Security.Cryptography.X509Certificates;
+
+namespace App.Certs;
+
+public class Trust
+{
+    public X509Store Open() => new X509Store(StoreName.My, StoreLocation.CurrentUser);
+}
+`, 'add-cert-to-root-store')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/ldap-anonymous-bind
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/ldap-anonymous-bind (C#)', () => {
+  it('detects AuthenticationTypes.Anonymous on a DirectoryEntry', () => {
+    const f1 = matches(`using System.DirectoryServices;
+
+namespace App.Directory;
+
+public class Ad
+{
+    public DirectoryEntry Connect(string path)
+        => new DirectoryEntry(path, null, null, AuthenticationTypes.Anonymous);
+}
+`, 'ldap-anonymous-bind')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.DirectoryServices;
+
+namespace App.Directory;
+
+public class Ad
+{
+    public void Configure(DirectoryEntry entry)
+    {
+        entry.AuthenticationType = AuthenticationTypes.Anonymous;
+    }
+}
+`, 'ldap-anonymous-bind')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a secure authenticated bind', () => {
+    const found = matches(`using System.DirectoryServices;
+
+namespace App.Directory;
+
+public class Ad
+{
+    public DirectoryEntry Connect(string path, string user, string pass)
+        => new DirectoryEntry(path, user, pass, AuthenticationTypes.Secure);
+}
+`, 'ldap-anonymous-bind')
+    expect(found).toHaveLength(0)
+  })
+})

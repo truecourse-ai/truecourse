@@ -141,6 +141,24 @@ import { csharpUnusedVariableVisitor } from './unused-variable.js'
 import { csharpUselessCatchVisitor } from './useless-catch.js'
 import { csharpUselessConstructorVisitor } from './useless-constructor.js'
 import { csharpYodaConditionVisitor } from './yoda-condition.js'
+import { csharpAbstractClassPublicConstructorVisitor } from './abstract-class-public-constructor.js'
+import { csharpAbstractClassWithoutAbstractMembersVisitor } from './abstract-class-without-abstract-members.js'
+import { csharpArithmeticPrecedenceParenthesesVisitor } from './arithmetic-precedence-parentheses.js'
+import { csharpAsymmetricEqualityOperatorsVisitor } from './asymmetric-equality-operators.js'
+import { csharpAttributeMissingUsageVisitor } from './attribute-missing-usage.js'
+import { csharpConditionalPrecedenceParenthesesVisitor } from './conditional-precedence-parentheses.js'
+import { csharpCrefWithPrefixVisitor } from './cref-with-prefix.js'
+import { csharpDebugAssertFalseVisitor } from './debug-assert-false.js'
+import { csharpDuplicateSwitchSectionBodiesVisitor } from './duplicate-switch-section-bodies.js'
+import { csharpDuplicateWordInCommentVisitor } from './duplicate-word-in-comment.js'
+import { csharpEmptyCommentVisitor } from './empty-comment.js'
+import { csharpEmptyElseClauseVisitor } from './empty-else-clause.js'
+import { csharpEmptyInterfaceVisitor } from './empty-interface.js'
+import { csharpEmptyNamespaceDeclarationVisitor } from './empty-namespace-declaration.js'
+import { csharpEnumMemberPrefixedWithTypeVisitor } from './enum-member-prefixed-with-type.js'
+import { csharpEnumReservedMemberNameVisitor } from './enum-reserved-member-name.js'
+import { csharpExceptionNamedTypeNotExceptionVisitor } from './exception-named-type-not-exception.js'
+import { csharpExceptionTypeNotPublicVisitor } from './exception-type-not-public.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -285,4 +303,22 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpUselessCatchVisitor,
   csharpUselessConstructorVisitor,
   csharpYodaConditionVisitor,
+  csharpAbstractClassPublicConstructorVisitor,
+  csharpAbstractClassWithoutAbstractMembersVisitor,
+  csharpArithmeticPrecedenceParenthesesVisitor,
+  csharpAsymmetricEqualityOperatorsVisitor,
+  csharpAttributeMissingUsageVisitor,
+  csharpConditionalPrecedenceParenthesesVisitor,
+  csharpCrefWithPrefixVisitor,
+  csharpDebugAssertFalseVisitor,
+  csharpDuplicateSwitchSectionBodiesVisitor,
+  csharpDuplicateWordInCommentVisitor,
+  csharpEmptyCommentVisitor,
+  csharpEmptyElseClauseVisitor,
+  csharpEmptyInterfaceVisitor,
+  csharpEmptyNamespaceDeclarationVisitor,
+  csharpEnumMemberPrefixedWithTypeVisitor,
+  csharpEnumReservedMemberNameVisitor,
+  csharpExceptionNamedTypeNotExceptionVisitor,
+  csharpExceptionTypeNotPublicVisitor,
 ]

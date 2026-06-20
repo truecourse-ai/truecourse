@@ -3160,3 +3160,660 @@ public sealed class NativeBuffer
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/anonymous-delegate-unsubscribe (C#)', () => {
+  const key = 'bugs/deterministic/anonymous-delegate-unsubscribe'
+
+  it('detects unsubscribing with a lambda', () => {
+    const found = matches(`namespace Devices;
+public sealed class TemperatureMonitor
+{
+    private readonly Sensor _sensor;
+
+    public void Detach()
+    {
+        _sensor.Reading -= (sender, reading) => Process(reading);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag subscribing with a lambda or unsubscribing a stored handler', () => {
+    const found = matches(`namespace Devices;
+public sealed class TemperatureMonitor
+{
+    private readonly Sensor _sensor;
+    private readonly EventHandler<Reading> _handler;
+
+    public void Attach()
+    {
+        _sensor.Reading += (sender, reading) => Process(reading);
+    }
+
+    public void Detach()
+    {
+        _sensor.Reading -= _handler;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/argumentexception-wrong-parameter-name (C#)', () => {
+  const key = 'bugs/deterministic/argumentexception-wrong-parameter-name'
+
+  it('detects a paramName that matches no parameter', () => {
+    const found = matches(`namespace Ordering;
+public sealed class OrderValidator
+{
+    public void Validate(int quantity)
+    {
+        if (quantity < 0)
+        {
+            throw new ArgumentException("must be non-negative", "count");
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag nameof or a correct parameter name', () => {
+    const found = matches(`namespace Ordering;
+public sealed class OrderValidator
+{
+    public void Validate(int quantity, string code)
+    {
+        if (quantity < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity), "must be non-negative");
+        }
+        if (code is null)
+        {
+            throw new ArgumentNullException("code");
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/assert-without-message (C#)', () => {
+  const key = 'bugs/deterministic/assert-without-message'
+
+  it('detects a Debug.Assert with only a condition', () => {
+    const found = matches(`namespace Pricing;
+public sealed class Ledger
+{
+    public void Apply(decimal balance)
+    {
+        Debug.Assert(balance >= 0);
+        _balance = balance;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an assert that supplies a message', () => {
+    const found = matches(`namespace Pricing;
+public sealed class Ledger
+{
+    public void Apply(decimal balance)
+    {
+        Debug.Assert(balance >= 0, "balance must never go negative");
+        _balance = balance;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/debug-fail-without-message (C#)', () => {
+  const key = 'bugs/deterministic/debug-fail-without-message'
+
+  it('detects a Debug.Fail with no message', () => {
+    const found = matches(`namespace Routing;
+public sealed class Dispatcher
+{
+    public void Route(RouteKind kind)
+    {
+        switch (kind)
+        {
+            case RouteKind.Direct:
+                SendDirect();
+                break;
+            default:
+                Debug.Fail();
+                break;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a Debug.Fail that supplies a message', () => {
+    const found = matches(`namespace Routing;
+public sealed class Dispatcher
+{
+    public void Route(RouteKind kind)
+    {
+        switch (kind)
+        {
+            case RouteKind.Direct:
+                SendDirect();
+                break;
+            default:
+                Debug.Fail("unhandled route kind");
+                break;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/base-call-on-object (C#)', () => {
+  const key = 'bugs/deterministic/base-call-on-object'
+
+  it('detects base.GetHashCode in a type deriving from object', () => {
+    const found = matches(`namespace Geometry;
+public sealed class Point
+{
+    private readonly int _x;
+    private readonly int _y;
+
+    public override int GetHashCode()
+    {
+        return base.GetHashCode();
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag base.GetHashCode when a real base class exists', () => {
+    const found = matches(`namespace Geometry;
+public sealed class ColoredPoint : Point
+{
+    private readonly int _color;
+
+    public override int GetHashCode()
+    {
+        return base.GetHashCode() ^ _color;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/caller-info-param-not-last (C#)', () => {
+  const key = 'bugs/deterministic/caller-info-param-not-last'
+
+  it('detects a caller-info parameter before a required one', () => {
+    const found = matches(`namespace Logging;
+public sealed class Tracer
+{
+    public void Log([CallerMemberName] string member, string message)
+    {
+        _sink.Write(member, message);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a caller-info parameter placed last and optional', () => {
+    const found = matches(`namespace Logging;
+public sealed class Tracer
+{
+    public void Log(string message, [CallerMemberName] string member = "")
+    {
+        _sink.Write(member, message);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/cancellation-token-not-last (C#)', () => {
+  const key = 'bugs/deterministic/cancellation-token-not-last'
+
+  it('detects a CancellationToken before a required parameter', () => {
+    const found = matches(`namespace Sync;
+public sealed class Replicator
+{
+    public Task ReplicateAsync(CancellationToken token, string target)
+    {
+        return _channel.SendAsync(target, token);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a trailing CancellationToken', () => {
+    const found = matches(`namespace Sync;
+public sealed class Replicator
+{
+    public Task ReplicateAsync(string target, CancellationToken token)
+    {
+        return _channel.SendAsync(target, token);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/catch-null-reference-exception (C#)', () => {
+  const key = 'bugs/deterministic/catch-null-reference-exception'
+
+  it('detects catching NullReferenceException', () => {
+    const found = matches(`namespace Importing;
+public sealed class FeedReader
+{
+    public void Read(Feed feed)
+    {
+        try
+        {
+            _parser.Parse(feed.Body);
+        }
+        catch (NullReferenceException)
+        {
+            _log.Warn("skipping malformed feed");
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag catching a meaningful exception', () => {
+    const found = matches(`namespace Importing;
+public sealed class FeedReader
+{
+    public void Read(Feed feed)
+    {
+        try
+        {
+            _parser.Parse(feed.Body);
+        }
+        catch (FormatException ex)
+        {
+            _log.Warn("skipping malformed feed", ex);
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/chained-orderby-loses-ordering (C#)', () => {
+  const key = 'bugs/deterministic/chained-orderby-loses-ordering'
+
+  it('detects a second OrderBy after the first', () => {
+    const found = matches(`namespace Reporting;
+public sealed class Roster
+{
+    public IEnumerable<Player> Ranked(IEnumerable<Player> players)
+    {
+        return players.OrderBy(p => p.LastName).OrderBy(p => p.FirstName);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag OrderBy followed by ThenBy', () => {
+    const found = matches(`namespace Reporting;
+public sealed class Roster
+{
+    public IEnumerable<Player> Ranked(IEnumerable<Player> players)
+    {
+        return players.OrderBy(p => p.LastName).ThenBy(p => p.FirstName);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/check-against-value-being-assigned (C#)', () => {
+  const key = 'bugs/deterministic/check-against-value-being-assigned'
+
+  it('detects a guard around an assignment of the compared value', () => {
+    const found = matches(`namespace State;
+public sealed class Toggle
+{
+    private bool _enabled;
+
+    public void Set(bool desired)
+    {
+        if (_enabled != desired)
+        {
+            _enabled = desired;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a guard that does real work or notifies', () => {
+    const found = matches(`namespace State;
+public sealed class Toggle
+{
+    private bool _enabled;
+
+    public void Set(bool desired)
+    {
+        if (_enabled != desired)
+        {
+            _enabled = desired;
+            Changed?.Invoke();
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/collection-passed-to-own-method (C#)', () => {
+  const key = 'bugs/deterministic/collection-passed-to-own-method'
+
+  it('detects a list passed to its own AddRange', () => {
+    const found = matches(`namespace Buffers;
+public sealed class Accumulator
+{
+    private readonly List<int> _values = new();
+
+    public void Double()
+    {
+        _values.AddRange(_values);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag adding a different collection', () => {
+    const found = matches(`namespace Buffers;
+public sealed class Accumulator
+{
+    private readonly List<int> _values = new();
+
+    public void Merge(List<int> extra)
+    {
+        _values.AddRange(extra);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/datetime-parse-no-format-provider (C#)', () => {
+  const key = 'bugs/deterministic/datetime-parse-no-format-provider'
+
+  it('detects DateTime.Parse without a provider', () => {
+    const found = matches(`namespace Scheduling;
+public sealed class WindowParser
+{
+    public DateTime Parse(string raw)
+    {
+        return DateTime.Parse(raw);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag parsing with an explicit culture', () => {
+    const found = matches(`namespace Scheduling;
+public sealed class WindowParser
+{
+    public DateTime Parse(string raw)
+    {
+        return DateTime.Parse(raw, CultureInfo.InvariantCulture);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/doubled-prefix-operator (C#)', () => {
+  const key = 'bugs/deterministic/doubled-prefix-operator'
+
+  it('detects a doubled bitwise complement', () => {
+    const found = matches(`namespace Flags;
+public sealed class Gate
+{
+    public int Normalize(int mask)
+    {
+        return ~~mask;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag doubled negation (owned by double-negation) or a single complement', () => {
+    const found = matches(`namespace Flags;
+public sealed class Gate
+{
+    public bool IsOpen(bool raw)
+    {
+        return !!raw;
+    }
+
+    public int Identity(int mask)
+    {
+        return ~mask;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/empty-guid-constructor (C#)', () => {
+  const key = 'bugs/deterministic/empty-guid-constructor'
+
+  it('detects new Guid()', () => {
+    const found = matches(`namespace Identity;
+public sealed class TokenFactory
+{
+    public Guid Create()
+    {
+        return new Guid();
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag Guid.NewGuid or a parameterized constructor', () => {
+    const found = matches(`namespace Identity;
+public sealed class TokenFactory
+{
+    public Guid Create()
+    {
+        return Guid.NewGuid();
+    }
+
+    public Guid From(string value)
+    {
+        return new Guid(value);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/empty-statement (C#)', () => {
+  const key = 'bugs/deterministic/empty-statement'
+
+  it('detects a stray semicolon in a block', () => {
+    const found = matches(`namespace Pipelines;
+public sealed class Stage
+{
+    public void Run()
+    {
+        _executor.Start();;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an empty for-loop header', () => {
+    const found = matches(`namespace Pipelines;
+public sealed class Stage
+{
+    public void Run()
+    {
+        for (;;)
+        {
+            if (_done) break;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/enum-duplicate-explicit-value (C#)', () => {
+  const key = 'bugs/deterministic/enum-duplicate-explicit-value'
+
+  it('detects two members with the same explicit value', () => {
+    const found = matches(`namespace Workflow;
+public enum Stage
+{
+    Created = 1,
+    Active = 2,
+    Pending = 1,
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag distinct values', () => {
+    const found = matches(`namespace Workflow;
+public enum Stage
+{
+    Created = 1,
+    Active = 2,
+    Pending = 3,
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/flags-enum-missing-zero (C#)', () => {
+  const key = 'bugs/deterministic/flags-enum-missing-zero'
+
+  it('detects a Flags enum without a zero member', () => {
+    const found = matches(`namespace Permissions;
+[Flags]
+public enum Access
+{
+    Read = 1,
+    Write = 2,
+    Execute = 4,
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a Flags enum with a None member', () => {
+    const found = matches(`namespace Permissions;
+[Flags]
+public enum Access
+{
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Execute = 4,
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/is-check-on-this (C#)', () => {
+  const key = 'bugs/deterministic/is-check-on-this'
+
+  it('detects this checked against a subtype', () => {
+    const found = matches(`namespace Shapes;
+public abstract class Shape
+{
+    public double Scale()
+    {
+        if (this is Circle circle)
+        {
+            return circle.Radius;
+        }
+        return 1.0;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a type check on another value', () => {
+    const found = matches(`namespace Shapes;
+public abstract class Shape
+{
+    public double Scale(object other)
+    {
+        if (other is Circle circle)
+        {
+            return circle.Radius;
+        }
+        return 1.0;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/literal-control-character (C#)', () => {
+  const key = 'bugs/deterministic/literal-control-character'
+  const tab = String.fromCharCode(9)
+
+  it('detects a raw tab in a string literal', () => {
+    const found = matches(`namespace Formatting;
+public sealed class Columnizer
+{
+    private const string Separator = "name${tab}value";
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an escaped tab', () => {
+    const found = matches(`namespace Formatting;
+public sealed class Columnizer
+{
+    private const string Separator = "name\\tvalue";
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})

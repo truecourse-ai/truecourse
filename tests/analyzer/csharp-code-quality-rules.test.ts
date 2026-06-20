@@ -5776,3 +5776,634 @@ public class ManifestReader
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// abstract-class-public-constructor
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/abstract-class-public-constructor (C#)', () => {
+  it('flags a public constructor on an abstract class', () => {
+    const found = matches(`namespace App;
+public abstract class Repository
+{
+    private readonly string _connectionString;
+
+    public Repository(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+}
+`, 'abstract-class-public-constructor')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a protected constructor or a concrete class', () => {
+    const found = matches(`namespace App;
+public abstract class Repository
+{
+    private readonly string _connectionString;
+
+    protected Repository(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+}
+
+public class FileStore
+{
+    public FileStore() { }
+}
+`, 'abstract-class-public-constructor')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// abstract-class-without-abstract-members
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/abstract-class-without-abstract-members (C#)', () => {
+  it('flags an abstract class with only concrete members', () => {
+    const found = matches(`namespace App;
+public abstract class BaseHandler
+{
+    protected readonly string Name = "handler";
+
+    protected void Log(string message)
+    {
+        System.Console.WriteLine(message);
+    }
+}
+`, 'abstract-class-without-abstract-members')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an abstract class that declares an abstract member', () => {
+    const found = matches(`namespace App;
+public abstract class BaseHandler
+{
+    public abstract void Handle(string payload);
+
+    protected void Log(string message)
+    {
+        System.Console.WriteLine(message);
+    }
+}
+`, 'abstract-class-without-abstract-members')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// arithmetic-precedence-parentheses
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/arithmetic-precedence-parentheses (C#)', () => {
+  it('flags addition mixed with multiplication without parentheses', () => {
+    const found = matches(`namespace App;
+public class Pricing
+{
+    public decimal Total(decimal basePrice, decimal taxRate, decimal shipping)
+    {
+        return basePrice + basePrice * taxRate + shipping;
+    }
+}
+`, 'arithmetic-precedence-parentheses')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag parenthesized or single-tier arithmetic', () => {
+    const found = matches(`namespace App;
+public class Pricing
+{
+    public decimal Total(decimal basePrice, decimal taxRate, decimal shipping)
+    {
+        return basePrice + (basePrice * taxRate) + shipping;
+    }
+
+    public decimal Sum(decimal a, decimal b, decimal c)
+    {
+        return a + b - c;
+    }
+}
+`, 'arithmetic-precedence-parentheses')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// asymmetric-equality-operators
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/asymmetric-equality-operators (C#)', () => {
+  it('flags a < operator overloaded without <=', () => {
+    const found = matches(`namespace App;
+public struct Version
+{
+    public int Value;
+
+    public static bool operator <(Version a, Version b) => a.Value < b.Value;
+    public static bool operator >(Version a, Version b) => a.Value > b.Value;
+}
+`, 'asymmetric-equality-operators')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag fully paired relational operators', () => {
+    const found = matches(`namespace App;
+public struct Version
+{
+    public int Value;
+
+    public static bool operator <(Version a, Version b) => a.Value < b.Value;
+    public static bool operator >(Version a, Version b) => a.Value > b.Value;
+    public static bool operator <=(Version a, Version b) => a.Value <= b.Value;
+    public static bool operator >=(Version a, Version b) => a.Value >= b.Value;
+}
+`, 'asymmetric-equality-operators')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// attribute-missing-usage
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/attribute-missing-usage (C#)', () => {
+  it('flags a custom attribute without [AttributeUsage]', () => {
+    const found = matches(`namespace App;
+public sealed class AuditedAttribute : Attribute
+{
+    public string Category { get; }
+
+    public AuditedAttribute(string category)
+    {
+        Category = category;
+    }
+}
+`, 'attribute-missing-usage')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an attribute that declares its usage', () => {
+    const found = matches(`namespace App;
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class AuditedAttribute : Attribute
+{
+    public string Category { get; }
+
+    public AuditedAttribute(string category)
+    {
+        Category = category;
+    }
+}
+`, 'attribute-missing-usage')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// conditional-precedence-parentheses
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/conditional-precedence-parentheses (C#)', () => {
+  it('flags && mixed with || without parentheses', () => {
+    const found = matches(`namespace App;
+public class AccessPolicy
+{
+    public bool CanEdit(bool isOwner, bool isAdmin, bool isLocked)
+    {
+        return isOwner || isAdmin && !isLocked;
+    }
+}
+`, 'conditional-precedence-parentheses')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag parenthesized or single-operator conditions', () => {
+    const found = matches(`namespace App;
+public class AccessPolicy
+{
+    public bool CanEdit(bool isOwner, bool isAdmin, bool isLocked)
+    {
+        return isOwner || (isAdmin && !isLocked);
+    }
+
+    public bool CanView(bool a, bool b, bool c)
+    {
+        return a && b && c;
+    }
+}
+`, 'conditional-precedence-parentheses')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// cref-with-prefix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/cref-with-prefix (C#)', () => {
+  it('flags a doc cref carrying a member-kind prefix', () => {
+    const found = matches(`namespace App;
+public class OrderService
+{
+    /// <summary>Delegates to <see cref="M:App.OrderService.Submit"/>.</summary>
+    public void SubmitAll() { }
+}
+`, 'cref-with-prefix')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a plain cref', () => {
+    const found = matches(`namespace App;
+public class OrderService
+{
+    /// <summary>Delegates to <see cref="Submit"/>.</summary>
+    public void SubmitAll() { }
+
+    public void Submit() { }
+}
+`, 'cref-with-prefix')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// debug-assert-false
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/debug-assert-false (C#)', () => {
+  it('flags Debug.Assert(false)', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics;
+public class StateMachine
+{
+    public void Transition(string state)
+    {
+        switch (state)
+        {
+            case "open": return;
+            case "closed": return;
+            default:
+                Debug.Assert(false, "unknown state");
+                return;
+        }
+    }
+}
+`, 'debug-assert-false')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a normal Debug.Assert or Debug.Fail', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics;
+public class StateMachine
+{
+    public void Check(int count)
+    {
+        Debug.Assert(count > 0);
+        Debug.Fail("unreachable");
+    }
+}
+`, 'debug-assert-false')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// duplicate-switch-section-bodies
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/duplicate-switch-section-bodies (C#)', () => {
+  it('flags two switch sections with identical bodies', () => {
+    const found = matches(`namespace App;
+public class Router
+{
+    public string Resolve(string scheme)
+    {
+        switch (scheme)
+        {
+            case "http":
+                return BuildUrl("insecure", 80);
+            case "https":
+                return BuildUrl("insecure", 80);
+            default:
+                return BuildUrl("local", 0);
+        }
+    }
+
+    private string BuildUrl(string mode, int port) => mode + port;
+}
+`, 'duplicate-switch-section-bodies')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag sections with distinct bodies', () => {
+    const found = matches(`namespace App;
+public class Router
+{
+    public string Resolve(string scheme)
+    {
+        switch (scheme)
+        {
+            case "http":
+                return BuildUrl("insecure", 80);
+            case "https":
+                return BuildUrl("secure", 443);
+            default:
+                return BuildUrl("local", 0);
+        }
+    }
+
+    private string BuildUrl(string mode, int port) => mode + port;
+}
+`, 'duplicate-switch-section-bodies')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// duplicate-word-in-comment
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/duplicate-word-in-comment (C#)', () => {
+  it('flags a repeated word in a comment', () => {
+    const found = matches(`namespace App;
+public class Cache
+{
+    // Evict the the oldest entry when capacity is exceeded.
+    public void Trim() { }
+}
+`, 'duplicate-word-in-comment')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag normal comments', () => {
+    const found = matches(`namespace App;
+public class Cache
+{
+    // Evict the oldest entry when capacity is exceeded.
+    public void Trim() { }
+}
+`, 'duplicate-word-in-comment')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// empty-comment
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/empty-comment (C#)', () => {
+  it('flags a comment marker with no text', () => {
+    const found = matches(`namespace App;
+public class Worker
+{
+    public void Run()
+    {
+        //
+        Process();
+    }
+
+    private void Process() { }
+}
+`, 'empty-comment')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag comments with text or divider lines', () => {
+    const found = matches(`namespace App;
+public class Worker
+{
+    // ----------------------------------
+    // Runs the work loop.
+    public void Run() { }
+}
+`, 'empty-comment')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// empty-else-clause
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/empty-else-clause (C#)', () => {
+  it('flags an empty else branch', () => {
+    const found = matches(`namespace App;
+public class Validator
+{
+    public void Check(bool ok, System.Collections.Generic.List<string> errors)
+    {
+        if (ok)
+        {
+            errors.Clear();
+        }
+        else
+        {
+        }
+    }
+}
+`, 'empty-else-clause')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a non-empty else or an else-if chain', () => {
+    const found = matches(`namespace App;
+public class Validator
+{
+    public string Check(int code)
+    {
+        if (code == 200)
+        {
+            return "ok";
+        }
+        else if (code >= 500)
+        {
+            return "server";
+        }
+        else
+        {
+            return "other";
+        }
+    }
+}
+`, 'empty-else-clause')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// empty-interface
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/empty-interface (C#)', () => {
+  it('flags a marker interface with no members', () => {
+    const found = matches(`namespace App;
+public interface IAggregateRoot
+{
+}
+`, 'empty-interface')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag interfaces with members or composed interfaces', () => {
+    const found = matches(`namespace App;
+public interface IEntity
+{
+    int Id { get; }
+}
+
+public interface IAuditable : IEntity
+{
+}
+`, 'empty-interface')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// empty-namespace-declaration
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/empty-namespace-declaration (C#)', () => {
+  it('flags a block namespace declaring no types', () => {
+    const found = matches(`namespace App.Legacy
+{
+}
+`, 'empty-namespace-declaration')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a namespace that declares a type', () => {
+    const found = matches(`namespace App.Domain
+{
+    public class Order { }
+}
+`, 'empty-namespace-declaration')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enum-member-prefixed-with-type
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/enum-member-prefixed-with-type (C#)', () => {
+  it('flags an enum member prefixed with the enum name', () => {
+    const found = matches(`namespace App;
+public enum LogLevel
+{
+    LogLevelTrace,
+    Information,
+    Warning
+}
+`, 'enum-member-prefixed-with-type')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag members that merely start with the type name as one word', () => {
+    const found = matches(`namespace App;
+public enum Color
+{
+    Red,
+    Green,
+    Colorful
+}
+`, 'enum-member-prefixed-with-type')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enum-reserved-member-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/enum-reserved-member-name (C#)', () => {
+  it('flags an enum member named Reserved', () => {
+    const found = matches(`namespace App;
+public enum Slot
+{
+    Active,
+    Inactive,
+    Reserved
+}
+`, 'enum-reserved-member-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag meaningfully named members', () => {
+    const found = matches(`namespace App;
+public enum Slot
+{
+    Active,
+    Inactive,
+    Pending
+}
+`, 'enum-reserved-member-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// exception-named-type-not-exception
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/exception-named-type-not-exception (C#)', () => {
+  it('flags an Exception-named type that does not derive from Exception', () => {
+    const found = matches(`namespace App;
+public class ValidationException
+{
+    public string Field { get; }
+
+    public ValidationException(string field)
+    {
+        Field = field;
+    }
+}
+`, 'exception-named-type-not-exception')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a real exception type', () => {
+    const found = matches(`namespace App;
+public class ValidationException : Exception
+{
+    public string Field { get; }
+
+    public ValidationException(string field) : base(field)
+    {
+        Field = field;
+    }
+}
+`, 'exception-named-type-not-exception')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// exception-type-not-public
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/exception-type-not-public (C#)', () => {
+  it('flags an internal exception type', () => {
+    const found = matches(`namespace App;
+internal class TenantNotFoundException : Exception
+{
+    public TenantNotFoundException(string message) : base(message) { }
+}
+`, 'exception-type-not-public')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a public exception type', () => {
+    const found = matches(`namespace App;
+public class TenantNotFoundException : Exception
+{
+    public TenantNotFoundException(string message) : base(message) { }
+}
+`, 'exception-type-not-public')
+    expect(found).toHaveLength(0)
+  })
+})

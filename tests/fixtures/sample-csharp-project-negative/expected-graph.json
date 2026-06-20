@@ -25,6 +25,12 @@
   ],
   "modules": [
     {
+      "name": "ArgumentGuards",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "AuthMiddleware",
       "service": "ApiGateway",
       "kind": "class",
@@ -32,6 +38,24 @@
     },
     {
       "name": "BackingStore",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Circle",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "CloseHandle",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ColumnFormatter",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -49,13 +73,31 @@
       "layer": "service"
     },
     {
+      "name": "DiagnosticsHarness",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "DiagnosticsProbe",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
     },
     {
+      "name": "DispatchStage",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "EnvironmentSettingsLoader",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EventBridge",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -85,6 +127,18 @@
       "layer": "api"
     },
     {
+      "name": "GatewayTimeoutException",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "GridPoint",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "HealthRoutes",
       "service": "ApiGateway",
       "kind": "standalone",
@@ -103,16 +157,34 @@
       "layer": "service"
     },
     {
+      "name": "HomegrownDigest",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IntegrationClients",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
     },
     {
+      "name": "IOutboxStore",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IProcessor",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "IRoutingTag",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
     },
     {
       "name": "ISweeper",
@@ -139,6 +211,12 @@
       "layer": "service"
     },
     {
+      "name": "LegacyCryptoAlgorithms",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "LegacyDeserialization",
       "service": "ApiGateway",
       "kind": "class",
@@ -148,6 +226,12 @@
       "name": "LocaleArtifacts",
       "service": "ApiGateway",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NativeBufferHandle",
+      "service": "ApiGateway",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -199,6 +283,18 @@
       "layer": "service"
     },
     {
+      "name": "Player",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PredictableCryptoInputs",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ProbeResult",
       "service": "ApiGateway",
       "kind": "class",
@@ -217,6 +313,12 @@
       "layer": "service"
     },
     {
+      "name": "QueryOperations",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "QueueMaintenance",
       "service": "ApiGateway",
       "kind": "class",
@@ -227,6 +329,12 @@
       "service": "ApiGateway",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "ReflectionAndUnsafe",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "RenderCache",
@@ -241,10 +349,40 @@
       "layer": "service"
     },
     {
+      "name": "RequestPipeline",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RetryMode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RouteAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RouteTagAttribute",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RouteTokenScanner",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "api"
+    },
+    {
+      "name": "RoutingFailureException",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "ScheduleFormatter",
@@ -254,6 +392,18 @@
     },
     {
       "name": "ScopeAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Shape",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "SignatureConventions",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -277,7 +427,19 @@
       "layer": "service"
     },
     {
+      "name": "TaskCombinators",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TelemetryDispatcher",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TextOperations",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -289,7 +451,19 @@
       "layer": "external"
     },
     {
+      "name": "TlsConfiguration",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TokenGenerator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TrustStoreManager",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -385,10 +559,22 @@
       "layer": "service"
     },
     {
+      "name": "CollectionShapes",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Comment",
       "service": "UserService",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "CommentHygiene",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "ConditionalCleanup",
@@ -398,6 +584,12 @@
     },
     {
       "name": "ConfigurationLoader",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ControlFlowResidue",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -500,6 +692,12 @@
     },
     {
       "name": "ImportJob",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LedgerEntryBase",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -625,6 +823,18 @@
       "layer": "data"
     },
     {
+      "name": "PrecedenceArithmetic",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PriceBand",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PriceTier",
       "service": "UserService",
       "kind": "class",
@@ -685,6 +895,12 @@
       "layer": "api"
     },
     {
+      "name": "ReportSectionBase",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RetryPolicyFormatter",
       "service": "UserService",
       "kind": "class",
@@ -701,6 +917,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "api"
+    },
+    {
+      "name": "RuntimeProbe",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "SessionsController",
@@ -722,6 +944,12 @@
     },
     {
       "name": "StockContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SwitchDuplication",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

@@ -127,6 +127,7 @@ internal class GuardExpressions
         var regionWeight = baseRisk - regionFactor;
         var historyWeight = baseRisk - historyFactor;
         // VIOLATION: code-quality/deterministic/expression-complexity
+        // VIOLATION: code-quality/deterministic/arithmetic-precedence-parentheses
         var riskScore = baseRisk + ageFactor * ageWeight + regionFactor * regionWeight + historyFactor * historyWeight;
         return Math.Max(riskScore, baseRisk);
     }

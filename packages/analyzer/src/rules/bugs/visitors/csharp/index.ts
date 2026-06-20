@@ -81,6 +81,25 @@ import { csharpLoopAtMostOneIterationVisitor } from './loop-at-most-one-iteratio
 import { csharpMissingFstringSyntaxVisitor } from './missing-fstring-syntax.js'
 import { csharpStaticKeyDictComprehensionVisitor } from './static-key-dict-comprehension.js'
 import { csharpUnrawRePatternVisitor } from './unraw-re-pattern.js'
+import { csharpAnonymousDelegateUnsubscribeVisitor } from './anonymous-delegate-unsubscribe.js'
+import { csharpArgumentExceptionWrongParameterNameVisitor } from './argumentexception-wrong-parameter-name.js'
+import { csharpAssertWithoutMessageVisitor } from './assert-without-message.js'
+import { csharpDebugFailWithoutMessageVisitor } from './debug-fail-without-message.js'
+import { csharpBaseCallOnObjectVisitor } from './base-call-on-object.js'
+import { csharpCallerInfoParamNotLastVisitor } from './caller-info-param-not-last.js'
+import { csharpCancellationTokenNotLastVisitor } from './cancellation-token-not-last.js'
+import { csharpCatchNullReferenceExceptionVisitor } from './catch-null-reference-exception.js'
+import { csharpChainedOrderByLosesOrderingVisitor } from './chained-orderby-loses-ordering.js'
+import { csharpCheckAgainstValueBeingAssignedVisitor } from './check-against-value-being-assigned.js'
+import { csharpCollectionPassedToOwnMethodVisitor } from './collection-passed-to-own-method.js'
+import { csharpDateTimeParseNoFormatProviderVisitor } from './datetime-parse-no-format-provider.js'
+import { csharpDoubledPrefixOperatorVisitor } from './doubled-prefix-operator.js'
+import { csharpEmptyGuidConstructorVisitor } from './empty-guid-constructor.js'
+import { csharpEmptyStatementVisitor } from './empty-statement.js'
+import { csharpEnumDuplicateExplicitValueVisitor } from './enum-duplicate-explicit-value.js'
+import { csharpFlagsEnumMissingZeroVisitor } from './flags-enum-missing-zero.js'
+import { csharpIsCheckOnThisVisitor } from './is-check-on-this.js'
+import { csharpLiteralControlCharacterVisitor } from './literal-control-character.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEmptyCatchVisitor,
@@ -164,4 +183,23 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMissingFstringSyntaxVisitor,
   csharpStaticKeyDictComprehensionVisitor,
   csharpUnrawRePatternVisitor,
+  csharpAnonymousDelegateUnsubscribeVisitor,
+  csharpArgumentExceptionWrongParameterNameVisitor,
+  csharpAssertWithoutMessageVisitor,
+  csharpDebugFailWithoutMessageVisitor,
+  csharpBaseCallOnObjectVisitor,
+  csharpCallerInfoParamNotLastVisitor,
+  csharpCancellationTokenNotLastVisitor,
+  csharpCatchNullReferenceExceptionVisitor,
+  csharpChainedOrderByLosesOrderingVisitor,
+  csharpCheckAgainstValueBeingAssignedVisitor,
+  csharpCollectionPassedToOwnMethodVisitor,
+  csharpDateTimeParseNoFormatProviderVisitor,
+  csharpDoubledPrefixOperatorVisitor,
+  csharpEmptyGuidConstructorVisitor,
+  csharpEmptyStatementVisitor,
+  csharpEnumDuplicateExplicitValueVisitor,
+  csharpFlagsEnumMissingZeroVisitor,
+  csharpIsCheckOnThisVisitor,
+  csharpLiteralControlCharacterVisitor,
 ]
