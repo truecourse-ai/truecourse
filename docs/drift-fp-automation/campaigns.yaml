@@ -136,7 +136,7 @@ campaigns:
       - docs/docs/deployment         # 19 — deployment behavior (kubernetes, dagster-plus)
       - docs/docs/integrations/libraries  # 36 — integration adapters (aws/gcp/snowflake/dbt/…)
     priority: 6
-    status: pending
+    status: discovering
     baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes:
