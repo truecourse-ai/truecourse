@@ -15,6 +15,17 @@ export const pythonShebangErrorVisitor: CodeRuleVisitor = {
     const segments = filePath.split('/')
     const fileName = segments[segments.length - 1] ?? ''
     const isMainFile = fileName === '__main__.py'
+    // A file is only "meant to be directly executed" (and therefore needs a
+    // shebang) when it is a __main__.py entrypoint or lives in a conventional
+    // executable-script directory (bin/, scripts/, …). A bare
+    // `if __name__ == "__main__":` guard is NOT sufficient on its own: many
+    // importable modules carry one for dual-use or ad-hoc debugging and are
+    // run via a runtime or `python path/to/file.py`, never as `./file.py`, so
+    // they require no shebang. Without this location gate the rule fires on
+    // every module with a guard, regardless of where it lives.
+    const dirName = (segments[segments.length - 2] ?? '').toLowerCase()
+    const SCRIPT_DIRS = new Set(['scripts', 'bin', 'tools', 'cli', 'cmd'])
+    if (!isMainFile && !SCRIPT_DIRS.has(dirName)) return null
     // Check for __main__ guard using the shared helper's AST check
     const hasMainGuard = !isMainFile && (() => {
       const module = node.type === 'module' ? node : null

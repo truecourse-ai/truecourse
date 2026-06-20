@@ -68,6 +68,12 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     const statement = findContainingStatement(node)
     if (!statement || !statement.parent) return null
 
+    // When the access result is bound to a local (`const value = arr[i]`), a
+    // later guard usually checks that *result* variable (`if (!value)`), not
+    // the index. `process.env[name]` followed by `if (!value)` is the canonical
+    // shape. Capture the bound name so the sibling scan can honor such guards.
+    const resultVar = declaredResultName(statement, node)
+
     const siblings = statement.parent.namedChildren
     const stmtIndex = siblings.findIndex(n => n.id === statement.id)
 
@@ -83,6 +89,10 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
       }
       // Check for guards that reference the index variable: if (!result), if (x >= N) return, etc.
       if (sibText.includes('if') && sibText.includes(indexText)) {
+        return null
+      }
+      // Guard that checks the bound result variable, e.g. `if (!value) return …`.
+      if (resultVar && sibText.includes('if') && sibText.includes(resultVar)) {
         return null
       }
     }
@@ -139,6 +149,33 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
       'Add a bounds check (e.g., if (i < arr.length)) before accessing the array by index.',
     )
   },
+}
+
+/**
+ * If `statement` is a `const`/`let`/`var` declaration whose initializer
+ * contains `accessNode` (i.e. the subscript result is bound to a single
+ * named local), return that local's name. Returns null for destructuring
+ * patterns or when the access isn't part of an initializer.
+ */
+function declaredResultName(statement: SyntaxNode, accessNode: SyntaxNode): string | null {
+  if (statement.type !== 'lexical_declaration' && statement.type !== 'variable_declaration') {
+    return null
+  }
+  for (let i = 0; i < statement.namedChildCount; i++) {
+    const decl = statement.namedChild(i)
+    if (decl?.type !== 'variable_declarator') continue
+    const value = decl.childForFieldName('value')
+    const nameNode = decl.childForFieldName('name')
+    if (
+      value &&
+      nameNode?.type === 'identifier' &&
+      accessNode.startIndex >= value.startIndex &&
+      accessNode.endIndex <= value.endIndex
+    ) {
+      return nameNode.text
+    }
+  }
+  return null
 }
 
 /**

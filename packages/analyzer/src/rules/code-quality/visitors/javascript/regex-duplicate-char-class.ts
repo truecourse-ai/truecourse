@@ -41,6 +41,19 @@ function tokenizeCharClass(content: string): string[] {
           i += 2
           continue
         }
+      } else if (next === 'p' || next === 'P') {
+        // \p{Name} / \P{Name} — Unicode property escape (u-flag mode).
+        // Consume the whole `\p{…}` as one atomic token so the letters
+        // inside the property name (e.g. the two `I`s in `\p{ASCII}`) aren't
+        // mistaken for repeated character-class members.
+        if (content[i + 2] === '{') {
+          const close = content.indexOf('}', i + 3)
+          if (close > 0) {
+            tokens.push(content.slice(i, close + 1))
+            i = close
+            continue
+          }
+        }
       }
       // Generic \X escape (\d, \w, \s, \., …)
       tokens.push(content.slice(i, i + 2))
