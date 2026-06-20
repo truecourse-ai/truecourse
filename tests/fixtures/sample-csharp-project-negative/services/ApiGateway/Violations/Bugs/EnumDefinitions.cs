@@ -1,5 +1,6 @@
 namespace ApiGateway.Violations.Bugs;
 
+// VIOLATION: code-quality/deterministic/enum-missing-zero-value
 internal enum DispatchStage
 {
     Created = 1,

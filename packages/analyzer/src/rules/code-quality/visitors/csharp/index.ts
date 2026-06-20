@@ -177,6 +177,23 @@ import { csharpUseStringConcatOverJoinVisitor } from './use-string-concat-over-j
 import { csharpPreferTupleSyntaxVisitor } from './prefer-tuple-syntax.js'
 import { csharpPreferLambdaOverDelegateVisitor } from './prefer-lambda-over-delegate.js'
 import { csharpUseEventArgsEmptyVisitor } from './use-eventargs-empty.js'
+import { csharpPreferStringEmptyVisitor } from './prefer-string-empty.js'
+import { csharpInfiniteLoopNonCanonicalVisitor } from './infinite-loop-non-canonical.js'
+import { csharpManualEnumeratorLoopVisitor } from './manual-enumerator-loop.js'
+import { csharpRedundantToStringCallVisitor } from './redundant-tostring-call.js'
+import { csharpRedundantToCharArrayCallVisitor } from './redundant-tochararray-call.js'
+import { csharpStaticReadonlyShouldBeConstVisitor } from './static-readonly-should-be-const.js'
+import { csharpRedundantLengthArgumentVisitor } from './redundant-length-argument.js'
+import { csharpTraceWriteUsageVisitor } from './trace-write-usage.js'
+import { csharpNonPrivateFieldVisitor } from './non-private-field.js'
+import { csharpEnumMissingZeroValueVisitor } from './enum-missing-zero-value.js'
+import { csharpRedundantAnonymousPropertyNameVisitor } from './redundant-anonymous-property-name.js'
+import { csharpUnnecessaryDeclarationSemicolonVisitor } from './unnecessary-declaration-semicolon.js'
+import { csharpRedundantDefaultInitializerVisitor } from './redundant-default-initializer.js'
+import { csharpStringCompareToZeroVisitor } from './string-compare-to-zero.js'
+import { csharpRedundantOverrideVisitor } from './redundant-override.js'
+import { csharpLiteralSuffixOverCastVisitor } from './literal-suffix-over-cast.js'
+import { csharpTooManyTypeParametersVisitor } from './too-many-type-parameters.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -357,4 +374,21 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpPreferTupleSyntaxVisitor,
   csharpPreferLambdaOverDelegateVisitor,
   csharpUseEventArgsEmptyVisitor,
+  csharpPreferStringEmptyVisitor,
+  csharpInfiniteLoopNonCanonicalVisitor,
+  csharpManualEnumeratorLoopVisitor,
+  csharpRedundantToStringCallVisitor,
+  csharpRedundantToCharArrayCallVisitor,
+  csharpStaticReadonlyShouldBeConstVisitor,
+  csharpRedundantLengthArgumentVisitor,
+  csharpTraceWriteUsageVisitor,
+  csharpNonPrivateFieldVisitor,
+  csharpEnumMissingZeroValueVisitor,
+  csharpRedundantAnonymousPropertyNameVisitor,
+  csharpUnnecessaryDeclarationSemicolonVisitor,
+  csharpRedundantDefaultInitializerVisitor,
+  csharpStringCompareToZeroVisitor,
+  csharpRedundantOverrideVisitor,
+  csharpLiteralSuffixOverCastVisitor,
+  csharpTooManyTypeParametersVisitor,
 ]

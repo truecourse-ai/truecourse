@@ -4399,3 +4399,415 @@ public sealed class Gauge
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/non-constant-static-field-visible (C#)', () => {
+  const key = 'bugs/deterministic/non-constant-static-field-visible'
+
+  it('detects a public mutable static field', () => {
+    const found = matches(`namespace Net;
+public static class Pool
+{
+    public static int ActiveConnections;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag readonly, const, or private static fields', () => {
+    const found = matches(`namespace Net;
+public static class Pool
+{
+    public static readonly int Max = 64;
+    public const string Scheme = "https";
+    private static int _active;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/readonly-mutable-reference-field (C#)', () => {
+  const key = 'bugs/deterministic/readonly-mutable-reference-field'
+
+  it('detects an exposed readonly List field', () => {
+    const found = matches(`namespace Events;
+public sealed class Bus
+{
+    public readonly List<string> Subscribers = new();
+    public void Add(string s) => Subscribers.Add(s);
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('detects an exposed readonly array field', () => {
+    const found = matches(`namespace Events;
+public sealed class Buffer
+{
+    protected readonly byte[] Bytes = new byte[16];
+    public byte First => Bytes[0];
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag private readonly mutable fields, or readonly immutable/scalar fields', () => {
+    const found = matches(`namespace Events;
+public sealed class Bus
+{
+    private readonly List<string> _subscribers = new();
+    public readonly IReadOnlyList<string> Names = Array.Empty<string>();
+    public readonly string Label = "bus";
+    public readonly int Capacity = 10;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/oneway-operation-non-void (C#)', () => {
+  const key = 'bugs/deterministic/oneway-operation-non-void'
+
+  it('detects a one-way operation returning a value', () => {
+    const found = matches(`namespace Wcf;
+[ServiceContract]
+public interface IPinger
+{
+    [OperationContract(IsOneWay = true)]
+    int Ping(string host);
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a one-way void operation or a normal operation', () => {
+    const found = matches(`namespace Wcf;
+[ServiceContract]
+public interface IPinger
+{
+    [OperationContract(IsOneWay = true)]
+    void Notify(string host);
+
+    [OperationContract]
+    int Query(string host);
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/finalizer-throws (C#)', () => {
+  const key = 'bugs/deterministic/finalizer-throws'
+
+  it('detects a finalizer that throws', () => {
+    const found = matches(`namespace Io;
+public sealed class Handle
+{
+    ~Handle()
+    {
+        throw new InvalidOperationException();
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a finalizer that swallows its exception', () => {
+    const found = matches(`namespace Io;
+public sealed class Handle
+{
+    ~Handle()
+    {
+        try
+        {
+            Release();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void Release()
+    {
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/virtual-call-in-constructor (C#)', () => {
+  const key = 'bugs/deterministic/virtual-call-in-constructor'
+
+  it('detects a constructor calling a virtual method', () => {
+    const found = matches(`namespace Build;
+public class Report
+{
+    public Report()
+    {
+        Initialize();
+    }
+
+    protected virtual void Initialize()
+    {
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a non-virtual call or a call on another object', () => {
+    const found = matches(`namespace Build;
+public class Report
+{
+    private readonly Helper _helper = new();
+
+    public Report()
+    {
+        Setup();
+        _helper.Initialize();
+    }
+
+    private void Setup()
+    {
+    }
+}
+
+public sealed class Helper
+{
+    public void Initialize()
+    {
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/optional-on-ref-out-parameter (C#)', () => {
+  const key = 'bugs/deterministic/optional-on-ref-out-parameter'
+
+  it('detects [Optional] on an out parameter', () => {
+    const found = matches(`namespace Interop;
+public sealed class Parser
+{
+    public void TryParse(string text, [Optional] out int value)
+    {
+        value = text.Length;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag [Optional] on a by-value parameter', () => {
+    const found = matches(`namespace Interop;
+public sealed class Parser
+{
+    public void Parse(string text, [Optional] int flags)
+    {
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/pure-method-returns-void (C#)', () => {
+  const key = 'bugs/deterministic/pure-method-returns-void'
+
+  it('detects a [Pure] method returning void', () => {
+    const found = matches(`namespace Hashing;
+public sealed class Combiner
+{
+    [Pure]
+    public void Combine(string a, string b)
+    {
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a [Pure] method that returns a value', () => {
+    const found = matches(`namespace Hashing;
+public sealed class Combiner
+{
+    [Pure]
+    public int Combine(string a, string b) => a.Length + b.Length;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/return-null-task (C#)', () => {
+  const key = 'bugs/deterministic/return-null-task'
+
+  it('detects returning null from a Task-returning method', () => {
+    const found = matches(`namespace Scheduling;
+public sealed class Flusher
+{
+    public Task FlushAsync()
+    {
+        return null;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('detects an expression-bodied Task method returning null', () => {
+    const found = matches(`namespace Scheduling;
+public sealed class Flusher
+{
+    public Task FlushAsync() => null;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag return null in an async method or a non-Task method', () => {
+    const found = matches(`namespace Scheduling;
+public sealed class Flusher
+{
+    public async Task<string> LoadAsync()
+    {
+        await Task.Yield();
+        return null;
+    }
+
+    public string Describe()
+    {
+        return null;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/tostring-returns-null (C#)', () => {
+  const key = 'bugs/deterministic/tostring-returns-null'
+
+  it('detects a ToString override returning null', () => {
+    const found = matches(`namespace Geo;
+public sealed class Label
+{
+    public override string ToString()
+    {
+        return null;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('detects an expression-bodied ToString returning null', () => {
+    const found = matches(`namespace Geo;
+public sealed class Label
+{
+    public override string ToString() => null;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a ToString override returning a string', () => {
+    const found = matches(`namespace Geo;
+public sealed class Label
+{
+    private readonly string _value = "x";
+    public override string ToString() => _value;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/exception-from-property-getter (C#)', () => {
+  const key = 'bugs/deterministic/exception-from-property-getter'
+
+  it('detects a getter throwing a disallowed exception', () => {
+    const found = matches(`namespace Config;
+public sealed class Lookup
+{
+    public string Endpoint
+    {
+        get
+        {
+            throw new KeyNotFoundException();
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag InvalidOperationException, NotSupportedException, or a normal getter', () => {
+    const found = matches(`namespace Config;
+public sealed class Lookup
+{
+    private readonly string _endpoint = "x";
+    private bool _ready;
+
+    public string Endpoint
+    {
+        get
+        {
+            if (!_ready)
+            {
+                throw new InvalidOperationException();
+            }
+            return _endpoint;
+        }
+    }
+
+    public string Region => throw new NotSupportedException();
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/for-condition-never-true (C#)', () => {
+  const key = 'bugs/deterministic/for-condition-never-true'
+
+  it('detects a for loop whose condition is false at entry', () => {
+    const found = matches(`namespace Retry;
+public sealed class Window
+{
+    private int _total;
+    public void Run()
+    {
+        for (int i = 5; i < 3; i++)
+        {
+            _total += i;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a loop that runs or one with a non-constant bound', () => {
+    const found = matches(`namespace Retry;
+public sealed class Window
+{
+    private int _total;
+    public void Run(int limit)
+    {
+        for (int i = 0; i < limit; i++)
+        {
+            _total += i;
+        }
+        for (int j = 0; j < 3; j++)
+        {
+            _total += j;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})

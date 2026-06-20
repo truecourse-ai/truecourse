@@ -3515,3 +3515,108 @@ public class SchemaLoader
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// security/deterministic/viewstateuserkey-not-set (wave 4)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/viewstateuserkey-not-set (C#)', () => {
+  it('detects a Page-derived class that never sets ViewStateUserKey', () => {
+    const found = matches(`using System;
+using System.Web.UI;
+
+namespace App.Web;
+
+public partial class CheckoutPage : Page
+{
+    protected void Page_Load(object sender, EventArgs e)
+    {
+        Response.Write("checkout");
+    }
+}
+`, 'viewstateuserkey-not-set')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a Page that sets ViewStateUserKey in OnInit', () => {
+    const found = matches(`using System;
+using System.Web.UI;
+
+namespace App.Web;
+
+public partial class CheckoutPage : Page
+{
+    protected override void OnInit(EventArgs e)
+    {
+        base.OnInit(e);
+        ViewStateUserKey = Session.SessionID;
+    }
+}
+`, 'viewstateuserkey-not-set')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a class that does not derive from Page', () => {
+    const found = matches(`using System;
+
+namespace App.Web;
+
+public class CheckoutService
+{
+    public void Run() { }
+}
+`, 'viewstateuserkey-not-set')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/sas-without-https (wave 4)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/sas-without-https (C#)', () => {
+  it('detects a SAS generated with SharedAccessProtocol.HttpsOrHttp', () => {
+    const found = matches(`using Microsoft.Azure.Storage;
+using Microsoft.Azure.Storage.Blob;
+
+namespace App.Storage;
+
+public class TokenIssuer
+{
+    public string Issue(CloudBlob blob, SharedAccessBlobPolicy policy)
+        => blob.GetSharedAccessSignature(policy, null, null, SharedAccessProtocol.HttpsOrHttp, null);
+}
+`, 'sas-without-https')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('detects HttpsOrHttp passed as the named protocols argument', () => {
+    const found = matches(`using Microsoft.Azure.Storage;
+using Microsoft.Azure.Storage.Blob;
+
+namespace App.Storage;
+
+public class TokenIssuer
+{
+    public string Issue(CloudBlob blob, SharedAccessBlobPolicy policy)
+        => blob.GetSharedAccessSignature(policy, protocols: SharedAccessProtocol.HttpsOrHttp);
+}
+`, 'sas-without-https')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a SAS pinned to HttpsOnly', () => {
+    const found = matches(`using Microsoft.Azure.Storage;
+using Microsoft.Azure.Storage.Blob;
+
+namespace App.Storage;
+
+public class TokenIssuer
+{
+    public string Issue(CloudBlob blob, SharedAccessBlobPolicy policy)
+        => blob.GetSharedAccessSignature(policy, null, null, SharedAccessProtocol.HttpsOnly, null);
+}
+`, 'sas-without-https')
+    expect(found).toHaveLength(0)
+  })
+})

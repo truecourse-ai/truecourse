@@ -1709,4 +1709,25 @@ export const SECURITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'high',
     type: 'deterministic',
   },
+  // C# wave 4
+  {
+    key: 'security/deterministic/viewstateuserkey-not-set',
+    category: 'code',
+    domain: 'security',
+    name: 'ViewStateUserKey not set',
+    description: 'A Page-derived class that never sets ViewStateUserKey, leaving view-state without the per-user binding that defends against CSRF.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'security/deterministic/sas-without-https',
+    category: 'code',
+    domain: 'security',
+    name: 'SAS without HTTPS-only protocol',
+    description: 'A shared access signature generated with SharedAccessProtocol.HttpsOrHttp, allowing the sensitive token to travel over plaintext HTTP.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+  },
 ]

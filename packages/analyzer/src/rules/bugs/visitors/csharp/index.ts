@@ -118,6 +118,17 @@ import { csharpInvalidShiftCountVisitor } from './invalid-shift-count.js'
 import { csharpLockOnPublicReferenceVisitor } from './lock-on-public-reference.js'
 import { csharpInstanceWritesStaticFieldVisitor } from './instance-writes-static-field.js'
 import { csharpStaticFieldSetInConstructorVisitor } from './static-field-set-in-constructor.js'
+import { csharpNonConstantStaticFieldVisibleVisitor } from './non-constant-static-field-visible.js'
+import { csharpReadonlyMutableReferenceFieldVisitor } from './readonly-mutable-reference-field.js'
+import { csharpOneWayOperationNonVoidVisitor } from './oneway-operation-non-void.js'
+import { csharpFinalizerThrowsVisitor } from './finalizer-throws.js'
+import { csharpVirtualCallInConstructorVisitor } from './virtual-call-in-constructor.js'
+import { csharpOptionalOnRefOutParameterVisitor } from './optional-on-ref-out-parameter.js'
+import { csharpPureMethodReturnsVoidVisitor } from './pure-method-returns-void.js'
+import { csharpReturnNullTaskVisitor } from './return-null-task.js'
+import { csharpToStringReturnsNullVisitor } from './tostring-returns-null.js'
+import { csharpExceptionFromPropertyGetterVisitor } from './exception-from-property-getter.js'
+import { csharpForConditionNeverTrueVisitor } from './for-condition-never-true.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEmptyCatchVisitor,
@@ -238,4 +249,15 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpLockOnPublicReferenceVisitor,
   csharpInstanceWritesStaticFieldVisitor,
   csharpStaticFieldSetInConstructorVisitor,
+  csharpNonConstantStaticFieldVisibleVisitor,
+  csharpReadonlyMutableReferenceFieldVisitor,
+  csharpOneWayOperationNonVoidVisitor,
+  csharpFinalizerThrowsVisitor,
+  csharpVirtualCallInConstructorVisitor,
+  csharpOptionalOnRefOutParameterVisitor,
+  csharpPureMethodReturnsVoidVisitor,
+  csharpReturnNullTaskVisitor,
+  csharpToStringReturnsNullVisitor,
+  csharpExceptionFromPropertyGetterVisitor,
+  csharpForConditionNeverTrueVisitor,
 ]

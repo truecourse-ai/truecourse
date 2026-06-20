@@ -6941,3 +6941,492 @@ public class C
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// prefer-string-empty
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-string-empty (C#)', () => {
+  it('flags an empty string literal in an assignment/return position', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Blank()
+    {
+        var note = "";
+        return note;
+    }
+}
+`, 'prefer-string-empty')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag non-empty literals, comparisons, or call arguments', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public bool Empty(string s) => s == "";
+    public string[] Split(string s) => s.Split("");
+    public string Name() => "value";
+}
+`, 'prefer-string-empty')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// infinite-loop-non-canonical
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/infinite-loop-non-canonical (C#)', () => {
+  it('flags for(;;) and do/while(true)', () => {
+    const a = matches(`namespace App;
+public class C { public void A() { for (;;) { Work(); } } public void Work() {} }
+`, 'infinite-loop-non-canonical')
+    const b = matches(`namespace App;
+public class C { public void B() { do { Work(); } while (true); } public void Work() {} }
+`, 'infinite-loop-non-canonical')
+    expect(a.length).toBe(1)
+    expect(b.length).toBe(1)
+  })
+
+  it('does not flag while(true) or a bounded for/do', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void A() { while (true) { Work(); } }
+    public void B() { for (int i = 0; i < 10; i++) { Work(); } }
+    public void D() { int n = 0; do { Work(); n++; } while (n < 3); }
+    public void Work() {}
+}
+`, 'infinite-loop-non-canonical')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// manual-enumerator-loop
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/manual-enumerator-loop (C#)', () => {
+  it('flags a hand-rolled GetEnumerator/MoveNext loop', () => {
+    const found = matches(`namespace App;
+using System.Collections.Generic;
+public class C
+{
+    public int Sum(List<int> items)
+    {
+        var sum = 0;
+        var e = items.GetEnumerator();
+        while (e.MoveNext())
+        {
+            sum += e.Current;
+        }
+        return sum;
+    }
+}
+`, 'manual-enumerator-loop')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a foreach or a while over a different condition', () => {
+    const found = matches(`namespace App;
+using System.Collections.Generic;
+public class C
+{
+    public int Sum(List<int> items)
+    {
+        var sum = 0;
+        foreach (var x in items) sum += x;
+        var i = 0;
+        while (i < items.Count) { sum += items[i]; i++; }
+        return sum;
+    }
+}
+`, 'manual-enumerator-loop')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-tostring-call
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-tostring-call (C#)', () => {
+  it('flags ToString() in concatenation and interpolation', () => {
+    const a = matches(`namespace App;
+public class C { public string M(int x) => "id-" + x.ToString(); }
+`, 'redundant-tostring-call')
+    const b = matches(`namespace App;
+public class C { public string M(int x) => $"{x.ToString()}"; }
+`, 'redundant-tostring-call')
+    expect(a.length).toBe(1)
+    expect(b.length).toBe(1)
+  })
+
+  it('does not flag a formatted ToString or a standalone ToString', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string M(int x) => "hex-" + x.ToString("X");
+    public string N(int x) => x.ToString();
+    public int Sum(int a, int b) => a + b;
+}
+`, 'redundant-tostring-call')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-tochararray-call
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-tochararray-call (C#)', () => {
+  it('flags ToCharArray() as a foreach source', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int Count(string s)
+    {
+        var n = 0;
+        foreach (var c in s.ToCharArray()) { if (c == 'a') n++; }
+        return n;
+    }
+}
+`, 'redundant-tochararray-call')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag iterating the string directly or a sliced ToCharArray', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int Count(string s)
+    {
+        var n = 0;
+        foreach (var c in s) { if (c == 'a') n++; }
+        foreach (var c in s.ToCharArray(0, 2)) { if (c == 'b') n++; }
+        return n;
+    }
+}
+`, 'redundant-tochararray-call')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// static-readonly-should-be-const
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/static-readonly-should-be-const (C#)', () => {
+  it('flags a static readonly primitive initialized to a literal', () => {
+    const found = matches(`namespace App;
+public class C { private static readonly int MaxRetries = 5; }
+`, 'static-readonly-should-be-const')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag non-literal, non-primitive, or instance readonly', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    private static readonly int Computed = Compute();
+    private static readonly int[] Codes = { 1, 2, 3 };
+    private readonly int _id = 7;
+    private static int Compute() => 3;
+}
+`, 'static-readonly-should-be-const')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-length-argument
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-length-argument (C#)', () => {
+  it('flags Substring(start, s.Length - start)', () => {
+    const found = matches(`namespace App;
+public class C { public string Tail(string s) => s.Substring(2, s.Length - 2); }
+`, 'redundant-length-argument')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a real length or a mismatched start', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string A(string s) => s.Substring(2, 4);
+    public string B(string s) => s.Substring(2, s.Length - 3);
+    public string D(string s) => s.Substring(2);
+}
+`, 'redundant-length-argument')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// trace-write-usage
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/trace-write-usage (C#)', () => {
+  it('flags Trace.Write and Trace.WriteLine', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics;
+public class C
+{
+    public void A(string m) { Trace.WriteLine(m); }
+    public void B(string m) { Trace.Write(m); }
+}
+`, 'trace-write-usage')
+    expect(found.length).toBe(2)
+  })
+
+  it('does not flag a logger or Trace.TraceError', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics;
+public class C
+{
+    private readonly ILogger _log;
+    public void A(string m) { _log.LogInformation(m); }
+    public void B(string m) { Trace.TraceError(m); }
+}
+`, 'trace-write-usage')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// non-private-field
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/non-private-field (C#)', () => {
+  it('flags public and protected mutable class fields', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int Count;
+    protected string Name;
+}
+`, 'non-private-field')
+    expect(found.length).toBe(2)
+  })
+
+  it('does not flag private fields, const, or static readonly', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    private int _count;
+    public const int Max = 10;
+    public static readonly string Prefix = Compute();
+    private static string Compute() => "x";
+}
+`, 'non-private-field')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enum-missing-zero-value
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/enum-missing-zero-value (C#)', () => {
+  it('flags a non-flags enum with all explicit non-zero values', () => {
+    const found = matches(`namespace App;
+public enum Mode { Primary = 1, Secondary = 2 }
+`, 'enum-missing-zero-value')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an enum with a zero member, implicit values, or [Flags]', () => {
+    const found = matches(`namespace App;
+using System;
+public enum A { None = 0, Primary = 1 }
+public enum B { First, Second }
+[Flags]
+public enum C { Read = 1, Write = 2 }
+`, 'enum-missing-zero-value')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-anonymous-property-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-anonymous-property-name (C#)', () => {
+  it('flags an explicit name matching the source member', () => {
+    const found = matches(`namespace App;
+public class C { public object M(Account a) => new { a.Id, Name = a.Name }; }
+public class Account { public int Id { get; } public string Name { get; } }
+`, 'redundant-anonymous-property-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a renamed member or already-inferred names', () => {
+    const found = matches(`namespace App;
+public class C { public object M(Account a) => new { a.Id, Label = a.Name }; }
+public class Account { public int Id { get; } public string Name { get; } }
+`, 'redundant-anonymous-property-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-declaration-semicolon
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-declaration-semicolon (C#)', () => {
+  it('flags a trailing semicolon after a type body', () => {
+    const found = matches(`namespace App;
+public class C { public int V => 1; };
+`, 'unnecessary-declaration-semicolon')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a normal type declaration', () => {
+    const found = matches(`namespace App;
+public class C { public int V => 1; }
+public enum E { A = 0, B = 1 }
+`, 'unnecessary-declaration-semicolon')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-default-initializer
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-default-initializer (C#)', () => {
+  it('flags fields initialized to their type default', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    private int _count = 0;
+    private string _name = null;
+    private bool _ready = false;
+}
+`, 'redundant-default-initializer')
+    expect(found.length).toBe(3)
+  })
+
+  it('does not flag non-default initializers or const', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    private int _count = 1;
+    private string _name = "x";
+    private bool _ready = true;
+    private const int Max = 0;
+}
+`, 'redundant-default-initializer')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// string-compare-to-zero
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/string-compare-to-zero (C#)', () => {
+  it('flags String.Compare(...) == 0', () => {
+    const found = matches(`namespace App;
+public class C { public bool Same(string a, string b) => string.Compare(a, b) == 0; }
+`, 'string-compare-to-zero')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag ordering comparisons or non-Compare equality', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public bool Less(string a, string b) => string.Compare(a, b) < 0;
+    public bool Eq(int a) => a == 0;
+}
+`, 'string-compare-to-zero')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-override
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-override (C#)', () => {
+  it('flags an override that only forwards to base with the same args', () => {
+    const found = matches(`namespace App;
+public class Derived : Base
+{
+    public override string Render(string input) => base.Render(input);
+}
+public class Base { public virtual string Render(string input) => input; }
+`, 'redundant-override')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an override that adds logic or reorders arguments', () => {
+    const found = matches(`namespace App;
+public class Derived : Base
+{
+    public override string Render(string input) => base.Render(input.Trim());
+    public override string Combine(string a, string b) => base.Combine(b, a);
+}
+public class Base
+{
+    public virtual string Render(string input) => input;
+    public virtual string Combine(string a, string b) => a + b;
+}
+`, 'redundant-override')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// literal-suffix-over-cast
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/literal-suffix-over-cast (C#)', () => {
+  it('flags a cast of a numeric literal to a suffixable type', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public long A() => (long)1;
+    public decimal B() => (decimal)0.5;
+}
+`, 'literal-suffix-over-cast')
+    expect(found.length).toBe(2)
+  })
+
+  it('does not flag casts of non-literals or to non-suffixable types', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public long A(int x) => (long)x;
+    public int B() => (int)1.5;
+    public short S() => (short)1;
+}
+`, 'literal-suffix-over-cast')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// too-many-type-parameters
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/too-many-type-parameters (C#)', () => {
+  it('flags a type with three or more type parameters', () => {
+    const found = matches(`namespace App;
+public class Triple<T1, T2, T3> { }
+`, 'too-many-type-parameters')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a type with one or two parameters', () => {
+    const found = matches(`namespace App;
+public class Pair<TKey, TValue> { }
+public class Box<T> { }
+`, 'too-many-type-parameters')
+    expect(found).toHaveLength(0)
+  })
+})

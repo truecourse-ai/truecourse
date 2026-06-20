@@ -16,6 +16,7 @@ internal sealed class GridPoint
         return _x + _y;
     }
 
+    // VIOLATION: code-quality/deterministic/redundant-override
     public override int GetHashCode()
     {
         // VIOLATION: bugs/deterministic/base-call-on-object

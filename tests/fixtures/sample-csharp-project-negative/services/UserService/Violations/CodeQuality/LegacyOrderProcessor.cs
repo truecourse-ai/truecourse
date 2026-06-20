@@ -82,6 +82,7 @@ internal class LegacyOrderProcessor
         var customs = pricing.IsWholesale ? "bulk-entry" : "single-entry";
         var packing = stock.HasReturns ? "reused-carton" : "new-carton";
         var dock = stock.HasTransfers ? "transfer-dock" : "main-dock";
+        // VIOLATION: code-quality/deterministic/prefer-string-empty
         var notes = "";
         if (stock.HasBackorders)
         {

@@ -2,6 +2,7 @@ namespace ApiGatewayApp.Violations.CodeQuality;
 
 internal class RouteDefaults
 {
+    // VIOLATION: code-quality/deterministic/static-readonly-should-be-const
     internal static readonly string Prefix = "/api";
 
     internal static string Qualify(string path)

@@ -3,6 +3,7 @@ namespace UserServiceApp.Violations.CodeQuality;
 // VIOLATION: code-quality/deterministic/abstract-class-public-constructor
 internal abstract class LedgerEntryBase
 {
+    // VIOLATION: code-quality/deterministic/non-private-field
     protected readonly string Account;
 
     public LedgerEntryBase(string account)

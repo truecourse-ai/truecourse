@@ -91,6 +91,12 @@
       "layer": "service"
     },
     {
+      "name": "CoordinateLabel",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CorsCookiesAndDebug",
       "service": "ApiGateway",
       "kind": "class",
@@ -151,7 +157,25 @@
       "layer": "service"
     },
     {
+      "name": "FieldHygiene",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileHandleGuard",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "FileSystemAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FlushScheduler",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -167,6 +191,12 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "GatewayMode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "GatewayProxyController",
@@ -199,6 +229,12 @@
       "layer": "api"
     },
     {
+      "name": "HashComputer",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "HealthRoutes",
       "service": "ApiGateway",
       "kind": "standalone",
@@ -223,10 +259,22 @@
       "layer": "service"
     },
     {
+      "name": "INotificationContract",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IntegrationClients",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "InteropParser",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "IOrderQuery",
@@ -302,6 +350,12 @@
     },
     {
       "name": "Lookups",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LoopShapes",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -481,6 +535,12 @@
       "layer": "service"
     },
     {
+      "name": "ReportBuilder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RequestAndTokenHardening",
       "service": "ApiGateway",
       "kind": "class",
@@ -512,6 +572,12 @@
     },
     {
       "name": "RetryMode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RetryWindow",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -577,6 +643,12 @@
       "layer": "service"
     },
     {
+      "name": "SasProtocol",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "ScheduleFormatter",
       "service": "ApiGateway",
       "kind": "class",
@@ -601,10 +673,22 @@
       "layer": "service"
     },
     {
+      "name": "SettingsLookup",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Shape",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "SharedRegistry",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "SignatureConventions",
@@ -638,6 +722,18 @@
     },
     {
       "name": "StringOps",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StringRedundancy",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SubscriberList",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -703,7 +799,19 @@
       "layer": "service"
     },
     {
+      "name": "TrailingPunctuation",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TrustStoreManager",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Tuple3",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -739,6 +847,12 @@
       "layer": "service"
     },
     {
+      "name": "ViewStateBinding",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "WeakCryptoService",
       "service": "ApiGateway",
       "kind": "class",
@@ -747,6 +861,12 @@
     {
       "name": "XmlProcessing",
       "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Account",
+      "service": "UserService",
       "kind": "class",
       "layer": "service"
     },
@@ -785,6 +905,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "BaseFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "BaseNotification",
@@ -896,6 +1022,12 @@
     },
     {
       "name": "ExceptionShapes",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ExpressionResidue",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1037,6 +1169,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "PassthroughFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "PasswordHasher",
@@ -1192,6 +1330,12 @@
       "name": "StaleSnapshotError",
       "service": "UserService",
       "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "StatementResidue",
+      "service": "UserService",
+      "kind": "class",
       "layer": "service"
     },
     {

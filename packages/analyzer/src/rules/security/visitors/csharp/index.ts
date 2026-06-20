@@ -77,6 +77,8 @@ export { csharpUnsafeDllImportSearchPathVisitor } from './unsafe-dllimportsearch
 export { csharpRequestValidationDisabledVisitor } from './request-validation-disabled.js'
 export { csharpTokenValidationDisabledVisitor } from './token-validation-disabled.js'
 export { csharpXmlSchemaAddByUrlVisitor } from './xmlschema-add-by-url.js'
+export { csharpViewStateUserKeyNotSetVisitor } from './viewstateuserkey-not-set.js'
+export { csharpSasWithoutHttpsVisitor } from './sas-without-https.js'
 
 import { csharpSqlInjectionVisitor } from './sql-injection.js'
 import { csharpHardcodedSqlExpressionVisitor } from './hardcoded-sql-expression.js'
@@ -155,6 +157,8 @@ import { csharpUnsafeDllImportSearchPathVisitor } from './unsafe-dllimportsearch
 import { csharpRequestValidationDisabledVisitor } from './request-validation-disabled.js'
 import { csharpTokenValidationDisabledVisitor } from './token-validation-disabled.js'
 import { csharpXmlSchemaAddByUrlVisitor } from './xmlschema-add-by-url.js'
+import { csharpViewStateUserKeyNotSetVisitor } from './viewstateuserkey-not-set.js'
+import { csharpSasWithoutHttpsVisitor } from './sas-without-https.js'
 
 export const SECURITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   // Injection
@@ -252,4 +256,7 @@ export const SECURITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpConflictingTransparencyAnnotationsVisitor,
   csharpCatchCorruptedStateExceptionVisitor,
   csharpAccountSharedAccessSignatureVisitor,
+  // ASP.NET / storage (wave 4)
+  csharpViewStateUserKeyNotSetVisitor,
+  csharpSasWithoutHttpsVisitor,
 ]

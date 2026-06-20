@@ -35,6 +35,7 @@ internal class ScheduleFormatter
     internal decimal ComputeSurcharge(decimal subtotal)
     {
         // VIOLATION: bugs/deterministic/decimal-from-float
+        // VIOLATION: code-quality/deterministic/literal-suffix-over-cast
         var rate = (decimal)0.0825;
         return subtotal * rate;
     }
