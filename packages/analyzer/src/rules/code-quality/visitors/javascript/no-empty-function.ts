@@ -50,6 +50,9 @@ export const jsNoEmptyFunctionVisitor: CodeRuleVisitor = {
     if (parent?.type === 'arguments') return null
     if (parent?.type === 'jsx_expression' || parent?.type === 'jsx_attribute') return null
     if (parent?.type === 'return_statement') return null
+    // Object-property value — `{ cleanup: async () => {} }` provides a
+    // deliberate no-op callable for an interface/config slot.
+    if (parent?.type === 'pair') return null
     if (parent?.type === 'binary_expression') {
       const op = parent.childForFieldName('operator')
       if (op?.text === '||' || op?.text === '??') return null

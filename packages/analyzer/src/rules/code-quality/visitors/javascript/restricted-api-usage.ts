@@ -38,6 +38,9 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
       if (parent.type === 'formal_parameters' || parent.type === 'required_parameter') return null
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null
+      // `[event: string]: ...` — the identifier is an index-signature parameter
+      // name, a local binding, not the global.
+      if (parent.type === 'index_signature') return null
 
       // Skip if identifier is declared as a local variable or parameter
       // in any enclosing scope. Closures can reference outer-scope bindings,
@@ -50,7 +53,8 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
           if (declPattern.test(scope.text)) return null
         }
         if (scope.type === 'arrow_function' || scope.type === 'function_declaration' ||
-            scope.type === 'function_expression' || scope.type === 'method_definition') {
+            scope.type === 'function_expression' || scope.type === 'method_definition' ||
+            scope.type === 'generator_function' || scope.type === 'generator_function_declaration') {
           const params = scope.childForFieldName('parameters')
           if (params && paramPattern.test(params.text)) return null
         }

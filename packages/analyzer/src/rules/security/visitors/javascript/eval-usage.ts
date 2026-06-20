@@ -3,6 +3,8 @@ import { makeViolation } from '../../../types.js'
 
 const EVAL_FUNCTIONS = new Set(['eval'])
 const TIMER_FUNCTIONS = new Set(['setTimeout', 'setInterval'])
+// Objects whose `.eval` member genuinely is the global eval function.
+const GLOBAL_OBJECTS = new Set(['window', 'globalThis', 'global', 'self'])
 
 export const evalUsageVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/eval-usage',
@@ -13,15 +15,24 @@ export const evalUsageVisitor: CodeRuleVisitor = {
     if (!fn) return null
 
     let funcName = ''
+    let isMemberCall = false
+    let objectText = ''
     if (fn.type === 'identifier') {
       funcName = fn.text
     } else if (fn.type === 'member_expression') {
+      isMemberCall = true
       const prop = fn.childForFieldName('property')
       if (prop) funcName = prop.text
+      const obj = fn.childForFieldName('object')
+      if (obj) objectText = obj.text
     }
 
-    // eval(), exec()
-    if (EVAL_FUNCTIONS.has(funcName)) {
+    // eval() — only the global eval function. A bare `eval(...)` identifier
+    // call, or an explicit global access like `globalThis.eval(...)`. A
+    // member call such as `client.eval(...)` is that object's own method
+    // (e.g. a key/value store's server-side scripting primitive), not the
+    // global eval the rule targets.
+    if (EVAL_FUNCTIONS.has(funcName) && (!isMemberCall || GLOBAL_OBJECTS.has(objectText))) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Dynamic code evaluation',

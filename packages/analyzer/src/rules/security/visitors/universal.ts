@@ -397,6 +397,19 @@ const DB_PASSWORD_KV_PATTERNS = [
 // connection string is templated, not hardcoded.
 const NON_LITERAL_PASSWORD_SEGMENT = /^\{[^{}]*\}$|^\$\{[^}]*\}$|^%s$|^%\([^)]+\)s$|^<[^>]+>$|^\$\([^)]*\)$|^\$[A-Z_][A-Z0-9_]*$|process\.env/i
 
+// Well-known placeholder passwords used in usage examples and documentation
+// (e.g. `postgresql://user:pass@localhost/db` printed in a `--help` message).
+// These are never real credentials, so a DSN whose password slot is one of
+// them is a documented example, not a hardcoded secret.
+// Kept deliberately narrow to unambiguous documentation tokens: a real
+// (if weak) credential like `mypassword` or `secret123` must still be
+// flagged, so compound `*password` values are intentionally excluded.
+const PLACEHOLDER_PASSWORDS = new Set([
+  'pass', 'passwd', 'pwd',
+  'xxx', 'xxxx', 'xxxxx', 'xxxxxx',
+  'changeme', 'placeholder', 'example', 'redacted',
+])
+
 export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-database-password',
   nodeTypes: STRING_NODE_TYPES,
@@ -415,6 +428,8 @@ export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
       // the generic exclusion above misses (Python f-strings use `{...}`,
       // not `${...}`).
       if (NON_LITERAL_PASSWORD_SEGMENT.test(urlMatch[1])) return null
+      // Documented example DSN (`user:pass@…`) rather than a real secret.
+      if (PLACEHOLDER_PASSWORDS.has(urlMatch[1].toLowerCase())) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'critical',
         'Hardcoded database password',
