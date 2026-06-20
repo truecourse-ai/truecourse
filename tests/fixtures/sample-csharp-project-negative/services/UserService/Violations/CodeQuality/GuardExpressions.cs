@@ -131,4 +131,64 @@ internal class GuardExpressions
         var riskScore = baseRisk + ageFactor * ageWeight + regionFactor * regionWeight + historyFactor * historyWeight;
         return Math.Max(riskScore, baseRisk);
     }
+
+    internal void RequireOrder(object order)
+    {
+        // VIOLATION: code-quality/deterministic/use-argumentnullexception-throwhelper
+        if (order == null) throw new ArgumentNullException(nameof(order));
+        _auditTrail.Add("order present");
+    }
+
+    internal void RequireOpen(bool disposed)
+    {
+        // VIOLATION: code-quality/deterministic/use-objectdisposedexception-throwhelper
+        if (disposed) throw new ObjectDisposedException(nameof(GuardExpressions));
+        _auditTrail.Add("still open");
+    }
+
+    internal bool IsTagBlank(string tag)
+    {
+        _auditTrail.Add("tag check");
+        // VIOLATION: code-quality/deterministic/use-isnullorempty
+        return tag == null || tag.Length == 0;
+    }
+
+    internal void ReplayUnlessMatched(Action work, int expected)
+    {
+        _auditTrail.Add("replay attempt");
+        try
+        {
+            work();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // VIOLATION: code-quality/deterministic/use-exception-filter
+            if (ex.HResult != expected) throw;
+            _auditTrail.Add("matched and recovered");
+        }
+    }
+
+    internal void MarkReady(int depth)
+    {
+        // VIOLATION: code-quality/deterministic/if-to-boolean-assignment
+        // VIOLATION: code-quality/deterministic/if-else-instead-of-ternary
+        if (depth > 0)
+        {
+            _ready = true;
+        }
+        else
+        {
+            _ready = false;
+        }
+        _auditTrail.Add(_ready ? "ready" : "idle");
+    }
+
+    private bool _ready;
+
+    internal bool MaskClear(int flags, int mask)
+    {
+        _auditTrail.Add("mask check");
+        // VIOLATION: code-quality/deterministic/add-clarifying-parentheses
+        return (flags & mask == 0);
+    }
 }

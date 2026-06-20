@@ -7984,3 +7984,926 @@ public class AlsoScoped { }
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// add-clarifying-parentheses
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/add-clarifying-parentheses (C#)', () => {
+  it('flags a bitwise operator mixed with an unparenthesized comparison', () => {
+    const found = matches(`namespace App;
+public class FeatureGate
+{
+    public bool IsOff(int flags, int mask) => (flags & mask == 0);
+}
+`, 'add-clarifying-parentheses')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a fully parenthesized bitwise expression', () => {
+    const found = matches(`namespace App;
+public class FeatureGate
+{
+    public bool IsOff(int flags, int mask) => (flags & mask) == 0;
+}
+`, 'add-clarifying-parentheses')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// async-method-naming
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/async-method-naming (C#)', () => {
+  it('flags an async method without the Async suffix', () => {
+    const found = matches(`namespace App;
+using System.Threading.Tasks;
+public class OrderService
+{
+    public async Task Process()
+    {
+        await Task.Delay(1);
+    }
+}
+`, 'async-method-naming')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a correctly suffixed or override async method', () => {
+    const found = matches(`namespace App;
+using System.Threading.Tasks;
+public class OrderService : BaseService
+{
+    public async Task ProcessAsync()
+    {
+        await Task.Delay(1);
+    }
+
+    public override async Task Handle()
+    {
+        await Task.Delay(1);
+    }
+}
+`, 'async-method-naming')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// equality-operator-on-reference-type
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/equality-operator-on-reference-type (C#)', () => {
+  it('flags operator== overloaded on a class', () => {
+    const found = matches(`namespace App;
+public class Money
+{
+    public static bool operator ==(Money a, Money b) => true;
+    public static bool operator !=(Money a, Money b) => false;
+}
+`, 'equality-operator-on-reference-type')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag operator== on a struct', () => {
+    const found = matches(`namespace App;
+public struct Money
+{
+    public static bool operator ==(Money a, Money b) => true;
+    public static bool operator !=(Money a, Money b) => false;
+}
+`, 'equality-operator-on-reference-type')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// excludefromcoverage-without-justification
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/excludefromcoverage-without-justification (C#)', () => {
+  it('flags [ExcludeFromCodeCoverage] without a Justification', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics.CodeAnalysis;
+public class Bootstrapper
+{
+    [ExcludeFromCodeCoverage]
+    public void Configure() { }
+}
+`, 'excludefromcoverage-without-justification')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag when a Justification is supplied', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics.CodeAnalysis;
+public class Bootstrapper
+{
+    [ExcludeFromCodeCoverage(Justification = "generated glue code")]
+    public void Configure() { }
+}
+`, 'excludefromcoverage-without-justification')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// expected-exception-attribute
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/expected-exception-attribute (C#)', () => {
+  it('flags an [ExpectedException]-attributed test', () => {
+    const found = matches(`namespace App.Tests;
+using System;
+public class OrderTests
+{
+    [ExpectedException(typeof(InvalidOperationException))]
+    public void Rejects_invalid_order() { }
+}
+`, 'expected-exception-attribute')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a test that has no ExpectedException attribute', () => {
+    const found = matches(`namespace App.Tests;
+public class OrderTests
+{
+    public void Rejects_invalid_order() { }
+}
+`, 'expected-exception-attribute')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// extension-method-on-object
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/extension-method-on-object (C#)', () => {
+  it('flags an extension method on object', () => {
+    const found = matches(`namespace App;
+public static class ObjectExtensions
+{
+    public static string Dump(this object value) => value?.ToString() ?? "";
+}
+`, 'extension-method-on-object')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an extension method on a specific type', () => {
+    const found = matches(`namespace App;
+public static class StringExtensions
+{
+    public static string Truncate(this string value, int max) => value;
+}
+`, 'extension-method-on-object')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// generic-parameter-not-inferable
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/generic-parameter-not-inferable (C#)', () => {
+  it('flags a type parameter used only in the return type', () => {
+    const found = matches(`namespace App;
+public class Factory
+{
+    public T Create<T>(int count) => default!;
+}
+`, 'generic-parameter-not-inferable')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a type parameter used in a parameter', () => {
+    const found = matches(`namespace App;
+public class Factory
+{
+    public T Echo<T>(T value) => value;
+}
+`, 'generic-parameter-not-inferable')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// if-to-boolean-assignment
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/if-to-boolean-assignment (C#)', () => {
+  it('flags an if/else assigning opposite booleans to one variable', () => {
+    const found = matches(`namespace App;
+public class OrderState
+{
+    private bool _ready;
+    public void Refresh(int count)
+    {
+        if (count > 0)
+        {
+            _ready = true;
+        }
+        else
+        {
+            _ready = false;
+        }
+    }
+}
+`, 'if-to-boolean-assignment')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag branches assigning different variables', () => {
+    const found = matches(`namespace App;
+public class OrderState
+{
+    private bool _ready;
+    private bool _failed;
+    public void Refresh(int count)
+    {
+        if (count > 0)
+        {
+            _ready = true;
+        }
+        else
+        {
+            _failed = true;
+        }
+    }
+}
+`, 'if-to-boolean-assignment')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// in-source-suppression
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/in-source-suppression (C#)', () => {
+  it('flags a #pragma warning disable directive', () => {
+    const found = matches(`namespace App;
+public class Legacy
+{
+#pragma warning disable CS0618
+    public void UseObsolete() { }
+#pragma warning restore CS0618
+}
+`, 'in-source-suppression')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a restore directive alone', () => {
+    const found = matches(`namespace App;
+public class Legacy
+{
+#pragma warning restore CS0618
+    public void UseObsolete() { }
+}
+`, 'in-source-suppression')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// native-method-not-wrapped
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/native-method-not-wrapped (C#)', () => {
+  it('flags a public extern DllImport method', () => {
+    const found = matches(`namespace App;
+using System.Runtime.InteropServices;
+public class NativeApi
+{
+    [DllImport("kernel32.dll")]
+    public static extern int GetCurrentThreadId();
+}
+`, 'native-method-not-wrapped')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a private extern DllImport method', () => {
+    const found = matches(`namespace App;
+using System.Runtime.InteropServices;
+public class NativeApi
+{
+    [DllImport("kernel32.dll")]
+    private static extern int GetCurrentThreadId();
+}
+`, 'native-method-not-wrapped')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// nested-generic-parameter
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/nested-generic-parameter (C#)', () => {
+  it('flags a parameter with a nested generic type', () => {
+    const found = matches(`namespace App;
+using System.Collections.Generic;
+public class Aggregator
+{
+    public void Combine(IEnumerable<IEnumerable<int>> batches) { }
+}
+`, 'nested-generic-parameter')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a single-level generic parameter', () => {
+    const found = matches(`namespace App;
+using System.Collections.Generic;
+public class Aggregator
+{
+    public void Combine(Dictionary<int, string> lookup) { }
+}
+`, 'nested-generic-parameter')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// outdated-base-type
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/outdated-base-type (C#)', () => {
+  it('flags deriving from ApplicationException', () => {
+    const found = matches(`namespace App;
+public class OrderException : ApplicationException
+{
+}
+`, 'outdated-base-type')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag deriving from Exception', () => {
+    const found = matches(`namespace App;
+using System;
+public class OrderException : Exception
+{
+}
+`, 'outdated-base-type')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parameter-duplicates-method-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/parameter-duplicates-method-name (C#)', () => {
+  it('flags a parameter sharing the method name', () => {
+    const found = matches(`namespace App;
+public class OrderProcessor
+{
+    public void Process(int process) { }
+}
+`, 'parameter-duplicates-method-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag descriptive parameter names', () => {
+    const found = matches(`namespace App;
+public class OrderProcessor
+{
+    public void Process(int orderId) { }
+}
+`, 'parameter-duplicates-method-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// prefer-assembly-load
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-assembly-load (C#)', () => {
+  it('flags Assembly.LoadFrom', () => {
+    const found = matches(`namespace App;
+using System.Reflection;
+public class PluginLoader
+{
+    public Assembly Load(string path) => Assembly.LoadFrom(path);
+}
+`, 'prefer-assembly-load')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag Assembly.Load', () => {
+    const found = matches(`namespace App;
+using System.Reflection;
+public class PluginLoader
+{
+    public Assembly Load(string name) => Assembly.Load(name);
+}
+`, 'prefer-assembly-load')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// property-name-matches-get-method
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/property-name-matches-get-method (C#)', () => {
+  it('flags a property X coexisting with a GetX method', () => {
+    const found = matches(`namespace App;
+public class Order
+{
+    public decimal Total { get; }
+    public decimal GetTotal() => Total;
+}
+`, 'property-name-matches-get-method')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a GetX method that takes parameters', () => {
+    const found = matches(`namespace App;
+public class Order
+{
+    public decimal Total { get; }
+    public decimal GetTotal(decimal discount) => Total - discount;
+}
+`, 'property-name-matches-get-method')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// public-const-versioning-hazard
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/public-const-versioning-hazard (C#)', () => {
+  it('flags a public const', () => {
+    const found = matches(`namespace App;
+public class Limits
+{
+    public const int MaxRetries = 5;
+}
+`, 'public-const-versioning-hazard')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a private const or a static readonly', () => {
+    const found = matches(`namespace App;
+public class Limits
+{
+    private const int MaxRetries = 5;
+    public static readonly int Timeout = 30;
+}
+`, 'public-const-versioning-hazard')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// public-multidimensional-array-param
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/public-multidimensional-array-param (C#)', () => {
+  it('flags a public method taking a multidimensional array', () => {
+    const found = matches(`namespace App;
+public class Grid
+{
+    public void Fill(int[,] cells) { }
+}
+`, 'public-multidimensional-array-param')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a single-dimensional array parameter', () => {
+    const found = matches(`namespace App;
+public class Grid
+{
+    public void Fill(int[] cells) { }
+}
+`, 'public-multidimensional-array-param')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// sealed-class-protected-member
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/sealed-class-protected-member (C#)', () => {
+  it('flags a protected member on a sealed class', () => {
+    const found = matches(`namespace App;
+public sealed class Cache
+{
+    protected int Slots;
+}
+`, 'sealed-class-protected-member')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a protected override on a sealed class', () => {
+    const found = matches(`namespace App;
+public sealed class Cache
+{
+    protected override string ToString() => "cache";
+}
+`, 'sealed-class-protected-member')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// suppressfinalize-without-finalizer
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/suppressfinalize-without-finalizer (C#)', () => {
+  it('flags GC.SuppressFinalize on a sealed type without a finalizer', () => {
+    const found = matches(`namespace App;
+using System;
+public sealed class Resource
+{
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+    }
+}
+`, 'suppressfinalize-without-finalizer')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag when the type has a finalizer', () => {
+    const found = matches(`namespace App;
+using System;
+public sealed class Resource
+{
+    ~Resource() { }
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+    }
+}
+`, 'suppressfinalize-without-finalizer')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// suppression-without-justification
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/suppression-without-justification (C#)', () => {
+  it('flags [SuppressMessage] without a Justification', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics.CodeAnalysis;
+public class Service
+{
+    [SuppressMessage("Performance", "CA1822")]
+    public void Run() { }
+}
+`, 'suppression-without-justification')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag when a Justification is supplied', () => {
+    const found = matches(`namespace App;
+using System.Diagnostics.CodeAnalysis;
+public class Service
+{
+    [SuppressMessage("Performance", "CA1822", Justification = "stateful by contract")]
+    public void Run() { }
+}
+`, 'suppression-without-justification')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// too-many-logging-calls
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/too-many-logging-calls (C#)', () => {
+  it('flags a method with more than the threshold of logging calls', () => {
+    const found = matches(`namespace App;
+using Microsoft.Extensions.Logging;
+public class Worker
+{
+    private readonly ILogger _logger;
+    public void Run()
+    {
+        _logger.LogInformation("1");
+        _logger.LogInformation("2");
+        _logger.LogInformation("3");
+        _logger.LogInformation("4");
+        _logger.LogInformation("5");
+        _logger.LogInformation("6");
+        _logger.LogInformation("7");
+        _logger.LogInformation("8");
+    }
+}
+`, 'too-many-logging-calls')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a method with a few logging calls', () => {
+    const found = matches(`namespace App;
+using Microsoft.Extensions.Logging;
+public class Worker
+{
+    private readonly ILogger _logger;
+    public void Run()
+    {
+        _logger.LogInformation("start");
+        _logger.LogInformation("done");
+    }
+}
+`, 'too-many-logging-calls')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-unsafe-context
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-unsafe-context (C#)', () => {
+  it('flags an unsafe block with no pointer operations', () => {
+    const found = matches(`namespace App;
+public class Buffer
+{
+    public void Fill()
+    {
+        unsafe
+        {
+            int total = 0;
+            total += 1;
+        }
+    }
+}
+`, 'unnecessary-unsafe-context')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an unsafe block that uses pointers', () => {
+    const found = matches(`namespace App;
+public class Buffer
+{
+    public void Fill()
+    {
+        unsafe
+        {
+            int value = 1;
+            int* p = &value;
+            *p = 2;
+        }
+    }
+}
+`, 'unnecessary-unsafe-context')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unused-type-parameter
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unused-type-parameter (C#)', () => {
+  it('flags a method type parameter used nowhere', () => {
+    const found = matches(`namespace App;
+public class Registry
+{
+    public void Register<TUnused>(int id) { }
+}
+`, 'unused-type-parameter')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a type parameter used in the body', () => {
+    const found = matches(`namespace App;
+public class Registry
+{
+    public void Register<T>(int id)
+    {
+        var instance = default(T);
+    }
+}
+`, 'unused-type-parameter')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-argumentnullexception-throwhelper
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-argumentnullexception-throwhelper (C#)', () => {
+  it('flags a manual null guard', () => {
+    const found = matches(`namespace App;
+using System;
+public class OrderService
+{
+    public void Submit(object order)
+    {
+        if (order == null) throw new ArgumentNullException(nameof(order));
+    }
+}
+`, 'use-argumentnullexception-throwhelper')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an if guard that does other work', () => {
+    const found = matches(`namespace App;
+public class OrderService
+{
+    public void Submit(object order)
+    {
+        if (order == null)
+        {
+            Log("missing order");
+            return;
+        }
+    }
+    private void Log(string m) { }
+}
+`, 'use-argumentnullexception-throwhelper')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-auto-property
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-auto-property (C#)', () => {
+  it('flags a property that only reads and writes a backing field', () => {
+    const found = matches(`namespace App;
+public class Customer
+{
+    private string _name;
+    public string Name
+    {
+        get { return _name; }
+        set { _name = value; }
+    }
+}
+`, 'use-auto-property')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a property whose setter validates', () => {
+    const found = matches(`namespace App;
+public class Customer
+{
+    private string _name;
+    public string Name
+    {
+        get { return _name; }
+        set { _name = value?.Trim(); }
+    }
+}
+`, 'use-auto-property')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-exception-filter
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-exception-filter (C#)', () => {
+  it('flags a catch that conditionally rethrows', () => {
+    const found = matches(`namespace App;
+using System;
+public class Retry
+{
+    public void Run()
+    {
+        try
+        {
+            Work();
+        }
+        catch (Exception ex)
+        {
+            if (ex.HResult != 1) throw;
+            Recover();
+        }
+    }
+    private void Work() { }
+    private void Recover() { }
+}
+`, 'use-exception-filter')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a catch that already uses a when filter', () => {
+    const found = matches(`namespace App;
+using System;
+public class Retry
+{
+    public void Run()
+    {
+        try
+        {
+            Work();
+        }
+        catch (Exception ex) when (ex.HResult == 1)
+        {
+            Recover();
+        }
+    }
+    private void Work() { }
+    private void Recover() { }
+}
+`, 'use-exception-filter')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-isnullorempty
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-isnullorempty (C#)', () => {
+  it('flags a manual null-or-empty string check', () => {
+    const found = matches(`namespace App;
+public class Validator
+{
+    public bool IsBlank(string value) => value == null || value.Length == 0;
+}
+`, 'use-isnullorempty')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an unrelated compound condition', () => {
+    const found = matches(`namespace App;
+public class Validator
+{
+    public bool IsLong(string value) => value == null || value.Length > 100;
+}
+`, 'use-isnullorempty')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-objectdisposedexception-throwhelper
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-objectdisposedexception-throwhelper (C#)', () => {
+  it('flags a manual disposed-state guard', () => {
+    const found = matches(`namespace App;
+using System;
+public class Connection
+{
+    private bool _disposed;
+    public void Send()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(Connection));
+    }
+}
+`, 'use-objectdisposedexception-throwhelper')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an unrelated guard', () => {
+    const found = matches(`namespace App;
+public class Connection
+{
+    private bool _open;
+    public void Send()
+    {
+        if (!_open) return;
+    }
+}
+`, 'use-objectdisposedexception-throwhelper')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// value-type-equals-without-operator
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/value-type-equals-without-operator (C#)', () => {
+  it('flags a struct overriding Equals without operator==', () => {
+    const found = matches(`namespace App;
+public struct Coordinate
+{
+    public override bool Equals(object obj) => true;
+    public override int GetHashCode() => 0;
+}
+`, 'value-type-equals-without-operator')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a struct that defines operator==', () => {
+    const found = matches(`namespace App;
+public struct Coordinate
+{
+    public override bool Equals(object obj) => true;
+    public override int GetHashCode() => 0;
+    public static bool operator ==(Coordinate a, Coordinate b) => true;
+    public static bool operator !=(Coordinate a, Coordinate b) => false;
+}
+`, 'value-type-equals-without-operator')
+    expect(found).toHaveLength(0)
+  })
+})
+

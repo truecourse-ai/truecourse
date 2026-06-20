@@ -33,6 +33,7 @@ internal sealed class ConnectionPool
     internal void Cleanup()
     {
         // VIOLATION: bugs/deterministic/suppressfinalize-misuse
+        // VIOLATION: code-quality/deterministic/suppressfinalize-without-finalizer
         GC.SuppressFinalize(this);
     }
 }

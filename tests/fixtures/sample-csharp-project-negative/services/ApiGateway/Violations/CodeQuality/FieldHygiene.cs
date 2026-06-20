@@ -20,4 +20,18 @@ internal sealed class FieldHygiene
     {
         _disposed = true;
     }
+
+    // VIOLATION: code-quality/deterministic/outdated-base-type
+    internal sealed class LegacyFieldFault : ApplicationException
+    {
+    }
+
+    internal sealed class FieldKey
+    {
+        // VIOLATION: code-quality/deterministic/equality-operator-on-reference-type
+        public static bool operator ==(FieldKey a, FieldKey b) => ReferenceEquals(a, b);
+        public static bool operator !=(FieldKey a, FieldKey b) => !ReferenceEquals(a, b);
+        public override bool Equals(object obj) => ReferenceEquals(this, obj);
+        public override int GetHashCode() => 0;
+    }
 }

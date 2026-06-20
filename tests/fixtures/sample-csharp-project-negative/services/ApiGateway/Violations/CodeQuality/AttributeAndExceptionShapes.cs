@@ -20,6 +20,34 @@ internal class RoutingFailureException
     {
         Reason = reason;
     }
+
+    // VIOLATION: code-quality/deterministic/value-type-equals-without-operator
+    internal struct RouteOffset
+    {
+        public override bool Equals(object obj) => obj is RouteOffset;
+        public override int GetHashCode() => 0;
+    }
+
+    // VIOLATION: code-quality/deterministic/excludefromcoverage-without-justification
+    [ExcludeFromCodeCoverage]
+    internal string Describe()
+    {
+        return Reason;
+    }
+
+    // VIOLATION: code-quality/deterministic/suppression-without-justification
+    [SuppressMessage("Performance", "CA1822")]
+    internal string Summarize()
+    {
+        return "route failure: " + Reason;
+    }
+
+    // VIOLATION: code-quality/deterministic/expected-exception-attribute
+    [ExpectedException(typeof(InvalidOperationException))]
+    internal void RejectsInvalidRoute()
+    {
+        throw new InvalidOperationException(Reason);
+    }
 }
 
 // VIOLATION: code-quality/deterministic/exception-type-not-public

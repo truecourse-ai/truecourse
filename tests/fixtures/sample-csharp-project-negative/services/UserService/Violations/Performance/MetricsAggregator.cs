@@ -76,6 +76,7 @@ internal sealed class MetricsAggregator
         return _samples.Where(s => !s.Succeeded).ToList().Any();
     }
 
+    // VIOLATION: code-quality/deterministic/nested-generic-parameter
     internal List<string> MergeTags(IEnumerable<List<string>> tagGroups)
     {
         // VIOLATION: performance/deterministic/spread-in-reduce

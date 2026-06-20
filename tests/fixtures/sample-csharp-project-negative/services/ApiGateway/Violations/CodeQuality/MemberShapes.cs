@@ -31,6 +31,7 @@ internal sealed class MemberShapes
     }
 
     // VIOLATION: code-quality/deterministic/too-many-generic-parameters
+    // VIOLATION: code-quality/deterministic/generic-parameter-not-inferable
     internal TResult Combine<TFirst, TSecond, TResult>(TFirst first, TSecond second)
     {
         Track(first?.GetHashCode() ?? 0);
@@ -50,6 +51,50 @@ internal sealed class MemberShapes
     // VIOLATION: code-quality/deterministic/prefer-unix-epoch-field
     // VIOLATION: code-quality/deterministic/magic-number
     internal DateTime Epoch => new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    private string _label = string.Empty;
+
+    // VIOLATION: code-quality/deterministic/use-auto-property
+    internal string Label
+    {
+        get { return _label; }
+        set { _label = value; }
+    }
+
+    // VIOLATION: code-quality/deterministic/property-name-matches-get-method
+    public int Weight { get; }
+
+    // Companion accessor that duplicates the Weight property.
+    public int GetWeight()
+    {
+        return Weight;
+    }
+
+    // VIOLATION: code-quality/deterministic/public-const-versioning-hazard
+    public const int DefaultLimit = 50;
+
+    // VIOLATION: code-quality/deterministic/public-multidimensional-array-param
+    // VIOLATION: performance/deterministic/multidimensional-array
+    public void Seed(int[,] grid)
+    {
+        _last = grid.Length;
+    }
+
+    // VIOLATION: code-quality/deterministic/sealed-class-protected-member
+    // VIOLATION: code-quality/deterministic/non-private-field
+    protected int Capacity;
+
+    // VIOLATION: code-quality/deterministic/parameter-duplicates-method-name
+    internal void Record(int record)
+    {
+        _last = record;
+    }
+
+    // VIOLATION: code-quality/deterministic/unused-type-parameter
+    internal void Register<TUnused>(int id)
+    {
+        _last = id;
+    }
 }
 
 internal sealed class EventRaiser

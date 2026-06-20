@@ -212,6 +212,35 @@ import { csharpEventBeforeAfterPrefixVisitor } from './event-before-after-prefix
 import { csharpStaticMemberOnGenericTypeVisitor } from './static-member-on-generic-type.js'
 import { csharpUseIsOverAsNullCheckVisitor } from './use-is-over-as-null-check.js'
 import { csharpTypeInGlobalNamespaceVisitor } from './type-in-global-namespace.js'
+import { csharpAddClarifyingParenthesesVisitor } from './add-clarifying-parentheses.js'
+import { csharpAsyncMethodNamingVisitor } from './async-method-naming.js'
+import { csharpEqualityOperatorOnReferenceTypeVisitor } from './equality-operator-on-reference-type.js'
+import { csharpExcludeFromCoverageWithoutJustificationVisitor } from './excludefromcoverage-without-justification.js'
+import { csharpExpectedExceptionAttributeVisitor } from './expected-exception-attribute.js'
+import { csharpExtensionMethodOnObjectVisitor } from './extension-method-on-object.js'
+import { csharpGenericParameterNotInferableVisitor } from './generic-parameter-not-inferable.js'
+import { csharpIfToBooleanAssignmentVisitor } from './if-to-boolean-assignment.js'
+import { csharpInSourceSuppressionVisitor } from './in-source-suppression.js'
+import { csharpNativeMethodNotWrappedVisitor } from './native-method-not-wrapped.js'
+import { csharpNestedGenericParameterVisitor } from './nested-generic-parameter.js'
+import { csharpOutdatedBaseTypeVisitor } from './outdated-base-type.js'
+import { csharpParameterDuplicatesMethodNameVisitor } from './parameter-duplicates-method-name.js'
+import { csharpPreferAssemblyLoadVisitor } from './prefer-assembly-load.js'
+import { csharpPropertyNameMatchesGetMethodVisitor } from './property-name-matches-get-method.js'
+import { csharpPublicConstVersioningHazardVisitor } from './public-const-versioning-hazard.js'
+import { csharpPublicMultidimensionalArrayParamVisitor } from './public-multidimensional-array-param.js'
+import { csharpSealedClassProtectedMemberVisitor } from './sealed-class-protected-member.js'
+import { csharpSuppressFinalizeWithoutFinalizerVisitor } from './suppressfinalize-without-finalizer.js'
+import { csharpSuppressionWithoutJustificationVisitor } from './suppression-without-justification.js'
+import { csharpTooManyLoggingCallsVisitor } from './too-many-logging-calls.js'
+import { csharpUnnecessaryUnsafeContextVisitor } from './unnecessary-unsafe-context.js'
+import { csharpUnusedTypeParameterVisitor } from './unused-type-parameter.js'
+import { csharpUseArgumentNullExceptionThrowHelperVisitor } from './use-argumentnullexception-throwhelper.js'
+import { csharpUseAutoPropertyVisitor } from './use-auto-property.js'
+import { csharpUseExceptionFilterVisitor } from './use-exception-filter.js'
+import { csharpUseIsNullOrEmptyVisitor } from './use-isnullorempty.js'
+import { csharpUseObjectDisposedExceptionThrowHelperVisitor } from './use-objectdisposedexception-throwhelper.js'
+import { csharpValueTypeEqualsWithoutOperatorVisitor } from './value-type-equals-without-operator.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -427,4 +456,33 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpStaticMemberOnGenericTypeVisitor,
   csharpUseIsOverAsNullCheckVisitor,
   csharpTypeInGlobalNamespaceVisitor,
+  csharpAddClarifyingParenthesesVisitor,
+  csharpAsyncMethodNamingVisitor,
+  csharpEqualityOperatorOnReferenceTypeVisitor,
+  csharpExcludeFromCoverageWithoutJustificationVisitor,
+  csharpExpectedExceptionAttributeVisitor,
+  csharpExtensionMethodOnObjectVisitor,
+  csharpGenericParameterNotInferableVisitor,
+  csharpIfToBooleanAssignmentVisitor,
+  csharpInSourceSuppressionVisitor,
+  csharpNativeMethodNotWrappedVisitor,
+  csharpNestedGenericParameterVisitor,
+  csharpOutdatedBaseTypeVisitor,
+  csharpParameterDuplicatesMethodNameVisitor,
+  csharpPreferAssemblyLoadVisitor,
+  csharpPropertyNameMatchesGetMethodVisitor,
+  csharpPublicConstVersioningHazardVisitor,
+  csharpPublicMultidimensionalArrayParamVisitor,
+  csharpSealedClassProtectedMemberVisitor,
+  csharpSuppressFinalizeWithoutFinalizerVisitor,
+  csharpSuppressionWithoutJustificationVisitor,
+  csharpTooManyLoggingCallsVisitor,
+  csharpUnnecessaryUnsafeContextVisitor,
+  csharpUnusedTypeParameterVisitor,
+  csharpUseArgumentNullExceptionThrowHelperVisitor,
+  csharpUseAutoPropertyVisitor,
+  csharpUseExceptionFilterVisitor,
+  csharpUseIsNullOrEmptyVisitor,
+  csharpUseObjectDisposedExceptionThrowHelperVisitor,
+  csharpValueTypeEqualsWithoutOperatorVisitor,
 ]
