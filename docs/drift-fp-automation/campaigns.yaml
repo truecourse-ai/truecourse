@@ -137,7 +137,7 @@ campaigns:
       - docs/docs/integrations/libraries  # 36 — integration adapters (aws/gcp/snowflake/dbt/…)
     priority: 6
     status: discovering
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    baseline: { verified_at: 2026-06-20, target_ref: 4fb00173b453ac4151c88454e30b567af14c1808, total_drifts: 1, tp: 0, fp: 1, info: 0, fp_rate: 1.0 }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes:
       - "Probe 2026-06-06: rich in-repo docs at docs/docs/guides/build/assets (12), build/external-resources (11), deployment/dagster-plus/management (12), integrations/libraries/aws (12). Python monorepo (python_modules/dagster/, python_modules/libraries/*); narrow code_dir if generate runs hot, but start with `.` like the other monorepos."
