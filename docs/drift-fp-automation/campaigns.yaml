@@ -169,6 +169,79 @@ campaigns:
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes: ["Probe 2026-06-06: 46+ behavioral .md/.mdx under www/src/content/docs/docs/. Different domain than the other 4: infra-as-code, lots of named-constant surface (region names, runtime versions, config defaults) and operation-like resource definitions. Should stress NamedConstant comparator on infra-domain naming conventions."]
 
+  # ---- C# (round 1) — first C# campaigns for the `cs-` scope (PR #593) ----
+  # Picked by the cs- account because tech_stack contains `csharp` (TECH_STACKS
+  # filter). Probed empirically (clone + .md tree inspection 2026-06-19); each
+  # doc_scope drops community/blog/release-info/samples/contributing and keeps
+  # the behavioral framework/identity/messaging/storage surfaces that overlap
+  # the contract-verifier's C# extractors (#547). Validation by `infer --dry-run`
+  # is the first cs-drift-fp-generate Run-now — same pattern as JS/Python seeds.
+
+  - target_repo: abpframework/abp
+    tech_stack: [csharp, framework, multi-tenancy, identity]
+    code_dir: "."
+    doc_scope:
+      - docs/en/framework       # 334 — core framework: auth, modules, DI, EF Core integration
+      - docs/en/modules         # 65 — feature modules (Identity, Permissions, Tenants, …)
+      - docs/en/guides          # 10 — cross-cutting how-tos
+      - docs/en/deployment      # 8 — deployment behavior, configuration
+    priority: 9
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-19: docs/en has 1206 .md across 24 top-level dirs; framework/modules/guides/deployment is the behavioral subset (~417 .md). Skipped: Community-Articles (365), Blog-Posts (103), solution-templates (92), release-info (63), tutorials (41). Strongest C# fit — Identity/Authorization/MultiTenancy modules give EF Core + auth-requirement surface; modular architecture may stress operation/route extraction (same family as strapi)."]
+
+  - target_repo: OrchardCMS/OrchardCore
+    tech_stack: [csharp, cms, modular]
+    code_dir: "."
+    doc_scope:
+      - src/docs/reference      # 116 — modules + APIs reference
+      - src/docs/guides         # 25 — behavioral how-tos
+      - src/docs/topics         # 16 — cross-cutting concepts
+    priority: 10
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-19: src/docs has 223 .md (docfx source); reference/guides/topics is the behavioral subset (~157 .md). Skipped: releases (39), contributing/community/samples (~26). Modular CMS — content-type/identity/permissions overlap EF Core extractors; module-mounted routes may stress operation extraction."]
+
+  - target_repo: JasperFx/marten
+    tech_stack: [csharp, event-sourcing, document-db, postgres]
+    code_dir: "."
+    doc_scope:
+      - docs/events             # 46 — event-sourcing surface: streams, projections, lifecycle
+      - docs/documents          # 46 — document store: identity, structure, sessions
+      - docs/postgres           # 18 — Postgres-specific behavior
+      - docs/configuration      # 12 — store configuration, DI integration
+      - docs/schema             # 7 — schema generation, migrations
+    priority: 11
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-19: docs/ has 312 .md; events/documents/postgres/configuration/schema is the behavioral subset (~129 .md). Skipped: community/devops/scenarios/images/public/src/tutorials/testing. Document DB + event store on Postgres — projection lifecycle (state-machine), session configuration (named-constants), event-type discriminators (enum surface)."]
+
+  - target_repo: JasperFx/wolverine
+    tech_stack: [csharp, messaging, framework]
+    code_dir: "."
+    doc_scope:
+      - docs/guide              # 193 — handlers, http, messaging transports, scheduling, sagas
+      - docs/introduction       # 5 — core concepts
+    priority: 12
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-19: docs/ has 264 .md; guide/introduction is the behavioral subset (~198 .md). Skipped: blog/public/tutorials. Messaging + ASP.NET Core integration — transport-name constants (named-constant), message-route conventions (operation), retry policies (named-constant). Sibling-author to marten (JasperFx) but distinct codebase + docs."]
+
+  - target_repo: EventStore/EventStore
+    tech_stack: [csharp, event-store, database]
+    code_dir: "."
+    doc_scope:
+      - docs/server             # 72 — http-api, projections, operations, security, diagnostics
+    priority: 13
+    status: pending
+    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    notes: ["Probe 2026-06-19: docs/server has 72 .md across features/operations/security/http-api/diagnostics. Event-store database — HTTP API operations, projection lifecycle (state-machine), security policies (auth-requirement). Should give a meaty operation+auth surface."]
+
   # ---- Add more campaigns below once validated (probe via `infer --dry-run`) ----
   # Bar: concrete .md specs in REAL (non-dot) folders that OVERLAP liftable app
   # code (Prisma entities / TS|Zod|str-Enum enums / Express|FastAPI routes /
