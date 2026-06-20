@@ -33,6 +33,7 @@ import { csharpAsyncVoidFunctionVisitor } from './async-void-function.js'
 import { csharpMissingReturnAwaitVisitor } from './missing-return-await.js'
 import { csharpSwitchExhaustivenessVisitor } from './switch-exhaustiveness.js'
 import { csharpUnsafeFinallyVisitor } from './unsafe-finally.js'
+import { csharpEmptyFinalizerVisitor } from './empty-finalizer.js'
 import { csharpNestedTryCatchVisitor } from './nested-try-catch.js'
 import { csharpElementOverwriteVisitor } from './element-overwrite.js'
 import { csharpBaseToStringVisitor } from './base-to-string.js'
@@ -115,6 +116,7 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMissingReturnAwaitVisitor,
   csharpSwitchExhaustivenessVisitor,
   csharpUnsafeFinallyVisitor,
+  csharpEmptyFinalizerVisitor,
   csharpNestedTryCatchVisitor,
   csharpElementOverwriteVisitor,
   csharpBaseToStringVisitor,

@@ -81,4 +81,14 @@ export const DATABASE_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'high',
     type: 'deterministic',
   },
+  {
+    key: 'database/deterministic/datetime-primary-key',
+    category: 'code',
+    domain: 'database',
+    name: 'DateTime used as a primary key',
+    description: 'An entity whose primary key is a date/time value risks collisions, reorders under clock skew, and leaks creation time into every foreign key.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
 ]

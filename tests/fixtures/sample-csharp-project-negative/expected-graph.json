@@ -13,12 +13,28 @@
       "type": "library"
     }
   ],
+  "serviceDependencies": [
+    {
+      "source": "ApiGateway",
+      "target": "Utils"
+    },
+    {
+      "source": "UserService",
+      "target": "Utils"
+    }
+  ],
   "modules": [
     {
       "name": "AuthMiddleware",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "api"
+    },
+    {
+      "name": "BackingStore",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "CorsCookiesAndDebug",
@@ -45,10 +61,22 @@
       "layer": "service"
     },
     {
+      "name": "FeatureToggle",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "FileSystemAccess",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "FunctionsHost",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
     },
     {
       "name": "GatewayProxyController",
@@ -81,6 +109,18 @@
       "layer": "external"
     },
     {
+      "name": "IProcessor",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "ISweeper",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "ITelemetryLogger",
       "service": "ApiGateway",
       "kind": "class",
@@ -88,6 +128,12 @@
     },
     {
       "name": "JwtAuthentication",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LedgerProjection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -111,6 +157,12 @@
       "layer": "service"
     },
     {
+      "name": "Order",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "PasswordHashing",
       "service": "ApiGateway",
       "kind": "class",
@@ -124,6 +176,24 @@
     },
     {
       "name": "PayloadValidator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PaymentFailed",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "PermissionFlags",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PipelineStage",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -159,6 +229,18 @@
       "layer": "data"
     },
     {
+      "name": "RenderCache",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RequestAuditor",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RouteTokenScanner",
       "service": "ApiGateway",
       "kind": "class",
@@ -166,6 +248,12 @@
     },
     {
       "name": "ScheduleFormatter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ScopeAccess",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -193,6 +281,12 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "TimerInfo",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
     },
     {
       "name": "TokenGenerator",
@@ -237,6 +331,18 @@
       "layer": "data"
     },
     {
+      "name": "AccountsController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "AggregationFunction",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "AppDbContext",
       "service": "UserService",
       "kind": "class",
@@ -247,6 +353,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "AuditRecordEntity",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "BaseNotification",
@@ -291,6 +403,12 @@
       "layer": "service"
     },
     {
+      "name": "CreateUserRequest",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CustomerAddress",
       "service": "UserService",
       "kind": "class",
@@ -309,6 +427,12 @@
       "layer": "data"
     },
     {
+      "name": "Diagnostics",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "DiagnosticsToolbox",
       "service": "UserService",
       "kind": "class",
@@ -321,7 +445,19 @@
       "layer": "service"
     },
     {
+      "name": "DualLog",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ExceptionShapes",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileBackedCache",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -333,7 +469,31 @@
       "layer": "service"
     },
     {
+      "name": "GlobalAuditMarker",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "GuardExpressions",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "HandleOwner",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IAccountService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ILogger",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -349,6 +509,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "LoginAttemptEntity",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "MaintenanceTasks",
@@ -370,6 +536,12 @@
     },
     {
       "name": "MetricsAggregator",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NativeBuffer",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -417,6 +589,12 @@
       "layer": "data"
     },
     {
+      "name": "PasswordHasher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PatternValidators",
       "service": "UserService",
       "kind": "standalone",
@@ -424,6 +602,12 @@
     },
     {
       "name": "PaymentRelay",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PermissionSet",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -453,6 +637,12 @@
       "layer": "service"
     },
     {
+      "name": "ProfilesController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "Program",
       "service": "UserService",
       "kind": "class",
@@ -460,6 +650,12 @@
     },
     {
       "name": "RateAuditor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Record",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -477,10 +673,40 @@
       "layer": "service"
     },
     {
+      "name": "RegistrationController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "RegistrationInput",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "RetryPolicyFormatter",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "RoleCatalog",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RolesController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "SessionsController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "SessionTracker",
@@ -537,6 +763,12 @@
       "layer": "service"
     },
     {
+      "name": "UploadController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "User",
       "service": "UserService",
       "kind": "class",
@@ -570,7 +802,19 @@
       "name": "WebhookDispatcher",
       "service": "UserService",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WebhookDispatcher",
+      "service": "UserService",
+      "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "WebhookEndpoint",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "Formatters",
@@ -589,6 +833,154 @@
       "service": "Utils",
       "kind": "standalone",
       "layer": "service"
+    }
+  ],
+  "moduleDependencies": [
+    {
+      "source": "HealthRoutes",
+      "sourceService": "ApiGateway",
+      "target": "HealthService",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "HealthService"
+      ]
+    },
+    {
+      "source": "Program",
+      "sourceService": "ApiGateway",
+      "target": "HealthRoutes",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "HealthRoutes"
+      ]
+    },
+    {
+      "source": "Program",
+      "sourceService": "ApiGateway",
+      "target": "UserRoutes",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "UserRoutes"
+      ]
+    },
+    {
+      "source": "StatusController",
+      "sourceService": "ApiGateway",
+      "target": "HealthService",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "HealthService"
+      ]
+    },
+    {
+      "source": "UserController",
+      "sourceService": "ApiGateway",
+      "target": "UserService",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "UserRoutes",
+      "sourceService": "ApiGateway",
+      "target": "UserController",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "UserController"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "ApiGateway",
+      "target": "Formatters",
+      "targetService": "Utils",
+      "importedNames": [
+        "Formatters"
+      ]
+    },
+    {
+      "source": "Program",
+      "sourceService": "UserService",
+      "target": "DbConnection",
+      "targetService": "UserService",
+      "importedNames": [
+        "DbConnection"
+      ]
+    },
+    {
+      "source": "Program",
+      "sourceService": "UserService",
+      "target": "UserHandler",
+      "targetService": "UserService",
+      "importedNames": [
+        "UserHandler"
+      ]
+    },
+    {
+      "source": "Token",
+      "sourceService": "UserService",
+      "target": "User",
+      "targetService": "UserService",
+      "importedNames": [
+        "User"
+      ]
+    },
+    {
+      "source": "UserHandler",
+      "sourceService": "UserService",
+      "target": "UserService",
+      "targetService": "UserService",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "UserHandler",
+      "sourceService": "UserService",
+      "target": "Validators",
+      "targetService": "Utils",
+      "importedNames": [
+        "Validators"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "UserService",
+      "target": "AppDbContext",
+      "targetService": "UserService",
+      "importedNames": [
+        "AppDbContext",
+        "User"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "UserService",
+      "target": "User",
+      "targetService": "UserService",
+      "importedNames": [
+        "AppDbContext",
+        "User"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "UserService",
+      "target": "UserHandler",
+      "targetService": "UserService",
+      "importedNames": [
+        "UserHandler"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "UserService",
+      "target": "UserRepository",
+      "targetService": "UserService",
+      "importedNames": [
+        "UserRepository"
+      ]
     }
   ],
   "fileDependencies": [
@@ -718,6 +1110,31 @@
       "method": "GET",
       "path": "/users/{userId}",
       "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles",
+      "file": "services/UserService/Violations/Architecture/ProfilesController.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/register",
+      "file": "services/UserService/Violations/Architecture/RegistrationController.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/list",
+      "file": "services/UserService/Violations/Architecture/RolesController.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/signout",
+      "file": "services/UserService/Violations/Architecture/SessionsController.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/uploads",
+      "file": "services/UserService/Violations/Architecture/UploadController.cs"
     }
   ],
   "databases": [
@@ -732,6 +1149,7 @@
         "PostTags",
         "Posts",
         "Users",
+        "login_attempt_entity",
         "token"
       ]
     },

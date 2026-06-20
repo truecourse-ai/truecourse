@@ -724,3 +724,120 @@ public class LeadsController : ControllerBase
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// database/deterministic/datetime-primary-key
+// ---------------------------------------------------------------------------
+
+describe('database/deterministic/datetime-primary-key (C#)', () => {
+  it('detects a [Key]-attributed DateTime primary key', () => {
+    const found = matches(`using System;
+using System.ComponentModel.DataAnnotations;
+
+namespace Telemetry.Domain;
+
+public class Reading
+{
+    [Key]
+    public DateTime CapturedAt { get; set; }
+
+    public double Value { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(1)
+  })
+
+  it('detects a by-convention Id property typed DateTimeOffset', () => {
+    const found = matches(`using System;
+
+namespace Audit.Domain;
+
+public class AuditEvent
+{
+    public DateTimeOffset Id { get; set; }
+
+    public string Action { get; set; } = string.Empty;
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(1)
+  })
+
+  it('detects a <ClassName>Id convention key typed System.DateTime', () => {
+    const found = matches(`namespace Sales.Domain;
+
+public class Snapshot
+{
+    public System.DateTime SnapshotId { get; set; }
+
+    public decimal Total { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(1)
+  })
+
+  it('detects a nullable DateTime? primary key', () => {
+    const found = matches(`using System;
+using System.ComponentModel.DataAnnotations;
+
+namespace Ops.Domain;
+
+public class Job
+{
+    [Key]
+    public DateTime? ScheduledFor { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(1)
+  })
+
+  it('does not flag a surrogate key with a timestamp column', () => {
+    const found = matches(`using System;
+
+namespace Telemetry.Domain;
+
+public class Reading
+{
+    public long Id { get; set; }
+
+    public DateTime CapturedAt { get; set; }
+
+    public double Value { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a DateTime property that is not the primary key', () => {
+    const found = matches(`using System;
+
+namespace Telemetry.Domain;
+
+public class Reading
+{
+    public Guid Id { get; set; }
+
+    public DateTime CapturedAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a non-temporal [Key] primary key', () => {
+    const found = matches(`using System;
+using System.ComponentModel.DataAnnotations;
+
+namespace Telemetry.Domain;
+
+public class Device
+{
+    [Key]
+    public Guid DeviceId { get; set; }
+
+    public DateTime LastSeen { get; set; }
+}
+`, 'database/deterministic/datetime-primary-key')
+    expect(found).toHaveLength(0)
+  })
+})

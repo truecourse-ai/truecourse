@@ -241,6 +241,16 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'bugs/deterministic/empty-finalizer',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Empty finalizer',
+    description: 'An empty finalizer does nothing but delay garbage collection by a generation.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
     key: 'bugs/deterministic/fallthrough-case',
     category: 'code',
     domain: 'bugs',

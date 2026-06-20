@@ -3121,3 +3121,42 @@ public class TodoScanner
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/empty-finalizer (C#)', () => {
+  const key = 'bugs/deterministic/empty-finalizer'
+
+  it('flags a finalizer whose body is empty', () => {
+    const found = matches(`namespace Caching;
+public sealed class FileCache
+{
+    private readonly Dictionary<string, byte[]> _entries = new();
+
+    ~FileCache()
+    {
+    }
+
+    public void Add(string key, byte[] value) => _entries[key] = value;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a finalizer that releases resources or one with real cleanup', () => {
+    const found = matches(`namespace Caching;
+public sealed class NativeBuffer
+{
+    private IntPtr _handle;
+
+    ~NativeBuffer()
+    {
+        if (_handle != IntPtr.Zero)
+        {
+            Marshal.FreeHGlobal(_handle);
+            _handle = IntPtr.Zero;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace UserServiceApp.Violations.Reliability;
 
+// VIOLATION: reliability/deterministic/disposable-field-without-idisposable
 internal sealed class WebhookDispatcher
 {
     private readonly HttpClient _client;
