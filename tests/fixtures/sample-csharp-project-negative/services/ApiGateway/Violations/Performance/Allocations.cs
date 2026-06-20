@@ -20,5 +20,6 @@ internal sealed class Allocations
     }
 
     // VIOLATION: performance/deterministic/property-returns-collection-copy
+    // VIOLATION: code-quality/deterministic/property-returns-array
     public string[] Tags => _tags.ToArray();
 }

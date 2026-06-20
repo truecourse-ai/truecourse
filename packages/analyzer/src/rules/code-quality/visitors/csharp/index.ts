@@ -194,6 +194,24 @@ import { csharpStringCompareToZeroVisitor } from './string-compare-to-zero.js'
 import { csharpRedundantOverrideVisitor } from './redundant-override.js'
 import { csharpLiteralSuffixOverCastVisitor } from './literal-suffix-over-cast.js'
 import { csharpTooManyTypeParametersVisitor } from './too-many-type-parameters.js'
+import { csharpPreferUnixEpochFieldVisitor } from './prefer-unix-epoch-field.js'
+import { csharpNonFlagsEnumPluralNameVisitor } from './non-flags-enum-plural-name.js'
+import { csharpFlagsEnumSingularNameVisitor } from './flags-enum-singular-name.js'
+import { csharpUseThrowIfCancellationRequestedVisitor } from './use-throwifcancellationrequested.js'
+import { csharpPropertyReturnsArrayVisitor } from './property-returns-array.js'
+import { csharpNonGenericEventHandlerVisitor } from './non-generic-event-handler.js'
+import { csharpOutRefParameterUsageVisitor } from './out-ref-parameter-usage.js'
+import { csharpParamsNotOnOverrideVisitor } from './params-not-on-override.js'
+import { csharpTooManyGenericParametersVisitor } from './too-many-generic-parameters.js'
+import { csharpMergeDeclarationWithAssignmentVisitor } from './merge-declaration-with-assignment.js'
+import { csharpUnnecessaryRawStringVisitor } from './unnecessary-raw-string.js'
+import { csharpUnnecessaryStringInterpolationVisitor } from './unnecessary-string-interpolation.js'
+import { csharpMergeableCatchClausesVisitor } from './mergeable-catch-clauses.js'
+import { csharpTypeofNameOverTypeofNameVisitor } from './typeof-name-over-typeof-name.js'
+import { csharpEventBeforeAfterPrefixVisitor } from './event-before-after-prefix.js'
+import { csharpStaticMemberOnGenericTypeVisitor } from './static-member-on-generic-type.js'
+import { csharpUseIsOverAsNullCheckVisitor } from './use-is-over-as-null-check.js'
+import { csharpTypeInGlobalNamespaceVisitor } from './type-in-global-namespace.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -391,4 +409,22 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpRedundantOverrideVisitor,
   csharpLiteralSuffixOverCastVisitor,
   csharpTooManyTypeParametersVisitor,
+  csharpPreferUnixEpochFieldVisitor,
+  csharpNonFlagsEnumPluralNameVisitor,
+  csharpFlagsEnumSingularNameVisitor,
+  csharpUseThrowIfCancellationRequestedVisitor,
+  csharpPropertyReturnsArrayVisitor,
+  csharpNonGenericEventHandlerVisitor,
+  csharpOutRefParameterUsageVisitor,
+  csharpParamsNotOnOverrideVisitor,
+  csharpTooManyGenericParametersVisitor,
+  csharpMergeDeclarationWithAssignmentVisitor,
+  csharpUnnecessaryRawStringVisitor,
+  csharpUnnecessaryStringInterpolationVisitor,
+  csharpMergeableCatchClausesVisitor,
+  csharpTypeofNameOverTypeofNameVisitor,
+  csharpEventBeforeAfterPrefixVisitor,
+  csharpStaticMemberOnGenericTypeVisitor,
+  csharpUseIsOverAsNullCheckVisitor,
+  csharpTypeInGlobalNamespaceVisitor,
 ]

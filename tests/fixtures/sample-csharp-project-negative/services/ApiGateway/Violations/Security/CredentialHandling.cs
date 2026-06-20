@@ -42,6 +42,7 @@ internal sealed class CredentialHandling
 
     internal void BindPassword(UserRecord user)
     {
+        // VIOLATION: code-quality/deterministic/merge-declaration-with-assignment
         string password;
         // VIOLATION: security/deterministic/password-stored-plaintext
         password = Request.Form["password"];

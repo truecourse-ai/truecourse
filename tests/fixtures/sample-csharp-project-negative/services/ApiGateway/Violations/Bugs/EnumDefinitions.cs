@@ -10,6 +10,7 @@ internal enum DispatchStage
 }
 
 // VIOLATION: bugs/deterministic/flags-enum-missing-zero
+// VIOLATION: code-quality/deterministic/flags-enum-singular-name
 [Flags]
 internal enum RouteAccess
 {

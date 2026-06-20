@@ -1,6 +1,7 @@
 namespace ApiGateway.Violations.Style;
 
 /// <summary>Request scope flags with a non-PascalCase member name.</summary>
+// VIOLATION: code-quality/deterministic/flags-enum-singular-name
 [Flags]
 internal enum ScopeAccess
 {

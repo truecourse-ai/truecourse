@@ -7430,3 +7430,557 @@ public class Box<T> { }
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// prefer-unix-epoch-field
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-unix-epoch-field (C#)', () => {
+  it('flags a hand-built Unix epoch DateTime', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public System.DateTime Epoch => new System.DateTime(1970, 1, 1, 0, 0, 0, System.DateTimeKind.Utc);
+    public System.DateTime Short => new DateTime(1970, 1, 1);
+}
+`, 'prefer-unix-epoch-field')
+    expect(found.length).toBe(2)
+  })
+
+  it('does not flag other dates or non-zero epoch-day times', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public System.DateTime Y2K => new System.DateTime(2000, 1, 1);
+    public System.DateTime Noon => new DateTime(1970, 1, 1, 12, 0, 0);
+    public System.DateTime Other => new DateTime(1970, 2, 1);
+}
+`, 'prefer-unix-epoch-field')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// non-flags-enum-plural-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/non-flags-enum-plural-name (C#)', () => {
+  it('flags a non-flags enum with a plural name', () => {
+    const found = matches(`namespace App;
+public enum OrderStates { Pending, Shipped, Delivered }
+`, 'non-flags-enum-plural-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag singular names, [Flags] enums, or singular words ending in s', () => {
+    const found = matches(`namespace App;
+public enum OrderState { Pending, Shipped }
+[System.Flags] public enum Permissions { None = 0, Read = 1 }
+public enum HttpStatus { Ok, NotFound }
+`, 'non-flags-enum-plural-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// flags-enum-singular-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/flags-enum-singular-name (C#)', () => {
+  it('flags a [Flags] enum with a singular name', () => {
+    const found = matches(`namespace App;
+[System.Flags] public enum AccessRight { None = 0, Read = 1, Write = 2 }
+`, 'flags-enum-singular-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag plural [Flags] names or non-flags enums', () => {
+    const found = matches(`namespace App;
+[System.Flags] public enum AccessRights { None = 0, Read = 1, Write = 2 }
+public enum Color { Red, Green }
+`, 'flags-enum-singular-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-throwifcancellationrequested
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-throwifcancellationrequested (C#)', () => {
+  it('flags a manual IsCancellationRequested check that throws OperationCanceledException', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Work(System.Threading.CancellationToken token)
+    {
+        if (token.IsCancellationRequested)
+        {
+            throw new System.OperationCanceledException();
+        }
+    }
+}
+`, 'use-throwifcancellationrequested')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag checks that do other work or throw a different exception', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void A(System.Threading.CancellationToken token)
+    {
+        if (token.IsCancellationRequested)
+        {
+            Cleanup();
+            throw new System.OperationCanceledException();
+        }
+    }
+    public void B(System.Threading.CancellationToken token)
+    {
+        if (token.IsCancellationRequested)
+        {
+            throw new System.InvalidOperationException();
+        }
+    }
+    private void Cleanup() { }
+}
+`, 'use-throwifcancellationrequested')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// property-returns-array
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/property-returns-array (C#)', () => {
+  it('flags a public property whose type is an array', () => {
+    const found = matches(`namespace App;
+public class Matrix
+{
+    public int[] Rows { get; }
+}
+`, 'property-returns-array')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag byte[], scalar, or private array properties', () => {
+    const found = matches(`namespace App;
+public class Blob
+{
+    public byte[] Payload { get; }
+    public int Size { get; }
+    private int[] _scratch { get; set; }
+}
+`, 'property-returns-array')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// non-generic-event-handler
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/non-generic-event-handler (C#)', () => {
+  it('flags an event using a custom non-generic delegate', () => {
+    const found = matches(`namespace App;
+public class Pump
+{
+    public event PressureChangedHandler PressureChanged;
+}
+`, 'non-generic-event-handler')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag EventHandler, EventHandler<T>, or arbitrary type names', () => {
+    const found = matches(`namespace App;
+public class Pump
+{
+    public event System.EventHandler Started;
+    public event System.EventHandler<int> Reading;
+    public event Changed OnChange;
+}
+`, 'non-generic-event-handler')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// out-ref-parameter-usage
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/out-ref-parameter-usage (C#)', () => {
+  it('flags a public method with an out or ref parameter', () => {
+    const found = matches(`namespace App;
+public class Calc
+{
+    public void Divide(int a, int b, out int remainder) { remainder = a % b; }
+}
+`, 'out-ref-parameter-usage')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag Try-pattern, private, or value-parameter methods', () => {
+    const found = matches(`namespace App;
+public class Calc
+{
+    public bool TryParse(string s, out int value) { value = 0; return false; }
+    private void Swap(ref int a, ref int b) { }
+    public int Add(int a, int b) => a + b;
+}
+`, 'out-ref-parameter-usage')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// params-not-on-override
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/params-not-on-override (C#)', () => {
+  it('flags an override whose final array parameter drops params', () => {
+    const found = matches(`namespace App;
+public class Logger : BaseLogger
+{
+    public override void Log(string format, object[] args) { }
+}
+public class BaseLogger { public virtual void Log(string format, params object[] args) { } }
+`, 'params-not-on-override')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag overrides that keep params or non-array final params', () => {
+    const found = matches(`namespace App;
+public class Logger : BaseLogger
+{
+    public override void Log(string format, params object[] args) { }
+    public override void Warn(string message) { }
+}
+public class BaseLogger
+{
+    public virtual void Log(string format, params object[] args) { }
+    public virtual void Warn(string message) { }
+}
+`, 'params-not-on-override')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// too-many-generic-parameters
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/too-many-generic-parameters (C#)', () => {
+  it('flags a generic method with three or more type parameters', () => {
+    const found = matches(`namespace App;
+public class C { public TResult Map<TInput, TState, TResult>(TInput a, TState b) => default; }
+`, 'too-many-generic-parameters')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag methods with one or two type parameters', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public TValue Get<TKey, TValue>(TKey key) => default;
+    public T Identity<T>(T x) => x;
+}
+`, 'too-many-generic-parameters')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// merge-declaration-with-assignment
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/merge-declaration-with-assignment (C#)', () => {
+  it('flags a declaration immediately followed by its assignment', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int M()
+    {
+        int total;
+        total = 5;
+        return total;
+    }
+}
+`, 'merge-declaration-with-assignment')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag initialized declarations or assignments after intervening code', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int M(int seed)
+    {
+        int total = 0;
+        int other;
+        System.Console.WriteLine(seed);
+        other = seed;
+        return total + other;
+    }
+}
+`, 'merge-declaration-with-assignment')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-raw-string
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-raw-string (C#)', () => {
+  it('flags a single-line raw string with no special characters', () => {
+    const found = matches(`namespace App;
+public class C { public string S => """hello world"""; }
+`, 'unnecessary-raw-string')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag raw strings containing quotes, backslashes, or newlines', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Quoted => """He said "hi"""";
+    public string Path => """C:\\temp\\x""";
+}
+`, 'unnecessary-raw-string')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-string-interpolation
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-string-interpolation (C#)', () => {
+  it('flags an interpolation wrapping a single already-string value', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string A(object o) => $"{o.ToString()}";
+    public string B() => $"{nameof(C)}";
+}
+`, 'unnecessary-string-interpolation')
+    expect(found.length).toBe(2)
+  })
+
+  it('does not flag interpolations with text, format clauses, or non-string holes', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string A(string n) => $"Hello {n}";
+    public string B(System.DateTime d) => $"{d:yyyy}";
+    public string D(int n) => $"{n}";
+}
+`, 'unnecessary-string-interpolation')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mergeable-catch-clauses
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/mergeable-catch-clauses (C#)', () => {
+  it('flags two catch clauses with identical handler bodies', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M()
+    {
+        try { Run(); }
+        catch (System.IO.IOException) { Log("failed"); }
+        catch (System.TimeoutException) { Log("failed"); }
+    }
+    private void Run() { }
+    private void Log(string s) { }
+}
+`, 'mergeable-catch-clauses')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag distinct bodies, when-filtered, or empty catches', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M()
+    {
+        try { Run(); }
+        catch (System.IO.IOException) { Log("io"); }
+        catch (System.TimeoutException) { Log("timeout"); }
+    }
+    public void N()
+    {
+        try { Run(); }
+        catch (System.Exception e) when (e.Message.Length > 0) { Log("a"); }
+        catch (System.Exception) { Log("a"); }
+    }
+    private void Run() { }
+    private void Log(string s) { }
+}
+`, 'mergeable-catch-clauses')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// typeof-name-over-typeof-name
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/typeof-name-over-typeof-name (C#)', () => {
+  it('flags typeof(X).Name', () => {
+    const found = matches(`namespace App;
+public class C { public string N() => typeof(C).Name; }
+`, 'typeof-name-over-typeof-name')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag typeof(X).FullName or instance .Name access', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string F() => typeof(C).FullName;
+    public string G(System.Type t) => t.Name;
+}
+`, 'typeof-name-over-typeof-name')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// event-before-after-prefix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/event-before-after-prefix (C#)', () => {
+  it('flags an event named with a Before/After prefix', () => {
+    const found = matches(`namespace App;
+public class Doc
+{
+    public event System.EventHandler BeforeSave;
+}
+`, 'event-before-after-prefix')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag verb-tense names or words that merely start with the letters', () => {
+    const found = matches(`namespace App;
+public class Doc
+{
+    public event System.EventHandler Saving;
+    public event System.EventHandler Saved;
+    public event System.EventHandler Afterglow;
+}
+`, 'event-before-after-prefix')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// static-member-on-generic-type
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/static-member-on-generic-type (C#)', () => {
+  it('flags a static property or method on a generic type', () => {
+    const found = matches(`namespace App;
+public class Cache<T>
+{
+    public static Cache<T> Create() => new();
+}
+`, 'static-member-on-generic-type')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag static members on non-generic types, static fields, or instance members', () => {
+    const found = matches(`namespace App;
+public class Cache
+{
+    public static Cache Create() => new();
+}
+public class Box<T>
+{
+    public static readonly Box<T> Empty = new();
+    public T Value { get; set; }
+}
+`, 'static-member-on-generic-type')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-is-over-as-null-check
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-is-over-as-null-check (C#)', () => {
+  it('flags an as-assignment immediately followed by a != null check', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M(object o)
+    {
+        var text = o as string;
+        if (text != null)
+        {
+            System.Console.WriteLine(text);
+        }
+    }
+}
+`, 'use-is-over-as-null-check')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag intervening use, compound conditions, or non-as declarations', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Used(object o)
+    {
+        var text = o as string;
+        System.Console.WriteLine(text);
+        if (text != null) { }
+    }
+    public void Compound(object o, bool flag)
+    {
+        var text = o as string;
+        if (text != null && flag) { }
+    }
+    public void Plain(object o)
+    {
+        var text = o.ToString();
+        if (text != null) { }
+    }
+}
+`, 'use-is-over-as-null-check')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// type-in-global-namespace
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/type-in-global-namespace (C#)', () => {
+  it('flags a type declared outside any namespace', () => {
+    const found = matches(`public class LooseType { public int X { get; set; } }
+`, 'type-in-global-namespace')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag types under a file-scoped namespace', () => {
+    const found = matches(`namespace App;
+public class Scoped { }
+public class AlsoScoped { }
+`, 'type-in-global-namespace')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag types inside a block namespace', () => {
+    const found = matches(`namespace App.Nested { public class BlockScoped { } }
+`, 'type-in-global-namespace')
+    expect(found).toHaveLength(0)
+  })
+})

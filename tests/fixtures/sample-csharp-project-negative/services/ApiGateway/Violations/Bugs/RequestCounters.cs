@@ -29,4 +29,7 @@ internal sealed class TypedCache<TValue>
     private static readonly Dictionary<string, TValue> _entries = new();
 
     internal void Store(string key, TValue value) => _entries[key] = value;
+
+    // VIOLATION: code-quality/deterministic/static-member-on-generic-type
+    internal static TypedCache<TValue> Create() => new();
 }
