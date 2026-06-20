@@ -11,6 +11,7 @@ internal sealed class AggregationFunction
     [FunctionName("Aggregate")]
     public void Aggregate(long windowCount)
     {
+        // VIOLATION: bugs/deterministic/instance-writes-static-field
         _runningTotal += windowCount;
     }
 }

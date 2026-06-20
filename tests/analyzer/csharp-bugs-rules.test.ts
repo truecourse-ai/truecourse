@@ -3817,3 +3817,585 @@ public sealed class Columnizer
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/property-assignment-in-own-setter (C#)', () => {
+  const key = 'bugs/deterministic/property-assignment-in-own-setter'
+
+  it('detects a setter that assigns to its own property', () => {
+    const found = matches(`namespace Accounts;
+public sealed class Account
+{
+    private string _name = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            Name = value.Trim();
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a setter that writes the backing field', () => {
+    const found = matches(`namespace Accounts;
+public sealed class Account
+{
+    private string _name = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set => _name = value.Trim();
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/unused-value-keyword-in-setter (C#)', () => {
+  const key = 'bugs/deterministic/unused-value-keyword-in-setter'
+
+  it('detects a setter that ignores value', () => {
+    const found = matches(`namespace Config;
+public sealed class Settings
+{
+    private int _timeout;
+    public int Timeout
+    {
+        get => _timeout;
+        set
+        {
+            _timeout = 30;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a setter that uses value, nor auto-properties', () => {
+    const found = matches(`namespace Config;
+public sealed class Settings
+{
+    private int _timeout;
+    public int Timeout
+    {
+        get => _timeout;
+        set => _timeout = value;
+    }
+    public string Region { get; set; } = "us";
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/redundant-base-call (C#)', () => {
+  const key = 'bugs/deterministic/redundant-base-call'
+
+  it('detects base. on a member the type does not declare', () => {
+    const found = matches(`namespace Handlers;
+public abstract class HandlerBase
+{
+    public virtual void Configure() { }
+}
+public sealed class WebHandler : HandlerBase
+{
+    public void Setup()
+    {
+        base.Configure();
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag base. when the type overrides the member', () => {
+    const found = matches(`namespace Handlers;
+public abstract class HandlerBase
+{
+    public virtual void Configure() { }
+}
+public sealed class WebHandler : HandlerBase
+{
+    public override void Configure()
+    {
+        base.Configure();
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/route-template-backslash (C#)', () => {
+  const key = 'bugs/deterministic/route-template-backslash'
+
+  it('detects a backslash in a route template', () => {
+    const found = matches(`namespace Api;
+public sealed class OrdersController
+{
+    [Route("api\\\\orders")]
+    public void List() { }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a forward-slash route', () => {
+    const found = matches(`namespace Api;
+public sealed class OrdersController
+{
+    [HttpGet("api/orders")]
+    public void List() { }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/sequential-same-condition (C#)', () => {
+  const key = 'bugs/deterministic/sequential-same-condition'
+
+  it('detects two consecutive ifs with the same condition', () => {
+    const found = matches(`namespace Validation;
+public sealed class Validator
+{
+    private string _status = "ok";
+    public void Check(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            _status = "missing";
+        }
+        if (string.IsNullOrEmpty(input))
+        {
+            _status = "rejected";
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag when the first body can change the condition', () => {
+    const found = matches(`namespace Validation;
+public sealed class Validator
+{
+    private readonly List<string> _items = new();
+    public void Check(string input)
+    {
+        if (_items.Contains(input))
+        {
+            _items.Remove(input);
+        }
+        if (_items.Contains(input))
+        {
+            _items.Clear();
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/static-field-in-generic-type (C#)', () => {
+  const key = 'bugs/deterministic/static-field-in-generic-type'
+
+  it('detects a static field in a generic type', () => {
+    const found = matches(`namespace Caching;
+public sealed class Cache<TValue>
+{
+    private static readonly Dictionary<string, TValue> _store = new();
+    public void Put(string key, TValue value) => _store[key] = value;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a static field in a non-generic type or a const', () => {
+    const found = matches(`namespace Caching;
+public sealed class Cache<TValue>
+{
+    private const int MaxEntries = 1000;
+    private readonly Dictionary<string, TValue> _store = new();
+}
+public sealed class Registry
+{
+    private static int _count;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/stackalloc-in-loop (C#)', () => {
+  const key = 'bugs/deterministic/stackalloc-in-loop'
+
+  it('detects stackalloc inside a loop', () => {
+    const found = matches(`namespace Buffers;
+public sealed class Encoder
+{
+    public void Encode(int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            Span<byte> chunk = stackalloc byte[1024];
+            chunk.Clear();
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag stackalloc outside a loop', () => {
+    const found = matches(`namespace Buffers;
+public sealed class Encoder
+{
+    public void Encode()
+    {
+        Span<byte> chunk = stackalloc byte[1024];
+        chunk.Clear();
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/threadstatic-on-instance-field (C#)', () => {
+  const key = 'bugs/deterministic/threadstatic-on-instance-field'
+
+  it('detects [ThreadStatic] on an instance field', () => {
+    const found = matches(`namespace Diagnostics;
+public sealed class Tracer
+{
+    [ThreadStatic]
+    private string _scope = string.Empty;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag [ThreadStatic] on a static field', () => {
+    const found = matches(`namespace Diagnostics;
+public sealed class Tracer
+{
+    [ThreadStatic]
+    private static int _depth;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/threadstatic-inline-initialization (C#)', () => {
+  const key = 'bugs/deterministic/threadstatic-inline-initialization'
+
+  it('detects an inline initializer on a [ThreadStatic] static field', () => {
+    const found = matches(`namespace Diagnostics;
+public sealed class Tracer
+{
+    [ThreadStatic]
+    private static int _depth = 1;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a [ThreadStatic] static field without an initializer', () => {
+    const found = matches(`namespace Diagnostics;
+public sealed class Tracer
+{
+    [ThreadStatic]
+    private static int _depth;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/recursive-type-inheritance (C#)', () => {
+  const key = 'bugs/deterministic/recursive-type-inheritance'
+
+  it('detects a type that inherits from itself', () => {
+    const found = matches(`namespace Trees;
+public class Node : Node
+{
+    public string Label { get; set; } = "";
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a normal base class or a self-referential interface', () => {
+    const found = matches(`namespace Trees;
+public class Node : NodeBase, IComparable<Node>
+{
+    public int CompareTo(Node? other) => 0;
+}
+public class NodeBase { }
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/raise-reserved-exception-type (C#)', () => {
+  const key = 'bugs/deterministic/raise-reserved-exception-type'
+
+  it('detects throwing a reserved exception type', () => {
+    const found = matches(`namespace Orders;
+public sealed class OrderService
+{
+    public void Process(int count)
+    {
+        if (count == 0)
+        {
+            throw new Exception("no orders");
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a specific exception type', () => {
+    const found = matches(`namespace Orders;
+public sealed class OrderService
+{
+    public void Process(int count)
+    {
+        if (count == 0)
+        {
+            throw new InvalidOperationException("no orders");
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/virtual-field-like-event (C#)', () => {
+  const key = 'bugs/deterministic/virtual-field-like-event'
+
+  it('detects a virtual field-like event', () => {
+    const found = matches(`namespace Events;
+public class Publisher
+{
+    public virtual event System.EventHandler? Published;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a non-virtual event or one with explicit accessors', () => {
+    const found = matches(`namespace Events;
+public class Publisher
+{
+    public event System.EventHandler? Published;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/suppressfinalize-misuse (C#)', () => {
+  const key = 'bugs/deterministic/suppressfinalize-misuse'
+
+  it('detects GC.SuppressFinalize outside Dispose', () => {
+    const found = matches(`namespace Resources;
+public sealed class Handle
+{
+    public void Close()
+    {
+        GC.SuppressFinalize(this);
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag GC.SuppressFinalize inside Dispose', () => {
+    const found = matches(`namespace Resources;
+public sealed class Handle : System.IDisposable
+{
+    public void Dispose()
+    {
+        GC.SuppressFinalize(this);
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/class-only-private-constructors (C#)', () => {
+  const key = 'bugs/deterministic/class-only-private-constructors'
+
+  it('detects a class whose only constructor is private with no factory', () => {
+    const found = matches(`namespace Tokens;
+public sealed class Token
+{
+    private readonly string _value;
+    private Token(string value)
+    {
+        _value = value;
+    }
+    public string Reveal() => _value;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a class with a static factory', () => {
+    const found = matches(`namespace Tokens;
+public sealed class Token
+{
+    private readonly string _value;
+    private Token(string value)
+    {
+        _value = value;
+    }
+    public static Token Create(string value) => new Token(value);
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/invalid-shift-count (C#)', () => {
+  const key = 'bugs/deterministic/invalid-shift-count'
+
+  it('detects a shift by zero', () => {
+    const found = matches(`namespace Bits;
+public sealed class Packer
+{
+    public int Pack(int flags) => flags << 0;
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a non-zero shift', () => {
+    const found = matches(`namespace Bits;
+public sealed class Packer
+{
+    public int Pack(int flags) => flags << 4;
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/lock-on-public-reference (C#)', () => {
+  const key = 'bugs/deterministic/lock-on-public-reference'
+
+  it('detects lock on this', () => {
+    const found = matches(`namespace Sync;
+public sealed class Pool
+{
+    private int _count;
+    public void Add()
+    {
+        lock (this)
+        {
+            _count++;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag lock on a private sync object', () => {
+    const found = matches(`namespace Sync;
+public sealed class Pool
+{
+    private readonly object _sync = new();
+    private int _count;
+    public void Add()
+    {
+        lock (_sync)
+        {
+            _count++;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/instance-writes-static-field (C#)', () => {
+  const key = 'bugs/deterministic/instance-writes-static-field'
+
+  it('detects an instance method writing a static field', () => {
+    const found = matches(`namespace Metrics;
+public sealed class Counter
+{
+    private static int _total;
+    private readonly string _name;
+    public Counter(string name) => _name = name;
+    public void Increment()
+    {
+        _total = _total + 1;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a static method writing a static field', () => {
+    const found = matches(`namespace Metrics;
+public sealed class Counter
+{
+    private static int _total;
+    public static void Reset()
+    {
+        _total = 0;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/static-field-set-in-constructor (C#)', () => {
+  const key = 'bugs/deterministic/static-field-set-in-constructor'
+
+  it('detects a constructor writing a static field', () => {
+    const found = matches(`namespace Metrics;
+public sealed class Gauge
+{
+    private static int _instances;
+    private readonly string _label;
+    public Gauge(string label)
+    {
+        _label = label;
+        _instances = 0;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a static constructor writing a static field', () => {
+    const found = matches(`namespace Metrics;
+public sealed class Gauge
+{
+    private static int _instances;
+    static Gauge()
+    {
+        _instances = 0;
+    }
+}
+`, key)
+    expect(found.length).toBe(0)
+  })
+})

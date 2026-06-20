@@ -100,6 +100,24 @@ import { csharpEnumDuplicateExplicitValueVisitor } from './enum-duplicate-explic
 import { csharpFlagsEnumMissingZeroVisitor } from './flags-enum-missing-zero.js'
 import { csharpIsCheckOnThisVisitor } from './is-check-on-this.js'
 import { csharpLiteralControlCharacterVisitor } from './literal-control-character.js'
+import { csharpPropertyAssignmentInOwnSetterVisitor } from './property-assignment-in-own-setter.js'
+import { csharpUnusedValueKeywordInSetterVisitor } from './unused-value-keyword-in-setter.js'
+import { csharpRedundantBaseCallVisitor } from './redundant-base-call.js'
+import { csharpRouteTemplateBackslashVisitor } from './route-template-backslash.js'
+import { csharpSequentialSameConditionVisitor } from './sequential-same-condition.js'
+import { csharpStaticFieldInGenericTypeVisitor } from './static-field-in-generic-type.js'
+import { csharpStackallocInLoopVisitor } from './stackalloc-in-loop.js'
+import { csharpThreadStaticOnInstanceFieldVisitor } from './threadstatic-on-instance-field.js'
+import { csharpThreadStaticInlineInitializationVisitor } from './threadstatic-inline-initialization.js'
+import { csharpRecursiveTypeInheritanceVisitor } from './recursive-type-inheritance.js'
+import { csharpRaiseReservedExceptionTypeVisitor } from './raise-reserved-exception-type.js'
+import { csharpVirtualFieldLikeEventVisitor } from './virtual-field-like-event.js'
+import { csharpSuppressFinalizeMisuseVisitor } from './suppressfinalize-misuse.js'
+import { csharpClassOnlyPrivateConstructorsVisitor } from './class-only-private-constructors.js'
+import { csharpInvalidShiftCountVisitor } from './invalid-shift-count.js'
+import { csharpLockOnPublicReferenceVisitor } from './lock-on-public-reference.js'
+import { csharpInstanceWritesStaticFieldVisitor } from './instance-writes-static-field.js'
+import { csharpStaticFieldSetInConstructorVisitor } from './static-field-set-in-constructor.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEmptyCatchVisitor,
@@ -202,4 +220,22 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpFlagsEnumMissingZeroVisitor,
   csharpIsCheckOnThisVisitor,
   csharpLiteralControlCharacterVisitor,
+  csharpPropertyAssignmentInOwnSetterVisitor,
+  csharpUnusedValueKeywordInSetterVisitor,
+  csharpRedundantBaseCallVisitor,
+  csharpRouteTemplateBackslashVisitor,
+  csharpSequentialSameConditionVisitor,
+  csharpStaticFieldInGenericTypeVisitor,
+  csharpStackallocInLoopVisitor,
+  csharpThreadStaticOnInstanceFieldVisitor,
+  csharpThreadStaticInlineInitializationVisitor,
+  csharpRecursiveTypeInheritanceVisitor,
+  csharpRaiseReservedExceptionTypeVisitor,
+  csharpVirtualFieldLikeEventVisitor,
+  csharpSuppressFinalizeMisuseVisitor,
+  csharpClassOnlyPrivateConstructorsVisitor,
+  csharpInvalidShiftCountVisitor,
+  csharpLockOnPublicReferenceVisitor,
+  csharpInstanceWritesStaticFieldVisitor,
+  csharpStaticFieldSetInConstructorVisitor,
 ]

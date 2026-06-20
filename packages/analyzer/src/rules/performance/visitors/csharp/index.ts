@@ -34,6 +34,18 @@ export { csharpPreferTryAddVisitor } from './prefer-tryadd.js'
 export { csharpToLowerForComparisonVisitor } from './tolower-for-comparison.js'
 export { csharpUseToHexStringVisitor } from './use-tohexstring.js'
 export { csharpLocalJsonSerializerOptionsVisitor } from './local-jsonserializeroptions.js'
+export { csharpFilterBeforeSortVisitor } from './filter-before-sort.js'
+export { csharpCountAsyncInsteadOfAnyAsyncVisitor } from './countasync-instead-of-anyasync.js'
+export { csharpPreferContainsOverAnyVisitor } from './prefer-contains-over-any.js'
+export { csharpPreferCharStartsWithEndsWithVisitor } from './prefer-char-startswith-endswith.js'
+export { csharpStringBuilderAppendSingleCharStringVisitor } from './stringbuilder-append-single-char-string.js'
+export { csharpStringBuilderToStringAppendVisitor } from './stringbuilder-tostring-append.js'
+export { csharpRedundantStringBuilderToStringVisitor } from './redundant-stringbuilder-tostring.js'
+export { csharpSpanFillDefaultOverClearVisitor } from './span-fill-default-over-clear.js'
+export { csharpPreferTryGetValueVisitor } from './prefer-trygetvalue.js'
+export { csharpStringBuilderPinvokeParameterVisitor } from './stringbuilder-pinvoke-parameter.js'
+export { csharpPropertyReturnsCollectionCopyVisitor } from './property-returns-collection-copy.js'
+export { csharpConstantArrayArgumentVisitor } from './constant-array-argument.js'
 
 import { csharpRegexInLoopVisitor } from './regex-in-loop.js'
 import { csharpSyncFsInRequestHandlerVisitor } from './sync-fs-in-request-handler.js'
@@ -69,6 +81,18 @@ import { csharpPreferTryAddVisitor } from './prefer-tryadd.js'
 import { csharpToLowerForComparisonVisitor } from './tolower-for-comparison.js'
 import { csharpUseToHexStringVisitor } from './use-tohexstring.js'
 import { csharpLocalJsonSerializerOptionsVisitor } from './local-jsonserializeroptions.js'
+import { csharpFilterBeforeSortVisitor } from './filter-before-sort.js'
+import { csharpCountAsyncInsteadOfAnyAsyncVisitor } from './countasync-instead-of-anyasync.js'
+import { csharpPreferContainsOverAnyVisitor } from './prefer-contains-over-any.js'
+import { csharpPreferCharStartsWithEndsWithVisitor } from './prefer-char-startswith-endswith.js'
+import { csharpStringBuilderAppendSingleCharStringVisitor } from './stringbuilder-append-single-char-string.js'
+import { csharpStringBuilderToStringAppendVisitor } from './stringbuilder-tostring-append.js'
+import { csharpRedundantStringBuilderToStringVisitor } from './redundant-stringbuilder-tostring.js'
+import { csharpSpanFillDefaultOverClearVisitor } from './span-fill-default-over-clear.js'
+import { csharpPreferTryGetValueVisitor } from './prefer-trygetvalue.js'
+import { csharpStringBuilderPinvokeParameterVisitor } from './stringbuilder-pinvoke-parameter.js'
+import { csharpPropertyReturnsCollectionCopyVisitor } from './property-returns-collection-copy.js'
+import { csharpConstantArrayArgumentVisitor } from './constant-array-argument.js'
 
 export const PERFORMANCE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpRegexInLoopVisitor,
@@ -105,4 +129,16 @@ export const PERFORMANCE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpToLowerForComparisonVisitor,
   csharpUseToHexStringVisitor,
   csharpLocalJsonSerializerOptionsVisitor,
+  csharpFilterBeforeSortVisitor,
+  csharpCountAsyncInsteadOfAnyAsyncVisitor,
+  csharpPreferContainsOverAnyVisitor,
+  csharpPreferCharStartsWithEndsWithVisitor,
+  csharpStringBuilderAppendSingleCharStringVisitor,
+  csharpStringBuilderToStringAppendVisitor,
+  csharpRedundantStringBuilderToStringVisitor,
+  csharpSpanFillDefaultOverClearVisitor,
+  csharpPreferTryGetValueVisitor,
+  csharpStringBuilderPinvokeParameterVisitor,
+  csharpPropertyReturnsCollectionCopyVisitor,
+  csharpConstantArrayArgumentVisitor,
 ]

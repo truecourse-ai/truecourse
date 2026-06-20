@@ -25,6 +25,18 @@
   ],
   "modules": [
     {
+      "name": "AccountProfile",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Allocations",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ArgumentGuards",
       "service": "ApiGateway",
       "kind": "class",
@@ -38,6 +50,18 @@
     },
     {
       "name": "BackingStore",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BackoffKind",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BufferPipeline",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -61,6 +85,12 @@
       "layer": "service"
     },
     {
+      "name": "ConnectionPool",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CorsCookiesAndDebug",
       "service": "ApiGateway",
       "kind": "class",
@@ -68,6 +98,12 @@
     },
     {
       "name": "CredentialHandling",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DeprecationMarkers",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -103,6 +139,12 @@
       "layer": "service"
     },
     {
+      "name": "EventRaiser",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "FeatureToggle",
       "service": "ApiGateway",
       "kind": "class",
@@ -112,6 +154,12 @@
       "name": "FileSystemAccess",
       "service": "ApiGateway",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ForwardingHandler",
+      "service": "ApiGateway",
+      "kind": "interface",
       "layer": "service"
     },
     {
@@ -133,10 +181,22 @@
       "layer": "service"
     },
     {
+      "name": "GraphNode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "GridPoint",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "HardeningHelpers",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "HealthRoutes",
@@ -167,6 +227,12 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "IOrderQuery",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "IOutboxStore",
@@ -223,9 +289,27 @@
       "layer": "service"
     },
     {
+      "name": "LinqQueries",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "LocaleArtifacts",
       "service": "ApiGateway",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Lookups",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MemberShapes",
+      "service": "ApiGateway",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -235,7 +319,43 @@
       "layer": "service"
     },
     {
+      "name": "NativeInterop",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NativeInteropMarshalling",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "NetworkBinding",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationHub",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NullableLongForm",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NullCoalescing",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Order",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -248,6 +368,18 @@
     },
     {
       "name": "PasswordHashing",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PasswordKeyDerivation",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PathJoiner",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -331,6 +463,12 @@
       "layer": "data"
     },
     {
+      "name": "RedundantSyntax",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ReflectionAndUnsafe",
       "service": "ApiGateway",
       "kind": "class",
@@ -343,7 +481,19 @@
       "layer": "service"
     },
     {
+      "name": "RequestAndTokenHardening",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "RequestAuditor",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RequestCounters",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -355,9 +505,21 @@
       "layer": "service"
     },
     {
+      "name": "RequestRouter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "RetryMode",
       "service": "ApiGateway",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RootHandler",
+      "service": "ApiGateway",
+      "kind": "interface",
       "layer": "service"
     },
     {
@@ -367,9 +529,39 @@
       "layer": "service"
     },
     {
+      "name": "RouteAttribute",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "RouteDefaults",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RouteHandlerBase",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "RouteKey",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RouteTagAttribute",
       "service": "ApiGateway",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RouteTagAttribute",
+      "service": "ApiGateway",
+      "kind": "interface",
       "layer": "service"
     },
     {
@@ -392,6 +584,18 @@
     },
     {
       "name": "ScopeAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SealedToken",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SecurityHeaderPolicy",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -421,6 +625,36 @@
       "layer": "api"
     },
     {
+      "name": "StorageTokenIssuer",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "StringBuilders",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StringOps",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SwitchShapes",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SymmetricEncryptionSetup",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "SyncRetryWorker",
       "service": "ApiGateway",
       "kind": "class",
@@ -440,6 +674,12 @@
     },
     {
       "name": "TextOperations",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ThreadLocalState",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -467,6 +707,18 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "TypedCache",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UntrustedDeserialization",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "UserController",
@@ -1318,6 +1570,11 @@
       "method": "POST",
       "path": "/",
       "file": "services/ApiGateway/Violations/Security/GatewayProxyController.cs"
+    },
+    {
+      "method": "POST",
+      "path": "/",
+      "file": "services/ApiGateway/Violations/Security/RequestAndTokenHardening.cs"
     },
     {
       "method": "GET",

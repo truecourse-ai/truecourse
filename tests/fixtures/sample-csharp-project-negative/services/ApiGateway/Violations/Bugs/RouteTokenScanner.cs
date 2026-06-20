@@ -35,6 +35,7 @@ internal class RouteTokenScanner
     internal bool HasReportAnchor(string line)
     {
         // VIOLATION: bugs/deterministic/regex-boundary-unmatchable
+        // VIOLATION: code-quality/deterministic/unnecessary-verbatim-string
         return Regex.IsMatch(line, @"^report$id");
     }
 

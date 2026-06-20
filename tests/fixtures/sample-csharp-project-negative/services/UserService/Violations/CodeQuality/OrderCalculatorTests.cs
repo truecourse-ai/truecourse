@@ -89,6 +89,7 @@ internal class OrderCalculatorTests
     {
         var calculator = new OrderCalculator();
         // VIOLATION: code-quality/deterministic/test-modifying-global-state
+        // VIOLATION: bugs/deterministic/instance-writes-static-field
         _sharedSeed = 11;
         Assert.Equal(11, _sharedSeed + calculator.Offset(0));
     }

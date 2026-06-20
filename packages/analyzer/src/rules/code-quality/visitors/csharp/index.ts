@@ -159,6 +159,24 @@ import { csharpEnumMemberPrefixedWithTypeVisitor } from './enum-member-prefixed-
 import { csharpEnumReservedMemberNameVisitor } from './enum-reserved-member-name.js'
 import { csharpExceptionNamedTypeNotExceptionVisitor } from './exception-named-type-not-exception.js'
 import { csharpExceptionTypeNotPublicVisitor } from './exception-type-not-public.js'
+import { csharpUnnecessaryUnaryPlusVisitor } from './unnecessary-unary-plus.js'
+import { csharpNullableShorthandVisitor } from './nullable-shorthand.js'
+import { csharpUnnecessaryVerbatimStringVisitor } from './unnecessary-verbatim-string.js'
+import { csharpRedundantBaseConstructorCallVisitor } from './redundant-base-constructor-call.js'
+import { csharpRedundantBaseTypeVisitor } from './redundant-base-type.js'
+import { csharpObsoleteWithoutMessageVisitor } from './obsolete-without-message.js'
+import { csharpNotImplementedExceptionVisitor } from './not-implemented-exception.js'
+import { csharpUnnecessaryRecordBracesVisitor } from './unnecessary-record-braces.js'
+import { csharpEnumUnderlyingTypeNotInt32Visitor } from './enum-underlying-type-not-int32.js'
+import { csharpRedundantDefaultSwitchSectionVisitor } from './redundant-default-switch-section.js'
+import { csharpUseNullCoalescingAssignmentVisitor } from './use-null-coalescing-assignment.js'
+import { csharpUseNullCoalescingVisitor } from './use-null-coalescing.js'
+import { csharpUnsealedAttributeVisitor } from './unsealed-attribute.js'
+import { csharpStaticHolderTypeHasConstructorVisitor } from './static-holder-type-has-constructor.js'
+import { csharpUseStringConcatOverJoinVisitor } from './use-string-concat-over-join.js'
+import { csharpPreferTupleSyntaxVisitor } from './prefer-tuple-syntax.js'
+import { csharpPreferLambdaOverDelegateVisitor } from './prefer-lambda-over-delegate.js'
+import { csharpUseEventArgsEmptyVisitor } from './use-eventargs-empty.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -321,4 +339,22 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEnumReservedMemberNameVisitor,
   csharpExceptionNamedTypeNotExceptionVisitor,
   csharpExceptionTypeNotPublicVisitor,
+  csharpUnnecessaryUnaryPlusVisitor,
+  csharpNullableShorthandVisitor,
+  csharpUnnecessaryVerbatimStringVisitor,
+  csharpRedundantBaseConstructorCallVisitor,
+  csharpRedundantBaseTypeVisitor,
+  csharpObsoleteWithoutMessageVisitor,
+  csharpNotImplementedExceptionVisitor,
+  csharpUnnecessaryRecordBracesVisitor,
+  csharpEnumUnderlyingTypeNotInt32Visitor,
+  csharpRedundantDefaultSwitchSectionVisitor,
+  csharpUseNullCoalescingAssignmentVisitor,
+  csharpUseNullCoalescingVisitor,
+  csharpUnsealedAttributeVisitor,
+  csharpStaticHolderTypeHasConstructorVisitor,
+  csharpUseStringConcatOverJoinVisitor,
+  csharpPreferTupleSyntaxVisitor,
+  csharpPreferLambdaOverDelegateVisitor,
+  csharpUseEventArgsEmptyVisitor,
 ]

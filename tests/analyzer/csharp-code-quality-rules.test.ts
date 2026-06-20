@@ -6407,3 +6407,537 @@ public class TenantNotFoundException : Exception
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// unnecessary-unary-plus
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-unary-plus (C#)', () => {
+  it('flags a unary plus', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int Adjust(int x) => +x;
+}
+`, 'unnecessary-unary-plus')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a unary minus or binary plus', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int A(int x) => -x;
+    public int B(int x, int y) => x + y;
+}
+`, 'unnecessary-unary-plus')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// nullable-shorthand
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/nullable-shorthand (C#)', () => {
+  it('flags Nullable<T> long form', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public Nullable<int> Count { get; set; }
+}
+`, 'nullable-shorthand')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag the T? shorthand or other generics', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public int? Count { get; set; }
+    public List<int> Items { get; set; }
+}
+`, 'nullable-shorthand')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-verbatim-string
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-verbatim-string (C#)', () => {
+  it('flags a verbatim string with no escapes', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Label() => @"plain text";
+}
+`, 'unnecessary-verbatim-string')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a verbatim string with a backslash', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Path() => @"C:\\temp\\data";
+}
+`, 'unnecessary-verbatim-string')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-base-constructor-call
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-base-constructor-call (C#)', () => {
+  it('flags an empty : base() initializer', () => {
+    const found = matches(`namespace App;
+public class Derived : Widget
+{
+    public Derived() : base()
+    {
+    }
+}
+`, 'redundant-base-constructor-call')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag base(args) or this()', () => {
+    const found = matches(`namespace App;
+public class Derived : Widget
+{
+    public Derived(int id) : base(id)
+    {
+    }
+
+    public Derived() : this(0)
+    {
+    }
+}
+`, 'redundant-base-constructor-call')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-base-type
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-base-type (C#)', () => {
+  it('flags object in a base list', () => {
+    const found = matches(`namespace App;
+public class Widget : object
+{
+}
+`, 'redundant-base-type')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a real base type or interface', () => {
+    const found = matches(`namespace App;
+public class Widget : Control, IDisposable
+{
+    public void Dispose() { }
+}
+`, 'redundant-base-type')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// obsolete-without-message
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/obsolete-without-message (C#)', () => {
+  it('flags [Obsolete] with no message', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    [Obsolete]
+    public void Old() { }
+}
+`, 'obsolete-without-message')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag [Obsolete] with a message', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    [Obsolete("Use New instead.")]
+    public void Old() { }
+}
+`, 'obsolete-without-message')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// not-implemented-exception
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/not-implemented-exception (C#)', () => {
+  it('flags throw new NotImplementedException()', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Pending()
+    {
+        throw new NotImplementedException();
+    }
+}
+`, 'not-implemented-exception')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag other thrown exceptions', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Guard(string s)
+    {
+        throw new ArgumentNullException(nameof(s));
+    }
+}
+`, 'not-implemented-exception')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unnecessary-record-braces
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unnecessary-record-braces (C#)', () => {
+  it('flags a positional record with an empty body', () => {
+    const found = matches(`namespace App;
+public record Point(int X, int Y) { }
+`, 'unnecessary-record-braces')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a semicolon-terminated record or one with members', () => {
+    const found = matches(`namespace App;
+public record Point(int X, int Y);
+public record Vec(int X, int Y)
+{
+    public int Length => X + Y;
+}
+`, 'unnecessary-record-braces')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enum-underlying-type-not-int32
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/enum-underlying-type-not-int32 (C#)', () => {
+  it('flags a non-Int32 underlying type', () => {
+    const found = matches(`namespace App;
+public enum Mode : long
+{
+    Off,
+    On
+}
+`, 'enum-underlying-type-not-int32')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag the default or explicit Int32 storage', () => {
+    const found = matches(`namespace App;
+public enum Mode
+{
+    Off,
+    On
+}
+public enum Other : int
+{
+    A
+}
+`, 'enum-underlying-type-not-int32')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// redundant-default-switch-section
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-default-switch-section (C#)', () => {
+  it('flags a default section that only breaks', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M(int x)
+    {
+        switch (x)
+        {
+            case 1:
+                Handle();
+                break;
+            default:
+                break;
+        }
+    }
+}
+`, 'redundant-default-switch-section')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a default section that does work', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M(int x)
+    {
+        switch (x)
+        {
+            case 1:
+                Handle();
+                break;
+            default:
+                HandleOther();
+                break;
+        }
+    }
+}
+`, 'redundant-default-switch-section')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-null-coalescing-assignment
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-null-coalescing-assignment (C#)', () => {
+  it('flags if (x == null) x = y;', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M(string s)
+    {
+        if (s == null) s = "default";
+    }
+}
+`, 'use-null-coalescing-assignment')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a null check with an else or different target', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void M(string s, string t)
+    {
+        if (s == null) t = "default";
+        if (s == null) { Log(s); } else { Use(s); }
+    }
+}
+`, 'use-null-coalescing-assignment')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-null-coalescing
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-null-coalescing (C#)', () => {
+  it('flags a != null ? a : b', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Pick(string a, string b) => a != null ? a : b;
+}
+`, 'use-null-coalescing')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag an unrelated ternary', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Pick(string a, string b) => a != null ? b : a;
+    public int Sign(int x) => x > 0 ? 1 : -1;
+}
+`, 'use-null-coalescing')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// prefer-tuple-syntax
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-tuple-syntax (C#)', () => {
+  it('flags ValueTuple<...> usage', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public ValueTuple<int, string> Pair() => default;
+}
+`, 'prefer-tuple-syntax')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag tuple syntax or single-element ValueTuple', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public (int, string) Pair() => default;
+    public ValueTuple<int> One() => default;
+}
+`, 'prefer-tuple-syntax')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// unsealed-attribute
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unsealed-attribute (C#)', () => {
+  it('flags an unsealed attribute class', () => {
+    const found = matches(`namespace App;
+public class RouteTag : Attribute
+{
+}
+`, 'unsealed-attribute')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a sealed or abstract attribute', () => {
+    const found = matches(`namespace App;
+public sealed class RouteTag : Attribute
+{
+}
+public abstract class BaseTag : Attribute
+{
+}
+`, 'unsealed-attribute')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// prefer-lambda-over-delegate
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-lambda-over-delegate (C#)', () => {
+  it('flags a delegate anonymous method', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Wire()
+    {
+        Action<int> handler = delegate(int x) { Use(x); };
+    }
+}
+`, 'prefer-lambda-over-delegate')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a lambda', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public void Wire()
+    {
+        Action<int> handler = (int x) => Use(x);
+    }
+}
+`, 'prefer-lambda-over-delegate')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// static-holder-type-has-constructor
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/static-holder-type-has-constructor (C#)', () => {
+  it('flags a static-holder type with a public instance constructor', () => {
+    const found = matches(`namespace App;
+public class Constants
+{
+    public static readonly int Max = 100;
+    public static void Reset() { }
+
+    public Constants() { }
+}
+`, 'static-holder-type-has-constructor')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a type with instance members', () => {
+    const found = matches(`namespace App;
+public class Service
+{
+    public int Count;
+    public Service() { }
+    public void Run() { }
+}
+`, 'static-holder-type-has-constructor')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-string-concat-over-join
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-string-concat-over-join (C#)', () => {
+  it('flags string.Join with an empty separator', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Combine(string[] parts) => string.Join("", parts);
+}
+`, 'use-string-concat-over-join')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag Join with a real separator', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public string Combine(string[] parts) => string.Join(", ", parts);
+}
+`, 'use-string-concat-over-join')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// use-eventargs-empty
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/use-eventargs-empty (C#)', () => {
+  it('flags new EventArgs()', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public event EventHandler Done;
+    public void Raise() => Done?.Invoke(this, new EventArgs());
+}
+`, 'use-eventargs-empty')
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag EventArgs.Empty or a derived args type', () => {
+    const found = matches(`namespace App;
+public class C
+{
+    public event EventHandler Done;
+    public void Raise() => Done?.Invoke(this, EventArgs.Empty);
+    public object Make() => new OrderEventArgs(42);
+}
+`, 'use-eventargs-empty')
+    expect(found).toHaveLength(0)
+  })
+})

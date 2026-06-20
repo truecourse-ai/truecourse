@@ -2809,3 +2809,709 @@ public class Ad
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// security/deterministic/account-shared-access-signature (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/account-shared-access-signature (C#)', () => {
+  it('detects an account SAS minted from a storage account', () => {
+    const found = matches(`using Microsoft.Azure.Storage;
+
+namespace App.Storage;
+
+public class TokenIssuer
+{
+    public string Issue(CloudStorageAccount storageAccount, SharedAccessAccountPolicy policy)
+        => storageAccount.GetSharedAccessSignature(policy);
+}
+`, 'account-shared-access-signature')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a container/blob service SAS', () => {
+    const found = matches(`using Microsoft.Azure.Storage.Blob;
+
+namespace App.Storage;
+
+public class TokenIssuer
+{
+    public string Issue(CloudBlockBlob blob, SharedAccessBlobPolicy policy)
+        => blob.GetSharedAccessSignature(policy);
+}
+`, 'account-shared-access-signature')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/catch-corrupted-state-exception (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/catch-corrupted-state-exception (C#)', () => {
+  it('detects [HandleProcessCorruptedStateExceptions] on a method', () => {
+    const found = matches(`using System;
+using System.Runtime.ExceptionServices;
+
+namespace App.Interop;
+
+public class NativeBridge
+{
+    [HandleProcessCorruptedStateExceptions]
+    public void Invoke()
+    {
+        try { } catch (Exception) { }
+    }
+}
+`, 'catch-corrupted-state-exception')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag an ordinary try/catch', () => {
+    const found = matches(`using System;
+
+namespace App.Interop;
+
+public class NativeBridge
+{
+    public void Invoke()
+    {
+        try { } catch (Exception) { }
+    }
+}
+`, 'catch-corrupted-state-exception')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/command-resolved-from-path (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/command-resolved-from-path (C#)', () => {
+  it('detects launching a bare executable name', () => {
+    const f1 = matches(`using System.Diagnostics;
+
+namespace App.Ops;
+
+public class Runner
+{
+    public void Run() => Process.Start("regsvr32.exe");
+}
+`, 'command-resolved-from-path')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using System.Diagnostics;
+
+namespace App.Ops;
+
+public class Runner
+{
+    public void Configure(ProcessStartInfo info)
+    {
+        info.FileName = "tool.exe";
+    }
+}
+`, 'command-resolved-from-path')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag an absolute path', () => {
+    const found = matches(`using System.Diagnostics;
+
+namespace App.Ops;
+
+public class Runner
+{
+    public void Run() => Process.Start(@"C:\\Windows\\System32\\regsvr32.exe");
+}
+`, 'command-resolved-from-path')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/conflicting-transparency-annotations (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/conflicting-transparency-annotations (C#)', () => {
+  it('detects SecurityCritical and SecuritySafeCritical on one method', () => {
+    const found = matches(`using System.Security;
+
+namespace App.Trust;
+
+public class Worker
+{
+    [SecurityCritical]
+    [SecuritySafeCritical]
+    public void Run() { }
+}
+`, 'conflicting-transparency-annotations')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a single transparency attribute', () => {
+    const found = matches(`using System.Security;
+
+namespace App.Trust;
+
+public class Worker
+{
+    [SecurityCritical]
+    public void Run() { }
+}
+`, 'conflicting-transparency-annotations')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/createencryptor-non-default-iv (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/createencryptor-non-default-iv (C#)', () => {
+  it('detects CreateEncryptor called with an explicit IV', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Sealer
+{
+    public ICryptoTransform Make(Aes aes, byte[] key, byte[] iv)
+        => aes.CreateEncryptor(key, iv);
+}
+`, 'createencryptor-non-default-iv')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag the parameterless CreateEncryptor', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Crypto;
+
+public class Sealer
+{
+    public ICryptoTransform Make(Aes aes)
+        => aes.CreateEncryptor();
+}
+`, 'createencryptor-non-default-iv')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/dataset-readxml-untrusted (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/dataset-readxml-untrusted (C#)', () => {
+  it('detects DataSet.ReadXml', () => {
+    const found = matches(`using System.Data;
+using System.IO;
+
+namespace App.Reports;
+
+public class Loader
+{
+    public DataSet Load(string xml)
+    {
+        var dataSet = new DataSet();
+        dataSet.ReadXml(new StringReader(xml));
+        return dataSet;
+    }
+}
+`, 'dataset-readxml-untrusted')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag WriteXml', () => {
+    const found = matches(`using System.Data;
+using System.IO;
+
+namespace App.Reports;
+
+public class Loader
+{
+    public void Save(DataSet dataSet, TextWriter writer) => dataSet.WriteXml(writer);
+}
+`, 'dataset-readxml-untrusted')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/datatable-readxml-untrusted (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/datatable-readxml-untrusted (C#)', () => {
+  it('detects DataTable.ReadXml', () => {
+    const found = matches(`using System.Data;
+using System.IO;
+
+namespace App.Reports;
+
+public class Loader
+{
+    public DataTable Load(string xml)
+    {
+        var dataTable = new DataTable();
+        dataTable.ReadXml(new StringReader(xml));
+        return dataTable;
+    }
+}
+`, 'datatable-readxml-untrusted')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a plain List.Add', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Reports;
+
+public class Loader
+{
+    public void Add(List<string> table, string row) => table.Add(row);
+}
+`, 'datatable-readxml-untrusted')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/hardcoded-certificate (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/hardcoded-certificate (C#)', () => {
+  it('detects a certificate built from a byte-array literal', () => {
+    const found = matches(`using System.Security.Cryptography.X509Certificates;
+
+namespace App.Certs;
+
+public class Loader
+{
+    public X509Certificate2 Get()
+        => new X509Certificate2(new byte[] { 0x30, 0x82, 0x01, 0x0A });
+}
+`, 'hardcoded-certificate')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag loading from a file path', () => {
+    const found = matches(`using System.Security.Cryptography.X509Certificates;
+
+namespace App.Certs;
+
+public class Loader
+{
+    public X509Certificate2 Get(string path) => new X509Certificate2(path);
+}
+`, 'hardcoded-certificate')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/permissive-content-security-policy (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/permissive-content-security-policy (C#)', () => {
+  it('detects unsafe-inline and wildcard CSP values', () => {
+    const f1 = matches(`using Microsoft.AspNetCore.Http;
+
+namespace App.Middleware;
+
+public class SecurityHeaders
+{
+    public void Apply(HttpResponse response)
+    {
+        response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'unsafe-inline'";
+    }
+}
+`, 'permissive-content-security-policy')
+    expect(f1.length).toBeGreaterThanOrEqual(1)
+
+    const f2 = matches(`using Microsoft.AspNetCore.Http;
+
+namespace App.Middleware;
+
+public class SecurityHeaders
+{
+    public void Apply(HttpResponse response)
+    {
+        response.Headers.Add("Content-Security-Policy", "default-src *");
+    }
+}
+`, 'permissive-content-security-policy')
+    expect(f2.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a restrictive policy', () => {
+    const found = matches(`using Microsoft.AspNetCore.Http;
+
+namespace App.Middleware;
+
+public class SecurityHeaders
+{
+    public void Apply(HttpResponse response)
+    {
+        response.Headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'";
+    }
+}
+`, 'permissive-content-security-policy')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/insecure-xslt-script (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/insecure-xslt-script (C#)', () => {
+  it('detects XsltSettings with script enabled', () => {
+    const found = matches(`using System.Xml.Xsl;
+
+namespace App.Xml;
+
+public class TransformFactory
+{
+    public XsltSettings Build()
+        => new XsltSettings(enableDocumentFunction: false, enableScript: true);
+}
+`, 'insecure-xslt-script')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag XsltSettings.Default', () => {
+    const found = matches(`using System.Xml.Xsl;
+
+namespace App.Xml;
+
+public class TransformFactory
+{
+    public XsltSettings Build() => XsltSettings.Default;
+}
+`, 'insecure-xslt-script')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/kdf-low-iteration-count (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/kdf-low-iteration-count (C#)', () => {
+  it('detects Rfc2898DeriveBytes with too few iterations', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Auth;
+
+public class Hasher
+{
+    public byte[] Derive(byte[] password, byte[] salt)
+    {
+        using var kdf = new Rfc2898DeriveBytes(password, salt, 5000, HashAlgorithmName.SHA256);
+        return kdf.GetBytes(32);
+    }
+}
+`, 'kdf-low-iteration-count')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a strong iteration count', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Auth;
+
+public class Hasher
+{
+    public byte[] Derive(byte[] password, byte[] salt)
+    {
+        using var kdf = new Rfc2898DeriveBytes(password, salt, 210000, HashAlgorithmName.SHA256);
+        return kdf.GetBytes(32);
+    }
+}
+`, 'kdf-low-iteration-count')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/password-hash-unpredictable-salt (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/password-hash-unpredictable-salt (C#)', () => {
+  it('detects a constant salt passed to Rfc2898DeriveBytes', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Auth;
+
+public class Hasher
+{
+    public byte[] Derive(string password)
+    {
+        using var kdf = new Rfc2898DeriveBytes(password, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, 210000);
+        return kdf.GetBytes(32);
+    }
+}
+`, 'password-hash-unpredictable-salt')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a random per-password salt', () => {
+    const found = matches(`using System.Security.Cryptography;
+
+namespace App.Auth;
+
+public class Hasher
+{
+    public byte[] Derive(string password)
+    {
+        var salt = RandomNumberGenerator.GetBytes(16);
+        using var kdf = new Rfc2898DeriveBytes(password, salt, 210000);
+        return kdf.GetBytes(32);
+    }
+}
+`, 'password-hash-unpredictable-salt')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/pinvoke-no-dllimportsearchpath (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/pinvoke-no-dllimportsearchpath (C#)', () => {
+  it('detects a DllImport without DefaultDllImportSearchPaths', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("metrics.dll")]
+    internal static extern int Read(int slot);
+}
+`, 'pinvoke-no-dllimportsearchpath')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a DllImport that constrains the search path', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("metrics.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static extern int Read(int slot);
+}
+`, 'pinvoke-no-dllimportsearchpath')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/pinvoke-string-marshalling-unspecified (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/pinvoke-string-marshalling-unspecified (C#)', () => {
+  it('detects a string parameter with no CharSet or MarshalAs', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("legacy.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static extern int Lookup(string key, out int handle);
+}
+`, 'pinvoke-string-marshalling-unspecified')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag when CharSet is specified', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("legacy.dll", CharSet = CharSet.Unicode)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static extern int Lookup(string key, out int handle);
+}
+`, 'pinvoke-string-marshalling-unspecified')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a non-string signature', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("legacy.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static extern int Add(int a, int b);
+}
+`, 'pinvoke-string-marshalling-unspecified')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/request-validation-disabled (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/request-validation-disabled (C#)', () => {
+  it('detects [ValidateInput(false)] on an action', () => {
+    const found = matches(`using Microsoft.AspNetCore.Mvc;
+
+namespace App.Controllers;
+
+public class FormsController : Controller
+{
+    [ValidateInput(false)]
+    public IActionResult Submit(string body) => Ok(body);
+}
+`, 'request-validation-disabled')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag [ValidateInput(true)]', () => {
+    const found = matches(`using Microsoft.AspNetCore.Mvc;
+
+namespace App.Controllers;
+
+public class FormsController : Controller
+{
+    [ValidateInput(true)]
+    public IActionResult Submit(string body) => Ok(body);
+}
+`, 'request-validation-disabled')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/token-validation-disabled (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/token-validation-disabled (C#)', () => {
+  it('detects ValidateIssuer = false in an initializer', () => {
+    const found = matches(`using Microsoft.IdentityModel.Tokens;
+
+namespace App.Auth;
+
+public class TokenSetup
+{
+    public TokenValidationParameters Build()
+        => new TokenValidationParameters { ValidateIssuer = false, ValidateAudience = true };
+}
+`, 'token-validation-disabled')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('detects ValidateLifetime assigned false', () => {
+    const found = matches(`using Microsoft.IdentityModel.Tokens;
+
+namespace App.Auth;
+
+public class TokenSetup
+{
+    public void Configure(TokenValidationParameters p)
+    {
+        p.ValidateLifetime = false;
+    }
+}
+`, 'token-validation-disabled')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag all checks left enabled', () => {
+    const found = matches(`using Microsoft.IdentityModel.Tokens;
+
+namespace App.Auth;
+
+public class TokenSetup
+{
+    public TokenValidationParameters Build()
+        => new TokenValidationParameters { ValidateIssuer = true, ValidateAudience = true };
+}
+`, 'token-validation-disabled')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/unsafe-dllimportsearchpath (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/unsafe-dllimportsearchpath (C#)', () => {
+  it('detects an unsafe DllImportSearchPath value', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("plugin.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.LegacyBehavior)]
+    internal static extern int Load(int id);
+}
+`, 'unsafe-dllimportsearchpath')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag System32', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("plugin.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static extern int Load(int id);
+}
+`, 'unsafe-dllimportsearchpath')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// security/deterministic/xmlschema-add-by-url (wave 3)
+// ---------------------------------------------------------------------------
+
+describe('security/deterministic/xmlschema-add-by-url (C#)', () => {
+  it('detects XmlSchemaSet.Add with a URL', () => {
+    const found = matches(`using System.Xml.Schema;
+
+namespace App.Xml;
+
+public class SchemaLoader
+{
+    public void Register(XmlSchemaSet schemas)
+        => schemas.Add("urn:orders", "https://schemas.example.com/orders.xsd");
+}
+`, 'xmlschema-add-by-url')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Add with an in-memory reader', () => {
+    const found = matches(`using System.Xml;
+using System.Xml.Schema;
+
+namespace App.Xml;
+
+public class SchemaLoader
+{
+    public void Register(XmlSchemaSet schemas, XmlReader reader)
+        => schemas.Add("urn:orders", reader);
+}
+`, 'xmlschema-add-by-url')
+    expect(found).toHaveLength(0)
+  })
+})
