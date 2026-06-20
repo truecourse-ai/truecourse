@@ -44,6 +44,7 @@ export function extractPyEnumsFromFile(
   out.push(...synthesizeInstanceRegistryEnum(tree.rootNode, filePath, source));
   out.push(...synthesizeDiscriminatedUnionEnum(tree.rootNode, filePath, source));
   out.push(...synthesizeConstantClusterEnums(tree.rootNode, filePath, source, stringTable));
+  out.push(...synthesizeSelectorUnionEnum(tree.rootNode, filePath, source));
   return out;
 }
 
@@ -327,6 +328,163 @@ function commonPrefix(a: string, b: string): string {
   let i = 0;
   while (i < len && a.charCodeAt(i) === b.charCodeAt(i)) i++;
   return a.slice(0, i);
+}
+
+// ---------------------------------------------------------------------------
+// Config-schema Selector union → enum
+//
+// A closed, mutually-exclusive set of options is commonly modeled in a config
+// DSL as a `Selector({...})` whose dict KEYS are the allowed alternatives —
+// "exactly one of these" — which is precisely an enumeration:
+//
+//   def _base_source_schema():
+//       return {"local_file": ..., "s3_bucket": ..., "http_feed": ...}
+//
+//   IMPORT_SCHEMA = {
+//       "source": Field([Selector(merge_dicts(_base_source_schema(),
+//                                             {"database_table": {...}}))]),
+//   }
+//
+// The "enum" is the set of Selector keys (`local_file`, `s3_bucket`,
+// `http_feed`, `database_table`). The schema dict is often assembled with a
+// `merge_dicts(...)`-style helper over a dict-returning function plus inline
+// literals, so we resolve those statically (same-file functions whose body
+// returns a dict literal, and merge/union calls) to recover the full key set.
+// Named after the nearest enclosing schema key or assignment so the comparator
+// binds it (by value-set, like the other synthesized shapes) to a spec enum
+// such as `WorkspaceLoadMethod`. `extra-value` is suppressed against this
+// heuristic shape (a Selector may carry internal keys a docs enum omits).
+// ---------------------------------------------------------------------------
+
+function synthesizeSelectorUnionEnum(
+  root: SyntaxNode,
+  filePath: string,
+  source: string,
+): ExtractedEnum[] {
+  // Same-file functions whose body is `return {<string-key>: ...}` → their keys.
+  // These are the building blocks a schema assembles via merge helpers.
+  const fnReturnKeys = collectDictReturningFunctions(root, source);
+  const out: ExtractedEnum[] = [];
+  walk(root, (node) => {
+    if (node.type !== 'call') return true;
+    const fn = node.childForFieldName('function');
+    if (!fn) return true;
+    const fnName = source.slice(fn.startIndex, fn.endIndex);
+    if (!/(^|\.)Selector$/.test(fnName)) return true;
+    const arg = firstCallArgument(node);
+    if (!arg) return true;
+    const keys = collectSchemaDictKeys(arg, source, fnReturnKeys, 0);
+    if (keys.length < 2) return true;
+    const name = enclosingSchemaName(node, source) ?? fnName;
+    out.push(mkEnum(name, keys, 'py-selector-union', node, filePath));
+    return true;
+  });
+  return out;
+}
+
+/** Map of same-file `def f(): return {<string>: ...}` functions → their dict
+ *  keys. Only a direct dict-literal return is resolved (no control flow). */
+function collectDictReturningFunctions(
+  root: SyntaxNode,
+  source: string,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  walk(root, (node) => {
+    if (node.type !== 'function_definition') return true;
+    const name = textOfField(node, 'name', source);
+    const body = node.childForFieldName('body');
+    if (!name || !body) return true;
+    for (let i = 0; i < body.namedChildCount; i++) {
+      const stmt = body.namedChild(i);
+      if (stmt?.type !== 'return_statement') continue;
+      let val = stmt.namedChild(0);
+      if (val?.type === 'expression_list') val = val.namedChild(0);
+      if (val?.type === 'dictionary') {
+        const keys = dictStringKeys(val, source);
+        if (keys.length > 0) out.set(name, keys);
+      }
+    }
+    return true;
+  });
+  return out;
+}
+
+/** The first positional argument of a call (unwrapping a `keyword_argument`
+ *  value if the schema is passed by keyword). */
+function firstCallArgument(callNode: SyntaxNode): SyntaxNode | null {
+  const args = callNode.childForFieldName('arguments');
+  const first = args?.namedChild(0);
+  if (!first) return null;
+  if (first.type === 'keyword_argument') return first.childForFieldName('value');
+  return first;
+}
+
+/** Recover the closed key set of a Selector schema argument: a dict literal's
+ *  keys, a same-file dict-returning function call, or a `merge_dicts(...)`-style
+ *  union over several such sources. Bounded recursion guards malformed input. */
+function collectSchemaDictKeys(
+  node: SyntaxNode,
+  source: string,
+  fnReturnKeys: Map<string, string[]>,
+  depth: number,
+): string[] {
+  if (depth > 6) return [];
+  if (node.type === 'dictionary') return dictStringKeys(node, source);
+  if (node.type === 'call') {
+    const fn = node.childForFieldName('function');
+    if (!fn) return [];
+    const fnName = source.slice(fn.startIndex, fn.endIndex);
+    // merge_dicts(a, b, …) / merge(a, b) — union the keys of every argument.
+    if (/(^|\.)(?:merge_dicts|merge)$/.test(fnName)) {
+      const args = node.childForFieldName('arguments');
+      const acc: string[] = [];
+      for (let i = 0; args && i < args.namedChildCount; i++) {
+        const a = args.namedChild(i);
+        if (a) acc.push(...collectSchemaDictKeys(a, source, fnReturnKeys, depth + 1));
+      }
+      return acc;
+    }
+    // A bare same-file helper call returning a dict literal.
+    const bare = fnName.replace(/^.*\./, '');
+    return fnReturnKeys.get(fnName) ?? fnReturnKeys.get(bare) ?? [];
+  }
+  return [];
+}
+
+/** The string keys of a dict literal (`{"a": …, "b": …}`). Non-string keys are
+ *  skipped — only a stable, name-like key set is an enumeration. */
+function dictStringKeys(dictNode: SyntaxNode, source: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < dictNode.namedChildCount; i++) {
+    const pair = dictNode.namedChild(i);
+    if (pair?.type !== 'pair') continue;
+    const key = pair.childForFieldName('key');
+    if (key?.type !== 'string') continue;
+    const v = stringValue(key, source);
+    if (v !== null) out.push(v);
+  }
+  return [...new Set(out)];
+}
+
+/** Name a Selector union after the nearest enclosing schema key (`"source":
+ *  Selector(...)`) or assignment (`X = Selector(...)`), walking up the tree. */
+function enclosingSchemaName(callNode: SyntaxNode, source: string): string | null {
+  let n: SyntaxNode | null = callNode.parent;
+  for (let hops = 0; n && hops < 8; hops++) {
+    if (n.type === 'pair') {
+      const key = n.childForFieldName('key');
+      if (key?.type === 'string') {
+        const v = stringValue(key, source);
+        if (v !== null) return v;
+      }
+    }
+    if (n.type === 'assignment') {
+      const left = n.childForFieldName('left');
+      if (left?.type === 'identifier') return source.slice(left.startIndex, left.endIndex);
+    }
+    n = n.parent;
+  }
+  return null;
 }
 
 function synthesizeInstanceRegistryEnum(

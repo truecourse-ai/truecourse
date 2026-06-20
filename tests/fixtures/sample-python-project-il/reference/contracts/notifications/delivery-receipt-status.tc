@@ -1,0 +1,4 @@
+enum DeliveryReceiptStatus {
+  origin "reference/specs/modules/notifications/receipts.md" "Delivery receipt status" 1..1
+  values [queued, sent, bounced]
+}

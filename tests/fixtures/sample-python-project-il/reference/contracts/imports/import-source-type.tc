@@ -1,0 +1,4 @@
+enum ImportSourceType {
+  origin "reference/specs/modules/imports/sources.md" "Import source types" 1..1
+  values [local_file, s3_object, http_feed]
+}
