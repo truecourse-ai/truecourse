@@ -4,7 +4,6 @@ import { makeViolation } from '../../../types.js'
 /**
  * Detects ML reduction operations (sum, mean, max, min, etc.) called without
  * specifying axis/dim — may reduce entire tensor unexpectedly.
- * S6929.
  */
 
 // Methods on numpy/torch/tensorflow arrays that perform reductions

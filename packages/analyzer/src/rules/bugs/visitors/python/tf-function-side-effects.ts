@@ -3,7 +3,7 @@ import { makeViolation } from '../../../types.js'
 
 /**
  * Detects Python side effects inside @tf.function decorated functions.
- * S6928: Side effects (print, list.append, etc.) only execute during tracing, not at runtime.
+ * Side effects (print, list.append, etc.) only execute during tracing, not at runtime.
  */
 
 const SIDE_EFFECT_CALLS = new Set([

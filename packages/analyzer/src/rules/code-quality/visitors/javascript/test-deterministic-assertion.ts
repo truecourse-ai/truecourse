@@ -2,7 +2,7 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 /**
- * sonarjs/S6092 (chai-determinate-assertion)
+ * chai-determinate-assertion
  * Detects Chai assertions that are non-determinate — have more than one way to succeed.
  *
  * Specifically:

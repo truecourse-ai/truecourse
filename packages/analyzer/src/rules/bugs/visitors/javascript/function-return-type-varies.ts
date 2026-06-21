@@ -5,7 +5,6 @@ import { TS_LANGUAGES } from './_helpers.js'
 
 /**
  * Detect: Function returns different types from different paths.
- * Corresponds to sonarjs S3800 (function-return-type).
  * Uses type query to check the return type of the function.
  */
 

@@ -25,7 +25,6 @@ function isGetHashCodeOverride(member: SyntaxNode): boolean {
  * `override Equals(object)` without `override GetHashCode()` — instances
  * misbehave in Dictionary/HashSet (equal objects landing in different
  * buckets). The compiler warns (CS0659) but warnings don't gate review;
- * Sonar ships the same check as S1206.
  */
 export const csharpEqWithoutHashVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/eq-without-hash',

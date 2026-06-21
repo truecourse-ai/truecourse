@@ -3,7 +3,7 @@ import { makeViolation } from '../../../types.js'
 
 /**
  * Detects invalid NumPy busdaycalendar weekmask values.
- * S6900: The weekmask argument must be a 7-character string of '0's and '1's,
+ * The weekmask argument must be a 7-character string of '0's and '1's,
  * or one of the named day abbreviations.
  */
 

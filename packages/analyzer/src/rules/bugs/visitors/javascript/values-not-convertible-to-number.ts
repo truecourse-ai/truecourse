@@ -6,7 +6,6 @@ const RELATIONAL_OPS = new Set(['<', '>', '<=', '>='])
 
 /**
  * Detect: Values not convertible to numbers used in numeric comparisons.
- * Corresponds to sonarjs S3758 (values-not-convertible-to-numbers).
  */
 export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/values-not-convertible-to-number',

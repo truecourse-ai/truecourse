@@ -2,7 +2,7 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 /**
- * sonarjs/S2970 (no-incomplete-assertions)
+ * no-incomplete-assertions
  * Detects incomplete Chai/Jest/Jasmine assertions that don't actually assert anything:
  * - expect(x).to.be (missing final assertion call)
  * - expect(x).toBe (missing invocation)

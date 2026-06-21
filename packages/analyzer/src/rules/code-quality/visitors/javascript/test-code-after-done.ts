@@ -4,7 +4,7 @@ import { makeViolation } from '../../../types.js'
 type SyntaxNode = import('web-tree-sitter').Node
 
 /**
- * sonarjs/S6079 (no-code-after-done)
+ * no-code-after-done
  * Detects code executed after done() callback is called in a test.
  */
 function findDoneCallIndex(stmts: SyntaxNode[]): number {
