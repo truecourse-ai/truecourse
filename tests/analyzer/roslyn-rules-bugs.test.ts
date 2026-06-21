@@ -1233,4 +1233,101 @@ class C {
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- non-static-log-template -------------------------------------------
+  describe('non-static-log-template', () => {
+    const K = 'bugs/deterministic/non-static-log-template'
+    it('flags an interpolated message template', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int userId) { log.LogInformation($"User {userId} signed in"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a concatenated message template', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, string name) { log.LogWarning("hello " + name); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an interpolated template on the generic ILogger<T>', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger<C> log, int id) { log.LogError($"failed {id}"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a constant template with named placeholders', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int userId) { log.LogInformation("User {UserId} signed in", userId); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a literal-concatenation that folds to a constant', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log) { log.LogInformation("part one " + "part two"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag interpolation passed to a non-logger method named Log', async () => {
+      const src = `
+class Other { public void LogInformation(string m) {} }
+class C { void M(Other o, int x) { o.LogInformation($"x={x}"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- numeric-log-placeholder -------------------------------------------
+  describe('numeric-log-placeholder', () => {
+    const K = 'bugs/deterministic/numeric-log-placeholder'
+    it('flags a numeric placeholder in a log template', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int id) { log.LogInformation("user {0} signed in", id); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a named placeholder', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int id) { log.LogInformation("user {UserId} signed in", id); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a numeric placeholder in a non-logger call', async () => {
+      const src = `class C { string M(int id) => string.Format("user {0}", id); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an escaped brace pair', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log) { log.LogInformation("literal {{0}} brace"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- invalid-log-template-braces ---------------------------------------
+  describe('invalid-log-template-braces', () => {
+    const K = 'bugs/deterministic/invalid-log-template-braces'
+    it('flags an unterminated placeholder brace', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int id) { log.LogInformation("user {UserId signed in", id); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a lone closing brace', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log) { log.LogInformation("orphan } brace"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a balanced template', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log, int id) { log.LogInformation("user {UserId} signed in", id); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag escaped braces', async () => {
+      const src = `
+using Microsoft.Extensions.Logging;
+class C { void M(ILogger log) { log.LogInformation("literal {{ and }} braces"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

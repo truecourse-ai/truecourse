@@ -74,4 +74,108 @@ describe.skipIf(!hostBuilt)('Roslyn host — security rules (semantic C#)', () =
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- json-net-typenamehandling -----------------------------------------
+  describe('json-net-typenamehandling', () => {
+    const K = 'security/deterministic/json-net-typenamehandling'
+
+    it('flags TypeNameHandling.All on JsonSerializerSettings', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { void M() { var s = new JsonSerializerSettings(); s.TypeNameHandling = TypeNameHandling.All; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags TypeNameHandling.Objects set in an object initializer', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { JsonSerializerSettings S = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.Objects }; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags TypeNameHandling.Auto', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { void M(JsonSerializerSettings s) { s.TypeNameHandling = TypeNameHandling.Auto; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag TypeNameHandling.None', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { void M(JsonSerializerSettings s) { s.TypeNameHandling = TypeNameHandling.None; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag when a SerializationBinder mitigates it', async () => {
+      const src = `
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+class C {
+  JsonSerializerSettings S = new JsonSerializerSettings {
+    TypeNameHandling = TypeNameHandling.Objects,
+    SerializationBinder = null,
+  };
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a same-named property on an unrelated type', async () => {
+      const src = `
+enum TypeNameHandling { None, All }
+class Settings { public TypeNameHandling TypeNameHandling { get; set; } }
+class C { void M(Settings s) { s.TypeNameHandling = TypeNameHandling.All; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- insecure-jsonserializersettings -----------------------------------
+  describe('insecure-jsonserializersettings', () => {
+    const K = 'security/deterministic/insecure-jsonserializersettings'
+
+    it('flags settings with TypeNameHandling.All passed inline to DeserializeObject', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { object M(string json) => JsonConvert.DeserializeObject<object>(json, new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.All }); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags settings built in a separate statement then passed to DeserializeObject', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { object M(string json) {
+  var settings = new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.Objects };
+  return JsonConvert.DeserializeObject<object>(json, settings);
+} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags settings passed to JsonSerializer.Create', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { JsonSerializer M() => JsonSerializer.Create(new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.Auto }); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag settings with TypeNameHandling.None', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { object M(string json) => JsonConvert.DeserializeObject<object>(json, new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.None }); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a DeserializeObject without settings', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { object M(string json) => JsonConvert.DeserializeObject<object>(json); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag when a SerializationBinder mitigates inline settings', async () => {
+      const src = `
+using Newtonsoft.Json;
+class C { object M(string json) => JsonConvert.DeserializeObject<object>(json, new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.Objects, SerializationBinder = null }); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

@@ -960,6 +960,42 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     engine: 'roslyn-host',
   },
   {
+    key: 'bugs/deterministic/non-static-log-template',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Non-constant log message template',
+    description:
+      'The message-template argument to an ILogger logging call is built with string concatenation or interpolation instead of a constant template, defeating structured logging and forcing the format cost even when the level is disabled.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'bugs/deterministic/numeric-log-placeholder',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Numeric log message placeholder',
+    description:
+      'A structured-logging message template uses numeric placeholders ({0}, {1}) instead of named ones, so the captured properties get meaningless index names and the call reads like a misplaced String.Format.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'bugs/deterministic/invalid-log-template-braces',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Malformed log message template braces',
+    description:
+      'An ILogger message template has unbalanced braces (an unterminated { placeholder or a lone unescaped }), so the logging formatter throws FormatException or mis-renders the message at runtime.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
     key: 'bugs/deterministic/fallthrough-case',
     category: 'code',
     domain: 'bugs',

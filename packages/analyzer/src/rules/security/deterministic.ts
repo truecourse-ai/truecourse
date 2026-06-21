@@ -1359,4 +1359,28 @@ export const SECURITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
     engine: 'roslyn-host',
   },
+  {
+    key: 'security/deterministic/json-net-typenamehandling',
+    category: 'code',
+    domain: 'security',
+    name: 'Insecure Json.NET TypeNameHandling',
+    description:
+      "Newtonsoft.Json JsonSerializerSettings.TypeNameHandling is set to something other than None, letting a JSON payload choose the CLR types to instantiate during deserialization — a known RCE vector. A custom SerializationBinder set alongside is treated as a mitigation.",
+    enabled: true,
+    severity: 'critical',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'security/deterministic/insecure-jsonserializersettings',
+    category: 'code',
+    domain: 'security',
+    name: 'Insecure JsonSerializerSettings passed to a serializer',
+    description:
+      'A JsonSerializerSettings configured with an unsafe TypeNameHandling is passed to a Newtonsoft.Json entry point (JsonConvert.DeserializeObject / JsonSerializer.Create), the call where the insecure type resolution takes effect. Flags the use site even when the settings are configured in a separate statement.',
+    enabled: true,
+    severity: 'critical',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]
