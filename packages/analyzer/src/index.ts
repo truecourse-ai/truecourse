@@ -196,3 +196,11 @@ export async function analyzeRepository(rootPath: string): Promise<{
 
 // Config file checkers
 export { checkPyprojectToml } from './rules/bugs/pyproject-checker.js'
+
+export {
+  runRoslynHost,
+  resolveRoslynHostBinary,
+  RoslynHostUnavailableError,
+  type RoslynFile,
+  type RoslynHostViolation,
+} from './roslyn-host-client.js'
