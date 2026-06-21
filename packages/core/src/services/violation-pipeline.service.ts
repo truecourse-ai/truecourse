@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
+import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, runRoslynHost, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -429,6 +429,43 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         // Re-check after yielding — the SIGINT handler runs during the
         // event-loop tick we just gave it, so the flag may have flipped.
         if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+      }
+    }
+  }
+
+  // C# semantic rules run in the out-of-process Roslyn host (build-required).
+  // Batch: one host invocation over all C# files. Fail-hard — if there are C#
+  // files and host rules but the host is unavailable, runRoslynHost throws and
+  // the analysis errors out (no tree-sitter fallback, by design).
+  const enabledHostRules = enabledCodeRules.filter((r) => r.engine === 'roslyn-host');
+  if (enabledHostRules.length > 0) {
+    const csharpFiles: { path: string; text: string }[] = [];
+    for (const { filePath, resolve } of filesToScan) {
+      if (detectLanguage(filePath) !== 'csharp') continue;
+      const absPath = resolve ? path.resolve(repoPath, filePath) : (path.isAbsolute(filePath) ? filePath : path.join(repoPath, filePath));
+      const key = changedFileSet ? absPath : filePath;
+      const fc = fileContents.get(key);
+      if (fc) csharpFiles.push({ path: key, text: fc.content });
+    }
+    if (csharpFiles.length > 0) {
+      const ruleByKey = new Map(enabledHostRules.map((r) => [r.key, r]));
+      const hostViolations = await runRoslynHost(csharpFiles, enabledHostRules.map((r) => r.key));
+      for (const v of hostViolations) {
+        const rule = ruleByKey.get(v.ruleKey);
+        if (!rule) continue;
+        const snippet = (fileContents.get(v.path)?.content.split('\n')[v.line - 1] ?? '').trim();
+        allCodeViolations.push({
+          ruleKey: v.ruleKey,
+          filePath: v.path,
+          lineStart: v.line,
+          lineEnd: v.line,
+          columnStart: v.column,
+          columnEnd: v.column,
+          severity: rule.severity,
+          title: rule.name,
+          content: v.message,
+          snippet,
+        });
       }
     }
   }

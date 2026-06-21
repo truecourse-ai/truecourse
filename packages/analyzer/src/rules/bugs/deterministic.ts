@@ -241,6 +241,17 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'bugs/deterministic/referenceequals-on-value-type',
+    category: 'code',
+    domain: 'bugs',
+    name: 'ReferenceEquals on a value type',
+    description: 'object.ReferenceEquals on a value type is always false — the arguments are boxed into distinct objects.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
     key: 'bugs/deterministic/fallthrough-case',
     category: 'code',
     domain: 'bugs',

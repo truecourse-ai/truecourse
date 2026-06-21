@@ -102,6 +102,12 @@ export const AnalysisRuleSchema = z.object({
   type: RuleTypeSchema,
   contextRequirement: ContextRequirementSchema.optional(),
   /**
+   * Which engine implements this rule's detection. Omitted = the default
+   * tree-sitter visitor. `roslyn-host` rules need the C# semantic model and run
+   * in the out-of-process Roslyn host (tools/csharp-roslyn-host) instead.
+   */
+  engine: z.enum(['tree-sitter', 'roslyn-host']).optional(),
+  /**
    * Per-language support status. Populated by the analyzer's rule registry
    * (derived from visitor coverage plus curated dispositions) — every rule
    * carries an entry for every AnalysisLanguage.
