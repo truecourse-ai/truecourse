@@ -1347,4 +1347,16 @@ export const SECURITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'high',
     type: 'deterministic',
   },
+  {
+    key: 'security/deterministic/hardcoded-ip-address',
+    category: 'code',
+    domain: 'security',
+    name: 'Hardcoded IP address',
+    description:
+      'A string literal is a routable IPv4/IPv6 address, coupling the code to one environment and potentially leaking internal topology. Loopback, link-local, documentation and other non-routable ranges are excluded.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

@@ -23,12 +23,15 @@ describe.skipIf(!hostBuilt)('Roslyn host client (semantic C#)', () => {
   })
 
   it('does not flag ReferenceEquals on reference types', async () => {
-    const violations = await runRoslynHost([
-      {
-        path: 'Neg.cs',
-        text: 'class C { void M() { var a = new object(); var b = new object(); var x = object.ReferenceEquals(a, b); } }',
-      },
-    ])
+    const violations = await runRoslynHost(
+      [
+        {
+          path: 'Neg.cs',
+          text: 'class C { void M() { var a = new object(); var b = new object(); var x = object.ReferenceEquals(a, b); } }',
+        },
+      ],
+      ['bugs/deterministic/referenceequals-on-value-type'],
+    )
     expect(violations).toEqual([])
   })
 

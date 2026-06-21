@@ -568,4 +568,585 @@ class C { public List<int> Items { get; init; } }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- write-only-property -----------------------------------------------
+  describe('write-only-property', () => {
+    const K = 'code-quality/deterministic/write-only-property'
+    it('flags a property with only a setter', async () => {
+      const src = `
+class C { private int _x; public int X { set { _x = value; } } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a get/set property', async () => {
+      const src = `
+class C { public int X { get; set; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a get-only property', async () => {
+      const src = `
+class C { public int X { get; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an override forced to be write-only', async () => {
+      const src = `
+abstract class B { public abstract int X { set; } }
+class C : B { public override int X { set {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- local-shadows-field -----------------------------------------------
+  describe('local-shadows-field', () => {
+    const K = 'code-quality/deterministic/local-shadows-field'
+    it('flags a local that shadows a field', async () => {
+      const src = `
+class C {
+  private int count;
+  void M() { int count = 3; System.Console.WriteLine(count); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a parameter that shadows a property', async () => {
+      const src = `
+class C {
+  public int Total { get; set; }
+  void M(int Total) { System.Console.WriteLine(Total); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a local with a unique name', async () => {
+      const src = `
+class C {
+  private int count;
+  void M() { int n = 3; System.Console.WriteLine(n); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a local shadowing a static member', async () => {
+      const src = `
+class C {
+  private static int count;
+  void M() { int count = 3; System.Console.WriteLine(count); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- redundant-async-await ---------------------------------------------
+  describe('redundant-async-await', () => {
+    const K = 'code-quality/deterministic/redundant-async-await'
+    it('flags an async method that only returns an awaited task', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C {
+  Task<int> Inner() => Task.FromResult(1);
+  async Task<int> M() { return await Inner(); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an expression-bodied redundant await', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C {
+  Task<int> Inner() => Task.FromResult(1);
+  async Task<int> M() => await Inner();
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag await inside a try block', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C {
+  Task<int> Inner() => Task.FromResult(1);
+  async Task<int> M() { try { return await Inner(); } finally {} }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a method with statements before the await', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C {
+  Task<int> Inner() => Task.FromResult(1);
+  async Task<int> M() { var x = 1; return await Inner(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- use-argumentnullexception-throwifnull ------------------------------
+  describe('use-argumentnullexception-throwifnull', () => {
+    const K = 'code-quality/deterministic/use-argumentnullexception-throwifnull'
+    it('flags a manual == null guard throwing ArgumentNullException', async () => {
+      const src = `
+using System;
+class C {
+  void M(string s) { if (s == null) throw new ArgumentNullException(nameof(s)); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an is null guard', async () => {
+      const src = `
+using System;
+class C {
+  void M(object o) { if (o is null) throw new ArgumentNullException(nameof(o)); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a guard throwing a different exception', async () => {
+      const src = `
+using System;
+class C {
+  void M(string s) { if (s == null) throw new InvalidOperationException(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a non-null comparison', async () => {
+      const src = `
+using System;
+class C {
+  void M(int n) { if (n == 0) throw new ArgumentException(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- use-nameof-for-member ----------------------------------------------
+  describe('use-nameof-for-member', () => {
+    const K = 'code-quality/deterministic/use-nameof-for-member'
+    it('flags a literal param name matching a parameter', async () => {
+      const src = `
+using System;
+class C {
+  void M(string value) { throw new ArgumentNullException("value"); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag nameof usage', async () => {
+      const src = `
+using System;
+class C {
+  void M(string value) { throw new ArgumentNullException(nameof(value)); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a literal that matches no parameter', async () => {
+      const src = `
+using System;
+class C {
+  void M(string value) { throw new ArgumentNullException("other"); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- tuple-element-by-name ----------------------------------------------
+  describe('tuple-element-by-name', () => {
+    const K = 'code-quality/deterministic/tuple-element-by-name'
+    it('flags Item1 access when a name is declared', async () => {
+      const src = `
+class C {
+  (int Count, string Name) Get() => (1, "a");
+  void M() { var t = Get(); System.Console.WriteLine(t.Item1); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag access by the declared name', async () => {
+      const src = `
+class C {
+  (int Count, string Name) Get() => (1, "a");
+  void M() { var t = Get(); System.Console.WriteLine(t.Count); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag Item1 on an unnamed tuple', async () => {
+      const src = `
+class C {
+  (int, string) Get() => (1, "a");
+  void M() { var t = Get(); System.Console.WriteLine(t.Item1); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- return-value-never-used --------------------------------------------
+  describe('return-value-never-used', () => {
+    const K = 'code-quality/deterministic/return-value-never-used'
+    it('flags a private method whose result is always discarded', async () => {
+      const src = `
+class C {
+  private int Compute() { return 1; }
+  void M() { Compute(); Compute(); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when the result is used at a call site', async () => {
+      const src = `
+class C {
+  private int Compute() { return 1; }
+  void M() { int x = Compute(); System.Console.WriteLine(x); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a public method', async () => {
+      const src = `
+class C {
+  public int Compute() { return 1; }
+  void M() { Compute(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- static-field-initialize-inline -------------------------------------
+  describe('static-field-initialize-inline', () => {
+    const K = 'code-quality/deterministic/static-field-initialize-inline'
+    it('flags a static field assigned only in the static ctor', async () => {
+      const src = `
+class C {
+  private static int Value;
+  static C() { Value = 42; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a field with an inline initializer', async () => {
+      const src = `
+class C {
+  private static int Value = 42;
+  static C() { System.Console.WriteLine(Value); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a field assigned conditionally', async () => {
+      const src = `
+class C {
+  private static int Value;
+  static C() { if (true) { Value = 1; } }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- obsolete-without-explanation ---------------------------------------
+  describe('obsolete-without-explanation', () => {
+    const K = 'code-quality/deterministic/obsolete-without-explanation'
+    it('flags [Obsolete] with no message', async () => {
+      const src = `
+using System;
+class C { [Obsolete] public void Old() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags [Obsolete] with an empty message', async () => {
+      const src = `
+using System;
+class C { [Obsolete("")] public void Old() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag [Obsolete] with a message', async () => {
+      const src = `
+using System;
+class C { [Obsolete("Use New() instead.")] public void Old() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- non-testable-datetime-provider -------------------------------------
+  describe('non-testable-datetime-provider', () => {
+    const K = 'code-quality/deterministic/non-testable-datetime-provider'
+    it('flags DateTime.Now', async () => {
+      const src = `
+using System;
+class C { DateTime M() { return DateTime.Now; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags DateTime.UtcNow', async () => {
+      const src = `
+using System;
+class C { DateTime M() { return DateTime.UtcNow; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a parsed DateTime', async () => {
+      const src = `
+using System;
+class C { DateTime M(string s) { return DateTime.Parse(s); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- unused-this-parameter ----------------------------------------------
+  describe('unused-this-parameter', () => {
+    const K = 'code-quality/deterministic/unused-this-parameter'
+    it('flags an instance method that never uses instance state', async () => {
+      const src = `
+class C {
+  private int _x;
+  public int Add(int a, int b) { return a + b; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a method that reads a field', async () => {
+      const src = `
+class C {
+  private int _x;
+  public int Get() { return _x; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a method that uses this', async () => {
+      const src = `
+class C {
+  public C Self() { return this; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an override', async () => {
+      const src = `
+class B { public virtual int F() { return 0; } }
+class C : B { public override int F() { return 1; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- inner-member-shadows-outer -----------------------------------------
+  describe('inner-member-shadows-outer', () => {
+    const K = 'code-quality/deterministic/inner-member-shadows-outer'
+    it('flags a nested member shadowing an outer static field', async () => {
+      const src = `
+class Outer {
+  private static int Shared;
+  class Inner { public int Shared; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when names differ', async () => {
+      const src = `
+class Outer {
+  private static int Shared;
+  class Inner { public int Other; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag shadowing an outer instance member', async () => {
+      const src = `
+class Outer {
+  private int Shared;
+  class Inner { public int Shared; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- use-argumentexception-throwhelper ----------------------------------
+  describe('use-argumentexception-throwhelper', () => {
+    const K = 'code-quality/deterministic/use-argumentexception-throwhelper'
+    it('flags a manual IsNullOrEmpty guard throwing ArgumentException', async () => {
+      const src = `
+using System;
+class C {
+  void M(string s) { if (string.IsNullOrEmpty(s)) throw new ArgumentException("empty", nameof(s)); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a manual IsNullOrWhiteSpace guard', async () => {
+      const src = `
+using System;
+class C {
+  void M(string s) { if (string.IsNullOrWhiteSpace(s)) throw new ArgumentException("ws", nameof(s)); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a guard throwing a different exception', async () => {
+      const src = `
+using System;
+class C {
+  void M(string s) { if (string.IsNullOrEmpty(s)) throw new InvalidOperationException(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- use-argumentoutofrange-throwhelper ---------------------------------
+  describe('use-argumentoutofrange-throwhelper', () => {
+    const K = 'code-quality/deterministic/use-argumentoutofrange-throwhelper'
+    it('flags a manual range guard throwing ArgumentOutOfRangeException', async () => {
+      const src = `
+using System;
+class C {
+  void M(int n) { if (n < 0) throw new ArgumentOutOfRangeException(nameof(n)); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a guard throwing ArgumentException', async () => {
+      const src = `
+using System;
+class C {
+  void M(int n) { if (n < 0) throw new ArgumentException(); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a compound condition', async () => {
+      const src = `
+using System;
+class C {
+  void M(int n) { if (n < 0 && n > 100) throw new ArgumentOutOfRangeException(nameof(n)); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- interface-colliding-base-members -----------------------------------
+  describe('interface-colliding-base-members', () => {
+    const K = 'code-quality/deterministic/interface-colliding-base-members'
+    it('flags an interface inheriting a colliding member from two bases', async () => {
+      const src = `
+interface IA { void Run(); }
+interface IB { void Run(); }
+interface IC : IA, IB {}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when the derived interface redeclares the member', async () => {
+      const src = `
+interface IA { void Run(); }
+interface IB { void Run(); }
+interface IC : IA, IB { new void Run(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag non-colliding base interfaces', async () => {
+      const src = `
+interface IA { void Start(); }
+interface IB { void Stop(); }
+interface IC : IA, IB {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- inline-single-use-local --------------------------------------------
+  describe('inline-single-use-local', () => {
+    const K = 'code-quality/deterministic/inline-single-use-local'
+    it('flags a local used once on the next statement', async () => {
+      const src = `
+class C {
+  int M() {
+    var x = Compute();
+    return x;
+  }
+  int Compute() => 1;
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a local used twice', async () => {
+      const src = `
+class C {
+  int M() {
+    var x = Compute();
+    return x + x;
+  }
+  int Compute() => 1;
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a local used after an intervening statement', async () => {
+      const src = `
+class C {
+  int M() {
+    var x = Compute();
+    System.Console.WriteLine("hi");
+    return x;
+  }
+  int Compute() => 1;
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- local-could-be-const -----------------------------------------------
+  describe('local-could-be-const', () => {
+    const K = 'code-quality/deterministic/local-could-be-const'
+    it('flags a constant int local never reassigned', async () => {
+      const src = `
+class C {
+  int M() { int x = 5; return x + 1; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a reassigned local', async () => {
+      const src = `
+class C {
+  int M() { int x = 5; x = 6; return x; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a non-constant initializer', async () => {
+      const src = `
+class C {
+  int M(int a) { int x = a; return x; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a var declaration', async () => {
+      const src = `
+class C {
+  int M() { var x = 5; return x; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- log-placeholder-not-pascalcase -------------------------------------
+  describe('log-placeholder-not-pascalcase', () => {
+    const K = 'code-quality/deterministic/log-placeholder-not-pascalcase'
+    // Microsoft.Extensions.Logging is not in the host reference set, so the test
+    // declares a minimal ILogger with the LogXxx methods the rule recognizes.
+    const LOGGER = `
+namespace Microsoft.Extensions.Logging {
+  public interface ILogger {
+    void LogInformation(string message, params object[] args);
+  }
+}`
+    it('flags a camelCase placeholder name', async () => {
+      const src = `${LOGGER}
+class C {
+  void M(Microsoft.Extensions.Logging.ILogger logger, int userId) { logger.LogInformation("User {userId} signed in", userId); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a PascalCase placeholder', async () => {
+      const src = `${LOGGER}
+class C {
+  void M(Microsoft.Extensions.Logging.ILogger logger, int userId) { logger.LogInformation("User {UserId} signed in", userId); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a positional index placeholder', async () => {
+      const src = `${LOGGER}
+class C {
+  void M(Microsoft.Extensions.Logging.ILogger logger, int id) { logger.LogInformation("User {0} signed in", id); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- identifier-contains-type-name --------------------------------------
+  describe('identifier-contains-type-name', () => {
+    const K = 'code-quality/deterministic/identifier-contains-type-name'
+    it('flags a parameter named String', async () => {
+      const src = `
+class C { void M(string String) { System.Console.WriteLine(String); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a property named Integer', async () => {
+      const src = `
+class C { public int Integer { get; set; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a descriptive name', async () => {
+      const src = `
+class C { void M(string name) { System.Console.WriteLine(name); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a name that merely contains a type token', async () => {
+      const src = `
+class C { void M(string stringBuilder) { System.Console.WriteLine(stringBuilder); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

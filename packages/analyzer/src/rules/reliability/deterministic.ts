@@ -243,4 +243,28 @@ export const RELIABILITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'reliability/deterministic/cancellationtoken-not-forwarded',
+    category: 'code',
+    domain: 'reliability',
+    name: 'CancellationToken not forwarded',
+    description:
+      'A method with a CancellationToken in scope calls a method that exposes a token-accepting overload but forwards no token, silently dropping cancellation.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'reliability/deterministic/class-with-idisposable-members-not-disposable',
+    category: 'code',
+    domain: 'reliability',
+    name: 'Class with IDisposable members is not disposable',
+    description:
+      'A class constructs and owns an IDisposable field but does not itself implement IDisposable, so the held resource is never released.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

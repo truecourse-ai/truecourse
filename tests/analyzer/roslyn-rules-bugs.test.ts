@@ -326,4 +326,404 @@ class C { void M(object o) { ArgumentNullException.ThrowIfNull(o); } }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- argument-exception-bad-arguments ----------------------------------
+  describe('argument-exception-bad-arguments', () => {
+    const K = 'bugs/deterministic/argument-exception-bad-arguments'
+    it('flags ArgumentException with message/paramName swapped', async () => {
+      const src = `
+using System;
+class C { void M(int count) { throw new ArgumentException("count", "must be positive"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags ArgumentNullException with the param name in the message slot', async () => {
+      const src = `
+using System;
+class C { void M(object value) { throw new ArgumentNullException("value cannot be null", "value"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a correctly-ordered ArgumentException', async () => {
+      const src = `
+using System;
+class C { void M(int count) { throw new ArgumentException("must be positive", "count"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag when neither argument names a parameter', async () => {
+      const src = `
+using System;
+class C { void M(int count) { throw new ArgumentException("bad", "worse"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- base-equals-not-reference-equality --------------------------------
+  describe('base-equals-not-reference-equality', () => {
+    const K = 'bugs/deterministic/base-equals-not-reference-equality'
+    it('flags base.Equals when the base overrides Equals with value semantics', async () => {
+      const src = `
+class Base { public override bool Equals(object o) => true; public override int GetHashCode() => 0; }
+class Derived : Base { bool Same(object o) => base.Equals(o); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag base.Equals when the base does not override Equals', async () => {
+      const src = `
+class Base {}
+class Derived : Base { bool Same(object o) => base.Equals(o); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- blockcopy-wrong-count ---------------------------------------------
+  describe('blockcopy-wrong-count', () => {
+    const K = 'bugs/deterministic/blockcopy-wrong-count'
+    it('flags BlockCopy using an int[] Length as the byte count', async () => {
+      const src = `
+using System;
+class C { void M(int[] src, int[] dst) { Buffer.BlockCopy(src, 0, dst, 0, src.Length); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag BlockCopy on a byte[]', async () => {
+      const src = `
+using System;
+class C { void M(byte[] src, byte[] dst) { Buffer.BlockCopy(src, 0, dst, 0, src.Length); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag BlockCopy with an explicit byte count', async () => {
+      const src = `
+using System;
+class C { void M(int[] src, int[] dst) { Buffer.BlockCopy(src, 0, dst, 0, src.Length * 4); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- delegate-subtraction ----------------------------------------------
+  describe('delegate-subtraction', () => {
+    const K = 'bugs/deterministic/delegate-subtraction'
+    it('flags subtracting one delegate from another', async () => {
+      const src = `
+using System;
+class C { Action M(Action a, Action b) => a - b; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag numeric subtraction', async () => {
+      const src = `class C { int M(int a, int b) => a - b; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag -= on an event', async () => {
+      const src = `
+using System;
+class C { event Action E; void M(Action h) { E -= h; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- enum-undefined-composite-flag -------------------------------------
+  describe('enum-undefined-composite-flag', () => {
+    const K = 'bugs/deterministic/enum-undefined-composite-flag'
+    it('flags a composite value with a bit no member backs', async () => {
+      const src = `
+using System;
+[Flags] enum F { A = 1, B = 2, Combo = 1 | 2 | 8 }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a composite of declared flags', async () => {
+      const src = `
+using System;
+[Flags] enum F { A = 1, B = 2, C = 4, Combo = A | B | C }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- exception-from-unexpected-member ----------------------------------
+  describe('exception-from-unexpected-member', () => {
+    const K = 'bugs/deterministic/exception-from-unexpected-member'
+    it('flags a throw in a finalizer', async () => {
+      const src = `
+using System;
+class C { ~C() { throw new InvalidOperationException(); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a throw in GetHashCode', async () => {
+      const src = `
+using System;
+class C { public override int GetHashCode() { throw new NotSupportedException(); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a re-throw inside a catch in Dispose', async () => {
+      const src = `
+using System;
+class C : IDisposable { public void Dispose() { try {} catch { throw; } } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a throw in an ordinary method', async () => {
+      const src = `
+using System;
+class C { public void Work() { throw new InvalidOperationException(); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- exception-missing-standard-constructors ---------------------------
+  describe('exception-missing-standard-constructors', () => {
+    const K = 'bugs/deterministic/exception-missing-standard-constructors'
+    it('flags an exception with only a custom constructor', async () => {
+      const src = `
+using System;
+public class MyException : Exception { public MyException(int code) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag an exception providing all three standard constructors', async () => {
+      const src = `
+using System;
+public class MyException : Exception {
+  public MyException() {}
+  public MyException(string message) : base(message) {}
+  public MyException(string message, Exception inner) : base(message, inner) {}
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a non-exception class', async () => {
+      const src = `public class Plain { public Plain(int x) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- explicit-caller-info-argument -------------------------------------
+  describe('explicit-caller-info-argument', () => {
+    const K = 'bugs/deterministic/explicit-caller-info-argument'
+    it('flags passing a value for a [CallerMemberName] parameter', async () => {
+      const src = `
+using System.Runtime.CompilerServices;
+class C {
+  void Log(string msg, [CallerMemberName] string member = "") {}
+  void M() { Log("hi", "explicitName"); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when the caller-info argument is omitted', async () => {
+      const src = `
+using System.Runtime.CompilerServices;
+class C {
+  void Log(string msg, [CallerMemberName] string member = "") {}
+  void M() { Log("hi"); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- finalizer-on-memorymanager ----------------------------------------
+  describe('finalizer-on-memorymanager', () => {
+    const K = 'bugs/deterministic/finalizer-on-memorymanager'
+    it('flags a finalizer on a MemoryManager<T> subtype', async () => {
+      const src = `
+using System;
+using System.Buffers;
+class M : MemoryManager<byte> {
+  ~M() {}
+  public override Span<byte> GetSpan() => default;
+  public override System.Buffers.MemoryHandle Pin(int i = 0) => default;
+  public override void Unpin() {}
+  protected override void Dispose(bool d) {}
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a finalizer on an unrelated type', async () => {
+      const src = `class C { ~C() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- flags-enum-non-power-of-two ---------------------------------------
+  describe('flags-enum-non-power-of-two', () => {
+    const K = 'bugs/deterministic/flags-enum-non-power-of-two'
+    it('flags a [Flags] member with a non-power-of-two stray value', async () => {
+      const src = `
+using System;
+[Flags] enum F { A = 1, B = 2, C = 3, D = 5 }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a clean power-of-two [Flags] enum with combos', async () => {
+      const src = `
+using System;
+[Flags] enum F { None = 0, A = 1, B = 2, C = 4, All = A | B | C }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- iequatable-class-not-sealed ---------------------------------------
+  describe('iequatable-class-not-sealed', () => {
+    const K = 'bugs/deterministic/iequatable-class-not-sealed'
+    it('flags an unsealed class implementing IEquatable<itself>', async () => {
+      const src = `
+using System;
+class Money : IEquatable<Money> { public bool Equals(Money other) => true; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a sealed class implementing IEquatable<itself>', async () => {
+      const src = `
+using System;
+sealed class Money : IEquatable<Money> { public bool Equals(Money other) => true; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a struct implementing IEquatable<itself>', async () => {
+      const src = `
+using System;
+struct Money : IEquatable<Money> { public bool Equals(Money other) => true; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- interface-method-not-callable-by-derived --------------------------
+  describe('interface-method-not-callable-by-derived', () => {
+    const K = 'bugs/deterministic/interface-method-not-callable-by-derived'
+    it('flags an explicit interface method on an unsealed class with no re-exposed member', async () => {
+      const src = `
+interface I { void Do(); }
+class C : I { void I.Do() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when a public method re-exposes the behaviour', async () => {
+      const src = `
+interface I { void Do(); }
+class C : I { void I.Do() => Do(); public void Do() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an explicit implementation on a sealed class', async () => {
+      const src = `
+interface I { void Do(); }
+sealed class C : I { void I.Do() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- modulus-direct-equality -------------------------------------------
+  describe('modulus-direct-equality', () => {
+    const K = 'bugs/deterministic/modulus-direct-equality'
+    it('flags x % 2 == 1 on a signed int', async () => {
+      const src = `class C { bool Odd(int x) => x % 2 == 1; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag x % 2 == 0', async () => {
+      const src = `class C { bool Even(int x) => x % 2 == 0; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag modulus on an unsigned type', async () => {
+      const src = `class C { bool Odd(uint x) => x % 2 == 1; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- non-flags-enum-with-flags-attribute -------------------------------
+  describe('non-flags-enum-with-flags-attribute', () => {
+    const K = 'bugs/deterministic/non-flags-enum-with-flags-attribute'
+    it('flags a [Flags] enum using sequential values', async () => {
+      const src = `
+using System;
+[Flags] enum Color { Red, Green, Blue, Yellow }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a proper power-of-two [Flags] enum', async () => {
+      const src = `
+using System;
+[Flags] enum Perm { None = 0, Read = 1, Write = 2, Exec = 4 }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- optionalfield-missing-deserialization-handler ---------------------
+  describe('optionalfield-missing-deserialization-handler', () => {
+    const K = 'bugs/deterministic/optionalfield-missing-deserialization-handler'
+    it('flags an [OptionalField] member with no deserialization handler', async () => {
+      const src = `
+using System.Runtime.Serialization;
+[DataContract] class C { [OptionalField] int _added; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when an [OnDeserialized] handler is present', async () => {
+      const src = `
+using System.Runtime.Serialization;
+class C {
+  [OptionalField] int _added;
+  [OnDeserialized] void OnDeser(StreamingContext ctx) { _added = 1; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- pinvoke-out-string-parameter --------------------------------------
+  describe('pinvoke-out-string-parameter', () => {
+    const K = 'bugs/deterministic/pinvoke-out-string-parameter'
+    it('flags [Out] on a by-value string P/Invoke parameter', async () => {
+      const src = `
+using System.Runtime.InteropServices;
+class C { [DllImport("x")] static extern void Native([Out] string buffer); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a by-value string parameter without [Out]', async () => {
+      const src = `
+using System.Runtime.InteropServices;
+class C { [DllImport("x")] static extern void Native(string buffer); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag [Out] on a StringBuilder parameter', async () => {
+      const src = `
+using System.Text;
+using System.Runtime.InteropServices;
+class C { [DllImport("x")] static extern void Native([Out] StringBuilder buffer); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- reference-equals-on-value-type (S2995) ----------------------------
+  describe('reference-equals-on-value-type', () => {
+    const K = 'bugs/deterministic/reference-equals-on-value-type'
+    it('flags ReferenceEquals on an int operand', async () => {
+      const src = `class C { bool M(int a, int b) => object.ReferenceEquals(a, b); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag ReferenceEquals on two reference operands', async () => {
+      const src = `class C { bool M(object a, object b) => object.ReferenceEquals(a, b); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- switch-expression-missing-cases -----------------------------------
+  describe('switch-expression-missing-cases', () => {
+    const K = 'bugs/deterministic/switch-expression-missing-cases'
+    it('flags a switch expression that omits an enum member', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { string M(Color c) => c switch { Color.Red => "r", Color.Green => "g" }; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when all members are handled', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { string M(Color c) => c switch { Color.Red => "r", Color.Green => "g", Color.Blue => "b" }; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag when a discard arm is present', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { string M(Color c) => c switch { Color.Red => "r", _ => "other" }; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- taskcompletionsource-wrong-options --------------------------------
+  describe('taskcompletionsource-wrong-options', () => {
+    const K = 'bugs/deterministic/taskcompletionsource-wrong-options'
+    it('flags TaskContinuationOptions passed to a TaskCompletionSource ctor', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C { void M() { var t = new TaskCompletionSource<int>(TaskContinuationOptions.LongRunning); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag the correct TaskCreationOptions', async () => {
+      const src = `
+using System.Threading.Tasks;
+class C { void M() { var t = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

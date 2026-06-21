@@ -141,4 +141,28 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'style/deterministic/extension-keyword-conflict',
+    category: 'code',
+    domain: 'style',
+    name: 'Identifier conflicts with the C# 14 extension keyword',
+    description:
+      'A declared identifier named extension collides with the new C# 14 contextual keyword and must be renamed or escaped as @extension.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'style/deterministic/partial-return-type-escape',
+    category: 'code',
+    domain: 'style',
+    name: 'Return type named partial should be escaped',
+    description:
+      'A return type named partial must be written @partial to remain valid under newer C# rules.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]
