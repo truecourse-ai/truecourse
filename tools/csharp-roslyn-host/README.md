@@ -46,13 +46,11 @@ cat test.jsonl | ./bin/Release/net8.0/csharp-roslyn-host
 ```
 
 ## Status / next steps
-- [x] Host skeleton: stdio JSON protocol, in-process `CSharpCompilation`, semantic-rule registry.
-- [x] First real semantic rule (`referenceequals-on-value-type`) — validated end-to-end.
-- [ ] **Node client**: spawn the host from the analyzer, stream changed files, ingest
-      violations (a `csharp` entry in `lsp-servers/registry.ts` / a sibling of the
-      Pyright path). Gate on `.NET SDK present`; fall back to tree-sitter-only when absent.
-- [ ] **MSBuildWorkspace** project loading (replace the runtime-assembly reference set)
-      for full cross-file / project fidelity.
-- [ ] Port the ~210 deferred rules as `ISemanticRule`s, in waves (mirroring the
-      tree-sitter waves), fixture-first to 0% FP.
+- [x] Host skeleton: stdio JSON protocol, in-process `CSharpCompilation`, reflection-discovered rule registry.
+- [x] **Node client** (`packages/analyzer/src/roslyn-host-client.ts`) + analyze-pipeline integration. Build-required, **fail-hard** (no tree-sitter fallback).
+- [x] **147 semantic rules** ported as `ISemanticRule` walkers across all domains, zero-FP, validated end-to-end. The single-compilation-decidable set is exhausted.
+- [x] Framework refs: `Microsoft.Extensions.Logging.Abstractions` + `Newtonsoft.Json` (so the model resolves `ILogger`/Json types).
+- [ ] **MSBuildWorkspace** project loading — the next infra step, to unlock the ~18 rules needing `.csproj` properties / `RootNamespace` / library-vs-entry / cross-project / assembly attributes. **Product decision:** it makes C# semantic analysis require a *restored, buildable* project.
+- [ ] Add the remaining niche framework refs (Blazor, MEF, WCF, Azure, test frameworks; WinForms/WPF are Windows-only) to unlock ~25 more rules — or load them via MSBuildWorkspace instead.
+- [ ] ~20 deferred rules stay unshipped by the zero-FP bar (dataflow-heavy / heuristic) — the semantic analog of `not-applicable`.
 - [ ] Distribution: ship a self-contained per-platform binary, or require the SDK.
