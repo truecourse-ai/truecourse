@@ -1149,4 +1149,382 @@ class C { void M(string stringBuilder) { System.Console.WriteLine(stringBuilder)
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- empty-namespace ----------------------------------------------------
+  describe('empty-namespace', () => {
+    const K = 'code-quality/deterministic/empty-namespace'
+    it('flags a namespace with no types', async () => {
+      const src = `
+namespace App.Empty {
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a file-scoped namespace with only a using', async () => {
+      const src = `
+namespace App.Util;
+using System;`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a namespace containing a class', async () => {
+      const src = `
+namespace App.Core { class Service {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an outer namespace whose nested namespace holds types', async () => {
+      const src = `
+namespace Outer { namespace Inner { class Thing {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- csharp-filename-type-mismatch --------------------------------------
+  describe('csharp-filename-type-mismatch', () => {
+    const K = 'code-quality/deterministic/csharp-filename-type-mismatch'
+    async function keysFor(text: string, path: string): Promise<string[]> {
+      const violations = await runRoslynHost([{ path, text }], [K])
+      return violations.map((v) => v.ruleKey)
+    }
+    it('flags a file whose name differs from its first type', async () => {
+      const src = `class OrderService {}`
+      expect(await keysFor(src, 'Helpers.cs')).toContain(K)
+    })
+    it('does not flag a matching file name', async () => {
+      const src = `class OrderService {}`
+      expect(await keysFor(src, 'OrderService.cs')).not.toContain(K)
+    })
+    it('does not flag a generic-arity file convention', async () => {
+      const src = `class Cache<TKey, TValue> {}`
+      expect(await keysFor(src, 'Cache{TKey,TValue}.cs')).not.toContain(K)
+    })
+    it('does not flag a partial-of file convention (Foo.Bar.cs)', async () => {
+      const src = `partial class Order {}`
+      expect(await keysFor(src, 'Order.Validation.cs')).not.toContain(K)
+    })
+  })
+
+  // ---- indexer-non-standard-key-type --------------------------------------
+  describe('indexer-non-standard-key-type', () => {
+    const K = 'code-quality/deterministic/indexer-non-standard-key-type'
+    it('flags an indexer keyed by an enum', async () => {
+      const src = `
+enum Color { Red, Green }
+class Palette { public string this[Color c] => ""; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an indexer keyed by a custom struct', async () => {
+      const src = `
+struct Key { public int V; }
+class Store { public int this[Key k] => 0; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a string-keyed indexer', async () => {
+      const src = `
+class Store { public int this[string name] => 0; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an int-keyed indexer', async () => {
+      const src = `
+class Store { public int this[int i] => 0; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a generic type-parameter key', async () => {
+      const src = `
+class Store<TKey> { public int this[TKey k] => 0; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- literal-as-localized-parameter -------------------------------------
+  describe('literal-as-localized-parameter', () => {
+    const K = 'code-quality/deterministic/literal-as-localized-parameter'
+    it('flags a literal passed to a [Localizable(true)] parameter', async () => {
+      const src = `
+using System.ComponentModel;
+class C {
+  void Show([Localizable(true)] string caption) {}
+  void M() { Show("Hello"); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a literal to a non-localizable parameter', async () => {
+      const src = `
+class C {
+  void Show(string caption) {}
+  void M() { Show("Hello"); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a [Localizable(false)] parameter', async () => {
+      const src = `
+using System.ComponentModel;
+class C {
+  void Show([Localizable(false)] string key) {}
+  void M() { Show("settings.key"); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an empty string literal', async () => {
+      const src = `
+using System.ComponentModel;
+class C {
+  void Show([Localizable(true)] string caption) {}
+  void M() { Show(""); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- locale-not-set -----------------------------------------------------
+  describe('locale-not-set', () => {
+    const K = 'code-quality/deterministic/locale-not-set'
+    it('flags a DataTable created without a Locale', async () => {
+      const src = `
+using System.Data;
+class C { DataTable M() => new DataTable(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a DataTable with Locale set in initializer', async () => {
+      const src = `
+using System.Data;
+using System.Globalization;
+class C { DataTable M() => new DataTable { Locale = CultureInfo.InvariantCulture }; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an unrelated type', async () => {
+      const src = `
+class Thing {}
+class C { Thing M() => new Thing(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- missing-generic-variance -------------------------------------------
+  describe('missing-generic-variance', () => {
+    const K = 'code-quality/deterministic/missing-generic-variance'
+    it('flags an output-only interface type parameter', async () => {
+      const src = `
+interface IReader<T> { T Read(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a type parameter also used as input', async () => {
+      const src = `
+interface IStore<T> { T Read(); void Write(T value); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an already-covariant out parameter', async () => {
+      const src = `
+interface IReader<out T> { T Read(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an input-only type parameter', async () => {
+      const src = `
+interface IWriter<T> { void Write(T value); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- optional-parameter-hazard ------------------------------------------
+  describe('optional-parameter-hazard', () => {
+    const K = 'code-quality/deterministic/optional-parameter-hazard'
+    it('flags an optional parameter on a public method', async () => {
+      const src = `
+public class C { public void Log(string msg, int level = 0) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a required parameter', async () => {
+      const src = `
+public class C { public void Log(string msg, int level) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an optional parameter on a private method', async () => {
+      const src = `
+public class C { void Log(string msg, int level = 0) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an optional parameter on an override', async () => {
+      const src = `
+public class B { public virtual void Log(int level = 0) {} }
+public class C : B { public override void Log(int level = 0) {} }`
+      const result = await keys(src, K)
+      // The base declaration is still flagged, but the override must not be.
+      expect(result.filter((k) => k === K).length).toBe(1)
+    })
+  })
+
+  // ---- override-parameter-name-mismatch -----------------------------------
+  describe('override-parameter-name-mismatch', () => {
+    const K = 'code-quality/deterministic/override-parameter-name-mismatch'
+    it('flags an override with a renamed parameter', async () => {
+      const src = `
+class B { public virtual void Save(int id) {} }
+class C : B { public override void Save(int key) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an interface implementation with a renamed parameter', async () => {
+      const src = `
+interface IStore { void Put(string key); }
+class C : IStore { public void Put(string name) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag matching parameter names', async () => {
+      const src = `
+class B { public virtual void Save(int id) {} }
+class C : B { public override void Save(int id) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- traceswitch-writelineif-misuse -------------------------------------
+  describe('traceswitch-writelineif-misuse', () => {
+    const K = 'code-quality/deterministic/traceswitch-writelineif-misuse'
+    it('flags WriteLineIf gated on a TraceSwitch Level', async () => {
+      const src = `
+using System.Diagnostics;
+class C {
+  static TraceSwitch sw = new TraceSwitch("a", "b");
+  void M() { Trace.WriteLineIf(sw.Level == TraceLevel.Error, "boom"); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag WriteLineIf on a plain boolean condition', async () => {
+      const src = `
+using System.Diagnostics;
+class C { void M(bool flag) { Trace.WriteLineIf(flag, "msg"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag the recommended boolean property usage', async () => {
+      const src = `
+using System.Diagnostics;
+class C {
+  static TraceSwitch sw = new TraceSwitch("a", "b");
+  void M() { Trace.WriteLineIf(sw.TraceError, "boom"); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- type-name-matches-namespace ----------------------------------------
+  describe('type-name-matches-namespace', () => {
+    const K = 'code-quality/deterministic/type-name-matches-namespace'
+    it('flags a type sharing a declared namespace name', async () => {
+      const src = `
+namespace Logging { class Sink {} }
+namespace App { class Logging {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a type with a unique name', async () => {
+      const src = `
+namespace Logging { class Sink {} }
+namespace App { class Reporter {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- property-matches-get-method ----------------------------------------
+  describe('property-matches-get-method', () => {
+    const K = 'code-quality/deterministic/property-matches-get-method'
+    it('flags a GetFoo method colliding with a Foo property', async () => {
+      const src = `
+class C {
+  public int Value { get; }
+  public int GetValue() => Value;
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a Get method without a matching property', async () => {
+      const src = `
+class C { public int GetValue() => 1; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a Get method that takes parameters', async () => {
+      const src = `
+class C {
+  public int Value { get; }
+  public int GetValue(int scale) => Value * scale;
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- missing-access-modifier --------------------------------------------
+  describe('missing-access-modifier', () => {
+    const K = 'code-quality/deterministic/missing-access-modifier'
+    it('flags a top-level type with no access modifier', async () => {
+      const src = `class Service {}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags a method with no access modifier', async () => {
+      const src = `
+public class C { void Run() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag an explicitly-modified type', async () => {
+      const src = `internal class Service {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an interface member', async () => {
+      const src = `
+public interface IService { void Run(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a static constructor', async () => {
+      const src = `
+public class C { static C() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an explicit interface implementation', async () => {
+      const src = `
+public interface IService { void Run(); }
+public class C : IService { void IService.Run() {} }`
+      // The class C itself is public; its explicit-impl method takes no modifier.
+      const result = await keys(src, K)
+      expect(result.filter((k) => k === K).length).toBe(0)
+    })
+  })
+
+  // ---- partial-element-missing-access-modifier ----------------------------
+  describe('partial-element-missing-access-modifier', () => {
+    const K = 'code-quality/deterministic/partial-element-missing-access-modifier'
+    it('flags a partial type with no access modifier', async () => {
+      const src = `partial class Widget {}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a partial type with an explicit modifier', async () => {
+      const src = `public partial class Widget {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a non-partial type (covered by the other rule)', async () => {
+      const src = `class Widget {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- verbose-declaration-initialization ---------------------------------
+  describe('verbose-declaration-initialization', () => {
+    const K = 'code-quality/deterministic/verbose-declaration-initialization'
+    it('flags a declaration repeating the type on both sides', async () => {
+      const src = `
+using System.Collections.Generic;
+class C { void M() { List<int> xs = new List<int>(); xs.Add(1); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag var', async () => {
+      const src = `
+using System.Collections.Generic;
+class C { void M() { var xs = new List<int>(); xs.Add(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a base/interface-typed declaration', async () => {
+      const src = `
+using System.Collections.Generic;
+class C { void M() { IList<int> xs = new List<int>(); xs.Add(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag target-typed new', async () => {
+      const src = `
+using System.Collections.Generic;
+class C { void M() { List<int> xs = new(); xs.Add(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

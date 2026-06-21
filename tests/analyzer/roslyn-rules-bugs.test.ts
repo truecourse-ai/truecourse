@@ -726,4 +726,511 @@ class C { void M() { var t = new TaskCompletionSource<int>(TaskCreationOptions.R
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- culture-unaware-string-operation ----------------------------------
+  describe('culture-unaware-string-operation', () => {
+    const K = 'bugs/deterministic/culture-unaware-string-operation'
+    it('flags parameterless string.ToLower()', async () => {
+      const src = `class C { string M(string s) => s.ToLower(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags string.Compare without a comparison', async () => {
+      const src = `class C { int M(string a, string b) => string.Compare(a, b); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag ToLowerInvariant', async () => {
+      const src = `class C { string M(string s) => s.ToLowerInvariant(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag string.Compare with a StringComparison', async () => {
+      const src = `
+using System;
+class C { int M(string a, string b) => string.Compare(a, b, StringComparison.Ordinal); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a user method named ToLower on another type', async () => {
+      const src = `class T { public string ToLower() => ""; } class C { string M(T t) => t.ToLower(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- missing-stringcomparison-overload ---------------------------------
+  describe('missing-stringcomparison-overload', () => {
+    const K = 'bugs/deterministic/missing-stringcomparison-overload'
+    it('flags string.Equals without a StringComparison', async () => {
+      const src = `class C { bool M(string a, string b) => a.Equals(b); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags string.StartsWith(string) without a StringComparison', async () => {
+      const src = `class C { bool M(string a) => a.StartsWith("x"); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when a StringComparison is supplied', async () => {
+      const src = `
+using System;
+class C { bool M(string a, string b) => a.Equals(b, StringComparison.Ordinal); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag StartsWith(char), which has no comparison overload', async () => {
+      const src = `class C { bool M(string a) => a.StartsWith('x'); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- missing-format-provider-overload ----------------------------------
+  describe('missing-format-provider-overload', () => {
+    const K = 'bugs/deterministic/missing-format-provider-overload'
+    it('flags int.Parse without an IFormatProvider', async () => {
+      const src = `class C { int M(string s) => int.Parse(s); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags double.ToString() without a provider', async () => {
+      const src = `class C { string M(double d) => d.ToString(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag int.Parse with a CultureInfo', async () => {
+      const src = `
+using System.Globalization;
+class C { int M(string s) => int.Parse(s, CultureInfo.InvariantCulture); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag ToString() on a reference type', async () => {
+      const src = `class T {} class C { string M(T t) => t.ToString(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- normalize-to-lower-not-upper --------------------------------------
+  describe('normalize-to-lower-not-upper', () => {
+    const K = 'bugs/deterministic/normalize-to-lower-not-upper'
+    it('flags string.ToLowerInvariant for normalization', async () => {
+      const src = `class C { string M(string s) => s.ToLowerInvariant(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags string.ToLower', async () => {
+      const src = `class C { string M(string s) => s.ToLower(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag ToUpperInvariant', async () => {
+      const src = `class C { string M(string s) => s.ToUpperInvariant(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- switch-missing-cases ----------------------------------------------
+  describe('switch-missing-cases', () => {
+    const K = 'bugs/deterministic/switch-missing-cases'
+    it('flags a switch statement that omits an enum member', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { void M(Color c) { switch (c) { case Color.Red: break; case Color.Green: break; } } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when a default label is present', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { void M(Color c) { switch (c) { case Color.Red: break; default: break; } } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag when all members are handled', async () => {
+      const src = `
+enum Color { Red, Green, Blue }
+class C { void M(Color c) { switch (c) { case Color.Red: break; case Color.Green: break; case Color.Blue: break; } } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- child-field-differs-only-by-case ----------------------------------
+  describe('child-field-differs-only-by-case', () => {
+    const K = 'bugs/deterministic/child-field-differs-only-by-case'
+    it('flags a derived field differing only by case from a base field', async () => {
+      const src = `
+class Base { protected int Count; }
+class Derived : Base { private int count; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a private base field', async () => {
+      const src = `
+class Base { private int Count; }
+class Derived : Base { private int count; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag distinct field names', async () => {
+      const src = `
+class Base { protected int Total; }
+class Derived : Base { private int count; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- inherited-member-visibility-decreased -----------------------------
+  describe('inherited-member-visibility-decreased', () => {
+    const K = 'bugs/deterministic/inherited-member-visibility-decreased'
+    it('flags a protected member hiding a public base member', async () => {
+      const src = `
+class Base { public void Run() {} }
+class Derived : Base { protected new void Run() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when visibility is preserved', async () => {
+      const src = `
+class Base { public void Run() {} }
+class Derived : Base { public new void Run() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an override (visibility is compiler-enforced)', async () => {
+      const src = `
+class Base { public virtual void Run() {} }
+class Derived : Base { public override void Run() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- override-changes-default-parameter --------------------------------
+  describe('override-changes-default-parameter', () => {
+    const K = 'bugs/deterministic/override-changes-default-parameter'
+    it('flags an override that changes a default value', async () => {
+      const src = `
+class Base { public virtual void M(int x = 1) {} }
+class Derived : Base { public override void M(int x = 2) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag an override that keeps the same default', async () => {
+      const src = `
+class Base { public virtual void M(int x = 1) {} }
+class Derived : Base { public override void M(int x = 1) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- optional-arg-not-forwarded-to-base --------------------------------
+  describe('optional-arg-not-forwarded-to-base', () => {
+    const K = 'bugs/deterministic/optional-arg-not-forwarded-to-base'
+    it('flags an override that does not forward its optional parameter', async () => {
+      const src = `
+class Base { public virtual void M(int x = 1) {} }
+class Derived : Base { public override void M(int x = 1) { base.M(); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when the optional parameter is forwarded', async () => {
+      const src = `
+class Base { public virtual void M(int x = 1) {} }
+class Derived : Base { public override void M(int x = 1) { base.M(x); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- params-introduced-on-override -------------------------------------
+  describe('params-introduced-on-override', () => {
+    const K = 'bugs/deterministic/params-introduced-on-override'
+    it('flags an override that adds params', async () => {
+      const src = `
+class Base { public virtual void M(int[] xs) {} }
+class Derived : Base { public override void M(params int[] xs) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when both have params', async () => {
+      const src = `
+class Base { public virtual void M(params int[] xs) {} }
+class Derived : Base { public override void M(params int[] xs) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- icomparable-without-equality-operators ----------------------------
+  describe('icomparable-without-equality-operators', () => {
+    const K = 'bugs/deterministic/icomparable-without-equality-operators'
+    it('flags an IComparable<T> type with no Equals or operators', async () => {
+      const src = `
+using System;
+class Money : IComparable<Money> { public int CompareTo(Money other) => 0; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a complete IComparable implementation', async () => {
+      const src = `
+using System;
+class Money : IComparable<Money> {
+  public int CompareTo(Money other) => 0;
+  public override bool Equals(object o) => true;
+  public override int GetHashCode() => 0;
+  public static bool operator ==(Money a, Money b) => true;
+  public static bool operator !=(Money a, Money b) => false;
+  public static bool operator <(Money a, Money b) => false;
+  public static bool operator >(Money a, Money b) => false;
+  public static bool operator <=(Money a, Money b) => true;
+  public static bool operator >=(Money a, Money b) => true;
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a record implementing IComparable', async () => {
+      const src = `
+using System;
+record Money(int Cents) : IComparable<Money> { public int CompareTo(Money other) => 0; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- partial-method-not-implemented ------------------------------------
+  describe('partial-method-not-implemented', () => {
+    const K = 'bugs/deterministic/partial-method-not-implemented'
+    it('flags a declared partial method with no implementation', async () => {
+      const src = `partial class C { partial void OnCreated(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when an implementing part exists', async () => {
+      const src = `partial class C { partial void OnCreated(); partial void OnCreated() {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- defaultparametervalue-without-optional ----------------------------
+  describe('defaultparametervalue-without-optional', () => {
+    const K = 'bugs/deterministic/defaultparametervalue-without-optional'
+    it('flags [DefaultParameterValue] without [Optional]', async () => {
+      const src = `
+using System.Runtime.InteropServices;
+class C { void M([DefaultParameterValue(5)] int x) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag when [Optional] is also present', async () => {
+      const src = `
+using System.Runtime.InteropServices;
+class C { void M([Optional, DefaultParameterValue(5)] int x) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- defaultvalue-instead-of-defaultparametervalue ---------------------
+  describe('defaultvalue-instead-of-defaultparametervalue', () => {
+    const K = 'bugs/deterministic/defaultvalue-instead-of-defaultparametervalue'
+    it('flags [DefaultValue] on a parameter', async () => {
+      const src = `
+using System.ComponentModel;
+class C { void M([DefaultValue(5)] int x) {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a C# default value', async () => {
+      const src = `class C { void M(int x = 5) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- symbol-and-member-same-statement ----------------------------------
+  describe('symbol-and-member-same-statement', () => {
+    const K = 'bugs/deterministic/symbol-and-member-same-statement'
+    it('flags x = x.Next = value', async () => {
+      const src = `
+class N { public N Next; public int Field; }
+class C { void M(N x) { x = x.Next = null; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag separate statements', async () => {
+      const src = `
+class N { public N Next; }
+class C { void M(N x, N y) { x = y; x.Next = null; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- unchecked-enumerable-sum-overflow ---------------------------------
+  describe('unchecked-enumerable-sum-overflow', () => {
+    const K = 'bugs/deterministic/unchecked-enumerable-sum-overflow'
+    it('flags Enumerable.Sum inside an unchecked block', async () => {
+      const src = `
+using System.Collections.Generic;
+using System.Linq;
+class C { int M(List<int> xs) { unchecked { return xs.Sum(); } } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag Sum outside an unchecked context', async () => {
+      const src = `
+using System.Collections.Generic;
+using System.Linq;
+class C { int M(List<int> xs) => xs.Sum(); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- format-string-placeholder-mismatch --------------------------------
+  describe('format-string-placeholder-mismatch', () => {
+    const K = 'bugs/deterministic/format-string-placeholder-mismatch'
+    it('flags a placeholder index with no matching argument', async () => {
+      const src = `class C { string M() => string.Format("{0} {1}", "a"); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags an unbalanced-brace format string', async () => {
+      const src = `class C { string M() => string.Format("hello {0", "a"); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a correct format string', async () => {
+      const src = `class C { string M() => string.Format("{0} {1}", "a", "b"); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag when arguments come from an array (cannot count statically)', async () => {
+      const src = `class C { string M(object[] args) => string.Format("{0} {1}", args); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- foreach-implicit-downcast -----------------------------------------
+  describe('foreach-implicit-downcast', () => {
+    const K = 'bugs/deterministic/foreach-implicit-downcast'
+    it('flags a foreach declaring a derived element type over a base collection', async () => {
+      const src = `
+using System.Collections.Generic;
+class Animal {} class Dog : Animal {}
+class C { void M(List<Animal> animals) { foreach (Dog d in animals) {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a foreach with var', async () => {
+      const src = `
+using System.Collections.Generic;
+class Animal {}
+class C { void M(List<Animal> animals) { foreach (var a in animals) {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a foreach with the exact element type', async () => {
+      const src = `
+using System.Collections.Generic;
+class Animal {}
+class C { void M(List<Animal> animals) { foreach (Animal a in animals) {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- lock-on-shared-instance -------------------------------------------
+  describe('lock-on-shared-instance', () => {
+    const K = 'bugs/deterministic/lock-on-shared-instance'
+    it('flags lock on this', async () => {
+      const src = `class C { void M() { lock (this) {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags lock on a typeof', async () => {
+      const src = `class C { void M() { lock (typeof(C)) {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags lock on a string literal', async () => {
+      const src = `class C { void M() { lock ("gate") {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag lock on a private readonly object', async () => {
+      const src = `
+class C { private readonly object _gate = new object(); void M() { lock (_gate) {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- lock-on-weak-identity-object --------------------------------------
+  describe('lock-on-weak-identity-object', () => {
+    const K = 'bugs/deterministic/lock-on-weak-identity-object'
+    it('flags lock on a string variable', async () => {
+      const src = `class C { void M(string s) { lock (s) {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags lock on a Type', async () => {
+      const src = `
+using System;
+class C { void M(Type t) { lock (t) {} } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag lock on a plain object', async () => {
+      const src = `class C { private readonly object _gate = new object(); void M() { lock (_gate) {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- iserializable-incorrect -------------------------------------------
+  describe('iserializable-incorrect', () => {
+    const K = 'bugs/deterministic/iserializable-incorrect'
+    it('flags an ISerializable type missing the members', async () => {
+      const src = `
+using System;
+using System.Runtime.Serialization;
+class C : ISerializable {
+  public void GetObjectData(SerializationInfo info, StreamingContext ctx) {}
+}`
+      // missing the deserialization constructor
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a complete ISerializable implementation', async () => {
+      const src = `
+using System;
+using System.Runtime.Serialization;
+class C : ISerializable {
+  public C() {}
+  protected C(SerializationInfo info, StreamingContext ctx) {}
+  public void GetObjectData(SerializationInfo info, StreamingContext ctx) {}
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- serialization-handler-wrong-signature -----------------------------
+  describe('serialization-handler-wrong-signature', () => {
+    const K = 'bugs/deterministic/serialization-handler-wrong-signature'
+    it('flags an [OnDeserialized] handler with the wrong signature', async () => {
+      const src = `
+using System.Runtime.Serialization;
+class C { [OnDeserialized] public void OnDeser() {} }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a correctly-shaped handler', async () => {
+      const src = `
+using System.Runtime.Serialization;
+class C { [OnDeserialized] void OnDeser(StreamingContext ctx) {} }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- debuggerdisplay-invalid-member ------------------------------------
+  describe('debuggerdisplay-invalid-member', () => {
+    const K = 'bugs/deterministic/debuggerdisplay-invalid-member'
+    it('flags a DebuggerDisplay referencing a nonexistent member', async () => {
+      const src = `
+using System.Diagnostics;
+[DebuggerDisplay("{Missing}")] class C { public int Name; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a DebuggerDisplay referencing an existing member', async () => {
+      const src = `
+using System.Diagnostics;
+[DebuggerDisplay("{Name}")] class C { public int Name; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a complex expression placeholder', async () => {
+      const src = `
+using System.Diagnostics;
+[DebuggerDisplay("{Name + 1}")] class C { public int Name; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- overlapping-default-overloads -------------------------------------
+  describe('overlapping-default-overloads', () => {
+    const K = 'bugs/deterministic/overlapping-default-overloads'
+    it('flags overloads that overlap once defaults are filled in', async () => {
+      const src = `
+class C {
+  public void M(int a) {}
+  public void M(int a, int b = 0) {}
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag overloads with distinct required parameter types', async () => {
+      const src = `
+class C {
+  public void M(int a) {}
+  public void M(string a, int b = 0) {}
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag overloads where the extra parameter is required', async () => {
+      const src = `
+class C {
+  public void M(int a) {}
+  public void M(int a, int b) {}
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })
