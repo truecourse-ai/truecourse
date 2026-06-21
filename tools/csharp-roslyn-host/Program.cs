@@ -109,44 +109,14 @@ internal interface ISemanticRule
 
 internal static class SemanticRules
 {
-    // The C# rules that need a semantic model. Each new rule from the Roslyn
-    // track is added here, mirroring how tree-sitter rules register in the
-    // analyzer's *_CSHARP_VISITORS arrays.
-    public static readonly IReadOnlyList<ISemanticRule> All = new ISemanticRule[]
-    {
-        new ReferenceEqualsOnValueType(),
-    };
-}
-
-/// <summary>
-/// `object.ReferenceEquals(a, b)` where an argument is a value type. Value types
-/// are boxed into separate objects, so ReferenceEquals is always false — a real
-/// bug that pure syntax cannot catch (it requires the argument's resolved type).
-/// (Roslyn CA2013.)
-/// </summary>
-internal sealed class ReferenceEqualsOnValueType : ISemanticRule
-{
-    public string RuleKey => "bugs/deterministic/referenceequals-on-value-type";
-
-    public IEnumerable<Violation> Analyze(SemanticModel model, SyntaxTree tree)
-    {
-        foreach (var inv in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
-        {
-            if (model.GetSymbolInfo(inv).Symbol is not IMethodSymbol m) continue;
-            if (m.Name != "ReferenceEquals" || m.ContainingType?.SpecialType != SpecialType.System_Object) continue;
-
-            foreach (var arg in inv.ArgumentList.Arguments)
-            {
-                var type = model.GetTypeInfo(arg.Expression).Type;
-                if (type is { IsValueType: true } && type.SpecialType != SpecialType.System_Void)
-                {
-                    var pos = inv.GetLocation().GetLineSpan().StartLinePosition;
-                    yield return new Violation(
-                        RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
-                        "object.ReferenceEquals on a value type is always false — the arguments are boxed into distinct objects.");
-                    break;
-                }
-            }
-        }
-    }
+    // Auto-discovered: every non-abstract ISemanticRule in the assembly is
+    // registered. Adding a rule = adding a file under Rules/<Domain>/ with a
+    // class implementing ISemanticRule (parameterless ctor) — no central edit,
+    // so parallel rule authoring never conflicts on a shared registry.
+    public static readonly IReadOnlyList<ISemanticRule> All =
+        typeof(SemanticRules).Assembly.GetTypes()
+            .Where(t => t is { IsAbstract: false, IsInterface: false } && typeof(ISemanticRule).IsAssignableFrom(t))
+            .Select(t => (ISemanticRule)Activator.CreateInstance(t)!)
+            .OrderBy(r => r.RuleKey, StringComparer.Ordinal)
+            .ToArray();
 }
