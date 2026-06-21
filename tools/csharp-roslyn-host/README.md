@@ -11,8 +11,8 @@ pattern as the Pyright LSP), speaking **newline-delimited JSON over stdin/stdout
 
 ## Why a custom host (not an off-the-shelf LSP)
 We run **our own** rules on Roslyn's semantic model and return them in our violation
-schema — clean-room, our keys/logic, no third-party analyzer bundled. An LSP would
-only surface its own diagnostics. (See `docs/CSHARP_OUTPERFORM_SONAR_PLAN.md`.)
+schema — our keys/logic, no third-party analyzer bundled. An LSP would only surface
+its own diagnostics.
 
 ## Protocol
 One JSON request per line in, one JSON response per line out.
@@ -37,7 +37,7 @@ Mirror the tree-sitter recipe, but in C#/Roslyn:
 3. The Node side maps those violations into the normal analyzer pipeline (see
    "Node integration" below).
 
-`ReferenceEqualsOnValueType` (Sonar S2995 / CA2013) is the reference implementation.
+`ReferenceEqualsOnValueType` (Roslyn CA2013) is the reference implementation.
 
 ## Build & smoke-test
 ```bash

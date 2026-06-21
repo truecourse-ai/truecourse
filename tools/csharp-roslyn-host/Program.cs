@@ -122,7 +122,7 @@ internal static class SemanticRules
 /// `object.ReferenceEquals(a, b)` where an argument is a value type. Value types
 /// are boxed into separate objects, so ReferenceEquals is always false — a real
 /// bug that pure syntax cannot catch (it requires the argument's resolved type).
-/// (Sonar S2995 / Roslyn CA2013.)
+/// (Roslyn CA2013.)
 /// </summary>
 internal sealed class ReferenceEqualsOnValueType : ISemanticRule
 {
