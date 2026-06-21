@@ -288,4 +288,90 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+
+  // C# semantic rules (Roslyn host) — need the type/semantic model.
+  {
+    key: 'architecture/deterministic/deep-inheritance-chain',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Excessive inheritance depth',
+    description:
+      'A type sits many levels deep in its total inheritance chain (every ancestor up to System.Object), making the effective behavior hard to follow.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/deep-inheritance-tree',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Class inheritance tree is too deep',
+    description:
+      'A class derives through too many project-defined base classes (framework bases excluded), a maintainability and fragility signal.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/class-coupled-to-too-many',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Class is coupled to too many other classes',
+    description:
+      'A type references an excessive number of distinct other types, a high-efferent-coupling signal that makes it fragile and hard to maintain.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/excessive-class-coupling',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Excessive class coupling',
+    description:
+      'A single method references an unusually large number of distinct types, indicating high coupling and low cohesion in that member.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/missing-public-argument-validation',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Missing null validation on public method argument',
+    description:
+      'A public method dereferences a reference-type parameter without a null guard, so callers get an opaque NullReferenceException instead of a clear ArgumentNullException.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/private-method-belongs-in-nested-class',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Private methods used only by a nested class should move into it',
+    description:
+      'A private method is called exclusively from one nested type and belongs there for cohesion.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/prefer-uri-over-string',
+    category: 'code',
+    domain: 'architecture',
+    name: 'System.Uri arguments should be used instead of strings',
+    description:
+      'A method accepts a URL as a string with no System.Uri overload, forcing ad-hoc parsing at every call site instead of a validated Uri contract.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]
