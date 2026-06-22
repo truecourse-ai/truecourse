@@ -122,9 +122,10 @@ export function compareEnum(input: EnumCompareInput): ContractDrift[] {
     }
     // `extra-value` (code has a value the spec omits) is only meaningful for an
     // EXACT declared value set. Synthesized code enums (sibling-id-literal,
-    // py-instance-registry, py-discriminated-union) are heuristic supersets that
-    // sweep in internal/alias/composed members a docs enum legitimately omits,
-    // so skip extra-value for them. Real declared enums still report extras.
+    // py-instance-registry, py-discriminated-union, py-selector-union) are
+    // heuristic supersets that sweep in internal/alias/composed members a docs
+    // enum legitimately omits, so skip extra-value for them. Real declared enums
+    // still report extras.
     for (const m of nameMatches) {
       if (isSynthesizedEnumShape(m.shape)) continue;
       const extra = m.values.filter((v) => !specNorm.has(normalizeValue(v)));
@@ -293,7 +294,8 @@ function isSynthesizedEnumShape(shape: ExtractedEnum['shape']): boolean {
     shape === 'sibling-id-literal' ||
     shape === 'py-instance-registry' ||
     shape === 'py-discriminated-union' ||
-    shape === 'py-constant-cluster'
+    shape === 'py-constant-cluster' ||
+    shape === 'py-selector-union'
   );
 }
 
