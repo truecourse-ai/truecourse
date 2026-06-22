@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// breaking the symmetry contract (a base instance and a derived instance will
 /// disagree on equality), so such classes should be sealed. We require T == the
 /// declaring type to avoid flagging IEquatable over an unrelated type. Needs the
-/// implemented-interface set with its type argument. S4035.
+/// implemented-interface set with its type argument.
 /// </summary>
 internal sealed class IEquatableClassNotSealed : ISemanticRule
 {

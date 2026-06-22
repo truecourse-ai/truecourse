@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// An interface that multiply-inherits two or more base interfaces which each declare
 /// a member with the same name (and neither inherits the other). Accessing that name
 /// through the derived interface is ambiguous and forces casts. Needs the resolved
-/// base-interface set and their members. S3444.
+/// base-interface set and their members.
 /// </summary>
 internal sealed class InterfaceCollidingBaseMembers : ISemanticRule
 {

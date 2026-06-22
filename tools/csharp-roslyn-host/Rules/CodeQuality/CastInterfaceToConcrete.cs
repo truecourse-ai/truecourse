@@ -8,7 +8,6 @@ namespace TrueCourse.RoslynHost;
 /// class/struct that implements it. Downcasting past the abstraction couples the
 /// caller to a specific implementation and defeats the point of the interface.
 /// Needs both the source's static type (an interface) and the target type's kind.
-/// S3215.
 /// </summary>
 internal sealed class CastInterfaceToConcrete : ISemanticRule
 {

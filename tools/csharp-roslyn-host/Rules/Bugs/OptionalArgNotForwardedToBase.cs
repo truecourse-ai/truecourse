@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// default rather than the caller's value — almost always a missed forward. We only flag
 /// when the base member has a same-named optional parameter that the base call omits and
 /// no argument otherwise occupies its position. Matching the override to its overridden
-/// member and reading the call's arguments needs the semantic model. S3466.
+/// member and reading the call's arguments needs the semantic model.
 /// </summary>
 internal sealed class OptionalArgNotForwardedToBase : ISemanticRule
 {

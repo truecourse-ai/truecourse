@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// another `OrderBy` / `OrderByDescending`. The second sort discards the first
 /// ordering entirely — `ThenBy` was almost certainly intended. Binding both calls
 /// to the LINQ extensions (so a user method named OrderBy is not flagged) is what
-/// makes this precise. S3169.
+/// makes this precise.
 /// </summary>
 internal sealed class MultipleOrderBy : ISemanticRule
 {

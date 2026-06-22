@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A user-defined operator overload with no corresponding named method (e.g.
 /// `op_Addition` without an `Add` method). Languages that do not support operator
 /// overloading can only call the named form, so omitting it makes the operation
-/// unreachable for them. Needs the type's full member set. S4069 / CA2225.
+/// unreachable for them. Needs the type's full member set. CA2225.
 /// </summary>
 internal sealed class OperatorWithoutNamedAlternative : ISemanticRule
 {

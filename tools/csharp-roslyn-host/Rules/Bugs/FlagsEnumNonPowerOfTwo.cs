@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// nor a combination of other declared single-bit members. Such a value overlaps other
 /// flags unexpectedly, so masking/testing produces wrong results. We allow composite
 /// members that are exactly the OR of known single-bit members; anything with stray
-/// bits OR a non-bit value is flagged. Needs resolved constant values. CA2217 / S2345.
+/// bits OR a non-bit value is flagged. Needs resolved constant values. CA2217.
 /// </summary>
 internal sealed class FlagsEnumNonPowerOfTwo : ISemanticRule
 {

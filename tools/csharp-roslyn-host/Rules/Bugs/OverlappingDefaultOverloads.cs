@@ -10,7 +10,6 @@ namespace TrueCourse.RoslynHost;
 /// callable against both signatures, and C# silently binds to the one WITHOUT the optional
 /// parameters — so the defaulted overload is unreachable for that arity, surprising the reader.
 /// Comparing parameter types and optionality across the overload set needs the semantic model.
-/// S3427.
 /// </summary>
 internal sealed class OverlappingDefaultOverloads : ISemanticRule
 {

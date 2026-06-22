@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// parameter overload. Each call then allocates a closure to carry the captured
 /// value. Both the receiver type (ConcurrentDictionary) and proving a real capture
 /// (an identifier resolving to a symbol declared outside the lambda) need the
-/// semantic model. S6612.
+/// semantic model.
 /// </summary>
 internal sealed class ConcurrentDictionaryCapturesArgument : ISemanticRule
 {

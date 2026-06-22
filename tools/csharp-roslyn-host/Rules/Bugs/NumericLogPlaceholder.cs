@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// produce meaningless property names ("0", "1") and read like a String.Format
 /// call that the author mistook for one — the values are still captured, just
 /// unusable for structured queries. Bound through the semantic model to confirm
-/// the call is an ILogger/LoggerExtensions logging method. S6677 / CA2253.
+/// the call is an ILogger/LoggerExtensions logging method. CA2253.
 /// </summary>
 internal sealed class NumericLogPlaceholder : ISemanticRule
 {

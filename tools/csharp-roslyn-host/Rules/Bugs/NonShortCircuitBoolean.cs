@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// short-circuit `&&` / `||` was almost certainly intended: the right operand
 /// always runs even when the left already decides the result. We require the right
 /// operand to be a method call (a genuine side-effect / skippable cost) so that
-/// deliberate branchless bitwise math is never flagged. S2178 / RCS1233.
+/// deliberate branchless bitwise math is never flagged. RCS1233.
 /// </summary>
 internal sealed class NonShortCircuitBoolean : ISemanticRule
 {

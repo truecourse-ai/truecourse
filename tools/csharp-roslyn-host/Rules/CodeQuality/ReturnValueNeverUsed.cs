@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// value is discarded at every call site in the compilation. Since the type is
 /// private the compilation sees all callers, so the method should return void.
 /// Needs whole-compilation symbol resolution to find every invocation and classify
-/// whether the result is consumed. S3241.
+/// whether the result is consumed.
 /// </summary>
 internal sealed class ReturnValueNeverUsed : ISemanticRule
 {

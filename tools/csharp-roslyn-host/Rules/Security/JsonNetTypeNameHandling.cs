@@ -13,7 +13,7 @@ namespace TrueCourse.RoslynHost;
 /// and read the assigned value as the Newtonsoft.Json.TypeNameHandling enum, so the
 /// rule never fires on an unrelated property or a same-named member of another type.
 /// A custom SerializationBinder set alongside is a recognized mitigation and suppresses
-/// the finding. S5773 / CWE-502.
+/// the finding. CWE-502.
 /// </summary>
 internal sealed class JsonNetTypeNameHandling : ISemanticRule
 {

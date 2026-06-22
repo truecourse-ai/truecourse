@@ -7,7 +7,6 @@ namespace TrueCourse.RoslynHost;
 /// `GetType()` invoked on a value whose static type is already System.Type. This
 /// returns the runtime type of the Type object itself (RuntimeType), not the type
 /// it represents — almost always a mistake. Needs the receiver's resolved type.
-/// S3443.
 /// </summary>
 internal sealed class GetTypeOnTypeInstance : ISemanticRule
 {

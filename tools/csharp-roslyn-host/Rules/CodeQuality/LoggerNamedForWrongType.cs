@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A logger created with `LoggerFactory.CreateLogger<T>()` (or `.CreateLogger(typeof(T))`)
 /// where T is not the type that contains the call. The generic/Type argument sets the
 /// log category, so logs land under another type's name. Needs the resolved type
-/// argument and the enclosing type. S3416.
+/// argument and the enclosing type.
 /// </summary>
 internal sealed class LoggerNamedForWrongType : ISemanticRule
 {

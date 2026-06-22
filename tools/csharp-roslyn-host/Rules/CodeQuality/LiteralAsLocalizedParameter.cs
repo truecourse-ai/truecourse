@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// text that should come from a resource, not be hardcoded. Hardcoding it ships an
 /// untranslated string. We resolve the target parameter and require an explicit
 /// `LocalizableAttribute(true)`, so only parameters the author opted into localizing
-/// are flagged. S4055.
+/// are flagged.
 /// </summary>
 internal sealed class LiteralAsLocalizedParameter : ISemanticRule
 {

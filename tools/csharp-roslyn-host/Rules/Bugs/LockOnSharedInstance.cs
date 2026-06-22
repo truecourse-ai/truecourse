@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// per-process interned Type), or a string literal/constant (interned across the whole
 /// AppDomain). Unrelated code can lock the same instance, so the lock can deadlock or be
 /// defeated. Distinguishing these targets — especially `typeof` and interned strings —
-/// needs the resolved type, hence the semantic model. S2551.
+/// needs the resolved type, hence the semantic model.
 /// </summary>
 internal sealed class LockOnSharedInstance : ISemanticRule
 {

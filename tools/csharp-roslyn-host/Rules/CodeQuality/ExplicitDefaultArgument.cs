@@ -7,7 +7,6 @@ namespace TrueCourse.RoslynHost;
 /// A call that explicitly passes a constant argument equal to the parameter's own
 /// declared default value, where omitting it would be clearer and identical. Needs
 /// the resolved parameter (to read its default) and the argument's constant value.
-/// S3254.
 /// </summary>
 internal sealed class ExplicitDefaultArgument : ISemanticRule
 {

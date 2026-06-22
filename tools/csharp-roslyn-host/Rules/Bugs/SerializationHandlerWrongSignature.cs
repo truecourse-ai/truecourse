@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// [OnDeserializing], [OnDeserialized]) whose signature does not match what the runtime
 /// requires: it must be an instance method returning void and taking a single StreamingContext
 /// parameter. If the signature is wrong, the runtime never invokes the handler — silent
-/// breakage. We resolve the attribute and inspect the method symbol's shape. S3927.
+/// breakage. We resolve the attribute and inspect the method symbol's shape.
 /// </summary>
 internal sealed class SerializationHandlerWrongSignature : ISemanticRule
 {

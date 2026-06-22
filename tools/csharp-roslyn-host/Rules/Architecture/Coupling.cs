@@ -6,7 +6,7 @@ namespace TrueCourse.RoslynHost;
 /// Shared efferent-coupling measurement: the set of distinct named types a syntax
 /// subtree refers to, excluding the analyzed type itself and the noise types that
 /// would inflate every count (void, the special framework primitives, anonymous /
-/// error types). Used by the class-coupling (S1200) and class/method-coupling
+/// error types). Used by the class-coupling and class/method-coupling
 /// (CA1506) rules so they measure coupling the same way.
 /// </summary>
 internal static class Coupling

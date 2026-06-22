@@ -13,7 +13,7 @@ namespace TrueCourse.RoslynHost;
 /// the rendered text instead of captured as named properties (and pay the format
 /// cost even when the level is disabled). Bound through the semantic model to confirm
 /// the call really is an ILogger/LoggerExtensions logging method and to locate the
-/// template parameter precisely. S2629 / CA2254.
+/// template parameter precisely. CA2254.
 /// </summary>
 internal sealed class NonStaticLogTemplate : ISemanticRule
 {

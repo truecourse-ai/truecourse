@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// but does not implement `IEquatable&lt;T&gt;`. Without the typed interface, equality
 /// goes through `object.Equals`, which boxes the argument and — for the default
 /// path — uses reflection-based `ValueType.Equals`. The type's resolved members and
-/// interface list are what make this precise. CA1066 / S3898.
+/// interface list are what make this precise. CA1066.
 ///
 /// (Scoped to structs that already override Equals to avoid flagging every trivial
 /// struct, which would be noisy. Record structs are skipped — the compiler

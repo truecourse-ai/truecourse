@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// An extension method whose receiver type lives in the SAME namespace as the
 /// extension class. Because the namespace is imported for the receiver type itself,
 /// the consumer can never opt out of the extension — it is always in scope. Needs
-/// the resolved `this` parameter type and both namespaces. S4226.
+/// the resolved `this` parameter type and both namespaces.
 /// </summary>
 internal sealed class ExtensionMethodNamespace : ISemanticRule
 {

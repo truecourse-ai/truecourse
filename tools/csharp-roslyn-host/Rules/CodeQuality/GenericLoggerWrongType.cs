@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A constructor parameter typed `ILogger<T>` where T is not the type declaring the
 /// constructor. The generic argument sets the log category, so a mismatched T routes
 /// the type's logs under the wrong category. Needs the resolved generic type argument
-/// and the enclosing type. S6672.
+/// and the enclosing type.
 /// </summary>
 internal sealed class GenericLoggerWrongType : ISemanticRule
 {

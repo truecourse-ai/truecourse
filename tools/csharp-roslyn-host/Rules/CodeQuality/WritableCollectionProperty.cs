@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// callers replace the entire collection (and bypass any add/remove invariants).
 /// Such properties should be getter-only. Needs the resolved property type to know it
 /// is a writable collection (ICollection&lt;T&gt;), and to exclude arrays and
-/// read-only collection interfaces. S4004 / CA2227.
+/// read-only collection interfaces. CA2227.
 /// </summary>
 internal sealed class WritableCollectionProperty : ISemanticRule
 {

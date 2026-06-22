@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// declaring type belongs in that nested type — keeping it on the outer class spreads
 /// the nested type's logic across two scopes. Deciding this needs the whole
 /// compilation's call sites resolved (a call can live in any analyzed file) plus the
-/// lexical nesting of each one. S3398.
+/// lexical nesting of each one.
 /// </summary>
 internal sealed class PrivateMethodBelongsInNestedClass : ISemanticRule
 {

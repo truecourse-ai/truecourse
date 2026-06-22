@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// Supplying it overrides the value the compiler would otherwise inject, which is
 /// almost always unintended. We resolve the call and map each supplied argument to its
 /// target parameter to see whether that parameter carries a caller-info attribute.
-/// Needs overload resolution and parameter attributes. S3236.
+/// Needs overload resolution and parameter attributes.
 /// </summary>
 internal sealed class ExplicitCallerInfoArgument : ISemanticRule
 {

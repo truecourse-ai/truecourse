@@ -8,8 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// type offers no overload accepting a `System.Uri` for it. Strings are parsed and
 /// validated ad hoc at every call site; a `Uri` overload makes the contract explicit
 /// and validated once. Confirming the parameter type is `string`, that the name truly
-/// denotes a URL, and that no `Uri` overload exists needs the semantic model. S4005 /
-/// CA2234.
+/// denotes a URL, and that no `Uri` overload exists needs the semantic model. CA2234.
 /// </summary>
 internal sealed class PreferUriOverString : ISemanticRule
 {

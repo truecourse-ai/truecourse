@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// dropped data. To stay free of false positives we only analyze calls where the format is a
 /// string literal and the arguments are passed individually (not via an `object[]` / params
 /// spread), and we resolve the bound method to find the format/args split. We need the
-/// semantic model to identify the format-parameter position and rule out a spread array. S2275.
+/// semantic model to identify the format-parameter position and rule out a spread array.
 /// </summary>
 internal sealed class FormatStringPlaceholderMismatch : ISemanticRule
 {

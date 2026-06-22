@@ -9,7 +9,6 @@ namespace TrueCourse.RoslynHost;
 /// clock makes time-dependent logic impossible to unit-test deterministically; an
 /// injectable clock abstraction (e.g. TimeProvider / IClock) is preferred. Needs the
 /// resolved property symbol to confirm the type and member, not just the syntax.
-/// S6354.
 /// </summary>
 internal sealed class NonTestableDateTimeProvider : ISemanticRule
 {

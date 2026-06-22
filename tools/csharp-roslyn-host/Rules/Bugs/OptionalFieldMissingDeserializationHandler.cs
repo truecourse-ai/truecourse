@@ -9,7 +9,6 @@ namespace TrueCourse.RoslynHost;
 /// older version that lacked the field, it is left at its default value with no chance
 /// to set a sensible one. We scan the type for any [OptionalField] field and the
 /// presence of a deserialization callback. Needs the resolved attributes on members.
-/// S3926.
 /// </summary>
 internal sealed class OptionalFieldMissingDeserializationHandler : ISemanticRule
 {

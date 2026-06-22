@@ -14,9 +14,7 @@ import { TS_LANGUAGES } from './_helpers.js'
 const ARGUMENT_MISMATCH_CODES = new Set<number>([2345, 2769, 2554, 2555])
 
 /**
- * Detect: Arguments to built-in functions that don't match documented types.
- * Corresponds to sonarjs S3782 (argument-type).
- * Checks first argument type against function parameter type for common built-ins.
+ * Detect: Arguments to built-in functions that don't match documented types. * Checks first argument type against function parameter type for common built-ins.
  */
 export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/argument-type-mismatch',

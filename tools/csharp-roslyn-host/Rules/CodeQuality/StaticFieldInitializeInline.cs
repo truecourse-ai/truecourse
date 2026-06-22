@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// `beforefieldinit`, relaxing initialization timing. The presence of an explicit
 /// static constructor blocks that optimization. Needs symbol resolution to match
 /// the assignment target to the field and to confirm the only write is in the cctor.
-/// S3963 / CA1810.
+/// CA1810.
 /// </summary>
 internal sealed class StaticFieldInitializeInline : ISemanticRule
 {

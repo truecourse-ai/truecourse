@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// usings, or nothing). An empty namespace is dead structure — it declares an
 /// organizing unit that organizes nothing. We confirm there is no declared type
 /// member anywhere beneath the block so a namespace that only wraps a sub-namespace
-/// holding types is not flagged. S3261.
+/// holding types is not flagged.
 /// </summary>
 internal sealed class EmptyNamespace : ISemanticRule
 {

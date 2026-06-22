@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A type that declares a strongly-typed `public bool Equals(T other)` (T == the
 /// declaring type) but does NOT implement `IEquatable<T>`. Generic collections and
 /// `EqualityComparer<T>.Default` look up the interface, not the loose method, so the
-/// typed equality is bypassed. Needs the interface set and the parameter type. S3897.
+/// typed equality is bypassed. Needs the interface set and the parameter type.
 /// </summary>
 internal sealed class EquatableWithoutIEquatable : ISemanticRule
 {

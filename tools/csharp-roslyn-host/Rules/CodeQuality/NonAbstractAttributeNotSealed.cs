@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A concrete (non-abstract) class deriving from System.Attribute that is not
 /// `sealed`. Attribute lookup is faster on sealed attributes, and attribute classes
 /// are almost never meant to be extended. Needs the base-type chain to confirm it is
-/// an Attribute. S4060.
+/// an Attribute.
 /// </summary>
 internal sealed class NonAbstractAttributeNotSealed : ISemanticRule
 {

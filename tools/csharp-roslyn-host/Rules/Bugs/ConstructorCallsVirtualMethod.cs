@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A constructor invokes a virtual/abstract member declared on its own (non-sealed)
 /// type. The most-derived override runs before that derived constructor has
 /// initialized its state, so the override observes default fields. Needs symbol
-/// resolution to know the invoked member is virtual and self-typed. S1699.
+/// resolution to know the invoked member is virtual and self-typed.
 /// </summary>
 internal sealed class ConstructorCallsVirtualMethod : ISemanticRule
 {

@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// result is negative, so the equality never holds and negative odd values slip
 /// through — a sign-handling bug. We require: signed integer modulus, compared against
 /// a non-zero integer constant with `==`/`!=`. Comparing against 0 is safe. Needs the
-/// operand type to confirm it is signed. S2197.
+/// operand type to confirm it is signed.
 /// </summary>
 internal sealed class ModulusDirectEquality : ISemanticRule
 {

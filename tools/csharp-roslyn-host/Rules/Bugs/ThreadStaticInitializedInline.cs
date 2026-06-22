@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A `[ThreadStatic]` field with an inline initializer. The initializer (run by the
 /// static constructor) executes only once, on the first thread to touch the type,
 /// so every OTHER thread sees the field at its default value. Needs the attribute
-/// resolved to System.ThreadStaticAttribute. S2996.
+/// resolved to System.ThreadStaticAttribute.
 /// </summary>
 internal sealed class ThreadStaticInitializedInline : ISemanticRule
 {

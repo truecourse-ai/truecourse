@@ -199,6 +199,7 @@ export { checkPyprojectToml } from './rules/bugs/pyproject-checker.js'
 
 export {
   runRoslynHost,
+  runRoslynWorkspace,
   resolveRoslynHostBinary,
   RoslynHostUnavailableError,
   type RoslynFile,

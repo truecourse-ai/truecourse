@@ -2346,9 +2346,10 @@ export function withLanguageSupport(rules: AnalysisRule[], visitors: CodeRuleVis
         continue
       }
 
-      if (rule.engine === 'roslyn-host') {
+      if (rule.engine === 'roslyn-host' || rule.engine === 'roslyn-workspace') {
         // Implemented in the C# Roslyn semantic host (no tree-sitter visitor).
         // These are C#-specific semantic defects, inexpressible elsewhere.
+        // `roslyn-workspace` additionally needs the real project loaded.
         support[language] =
           language === 'csharp'
             ? { status: 'supported' }

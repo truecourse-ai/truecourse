@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// enclosing type. Shadowing is a classic source of "assigned the wrong thing"
 /// bugs: a bare `value = x` can silently target the local instead of the member.
 /// Needs symbol resolution to confirm a same-named instance member actually
-/// exists on the containing type. S1117.
+/// exists on the containing type.
 /// </summary>
 internal sealed class LocalShadowsField : ISemanticRule
 {

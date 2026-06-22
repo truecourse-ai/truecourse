@@ -49,8 +49,9 @@ describe('rule language-support matrix', () => {
     const phantom: string[] = [];
     for (const rule of rules) {
       if (rule.category !== 'code' || rule.type !== 'deterministic') continue;
-      // roslyn-host rules are implemented by the C# semantic host, not a tree-sitter visitor
-      if (rule.engine === 'roslyn-host') continue;
+      // roslyn-host / roslyn-workspace rules are implemented by the C# semantic
+      // host (loose-text or MSBuildWorkspace), not a tree-sitter visitor
+      if (rule.engine === 'roslyn-host' || rule.engine === 'roslyn-workspace') continue;
       for (const language of ANALYSIS_LANGUAGES) {
         const entry = rule.languageSupport?.[language];
         if (!entry || (entry.status !== 'supported' && entry.status !== 'partial')) continue;

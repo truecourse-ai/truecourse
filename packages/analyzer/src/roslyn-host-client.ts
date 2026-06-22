@@ -64,23 +64,8 @@ interface HostResponse {
   error?: string
 }
 
-/**
- * Run the C# semantic rules over `files` via the Roslyn host.
- * @param rules optional allow-list of rule keys; omit to run all host rules.
- * @throws RoslynHostUnavailableError if the host is missing or can't start.
- */
-export function runRoslynHost(files: RoslynFile[], rules?: string[]): Promise<RoslynHostViolation[]> {
-  const bin = resolveRoslynHostBinary()
-  if (!bin) {
-    return Promise.reject(
-      new RoslynHostUnavailableError(
-        'C# semantic analysis requires the Roslyn host. Build it with ' +
-          '`dotnet build -c Release tools/csharp-roslyn-host`, or set ' +
-          `$${HOST_BINARY_ENV} to the built binary.`,
-      ),
-    )
-  }
-
+/** Spawn the host with one request line and resolve its single JSON response. */
+function invokeHost(bin: string, request: object): Promise<RoslynHostViolation[]> {
   return new Promise<RoslynHostViolation[]>((resolvePromise, reject) => {
     const child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
@@ -118,7 +103,50 @@ export function runRoslynHost(files: RoslynFile[], rules?: string[]): Promise<Ro
       resolvePromise(resp.violations ?? [])
     })
 
-    child.stdin.write(JSON.stringify({ op: 'analyze', files, rules }) + '\n')
+    child.stdin.write(JSON.stringify(request) + '\n')
     child.stdin.end()
   })
+}
+
+/**
+ * Run the project-aware C# semantic rules by opening a real `.csproj`/`.sln` via
+ * MSBuildWorkspace (full-fidelity references + project metadata). The project must
+ * be restored and buildable; if it can't be loaded the host returns an error and
+ * this rejects (no degraded result).
+ * @param projectPath absolute path to a .csproj or .sln
+ * @param rules optional allow-list of rule keys; omit to run all host rules.
+ * @throws RoslynHostUnavailableError if the host is missing or can't start.
+ */
+export function runRoslynWorkspace(projectPath: string, rules?: string[]): Promise<RoslynHostViolation[]> {
+  const bin = resolveRoslynHostBinary()
+  if (!bin) {
+    return Promise.reject(
+      new RoslynHostUnavailableError(
+        'C# semantic analysis requires the Roslyn host. Build it with ' +
+          '`dotnet build -c Release tools/csharp-roslyn-host`, or set ' +
+          `$${HOST_BINARY_ENV} to the built binary.`,
+      ),
+    )
+  }
+  return invokeHost(bin, { op: 'analyze-project', project: projectPath, rules })
+}
+
+/**
+ * Run the C# semantic rules over `files` via the Roslyn host.
+ * @param rules optional allow-list of rule keys; omit to run all host rules.
+ * @throws RoslynHostUnavailableError if the host is missing or can't start.
+ */
+export function runRoslynHost(files: RoslynFile[], rules?: string[]): Promise<RoslynHostViolation[]> {
+  const bin = resolveRoslynHostBinary()
+  if (!bin) {
+    return Promise.reject(
+      new RoslynHostUnavailableError(
+        'C# semantic analysis requires the Roslyn host. Build it with ' +
+          '`dotnet build -c Release tools/csharp-roslyn-host`, or set ' +
+          `$${HOST_BINARY_ENV} to the built binary.`,
+      ),
+    )
+  }
+
+  return invokeHost(bin, { op: 'analyze', files, rules })
 }

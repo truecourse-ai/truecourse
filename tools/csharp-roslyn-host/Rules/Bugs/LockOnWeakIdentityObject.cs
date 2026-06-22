@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// String, a Type (System.Type / reflection runtime types), MarshalByRefObject, ExecutionEngineException,
 /// OutOfMemoryException, StackOverflowException, or any MemberInfo/ParameterInfo. Such objects
 /// can be shared or marshalled, so the monitor a lock acquires is not exclusive. Identifying
-/// the static type and walking its base chain needs the semantic model. S3998/CA2002.
+/// the static type and walking its base chain needs the semantic model. CA2002.
 /// </summary>
 internal sealed class LockOnWeakIdentityObject : ISemanticRule
 {

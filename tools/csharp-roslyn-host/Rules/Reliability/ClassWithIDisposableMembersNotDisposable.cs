@@ -6,7 +6,7 @@ namespace TrueCourse.RoslynHost;
 /// <summary>
 /// A class that <i>owns</i> an IDisposable field — i.e. constructs the instance
 /// itself via <c>new</c> in the field initializer or a constructor — but does not
-/// implement IDisposable, so the held resource is never released. Mirrors S2931.
+/// implement IDisposable, so the held resource is never released.
 ///
 /// To stay false-positive free we require provable ownership: only fields assigned
 /// a freshly-constructed object are considered. Borrowed/injected disposables

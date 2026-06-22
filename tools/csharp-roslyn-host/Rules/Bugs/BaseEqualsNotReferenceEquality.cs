@@ -9,7 +9,6 @@ namespace TrueCourse.RoslynHost;
 /// the call and walk the base hierarchy: if the resolved Equals is declared on a type
 /// other than System.Object (i.e. a value-semantics override sits between here and
 /// object), the call cannot be an identity check. Needs override/base resolution.
-/// S3397.
 /// </summary>
 internal sealed class BaseEqualsNotReferenceEquality : ISemanticRule
 {

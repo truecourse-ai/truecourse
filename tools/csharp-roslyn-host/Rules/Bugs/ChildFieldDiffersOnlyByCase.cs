@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// base field ONLY by capitalization (e.g. base `Count` vs derived `count`). The two names
 /// read the same to a human, so one easily shadows the other and reads/writes go to the
 /// wrong member. Resolving the base-type chain and comparing field names case-insensitively
-/// needs the semantic model. S4025/CA1708.
+/// needs the semantic model. CA1708.
 /// </summary>
 internal sealed class ChildFieldDiffersOnlyByCase : ISemanticRule
 {

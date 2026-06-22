@@ -53,7 +53,7 @@ function usesInstanceState(body: SyntaxNode, instanceMembers: Set<string>): bool
 }
 
 /**
- * Mirrors Sonar S2325: only private/protected methods are flagged — public
+ * Only private/protected methods are flagged — public
  * methods on concrete classes are often kept non-static deliberately for DI
  * registration and mocking, which would be false positives.
  */

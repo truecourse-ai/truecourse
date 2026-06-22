@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// Subtraction (`-` or `-=`) applied to delegate operands. Multicast delegate removal
 /// matches the invocation list by sequence from the end, so subtracting a composite
 /// delegate rarely removes what the author expects, and `-=` on event-like fields can
-/// silently no-op. Needs the operand type to confirm it is a delegate. S3172.
+/// silently no-op. Needs the operand type to confirm it is a delegate.
 /// </summary>
 internal sealed class DelegateSubtraction : ISemanticRule
 {

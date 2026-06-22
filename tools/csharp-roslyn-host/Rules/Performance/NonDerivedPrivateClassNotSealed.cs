@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// outside this assembly, the absence of any subclass here proves nothing derives
 /// from it, so it can be `sealed` (a small devirtualization win and clearer intent).
 /// Scoped to private/file visibility so the single-compilation view is complete — an
-/// internal/public class could be subclassed in code we cannot see. CA1852 / S3260.
+/// internal/public class could be subclassed in code we cannot see. CA1852.
 /// </summary>
 internal sealed class NonDerivedPrivateClassNotSealed : ISemanticRule
 {

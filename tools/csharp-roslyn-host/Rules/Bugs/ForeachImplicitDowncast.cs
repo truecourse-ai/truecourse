@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// inserted silently by the language and throws InvalidCastException at runtime if any element
 /// is not actually of the narrower type. We compare the collection's element type to the
 /// declared loop type via the semantic model and only flag a genuine downcast (declared type
-/// derives from the element type), excluding `var`, identical types, and upcasts. S3217.
+/// derives from the element type), excluding `var`, identical types, and upcasts.
 /// </summary>
 internal sealed class ForeachImplicitDowncast : ISemanticRule
 {

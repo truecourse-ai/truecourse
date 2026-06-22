@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// Assigning a derived-element array to a base-element array reference. Arrays are
 /// covariant in C#, so this compiles, but a later store of a base instance throws
 /// ArrayTypeMismatchException at runtime. Needs the element types to compare the
-/// reference-type chain (struct arrays are invariant and never affected). S2330.
+/// reference-type chain (struct arrays are invariant and never affected).
 /// </summary>
 internal sealed class ArrayCovariance : ISemanticRule
 {

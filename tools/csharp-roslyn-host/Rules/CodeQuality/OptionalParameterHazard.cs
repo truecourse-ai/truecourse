@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// also interact confusingly with overload resolution across assembly boundaries. We
 /// resolve the declaring method's effective accessibility and flag only public /
 /// protected surface, leaving private helpers — where the hazard does not apply —
-/// alone. S2360.
+/// alone.
 /// </summary>
 internal sealed class OptionalParameterHazard : ISemanticRule
 {

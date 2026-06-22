@@ -674,9 +674,9 @@ class C { [DllImport("x")] static extern void Native([Out] StringBuilder buffer)
     })
   })
 
-  // ---- reference-equals-on-value-type (S2995) ----------------------------
-  describe('reference-equals-on-value-type', () => {
-    const K = 'bugs/deterministic/reference-equals-on-value-type'
+  // ---- referenceequals-on-value-type -------------------------------------
+  describe('referenceequals-on-value-type', () => {
+    const K = 'bugs/deterministic/referenceequals-on-value-type'
     it('flags ReferenceEquals on an int operand', async () => {
       const src = `class C { bool M(int a, int b) => object.ReferenceEquals(a, b); }`
       expect(await keys(src, K)).toContain(K)

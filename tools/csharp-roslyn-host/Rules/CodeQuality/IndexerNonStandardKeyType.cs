@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// or an integral type. `collection[someEnum]` or `collection[someCustomStruct]`
 /// reads like an array access but isn't, hiding intent that a named method would make
 /// explicit. We resolve the single key parameter's type and flag only clearly
-/// non-standard keys. S3876.
+/// non-standard keys.
 /// </summary>
 internal sealed class IndexerNonStandardKeyType : ISemanticRule
 {

@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// An override of GetHashCode reads a non-readonly instance field of the same type.
 /// If that field is mutated after the object is used as a dictionary/hashset key,
 /// the hash changes and the entry is lost. Needs symbol resolution to confirm the
-/// referenced symbol is a mutable field of the declaring type. S2328.
+/// referenced symbol is a mutable field of the declaring type.
 /// </summary>
 internal sealed class GetHashCodeUsesMutableField : ISemanticRule
 {

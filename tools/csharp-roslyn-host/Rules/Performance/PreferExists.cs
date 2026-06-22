@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// The LINQ `Any(predicate)` extension called on an array or `List&lt;T&gt;`, both
 /// of which expose their own `Exists(Predicate&lt;T&gt;)` that avoids the LINQ
 /// enumerator allocation. The receiver's resolved type is what distinguishes this
-/// from `Any` on an arbitrary `IEnumerable`. S6605.
+/// from `Any` on an arbitrary `IEnumerable`.
 /// </summary>
 internal sealed class PreferExists : ISemanticRule
 {

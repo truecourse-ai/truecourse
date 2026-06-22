@@ -8,11 +8,11 @@ namespace TrueCourse.RoslynHost;
 /// members — a high efferent-coupling signal. Such a type knows about too much of the
 /// system and is fragile to change. Resolving how many *distinct* types are touched
 /// (deduping generics, ignoring primitives and self-references) needs the semantic
-/// model. S1200.
+/// model.
 /// </summary>
 internal sealed class ClassCoupledToTooMany : ISemanticRule
 {
-    // SonarQube S1200 default coupling threshold is 20 distinct classes.
+    // The default coupling threshold is 20 distinct classes.
     private const int MaxDistinctTypes = 20;
 
     public string RuleKey => "architecture/deterministic/class-coupled-to-too-many";

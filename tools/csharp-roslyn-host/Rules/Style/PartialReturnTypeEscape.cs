@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// keep parsing unambiguously. We flag only an unescaped <c>partial</c> used in
 /// return-type position and confirm via the semantic model that it binds to a real
 /// named type (not the modifier), so legitimate partial-member declarations are
-/// never touched. S8380.
+/// never touched.
 /// </summary>
 internal sealed class PartialReturnTypeEscape : ISemanticRule
 {

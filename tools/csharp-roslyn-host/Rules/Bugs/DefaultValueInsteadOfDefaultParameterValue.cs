@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// [DefaultValue] (System.ComponentModel) is applied to a PARAMETER as if it set the
 /// parameter's default. It does not — only [DefaultParameterValue] (with [Optional]) does;
 /// [DefaultValue] is a designer/serialization hint and is ignored for call-site defaulting.
-/// We resolve the attribute on the parameter symbol to confirm the misuse. S3451.
+/// We resolve the attribute on the parameter symbol to confirm the misuse.
 /// </summary>
 internal sealed class DefaultValueInsteadOfDefaultParameterValue : ISemanticRule
 {

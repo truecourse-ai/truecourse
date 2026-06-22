@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A public, parameterless, non-static method named `Dispose` on a type that does
 /// NOT implement IDisposable. `using` and disposal-aware callers key off the
 /// interface, so this cleanup method is never invoked by them. Needs the
-/// interface-implementation set to confirm IDisposable is absent. S2953.
+/// interface-implementation set to confirm IDisposable is absent.
 /// </summary>
 internal sealed class DisposeNotImplementingIDisposable : ISemanticRule
 {

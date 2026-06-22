@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// or string.Compare without a StringComparison/CultureInfo. These give locale-dependent,
 /// non-portable results. We require the receiver/target to resolve to System.String and
 /// the culture-bearing overload to actually be the one being called (no comparison arg),
-/// so this needs the semantic model. S1449.
+/// so this needs the semantic model.
 /// </summary>
 internal sealed class CultureUnawareStringOperation : ISemanticRule
 {

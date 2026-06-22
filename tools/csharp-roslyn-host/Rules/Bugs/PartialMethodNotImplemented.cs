@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// implemented in any part of the type, so the compiler silently removes the declaration
 /// and every call to it — easy to read as "this hook runs" when it does not. We use the
 /// symbol's PartialImplementationPart to confirm no implementing body exists across all
-/// partial parts. S3251.
+/// partial parts.
 /// </summary>
 internal sealed class PartialMethodNotImplemented : ISemanticRule
 {

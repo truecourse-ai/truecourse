@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// behaviour — usually unintended for an extensible (unsealed) type. We require: the
 /// class is unsealed and non-static, the member is an explicit interface
 /// implementation, and the class exposes no public/protected member of the same name.
-/// Needs ExplicitInterfaceImplementations and the member set. S4039.
+/// Needs ExplicitInterfaceImplementations and the member set.
 /// </summary>
 internal sealed class InterfaceMethodNotCallableByDerived : ISemanticRule
 {

@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A static field initializer that reads another static field of the SAME type
 /// declared textually later. Static initializers run in declaration order, so the
 /// later field is still at its default when this one reads it — a silent
-/// wrong-value bug. Needs symbol resolution + declaration order. S3263.
+/// wrong-value bug. Needs symbol resolution + declaration order.
 /// </summary>
 internal sealed class StaticFieldInitializationOrder : ISemanticRule
 {

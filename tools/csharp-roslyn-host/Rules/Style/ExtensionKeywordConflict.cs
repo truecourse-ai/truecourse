@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// <c>extension</c> as a contextual keyword (extension blocks); an unescaped
 /// identifier of that name will collide and must be written <c>@extension</c>.
 /// We flag only declaration sites (types, members, parameters, locals) so a use of
-/// a correctly-escaped name elsewhere is unaffected. S8368.
+/// a correctly-escaped name elsewhere is unaffected.
 /// </summary>
 internal sealed class ExtensionKeywordConflict : ISemanticRule
 {

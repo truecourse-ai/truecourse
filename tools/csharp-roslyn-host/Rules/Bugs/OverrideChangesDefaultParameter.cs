@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// the base member does. Default values are baked in at the call site from the STATIC type
 /// of the reference, so `((Base)d).M()` and `d.M()` silently pass different defaults — a
 /// behavioral split that depends only on the declared type. Comparing the override's
-/// default constants against the overridden member's needs the semantic model. S1006.
+/// default constants against the overridden member's needs the semantic model.
 /// </summary>
 internal sealed class OverrideChangesDefaultParameter : ISemanticRule
 {

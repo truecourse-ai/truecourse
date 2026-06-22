@@ -11,7 +11,6 @@ namespace TrueCourse.RoslynHost;
 /// identifier (optionally with the `,nq` suffix or a trailing `()` call), and check the type's
 /// members through the inheritance chain via the semantic model. To stay false-positive-free we
 /// ignore any placeholder containing operators, indexers, or dotted paths we can't resolve cheaply.
-/// S4545.
 /// </summary>
 internal sealed class DebuggerDisplayInvalidMember : ISemanticRule
 {

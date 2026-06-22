@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// A local variable initialized with a compile-time constant and never reassigned,
 /// where its declared type permits `const`. Marking it `const` documents the intent
 /// and lets the compiler fold it. Needs constant-folding (GetConstantValue) plus a
-/// read/write scan to confirm it is never mutated. S3353 / RCS1118.
+/// read/write scan to confirm it is never mutated. RCS1118.
 /// </summary>
 internal sealed class LocalCouldBeConst : ISemanticRule
 {

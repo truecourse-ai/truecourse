@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// even though an overload that takes one exists. The result is then locale-dependent.
 /// The semantic model is needed to confirm the bound method omits an IFormatProvider
 /// parameter while a sibling overload supplies one — guaranteeing a valid fix and no FP
-/// on types that have no provider overload. CA1304/CA1305/S4056.
+/// on types that have no provider overload. CA1304/CA1305.
 /// </summary>
 internal sealed class MissingFormatProviderOverload : ISemanticRule
 {

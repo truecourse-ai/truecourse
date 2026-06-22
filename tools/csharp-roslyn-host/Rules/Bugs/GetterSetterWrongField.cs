@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// different one — a classic copy-paste bug where the stored value can never be
 /// read back. We only fire when both accessors touch exactly one instance field of
 /// the declaring type and those fields differ, which keeps us free of false
-/// positives on computed/validating accessors. S4275.
+/// positives on computed/validating accessors.
 /// </summary>
 internal sealed class GetterSetterWrongField : ISemanticRule
 {

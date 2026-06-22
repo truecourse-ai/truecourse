@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// a documented round-trip data-loss problem (the Turkish dotless-I), so the guidance is to
 /// normalize with ToUpperInvariant instead. We require the receiver to resolve to
 /// System.String (so this is a real string op, not some user method named ToLower) — hence
-/// the semantic model. S4040/CA1308.
+/// the semantic model. CA1308.
 /// </summary>
 internal sealed class NormalizeToLowerNotUpper : ISemanticRule
 {

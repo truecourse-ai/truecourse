@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// disagree (`CompareTo == 0` but `Equals == false`, or `&lt;`/`&gt;` not even compiling),
 /// which surprises sorting, dictionaries, and comparisons. Detecting the implemented
 /// interface and the presence of Equals / operator overloads needs the semantic model.
-/// S1210/CA1036.
+/// CA1036.
 /// </summary>
 internal sealed class IComparableWithoutEqualityOperators : ISemanticRule
 {

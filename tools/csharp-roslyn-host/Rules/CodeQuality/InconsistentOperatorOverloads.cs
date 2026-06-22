@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A type that overloads one operator of a complementary pair but not the other:
 /// `==` without `!=`, `&lt;` without `&gt;`, `&lt;=` without `&gt;=` (and vice
 /// versa). Roslyn's full member set is the reliable way to detect the gaps across
-/// partial declarations. S4050 / CA2224.
+/// partial declarations. CA2224.
 /// </summary>
 internal sealed class InconsistentOperatorOverloads : ISemanticRule
 {

@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A parameter carries [DefaultParameterValue] but NOT [Optional]. The default is then never
 /// actually applied — the parameter remains required, so the value is dead metadata. We
 /// resolve the attributes on the parameter symbol (both live in
-/// System.Runtime.InteropServices) to confirm the pairing is broken. S3450.
+/// System.Runtime.InteropServices) to confirm the pairing is broken.
 /// </summary>
 internal sealed class DefaultParameterValueWithoutOptional : ISemanticRule
 {

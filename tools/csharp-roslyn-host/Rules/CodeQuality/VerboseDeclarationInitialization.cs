@@ -12,7 +12,7 @@ namespace TrueCourse.RoslynHost;
 /// object-creation type (resolved through the semantic model), and skip `var`,
 /// already-target-typed `new()`, and any case where the two types differ — so a
 /// declaration whose static type is a base/interface of the created type is never
-/// flagged. S3257.
+/// flagged.
 /// </summary>
 internal sealed class VerboseDeclarationInitialization : ISemanticRule
 {

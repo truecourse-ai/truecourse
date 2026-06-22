@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// forces awkward fully qualified references and ambiguous resolution. We collect the
 /// simple names of all namespaces declared in this compilation and flag a type that
 /// shares one. Limiting the namespace set to the compilation's own (rather than every
-/// referenced assembly's namespace) keeps this free of false positives. S4041 / CA1724.
+/// referenced assembly's namespace) keeps this free of false positives. CA1724.
 /// </summary>
 internal sealed class TypeNameMatchesNamespace : ISemanticRule
 {

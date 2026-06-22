@@ -7,7 +7,6 @@ namespace TrueCourse.RoslynHost;
 /// An explicit array-creation expression passed as the final argument to a `params`
 /// parameter, where the elements could be passed inline. Needs the resolved target
 /// method to know the last parameter is `params` and that the argument lands there.
-/// S3878.
 /// </summary>
 internal sealed class ArrayForParamsArgument : ISemanticRule
 {

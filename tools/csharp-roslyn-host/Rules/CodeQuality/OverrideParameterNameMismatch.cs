@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// base declaration. Named-argument calls bind to the parameter names of the static
 /// type, so a renamed override silently breaks `base.Method(x: ...)` callers and
 /// confuses readers comparing the two. We resolve the overridden/implemented method
-/// and compare parameter names position-by-position. S927 / CA1725.
+/// and compare parameter names position-by-position. CA1725.
 /// </summary>
 internal sealed class OverrideParameterNameMismatch : ISemanticRule
 {

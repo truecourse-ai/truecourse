@@ -3,7 +3,7 @@ import { makeViolation } from '../../../types.js'
 
 /**
  * Detects CORSMiddleware added before other middlewares in FastAPI.
- * S8414: CORSMiddleware should be added last in the middleware chain.
+ * CORSMiddleware should be added last in the middleware chain.
  *
  * Pattern: app.add_middleware(CORSMiddleware, ...) appears before other
  * app.add_middleware() calls.

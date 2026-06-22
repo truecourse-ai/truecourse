@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// argument, even though an overload that takes one exists. The default culture sensitivity
 /// is then implicit and surprising. We confirm via the semantic model that (a) the bound
 /// method is on System.String, (b) no StringComparison is already supplied, and (c) a
-/// sibling overload taking StringComparison exists — so the fix is real. CA1307/CA1309/CA1310/S4058.
+/// sibling overload taking StringComparison exists — so the fix is real. CA1307/CA1309/CA1310.
 /// </summary>
 internal sealed class MissingStringComparisonOverload : ISemanticRule
 {

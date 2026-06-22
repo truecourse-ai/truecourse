@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A property that declares a setter but no getter. A write-only property is
 /// surprising — callers can store a value but never observe it — and usually a
 /// method (e.g. SetX) would communicate intent better. Needs the resolved
-/// property symbol to confirm the accessor shape. S2376 / CA1044.
+/// property symbol to confirm the accessor shape. CA1044.
 /// </summary>
 internal sealed class WriteOnlyProperty : ISemanticRule
 {

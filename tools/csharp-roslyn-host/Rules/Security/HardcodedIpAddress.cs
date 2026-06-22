@@ -13,7 +13,7 @@ namespace TrueCourse.RoslynHost;
 /// the literal is a string (not, say, an interpolation fragment), but the decision
 /// is the parsed address itself. Loopback, link-local, unspecified, multicast,
 /// documentation and other non-routable ranges are excluded to stay false-positive
-/// free — those are never an environment-coupling concern. S1313.
+/// free — those are never an environment-coupling concern.
 /// </summary>
 internal sealed class HardcodedIpAddress : ISemanticRule
 {

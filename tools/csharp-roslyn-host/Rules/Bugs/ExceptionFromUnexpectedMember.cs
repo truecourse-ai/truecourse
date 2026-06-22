@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// these is catastrophic (e.g. a finalizer crash terminates the process). We exclude
 /// re-throws inside catch blocks (legitimate) and argument-validation throws are part
 /// of the call contract for some members but not these. Needs the resolved member
-/// symbol to classify it. S3877 / CA1065.
+/// symbol to classify it. CA1065.
 /// </summary>
 internal sealed class ExceptionFromUnexpectedMember : ISemanticRule
 {

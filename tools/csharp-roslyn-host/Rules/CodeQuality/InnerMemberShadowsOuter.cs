@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// type. Inside the nested type the name resolves to the nested member, silently
 /// hiding the outer static — a confusing surprise for readers who expect the outer
 /// one. Needs symbol resolution to enumerate the enclosing type's static members and
-/// compare against the nested type's declared members. S3218.
+/// compare against the nested type's declared members.
 /// </summary>
 internal sealed class InnerMemberShadowsOuter : ISemanticRule
 {

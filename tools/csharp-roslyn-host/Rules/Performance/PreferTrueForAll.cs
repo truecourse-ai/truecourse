@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// The LINQ `All(predicate)` extension called on an array or `List&lt;T&gt;`, both
 /// of which expose their own `TrueForAll(Predicate&lt;T&gt;)` that avoids the LINQ
 /// enumerator allocation. Receiver type resolution distinguishes this from `All`
-/// on an arbitrary `IEnumerable`. S6603.
+/// on an arbitrary `IEnumerable`.
 /// </summary>
 internal sealed class PreferTrueForAll : ISemanticRule
 {

@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// method did NOT have it (or vice-versa). `params` is honored from the static type at the
 /// call site, so callers through the base reference cannot use the variadic form even though
 /// callers through the derived type can — behavior depends on the static type. Comparing the
-/// override's `params` flag to the base member's needs the resolved overridden symbol. S3600.
+/// override's `params` flag to the base member's needs the resolved overridden symbol.
 /// </summary>
 internal sealed class ParamsIntroducedOnOverride : ISemanticRule
 {

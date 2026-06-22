@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// `GetObjectData(SerializationInfo, StreamingContext)` method, and/or the deserialization
 /// constructor `(SerializationInfo, StreamingContext)`. Without both, the type does not
 /// round-trip through BinaryFormatter-style serialization. We confirm the interface is
-/// implemented and look for the two members via the semantic model. S3925/CA2229/CA2237.
+/// implemented and look for the two members via the semantic model. CA2229/CA2237.
 /// </summary>
 internal sealed class ISerializableIncorrect : ISemanticRule
 {

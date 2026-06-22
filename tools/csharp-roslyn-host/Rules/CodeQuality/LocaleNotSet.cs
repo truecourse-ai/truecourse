@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// sorting/filtering behavior follows the ambient culture and varies by environment.
 /// We resolve the constructed type and, for object-initializer creations, check
 /// whether `Locale` is assigned; a bare `new DataTable()` with no initializer is the
-/// clear offender. S4057.
+/// clear offender.
 /// </summary>
 internal sealed class LocaleNotSet : ISemanticRule
 {

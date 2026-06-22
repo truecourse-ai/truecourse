@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// The argument-less LINQ `First()` / `Last()` or `ElementAt(i)` extension called
 /// on an indexable receiver (an array or a type implementing `IList&lt;T&gt;`),
 /// where direct indexing — `xs[0]`, `xs[^1]`, `xs[i]` — avoids enumeration. The
-/// receiver's resolved type is what proves indexing is available. S6608.
+/// receiver's resolved type is what proves indexing is available.
 /// </summary>
 internal sealed class PreferIndexingOverLinq : ISemanticRule
 {

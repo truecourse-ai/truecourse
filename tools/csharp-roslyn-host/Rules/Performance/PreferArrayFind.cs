@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// `List&lt;T&gt;`, both of which expose their own `Find` (Array.Find / List.Find)
 /// that returns the same result without the LINQ enumerator allocation. The
 /// receiver's resolved type is what separates this from `FirstOrDefault` on an
-/// arbitrary `IEnumerable`, where no `Find` exists. S6602.
+/// arbitrary `IEnumerable`, where no `Find` exists.
 /// </summary>
 internal sealed class PreferArrayFind : ISemanticRule
 {

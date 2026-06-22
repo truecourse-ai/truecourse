@@ -11,7 +11,7 @@ namespace TrueCourse.RoslynHost;
 /// (e.g. `All = A | B`) nevertheless has a non-zero value that is not a single bit —
 /// the hallmark of the sequential default. Members whose initializer is a `|`/`+`
 /// combination of other flags are intentional and exempt. Needs resolved member
-/// constant values plus the initializer syntax. S4070.
+/// constant values plus the initializer syntax.
 /// </summary>
 internal sealed class NonFlagsEnumWithFlagsAttribute : ISemanticRule
 {

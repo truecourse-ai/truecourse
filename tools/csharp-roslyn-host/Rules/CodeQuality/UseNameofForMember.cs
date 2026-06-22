@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// whose text matches a parameter of the enclosing method. `nameof(param)` stays in
 /// sync across renames; the literal silently rots. Needs symbol resolution to (a)
 /// identify the exception's paramName parameter position and (b) confirm a parameter
-/// with that exact name is actually in scope. S2302 / CA1507 / IDE0280.
+/// with that exact name is actually in scope. CA1507 / IDE0280.
 /// </summary>
 internal sealed class UseNameofForMember : ISemanticRule
 {

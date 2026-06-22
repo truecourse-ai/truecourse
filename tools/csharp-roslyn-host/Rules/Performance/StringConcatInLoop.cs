@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// `s += ...` where `s` is a string, inside a loop body. Strings are immutable, so
 /// each `+=` allocates a new string and copies the accumulated text — O(n^2) over
 /// the loop. `StringBuilder` accumulates in place. The compound-assignment target's
-/// resolved type (string) is what separates this from numeric `+=`. S1643.
+/// resolved type (string) is what separates this from numeric `+=`.
 /// </summary>
 internal sealed class StringConcatInLoop : ISemanticRule
 {

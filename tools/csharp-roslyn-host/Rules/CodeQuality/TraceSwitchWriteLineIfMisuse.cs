@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// boolean `TraceError`/`TraceWarning`/`TraceInfo`/`TraceVerbose` properties for this
 /// purpose; comparing `Level` by hand double-evaluates the level and is error-prone.
 /// We resolve the call to `System.Diagnostics.Trace.WriteLineIf` and inspect the first
-/// argument for a `TraceSwitch`-typed `Level` comparison. S6675.
+/// argument for a `TraceSwitch`-typed `Level` comparison.
 /// </summary>
 internal sealed class TraceSwitchWriteLineIfMisuse : ISemanticRule
 {

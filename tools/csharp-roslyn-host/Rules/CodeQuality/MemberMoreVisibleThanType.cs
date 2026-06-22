@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// accessibility is capped by the containing type, so the broader modifier is
 /// misleading — readers think the member is part of the public surface when it
 /// cannot be. Needs the resolved declared accessibility of both member and type
-/// (which folds in containment). S3059.
+/// (which folds in containment).
 /// </summary>
 internal sealed class MemberMoreVisibleThanType : ISemanticRule
 {

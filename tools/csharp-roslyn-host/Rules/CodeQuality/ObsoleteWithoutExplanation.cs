@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// An `[Obsolete]` attribute applied without a message argument. The message is the
 /// only place to tell callers what to use instead; an empty `[Obsolete]` leaves them
 /// guessing. Needs the resolved attribute type to confirm it is
-/// System.ObsoleteAttribute (rather than a same-named user attribute). S1123.
+/// System.ObsoleteAttribute (rather than a same-named user attribute).
 /// </summary>
 internal sealed class ObsoleteWithoutExplanation : ISemanticRule
 {

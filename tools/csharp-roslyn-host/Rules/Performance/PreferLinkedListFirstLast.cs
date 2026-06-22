@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// The argument-less LINQ `First()` / `Last()` extension called on a
 /// `LinkedList&lt;T&gt;`, which exposes O(1) `First` / `Last` properties. The LINQ
 /// extensions walk the list; the properties are direct. Receiver type resolution
-/// (the concrete LinkedList type) is what makes this safe. S6613.
+/// (the concrete LinkedList type) is what makes this safe.
 /// </summary>
 internal sealed class PreferLinkedListFirstLast : ISemanticRule
 {

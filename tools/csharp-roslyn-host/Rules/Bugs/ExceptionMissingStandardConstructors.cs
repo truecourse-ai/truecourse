@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// (string message, Exception inner). Callers and frameworks (serialization,
 /// re-wrapping) expect these, so the omission limits usability. We only consider
 /// public/accessible exception classes and require all three. Needs base-type
-/// resolution and the declared constructor set. CA1032 / S4027.
+/// resolution and the declared constructor set. CA1032.
 /// </summary>
 internal sealed class ExceptionMissingStandardConstructors : ISemanticRule
 {

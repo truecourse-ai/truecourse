@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// constructor body. The receiving code gets a reference to a partially-initialized
 /// instance (fields after the call site, and subclass fields, are still default).
 /// Needs symbol resolution to confirm the call escapes to a method that is not the
-/// type's own private helper. S3366.
+/// type's own private helper.
 /// </summary>
 internal sealed class ThisEscapesConstructor : ISemanticRule
 {

@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// The argument-less LINQ `Min()` / `Max()` extension called on a
 /// `SortedSet&lt;T&gt;`, which exposes O(1) `Min` / `Max` properties (the set is
 /// kept ordered). The LINQ extensions scan the whole set. Receiver type resolution
-/// (the concrete SortedSet type) is what makes this safe. S6609.
+/// (the concrete SortedSet type) is what makes this safe.
 /// </summary>
 internal sealed class PreferSetMinMaxProperty : ISemanticRule
 {

@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// Bitwise OR / AND / XOR applied to operands of an enum type that is NOT marked
 /// [Flags]. Combining or masking the members of a plain enum yields a value with
 /// no declared member — a logic error or a missing attribute. Needs the resolved
-/// operand type plus its attributes. S3265 / RCS1130.
+/// operand type plus its attributes. RCS1130.
 /// </summary>
 internal sealed class BitwiseOnNonFlagsEnum : ISemanticRule
 {

@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// `lock` taken on a non-readonly instance/static field. Because the field can be
 /// reassigned, two threads may lock different object instances and the mutual
 /// exclusion is silently defeated. Needs symbol resolution to confirm the lock
-/// target is a writable field. S2445.
+/// target is a writable field.
 /// </summary>
 internal sealed class LockOnNonReadonlyField : ISemanticRule
 {

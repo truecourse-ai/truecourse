@@ -636,18 +636,6 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     engine: 'roslyn-host',
   },
   {
-    key: 'bugs/deterministic/reference-equals-on-value-type',
-    category: 'code',
-    domain: 'bugs',
-    name: 'ReferenceEquals used on value types',
-    description:
-      'object.ReferenceEquals is called with a value-type operand, which is boxed into a distinct object, so the call always returns false even for equal values.',
-    enabled: true,
-    severity: 'medium',
-    type: 'deterministic',
-    engine: 'roslyn-host',
-  },
-  {
     key: 'bugs/deterministic/switch-expression-missing-cases',
     category: 'code',
     domain: 'bugs',

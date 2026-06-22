@@ -9,11 +9,11 @@ namespace TrueCourse.RoslynHost;
 /// counts every ancestor including framework types), this counts only base classes
 /// declared in the analyzed source, so deriving deeply from a framework base (e.g. a
 /// long WPF/ASP.NET chain) is not penalized while a home-grown tower is. Needs the
-/// semantic model to walk resolved base types and inspect their declaring source. S110.
+/// semantic model to walk resolved base types and inspect their declaring source.
 /// </summary>
 internal sealed class DeepInheritanceTree : ISemanticRule
 {
-    // S110 default maximumDepth is 5: flag at 6+ source-authored base classes.
+    // The default maximumDepth is 5: flag at 6+ source-authored base classes.
     private const int MaxDepth = 5;
 
     public string RuleKey => "architecture/deterministic/deep-inheritance-tree";

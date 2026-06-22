@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// NullReferenceException deep inside the method instead of a clear
 /// ArgumentNullException at the boundary. Needs the semantic model to resolve the
 /// dereferenced symbol back to a by-value reference-type parameter and to confirm no
-/// guard exists. S3900 / CA1062.
+/// guard exists. CA1062.
 /// </summary>
 internal sealed class MissingPublicArgumentValidation : ISemanticRule
 {

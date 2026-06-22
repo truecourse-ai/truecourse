@@ -10,7 +10,7 @@ namespace TrueCourse.RoslynHost;
 /// method. Callers holding a base reference still see the wider access, so the substitution
 /// contract is broken and which body runs depends on the static type. We resolve the hidden
 /// base member through the type chain and compare accessibility, which needs the semantic
-/// model. S4015.
+/// model.
 /// </summary>
 internal sealed class InheritedMemberVisibilityDecreased : ISemanticRule
 {

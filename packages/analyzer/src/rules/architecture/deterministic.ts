@@ -339,6 +339,18 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     engine: 'roslyn-host',
   },
   {
+    key: 'architecture/deterministic/namespace-folder-mismatch',
+    category: 'code',
+    domain: 'architecture',
+    name: "Namespace does not match the file's folder path",
+    description:
+      "A type's namespace does not match its file's location under the project root, breaking the conventional namespace-to-directory mapping and making types hard to locate.",
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-workspace',
+  },
+  {
     key: 'architecture/deterministic/missing-public-argument-validation',
     category: 'code',
     domain: 'architecture',

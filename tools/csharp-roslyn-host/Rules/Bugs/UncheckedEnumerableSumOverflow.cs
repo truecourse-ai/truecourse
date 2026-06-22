@@ -8,7 +8,7 @@ namespace TrueCourse.RoslynHost;
 /// itself does overflow-checked addition by design; wrapping it in `unchecked` (or compiling
 /// with overflow checks off and an explicit `unchecked` block) silently disables that, so an
 /// overflow wraps to a wrong total instead of throwing. We confirm the invocation binds to
-/// System.Linq.Enumerable.Sum and sits in an unchecked expression/statement. S2291.
+/// System.Linq.Enumerable.Sum and sits in an unchecked expression/statement.
 /// </summary>
 internal sealed class UncheckedEnumerableSumOverflow : ISemanticRule
 {

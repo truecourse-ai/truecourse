@@ -9,9 +9,9 @@ namespace TrueCourse.RoslynHost;
 /// A structured-logging call (Microsoft.Extensions.Logging ILogger.Log*) whose
 /// message-template literal contains a named placeholder that is not PascalCase, e.g.
 /// `"User {userId} signed in"`. Structured-logging conventions (and the analyzers
-/// CA1727 / S6678) expect PascalCase property names so the captured fields are
+/// CA1727) expect PascalCase property names so the captured fields are
 /// consistent. Needs symbol resolution to confirm the call is an ILogger logging
-/// method and to find the message-template argument. S6678 / CA1727.
+/// method and to find the message-template argument. CA1727.
 /// </summary>
 internal sealed class LogPlaceholderNotPascalCase : ISemanticRule
 {

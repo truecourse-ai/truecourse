@@ -7,7 +7,7 @@ namespace TrueCourse.RoslynHost;
 /// A derived method whose signature matches an accessible base method but carries
 /// neither `override` nor `new`. The compiler emits a warning and silently hides
 /// the base member, so calls through a base reference dispatch to the base body —
-/// a real dispatch surprise. Needs the base-type chain and overload comparison. S4019/CA1061.
+/// a real dispatch surprise. Needs the base-type chain and overload comparison. CA1061.
 /// </summary>
 internal sealed class BaseMethodHidden : ISemanticRule
 {

@@ -9,7 +9,7 @@ namespace TrueCourse.RoslynHost;
 /// Declaring it `out` would let callers assign `IReader&lt;Derived&gt;` to
 /// `IReader&lt;Base&gt;`. We analyze every member of the interface, classify each
 /// occurrence of the type parameter as input or output, and flag only when it appears
-/// exclusively as output (the safe, unambiguous covariance case). S3246.
+/// exclusively as output (the safe, unambiguous covariance case).
 /// </summary>
 internal sealed class MissingGenericVariance : ISemanticRule
 {
