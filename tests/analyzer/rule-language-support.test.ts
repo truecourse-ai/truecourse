@@ -107,11 +107,10 @@ describe('rule language-support matrix', () => {
       const total = counts.supported + counts.partial + counts['not-applicable'] + counts.unsupported;
       expect(total).toBe(rules.length);
     }
-    // Every language has real coverage; C# trails until its visitor port lands
+    // Every language has real coverage. C# now leads after the full tree-sitter
+    // visitor port plus the Roslyn semantic-host rules.
     expect(summary.javascript.supported).toBeGreaterThan(0);
     expect(summary.python.supported).toBeGreaterThan(0);
     expect(summary.csharp.supported).toBeGreaterThan(0);
-    expect(summary.csharp.supported).toBeLessThanOrEqual(summary.javascript.supported);
-    expect(summary.csharp.supported).toBeLessThanOrEqual(summary.python.supported);
   });
 });
