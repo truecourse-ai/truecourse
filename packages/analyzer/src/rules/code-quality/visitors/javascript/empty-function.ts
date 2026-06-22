@@ -27,6 +27,8 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
     //  - JSX attribute value — `onClick={() => {}}` placeholder
     //  - return value of another function — `return () => {}` no-op
     //  - default in `||` / `??` fallback — `cb || (() => {})`
+    //  - object-property value — `{ cleanup: async () => {} }` provides a
+    //    deliberate no-op callable for an interface/config slot
     if (node.type === 'arrow_function') {
       let parent = node.parent
       // Look through parentheses, e.g. `(() => {})` in `x || (() => {})`
@@ -34,6 +36,7 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
       if (parent?.type === 'arguments') return null
       if (parent?.type === 'jsx_expression' || parent?.type === 'jsx_attribute') return null
       if (parent?.type === 'return_statement') return null
+      if (parent?.type === 'pair') return null
       if (parent?.type === 'binary_expression') {
         const op = parent.childForFieldName('operator')
         if (op?.text === '||' || op?.text === '??') return null

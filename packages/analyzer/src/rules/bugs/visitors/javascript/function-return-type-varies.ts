@@ -11,13 +11,18 @@ import { TS_LANGUAGES } from './_helpers.js'
 
 /** Normalize TypeScript literal types to their base types */
 function normalizeType(typeStr: string): string {
+  // `T & {}` is the literal-preserving widening idiom: it keeps editor
+  // autocomplete for known members while still accepting any `T` (e.g.
+  // `"a" | "b" | (string & {})`). It is semantically the base type `T`, so
+  // strip the empty-object intersection before comparing return types.
+  let t = typeStr.replace(/\s*&\s*\{\s*\}/g, '').trim()
   // String literal types: "hello", 'world' → string
-  if (/^["']/.test(typeStr)) return 'string'
+  if (/^["']/.test(t)) return 'string'
   // Number literal types: 42, 3.14 → number
-  if (/^-?\d/.test(typeStr)) return 'number'
+  if (/^-?\d/.test(t)) return 'number'
   // Boolean literal types
-  if (typeStr === 'true' || typeStr === 'false') return 'boolean'
-  return typeStr
+  if (t === 'true' || t === 'false') return 'boolean'
+  return t
 }
 
 /**
