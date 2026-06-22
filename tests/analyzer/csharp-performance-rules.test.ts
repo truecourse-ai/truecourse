@@ -1099,3 +1099,1227 @@ public class WhitespaceNormalizer
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/explicit-gc-collect
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/explicit-gc-collect (C#)', () => {
+  it('flags an explicit GC.Collect() call', () => {
+    const found = matches(`using System;
+
+namespace App.Maintenance;
+
+public class MemoryReclaimer
+{
+    public void Reclaim()
+    {
+        GC.Collect();
+    }
+}
+`, 'explicit-gc-collect')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a Collect method on an unrelated object', () => {
+    const found = matches(`namespace App.Sampling;
+
+public class TraceSampler
+{
+    public void Run(SampleBag bag)
+    {
+        bag.Collect();
+    }
+}
+`, 'explicit-gc-collect')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/get-executing-assembly
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/get-executing-assembly (C#)', () => {
+  it('flags Assembly.GetExecutingAssembly()', () => {
+    const found = matches(`using System.Reflection;
+
+namespace App.Plugins;
+
+public class ManifestReader
+{
+    public Assembly Current()
+    {
+        return Assembly.GetExecutingAssembly();
+    }
+}
+`, 'get-executing-assembly')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag typeof(T).Assembly', () => {
+    const found = matches(`using System.Reflection;
+
+namespace App.Plugins;
+
+public class ManifestReader
+{
+    public Assembly Current()
+    {
+        return typeof(ManifestReader).Assembly;
+    }
+}
+`, 'get-executing-assembly')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/zero-length-array-allocation
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/zero-length-array-allocation (C#)', () => {
+  it('flags new T[0]', () => {
+    const found = matches(`namespace App.Buffers;
+
+public class EmptyBatch
+{
+    public int[] None()
+    {
+        return new int[0];
+    }
+}
+`, 'zero-length-array-allocation')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a sized array allocation', () => {
+    const found = matches(`namespace App.Buffers;
+
+public class Batch
+{
+    public int[] Of(int size)
+    {
+        return new int[size];
+    }
+}
+`, 'zero-length-array-allocation')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/multidimensional-array
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/multidimensional-array (C#)', () => {
+  it('flags a rectangular multidimensional array type', () => {
+    const found = matches(`namespace App.Grids;
+
+public class Board
+{
+    private readonly int[,] _cells = new int[8, 8];
+}
+`, 'multidimensional-array')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a jagged array', () => {
+    const found = matches(`namespace App.Grids;
+
+public class Rows
+{
+    private readonly int[][] _data = new int[8][];
+}
+`, 'multidimensional-array')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/whenall-single-task
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/whenall-single-task (C#)', () => {
+  it('flags Task.WhenAll with a single task', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace App.Jobs;
+
+public class Runner
+{
+    public async Task RunAsync()
+    {
+        await Task.WhenAll(StepAsync());
+    }
+
+    private Task StepAsync() => Task.CompletedTask;
+}
+`, 'whenall-single-task')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Task.WhenAll with multiple tasks', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace App.Jobs;
+
+public class Runner
+{
+    public async Task RunAsync()
+    {
+        await Task.WhenAll(FirstAsync(), SecondAsync());
+    }
+
+    private Task FirstAsync() => Task.CompletedTask;
+    private Task SecondAsync() => Task.CompletedTask;
+}
+`, 'whenall-single-task')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/waitall-single-task
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/waitall-single-task (C#)', () => {
+  it('flags Task.WaitAll with a single task', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace App.Jobs;
+
+public class Waiter
+{
+    public void Run()
+    {
+        Task.WaitAll(StepAsync());
+    }
+
+    private Task StepAsync() => Task.CompletedTask;
+}
+`, 'waitall-single-task')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Task.WaitAll with multiple tasks', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace App.Jobs;
+
+public class Waiter
+{
+    public void Run()
+    {
+        Task.WaitAll(FirstAsync(), SecondAsync());
+    }
+
+    private Task FirstAsync() => Task.CompletedTask;
+    private Task SecondAsync() => Task.CompletedTask;
+}
+`, 'waitall-single-task')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/use-currentmanagedthreadid
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/use-currentmanagedthreadid (C#)', () => {
+  it('flags Thread.CurrentThread.ManagedThreadId', () => {
+    const found = matches(`using System.Threading;
+
+namespace App.Diagnostics;
+
+public class ThreadTag
+{
+    public int Current()
+    {
+        return Thread.CurrentThread.ManagedThreadId;
+    }
+}
+`, 'use-currentmanagedthreadid')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Environment.CurrentManagedThreadId', () => {
+    const found = matches(`using System;
+
+namespace App.Diagnostics;
+
+public class ThreadTag
+{
+    public int Current()
+    {
+        return Environment.CurrentManagedThreadId;
+    }
+}
+`, 'use-currentmanagedthreadid')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/use-environment-processid
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/use-environment-processid (C#)', () => {
+  it('flags Process.GetCurrentProcess().Id', () => {
+    const found = matches(`using System.Diagnostics;
+
+namespace App.Diagnostics;
+
+public class ProcessTag
+{
+    public int Current()
+    {
+        return Process.GetCurrentProcess().Id;
+    }
+}
+`, 'use-environment-processid')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Environment.ProcessId', () => {
+    const found = matches(`using System;
+
+namespace App.Diagnostics;
+
+public class ProcessTag
+{
+    public int Current()
+    {
+        return Environment.ProcessId;
+    }
+}
+`, 'use-environment-processid')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/use-environment-processpath
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/use-environment-processpath (C#)', () => {
+  it('flags Process.GetCurrentProcess().MainModule.FileName', () => {
+    const found = matches(`using System.Diagnostics;
+
+namespace App.Diagnostics;
+
+public class ExecutablePath
+{
+    public string Current()
+    {
+        return Process.GetCurrentProcess().MainModule.FileName;
+    }
+}
+`, 'use-environment-processpath')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Environment.ProcessPath', () => {
+    const found = matches(`using System;
+
+namespace App.Diagnostics;
+
+public class ExecutablePath
+{
+    public string Current()
+    {
+        return Environment.ProcessPath;
+    }
+}
+`, 'use-environment-processpath')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/nested-path-combine
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/nested-path-combine (C#)', () => {
+  it('flags a nested Path.Combine call', () => {
+    const found = matches(`using System.IO;
+
+namespace App.Storage;
+
+public class PathBuilder
+{
+    public string Build(string root, string dir, string file)
+    {
+        return Path.Combine(root, Path.Combine(dir, file));
+    }
+}
+`, 'nested-path-combine')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a flat Path.Combine call', () => {
+    const found = matches(`using System.IO;
+
+namespace App.Storage;
+
+public class PathBuilder
+{
+    public string Build(string root, string dir, string file)
+    {
+        return Path.Combine(root, dir, file);
+    }
+}
+`, 'nested-path-combine')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-regex-ismatch
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-regex-ismatch (C#)', () => {
+  it('flags Regex.Match(...).Success', () => {
+    const found = matches(`using System.Text.RegularExpressions;
+
+namespace App.Validation;
+
+public class SkuCheck
+{
+    public bool IsValid(string sku)
+    {
+        return Regex.Match(sku, "^[A-Z]{3}-").Success;
+    }
+}
+`, 'prefer-regex-ismatch')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Regex.IsMatch', () => {
+    const found = matches(`using System.Text.RegularExpressions;
+
+namespace App.Validation;
+
+public class SkuCheck
+{
+    public bool IsValid(string sku)
+    {
+        return Regex.IsMatch(sku, "^[A-Z]{3}-");
+    }
+}
+`, 'prefer-regex-ismatch')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-regex-count
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-regex-count (C#)', () => {
+  it('flags Regex.Matches(...).Count', () => {
+    const found = matches(`using System.Text.RegularExpressions;
+
+namespace App.Text;
+
+public class WordCounter
+{
+    public int Count(string text)
+    {
+        return Regex.Matches(text, @"\\w+").Count;
+    }
+}
+`, 'prefer-regex-count')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Regex.Count', () => {
+    const found = matches(`using System.Text.RegularExpressions;
+
+namespace App.Text;
+
+public class WordCounter
+{
+    public int Count(string text)
+    {
+        return Regex.Count(text, @"\\w+");
+    }
+}
+`, 'prefer-regex-count')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/jsondocument-rootelement
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/jsondocument-rootelement (C#)', () => {
+  it('flags JsonDocument.Parse(...).RootElement', () => {
+    const found = matches(`using System.Text.Json;
+
+namespace App.Json;
+
+public class Reader
+{
+    public JsonElement Root(string json)
+    {
+        return JsonDocument.Parse(json).RootElement;
+    }
+}
+`, 'jsondocument-rootelement')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag RootElement read from a disposed document variable', () => {
+    const found = matches(`using System.Text.Json;
+
+namespace App.Json;
+
+public class Reader
+{
+    public int Count(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetArrayLength();
+    }
+}
+`, 'jsondocument-rootelement')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/redundant-containskey-before-remove
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/redundant-containskey-before-remove (C#)', () => {
+  it('flags if (d.ContainsKey(k)) d.Remove(k)', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Cache;
+
+public class Evictor
+{
+    public void Evict(Dictionary<string, int> map, string key)
+    {
+        if (map.ContainsKey(key))
+            map.Remove(key);
+    }
+}
+`, 'redundant-containskey-before-remove')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a guard that does extra work', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Cache;
+
+public class Evictor
+{
+    public void Evict(Dictionary<string, int> map, string key)
+    {
+        if (map.ContainsKey(key))
+        {
+            Audit(key);
+            map.Remove(key);
+        }
+    }
+
+    private void Audit(string key) { }
+}
+`, 'redundant-containskey-before-remove')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-tryadd
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-tryadd (C#)', () => {
+  it('flags if (!d.ContainsKey(k)) d.Add(k, v)', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Cache;
+
+public class Registry
+{
+    public void Register(Dictionary<string, int> map, string key, int value)
+    {
+        if (!map.ContainsKey(key))
+            map.Add(key, value);
+    }
+}
+`, 'prefer-tryadd')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a guard that adds a different key or does extra work', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Cache;
+
+public class Registry
+{
+    public void Register(Dictionary<string, int> map, string key, int value)
+    {
+        if (!map.ContainsKey(key))
+        {
+            Audit(key);
+            map.Add(key, value);
+        }
+    }
+
+    private void Audit(string key) { }
+}
+`, 'prefer-tryadd')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/tolower-for-comparison
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/tolower-for-comparison (C#)', () => {
+  it('flags a.ToLower() == b.ToLower()', () => {
+    const found = matches(`namespace App.Matching;
+
+public class NameMatcher
+{
+    public bool Same(string a, string b)
+    {
+        return a.ToLower() == b.ToLower();
+    }
+}
+`, 'tolower-for-comparison')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a StringComparison overload', () => {
+    const found = matches(`using System;
+
+namespace App.Matching;
+
+public class NameMatcher
+{
+    public bool Same(string a, string b)
+    {
+        return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    }
+}
+`, 'tolower-for-comparison')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/use-tohexstring
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/use-tohexstring (C#)', () => {
+  it('flags BitConverter.ToString(...).Replace("-", "")', () => {
+    const found = matches(`using System;
+
+namespace App.Hashing;
+
+public class HexEncoder
+{
+    public string Encode(byte[] bytes)
+    {
+        return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+    }
+}
+`, 'use-tohexstring')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Convert.ToHexString', () => {
+    const found = matches(`using System;
+
+namespace App.Hashing;
+
+public class HexEncoder
+{
+    public string Encode(byte[] bytes)
+    {
+        return Convert.ToHexString(bytes);
+    }
+}
+`, 'use-tohexstring')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/local-jsonserializeroptions
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/local-jsonserializeroptions (C#)', () => {
+  it('flags a JsonSerializerOptions constructed inline at a Serialize call', () => {
+    const found = matches(`using System.Text.Json;
+
+namespace App.Json;
+
+public class Writer
+{
+    public string Write(object value)
+    {
+        return JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+    }
+}
+`, 'local-jsonserializeroptions')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a reused static options instance', () => {
+    const found = matches(`using System.Text.Json;
+
+namespace App.Json;
+
+public class Writer
+{
+    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+
+    public string Write(object value)
+    {
+        return JsonSerializer.Serialize(value, Options);
+    }
+}
+`, 'local-jsonserializeroptions')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/filter-before-sort
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/filter-before-sort (C#)', () => {
+  it('flags OrderBy followed by Where', () => {
+    const found = matches(`using System.Linq;
+
+namespace App.Catalog;
+
+public class ProductQuery
+{
+    public List<Product> Cheap(List<Product> products, decimal max)
+    {
+        return products.OrderBy(p => p.Price).Where(p => p.Price < max).ToList();
+    }
+}
+`, 'filter-before-sort')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Where before OrderBy', () => {
+    const found = matches(`using System.Linq;
+
+namespace App.Catalog;
+
+public class ProductQuery
+{
+    public List<Product> Cheap(List<Product> products, decimal max)
+    {
+        return products.Where(p => p.Price < max).OrderBy(p => p.Price).ToList();
+    }
+}
+`, 'filter-before-sort')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/countasync-instead-of-anyasync
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/countasync-instead-of-anyasync (C#)', () => {
+  it('flags await CountAsync() == 0', () => {
+    const found = matches(`using System.Linq;
+using System.Threading.Tasks;
+
+namespace App.Orders;
+
+public class OrderService
+{
+    public async Task<bool> NonePending(IOrderQuery query)
+    {
+        return await query.Pending().CountAsync() == 0;
+    }
+}
+`, 'countasync-instead-of-anyasync')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a non-zero count comparison or AnyAsync', () => {
+    const found = matches(`using System.Linq;
+using System.Threading.Tasks;
+
+namespace App.Orders;
+
+public class OrderService
+{
+    public async Task<bool> ManyPending(IOrderQuery query)
+    {
+        return await query.Pending().CountAsync() > 10;
+    }
+
+    public async Task<bool> AnyPending(IOrderQuery query)
+    {
+        return await query.Pending().AnyAsync();
+    }
+}
+`, 'countasync-instead-of-anyasync')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-contains-over-any
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-contains-over-any (C#)', () => {
+  it('flags Any(x => x == value)', () => {
+    const found = matches(`using System.Linq;
+
+namespace App.Access;
+
+public class RoleCheck
+{
+    public bool HasRole(List<string> roles, string role)
+    {
+        return roles.Any(r => r == role);
+    }
+}
+`, 'prefer-contains-over-any')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a predicate that does real work', () => {
+    const found = matches(`using System.Linq;
+
+namespace App.Access;
+
+public class RoleCheck
+{
+    public bool HasAdmin(List<User> users)
+    {
+        return users.Any(u => u.IsAdmin);
+    }
+
+    public bool HasOver(List<int> scores, int min)
+    {
+        return scores.Any(s => s > min);
+    }
+}
+`, 'prefer-contains-over-any')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-char-startswith-endswith
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-char-startswith-endswith (C#)', () => {
+  it('flags StartsWith with a single-character string', () => {
+    const found = matches(`namespace App.Routing;
+
+public class PathInspector
+{
+    public bool IsRooted(string path)
+    {
+        return path.StartsWith("/");
+    }
+}
+`, 'prefer-char-startswith-endswith')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a multi-character prefix or StringComparison overload', () => {
+    const found = matches(`using System;
+
+namespace App.Routing;
+
+public class PathInspector
+{
+    public bool IsApi(string path)
+    {
+        return path.StartsWith("/api");
+    }
+
+    public bool IsRootedOrdinal(string path)
+    {
+        return path.StartsWith("/", StringComparison.Ordinal);
+    }
+}
+`, 'prefer-char-startswith-endswith')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/stringbuilder-append-single-char-string
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/stringbuilder-append-single-char-string (C#)', () => {
+  it('flags Append with a single-character string', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class CsvWriter
+{
+    public string Row(string[] cells)
+    {
+        var sb = new StringBuilder();
+        sb.Append(cells[0]);
+        sb.Append(",");
+        return sb.ToString();
+    }
+}
+`, 'stringbuilder-append-single-char-string')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a multi-character or non-string Append', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class CsvWriter
+{
+    public string Row(string[] cells)
+    {
+        var sb = new StringBuilder();
+        sb.Append(", ");
+        sb.Append(',');
+        return sb.ToString();
+    }
+}
+`, 'stringbuilder-append-single-char-string')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/stringbuilder-tostring-append
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/stringbuilder-tostring-append (C#)', () => {
+  it('flags Append(x.ToString())', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class Report
+{
+    public string Line(int total)
+    {
+        var sb = new StringBuilder();
+        sb.Append(total.ToString());
+        return sb.ToString();
+    }
+}
+`, 'stringbuilder-tostring-append')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Append(x) or a formatted ToString', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class Report
+{
+    public string Line(int total)
+    {
+        var sb = new StringBuilder();
+        sb.Append(total);
+        sb.Append(total.ToString("X"));
+        return sb.ToString();
+    }
+}
+`, 'stringbuilder-tostring-append')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/redundant-stringbuilder-tostring
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/redundant-stringbuilder-tostring (C#)', () => {
+  it('flags Append of a string concatenation', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class Report
+{
+    public string Line(StringBuilder sb, string value)
+    {
+        sb.Append(value + ";");
+        return sb.ToString();
+    }
+}
+`, 'redundant-stringbuilder-tostring')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag numeric addition or a plain string argument', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Export;
+
+public class Report
+{
+    public string Line(StringBuilder sb, int a, int b, string value)
+    {
+        sb.Append(a + b);
+        sb.Append(value);
+        return sb.ToString();
+    }
+}
+`, 'redundant-stringbuilder-tostring')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/span-fill-default-over-clear
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/span-fill-default-over-clear (C#)', () => {
+  it('flags span.Fill(default)', () => {
+    const found = matches(`using System;
+
+namespace App.Buffers;
+
+public class Scratch
+{
+    public void Reset(Span<int> data)
+    {
+        data.Fill(default);
+    }
+}
+`, 'span-fill-default-over-clear')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag Fill with a real value', () => {
+    const found = matches(`using System;
+
+namespace App.Buffers;
+
+public class Scratch
+{
+    public void Seed(Span<int> data)
+    {
+        data.Fill(-1);
+    }
+}
+`, 'span-fill-default-over-clear')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/prefer-trygetvalue
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/prefer-trygetvalue (C#)', () => {
+  it('flags if (d.ContainsKey(k)) { ... d[k] ... }', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Pricing;
+
+public class Catalog
+{
+    public decimal Price(Dictionary<string, decimal> prices, string sku)
+    {
+        if (prices.ContainsKey(sku))
+        {
+            return prices[sku];
+        }
+        return 0m;
+    }
+}
+`, 'prefer-trygetvalue')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a guard whose body only writes the indexer', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Pricing;
+
+public class Catalog
+{
+    public void Bump(Dictionary<string, decimal> prices, string sku)
+    {
+        if (prices.ContainsKey(sku))
+        {
+            prices[sku] = 0m;
+        }
+    }
+}
+`, 'prefer-trygetvalue')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/stringbuilder-pinvoke-parameter
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/stringbuilder-pinvoke-parameter (C#)', () => {
+  it('flags a StringBuilder parameter on a DllImport method', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+using System.Text;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("kernel32.dll")]
+    internal static extern int GetModuleFileName(nint module, StringBuilder buffer, int size);
+}
+`, 'stringbuilder-pinvoke-parameter')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a P/Invoke without a StringBuilder parameter', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace App.Interop;
+
+internal static class Native
+{
+    [DllImport("kernel32.dll")]
+    internal static extern int GetCurrentProcessId();
+}
+`, 'stringbuilder-pinvoke-parameter')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag an ordinary method taking a StringBuilder', () => {
+    const found = matches(`using System.Text;
+
+namespace App.Interop;
+
+internal static class Formatter
+{
+    internal static void Write(StringBuilder buffer, string value)
+    {
+        buffer.Append(value);
+    }
+}
+`, 'stringbuilder-pinvoke-parameter')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/property-returns-collection-copy
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/property-returns-collection-copy (C#)', () => {
+  it('flags an expression-bodied property returning ToArray()', () => {
+    const found = matches(`using System.Collections.Generic;
+using System.Linq;
+
+namespace App.Catalog;
+
+public class Basket
+{
+    private readonly List<string> _items = new();
+
+    public string[] Items => _items.ToArray();
+}
+`, 'property-returns-collection-copy')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('flags a getter body returning ToList()', () => {
+    const found = matches(`using System.Collections.Generic;
+using System.Linq;
+
+namespace App.Catalog;
+
+public class Basket
+{
+    private readonly List<string> _items = new();
+
+    public List<string> Items
+    {
+        get { return _items.ToList(); }
+    }
+}
+`, 'property-returns-collection-copy')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a property returning the field directly or a computed scalar', () => {
+    const found = matches(`using System.Collections.Generic;
+
+namespace App.Catalog;
+
+public class Basket
+{
+    private readonly List<string> _items = new();
+
+    public IReadOnlyList<string> Items => _items;
+    public int Count => _items.Count;
+}
+`, 'property-returns-collection-copy')
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/constant-array-argument
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/constant-array-argument (C#)', () => {
+  it('flags a constant array literal passed as an argument', () => {
+    const found = matches(`using System;
+
+namespace App.Http;
+
+public class MethodCheck
+{
+    public bool IsSafe(string method)
+    {
+        return Array.IndexOf(new[] { "GET", "HEAD", "OPTIONS" }, method) >= 0;
+    }
+}
+`, 'constant-array-argument')
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a static readonly field or an array with non-constant elements', () => {
+    const found = matches(`using System;
+
+namespace App.Http;
+
+public class MethodCheck
+{
+    private static readonly string[] SafeMethods = { "GET", "HEAD", "OPTIONS" };
+
+    public bool IsSafe(string method)
+    {
+        return Array.IndexOf(SafeMethods, method) >= 0;
+    }
+
+    public int FindFirst(string a, string b, string target)
+    {
+        return Array.IndexOf(new[] { a, b }, target);
+    }
+}
+`, 'constant-array-argument')
+    expect(found).toHaveLength(0)
+  })
+})

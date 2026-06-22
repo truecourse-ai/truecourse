@@ -679,3 +679,714 @@ public class ServerConfig
     expect(found).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/dangerous-get-handle
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/dangerous-get-handle (C#)', () => {
+  const key = 'reliability/deterministic/dangerous-get-handle'
+
+  it('detects a DangerousGetHandle call on a SafeHandle', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace Interop;
+internal sealed class HandleReader
+{
+    internal nint Raw(SafeHandle handle)
+    {
+        return handle.DangerousGetHandle();
+    }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag the safe SafeHandle accessors', () => {
+    const found = matches(`using System.Runtime.InteropServices;
+
+namespace Interop;
+internal sealed class HandleReader
+{
+    internal bool Touch(SafeHandle handle)
+    {
+        var added = false;
+        handle.DangerousAddRef(ref added);
+        try
+        {
+            return !handle.IsInvalid;
+        }
+        finally
+        {
+            if (added) handle.DangerousRelease();
+        }
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/thread-resume-suspend
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/thread-resume-suspend (C#)', () => {
+  const key = 'reliability/deterministic/thread-resume-suspend'
+
+  it('detects Thread.Suspend and Thread.Resume', () => {
+    const found = matches(`using System.Threading;
+
+namespace Worker;
+internal sealed class Pauser
+{
+    private readonly Thread _worker;
+
+    internal Pauser(Thread worker) => _worker = worker;
+
+    internal void Pause() => _worker.Suspend();
+
+    internal void Continue() => _worker.Resume();
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does not flag unrelated Suspend/Resume APIs or cooperative pausing', () => {
+    const found = matches(`using System.Threading;
+
+namespace Worker;
+internal sealed class Pauser
+{
+    private readonly ManualResetEventSlim _gate = new(true);
+
+    internal void Pause() => _gate.Reset();
+
+    internal void Continue() => _gate.Set();
+
+    internal void SuspendLayout(Panel panel) => panel.SuspendLayout();
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/task-without-taskscheduler
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/task-without-taskscheduler (C#)', () => {
+  const key = 'reliability/deterministic/task-without-taskscheduler'
+
+  it('detects StartNew and ContinueWith without an explicit scheduler', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace Jobs;
+internal sealed class Runner
+{
+    internal void Kick()
+    {
+        Task.Factory.StartNew(() => Work());
+    }
+
+    internal void Chain(Task previous)
+    {
+        previous.ContinueWith(t => Finish());
+    }
+
+    private void Work() { }
+    private void Finish() { }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does not flag calls that pass a TaskScheduler or use Task.Run', () => {
+    const found = matches(`using System.Threading.Tasks;
+
+namespace Jobs;
+internal sealed class Runner
+{
+    private readonly TaskScheduler _scheduler = TaskScheduler.Default;
+
+    internal void Kick()
+    {
+        Task.Factory.StartNew(() => Work(), CancellationToken.None, TaskCreationOptions.None, _scheduler);
+    }
+
+    internal void Chain(Task previous)
+    {
+        previous.ContinueWith(t => Finish(), TaskScheduler.Default);
+    }
+
+    internal void Modern()
+    {
+        Task.Run(() => Work());
+    }
+
+    private void Work() { }
+    private void Finish() { }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/return-disposable-from-using
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/return-disposable-from-using (C#)', () => {
+  const key = 'reliability/deterministic/return-disposable-from-using'
+
+  it('detects returning the resource declared by the enclosing using', () => {
+    const found = matches(`using System.IO;
+
+namespace Io;
+internal sealed class Opener
+{
+    internal Stream Open(string path)
+    {
+        using (var stream = File.OpenRead(path))
+        {
+            return stream;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag returning data read from the resource or a different object', () => {
+    const found = matches(`using System.IO;
+
+namespace Io;
+internal sealed class Opener
+{
+    internal string ReadAll(string path)
+    {
+        using (var reader = new StreamReader(path))
+        {
+            return reader.ReadToEnd();
+        }
+    }
+
+    internal Stream Hand(string path)
+    {
+        var stream = File.OpenRead(path);
+        return stream;
+    }
+
+    internal byte[] Snapshot(string path)
+    {
+        using var source = File.OpenRead(path);
+        using var buffer = new MemoryStream();
+        source.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/exception-logged-and-rethrown
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/exception-logged-and-rethrown (C#)', () => {
+  const key = 'reliability/deterministic/exception-logged-and-rethrown'
+
+  it('detects a catch that logs the exception and then rethrows', () => {
+    const found = matches(`namespace Persistence;
+internal sealed class EntityStore
+{
+    private readonly ILogger _logger;
+
+    internal EntityStore(ILogger logger) => _logger = logger;
+
+    internal void Save(Entity entity)
+    {
+        try
+        {
+            _session.Persist(entity);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Persist failed for {Id}", entity.Id);
+            throw;
+        }
+    }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag log-and-handle or wrap-and-rethrow', () => {
+    const found = matches(`namespace Persistence;
+internal sealed class EntityStore
+{
+    private readonly ILogger _logger;
+
+    internal EntityStore(ILogger logger) => _logger = logger;
+
+    internal bool TrySave(Entity entity)
+    {
+        try
+        {
+            _session.Persist(entity);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Persist failed for {Id}", entity.Id);
+            return false;
+        }
+    }
+
+    internal void SaveOrWrap(Entity entity)
+    {
+        try
+        {
+            _session.Persist(entity);
+        }
+        catch (SqlException ex)
+        {
+            throw new DataAccessException($"Saving {entity.Id} failed", ex);
+        }
+    }
+
+    internal void Rethrow(Entity entity)
+    {
+        try
+        {
+            _session.Persist(entity);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/azure-function-no-error-handling
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/azure-function-no-error-handling (C#)', () => {
+  const key = 'reliability/deterministic/azure-function-no-error-handling'
+
+  it('detects a [Function] method whose body has no try/catch', () => {
+    const found = matches(`using Microsoft.Azure.Functions.Worker;
+
+namespace Functions;
+internal sealed class QueueProcessor
+{
+    private readonly IProcessor _processor;
+
+    internal QueueProcessor(IProcessor processor) => _processor = processor;
+
+    [Function("ProcessQueue")]
+    internal void Run([QueueTrigger("orders")] string message)
+    {
+        var order = Parse(message);
+        _processor.Handle(order);
+    }
+
+    private static Order Parse(string message) => Order.From(message);
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag functions that wrap their body in try/catch or non-function methods', () => {
+    const found = matches(`using Microsoft.Azure.Functions.Worker;
+
+namespace Functions;
+internal sealed class QueueProcessor
+{
+    private readonly IProcessor _processor;
+    private readonly ILogger _logger;
+
+    internal QueueProcessor(IProcessor processor, ILogger logger)
+    {
+        _processor = processor;
+        _logger = logger;
+    }
+
+    [Function("ProcessQueue")]
+    internal void Run([QueueTrigger("orders")] string message)
+    {
+        try
+        {
+            var order = Parse(message);
+            _processor.Handle(order);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process {Message}", message);
+            throw;
+        }
+    }
+
+    private static Order Parse(string message) => Order.From(message);
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/azure-function-failure-not-logged
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/azure-function-failure-not-logged (C#)', () => {
+  const key = 'reliability/deterministic/azure-function-failure-not-logged'
+
+  it('detects a function catch that swallows without logging or rethrowing', () => {
+    const found = matches(`using Microsoft.Azure.Functions.Worker;
+
+namespace Functions;
+internal sealed class TimerJob
+{
+    private readonly ISweeper _sweeper;
+
+    internal TimerJob(ISweeper sweeper) => _sweeper = sweeper;
+
+    [Function("Sweep")]
+    internal void Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer)
+    {
+        try
+        {
+            _sweeper.Sweep();
+        }
+        catch (Exception)
+        {
+            _failures++;
+        }
+    }
+
+    private int _failures;
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag function catches that log or rethrow', () => {
+    const found = matches(`using Microsoft.Azure.Functions.Worker;
+
+namespace Functions;
+internal sealed class TimerJob
+{
+    private readonly ISweeper _sweeper;
+    private readonly ILogger _logger;
+
+    internal TimerJob(ISweeper sweeper, ILogger logger)
+    {
+        _sweeper = sweeper;
+        _logger = logger;
+    }
+
+    [Function("Sweep")]
+    internal void Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer)
+    {
+        try
+        {
+            _sweeper.Sweep();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Sweep failed");
+        }
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/disposable-field-without-idisposable
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/disposable-field-without-idisposable (C#)', () => {
+  const key = 'reliability/deterministic/disposable-field-without-idisposable'
+
+  it('detects a class owning a disposable field that is not IDisposable', () => {
+    const found = matches(`using System.IO;
+
+namespace Caching;
+internal sealed class FileCache
+{
+    private readonly FileStream _backing;
+
+    internal FileCache(string path)
+    {
+        _backing = File.Create(path);
+    }
+
+    internal void Append(byte[] data) => _backing.Write(data);
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag disposable classes, static singletons, or non-disposable fields', () => {
+    const found = matches(`using System;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+
+namespace Caching;
+internal sealed class FileCache : IDisposable
+{
+    private readonly FileStream _backing;
+
+    internal FileCache(string path)
+    {
+        _backing = File.Create(path);
+    }
+
+    public void Dispose() => _backing.Dispose();
+}
+
+internal sealed class HttpGateway
+{
+    private static readonly HttpClient Shared = new();
+    private readonly StringBuilder _buffer = new();
+
+    internal void Note(string line) => _buffer.AppendLine(line);
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/dispose-own-members
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/dispose-own-members (C#)', () => {
+  const key = 'reliability/deterministic/dispose-own-members'
+
+  it('detects a Dispose that leaves an owned disposable field undisposed', () => {
+    const found = matches(`using System;
+using System.IO;
+
+namespace Caching;
+internal sealed class DualWriter : IDisposable
+{
+    private readonly StreamWriter _primary;
+    private readonly StreamWriter _secondary;
+
+    internal DualWriter(string a, string b)
+    {
+        _primary = new StreamWriter(a);
+        _secondary = new StreamWriter(b);
+    }
+
+    public void Dispose()
+    {
+        _primary.Dispose();
+    }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag a Dispose that releases every owned field, including via Dispose(bool)', () => {
+    const found = matches(`using System;
+using System.IO;
+
+namespace Caching;
+internal sealed class DualWriter : IDisposable
+{
+    private readonly StreamWriter _primary;
+    private readonly StreamWriter _secondary;
+
+    internal DualWriter(string a, string b)
+    {
+        _primary = new StreamWriter(a);
+        _secondary = new StreamWriter(b);
+    }
+
+    public void Dispose()
+    {
+        _primary.Dispose();
+        _secondary.Dispose();
+    }
+}
+
+internal class PatternWriter : IDisposable
+{
+    private readonly StreamWriter _writer;
+
+    internal PatternWriter(string path) => _writer = new StreamWriter(path);
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _writer?.Dispose();
+        }
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/disposable-without-finalizer
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/disposable-without-finalizer (C#)', () => {
+  const key = 'reliability/deterministic/disposable-without-finalizer'
+
+  it('detects an IDisposable holding an IntPtr with no finalizer', () => {
+    const found = matches(`using System;
+
+namespace Interop;
+internal sealed class NativeBuffer : IDisposable
+{
+    private IntPtr _buffer;
+
+    internal NativeBuffer(int size)
+    {
+        _buffer = Allocate(size);
+    }
+
+    public void Dispose()
+    {
+        Free(_buffer);
+        _buffer = IntPtr.Zero;
+    }
+
+    private static IntPtr Allocate(int size) => IntPtr.Zero;
+    private static void Free(IntPtr p) { }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag managed disposables or unmanaged ones that declare a finalizer', () => {
+    const found = matches(`using System;
+using System.IO;
+
+namespace Interop;
+internal sealed class ManagedWrapper : IDisposable
+{
+    private readonly FileStream _stream;
+
+    internal ManagedWrapper(string path) => _stream = File.Create(path);
+
+    public void Dispose() => _stream.Dispose();
+}
+
+internal sealed class GuardedBuffer : IDisposable
+{
+    private IntPtr _buffer;
+
+    internal GuardedBuffer(int size) => _buffer = Allocate(size);
+
+    ~GuardedBuffer() => Free(_buffer);
+
+    public void Dispose()
+    {
+        Free(_buffer);
+        _buffer = IntPtr.Zero;
+        GC.SuppressFinalize(this);
+    }
+
+    private static IntPtr Allocate(int size) => IntPtr.Zero;
+    private static void Free(IntPtr p) { }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// reliability/deterministic/idisposable-pattern-incorrect
+// ---------------------------------------------------------------------------
+
+describe('reliability/deterministic/idisposable-pattern-incorrect (C#)', () => {
+  const key = 'reliability/deterministic/idisposable-pattern-incorrect'
+
+  it('detects a finalizer + public Dispose with no unifying Dispose(bool)', () => {
+    const found = matches(`using System;
+
+namespace Interop;
+internal class ResourceOwner : IDisposable
+{
+    private IntPtr _handle;
+
+    internal ResourceOwner() => _handle = Acquire();
+
+    ~ResourceOwner()
+    {
+        Release(_handle);
+    }
+
+    public void Dispose()
+    {
+        Release(_handle);
+        _handle = IntPtr.Zero;
+    }
+
+    private static IntPtr Acquire() => IntPtr.Zero;
+    private static void Release(IntPtr h) { }
+}
+`, key)
+    expect(found.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not flag the correct Dispose(bool) pattern or managed-only disposables', () => {
+    const found = matches(`using System;
+
+namespace Interop;
+internal class ResourceOwner : IDisposable
+{
+    private IntPtr _handle;
+
+    internal ResourceOwner() => _handle = Acquire();
+
+    ~ResourceOwner()
+    {
+        Dispose(false);
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        Release(_handle);
+        _handle = IntPtr.Zero;
+    }
+
+    private static IntPtr Acquire() => IntPtr.Zero;
+    private static void Release(IntPtr h) { }
+}
+
+internal sealed class SimpleManaged : IDisposable
+{
+    public void Dispose() { }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+})

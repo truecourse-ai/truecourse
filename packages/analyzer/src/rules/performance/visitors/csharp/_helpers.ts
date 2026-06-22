@@ -1,5 +1,22 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { hasCSharpModifier } from '../../../_shared/csharp-helpers.js'
+import { hasCSharpModifier, isCSharpStringNode, getCSharpStringText } from '../../../_shared/csharp-helpers.js'
+
+/**
+ * The single character of a one-character non-interpolated string literal
+ * (`"a"` → 'a'), or null. Interpolated/raw strings and escape sequences longer
+ * than one source character are rejected so callers only match literals a
+ * `char` overload could replace.
+ */
+export function singleCharStringLiteral(node: SyntaxNode): string | null {
+  if (!isCSharpStringNode(node)) return null
+  if (node.type === 'interpolated_string_expression' || node.type === 'raw_string_literal') return null
+  const text = getCSharpStringText(node)
+  if (text === null) return null
+  // Reject escapes (\n, \t, \\, A): a one-char overload only helps for a
+  // genuine single character, and escape handling here would be error-prone.
+  if (text.length !== 1 || text === '\\') return null
+  return text
+}
 
 export const CSHARP_LOOP_TYPES = new Set([
   'for_statement',
@@ -70,6 +87,25 @@ export function getCSharpChainRoot(node: SyntaxNode): SyntaxNode {
     }
     return current
   }
+}
+
+/**
+ * The receiver's *simple* (rightmost) name for a member call:
+ * `System.Threading.Tasks.Task.WhenAll(...)` → 'Task', `_db.Save()` → '_db'.
+ * Returns '' when the call has no member-access receiver.
+ */
+export function getCSharpReceiverSimpleName(invocation: SyntaxNode): string {
+  const fn = invocation.childForFieldName('function')
+  if (fn?.type !== 'member_access_expression') return ''
+  const receiver = fn.childForFieldName('expression')
+  if (!receiver) return ''
+  if (receiver.type === 'member_access_expression') {
+    return receiver.childForFieldName('name')?.text ?? ''
+  }
+  if (receiver.type === 'qualified_name') {
+    return receiver.childForFieldName('name')?.text ?? ''
+  }
+  return receiver.text
 }
 
 /** Simple name of an object-creation type: `System.Threading.Timer` → 'Timer'. */

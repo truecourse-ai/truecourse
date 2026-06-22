@@ -197,6 +197,51 @@ export function getInitializerAssignments(creation: SyntaxNode): { name: string;
   return out
 }
 
+export interface CSharpAttribute {
+  /** Simple attribute name with any namespace prefix and the `Attribute` suffix stripped. */
+  name: string
+  node: SyntaxNode
+  /** Positional and named attribute arguments (named ones carry `name`). */
+  args: CSharpCallArg[]
+}
+
+/** Strip a namespace prefix and the optional `Attribute` suffix (`[Foo.BarAttribute]` → 'Bar'). */
+function normalizeAttributeName(raw: string): string {
+  const simple = lastSegment(raw)
+  return simple.endsWith('Attribute') && simple.length > 'Attribute'.length
+    ? simple.slice(0, -'Attribute'.length)
+    : simple
+}
+
+/** Every `[Attr(...)]` declared on a node, with arguments parsed. */
+export function getCSharpAttributes(node: SyntaxNode): CSharpAttribute[] {
+  const out: CSharpAttribute[] = []
+  for (const list of node.children) {
+    if (list?.type !== 'attribute_list') continue
+    for (const attr of list.namedChildren) {
+      if (attr?.type !== 'attribute') continue
+      const nameNode = attr.childForFieldName('name') ?? attr.namedChildren[0]
+      if (!nameNode) continue
+      const argList = attr.namedChildren.find((c) => c?.type === 'attribute_argument_list')
+      const args: CSharpCallArg[] = []
+      if (argList) {
+        for (const arg of argList.namedChildren) {
+          if (arg?.type !== 'attribute_argument') continue
+          const named = arg.namedChildren.filter(Boolean) as SyntaxNode[]
+          const hasEquals = arg.children.some((c) => c && !c.isNamed && c.text === '=')
+          if (hasEquals && named.length >= 2 && named[0]!.type === 'identifier') {
+            args.push({ name: named[0]!.text, value: named[named.length - 1]! })
+          } else if (named.length > 0) {
+            args.push({ name: null, value: named[named.length - 1]! })
+          }
+        }
+      }
+      out.push({ name: normalizeAttributeName(nameNode.text), node: attr, args })
+    }
+  }
+  return out
+}
+
 /** Last segment of a member access / qualified receiver (`System.Net.Tls` → 'Tls'). */
 export function lastSegment(text: string): string {
   const clean = text.replace(/<.*$/, '')

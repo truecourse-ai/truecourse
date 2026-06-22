@@ -28,6 +28,7 @@ internal class ExceptionShapes
         if (debits < credits)
         {
             // VIOLATION: code-quality/deterministic/broad-exception-raised
+            // VIOLATION: bugs/deterministic/raise-reserved-exception-type
             throw new Exception("Refund ledger is out of balance for the current period");
         }
     }

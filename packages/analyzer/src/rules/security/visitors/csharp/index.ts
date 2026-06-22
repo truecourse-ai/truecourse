@@ -41,6 +41,44 @@ export { csharpHardcodedPasswordFunctionArgVisitor } from './hardcoded-password-
 export { csharpPubliclyWritableDirectoryVisitor } from './publicly-writable-directory.js'
 export { csharpLongTermAwsKeysInCodeVisitor } from './long-term-aws-keys-in-code.js'
 export { csharpS3InsecureHttpVisitor } from './s3-insecure-http.js'
+export { csharpUseOfDsaVisitor } from './use-of-dsa.js'
+export { csharpUseOfXslTransformVisitor } from './use-of-xsltransform.js'
+export { csharpCustomCryptoAlgorithmVisitor } from './custom-crypto-algorithm.js'
+export { csharpHardcodedSecurityProtocolTypeVisitor } from './hardcoded-securityprotocoltype.js'
+export { csharpHardcodedSslProtocolsVisitor } from './hardcoded-sslprotocols.js'
+export { csharpPredictableCipherIvVisitor } from './predictable-cipher-iv.js'
+export { csharpPredictableRandomSeedVisitor } from './predictable-random-seed.js'
+export { csharpMutablePublicStaticFieldVisitor } from './mutable-public-static-field.js'
+export { csharpReflectionBypassAccessibilityVisitor } from './reflection-bypass-accessibility.js'
+export { csharpUnsafeCodeBlockVisitor } from './unsafe-code-block.js'
+export { csharpPInvokePubliclyVisibleVisitor } from './pinvoke-publicly-visible.js'
+export { csharpVisibleEventHandlerVisitor } from './visible-event-handler.js'
+export { csharpSchannelStrongCryptoDisabledVisitor } from './schannel-strong-crypto-disabled.js'
+export { csharpServicePointManagerProtocolsDisabledVisitor } from './servicepointmanager-protocols-disabled.js'
+export { csharpHttpHeaderCheckingDisabledVisitor } from './http-header-checking-disabled.js'
+export { csharpUnmanagedPointerVisibleVisitor } from './unmanaged-pointer-visible.js'
+export { csharpAddCertToRootStoreVisitor } from './add-cert-to-root-store.js'
+export { csharpLdapAnonymousBindVisitor } from './ldap-anonymous-bind.js'
+export { csharpAccountSharedAccessSignatureVisitor } from './account-shared-access-signature.js'
+export { csharpCatchCorruptedStateExceptionVisitor } from './catch-corrupted-state-exception.js'
+export { csharpCommandResolvedFromPathVisitor } from './command-resolved-from-path.js'
+export { csharpConflictingTransparencyAnnotationsVisitor } from './conflicting-transparency-annotations.js'
+export { csharpCreateEncryptorNonDefaultIvVisitor } from './createencryptor-non-default-iv.js'
+export { csharpDataSetReadXmlUntrustedVisitor } from './dataset-readxml-untrusted.js'
+export { csharpDataTableReadXmlUntrustedVisitor } from './datatable-readxml-untrusted.js'
+export { csharpHardcodedCertificateVisitor } from './hardcoded-certificate.js'
+export { csharpPermissiveContentSecurityPolicyVisitor } from './permissive-content-security-policy.js'
+export { csharpInsecureXsltScriptVisitor } from './insecure-xslt-script.js'
+export { csharpKdfLowIterationCountVisitor } from './kdf-low-iteration-count.js'
+export { csharpPasswordHashUnpredictableSaltVisitor } from './password-hash-unpredictable-salt.js'
+export { csharpPInvokeNoDllImportSearchPathVisitor } from './pinvoke-no-dllimportsearchpath.js'
+export { csharpPInvokeStringMarshallingUnspecifiedVisitor } from './pinvoke-string-marshalling-unspecified.js'
+export { csharpUnsafeDllImportSearchPathVisitor } from './unsafe-dllimportsearchpath.js'
+export { csharpRequestValidationDisabledVisitor } from './request-validation-disabled.js'
+export { csharpTokenValidationDisabledVisitor } from './token-validation-disabled.js'
+export { csharpXmlSchemaAddByUrlVisitor } from './xmlschema-add-by-url.js'
+export { csharpViewStateUserKeyNotSetVisitor } from './viewstateuserkey-not-set.js'
+export { csharpSasWithoutHttpsVisitor } from './sas-without-https.js'
 
 import { csharpSqlInjectionVisitor } from './sql-injection.js'
 import { csharpHardcodedSqlExpressionVisitor } from './hardcoded-sql-expression.js'
@@ -83,6 +121,44 @@ import { csharpHardcodedPasswordFunctionArgVisitor } from './hardcoded-password-
 import { csharpPubliclyWritableDirectoryVisitor } from './publicly-writable-directory.js'
 import { csharpLongTermAwsKeysInCodeVisitor } from './long-term-aws-keys-in-code.js'
 import { csharpS3InsecureHttpVisitor } from './s3-insecure-http.js'
+import { csharpUseOfDsaVisitor } from './use-of-dsa.js'
+import { csharpUseOfXslTransformVisitor } from './use-of-xsltransform.js'
+import { csharpCustomCryptoAlgorithmVisitor } from './custom-crypto-algorithm.js'
+import { csharpHardcodedSecurityProtocolTypeVisitor } from './hardcoded-securityprotocoltype.js'
+import { csharpHardcodedSslProtocolsVisitor } from './hardcoded-sslprotocols.js'
+import { csharpPredictableCipherIvVisitor } from './predictable-cipher-iv.js'
+import { csharpPredictableRandomSeedVisitor } from './predictable-random-seed.js'
+import { csharpMutablePublicStaticFieldVisitor } from './mutable-public-static-field.js'
+import { csharpReflectionBypassAccessibilityVisitor } from './reflection-bypass-accessibility.js'
+import { csharpUnsafeCodeBlockVisitor } from './unsafe-code-block.js'
+import { csharpPInvokePubliclyVisibleVisitor } from './pinvoke-publicly-visible.js'
+import { csharpVisibleEventHandlerVisitor } from './visible-event-handler.js'
+import { csharpSchannelStrongCryptoDisabledVisitor } from './schannel-strong-crypto-disabled.js'
+import { csharpServicePointManagerProtocolsDisabledVisitor } from './servicepointmanager-protocols-disabled.js'
+import { csharpHttpHeaderCheckingDisabledVisitor } from './http-header-checking-disabled.js'
+import { csharpUnmanagedPointerVisibleVisitor } from './unmanaged-pointer-visible.js'
+import { csharpAddCertToRootStoreVisitor } from './add-cert-to-root-store.js'
+import { csharpLdapAnonymousBindVisitor } from './ldap-anonymous-bind.js'
+import { csharpAccountSharedAccessSignatureVisitor } from './account-shared-access-signature.js'
+import { csharpCatchCorruptedStateExceptionVisitor } from './catch-corrupted-state-exception.js'
+import { csharpCommandResolvedFromPathVisitor } from './command-resolved-from-path.js'
+import { csharpConflictingTransparencyAnnotationsVisitor } from './conflicting-transparency-annotations.js'
+import { csharpCreateEncryptorNonDefaultIvVisitor } from './createencryptor-non-default-iv.js'
+import { csharpDataSetReadXmlUntrustedVisitor } from './dataset-readxml-untrusted.js'
+import { csharpDataTableReadXmlUntrustedVisitor } from './datatable-readxml-untrusted.js'
+import { csharpHardcodedCertificateVisitor } from './hardcoded-certificate.js'
+import { csharpPermissiveContentSecurityPolicyVisitor } from './permissive-content-security-policy.js'
+import { csharpInsecureXsltScriptVisitor } from './insecure-xslt-script.js'
+import { csharpKdfLowIterationCountVisitor } from './kdf-low-iteration-count.js'
+import { csharpPasswordHashUnpredictableSaltVisitor } from './password-hash-unpredictable-salt.js'
+import { csharpPInvokeNoDllImportSearchPathVisitor } from './pinvoke-no-dllimportsearchpath.js'
+import { csharpPInvokeStringMarshallingUnspecifiedVisitor } from './pinvoke-string-marshalling-unspecified.js'
+import { csharpUnsafeDllImportSearchPathVisitor } from './unsafe-dllimportsearchpath.js'
+import { csharpRequestValidationDisabledVisitor } from './request-validation-disabled.js'
+import { csharpTokenValidationDisabledVisitor } from './token-validation-disabled.js'
+import { csharpXmlSchemaAddByUrlVisitor } from './xmlschema-add-by-url.js'
+import { csharpViewStateUserKeyNotSetVisitor } from './viewstateuserkey-not-set.js'
+import { csharpSasWithoutHttpsVisitor } from './sas-without-https.js'
 
 export const SECURITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   // Injection
@@ -133,4 +209,54 @@ export const SECURITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpSnmpInsecureVersionVisitor,
   csharpSnmpWeakCryptoVisitor,
   csharpS3InsecureHttpVisitor,
+  // Cryptography (wave 2)
+  csharpUseOfDsaVisitor,
+  csharpCustomCryptoAlgorithmVisitor,
+  csharpHardcodedSecurityProtocolTypeVisitor,
+  csharpHardcodedSslProtocolsVisitor,
+  csharpPredictableCipherIvVisitor,
+  csharpPredictableRandomSeedVisitor,
+  csharpSchannelStrongCryptoDisabledVisitor,
+  csharpServicePointManagerProtocolsDisabledVisitor,
+  // XML (wave 2)
+  csharpUseOfXslTransformVisitor,
+  // Web / ASP.NET (wave 2)
+  csharpHttpHeaderCheckingDisabledVisitor,
+  csharpVisibleEventHandlerVisitor,
+  // Reflection / unsafe / interop (wave 2)
+  csharpReflectionBypassAccessibilityVisitor,
+  csharpUnsafeCodeBlockVisitor,
+  csharpPInvokePubliclyVisibleVisitor,
+  csharpMutablePublicStaticFieldVisitor,
+  csharpUnmanagedPointerVisibleVisitor,
+  // Certificates / directory (wave 2)
+  csharpAddCertToRootStoreVisitor,
+  csharpLdapAnonymousBindVisitor,
+  // Cryptography / KDF (wave 3)
+  csharpCreateEncryptorNonDefaultIvVisitor,
+  csharpKdfLowIterationCountVisitor,
+  csharpPasswordHashUnpredictableSaltVisitor,
+  csharpHardcodedCertificateVisitor,
+  // Deserialization / XML (wave 3)
+  csharpDataSetReadXmlUntrustedVisitor,
+  csharpDataTableReadXmlUntrustedVisitor,
+  csharpInsecureXsltScriptVisitor,
+  csharpXmlSchemaAddByUrlVisitor,
+  // Web / ASP.NET headers (wave 3)
+  csharpPermissiveContentSecurityPolicyVisitor,
+  // Interop / P/Invoke (wave 3)
+  csharpPInvokeNoDllImportSearchPathVisitor,
+  csharpPInvokeStringMarshallingUnspecifiedVisitor,
+  csharpUnsafeDllImportSearchPathVisitor,
+  csharpCommandResolvedFromPathVisitor,
+  // ASP.NET / tokens (wave 3)
+  csharpRequestValidationDisabledVisitor,
+  csharpTokenValidationDisabledVisitor,
+  // Security transparency / storage (wave 3)
+  csharpConflictingTransparencyAnnotationsVisitor,
+  csharpCatchCorruptedStateExceptionVisitor,
+  csharpAccountSharedAccessSignatureVisitor,
+  // ASP.NET / storage (wave 4)
+  csharpViewStateUserKeyNotSetVisitor,
+  csharpSasWithoutHttpsVisitor,
 ]

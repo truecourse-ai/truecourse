@@ -7,8 +7,9 @@
  */
 
 import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { discoverFiles } from '../packages/analyzer/src/file-discovery';
+import { initParsers } from '../packages/analyzer/src/parser';
 import { analyzeFile } from '../packages/analyzer/src/file-analyzer';
 import { buildDependencyGraph } from '../packages/analyzer/src/dependency-graph';
 import { performSplitAnalysis } from '../packages/analyzer/src/split-analyzer';
@@ -22,6 +23,7 @@ async function main() {
   }
 
   console.log(`Analyzing ${fixturePath}...`);
+  await initParsers();
   const files = discoverFiles(fixturePath);
   const results = await Promise.all(files.map((f) => analyzeFile(f)));
   const analyses = results.filter(Boolean) as FileAnalysis[];
@@ -57,6 +59,29 @@ async function main() {
           a.targetService.localeCompare(b.targetService) ||
           a.target.localeCompare(b.target),
       ),
+
+    fileDependencies: deps
+      .map((d) => ({ source: relative(fixturePath, d.source), target: relative(fixturePath, d.target) }))
+      .sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target)),
+
+    routes: analyses
+      .flatMap((a) =>
+        (a.routeRegistrations ?? []).map((r) => ({
+          method: r.httpMethod,
+          path: r.path,
+          file: relative(fixturePath, a.filePath),
+        })),
+      )
+      .sort((a, b) => a.file.localeCompare(b.file) || a.path.localeCompare(b.path) || a.method.localeCompare(b.method)),
+
+    databases: (split.databaseResult?.databases ?? [])
+      .map((db) => ({
+        type: db.type,
+        driver: db.driver,
+        connectedServices: [...db.connectedServices].sort(),
+        tables: db.tables.map((t) => t.name).sort(),
+      }))
+      .sort((a, b) => a.type.localeCompare(b.type)),
 
   };
 

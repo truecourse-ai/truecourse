@@ -131,6 +131,16 @@ export const CSHARP_LITERAL_TYPES = new Set([
   'raw_string_literal', 'character_literal', 'boolean_literal', 'null_literal',
 ])
 
+/**
+ * Method names recognised as structured-logging calls across
+ * `Microsoft.Extensions.Logging` (`LogInformation`, …), Serilog/NLog
+ * (`Information`, `Warning`, …), and the generic `Log`.
+ */
+export const CSHARP_LOG_METHOD_NAMES = new Set([
+  'LogTrace', 'LogDebug', 'LogInformation', 'LogWarning', 'LogError', 'LogCritical', 'Log',
+  'Trace', 'Debug', 'Information', 'Warning', 'Error', 'Fatal', 'Critical', 'Verbose',
+])
+
 /** Method-level attributes that mark a test across xUnit / NUnit / MSTest. */
 export const CSHARP_TEST_METHOD_ATTRIBUTES = new Set([
   'Fact', 'Theory',                                    // xUnit

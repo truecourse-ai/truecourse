@@ -141,6 +141,106 @@ import { csharpUnusedVariableVisitor } from './unused-variable.js'
 import { csharpUselessCatchVisitor } from './useless-catch.js'
 import { csharpUselessConstructorVisitor } from './useless-constructor.js'
 import { csharpYodaConditionVisitor } from './yoda-condition.js'
+import { csharpAbstractClassPublicConstructorVisitor } from './abstract-class-public-constructor.js'
+import { csharpAbstractClassWithoutAbstractMembersVisitor } from './abstract-class-without-abstract-members.js'
+import { csharpArithmeticPrecedenceParenthesesVisitor } from './arithmetic-precedence-parentheses.js'
+import { csharpAsymmetricEqualityOperatorsVisitor } from './asymmetric-equality-operators.js'
+import { csharpAttributeMissingUsageVisitor } from './attribute-missing-usage.js'
+import { csharpConditionalPrecedenceParenthesesVisitor } from './conditional-precedence-parentheses.js'
+import { csharpCrefWithPrefixVisitor } from './cref-with-prefix.js'
+import { csharpDebugAssertFalseVisitor } from './debug-assert-false.js'
+import { csharpDuplicateSwitchSectionBodiesVisitor } from './duplicate-switch-section-bodies.js'
+import { csharpDuplicateWordInCommentVisitor } from './duplicate-word-in-comment.js'
+import { csharpEmptyCommentVisitor } from './empty-comment.js'
+import { csharpEmptyElseClauseVisitor } from './empty-else-clause.js'
+import { csharpEmptyInterfaceVisitor } from './empty-interface.js'
+import { csharpEmptyNamespaceDeclarationVisitor } from './empty-namespace-declaration.js'
+import { csharpEnumMemberPrefixedWithTypeVisitor } from './enum-member-prefixed-with-type.js'
+import { csharpEnumReservedMemberNameVisitor } from './enum-reserved-member-name.js'
+import { csharpExceptionNamedTypeNotExceptionVisitor } from './exception-named-type-not-exception.js'
+import { csharpExceptionTypeNotPublicVisitor } from './exception-type-not-public.js'
+import { csharpUnnecessaryUnaryPlusVisitor } from './unnecessary-unary-plus.js'
+import { csharpNullableShorthandVisitor } from './nullable-shorthand.js'
+import { csharpUnnecessaryVerbatimStringVisitor } from './unnecessary-verbatim-string.js'
+import { csharpRedundantBaseConstructorCallVisitor } from './redundant-base-constructor-call.js'
+import { csharpRedundantBaseTypeVisitor } from './redundant-base-type.js'
+import { csharpObsoleteWithoutMessageVisitor } from './obsolete-without-message.js'
+import { csharpNotImplementedExceptionVisitor } from './not-implemented-exception.js'
+import { csharpUnnecessaryRecordBracesVisitor } from './unnecessary-record-braces.js'
+import { csharpEnumUnderlyingTypeNotInt32Visitor } from './enum-underlying-type-not-int32.js'
+import { csharpRedundantDefaultSwitchSectionVisitor } from './redundant-default-switch-section.js'
+import { csharpUseNullCoalescingAssignmentVisitor } from './use-null-coalescing-assignment.js'
+import { csharpUseNullCoalescingVisitor } from './use-null-coalescing.js'
+import { csharpUnsealedAttributeVisitor } from './unsealed-attribute.js'
+import { csharpStaticHolderTypeHasConstructorVisitor } from './static-holder-type-has-constructor.js'
+import { csharpUseStringConcatOverJoinVisitor } from './use-string-concat-over-join.js'
+import { csharpPreferTupleSyntaxVisitor } from './prefer-tuple-syntax.js'
+import { csharpPreferLambdaOverDelegateVisitor } from './prefer-lambda-over-delegate.js'
+import { csharpUseEventArgsEmptyVisitor } from './use-eventargs-empty.js'
+import { csharpPreferStringEmptyVisitor } from './prefer-string-empty.js'
+import { csharpInfiniteLoopNonCanonicalVisitor } from './infinite-loop-non-canonical.js'
+import { csharpManualEnumeratorLoopVisitor } from './manual-enumerator-loop.js'
+import { csharpRedundantToStringCallVisitor } from './redundant-tostring-call.js'
+import { csharpRedundantToCharArrayCallVisitor } from './redundant-tochararray-call.js'
+import { csharpStaticReadonlyShouldBeConstVisitor } from './static-readonly-should-be-const.js'
+import { csharpRedundantLengthArgumentVisitor } from './redundant-length-argument.js'
+import { csharpTraceWriteUsageVisitor } from './trace-write-usage.js'
+import { csharpNonPrivateFieldVisitor } from './non-private-field.js'
+import { csharpEnumMissingZeroValueVisitor } from './enum-missing-zero-value.js'
+import { csharpRedundantAnonymousPropertyNameVisitor } from './redundant-anonymous-property-name.js'
+import { csharpUnnecessaryDeclarationSemicolonVisitor } from './unnecessary-declaration-semicolon.js'
+import { csharpRedundantDefaultInitializerVisitor } from './redundant-default-initializer.js'
+import { csharpStringCompareToZeroVisitor } from './string-compare-to-zero.js'
+import { csharpRedundantOverrideVisitor } from './redundant-override.js'
+import { csharpLiteralSuffixOverCastVisitor } from './literal-suffix-over-cast.js'
+import { csharpTooManyTypeParametersVisitor } from './too-many-type-parameters.js'
+import { csharpPreferUnixEpochFieldVisitor } from './prefer-unix-epoch-field.js'
+import { csharpNonFlagsEnumPluralNameVisitor } from './non-flags-enum-plural-name.js'
+import { csharpFlagsEnumSingularNameVisitor } from './flags-enum-singular-name.js'
+import { csharpUseThrowIfCancellationRequestedVisitor } from './use-throwifcancellationrequested.js'
+import { csharpPropertyReturnsArrayVisitor } from './property-returns-array.js'
+import { csharpNonGenericEventHandlerVisitor } from './non-generic-event-handler.js'
+import { csharpOutRefParameterUsageVisitor } from './out-ref-parameter-usage.js'
+import { csharpParamsNotOnOverrideVisitor } from './params-not-on-override.js'
+import { csharpTooManyGenericParametersVisitor } from './too-many-generic-parameters.js'
+import { csharpMergeDeclarationWithAssignmentVisitor } from './merge-declaration-with-assignment.js'
+import { csharpUnnecessaryRawStringVisitor } from './unnecessary-raw-string.js'
+import { csharpUnnecessaryStringInterpolationVisitor } from './unnecessary-string-interpolation.js'
+import { csharpMergeableCatchClausesVisitor } from './mergeable-catch-clauses.js'
+import { csharpTypeofNameOverTypeofNameVisitor } from './typeof-name-over-typeof-name.js'
+import { csharpEventBeforeAfterPrefixVisitor } from './event-before-after-prefix.js'
+import { csharpStaticMemberOnGenericTypeVisitor } from './static-member-on-generic-type.js'
+import { csharpUseIsOverAsNullCheckVisitor } from './use-is-over-as-null-check.js'
+import { csharpTypeInGlobalNamespaceVisitor } from './type-in-global-namespace.js'
+import { csharpAddClarifyingParenthesesVisitor } from './add-clarifying-parentheses.js'
+import { csharpAsyncMethodNamingVisitor } from './async-method-naming.js'
+import { csharpEqualityOperatorOnReferenceTypeVisitor } from './equality-operator-on-reference-type.js'
+import { csharpExcludeFromCoverageWithoutJustificationVisitor } from './excludefromcoverage-without-justification.js'
+import { csharpExpectedExceptionAttributeVisitor } from './expected-exception-attribute.js'
+import { csharpExtensionMethodOnObjectVisitor } from './extension-method-on-object.js'
+import { csharpGenericParameterNotInferableVisitor } from './generic-parameter-not-inferable.js'
+import { csharpIfToBooleanAssignmentVisitor } from './if-to-boolean-assignment.js'
+import { csharpInSourceSuppressionVisitor } from './in-source-suppression.js'
+import { csharpNativeMethodNotWrappedVisitor } from './native-method-not-wrapped.js'
+import { csharpNestedGenericParameterVisitor } from './nested-generic-parameter.js'
+import { csharpOutdatedBaseTypeVisitor } from './outdated-base-type.js'
+import { csharpParameterDuplicatesMethodNameVisitor } from './parameter-duplicates-method-name.js'
+import { csharpPreferAssemblyLoadVisitor } from './prefer-assembly-load.js'
+import { csharpPropertyNameMatchesGetMethodVisitor } from './property-name-matches-get-method.js'
+import { csharpPublicConstVersioningHazardVisitor } from './public-const-versioning-hazard.js'
+import { csharpPublicMultidimensionalArrayParamVisitor } from './public-multidimensional-array-param.js'
+import { csharpSealedClassProtectedMemberVisitor } from './sealed-class-protected-member.js'
+import { csharpSuppressFinalizeWithoutFinalizerVisitor } from './suppressfinalize-without-finalizer.js'
+import { csharpSuppressionWithoutJustificationVisitor } from './suppression-without-justification.js'
+import { csharpTooManyLoggingCallsVisitor } from './too-many-logging-calls.js'
+import { csharpUnnecessaryUnsafeContextVisitor } from './unnecessary-unsafe-context.js'
+import { csharpUnusedTypeParameterVisitor } from './unused-type-parameter.js'
+import { csharpUseArgumentNullExceptionThrowHelperVisitor } from './use-argumentnullexception-throwhelper.js'
+import { csharpUseAutoPropertyVisitor } from './use-auto-property.js'
+import { csharpUseExceptionFilterVisitor } from './use-exception-filter.js'
+import { csharpUseIsNullOrEmptyVisitor } from './use-isnullorempty.js'
+import { csharpUseObjectDisposedExceptionThrowHelperVisitor } from './use-objectdisposedexception-throwhelper.js'
+import { csharpValueTypeEqualsWithoutOperatorVisitor } from './value-type-equals-without-operator.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -285,4 +385,104 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpUselessCatchVisitor,
   csharpUselessConstructorVisitor,
   csharpYodaConditionVisitor,
+  csharpAbstractClassPublicConstructorVisitor,
+  csharpAbstractClassWithoutAbstractMembersVisitor,
+  csharpArithmeticPrecedenceParenthesesVisitor,
+  csharpAsymmetricEqualityOperatorsVisitor,
+  csharpAttributeMissingUsageVisitor,
+  csharpConditionalPrecedenceParenthesesVisitor,
+  csharpCrefWithPrefixVisitor,
+  csharpDebugAssertFalseVisitor,
+  csharpDuplicateSwitchSectionBodiesVisitor,
+  csharpDuplicateWordInCommentVisitor,
+  csharpEmptyCommentVisitor,
+  csharpEmptyElseClauseVisitor,
+  csharpEmptyInterfaceVisitor,
+  csharpEmptyNamespaceDeclarationVisitor,
+  csharpEnumMemberPrefixedWithTypeVisitor,
+  csharpEnumReservedMemberNameVisitor,
+  csharpExceptionNamedTypeNotExceptionVisitor,
+  csharpExceptionTypeNotPublicVisitor,
+  csharpUnnecessaryUnaryPlusVisitor,
+  csharpNullableShorthandVisitor,
+  csharpUnnecessaryVerbatimStringVisitor,
+  csharpRedundantBaseConstructorCallVisitor,
+  csharpRedundantBaseTypeVisitor,
+  csharpObsoleteWithoutMessageVisitor,
+  csharpNotImplementedExceptionVisitor,
+  csharpUnnecessaryRecordBracesVisitor,
+  csharpEnumUnderlyingTypeNotInt32Visitor,
+  csharpRedundantDefaultSwitchSectionVisitor,
+  csharpUseNullCoalescingAssignmentVisitor,
+  csharpUseNullCoalescingVisitor,
+  csharpUnsealedAttributeVisitor,
+  csharpStaticHolderTypeHasConstructorVisitor,
+  csharpUseStringConcatOverJoinVisitor,
+  csharpPreferTupleSyntaxVisitor,
+  csharpPreferLambdaOverDelegateVisitor,
+  csharpUseEventArgsEmptyVisitor,
+  csharpPreferStringEmptyVisitor,
+  csharpInfiniteLoopNonCanonicalVisitor,
+  csharpManualEnumeratorLoopVisitor,
+  csharpRedundantToStringCallVisitor,
+  csharpRedundantToCharArrayCallVisitor,
+  csharpStaticReadonlyShouldBeConstVisitor,
+  csharpRedundantLengthArgumentVisitor,
+  csharpTraceWriteUsageVisitor,
+  csharpNonPrivateFieldVisitor,
+  csharpEnumMissingZeroValueVisitor,
+  csharpRedundantAnonymousPropertyNameVisitor,
+  csharpUnnecessaryDeclarationSemicolonVisitor,
+  csharpRedundantDefaultInitializerVisitor,
+  csharpStringCompareToZeroVisitor,
+  csharpRedundantOverrideVisitor,
+  csharpLiteralSuffixOverCastVisitor,
+  csharpTooManyTypeParametersVisitor,
+  csharpPreferUnixEpochFieldVisitor,
+  csharpNonFlagsEnumPluralNameVisitor,
+  csharpFlagsEnumSingularNameVisitor,
+  csharpUseThrowIfCancellationRequestedVisitor,
+  csharpPropertyReturnsArrayVisitor,
+  csharpNonGenericEventHandlerVisitor,
+  csharpOutRefParameterUsageVisitor,
+  csharpParamsNotOnOverrideVisitor,
+  csharpTooManyGenericParametersVisitor,
+  csharpMergeDeclarationWithAssignmentVisitor,
+  csharpUnnecessaryRawStringVisitor,
+  csharpUnnecessaryStringInterpolationVisitor,
+  csharpMergeableCatchClausesVisitor,
+  csharpTypeofNameOverTypeofNameVisitor,
+  csharpEventBeforeAfterPrefixVisitor,
+  csharpStaticMemberOnGenericTypeVisitor,
+  csharpUseIsOverAsNullCheckVisitor,
+  csharpTypeInGlobalNamespaceVisitor,
+  csharpAddClarifyingParenthesesVisitor,
+  csharpAsyncMethodNamingVisitor,
+  csharpEqualityOperatorOnReferenceTypeVisitor,
+  csharpExcludeFromCoverageWithoutJustificationVisitor,
+  csharpExpectedExceptionAttributeVisitor,
+  csharpExtensionMethodOnObjectVisitor,
+  csharpGenericParameterNotInferableVisitor,
+  csharpIfToBooleanAssignmentVisitor,
+  csharpInSourceSuppressionVisitor,
+  csharpNativeMethodNotWrappedVisitor,
+  csharpNestedGenericParameterVisitor,
+  csharpOutdatedBaseTypeVisitor,
+  csharpParameterDuplicatesMethodNameVisitor,
+  csharpPreferAssemblyLoadVisitor,
+  csharpPropertyNameMatchesGetMethodVisitor,
+  csharpPublicConstVersioningHazardVisitor,
+  csharpPublicMultidimensionalArrayParamVisitor,
+  csharpSealedClassProtectedMemberVisitor,
+  csharpSuppressFinalizeWithoutFinalizerVisitor,
+  csharpSuppressionWithoutJustificationVisitor,
+  csharpTooManyLoggingCallsVisitor,
+  csharpUnnecessaryUnsafeContextVisitor,
+  csharpUnusedTypeParameterVisitor,
+  csharpUseArgumentNullExceptionThrowHelperVisitor,
+  csharpUseAutoPropertyVisitor,
+  csharpUseExceptionFilterVisitor,
+  csharpUseIsNullOrEmptyVisitor,
+  csharpUseObjectDisposedExceptionThrowHelperVisitor,
+  csharpValueTypeEqualsWithoutOperatorVisitor,
 ]

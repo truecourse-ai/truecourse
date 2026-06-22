@@ -28,6 +28,7 @@ internal class AuditContext
 // VIOLATION: code-quality/deterministic/class-as-data-structure
 internal class SyncCursor
 {
+    // VIOLATION: code-quality/deterministic/non-private-field
     public int Offset;
     public int BatchSize;
 }
