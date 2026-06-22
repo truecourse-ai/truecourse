@@ -43,6 +43,12 @@ export const genericErrorMessageVisitor: CodeRuleVisitor = {
     // property is present.
     if (isLabeledWithDescriptionSibling(node)) return null
 
+    // The same title+detail pairing also appears as JSX attributes
+    // (`<ErrorView title="Oops" message={detail} />`). The vague headline is
+    // paired with a sibling attribute carrying the actionable detail, so
+    // flagging the title alone is noise — mirror the object-literal carve-out.
+    if (isJsxTitleWithDescriptionSibling(node)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Generic error message',
@@ -51,6 +57,33 @@ export const genericErrorMessageVisitor: CodeRuleVisitor = {
       'Replace with a specific error message that includes an error code or actionable detail.',
     )
   },
+}
+
+// JSX analogue of isLabeledWithDescriptionSibling: a string that is the value
+// of a `title`/`heading`/... JSX attribute whose element also carries a
+// `message`/`description`/... attribute. The attribute name is the first named
+// child of the `jsx_attribute`; sibling attributes live on the enclosing
+// opening / self-closing element.
+function isJsxTitleWithDescriptionSibling(node: SyntaxNode): boolean {
+  const attr = node.parent
+  if (!attr || attr.type !== 'jsx_attribute') return false
+
+  const nameNode = attr.namedChild(0)
+  if (!nameNode) return false
+  const attrName = nameNode.text.replace(/['"`]/g, '')
+  if (!TITLE_KEYS.has(attrName)) return false
+
+  const element = attr.parent
+  if (!element) return false
+
+  for (const child of element.namedChildren) {
+    if (child.id === attr.id || child.type !== 'jsx_attribute') continue
+    const k = child.namedChild(0)
+    if (!k) continue
+    const kn = k.text.replace(/['"`]/g, '')
+    if (DESCRIPTION_KEYS.has(kn)) return true
+  }
+  return false
 }
 
 function isLabeledWithDescriptionSibling(node: SyntaxNode): boolean {

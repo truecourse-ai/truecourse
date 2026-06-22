@@ -41,6 +41,22 @@ export const restrictedTypesVisitor: CodeRuleVisitor = {
       parent.type !== 'implements_clause'
     ) return null
 
+    // Don't flag a restricted type that is a member of a union which forms a
+    // type alias, e.g. `type Builtin = Date | Function | Uint8Array | ...`.
+    // Such a union is a type-set used for structural matching in conditional
+    // types (`T extends Builtin ? ...`); its members are matchers, not usable
+    // annotations. Direct annotations (`x: Object | undefined`, `cb: Function`)
+    // are unaffected — their union resolves to a type_annotation, not an alias.
+    // `A | B | C` nests as chained union_type nodes, so walk to the outermost
+    // union before checking what it belongs to.
+    if (parent.type === 'union_type') {
+      let union = parent
+      while (union.parent && union.parent.type === 'union_type') {
+        union = union.parent
+      }
+      if (union.parent?.type === 'type_alias_declaration') return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Restricted type usage',

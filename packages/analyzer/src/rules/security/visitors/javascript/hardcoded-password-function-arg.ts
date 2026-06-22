@@ -28,6 +28,10 @@ export const hardcodedPasswordFunctionArgVisitor: CodeRuleVisitor = {
     for (const arg of args.namedChildren) {
       if (arg.type === 'string') {
         const val = arg.text.replace(/['"]/g, '')
+        // Skip kebab-case identifier labels/slugs (e.g. "failed-pod-informer",
+        // "email-link") — lowercase hyphen-joined words used as names, not
+        // credentials. A real password carries mixed case, digits, or symbols.
+        if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(val)) continue
         if (val.length >= 8 && PLAINTEXT_PASSWORD_PATTERN.test(val) &&
             !/^https?:\/\//.test(val) && !/localhost/.test(val)) {
           return makeViolation(
