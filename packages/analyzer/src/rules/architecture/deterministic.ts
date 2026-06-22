@@ -360,7 +360,11 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
-    engine: 'roslyn-host',
+    // Needs the project's nullable context to avoid false positives: under nullable
+    // reference types a non-`?` parameter is compiler-guaranteed non-null, so the
+    // guard is redundant. Loose-text compilation can't see that, so this runs in
+    // MSBuildWorkspace mode where the real nullable setting applies.
+    engine: 'roslyn-workspace',
   },
   {
     key: 'architecture/deterministic/private-method-belongs-in-nested-class',

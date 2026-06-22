@@ -22,35 +22,32 @@ internal sealed class FileNameTypeMismatch : ISemanticRule
         var fileName = Path.GetFileNameWithoutExtension(path);
         if (string.IsNullOrEmpty(fileName)) yield break;
 
-        // The first type declared in the file (ignoring nested types) is the one the
-        // file should be named for.
-        var identifier = FirstTopLevelTypeIdentifier(tree.GetRoot());
-        if (identifier is not { } id) yield break;
+        // The file is well-named if ANY top-level type matches the file name — a
+        // file holding `IOrderRepository` + `OrderRepository` named OrderRepository.cs
+        // is correct, so we never flag on the first type alone.
+        var identifiers = TopLevelTypeIdentifiers(tree.GetRoot()).ToList();
+        if (identifiers.Count == 0) yield break;
 
-        var typeName = id.ValueText;
+        // Allow `OrderService` in `OrderService.cs`, or generic-file conventions
+        // (`OrderService{TKey}.cs` / `OrderService.TKey.cs`).
+        if (identifiers.Any(id => NameMatches(fileName, id.ValueText))) yield break;
 
-        // Allow `OrderService` to live in either `OrderService.cs` or, for generics,
-        // `OrderService{TKey}.cs` / `OrderService.TKey.cs` — compare against the bare
-        // type name and a few common generic-file conventions.
-        if (NameMatches(fileName, typeName)) yield break;
-
-        var pos = id.GetLocation().GetLineSpan().StartLinePosition;
+        var first = identifiers[0];
+        var pos = first.GetLocation().GetLineSpan().StartLinePosition;
         yield return new Violation(
             RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
-            $"File '{fileName}' declares type '{typeName}' first; name the file after the type so it is easy to locate.");
+            $"File '{fileName}' declares type '{first.ValueText}' but no top-level type matches the file name; name the file after a type so it is easy to locate.");
     }
 
-    private static SyntaxToken? FirstTopLevelTypeIdentifier(SyntaxNode root)
+    private static IEnumerable<SyntaxToken> TopLevelTypeIdentifiers(SyntaxNode root)
     {
-        // Walk compilation-unit and namespace members in order; return the identifier
-        // of the first type/delegate declaration encountered.
+        // Identifiers of every top-level type/delegate declaration, in source order.
         foreach (var member in EnumerateTopLevel(root))
             switch (member)
             {
-                case BaseTypeDeclarationSyntax t: return t.Identifier;
-                case DelegateDeclarationSyntax d: return d.Identifier;
+                case BaseTypeDeclarationSyntax t: yield return t.Identifier; break;
+                case DelegateDeclarationSyntax d: yield return d.Identifier; break;
             }
-        return null;
     }
 
     private static IEnumerable<MemberDeclarationSyntax> EnumerateTopLevel(SyntaxNode node)

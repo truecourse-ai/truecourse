@@ -36,10 +36,12 @@ internal sealed class MissingPublicArgumentValidation : ISemanticRule
                 if (model.GetDeclaredSymbol(p) is not IParameterSymbol ps) continue;
                 if (!IsGuardableReferenceParameter(ps)) continue;
 
-                // A parameter the author already declared nullable (`string?`) is an
-                // intentional may-be-null contract — dereferencing it is their concern,
-                // not a missing-guard finding.
-                if (ps.NullableAnnotation == NullableAnnotation.Annotated) continue;
+                // Only flag in nullable-OBLIVIOUS code (annotation None). When the
+                // nullable context is enabled, a non-`?` parameter (NotAnnotated) is
+                // compiler-guaranteed non-null and a guard is redundant, and a `?`
+                // parameter (Annotated) is an intentional may-be-null contract. Either
+                // way the missing-guard finding is a false positive under NRT.
+                if (ps.NullableAnnotation != NullableAnnotation.None) continue;
 
                 if (HasNullGuard(body, model, ps)) continue;
 

@@ -35,6 +35,9 @@ internal sealed class LocalShadowsField : ISemanticRule
         foreach (var param in root.DescendantNodes().OfType<ParameterSyntax>())
         {
             if (param.Identifier.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.None)) continue;
+            // Primary-constructor / record positional parameters DEFINE the type's
+            // members (the auto-generated properties), so they don't shadow them.
+            if (param.Parent is ParameterListSyntax { Parent: TypeDeclarationSyntax }) continue;
             if (model.GetDeclaredSymbol(param) is not IParameterSymbol p) continue;
             // Skip parameters of accessors named `value` (the compiler-supplied setter
             // parameter would otherwise be reported against a same-named member).

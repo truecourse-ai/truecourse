@@ -5134,7 +5134,11 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     name: 'Inline a single-use local variable',
     description:
       'A local assigned once and used exactly once on the next statement only adds a name; inline the initializer.',
-    enabled: true,
+    // Disabled: a subjective style preference (Roslynator RCS1124, not a Sonar
+    // rule) that fires on idiomatic code where naming an intermediate aids
+    // readability — it cannot reach zero false positives without becoming
+    // trivial, and isn't needed for competitive parity.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
     engine: 'roslyn-host',

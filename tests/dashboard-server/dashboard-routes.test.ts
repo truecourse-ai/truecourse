@@ -582,11 +582,19 @@ describe('dashboard routes (seeded store)', () => {
     });
 
     it('GET /api/repos/:id/rules mirrors the catalogue when no overrides exist', async () => {
+      const catalogue = await request(app).get('/api/rules').expect(200);
+      const catalogEnabled = new Map(
+        (catalogue.body as Array<{ key: string; enabled: boolean }>).map((r) => [r.key, r.enabled]),
+      );
       const res = await request(app)
         .get(`/api/repos/${fixture.project.slug}/rules`)
         .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.every((r: { enabled: boolean }) => r.enabled === true)).toBe(true);
+      // No per-repo overrides → each rule's enabled state equals the catalogue default
+      // (which can legitimately ship a rule disabled, e.g. an FP-prone style rule).
+      expect(
+        res.body.every((r: { key: string; enabled: boolean }) => r.enabled === catalogEnabled.get(r.key)),
+      ).toBe(true);
     });
 
     it('PATCH /api/repos/:id/rules/:ruleKey toggles a rule and persists', async () => {
