@@ -48,12 +48,30 @@ internal sealed class InlineSingleUseLocal : ISemanticRule
             if (!nextStmt.Span.Contains(theRef.Span)) continue;
             if (IsWrite(theRef)) continue;
 
+            // Only flag a pure passthrough — the local used as the WHOLE value of the
+            // next statement (`return x;`, `x;`, or `y = x;`). When it appears as a
+            // sub-expression (`x.Member`, `!x`, `f(x)`, `x ? a : b`), the name aids
+            // readability and inlining would nest it into a larger expression, so leave
+            // it alone — that's the idiomatic "name the intermediate" case, not a defect.
+            if (!IsBarePassthrough(theRef)) continue;
+
             var pos = v.Identifier.GetLocation().GetLineSpan().StartLinePosition;
             yield return new Violation(
                 RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
                 $"Local '{local.Name}' is used exactly once on the next statement; inline its initializer at the point of use.");
         }
     }
+
+    /// True when the single read is the WHOLE value of its statement — `return x;`,
+    /// a bare `x;`, or `y = x;` — so inlining is a mechanical, readability-neutral
+    /// substitution. A read nested inside a larger expression returns false.
+    private static bool IsBarePassthrough(IdentifierNameSyntax read) => read.Parent switch
+    {
+        ReturnStatementSyntax => true,
+        ExpressionStatementSyntax => true,
+        AssignmentExpressionSyntax a when a.Right == read && a.Parent is ExpressionStatementSyntax => true,
+        _ => false,
+    };
 
     /// True when the initializer is a method invocation (the classic compute-then-use
     /// case). Object/collection/array creation is intentionally excluded.
