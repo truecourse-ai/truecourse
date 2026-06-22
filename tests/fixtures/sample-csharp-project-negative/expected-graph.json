@@ -25,6 +25,12 @@
   ],
   "modules": [
     {
+      "name": "@partial",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
       "name": "AccountProfile",
       "service": "ApiGateway",
       "kind": "class",
@@ -43,7 +49,31 @@
       "layer": "service"
     },
     {
+      "name": "AuditableEntity",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "AuditChannel",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "AuthenticationHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "AuthMiddleware",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "AuthorizationHandler",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "api"
@@ -61,7 +91,61 @@
       "layer": "service"
     },
     {
+      "name": "BatchRetry",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BufferHandle",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "BufferPipeline",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BuildSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CachedResource",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "CacheEntry",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CacheLocking",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CacheSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CallerAwareLogger",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CheckoutOrchestrator",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -85,7 +169,19 @@
       "layer": "service"
     },
     {
+      "name": "ConfigSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ConnectionPool",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ConnectionState",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -103,7 +199,43 @@
       "layer": "api"
     },
     {
+      "name": "CpuSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CreateOrderHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "CredentialHandling",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Customer",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DatabaseSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DeferredResult",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DependencySection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -127,13 +259,37 @@
       "layer": "service"
     },
     {
+      "name": "DiagnosticsReportBuilder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DiskSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "DispatchStage",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
     },
     {
+      "name": "EnterpriseAccount",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "EnvironmentSettingsLoader",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ErrorSection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -146,6 +302,18 @@
     },
     {
       "name": "EventRaiser",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ExponentialBackoff",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FeatureFlagSection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -187,6 +355,12 @@
       "layer": "service"
     },
     {
+      "name": "FragileKey",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "FunctionsHost",
       "service": "ApiGateway",
       "kind": "class",
@@ -205,9 +379,21 @@
       "layer": "api"
     },
     {
+      "name": "GatewayRoutingException",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "GatewayTimeoutException",
       "service": "ApiGateway",
       "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "GcSection",
+      "service": "ApiGateway",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -223,6 +409,18 @@
       "layer": "data"
     },
     {
+      "name": "GuardedHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "HandlerBase",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "HardeningHelpers",
       "service": "ApiGateway",
       "kind": "class",
@@ -230,6 +428,12 @@
     },
     {
       "name": "HashComputer",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "HeaderNormalization",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -259,7 +463,103 @@
       "layer": "service"
     },
     {
+      "name": "IAddressValidator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IAuditLogger",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ICart",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ICartValidator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ICouponService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ICurrencyConverter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ICustomerProfile",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IDiscountEngine",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IDispatchSink",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "IEmailFormatter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IFeatureFlags",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IFraudDetector",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IInventoryService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ILoyaltyService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IMetricsRecorder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "INotificationContract",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "INotificationService",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -283,7 +583,25 @@
       "layer": "service"
     },
     {
+      "name": "IOrderRepository",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IOutboxStore",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IPaymentGateway",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IPricingEngine",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -295,9 +613,21 @@
       "layer": "external"
     },
     {
+      "name": "IReceiptBuilder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IRoutingTag",
       "service": "ApiGateway",
       "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "IShippingCalculator",
+      "service": "ApiGateway",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -307,13 +637,37 @@
       "layer": "external"
     },
     {
+      "name": "ITaxCalculator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ITelemetryLogger",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
     },
     {
+      "name": "IWalletService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "JsonDeserializationConfig",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "JwtAuthentication",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "KeywordNaming",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -337,6 +691,18 @@
       "layer": "service"
     },
     {
+      "name": "LinearBatchRetry",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LinkState",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "LinqQueries",
       "service": "ApiGateway",
       "kind": "class",
@@ -347,6 +713,12 @@
       "service": "ApiGateway",
       "kind": "standalone",
       "layer": "service"
+    },
+    {
+      "name": "LoggingHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "Lookups",
@@ -362,6 +734,30 @@
     },
     {
       "name": "MemberShapes",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MemorySection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricsHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "MetricsMath",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Money",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -391,7 +787,25 @@
       "layer": "service"
     },
     {
+      "name": "NetworkSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "NotificationHub",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationRouter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationScope",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -419,6 +833,18 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "Organization",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Party",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "PasswordHashing",
@@ -463,6 +889,12 @@
       "layer": "service"
     },
     {
+      "name": "PersistedEntity",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "PipelineStage",
       "service": "ApiGateway",
       "kind": "class",
@@ -470,6 +902,12 @@
     },
     {
       "name": "Player",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PooledMemory",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -499,6 +937,12 @@
       "layer": "service"
     },
     {
+      "name": "Quantity",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "QueryOperations",
       "service": "ApiGateway",
       "kind": "class",
@@ -506,6 +950,12 @@
     },
     {
       "name": "QueueMaintenance",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "QueueSection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -529,6 +979,12 @@
       "layer": "service"
     },
     {
+      "name": "Register",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "RenderCache",
       "service": "ApiGateway",
       "kind": "class",
@@ -536,6 +992,12 @@
     },
     {
       "name": "ReportBuilder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ReportHeader",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -553,7 +1015,25 @@
       "layer": "service"
     },
     {
+      "name": "RequestBuilder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RequestCounters",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RequestHandlerBase",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "RequestLogging",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -565,13 +1045,61 @@
       "layer": "service"
     },
     {
+      "name": "RequestPipeline",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RequestPriority",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RequestRouter",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "api"
     },
     {
+      "name": "RequestSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RequestValidation",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Resource",
+      "service": "ApiGateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "ResponseBuffer",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ResultPager",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RetryMode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RetryStrategy",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -673,7 +1201,31 @@
       "layer": "service"
     },
     {
+      "name": "SessionNode",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SessionRegistry",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SessionSnapshot",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "SettingsLookup",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SettingsPayload",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -697,10 +1249,22 @@
       "layer": "service"
     },
     {
+      "name": "SoftDeletableEntity",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "SqlAndScriptInjection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "StartupConfig",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "StatusController",
@@ -713,6 +1277,12 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
+    },
+    {
+      "name": "StreamingHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "StringBuilders",
@@ -769,6 +1339,12 @@
       "layer": "service"
     },
     {
+      "name": "TelemetrySink",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "TextOperations",
       "service": "ApiGateway",
       "kind": "class",
@@ -776,6 +1352,12 @@
     },
     {
       "name": "ThreadLocalState",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ThreadPoolSection",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -817,6 +1399,12 @@
       "layer": "service"
     },
     {
+      "name": "TypeComparisons",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TypedCache",
       "service": "ApiGateway",
       "kind": "class",
@@ -827,6 +1415,18 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "UpstreamProbe",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UptimeSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "UserController",
@@ -847,6 +1447,12 @@
       "layer": "service"
     },
     {
+      "name": "ValidationHandler",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "ViewStateBinding",
       "service": "ApiGateway",
       "kind": "class",
@@ -854,6 +1460,12 @@
     },
     {
       "name": "WeakCryptoService",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "WebhookDispatcher",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "external"
@@ -871,16 +1483,34 @@
       "layer": "service"
     },
     {
+      "name": "AccountDefaults",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "AccountMaintenanceRepository",
       "service": "UserService",
       "kind": "class",
       "layer": "data"
     },
     {
+      "name": "AccountRegistration",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "AccountsController",
       "service": "UserService",
       "kind": "class",
       "layer": "api"
+    },
+    {
+      "name": "AccountTier",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "AggregationFunction",
@@ -926,6 +1556,18 @@
     },
     {
       "name": "BillingPlan",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CacheBase",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CacheCoordinator",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1021,6 +1663,24 @@
       "layer": "service"
     },
     {
+      "name": "EmailFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmailNotification",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Event",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ExceptionShapes",
       "service": "UserService",
       "kind": "class",
@@ -1028,6 +1688,18 @@
     },
     {
       "name": "ExpressionResidue",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FeatureFlagAttribute",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FeatureToggles",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1063,7 +1735,37 @@
       "layer": "service"
     },
     {
+      "name": "HandleValidator",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IAccountService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IAccountStore",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IAuditable",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "IBannerSink",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IInvoiceStore",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1081,6 +1783,42 @@
       "layer": "service"
     },
     {
+      "name": "INotification",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "InvoiceCalculator",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "InvoiceLine",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ITrackable",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "IUserReader",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "IUserRecord",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "LedgerEntryBase",
       "service": "UserService",
       "kind": "class",
@@ -1088,6 +1826,12 @@
     },
     {
       "name": "LegacyOrderProcessor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Logging",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1102,6 +1846,12 @@
       "name": "MaintenanceTasks",
       "service": "UserService",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Mask",
+      "service": "UserService",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1123,6 +1873,12 @@
       "layer": "service"
     },
     {
+      "name": "MoneyAmount",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "NativeBuffer",
       "service": "UserService",
       "kind": "class",
@@ -1139,6 +1895,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "NotificationDispatcher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "NotificationPriority",
@@ -1183,6 +1945,12 @@
       "layer": "service"
     },
     {
+      "name": "PasswordPolicy",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PatternValidators",
       "service": "UserService",
       "kind": "standalone",
@@ -1195,7 +1963,19 @@
       "layer": "service"
     },
     {
+      "name": "PermissionCache",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PermissionSet",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PlanCatalog",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1232,6 +2012,12 @@
     },
     {
       "name": "PricingContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ProfileEnricher",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -1285,6 +2071,18 @@
       "layer": "api"
     },
     {
+      "name": "ReportBuilder",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "ReportBuilderState",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "ReportSectionBase",
       "service": "UserService",
       "kind": "class",
@@ -1315,10 +2113,22 @@
       "layer": "service"
     },
     {
+      "name": "SessionAuditLog",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "SessionsController",
       "service": "UserService",
       "kind": "class",
       "layer": "api"
+    },
+    {
+      "name": "SessionTracker",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "SessionTracker",
@@ -1375,6 +2185,12 @@
       "layer": "data"
     },
     {
+      "name": "TokenIssuer",
+      "service": "UserService",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
       "name": "TokenService",
       "service": "UserService",
       "kind": "class",
@@ -1384,6 +2200,12 @@
       "name": "TokenServiceModule",
       "service": "UserService",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "TrialExpiryService",
+      "service": "UserService",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1405,16 +2227,46 @@
       "layer": "data"
     },
     {
+      "name": "UserHandle",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "UserHandler",
       "service": "UserService",
       "kind": "standalone",
       "layer": "api"
     },
     {
+      "name": "UserId",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserProfile",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserRecord",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "UserRepository",
       "service": "UserService",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "UserRosterQueries",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "UserService",
@@ -1441,6 +2293,12 @@
       "layer": "api"
     },
     {
+      "name": "WelcomeBanner",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Formatters",
       "service": "Utils",
       "kind": "standalone",
@@ -1461,12 +2319,75 @@
   ],
   "moduleDependencies": [
     {
+      "source": "AuthenticationHandler",
+      "sourceService": "ApiGateway",
+      "target": "MetricsHandler",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "MetricsHandler"
+      ]
+    },
+    {
+      "source": "AuthorizationHandler",
+      "sourceService": "ApiGateway",
+      "target": "MetricsHandler",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "MetricsHandler"
+      ]
+    },
+    {
+      "source": "CreateOrderHandler",
+      "sourceService": "ApiGateway",
+      "target": "ValidationHandler",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "ValidationHandler"
+      ]
+    },
+    {
+      "source": "Customer",
+      "sourceService": "ApiGateway",
+      "target": "SoftDeletableEntity",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "SoftDeletableEntity"
+      ]
+    },
+    {
+      "source": "EnterpriseAccount",
+      "sourceService": "ApiGateway",
+      "target": "Customer",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "Customer"
+      ]
+    },
+    {
       "source": "HealthRoutes",
       "sourceService": "ApiGateway",
       "target": "HealthService",
       "targetService": "ApiGateway",
       "importedNames": [
         "HealthService"
+      ]
+    },
+    {
+      "source": "Organization",
+      "sourceService": "ApiGateway",
+      "target": "SoftDeletableEntity",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "SoftDeletableEntity"
+      ]
+    },
+    {
+      "source": "Party",
+      "sourceService": "ApiGateway",
+      "target": "SoftDeletableEntity",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "SoftDeletableEntity"
       ]
     },
     {
@@ -1521,6 +2442,15 @@
       "targetService": "Utils",
       "importedNames": [
         "Formatters"
+      ]
+    },
+    {
+      "source": "ValidationHandler",
+      "sourceService": "ApiGateway",
+      "target": "MetricsHandler",
+      "targetService": "ApiGateway",
+      "importedNames": [
+        "MetricsHandler"
       ]
     },
     {
@@ -1635,6 +2565,22 @@
     {
       "source": "services/ApiGateway/Services/UserService.cs",
       "target": "shared/Utils/Formatters.cs"
+    },
+    {
+      "source": "services/ApiGateway/Violations/Architecture/AuthenticationHandler.cs",
+      "target": "services/ApiGateway/Violations/Architecture/HandlerBase.cs"
+    },
+    {
+      "source": "services/ApiGateway/Violations/Architecture/CreateOrderHandler.cs",
+      "target": "services/ApiGateway/Violations/Architecture/AuthenticationHandler.cs"
+    },
+    {
+      "source": "services/ApiGateway/Violations/Architecture/EnterpriseAccount.cs",
+      "target": "services/ApiGateway/Violations/Architecture/Party.cs"
+    },
+    {
+      "source": "services/ApiGateway/Violations/Architecture/Party.cs",
+      "target": "services/ApiGateway/Violations/Architecture/PersistedEntity.cs"
     },
     {
       "source": "services/UserService/Handlers/UserHandler.cs",

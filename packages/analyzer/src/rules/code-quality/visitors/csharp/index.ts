@@ -57,7 +57,6 @@ import { csharpCyclomaticComplexityVisitor } from './cyclomatic-complexity.js'
 import { csharpDeadStoreVisitor } from './dead-store.js'
 import { csharpDeprecatedApiUsageVisitor } from './deprecated-api-usage.js'
 import { csharpDisabledTestTimeoutVisitor } from './disabled-test-timeout.js'
-import { csharpDebuggerStatementVisitor } from './debugger-statement.js'
 import { csharpDeeplyNestedFunctionsVisitor } from './deeply-nested-functions.js'
 import { csharpDefaultCaseInSwitchVisitor } from './default-case-in-switch.js'
 import { csharpDefaultCaseLastVisitor } from './default-case-last.js'
@@ -299,7 +298,6 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpContradictoryBooleanExpressionVisitor,
   csharpCyclomaticComplexityVisitor,
   csharpDeadStoreVisitor,
-  csharpDebuggerStatementVisitor,
   csharpDeeplyNestedFunctionsVisitor,
   csharpDefaultCaseInSwitchVisitor,
   csharpDefaultCaseLastVisitor,

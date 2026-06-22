@@ -17,9 +17,16 @@ import { buildDependencyGraph } from '../../packages/analyzer/src/dependency-gra
 import { performSplitAnalysis } from '../../packages/analyzer/src/split-analyzer';
 import { DETERMINISTIC_RULES, ALL_CODE_VISITORS } from '../../packages/analyzer/src/rules';
 import { checkCodeRules, parseFile, detectLanguage } from '../../packages/analyzer/src';
+import { runRoslynHost, resolveRoslynHostBinary } from '../../packages/analyzer/src/roslyn-host-client';
 import type { FileAnalysis, CodeViolation } from '../../packages/shared/src/types/analysis';
 
 const FIXTURE_PATH = new URL('../fixtures/sample-csharp-project-negative', import.meta.url).pathname;
+const hostBuilt = resolveRoslynHostBinary() !== null;
+
+/** Enabled Roslyn-host rule keys (no tree-sitter visitor; run via the host). */
+function hostRuleKeys(): string[] {
+  return DETERMINISTIC_RULES.filter((r) => r.enabled && r.engine === 'roslyn-host').map((r) => r.key);
+}
 
 // ---------------------------------------------------------------------------
 // Marker parsing
@@ -73,17 +80,21 @@ function runCodeRules(rootPath: string): CodeViolation[] {
   return allViolations;
 }
 
-/** Every deterministic code rule that can fire on C#: visitors declaring
- *  csharp plus the audited universal visitors. */
+/** Every deterministic code rule that can fire on C#: tree-sitter visitors
+ *  declaring csharp, the audited universal visitors, plus the Roslyn-host rules
+ *  (which have no visitor but fire on C# via the semantic host). */
 function csharpCoverageUniverse(): Set<string> {
   const enabledKeys = new Set(DETERMINISTIC_RULES.filter((r) => r.enabled).map((r) => r.key));
   const universe = new Set<string>();
   for (const visitor of ALL_CODE_VISITORS) {
     if (!enabledKeys.has(visitor.ruleKey)) continue;
+    // A universal visitor that opts out of C# at runtime doesn't fire here.
+    if (visitor.excludeLanguages?.includes('csharp')) continue;
     if (!visitor.languages || visitor.languages.includes('csharp')) {
       universe.add(visitor.ruleKey);
     }
   }
+  for (const key of hostRuleKeys()) universe.add(key);
   return universe;
 }
 
@@ -102,8 +113,21 @@ describe('C# negative fixture — code rules', () => {
     const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
     performSplitAnalysis(FIXTURE_PATH, analyses, deps);
     violations = runCodeRules(FIXTURE_PATH);
+    // Merge in the Roslyn-host rules (semantic engine, no tree-sitter visitor)
+    // when the host is built, so the marker assertions cover both engines.
+    if (hostBuilt) {
+      const hostFiles = collectCsFiles(FIXTURE_PATH).map((p) => ({ path: p, text: readFileSync(p, 'utf-8') }));
+      const hostViolations = await runRoslynHost(hostFiles, hostRuleKeys());
+      for (const v of hostViolations) {
+        violations.push({
+          ruleKey: v.ruleKey, filePath: v.path, lineStart: v.line, lineEnd: v.line,
+          columnStart: v.column, columnEnd: v.column, severity: 'medium',
+          title: v.ruleKey, content: v.message, snippet: '',
+        } as CodeViolation);
+      }
+    }
     expected = parseExpectedViolations(FIXTURE_PATH);
-  }, 120_000);
+  }, 240_000);
 
   it('has expected violation markers', () => {
     expect(expected.length).toBeGreaterThan(0);
@@ -120,8 +144,11 @@ describe('C# negative fixture — code rules', () => {
   });
 
   it('finds violations for each expected marker', () => {
+    // Host-rule markers can only be verified when the host is built; skip them otherwise.
+    const hostKeys = new Set(hostRuleKeys());
+    const checkable = hostBuilt ? expected : expected.filter((e) => !hostKeys.has(e.ruleKey));
     const missing: ExpectedViolation[] = [];
-    for (const exp of expected) {
+    for (const exp of checkable) {
       const found = violations.some(
         (v) => v.ruleKey === exp.ruleKey && v.filePath === exp.filePath,
       );
@@ -156,9 +183,17 @@ describe('C# negative fixture — code rules', () => {
   });
 
   it('does not produce unexpected violations in violation source files', () => {
-    // Scope: dedicated marker files. The pre-existing service files carry
-    // their own seeded defects asserted by the graph/architecture tests.
-    const scoped = violations.filter((v) => v.filePath.includes('/Violations/'));
+    // Scope: dedicated marker files, tree-sitter rules only. The pre-existing
+    // service files carry their own seeded defects asserted by the graph tests.
+    // Roslyn-host rules are EXCLUDED here: they fire incidentally across these
+    // deliberately-defective files (e.g. many methods that could be static),
+    // which is expected on a violation fixture — host false positives are caught
+    // by the zero-FP positive fixture instead. Host rules still need coverage
+    // (a marker each) below.
+    const hostKeys = new Set(hostRuleKeys());
+    const scoped = violations.filter(
+      (v) => v.filePath.includes('/Violations/') && !hostKeys.has(v.ruleKey),
+    );
     const expectedSet = new Set(expected.map((e) => `${e.ruleKey}::${e.filePath}`));
     const unexpected = scoped.filter((v) => !expectedSet.has(`${v.ruleKey}::${v.filePath}`));
 
@@ -177,10 +212,14 @@ describe('C# negative fixture — code rules', () => {
   });
 
   it('does not fire duplicate rules at the same location', () => {
+    // Tree-sitter rules only — host rules dedupe by position in the host and can
+    // legitimately co-locate on the dense violation fixture.
+    const hostKeys = new Set(hostRuleKeys());
     const seen = new Map<string, CodeViolation>();
     const overlaps: Array<{ filePath: string; line: number; rules: string[] }> = [];
     const byLocation = new Map<string, CodeViolation[]>();
     for (const v of violations) {
+      if (hostKeys.has(v.ruleKey)) continue;
       const key = `${v.filePath}:${v.lineStart}:${v.ruleKey}`;
       if (seen.has(key)) {
         const locKey = `${v.filePath}:${v.lineStart}`;

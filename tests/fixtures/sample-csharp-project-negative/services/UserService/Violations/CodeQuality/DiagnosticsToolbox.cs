@@ -10,7 +10,6 @@ internal class DiagnosticsToolbox
     internal void PauseForInspection()
     {
         // VIOLATION: code-quality/deterministic/no-debugger
-        // VIOLATION: code-quality/deterministic/debugger-statement
         Debugger.Break();
     }
 

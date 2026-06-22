@@ -123,6 +123,10 @@ const EXCLUDED_IPS = new Set(['127.0.0.1', '0.0.0.0', '255.255.255.255'])
 
 export const hardcodedIpVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-ip',
+  // C# is covered by the more precise host rule hardcoded-ip-address (which
+  // excludes non-routable ranges), so skip C# here to avoid a double-fire.
+  // This stays universal for every other family (JS/TS/TSX + Python).
+  excludeLanguages: ['csharp'],
   nodeTypes: STRING_NODE_TYPES,
   visit(node, filePath, sourceCode) {
     const text = node.text

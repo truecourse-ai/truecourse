@@ -2057,15 +2057,8 @@ describe('code-quality/deterministic/no-debugger (C#)', () => {
   })
 })
 
-describe('code-quality/deterministic/debugger-statement (C#)', () => {
-  it('detects Debugger.Break()', () => {
-    expect(matches(debuggerCallFixture, 'debugger-statement').length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('does not flag normal logging', () => {
-    expect(matches(noDebuggerFixture, 'debugger-statement')).toHaveLength(0)
-  })
-})
+// debugger-statement is not-applicable on C# (duplicate of no-debugger, which
+// owns the Debugger.Break()/Launch() detection) — see RULE_LANGUAGE_DISPOSITIONS.
 
 // ---------------------------------------------------------------------------
 // yoda-condition

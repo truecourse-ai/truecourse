@@ -21,15 +21,21 @@ import {
 
 const rules = getAllDefaultRules();
 
-// ruleKey → families with a visitor; universal visitors (no languages field)
-// cover the audited family set
+// ruleKey → families with a runtime visitor; universal visitors (no languages
+// field) cover the audited family set minus any they explicitly opt out of via
+// excludeLanguages — mirroring withLanguageSupport, so a visitor that excludes a
+// language genuinely does not count as covering it.
 const visitorFamilies = new Map<string, Set<AnalysisLanguage>>();
 for (const visitor of ALL_CODE_VISITORS) {
   if (!visitorFamilies.has(visitor.ruleKey)) visitorFamilies.set(visitor.ruleKey, new Set());
   const families = visitor.languages
     ? visitor.languages.map((l) => LANGUAGE_FAMILY[l])
     : [...UNIVERSAL_VISITOR_FAMILIES];
-  for (const family of families) visitorFamilies.get(visitor.ruleKey)!.add(family);
+  const excluded = new Set((visitor.excludeLanguages ?? []).map((l) => LANGUAGE_FAMILY[l]));
+  for (const family of families) {
+    if (excluded.has(family)) continue;
+    visitorFamilies.get(visitor.ruleKey)!.add(family);
+  }
 }
 
 describe('rule language-support matrix', () => {
