@@ -849,4 +849,50 @@ export const PERFORMANCE_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'performance/deterministic/stringbuilder-not-consumed',
+    category: 'code',
+    domain: 'performance',
+    name: 'StringBuilder result never consumed',
+    description:
+      "A local StringBuilder is appended to but its accumulated string is never read — every reference is a discarded mutating call and nothing calls ToString, reads Length, returns it or passes it on, so the whole buffer is dead work. Conservative: any non-mutation reference (a fluent chain, an argument, an assignment) clears it.",
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'performance/deterministic/prefer-asspan-over-substring',
+    category: 'code',
+    domain: 'performance',
+    name: 'Prefer AsSpan over Substring before parsing',
+    description:
+      'A Substring(...) whose result is passed straight to a primitive Parse/TryParse allocates a throwaway string; every primitive parser accepts a ReadOnlySpan<char>, so str.AsSpan(start, length) parses the same characters with no allocation (CA1846). Scoped to that exact consumer.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'performance/deterministic/expensive-logging-argument',
+    category: 'code',
+    domain: 'performance',
+    name: 'Expensive argument in verbose logging call',
+    description:
+      'A LogDebug/LogTrace call (or Log(LogLevel.Debug/Trace, …)) passes a method-call argument that is evaluated eagerly even when the level is disabled, wasting the work in production (CA1873). Scoped to a constant message template with a method-call argument and no enclosing ILogger.IsEnabled guard; interpolated templates are left to the non-constant template rule and cheap field/property arguments are ignored.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'performance/deterministic/prefer-string-create',
+    category: 'code',
+    domain: 'performance',
+    name: 'Prefer string.Create over FormattableString',
+    description:
+      'A FormattableString.Invariant/CurrentCulture call over an interpolated string allocates a FormattableString just to format it (S6618); string.Create(CultureInfo.InvariantCulture/CurrentCulture, $"…") formats the same interpolation directly with no allocation. Resolved by symbol so only the real System.FormattableString helpers over an interpolated-string argument are flagged.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

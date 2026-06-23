@@ -243,8 +243,14 @@ import { csharpValueTypeEqualsWithoutOperatorVisitor } from './value-type-equals
 import { csharpMissingAccessModifierVisitor } from './missing-access-modifier.js'
 import { csharpPartialElementMissingAccessModifierVisitor } from './partial-element-missing-access-modifier.js'
 import { csharpFilenameTypeMismatchVisitor } from './csharp-filename-type-mismatch.js'
+import { csharpPreferPropertyOverMethodVisitor } from './prefer-property-over-method.js'
+import { csharpGetMethodShouldBePropertyVisitor } from './get-method-should-be-property.js'
+import { csharpPreferGenericsOverObjectVisitor } from './prefer-generics-over-object.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpPreferPropertyOverMethodVisitor,
+  csharpGetMethodShouldBePropertyVisitor,
+  csharpPreferGenericsOverObjectVisitor,
   csharpAccessorPairsVisitor,
   csharpAmbiguousUnicodeCharacterVisitor,
   csharpBanTsCommentVisitor,

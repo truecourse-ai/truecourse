@@ -552,4 +552,27 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'medium',
     type: 'deterministic',
   },
+  {
+    key: 'architecture/deterministic/uri-string-overload-not-delegating',
+    category: 'code',
+    domain: 'architecture',
+    name: 'String URL overload does not delegate to the Uri overload',
+    description:
+      'A method offers both a string and a System.Uri overload, but the string overload neither constructs a Uri nor calls the sibling overload — it parses the URL ad hoc, duplicating and diverging from the validated Uri path. The string overload should build a Uri and forward. Only flagged when the Uri sibling exists.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'architecture/deterministic/action-missing-producesresponsetype',
+    category: 'code',
+    domain: 'architecture',
+    name: 'Controller action has no [ProducesResponseType]',
+    description:
+      'An MVC/Web-API controller action (a method on a *Controller with an HTTP-verb attribute) declares no [ProducesResponseType], so the generated OpenAPI document cannot describe its response shapes or status codes. A class-level [ProducesResponseType]/[ProducesDefaultResponseType] covering every action clears it.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
 ]

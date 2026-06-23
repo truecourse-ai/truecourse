@@ -159,8 +159,10 @@ import { csharpTokenValidationDisabledVisitor } from './token-validation-disable
 import { csharpXmlSchemaAddByUrlVisitor } from './xmlschema-add-by-url.js'
 import { csharpViewStateUserKeyNotSetVisitor } from './viewstateuserkey-not-set.js'
 import { csharpSasWithoutHttpsVisitor } from './sas-without-https.js'
+import { csharpFastPasswordHashVisitor } from './fast-password-hash.js'
 
 export const SECURITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpFastPasswordHashVisitor,
   // Injection
   csharpSqlInjectionVisitor,
   csharpHardcodedSqlExpressionVisitor,

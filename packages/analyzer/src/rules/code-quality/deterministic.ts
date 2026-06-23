@@ -6328,4 +6328,61 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'medium',
     type: 'deterministic',
   },
+  {
+    key: 'code-quality/deterministic/prefer-property-over-method',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Get/Set method pair should be a property',
+    description:
+      'A parameterless GetX() method paired with a SetX(value) method should be exposed as a property X — it reads more naturally and participates in object initializers and data binding. Only flagged when both halves are present.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'code-quality/deterministic/get-method-should-be-property',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Get-prefixed method should be a property',
+    description:
+      'A public, parameterless GetX() whose body just returns a field or property is an idiomatic property in disguise. Exposing it as a property reads naturally and participates in object initializers and data binding. Only a trivial expression-bodied accessor is flagged (no work, no array/Task return); the Get/Set-pair case is handled by prefer-property-over-method.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'code-quality/deterministic/prefer-generics-over-object',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Object used instead of generics',
+    description:
+      'A public method that takes a single object parameter and returns object is untyped at both ends, costing compile-time safety and usually a runtime cast in the body. A generic type parameter (T M<T>(T value)) preserves the argument-to-result relationship without a cast (S4047). Scoped to the single-object-in, object-out shape on a method whose signature the author owns — overrides, virtual/abstract members, explicit interface implementations, extension/ref/out/params parameters and already-generic methods are excluded.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'code-quality/deterministic/moduleinitializer-in-library',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'ModuleInitializer in a library',
+    description:
+      'A [ModuleInitializer] method declared in a library (CA2255). Module initializers run before any other code in the assembly, at a point the consuming application cannot control — appropriate for an application entry assembly, but in a library it forces hidden, ordering-sensitive startup on every consumer. Needs the project OutputKind to tell a library from an application, so it runs in MSBuildWorkspace mode.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-workspace',
+  },
+  {
+    key: 'code-quality/deterministic/parameter-narrower-than-needed',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Parameter type narrower than its usage needs',
+    description:
+      'A method parameter typed as a concrete collection (List<T>, HashSet<T>, …) that the body only iterates with foreach (S3242). Since nothing but enumeration is done, IEnumerable<T> would accept the same arguments and more, so the concrete type needlessly narrows the API. Flagged only when every reference to the parameter is the foreach collection expression, and never on an override/virtual/abstract member or interface implementation.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

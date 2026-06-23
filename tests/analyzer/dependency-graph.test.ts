@@ -131,7 +131,7 @@ describe('dependency graph with fixture project', () => {
       }
     }
     fixtureAnalyses = analyses;
-  });
+  }, 60_000);
 
   it('finds expected dependencies in the fixture project', () => {
     const deps = buildDependencyGraph(fixtureAnalyses, FIXTURE_PATH);

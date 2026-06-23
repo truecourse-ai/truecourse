@@ -46,6 +46,7 @@ export { csharpPreferTryGetValueVisitor } from './prefer-trygetvalue.js'
 export { csharpStringBuilderPinvokeParameterVisitor } from './stringbuilder-pinvoke-parameter.js'
 export { csharpPropertyReturnsCollectionCopyVisitor } from './property-returns-collection-copy.js'
 export { csharpConstantArrayArgumentVisitor } from './constant-array-argument.js'
+export { csharpExpensiveLoggingArgumentVisitor } from './expensive-logging-argument.js'
 
 import { csharpRegexInLoopVisitor } from './regex-in-loop.js'
 import { csharpSyncFsInRequestHandlerVisitor } from './sync-fs-in-request-handler.js'
@@ -93,8 +94,12 @@ import { csharpPreferTryGetValueVisitor } from './prefer-trygetvalue.js'
 import { csharpStringBuilderPinvokeParameterVisitor } from './stringbuilder-pinvoke-parameter.js'
 import { csharpPropertyReturnsCollectionCopyVisitor } from './property-returns-collection-copy.js'
 import { csharpConstantArrayArgumentVisitor } from './constant-array-argument.js'
+import { csharpPreferAsSpanOverSubstringVisitor } from './prefer-asspan-over-substring.js'
+import { csharpExpensiveLoggingArgumentVisitor } from './expensive-logging-argument.js'
 
 export const PERFORMANCE_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpExpensiveLoggingArgumentVisitor,
+  csharpPreferAsSpanOverSubstringVisitor,
   csharpRegexInLoopVisitor,
   csharpSyncFsInRequestHandlerVisitor,
   csharpJsonParseInLoopVisitor,

@@ -16,6 +16,7 @@ public class RegistrationController : Controller
     /// <summary>Create an account from the posted form.</summary>
     [HttpPost]
     // VIOLATION: architecture/deterministic/missing-modelstate-validation
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     public IActionResult Create(RegistrationInput model)
     {
         return RedirectToAction("Index", model);

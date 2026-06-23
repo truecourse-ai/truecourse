@@ -3620,3 +3620,29 @@ public class TokenIssuer
     expect(found).toHaveLength(0)
   })
 })
+
+describe('security/deterministic/fast-password-hash (C#)', () => {
+  it('flags SHA256.HashData on a password', () => {
+    const src = `using System.Security.Cryptography; using System.Text;
+class C { byte[] H(string password) => SHA256.HashData(Encoding.UTF8.GetBytes(password)); }`
+    expect(matches(src, 'fast-password-hash').length).toBe(1)
+  })
+
+  it('flags MD5 hashing of a pwd variable', () => {
+    const src = `using System.Security.Cryptography;
+class C { byte[] H(byte[] pwd) => MD5.HashData(pwd); }`
+    expect(matches(src, 'fast-password-hash').length).toBe(1)
+  })
+
+  it('does not flag a fast hash of non-password data', () => {
+    const src = `using System.Security.Cryptography;
+class C { byte[] H(byte[] fileBytes) => SHA256.HashData(fileBytes); }`
+    expect(matches(src, 'fast-password-hash').length).toBe(0)
+  })
+
+  it('does not flag a slow KDF on a password', () => {
+    const src = `using System.Security.Cryptography; using System.Text;
+class C { byte[] H(string password, byte[] salt) => new Rfc2898DeriveBytes(password, salt, 100000, HashAlgorithmName.SHA256).GetBytes(32); }`
+    expect(matches(src, 'fast-password-hash').length).toBe(0)
+  })
+})

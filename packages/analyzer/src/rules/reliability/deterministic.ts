@@ -379,4 +379,40 @@ export const RELIABILITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'reliability/deterministic/double-dispose',
+    category: 'code',
+    domain: 'reliability',
+    name: 'Resource disposed twice',
+    description:
+      'A resource held by a using (statement or declaration) is also disposed explicitly inside the same scope. The using already disposes it at scope exit, so the explicit Dispose/DisposeAsync is a second disposal — undefined for many types and an ObjectDisposedException for some (CA2202). The variable is matched semantically.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'reliability/deterministic/idisposable-not-disposed',
+    category: 'code',
+    domain: 'reliability',
+    name: 'IDisposable never disposed',
+    description:
+      'A local owns a freshly-new\'d IDisposable that is never released — no using, no Dispose(), and the reference never escapes (not returned, assigned away, or passed as an argument), so the handle leaks. Conservative: the moment the value escapes or is disposed it is cleared, so only an unambiguous local leak is flagged.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'reliability/deterministic/missing-configureawait',
+    category: 'code',
+    domain: 'reliability',
+    name: 'ConfigureAwait(false) should be used in library code',
+    description:
+      'An await in library code that does not call ConfigureAwait(false) (S3216 / CA2007). A library that captures the caller\'s synchronization context can deadlock an application that blocks on the returned task under a single-threaded context. Needs the project OutputKind to identify library code and the semantic model to confirm the awaited type exposes ConfigureAwait, so it runs in MSBuildWorkspace mode.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-workspace',
+  },
 ]

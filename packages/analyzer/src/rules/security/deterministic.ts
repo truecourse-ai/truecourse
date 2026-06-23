@@ -1766,4 +1766,15 @@ export const SECURITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'high',
     type: 'deterministic',
   },
+  {
+    key: 'security/deterministic/fast-password-hash',
+    category: 'code',
+    domain: 'security',
+    name: 'Password hashed with a fast algorithm',
+    description:
+      'A password is hashed with a general-purpose fast hash (MD5/SHA-family) instead of a slow, salted key-derivation function (PBKDF2/bcrypt/Argon2). Fast hashes are cheap to brute-force at scale. Flagged only when a fast-hash type is the receiver and a password-named value is hashed.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+  },
 ]

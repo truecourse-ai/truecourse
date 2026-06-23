@@ -9,6 +9,7 @@ public class UploadController : ControllerBase
 {
     /// <summary>Store a posted avatar.</summary>
     [HttpPost]
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     public IActionResult Save()
     {
         // VIOLATION: architecture/deterministic/raw-request-access-in-action

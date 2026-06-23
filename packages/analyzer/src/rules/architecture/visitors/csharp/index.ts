@@ -39,8 +39,10 @@ import { csharpUriParameterAsStringVisitor } from './uri-parameter-as-string.js'
 import { csharpUriPropertyAsStringVisitor } from './uri-property-as-string.js'
 import { csharpUriReturnAsStringVisitor } from './uri-return-as-string.js'
 import { csharpValueTypeActionParamUnderPostingVisitor } from './value-type-action-param-under-posting.js'
+import { csharpActionMissingProducesResponseTypeVisitor } from './action-missing-producesresponsetype.js'
 
 export const ARCHITECTURE_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpActionMissingProducesResponseTypeVisitor,
   csharpDuplicateImportVisitor,
   csharpDeclarationsInGlobalScopeVisitor,
   csharpUnusedImportVisitor,

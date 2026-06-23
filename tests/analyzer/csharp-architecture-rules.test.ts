@@ -691,3 +691,51 @@ public class Counter
 `, key)).toBe(0)
   })
 })
+
+describe('architecture/deterministic/action-missing-producesresponsetype (C#)', () => {
+  const KEY = 'architecture/deterministic/action-missing-producesresponsetype'
+  const fired = (code: string) => check(code).filter((v) => v.ruleKey === KEY)
+
+  it('flags a verb action with no [ProducesResponseType]', () => {
+    const src = `using Microsoft.AspNetCore.Mvc;
+public class OrdersController : ControllerBase {
+  [HttpGet] public IActionResult Get() => Ok();
+}`
+    expect(fired(src).length).toBe(1)
+  })
+
+  it('does not flag an action that declares [ProducesResponseType]', () => {
+    const src = `using Microsoft.AspNetCore.Mvc;
+public class OrdersController : ControllerBase {
+  [HttpGet]
+  [ProducesResponseType(200)]
+  public IActionResult Get() => Ok();
+}`
+    expect(fired(src).length).toBe(0)
+  })
+
+  it('does not flag when the class carries a [ProducesResponseType]', () => {
+    const src = `using Microsoft.AspNetCore.Mvc;
+[ProducesResponseType(500)]
+public class OrdersController : ControllerBase {
+  [HttpGet] public IActionResult Get() => Ok();
+}`
+    expect(fired(src).length).toBe(0)
+  })
+
+  it('does not flag a non-action method', () => {
+    const src = `using Microsoft.AspNetCore.Mvc;
+public class OrdersController : ControllerBase {
+  private int Helper() => 0;
+}`
+    expect(fired(src).length).toBe(0)
+  })
+
+  it('does not flag a verb method on a non-controller class', () => {
+    const src = `using Microsoft.AspNetCore.Mvc;
+public class OrderService {
+  [HttpGet] public IActionResult Get() => null;
+}`
+    expect(fired(src).length).toBe(0)
+  })
+})

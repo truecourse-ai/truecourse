@@ -22,6 +22,7 @@ internal sealed class ImportJob
         try
         {
             // VIOLATION: reliability/deterministic/missing-finally-cleanup
+            // VIOLATION: reliability/deterministic/idisposable-not-disposed
             var reader = new StreamReader(Path.Combine(_dropFolder, fileName));
             for (var line = reader.ReadLine(); line != null; line = reader.ReadLine())
             {

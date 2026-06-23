@@ -9,5 +9,6 @@ public class RolesController : ControllerBase
 {
     /// <summary>List the available roles.</summary>
     [HttpGet("list")]
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     public IActionResult List() => Ok();
 }

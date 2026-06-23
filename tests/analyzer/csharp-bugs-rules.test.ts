@@ -4933,3 +4933,91 @@ class C { void M(List<int> xs) { Debug.Assert(xs.Contains(1)); } }`, key)
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/enum-implicit-values (C#)', () => {
+  const key = 'bugs/deterministic/enum-implicit-values'
+
+  it('flags an enum that mixes explicit and implicit members', () => {
+    expect(matches(`enum Stage { Queued = 1, Running, Done = 9 }`, key).length).toBe(1)
+  })
+
+  it('does not flag a fully-explicit enum', () => {
+    expect(matches(`enum Stage { Queued = 1, Running = 2, Done = 3 }`, key).length).toBe(0)
+  })
+
+  it('does not flag a fully-implicit enum', () => {
+    expect(matches(`enum Stage { Queued, Running, Done }`, key).length).toBe(0)
+  })
+
+  it('does not flag a single-member enum', () => {
+    expect(matches(`enum Stage { Queued = 1 }`, key).length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/maxresponseheaderslength-misset (C#)', () => {
+  const key = 'bugs/deterministic/maxresponseheaderslength-misset'
+
+  it('flags a bytes-scale assignment via member access', () => {
+    expect(matches(`class C { void M(System.Net.Http.HttpClientHandler h) { h.MaxResponseHeadersLength = 65536; } }`, key).length).toBe(1)
+  })
+
+  it('flags a bytes-scale assignment in an object initializer', () => {
+    expect(matches(`class C { object M() => new System.Net.Http.HttpClientHandler { MaxResponseHeadersLength = 1048576 }; }`, key).length).toBe(1)
+  })
+
+  it('does not flag a sane kilobyte value', () => {
+    expect(matches(`class C { void M(System.Net.Http.HttpClientHandler h) { h.MaxResponseHeadersLength = 64; } }`, key).length).toBe(0)
+  })
+
+  it('does not flag an unrelated property', () => {
+    expect(matches(`class C { void M(System.Net.Http.HttpClientHandler h) { h.MaxConnectionsPerServer = 65536; } }`, key).length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/sql-keyword-not-delimited (C#)', () => {
+  const key = 'bugs/deterministic/sql-keyword-not-delimited'
+
+  it('flags a FROM keyword jammed onto a table name', () => {
+    expect(matches(`class C { string Q(string table) => "SELECT * FROM" + table; }`, key).length).toBe(1)
+  })
+
+  it('flags a WHERE concatenated onto a predicate', () => {
+    expect(matches(`class C { string Q(string id) => "SELECT * FROM users WHERE" + id; }`, key).length).toBe(1)
+  })
+
+  it('does not flag when the literal ends with a space', () => {
+    expect(matches(`class C { string Q(string table) => "SELECT * FROM " + table; }`, key).length).toBe(0)
+  })
+
+  it('does not flag non-SQL prose ending in a keyword', () => {
+    expect(matches(`class C { string M(string x) => "items grouped by" + x; }`, key).length).toBe(0)
+  })
+
+  it('does not flag when the right fragment starts with a space', () => {
+    expect(matches(`class C { string Q(string table) => "SELECT * FROM" + " " + table; }`, key).length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/attribute-string-literal-parse (C#)', () => {
+  const key = 'bugs/deterministic/attribute-string-literal-parse'
+
+  it('flags a malformed Guid attribute', () => {
+    expect(matches(`using System.Runtime.InteropServices; [Guid("not-a-guid")] class C { }`, key).length).toBe(1)
+  })
+
+  it('flags a non-numeric assembly version', () => {
+    expect(matches(`using System.Reflection; [assembly: AssemblyVersion("one.two")]`, key).length).toBe(1)
+  })
+
+  it('does not flag a valid Guid', () => {
+    expect(matches(`using System.Runtime.InteropServices; [Guid("d3b07384-d113-4ec4-9f5a-1b2c3d4e5f60")] class C { }`, key).length).toBe(0)
+  })
+
+  it('does not flag a valid version with a wildcard', () => {
+    expect(matches(`using System.Reflection; [assembly: AssemblyVersion("1.0.*")]`, key).length).toBe(0)
+  })
+
+  it('does not flag an unrelated attribute', () => {
+    expect(matches(`using System; [Obsolete("use something else")] class C { }`, key).length).toBe(0)
+  })
+})

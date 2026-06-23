@@ -502,4 +502,33 @@ class C {
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- stringbuilder-not-consumed ----------------------------------------
+  describe('stringbuilder-not-consumed', () => {
+    const K = 'performance/deterministic/stringbuilder-not-consumed'
+
+    it('flags a builder appended to but never read', async () => {
+      const src = `using System.Text;
+class C { void M() { var sb = new StringBuilder(); sb.Append("a"); sb.AppendLine("b"); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a builder whose ToString is read', async () => {
+      const src = `using System.Text;
+class C { string M() { var sb = new StringBuilder(); sb.Append("a"); return sb.ToString(); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a fluent chain ending in ToString', async () => {
+      const src = `using System.Text;
+class C { string M() { var sb = new StringBuilder(); return sb.Append("a").ToString(); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a builder passed to another method', async () => {
+      const src = `using System.Text;
+class C { void Use(StringBuilder b) {} void M() { var sb = new StringBuilder(); sb.Append("a"); Use(sb); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

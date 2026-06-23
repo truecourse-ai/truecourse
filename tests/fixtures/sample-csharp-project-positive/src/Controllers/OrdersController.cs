@@ -21,6 +21,8 @@ public class OrdersController : ControllerBase
 
     /// <summary>Returns one order, or 404 when absent.</summary>
     [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(Order), 200)]
+    [ProducesResponseType(404)]
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {
         var order = await _orderService.GetAsync(id, cancellationToken);
@@ -33,6 +35,7 @@ public class OrdersController : ControllerBase
 
     /// <summary>Places a new order for the given customer.</summary>
     [HttpPost]
+    [ProducesResponseType(typeof(Order), 201)]
     public async Task<IActionResult> Place([FromBody] PlaceOrderRequest request, CancellationToken cancellationToken)
     {
         var order = await _orderService.PlaceAsync(request.CustomerId, request.Lines, cancellationToken);
@@ -41,6 +44,8 @@ public class OrdersController : ControllerBase
 
     /// <summary>Ships a paid order; 409 when it is not in a shippable state.</summary>
     [HttpPost("{id:guid}/ship")]
+    [ProducesResponseType(204)]
+    [ProducesResponseType(409)]
     public async Task<IActionResult> Ship(Guid id, CancellationToken cancellationToken)
     {
         var shipped = await _orderService.ShipAsync(id, cancellationToken);

@@ -1411,4 +1411,123 @@ class C { public event Action<int> Ticked; }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- event-never-invoked -----------------------------------------------
+  describe('event-never-invoked', () => {
+    const K = 'bugs/deterministic/event-never-invoked'
+
+    it('flags an event that is never raised', async () => {
+      const src = `using System;
+class C { public event EventHandler Changed; public void Touch() { } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag an event raised via ?.Invoke', async () => {
+      const src = `using System;
+class C {
+  public event EventHandler Changed;
+  void Go() { Changed?.Invoke(this, EventArgs.Empty); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a virtual event (a derived type may raise it)', async () => {
+      const src = `using System;
+class C { public virtual event EventHandler Changed; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag an interface event declaration', async () => {
+      const src = `using System;
+interface I { event EventHandler Changed; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- stream-read-result-ignored ----------------------------------------
+  describe('stream-read-result-ignored', () => {
+    const K = 'bugs/deterministic/stream-read-result-ignored'
+
+    it('flags a discarded Stream.Read(buffer, offset, count)', async () => {
+      const src = `using System.IO;
+class C { void M(Stream s, byte[] buf) { s.Read(buf, 0, buf.Length); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag when the result is captured', async () => {
+      const src = `using System.IO;
+class C { int M(Stream s, byte[] buf) { int n = s.Read(buf, 0, buf.Length); return n; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a non-Stream Read', async () => {
+      const src = `class Reader { public int Read(byte[] b, int o, int c) => 0; }
+class C { void M(Reader r, byte[] buf) { r.Read(buf, 0, buf.Length); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- initial-value-overwritten -----------------------------------------
+  describe('initial-value-overwritten', () => {
+    const K = 'bugs/deterministic/initial-value-overwritten'
+
+    it('flags a parameter overwritten before it is read', async () => {
+      const src = `class C { int M(int x) { x = 5; return x; } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a fallback that reads the parameter', async () => {
+      const src = `class C { string M(string s) { s = s ?? ""; return s; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag x = x + 1 (reads the incoming value)', async () => {
+      const src = `class C { int M(int x) { x = x + 1; return x; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a read before the write', async () => {
+      const src = `using System;
+class C { int M(int x) { Console.Write(x); x = 5; return x; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a ref parameter', async () => {
+      const src = `class C { void M(ref int x) { x = 5; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- valuetask-consumed-incorrectly ------------------------------------
+  describe('valuetask-consumed-incorrectly', () => {
+    const K = 'bugs/deterministic/valuetask-consumed-incorrectly'
+
+    it('flags a ValueTask awaited twice', async () => {
+      const src = `using System.Threading.Tasks;
+class C {
+  async Task M(ValueTask vt) { await vt; await vt; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags await then .Result', async () => {
+      const src = `using System.Threading.Tasks;
+class C {
+  async Task M(ValueTask<int> vt) { await vt; var x = vt.Result; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a single await', async () => {
+      const src = `using System.Threading.Tasks;
+class C { async Task M(ValueTask vt) { await vt; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a Task awaited twice', async () => {
+      const src = `using System.Threading.Tasks;
+class C { async Task M(Task t) { await t; await t; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

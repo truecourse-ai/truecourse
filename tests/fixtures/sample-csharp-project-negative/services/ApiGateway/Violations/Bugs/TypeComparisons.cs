@@ -22,6 +22,7 @@ internal sealed class TypeComparisons
         return pool;
     }
 
+    // VIOLATION: code-quality/deterministic/parameter-narrower-than-needed
     internal void Refresh(List<Resource> resources)
     {
         // Declares CachedResource over a List<Resource> — an InvalidCastException if any

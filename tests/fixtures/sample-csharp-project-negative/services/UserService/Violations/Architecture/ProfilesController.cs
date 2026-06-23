@@ -10,5 +10,6 @@ public class ProfilesController : Controller
 {
     /// <summary>List all profiles.</summary>
     [HttpGet]
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     public IActionResult List() => Ok();
 }

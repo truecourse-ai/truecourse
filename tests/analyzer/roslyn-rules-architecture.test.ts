@@ -205,4 +205,32 @@ public class Client { private void Fetch(string url) {} }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- uri-string-overload-not-delegating --------------------------------
+  describe('uri-string-overload-not-delegating', () => {
+    const K = 'architecture/deterministic/uri-string-overload-not-delegating'
+
+    it('flags a string overload that parses the URL instead of delegating', async () => {
+      const src = `using System;
+class Client {
+  public void Get(Uri url) { }
+  public void Get(string url) { var host = url.Split('/')[2]; }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag when the string overload builds a Uri and forwards', async () => {
+      const src = `using System;
+class Client {
+  public void Get(Uri url) { }
+  public void Get(string url) { Get(new Uri(url)); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag a string method with no Uri overload', async () => {
+      const src = `class Client { public void Get(string url) { var x = url.Length; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

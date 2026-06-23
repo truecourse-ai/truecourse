@@ -129,4 +129,67 @@ class C { private static MemoryStream _s = new MemoryStream(); }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- double-dispose ----------------------------------------------------
+  describe('double-dispose', () => {
+    const K = 'reliability/deterministic/double-dispose'
+
+    it('flags a using declaration that is also disposed explicitly', async () => {
+      const src = `using System.IO;
+class C { void M() { using var s = new MemoryStream(); s.Dispose(); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags an explicit dispose inside a using statement body', async () => {
+      const src = `using System.IO;
+class C { void M() { using (var s = new MemoryStream()) { s.Dispose(); } } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a using with no explicit dispose', async () => {
+      const src = `using System.IO;
+class C { void M() { using var s = new MemoryStream(); s.WriteByte(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag an explicit dispose without a using', async () => {
+      const src = `using System.IO;
+class C { void M() { var s = new MemoryStream(); s.Dispose(); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+  // ---- idisposable-not-disposed ------------------------------------------
+  describe('idisposable-not-disposed', () => {
+    const K = 'reliability/deterministic/idisposable-not-disposed'
+
+    it('flags a new IDisposable that is used locally but never disposed', async () => {
+      const src = `using System.IO;
+class C { void M() { var s = new MemoryStream(); s.WriteByte(1); } }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a using declaration', async () => {
+      const src = `using System.IO;
+class C { void M() { using var s = new MemoryStream(); s.WriteByte(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag when Dispose is called', async () => {
+      const src = `using System.IO;
+class C { void M() { var s = new MemoryStream(); s.WriteByte(1); s.Dispose(); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag when the resource is returned (ownership escapes)', async () => {
+      const src = `using System.IO;
+class C { Stream M() { var s = new MemoryStream(); return s; } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag when the resource is passed to a method', async () => {
+      const src = `using System.IO;
+class C { void Use(Stream x) {} void M() { var s = new MemoryStream(); Use(s); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

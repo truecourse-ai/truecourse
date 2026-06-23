@@ -133,8 +133,16 @@ import { csharpIrregularNumberPatternVisitor } from './irregular-number-pattern.
 import { csharpDebugAssertSideEffectVisitor } from './debug-assert-side-effect.js'
 import { csharpDateTimeNowForTimingVisitor } from './datetime-now-for-timing.js'
 import { csharpStreamReaderEndOfStreamInAsyncVisitor } from './streamreader-endofstream-in-async.js'
+import { csharpEnumImplicitValuesVisitor } from './enum-implicit-values.js'
+import { csharpMaxResponseHeadersLengthMissetVisitor } from './maxresponseheaderslength-misset.js'
+import { csharpSqlKeywordNotDelimitedVisitor } from './sql-keyword-not-delimited.js'
+import { csharpAttributeStringLiteralParseVisitor } from './attribute-string-literal-parse.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpEnumImplicitValuesVisitor,
+  csharpMaxResponseHeadersLengthMissetVisitor,
+  csharpSqlKeywordNotDelimitedVisitor,
+  csharpAttributeStringLiteralParseVisitor,
   csharpEmptyCatchVisitor,
   csharpSelfComparisonVisitor,
   csharpSelfAssignmentVisitor,

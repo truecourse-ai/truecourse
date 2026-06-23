@@ -11,5 +11,6 @@ public class SessionsController : ControllerBase
     [HttpPost]
     // VIOLATION: architecture/deterministic/action-route-leading-slash
     [Route("/signout")]
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     public IActionResult SignOut() => Ok();
 }

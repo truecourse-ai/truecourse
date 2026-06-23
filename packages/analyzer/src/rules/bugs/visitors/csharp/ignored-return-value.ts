@@ -13,12 +13,16 @@ import { getCSharpMethodName, getCSharpReceiver } from '../../../_shared/csharp-
  * PascalCase receivers are skipped too — they may be static classes with
  * unrelated semantics (e.g. Socket.Select).
  */
+// `Append`/`Prepend` are intentionally absent: without type information a
+// tree-sitter rule cannot tell LINQ's pure `Append` (return matters) from
+// `StringBuilder.Append` (returns `this`, idiomatically discarded), and the
+// builder case dominates real code — so including them is a net false positive.
 const PURE_METHODS = new Set([
   'Trim', 'TrimStart', 'TrimEnd', 'ToUpper', 'ToLower',
   'ToUpperInvariant', 'ToLowerInvariant', 'Substring', 'PadLeft', 'PadRight',
   'Where', 'Select', 'SelectMany', 'OrderBy', 'OrderByDescending', 'ThenBy',
   'ThenByDescending', 'GroupBy', 'Distinct', 'DistinctBy', 'Skip', 'Take',
-  'OfType', 'Append', 'Prepend',
+  'OfType',
 ])
 
 export const csharpIgnoredReturnValueVisitor: CodeRuleVisitor = {

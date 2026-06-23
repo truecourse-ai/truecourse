@@ -2323,3 +2323,75 @@ public class MethodCheck
     expect(found).toHaveLength(0)
   })
 })
+
+describe('performance/deterministic/prefer-asspan-over-substring (C#)', () => {
+  const K = 'prefer-asspan-over-substring'
+
+  it('flags Substring passed to int.Parse', () => {
+    expect(matches(`class C { int M(string s) => int.Parse(s.Substring(0, 2)); }`, K).length).toBe(1)
+  })
+
+  it('flags Substring passed to double.TryParse', () => {
+    expect(matches(`class C { bool M(string s, out double d) => double.TryParse(s.Substring(2), out d); }`, K).length).toBe(1)
+  })
+
+  it('does not flag a Substring whose result is used as a string', () => {
+    expect(matches(`class C { string M(string s) => s.Substring(0, 2); }`, K).length).toBe(0)
+  })
+
+  it('does not flag Substring passed to a non-parse method', () => {
+    expect(matches(`class C { void Log(string x) {} void M(string s) => Log(s.Substring(0, 2)); }`, K).length).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// performance/deterministic/expensive-logging-argument
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/expensive-logging-argument (C#)', () => {
+  const K = 'expensive-logging-argument'
+
+  it('flags a method-call argument to LogDebug', () => {
+    expect(
+      matches(`class C { void M(ILogger logger) { logger.LogDebug("Result: {R}", Compute()); } int Compute() => 1; }`, K).length,
+    ).toBe(1)
+  })
+
+  it('flags a method-call argument to LogTrace', () => {
+    expect(
+      matches(`class C { void M(ILogger logger) { logger.LogTrace("State {S}", BuildState()); } string BuildState() => ""; }`, K).length,
+    ).toBe(1)
+  })
+
+  it('flags Log(LogLevel.Debug, ...) with an expensive argument', () => {
+    expect(
+      matches(`class C { void M(ILogger logger) { logger.Log(LogLevel.Debug, "X {Y}", Build()); } int Build() => 1; }`, K).length,
+    ).toBe(1)
+  })
+
+  it('does not flag a call already guarded by IsEnabled', () => {
+    expect(
+      matches(`class C { void M(ILogger logger) { if (logger.IsEnabled(LogLevel.Debug)) logger.LogDebug("X {Y}", Build()); } int Build() => 1; }`, K).length,
+    ).toBe(0)
+  })
+
+  it('does not flag a cheap property argument', () => {
+    expect(matches(`class C { void M(ILogger logger, System.Collections.Generic.List<int> items) { logger.LogDebug("Count {C}", items.Count); } }`, K).length).toBe(0)
+  })
+
+  it('does not flag a plain identifier argument', () => {
+    expect(matches(`class C { void M(ILogger logger, object user) { logger.LogDebug("User {U}", user); } }`, K).length).toBe(0)
+  })
+
+  it('does not flag an enabled level (LogInformation)', () => {
+    expect(matches(`class C { void M(ILogger logger) { logger.LogInformation("X {Y}", Build()); } int Build() => 1; }`, K).length).toBe(0)
+  })
+
+  it('does not flag an interpolated template (owned by non-static-log-template)', () => {
+    expect(matches(`class C { void M(ILogger logger) { logger.LogDebug($"X {Build()}"); } int Build() => 1; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a nameof argument', () => {
+    expect(matches(`class C { void M(ILogger logger) { logger.LogDebug("Name {N}", nameof(C)); } }`, K).length).toBe(0)
+  })
+})

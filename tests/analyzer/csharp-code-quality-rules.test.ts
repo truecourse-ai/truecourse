@@ -8966,3 +8966,105 @@ describe('code-quality/deterministic/csharp-filename-type-mismatch (C#)', () => 
     expect(onFile(`namespace N; `, '/src/Whatever.cs').length).toBe(0)
   })
 })
+
+describe('code-quality/deterministic/prefer-property-over-method (C#)', () => {
+  it('flags a Get/Set method pair', () => {
+    expect(matches(`class C { int GetWidth() => 0; void SetWidth(int v) { } }`, 'prefer-property-over-method').length).toBe(1)
+  })
+
+  it('does not flag a lone Get method (may be an expensive computation)', () => {
+    expect(matches(`class C { int GetWidth() => 0; }`, 'prefer-property-over-method').length).toBe(0)
+  })
+
+  it('does not flag GetEnumerator', () => {
+    expect(matches(`using System.Collections; class C { IEnumerator GetEnumerator() => null; void SetEnumerator(int v) { } }`, 'prefer-property-over-method').length).toBe(0)
+  })
+
+  it('does not flag a Get method with parameters', () => {
+    expect(matches(`class C { int GetWidth(int scale) => 0; void SetWidth(int v) { } }`, 'prefer-property-over-method').length).toBe(0)
+  })
+
+  it('does not flag a void Get method', () => {
+    expect(matches(`class C { void GetWidth() { } void SetWidth(int v) { } }`, 'prefer-property-over-method').length).toBe(0)
+  })
+})
+
+describe('code-quality/deterministic/get-method-should-be-property (C#)', () => {
+  const K = 'get-method-should-be-property'
+
+  it('flags a trivial public GetX accessor', () => {
+    expect(matches(`class C { private int _w; public int GetWidth() => _w; }`, K).length).toBe(1)
+  })
+
+  it('does not flag a GetX that does work', () => {
+    expect(matches(`class C { public int GetWidth() => Compute(); int Compute() => 1; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a non-public GetX', () => {
+    expect(matches(`class C { private int _w; private int GetWidth() => _w; }`, K).length).toBe(0)
+  })
+
+  it('does not flag GetEnumerator', () => {
+    expect(matches(`using System.Collections; class C { private IEnumerator _e; public IEnumerator GetEnumerator() => _e; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a Get with a Set pair (prefer-property-over-method owns it)', () => {
+    expect(matches(`class C { private int _w; public int GetWidth() => _w; public void SetWidth(int v) { _w = v; } }`, K).length).toBe(0)
+  })
+
+  it('does not flag an array-returning Get', () => {
+    expect(matches(`class C { private int[] _w; public int[] GetWidths() => _w; }`, K).length).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// code-quality/deterministic/prefer-generics-over-object
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/prefer-generics-over-object (C#)', () => {
+  const K = 'prefer-generics-over-object'
+
+  it('flags a public object-in object-out method', () => {
+    expect(matches(`class C { public object Echo(object value) => value; }`, K).length).toBe(1)
+  })
+
+  it('flags object? variants', () => {
+    expect(matches(`class C { public object? Echo(object? value) => value; }`, K).length).toBe(1)
+  })
+
+  it('does not flag an override', () => {
+    expect(matches(`class C : B { public override object Map(object x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a virtual method', () => {
+    expect(matches(`class C { public virtual object Map(object x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a two-parameter method', () => {
+    expect(matches(`class C { public object Combine(object a, object b) => a; }`, K).length).toBe(0)
+  })
+
+  it('does not flag an already-generic method', () => {
+    expect(matches(`class C { public object Wrap<T>(object x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a non-public method', () => {
+    expect(matches(`class C { object Echo(object x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag when the return is not object', () => {
+    expect(matches(`class C { public string Echo(object x) => x.ToString(); }`, K).length).toBe(0)
+  })
+
+  it('does not flag when the parameter is not object', () => {
+    expect(matches(`class C { public object Echo(string x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag an extension method on object', () => {
+    expect(matches(`static class C { public static object Echo(this object x) => x; }`, K).length).toBe(0)
+  })
+
+  it('does not flag a ref parameter', () => {
+    expect(matches(`class C { public object Echo(ref object x) => x; }`, K).length).toBe(0)
+  })
+})
