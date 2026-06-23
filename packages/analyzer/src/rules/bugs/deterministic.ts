@@ -5158,6 +5158,41 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'bugs/deterministic/constructorargument-no-matching-property',
+    category: 'code',
+    domain: 'bugs',
+    name: 'ConstructorArgument parameters should match a constructor parameter',
+    description:
+      'A XAML markup-extension property carrying [ConstructorArgument("name")] whose name matches no constructor parameter on the type (S4260). The XAML parser uses it to map a positional constructor argument onto the property; a wrong name silently breaks the mapping. Purely structural — the attribute string vs the type\'s own constructor parameter names.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/export-interface-not-implemented',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Classes should implement their ExportAttribute interfaces',
+    description:
+      'A MEF [Export(typeof(I))] whose type does not implement or derive from the exported contract I (S4159), so an importer of I receives an instance it cannot cast and composition throws. Resolved with the semantic model (transitive/base implementations count); skips any type whose hierarchy is not fully resolved to stay false-positive free.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'bugs/deterministic/shared-part-created-with-new',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Shared MEF parts should not be created with new',
+    description:
+      'A new on a type that is a shared MEF part — [Export] plus [PartCreationPolicy(CreationPolicy.Shared)] (S4277). Constructing it directly bypasses the container and yields a second, uncomposed instance whose imports are never satisfied. The part\'s attributes are read off its own declaration; a part not explicitly marked Shared never fires.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
     key: 'bugs/deterministic/mef-export-missing-creation-policy',
     category: 'code',
     domain: 'bugs',

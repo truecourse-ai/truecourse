@@ -319,6 +319,12 @@
       "layer": "service"
     },
     {
+      "name": "EmailDispatcher",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "EnterpriseAccount",
       "service": "ApiGateway",
       "kind": "class",
@@ -625,6 +631,12 @@
       "layer": "service"
     },
     {
+      "name": "INotifier",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IntegrationClients",
       "service": "ApiGateway",
       "kind": "class",
@@ -778,6 +790,12 @@
       "name": "LocaleArtifacts",
       "service": "ApiGateway",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "LocalizeExtension",
+      "service": "ApiGateway",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1052,6 +1070,12 @@
     },
     {
       "name": "QueueSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RateCache",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"

@@ -142,6 +142,7 @@ import { csharpBlazorUnsupportedQueryParamTypeVisitor } from './blazor-unsupport
 import { csharpMefExportMissingCreationPolicyVisitor } from './mef-export-missing-creation-policy.js'
 import { csharpWinFormsMissingSTAThreadVisitor } from './winforms-missing-stathread.js'
 import { csharpTimeZoneConverterMisuseVisitor } from './timezoneconverter-misuse.js'
+import { csharpConstructorArgumentNoMatchingPropertyVisitor } from './constructorargument-no-matching-property.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEnumImplicitValuesVisitor,
@@ -286,4 +287,5 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMefExportMissingCreationPolicyVisitor,
   csharpWinFormsMissingSTAThreadVisitor,
   csharpTimeZoneConverterMisuseVisitor,
+  csharpConstructorArgumentNoMatchingPropertyVisitor,
 ]
