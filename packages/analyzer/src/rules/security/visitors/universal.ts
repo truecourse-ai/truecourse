@@ -137,6 +137,13 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     // Skip version-like numbers in User-Agent strings, semver, etc.
     if (/Mozilla|Chrome|Safari|Firefox|AppleWebKit|Gecko/i.test(stripped)) return null
 
+    // Skip outline / section / step labels: a single leading word followed
+    // by a dotted run of small integers (e.g. "span 2.1.1.1", "step 3.2.1.1").
+    // This is hierarchical numbering, not a network address — a real
+    // hardcoded IP appears bare, in a URL/host:port, or inside multi-word
+    // prose, never as the sole dotted-number tail of a one-word label.
+    if (/^[A-Za-z][\w-]*\s+\d{1,3}(?:\.\d{1,3}){3}$/.test(stripped.trim())) return null
+
     // Skip when the match is embedded in a longer numeric sequence — SVG
     // `<path d="...">` coordinate strings are the main source of these,
     // e.g. `013.002.027.012` snapped out of `.013.002.027.012.013`. The
