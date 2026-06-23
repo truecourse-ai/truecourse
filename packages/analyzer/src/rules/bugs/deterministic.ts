@@ -5136,6 +5136,28 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     engine: 'roslyn-host',
   },
   {
+    key: 'bugs/deterministic/jsinvokable-non-public',
+    category: 'code',
+    domain: 'bugs',
+    name: '[JSInvokable] should only be on public methods',
+    description:
+      'A [JSInvokable] method that is not public. Blazor JavaScript interop reaches managed methods over the public surface, so a private/internal/protected [JSInvokable] method is invisible to DotNet.invokeMethod and throws at runtime. Matched by attribute name (no Blazor references needed); interface members are out of scope.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/blazor-unsupported-query-param-type',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Unsupported Blazor query parameter type',
+    description:
+      'A Blazor [SupplyParameterFromQuery] property typed as a generic collection (List<T>, Dictionary<,>, …). Query binding accepts only supported scalars and arrays of them, so a generic collection is rejected at runtime. Matched by attribute name and scoped to generic collection types — the unambiguous case — so a supported scalar or array never fires.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
     key: 'bugs/deterministic/params-overload-ambiguity',
     category: 'code',
     domain: 'bugs',

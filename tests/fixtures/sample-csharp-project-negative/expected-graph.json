@@ -181,6 +181,12 @@
       "layer": "data"
     },
     {
+      "name": "ClipboardInterop",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CloseHandle",
       "service": "ApiGateway",
       "kind": "standalone",
@@ -986,6 +992,12 @@
     },
     {
       "name": "ProcessExecution",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ProductListingState",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"

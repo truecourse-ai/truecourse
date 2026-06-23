@@ -137,6 +137,8 @@ import { csharpEnumImplicitValuesVisitor } from './enum-implicit-values.js'
 import { csharpMaxResponseHeadersLengthMissetVisitor } from './maxresponseheaderslength-misset.js'
 import { csharpSqlKeywordNotDelimitedVisitor } from './sql-keyword-not-delimited.js'
 import { csharpAttributeStringLiteralParseVisitor } from './attribute-string-literal-parse.js'
+import { csharpJsInvokableNonPublicVisitor } from './jsinvokable-non-public.js'
+import { csharpBlazorUnsupportedQueryParamTypeVisitor } from './blazor-unsupported-query-param-type.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEnumImplicitValuesVisitor,
@@ -276,4 +278,6 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpDebugAssertSideEffectVisitor,
   csharpDateTimeNowForTimingVisitor,
   csharpStreamReaderEndOfStreamInAsyncVisitor,
+  csharpJsInvokableNonPublicVisitor,
+  csharpBlazorUnsupportedQueryParamTypeVisitor,
 ]
