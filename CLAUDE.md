@@ -80,7 +80,7 @@ npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and
 ## Conventions
 
 - All tests live in the `tests/` directory at the repo root, not colocated with source files
-- The analyzer only supports TypeScript and JavaScript (no Python/C# yet — that's Phase 6)
+- The analyzer supports TypeScript, JavaScript, Python, and C#. C#'s deterministic rules run as tree-sitter visitors plus a **build-required** Roslyn semantic host (`tools/csharp-roslyn-host`, needs the .NET 8 SDK). Analyzing C# without the host **fails hard** — there is no tree-sitter-only fallback, by design (see `violation-pipeline.service.ts`).
 - Detection patterns are TypeScript constants in `packages/analyzer/src/patterns/`, not JSON files
 - LLM providers implement the `LLMProvider` interface — add new providers there
 - Types shared between frontend and backend go in `packages/shared`. The analysis-store's file format lives in `packages/core/src/types/snapshot.ts` (core-internal).
