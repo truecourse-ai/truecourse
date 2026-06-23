@@ -27,7 +27,10 @@ export const csharpRedundantNullableDirectiveVisitor: CodeRuleVisitor = {
     if (index < 0) return null
 
     let state: NullState = { ann: '?', warn: '?' }
-    for (let i = 0; i < index; i++) state = apply(state, parseDirective(directives[i].text))
+    for (let i = 0; i < index; i++) {
+      const prior = parseDirective(directives[i].text)
+      if (prior) state = apply(state, prior)
+    }
 
     const dir = parseDirective(node.text)
     if (dir === null) return null

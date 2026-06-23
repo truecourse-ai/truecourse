@@ -48,6 +48,7 @@ export const csharpMissingAccessModifierVisitor: CodeRuleVisitor = {
       // Explicit interface implementations (`void IFoo.Bar()`) take no modifier.
       const nm = node.childForFieldName('name')
       if (nm?.type === 'qualified_name' || (nm?.text ?? '').includes('.')) return null
+      if (node.namedChildren.some((c) => c?.type === 'explicit_interface_specifier')) return null
     }
     if (node.type === 'constructor_declaration' && mods.includes('static')) return null
 

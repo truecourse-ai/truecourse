@@ -68,7 +68,6 @@ internal class TelemetrySink : IDispatchSink
     private int _count;
 
     // VIOLATION: bugs/deterministic/interface-method-not-callable-by-derived
-    // VIOLATION: code-quality/deterministic/missing-access-modifier
     void IDispatchSink.Dispatch()
     {
         _count++;
