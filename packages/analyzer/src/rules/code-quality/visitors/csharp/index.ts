@@ -248,6 +248,8 @@ import { csharpGetMethodShouldBePropertyVisitor } from './get-method-should-be-p
 import { csharpPreferGenericsOverObjectVisitor } from './prefer-generics-over-object.js'
 import { csharpIncompleteAssertionVisitor } from './incomplete-assertion.js'
 import { csharpInvalidTestMethodSignatureVisitor } from './invalid-test-method-signature.js'
+import { csharpLegacySuppressMessageTargetVisitor } from './legacy-suppressmessage-target.js'
+import { csharpRedundantNullableDirectiveVisitor } from './redundant-nullable-directive.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpPreferPropertyOverMethodVisitor,
@@ -255,6 +257,8 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpPreferGenericsOverObjectVisitor,
   csharpIncompleteAssertionVisitor,
   csharpInvalidTestMethodSignatureVisitor,
+  csharpLegacySuppressMessageTargetVisitor,
+  csharpRedundantNullableDirectiveVisitor,
   csharpAccessorPairsVisitor,
   csharpAmbiguousUnicodeCharacterVisitor,
   csharpBanTsCommentVisitor,

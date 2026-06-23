@@ -6407,4 +6407,26 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'medium',
     type: 'deterministic',
   },
+  {
+    key: 'code-quality/deterministic/legacy-suppressmessage-target',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Legacy SuppressMessage target format',
+    description:
+      'A global [SuppressMessage(..., Target = "…")] whose Target uses the legacy FxCop format instead of the documentation-ID format (IDE0077). The modern format begins with a kind prefix (~N:/~T:/~M:/~F:/~P:/~E:) that tooling verifies and rewrites; the legacy Namespace.Type.#Member(…) form silently stops matching after a rename. Purely structural — the shape of the Target string.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
+    key: 'code-quality/deterministic/redundant-nullable-directive',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Redundant nullable directive',
+    description:
+      'A #nullable directive that restates the context already in effect from an earlier directive in the same file, so it changes nothing (IDE0240). Tracked file-locally by replaying the annotations/warnings state; the first enable/disable is never flagged (its relation to the project default is unknown), only restatements of a state this file already set — keeping it false-positive free.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
 ]
