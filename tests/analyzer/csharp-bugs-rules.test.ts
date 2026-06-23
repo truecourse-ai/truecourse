@@ -4811,3 +4811,125 @@ public sealed class Window
     expect(found.length).toBe(0)
   })
 })
+
+describe('bugs/deterministic/irregular-number-pattern (C#)', () => {
+  const key = 'bugs/deterministic/irregular-number-pattern'
+
+  it('flags inconsistent interior digit groups', () => {
+    expect(matches(`class C { long N = 1_23_456; }`, key).length).toBe(1)
+  })
+
+  it('flags an irregular hex grouping', () => {
+    expect(matches(`class C { int N = 0xF_FF_F; }`, key).length).toBe(1)
+  })
+
+  it('does not flag standard thousands grouping', () => {
+    expect(matches(`class C { long N = 1_000_000; }`, key).length).toBe(0)
+  })
+
+  it('does not flag a short leading group', () => {
+    expect(matches(`class C { long N = 1_000; }`, key).length).toBe(0)
+  })
+
+  it('does not flag a consistent non-thousands width', () => {
+    expect(matches(`class C { long N = 1_2345_6789; }`, key).length).toBe(0)
+  })
+
+  it('does not flag a literal with no separators', () => {
+    expect(matches(`class C { long N = 123456; }`, key).length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/streamreader-endofstream-in-async (C#)', () => {
+  const key = 'bugs/deterministic/streamreader-endofstream-in-async'
+
+  it('flags EndOfStream polled in an async method', () => {
+    const found = matches(`using System.IO;
+using System.Threading.Tasks;
+class C {
+  async Task ReadAll(StreamReader r) {
+    while (!r.EndOfStream) { await r.ReadLineAsync(); }
+  }
+}`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag EndOfStream in a synchronous method', () => {
+    const found = matches(`using System.IO;
+class C {
+  void ReadAll(StreamReader r) {
+    while (!r.EndOfStream) { r.ReadLine(); }
+  }
+}`, key)
+    expect(found.length).toBe(0)
+  })
+
+  it('does not flag an unrelated member in an async method', () => {
+    const found = matches(`using System.Threading.Tasks;
+using System.Collections.Generic;
+class C {
+  async Task M(List<int> xs) { await Task.Yield(); var n = xs.Count; }
+}`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/datetime-now-for-timing (C#)', () => {
+  const key = 'bugs/deterministic/datetime-now-for-timing'
+
+  it('flags (DateTime.Now - start).TotalMilliseconds', () => {
+    const found = matches(`using System;
+class C { double M(DateTime start) => (DateTime.Now - start).TotalMilliseconds; }`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('flags a UtcNow timing subtraction read as Ticks', () => {
+    const found = matches(`using System;
+class C { long M(DateTime start) => (DateTime.UtcNow - start).Ticks; }`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag calendar arithmetic without a duration read', () => {
+    const found = matches(`using System;
+class C { TimeSpan Age(DateTime birth) => DateTime.Now - birth; }`, key)
+    expect(found.length).toBe(0)
+  })
+
+  it('does not flag a Stopwatch-based measurement', () => {
+    const found = matches(`using System.Diagnostics;
+class C { long M(Stopwatch sw) => sw.ElapsedMilliseconds; }`, key)
+    expect(found.length).toBe(0)
+  })
+})
+
+describe('bugs/deterministic/debug-assert-side-effect (C#)', () => {
+  const key = 'bugs/deterministic/debug-assert-side-effect'
+
+  it('flags an assignment in the assert condition', () => {
+    const found = matches(`using System.Diagnostics;
+class C {
+  void M(int x) { Debug.Assert((x = Compute()) > 0); }
+  int Compute() => 1;
+}`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('flags an increment in the assert condition', () => {
+    const found = matches(`using System.Diagnostics;
+class C { void M(int i, int max) { Debug.Assert(i++ < max); } }`, key)
+    expect(found.length).toBe(1)
+  })
+
+  it('does not flag a pure comparison', () => {
+    const found = matches(`using System.Diagnostics;
+class C { void M(int x) { Debug.Assert(x > 0); } }`, key)
+    expect(found.length).toBe(0)
+  })
+
+  it('does not flag a method call in the condition', () => {
+    const found = matches(`using System.Diagnostics;
+using System.Collections.Generic;
+class C { void M(List<int> xs) { Debug.Assert(xs.Contains(1)); } }`, key)
+    expect(found.length).toBe(0)
+  })
+})

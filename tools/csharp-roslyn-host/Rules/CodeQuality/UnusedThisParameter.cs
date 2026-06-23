@@ -20,6 +20,11 @@ internal sealed class UnusedThisParameter : ISemanticRule
         {
             if (model.GetDeclaredSymbol(method) is not IMethodSymbol sym) continue;
             if (sym.IsStatic) continue;
+            // Only private methods: turning a private method static is a safe, local
+            // change. A protected/public/internal method is part of the type's
+            // (inheritance or assembly) surface, where instance-vs-static is a contract
+            // decision a derived or calling site may depend on — not a smell to flag.
+            if (sym.DeclaredAccessibility != Accessibility.Private) continue;
             // Overrides, virtual/abstract members, and interface implementations are
             // contractually instance-bound — making them static is not an option.
             if (sym.IsVirtual || sym.IsOverride || sym.IsAbstract) continue;

@@ -1,6 +1,7 @@
 namespace UserServiceApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/abstract-class-public-constructor
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal abstract class LedgerEntryBase
 {
     // VIOLATION: code-quality/deterministic/non-private-field

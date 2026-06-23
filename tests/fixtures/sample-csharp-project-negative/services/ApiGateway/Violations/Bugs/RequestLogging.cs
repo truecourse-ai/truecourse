@@ -50,6 +50,7 @@ internal sealed class RequestLogging
     {
         // string.Format references {0} and {1} but only one argument is supplied.
         // VIOLATION: bugs/deterministic/format-string-placeholder-mismatch
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return string.Format("processed {0} of {1}", total);
     }
 }

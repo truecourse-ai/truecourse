@@ -42,6 +42,7 @@ public sealed class CheckoutOrchestrator
     public CheckoutOrchestrator(IServiceProvider services) => _services = services;
 
     /// <summary>Runs the full purchase flow and returns the receipt text.</summary>
+    // VIOLATION: architecture/deterministic/excessive-class-coupling
     public string PlaceOrder(ICart cart, ICustomerProfile profile, string coupon, string zip)
     {
         _services.GetRequiredService<ICartValidator>().Validate(cart);

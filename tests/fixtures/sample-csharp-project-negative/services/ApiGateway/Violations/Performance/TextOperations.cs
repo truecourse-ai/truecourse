@@ -22,12 +22,15 @@ internal sealed class TextOperations
     internal bool SameName(string left, string right)
     {
         // VIOLATION: performance/deterministic/tolower-for-comparison
+        // VIOLATION: bugs/deterministic/culture-unaware-string-operation
+        // VIOLATION: bugs/deterministic/normalize-to-lower-not-upper
         return left.ToLower() == right.ToLower();
     }
 
     internal string Fingerprint(byte[] digest)
     {
         // VIOLATION: performance/deterministic/use-tohexstring
+        // VIOLATION: bugs/deterministic/normalize-to-lower-not-upper
         return BitConverter.ToString(digest).Replace("-", "").ToLowerInvariant();
     }
 

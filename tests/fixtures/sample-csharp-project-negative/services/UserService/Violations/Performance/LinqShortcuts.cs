@@ -3,6 +3,7 @@ using System.Linq;
 
 namespace UserServiceApp.Violations.Performance;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class UserRecord
 {
     public int Id { get; init; }

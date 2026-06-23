@@ -8900,3 +8900,69 @@ public struct Coordinate
   })
 })
 
+
+describe('code-quality/deterministic/missing-access-modifier (C#)', () => {
+  it('flags a top-level type with no access modifier', () => {
+    expect(matches(`namespace N; class Orphan { }`, 'missing-access-modifier').length).toBe(1)
+  })
+
+  it('flags a method with no access modifier', () => {
+    expect(matches(`namespace N; public class C { void Hidden() { } }`, 'missing-access-modifier').length).toBe(1)
+  })
+
+  it('does not flag an explicit modifier', () => {
+    expect(matches(`namespace N; internal class C { private void M() { } }`, 'missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag interface members (implicitly public)', () => {
+    expect(matches(`namespace N; public interface I { void M(); int P { get; } }`, 'missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag a static constructor', () => {
+    expect(matches(`namespace N; public class C { static C() { } }`, 'missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag a partial type (covered by the partial rule)', () => {
+    expect(matches(`namespace N; partial class C { }`, 'missing-access-modifier').length).toBe(0)
+  })
+})
+
+describe('code-quality/deterministic/partial-element-missing-access-modifier (C#)', () => {
+  it('flags a partial type with no access modifier', () => {
+    expect(matches(`namespace N; partial class C { }`, 'partial-element-missing-access-modifier').length).toBe(1)
+  })
+
+  it('flags a partial method with no access modifier', () => {
+    expect(matches(`namespace N; public partial class C { partial void OnDone(); }`, 'partial-element-missing-access-modifier').length).toBe(1)
+  })
+
+  it('does not flag a partial type that states its modifier', () => {
+    expect(matches(`namespace N; internal partial class C { }`, 'partial-element-missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag a non-partial type', () => {
+    expect(matches(`namespace N; class C { }`, 'partial-element-missing-access-modifier').length).toBe(0)
+  })
+})
+
+describe('code-quality/deterministic/csharp-filename-type-mismatch (C#)', () => {
+  const KEY = 'code-quality/deterministic/csharp-filename-type-mismatch'
+  const onFile = (code: string, path: string) =>
+    checkCodeRules(parseCode(code, 'csharp'), path, code, enabledRules, 'csharp').filter((v) => v.ruleKey === KEY)
+
+  it('flags a file whose name matches no top-level type', () => {
+    expect(onFile(`namespace N; internal class Money { } internal class Quantity { }`, '/src/MoneyValue.cs').length).toBe(1)
+  })
+
+  it('does not flag when a top-level type matches the file name', () => {
+    expect(onFile(`namespace N; internal interface IMoney { } internal class Money { }`, '/src/Money.cs').length).toBe(0)
+  })
+
+  it('accepts a generic-file convention (Cache.TKey.cs)', () => {
+    expect(onFile(`namespace N; internal class Cache { }`, '/src/Cache.TKey.cs').length).toBe(0)
+  })
+
+  it('does not flag a file with no top-level types', () => {
+    expect(onFile(`namespace N; `, '/src/Whatever.cs').length).toBe(0)
+  })
+})

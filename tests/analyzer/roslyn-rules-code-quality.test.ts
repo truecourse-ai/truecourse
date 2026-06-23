@@ -401,12 +401,21 @@ class Service {
   // ---- member-more-visible-than-type -------------------------------------
   describe('member-more-visible-than-type', () => {
     const K = 'code-quality/deterministic/member-more-visible-than-type'
-    it('flags a public method on an internal type', async () => {
+    it('flags a public member on a private nested type', async () => {
+      const src = `
+public class Outer {
+  private class Helper {
+    public void Do() {}
+  }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a public member on an internal type (reachable across the assembly)', async () => {
       const src = `
 internal class Helper {
   public void Do() {}
 }`
-      expect(await keys(src, K)).toContain(K)
+      expect(await keys(src, K)).not.toContain(K)
     })
     it('does not flag a public method on a public type', async () => {
       const src = `
@@ -415,10 +424,12 @@ public class Helper {
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
-    it('does not flag an internal member on an internal type', async () => {
+    it('does not flag an internal member on a private nested type', async () => {
       const src = `
-internal class Helper {
-  internal void Do() {}
+public class Outer {
+  private class Helper {
+    internal void Do() {}
+  }
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
@@ -875,33 +886,40 @@ class C { DateTime M(string s) { return DateTime.Parse(s); } }`
   // ---- unused-this-parameter ----------------------------------------------
   describe('unused-this-parameter', () => {
     const K = 'code-quality/deterministic/unused-this-parameter'
-    it('flags an instance method that never uses instance state', async () => {
+    it('flags a private method that never uses instance state', async () => {
       const src = `
 class C {
   private int _x;
-  public int Add(int a, int b) { return a + b; }
+  private int Add(int a, int b) { return a + b; }
 }`
       expect(await keys(src, K)).toContain(K)
     })
-    it('does not flag a method that reads a field', async () => {
+    it('does not flag a private method that reads a field', async () => {
       const src = `
 class C {
   private int _x;
-  public int Get() { return _x; }
+  private int Get(int n) { return _x + n; }
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
-    it('does not flag a method that uses this', async () => {
+    it('does not flag a public method (making it static would change the API)', async () => {
       const src = `
 class C {
-  public C Self() { return this; }
+  public int Add(int a, int b) { return a + b; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a protected method (part of the inheritance surface)', async () => {
+      const src = `
+class C {
+  protected int Add(int a, int b) { return a + b; }
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
     it('does not flag an override', async () => {
       const src = `
-class B { public virtual int F() { return 0; } }
-class C : B { public override int F() { return 1; } }`
+class B { protected virtual int F(int n) { return 0; } }
+class C : B { protected override int F(int n) { return 1; } }`
       expect(await keys(src, K)).not.toContain(K)
     })
   })
@@ -1150,58 +1168,6 @@ class C { void M(string stringBuilder) { System.Console.WriteLine(stringBuilder)
     })
   })
 
-  // ---- empty-namespace ----------------------------------------------------
-  describe('empty-namespace', () => {
-    const K = 'code-quality/deterministic/empty-namespace'
-    it('flags a namespace with no types', async () => {
-      const src = `
-namespace App.Empty {
-}`
-      expect(await keys(src, K)).toContain(K)
-    })
-    it('flags a file-scoped namespace with only a using', async () => {
-      const src = `
-namespace App.Util;
-using System;`
-      expect(await keys(src, K)).toContain(K)
-    })
-    it('does not flag a namespace containing a class', async () => {
-      const src = `
-namespace App.Core { class Service {} }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-    it('does not flag an outer namespace whose nested namespace holds types', async () => {
-      const src = `
-namespace Outer { namespace Inner { class Thing {} } }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-  })
-
-  // ---- csharp-filename-type-mismatch --------------------------------------
-  describe('csharp-filename-type-mismatch', () => {
-    const K = 'code-quality/deterministic/csharp-filename-type-mismatch'
-    async function keysFor(text: string, path: string): Promise<string[]> {
-      const violations = await runRoslynHost([{ path, text }], [K])
-      return violations.map((v) => v.ruleKey)
-    }
-    it('flags a file whose name differs from its first type', async () => {
-      const src = `class OrderService {}`
-      expect(await keysFor(src, 'Helpers.cs')).toContain(K)
-    })
-    it('does not flag a matching file name', async () => {
-      const src = `class OrderService {}`
-      expect(await keysFor(src, 'OrderService.cs')).not.toContain(K)
-    })
-    it('does not flag a generic-arity file convention', async () => {
-      const src = `class Cache<TKey, TValue> {}`
-      expect(await keysFor(src, 'Cache{TKey,TValue}.cs')).not.toContain(K)
-    })
-    it('does not flag a partial-of file convention (Foo.Bar.cs)', async () => {
-      const src = `partial class Order {}`
-      expect(await keysFor(src, 'Order.Validation.cs')).not.toContain(K)
-    })
-  })
-
   // ---- indexer-non-standard-key-type --------------------------------------
   describe('indexer-non-standard-key-type', () => {
     const K = 'code-quality/deterministic/indexer-non-standard-key-type'
@@ -1442,59 +1408,6 @@ class C {
   public int Value { get; }
   public int GetValue(int scale) => Value * scale;
 }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-  })
-
-  // ---- missing-access-modifier --------------------------------------------
-  describe('missing-access-modifier', () => {
-    const K = 'code-quality/deterministic/missing-access-modifier'
-    it('flags a top-level type with no access modifier', async () => {
-      const src = `class Service {}`
-      expect(await keys(src, K)).toContain(K)
-    })
-    it('flags a method with no access modifier', async () => {
-      const src = `
-public class C { void Run() {} }`
-      expect(await keys(src, K)).toContain(K)
-    })
-    it('does not flag an explicitly-modified type', async () => {
-      const src = `internal class Service {}`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-    it('does not flag an interface member', async () => {
-      const src = `
-public interface IService { void Run(); }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-    it('does not flag a static constructor', async () => {
-      const src = `
-public class C { static C() {} }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-    it('does not flag an explicit interface implementation', async () => {
-      const src = `
-public interface IService { void Run(); }
-public class C : IService { void IService.Run() {} }`
-      // The class C itself is public; its explicit-impl method takes no modifier.
-      const result = await keys(src, K)
-      expect(result.filter((k) => k === K).length).toBe(0)
-    })
-  })
-
-  // ---- partial-element-missing-access-modifier ----------------------------
-  describe('partial-element-missing-access-modifier', () => {
-    const K = 'code-quality/deterministic/partial-element-missing-access-modifier'
-    it('flags a partial type with no access modifier', async () => {
-      const src = `partial class Widget {}`
-      expect(await keys(src, K)).toContain(K)
-    })
-    it('does not flag a partial type with an explicit modifier', async () => {
-      const src = `public partial class Widget {}`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-    it('does not flag a non-partial type (covered by the other rule)', async () => {
-      const src = `class Widget {}`
       expect(await keys(src, K)).not.toContain(K)
     })
   })

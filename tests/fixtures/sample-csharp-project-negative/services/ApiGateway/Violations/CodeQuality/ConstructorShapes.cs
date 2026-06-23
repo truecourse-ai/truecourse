@@ -1,6 +1,7 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/redundant-base-type
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class RootHandler : object
 {
 }

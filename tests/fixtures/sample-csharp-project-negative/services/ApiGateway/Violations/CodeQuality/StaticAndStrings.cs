@@ -1,5 +1,6 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class RouteDefaults
 {
     // VIOLATION: code-quality/deterministic/static-readonly-should-be-const

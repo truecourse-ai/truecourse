@@ -15,35 +15,6 @@ async function keys(text: string, ruleKey: string): Promise<string[]> {
 }
 
 describe.skipIf(!hostBuilt)('Roslyn host — style rules (semantic C#)', () => {
-  // ---- extension-keyword-conflict ----------------------------------------
-  describe('extension-keyword-conflict', () => {
-    const K = 'style/deterministic/extension-keyword-conflict'
-
-    it('flags a method named extension', async () => {
-      const src = `class C { void extension() {} }`
-      expect(await keys(src, K)).toContain(K)
-    })
-
-    it('flags a parameter named extension', async () => {
-      const src = `class C { void M(int extension) {} }`
-      expect(await keys(src, K)).toContain(K)
-    })
-
-    it('flags a local variable named extension', async () => {
-      const src = `class C { void M() { int extension = 1; } }`
-      expect(await keys(src, K)).toContain(K)
-    })
-
-    it('does not flag an escaped @extension identifier', async () => {
-      const src = `class C { void M() { int @extension = 1; } }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-
-    it('does not flag an unrelated identifier', async () => {
-      const src = `class C { void M() { int ext = 1; } }`
-      expect(await keys(src, K)).not.toContain(K)
-    })
-  })
 
   // ---- partial-return-type-escape ----------------------------------------
   describe('partial-return-type-escape', () => {

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace UserServiceApp.Violations.Reliability;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class NativeBuffer : IDisposable
 {
     // VIOLATION: reliability/deterministic/disposable-without-finalizer
@@ -13,6 +14,7 @@ internal sealed class NativeBuffer : IDisposable
         _buffer = Marshal.AllocHGlobal(size);
     }
 
+    // VIOLATION: code-quality/deterministic/identifier-contains-type-name
     internal IntPtr Pointer => _buffer;
 
     /// <summary>Frees the native buffer.</summary>

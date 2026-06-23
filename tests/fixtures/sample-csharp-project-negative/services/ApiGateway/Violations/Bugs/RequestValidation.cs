@@ -25,6 +25,7 @@ internal sealed class RequestValidation
         // VIOLATION: bugs/deterministic/throwifnull-never-null-argument
         ArgumentNullException.ThrowIfNull(new object());
 
+        // VIOLATION: code-quality/deterministic/use-argumentnullexception-throwifnull
         if (value is null)
         {
             // VIOLATION: code-quality/deterministic/use-argumentnullexception-throwifnull

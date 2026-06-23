@@ -39,6 +39,7 @@ internal sealed class MetricsMath
         // VIOLATION: bugs/deterministic/unchecked-enumerable-sum-overflow
         unchecked
         {
+            // VIOLATION: bugs/deterministic/unchecked-enumerable-sum-overflow
             return latencies.Sum();
         }
     }

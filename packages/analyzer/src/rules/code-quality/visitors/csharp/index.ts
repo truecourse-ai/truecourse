@@ -240,6 +240,9 @@ import { csharpUseExceptionFilterVisitor } from './use-exception-filter.js'
 import { csharpUseIsNullOrEmptyVisitor } from './use-isnullorempty.js'
 import { csharpUseObjectDisposedExceptionThrowHelperVisitor } from './use-objectdisposedexception-throwhelper.js'
 import { csharpValueTypeEqualsWithoutOperatorVisitor } from './value-type-equals-without-operator.js'
+import { csharpMissingAccessModifierVisitor } from './missing-access-modifier.js'
+import { csharpPartialElementMissingAccessModifierVisitor } from './partial-element-missing-access-modifier.js'
+import { csharpFilenameTypeMismatchVisitor } from './csharp-filename-type-mismatch.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpAccessorPairsVisitor,
@@ -483,4 +486,7 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpUseIsNullOrEmptyVisitor,
   csharpUseObjectDisposedExceptionThrowHelperVisitor,
   csharpValueTypeEqualsWithoutOperatorVisitor,
+  csharpMissingAccessModifierVisitor,
+  csharpPartialElementMissingAccessModifierVisitor,
+  csharpFilenameTypeMismatchVisitor,
 ]

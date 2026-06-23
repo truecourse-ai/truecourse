@@ -28,6 +28,16 @@ function hostRuleKeys(): string[] {
   return DETERMINISTIC_RULES.filter((r) => r.enabled && r.engine === 'roslyn-host').map((r) => r.key);
 }
 
+/**
+ * Enabled Roslyn-workspace rule keys: they need the real project loaded
+ * (MSBuildWorkspace), so they cannot fire on loose file texts. Their markers in
+ * this fixture are verified by csharp-negative-project.test.ts instead, and are
+ * excluded from this loose-text harness.
+ */
+function workspaceRuleKeys(): string[] {
+  return DETERMINISTIC_RULES.filter((r) => r.enabled && r.engine === 'roslyn-workspace').map((r) => r.key);
+}
+
 // ---------------------------------------------------------------------------
 // Marker parsing
 // ---------------------------------------------------------------------------
@@ -95,6 +105,7 @@ function csharpCoverageUniverse(): Set<string> {
     }
   }
   for (const key of hostRuleKeys()) universe.add(key);
+  for (const key of workspaceRuleKeys()) universe.add(key);
   return universe;
 }
 
@@ -145,8 +156,13 @@ describe('C# negative fixture — code rules', () => {
 
   it('finds violations for each expected marker', () => {
     // Host-rule markers can only be verified when the host is built; skip them otherwise.
+    // Workspace-rule markers need the loaded project and are verified separately
+    // (csharp-negative-project.test.ts) — never by this loose-text harness.
     const hostKeys = new Set(hostRuleKeys());
-    const checkable = hostBuilt ? expected : expected.filter((e) => !hostKeys.has(e.ruleKey));
+    const workspaceKeys = new Set(workspaceRuleKeys());
+    const checkable = (hostBuilt ? expected : expected.filter((e) => !hostKeys.has(e.ruleKey))).filter(
+      (e) => !workspaceKeys.has(e.ruleKey),
+    );
     const missing: ExpectedViolation[] = [];
     for (const exp of checkable) {
       const found = violations.some(
@@ -183,17 +199,10 @@ describe('C# negative fixture — code rules', () => {
   });
 
   it('does not produce unexpected violations in violation source files', () => {
-    // Scope: dedicated marker files, tree-sitter rules only. The pre-existing
-    // service files carry their own seeded defects asserted by the graph tests.
-    // Roslyn-host rules are EXCLUDED here: they fire incidentally across these
-    // deliberately-defective files (e.g. many methods that could be static),
-    // which is expected on a violation fixture — host false positives are caught
-    // by the zero-FP positive fixture instead. Host rules still need coverage
-    // (a marker each) below.
-    const hostKeys = new Set(hostRuleKeys());
-    const scoped = violations.filter(
-      (v) => v.filePath.includes('/Violations/') && !hostKeys.has(v.ruleKey),
-    );
+    // Level 2 (the false-positive guard): EVERY fire in a /Violations/ file — host
+    // rules included — must sit on a marker. No exemption. A surprise fire is either
+    // a real violation we forgot to mark, or a false positive to fix in the rule.
+    const scoped = violations.filter((v) => v.filePath.includes('/Violations/'));
     const expectedSet = new Set(expected.map((e) => `${e.ruleKey}::${e.filePath}`));
     const unexpected = scoped.filter((v) => !expectedSet.has(`${v.ruleKey}::${v.filePath}`));
 

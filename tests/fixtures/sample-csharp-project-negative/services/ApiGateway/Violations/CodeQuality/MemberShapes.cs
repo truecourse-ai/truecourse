@@ -65,6 +65,7 @@ internal sealed class MemberShapes
     public int Weight { get; }
 
     // Companion accessor that duplicates the Weight property.
+    // VIOLATION: code-quality/deterministic/property-matches-get-method
     public int GetWeight()
     {
         return Weight;
@@ -102,6 +103,7 @@ internal sealed class EventRaiser
     internal event EventHandler Flushed;
 
     // VIOLATION: code-quality/deterministic/non-generic-event-handler
+    // VIOLATION: bugs/deterministic/event-handler-wrong-signature
     internal event FlushCompletedHandler FlushCompleted;
 
     // VIOLATION: code-quality/deterministic/event-before-after-prefix

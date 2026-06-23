@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/namespace-folder-mismatch
 namespace UserServiceApp.Violations.CodeQuality.Logging;
 
 /// <summary>

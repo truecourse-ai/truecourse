@@ -79,6 +79,7 @@ internal class GuardExpressions
     internal void GateMiddleName(CustomerProfile customer)
     {
         // VIOLATION: code-quality/deterministic/compare-to-empty-string
+        // VIOLATION: performance/deterministic/empty-string-compared-with-equals
         if (customer.MiddleName != "")
         {
             _auditTrail.Add("middle name present");
@@ -106,6 +107,8 @@ internal class GuardExpressions
     internal void GateLegacySku(string sku)
     {
         // VIOLATION: code-quality/deterministic/substring-over-starts-ends
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
+        // VIOLATION: performance/deterministic/startswith-over-indexof-zero
         if (sku.IndexOf("LEGACY") == 0)
         {
             _auditTrail.Add("legacy sku detected");

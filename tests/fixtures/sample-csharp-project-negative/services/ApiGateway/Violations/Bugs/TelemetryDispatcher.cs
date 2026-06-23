@@ -35,6 +35,8 @@ internal class TelemetryDispatcher
     internal string DescribeShardProgress(int readyShards, int totalShards)
     {
         // VIOLATION: bugs/deterministic/string-format-mismatch
+        // VIOLATION: bugs/deterministic/format-string-placeholder-mismatch
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return string.Format("{0}/{1} shards ready ({2}%)", readyShards, totalShards);
     }
 

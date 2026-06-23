@@ -10,6 +10,7 @@ namespace UserServiceApp.Violations.CodeQuality;
 // VIOLATION: code-quality/deterministic/value-type-equals-without-operator
 // VIOLATION: code-quality/deterministic/equatable-without-iequatable
 // VIOLATION: code-quality/deterministic/inconsistent-operator-overloads
+// VIOLATION: performance/deterministic/value-type-without-iequatable
 internal readonly struct MoneyAmount
 {
     public MoneyAmount(decimal value, string currency)

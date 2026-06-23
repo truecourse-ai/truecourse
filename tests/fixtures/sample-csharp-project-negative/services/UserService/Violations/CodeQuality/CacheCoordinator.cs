@@ -28,8 +28,10 @@ internal sealed class CacheCoordinator : CacheBase
     private sealed class Entry
     {
         // VIOLATION: code-quality/deterministic/inner-member-shadows-outer
+        // VIOLATION: code-quality/deterministic/member-more-visible-than-type
         public TimeSpan DefaultTtl { get; set; }
 
+        // VIOLATION: code-quality/deterministic/member-more-visible-than-type
         public object? Value { get; set; }
     }
 

@@ -1,6 +1,7 @@
 // VIOLATION: code-quality/deterministic/too-many-classes-per-file
 namespace UserServiceApp.Violations.CodeQuality;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class AuditContext
 {
     private readonly List<string> _entries = new List<string>();
@@ -11,6 +12,7 @@ internal class AuditContext
     }
 
     // VIOLATION: code-quality/deterministic/accessor-pairs
+    // VIOLATION: code-quality/deterministic/write-only-property
     public string Actor
     {
         set
@@ -34,6 +36,7 @@ internal class SyncCursor
 }
 
 // VIOLATION: code-quality/deterministic/no-extraneous-class
+// VIOLATION: code-quality/deterministic/static-holder-type-not-sealed
 internal class MaintenanceTasks
 {
     private static readonly List<string> _backlog = new List<string>();
@@ -78,6 +81,7 @@ internal class RateAuditor
     }
 
     // VIOLATION: code-quality/deterministic/static-method-candidate
+    // VIOLATION: code-quality/deterministic/unused-this-parameter
     private decimal RoundFee(decimal fee)
     {
         return Math.Round(fee, 2);

@@ -28,6 +28,7 @@ internal class DiagnosticsToolbox
     internal string BuildSummary(List<string> rows)
     {
         // VIOLATION: code-quality/deterministic/unnecessary-namespace-qualifier
+        // VIOLATION: code-quality/deterministic/verbose-declaration-initialization
         StringBuilder builder = new System.Text.StringBuilder();
         foreach (var row in rows)
         {
@@ -48,6 +49,7 @@ internal class DiagnosticsToolbox
     internal string DescribeResponse(int code)
     {
         // VIOLATION: code-quality/deterministic/ambiguous-unicode-character
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         var statuѕLabel = code.ToString();
         return $"status {statuѕLabel}";
     }

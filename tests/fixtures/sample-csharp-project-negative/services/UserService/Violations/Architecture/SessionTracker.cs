@@ -16,6 +16,7 @@ internal sealed class SessionTracker
 
     internal void Begin(string sessionId)
     {
+        // VIOLATION: code-quality/deterministic/non-testable-datetime-provider
         _startedAt[sessionId] = DateTime.UtcNow;
         _activeSessions++;
     }

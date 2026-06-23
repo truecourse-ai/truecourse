@@ -18,6 +18,7 @@ internal sealed class StringBuilders
     internal string Describe(StringBuilder sb, int count)
     {
         // VIOLATION: performance/deterministic/stringbuilder-tostring-append
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return sb.Append(count.ToString()).ToString();
     }
 

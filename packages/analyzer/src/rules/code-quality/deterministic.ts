@@ -5176,17 +5176,6 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     engine: 'roslyn-host',
   },
   {
-    key: 'code-quality/deterministic/empty-namespace',
-    category: 'code',
-    domain: 'code-quality',
-    name: 'Empty namespace',
-    description: 'A namespace declaration contains no type definitions.',
-    enabled: true,
-    severity: 'low',
-    type: 'deterministic',
-    engine: 'roslyn-host',
-  },
-  {
     key: 'code-quality/deterministic/csharp-filename-type-mismatch',
     category: 'code',
     domain: 'code-quality',
@@ -5196,7 +5185,6 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
-    engine: 'roslyn-host',
   },
   {
     key: 'code-quality/deterministic/indexer-non-standard-key-type',
@@ -5316,7 +5304,6 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
-    engine: 'roslyn-host',
   },
   {
     key: 'code-quality/deterministic/partial-element-missing-access-modifier',
@@ -5328,7 +5315,6 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
-    engine: 'roslyn-host',
   },
   {
     key: 'code-quality/deterministic/verbose-declaration-initialization',

@@ -1,6 +1,7 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/empty-interface
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal interface IRoutingTag
 {
 }

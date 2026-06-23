@@ -9,6 +9,7 @@ internal sealed class FileHandleGuard
     ~FileHandleGuard()
     {
         // VIOLATION: bugs/deterministic/finalizer-throws
+        // VIOLATION: bugs/deterministic/exception-from-unexpected-member
         throw new InvalidOperationException(_path);
     }
 }

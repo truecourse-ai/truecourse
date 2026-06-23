@@ -31,6 +31,7 @@ internal sealed class FieldHygiene
         // VIOLATION: code-quality/deterministic/equality-operator-on-reference-type
         public static bool operator ==(FieldKey a, FieldKey b) => ReferenceEquals(a, b);
         public static bool operator !=(FieldKey a, FieldKey b) => !ReferenceEquals(a, b);
+        // VIOLATION: code-quality/deterministic/inner-member-shadows-outer
         public override bool Equals(object obj) => ReferenceEquals(this, obj);
         public override int GetHashCode() => 0;
     }

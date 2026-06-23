@@ -3,6 +3,7 @@ namespace ApiGateway.Violations.Style;
 /// <summary>A model type that predates the `partial` contextual keyword usage below.</summary>
 // The type name is lower-cased, against the PascalCase convention for types.
 // VIOLATION: style/deterministic/csharp-naming-convention
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class @partial { }
 
 /// <summary>
@@ -17,6 +18,7 @@ internal sealed class KeywordNaming
     // VIOLATION: code-quality/deterministic/empty-function
     // VIOLATION: code-quality/deterministic/no-empty-function
     // VIOLATION: code-quality/deterministic/unused-private-method
+    // VIOLATION: code-quality/deterministic/missing-access-modifier
     void extension() { }
 
     // The return type is the bare identifier `partial`, which reads as the modifier.

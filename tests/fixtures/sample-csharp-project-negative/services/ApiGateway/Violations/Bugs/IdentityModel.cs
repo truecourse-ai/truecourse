@@ -1,5 +1,6 @@
 namespace ApiGateway.Violations.Bugs;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class GridPoint
 {
     private readonly int _x;

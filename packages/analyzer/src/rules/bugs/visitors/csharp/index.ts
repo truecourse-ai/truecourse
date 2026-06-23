@@ -129,6 +129,10 @@ import { csharpReturnNullTaskVisitor } from './return-null-task.js'
 import { csharpToStringReturnsNullVisitor } from './tostring-returns-null.js'
 import { csharpExceptionFromPropertyGetterVisitor } from './exception-from-property-getter.js'
 import { csharpForConditionNeverTrueVisitor } from './for-condition-never-true.js'
+import { csharpIrregularNumberPatternVisitor } from './irregular-number-pattern.js'
+import { csharpDebugAssertSideEffectVisitor } from './debug-assert-side-effect.js'
+import { csharpDateTimeNowForTimingVisitor } from './datetime-now-for-timing.js'
+import { csharpStreamReaderEndOfStreamInAsyncVisitor } from './streamreader-endofstream-in-async.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEmptyCatchVisitor,
@@ -260,4 +264,8 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpToStringReturnsNullVisitor,
   csharpExceptionFromPropertyGetterVisitor,
   csharpForConditionNeverTrueVisitor,
+  csharpIrregularNumberPatternVisitor,
+  csharpDebugAssertSideEffectVisitor,
+  csharpDateTimeNowForTimingVisitor,
+  csharpStreamReaderEndOfStreamInAsyncVisitor,
 ]

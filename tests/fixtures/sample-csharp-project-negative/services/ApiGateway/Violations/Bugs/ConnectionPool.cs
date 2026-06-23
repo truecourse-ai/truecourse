@@ -7,6 +7,7 @@ internal sealed class ConnectionPool
     internal void Release(string connection)
     {
         // VIOLATION: bugs/deterministic/lock-on-public-reference
+        // VIOLATION: bugs/deterministic/lock-on-shared-instance
         lock (this)
         {
             _idle.Enqueue(connection);

@@ -26,7 +26,6 @@ namespace UserServiceApp.Violations.CodeQuality
 }
 
 // VIOLATION: code-quality/deterministic/empty-namespace-declaration
-// VIOLATION: code-quality/deterministic/empty-namespace
 namespace UserServiceApp.Violations.CodeQuality.Reserved
 {
 }

@@ -55,6 +55,7 @@ internal sealed class CacheEntry
 
     // VIOLATION: bugs/deterministic/serialization-handler-wrong-signature
     [OnDeserialized]
+    // VIOLATION: bugs/deterministic/serialization-handler-wrong-signature
     private void AfterLoad()
     {
         _key ??= string.Empty;

@@ -20,5 +20,6 @@ internal struct UserId
 
     public override int GetHashCode() => _value.GetHashCode();
 
+    // VIOLATION: bugs/deterministic/missing-format-provider-overload
     public override string ToString() => _value.ToString();
 }

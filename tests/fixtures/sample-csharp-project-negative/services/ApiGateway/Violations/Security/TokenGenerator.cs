@@ -8,6 +8,7 @@ internal sealed class TokenGenerator
     {
         // VIOLATION: security/deterministic/insecure-random
         var random = new Random();
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return random.Next().ToString();
     }
 }

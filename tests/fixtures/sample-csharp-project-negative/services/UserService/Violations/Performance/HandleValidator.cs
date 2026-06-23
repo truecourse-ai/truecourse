@@ -21,6 +21,7 @@ internal sealed class HandleValidator
     {
         // VIOLATION: performance/deterministic/prefer-char-overload
         // VIOLATION: performance/deterministic/prefer-char-startswith-endswith
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
         return handle.StartsWith("@");
     }
 
@@ -34,6 +35,7 @@ internal sealed class HandleValidator
     {
         // VIOLATION: performance/deterministic/startswith-over-indexof-zero
         // VIOLATION: code-quality/deterministic/substring-over-starts-ends
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
         return path.IndexOf("/") == 0;
     }
 

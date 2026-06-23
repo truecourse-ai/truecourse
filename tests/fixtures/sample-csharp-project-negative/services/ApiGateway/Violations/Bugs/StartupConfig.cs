@@ -26,6 +26,7 @@ internal static class StartupConfig
     // VIOLATION: bugs/deterministic/threadstatic-inline-initialization
     // VIOLATION: architecture/deterministic/declarations-in-global-scope
     [ThreadStatic]
+    // VIOLATION: bugs/deterministic/threadstatic-initialized-inline
     private static int _retryCounter = 3;
 
     internal static int NextRetry() => ++_retryCounter;

@@ -8,6 +8,7 @@ namespace UserServiceApp.Violations.Performance;
 /// arrival order, a SortedSet of priority scores, and a HashSet of banned users.
 /// Each access below uses a LINQ extension that has a cheaper concrete-type form.
 /// </summary>
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class SessionTracker
 {
     private readonly LinkedList<string> _arrivalOrder = new();

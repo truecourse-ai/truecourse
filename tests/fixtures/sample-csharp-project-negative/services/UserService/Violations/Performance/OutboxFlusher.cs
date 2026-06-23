@@ -17,6 +17,7 @@ internal sealed class OutboxFlusher
     {
         foreach (var message in messages)
         {
+            // VIOLATION: code-quality/deterministic/non-testable-datetime-provider
             message.DispatchedAt = DateTime.UtcNow;
             _db.Outbox.Update(message);
             // VIOLATION: performance/deterministic/batch-writes-in-loop

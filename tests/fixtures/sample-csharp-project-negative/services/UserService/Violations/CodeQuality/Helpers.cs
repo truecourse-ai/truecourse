@@ -12,6 +12,7 @@ internal sealed class EmailFormatter
     /// <summary>Builds a normalized email address from its parts.</summary>
     public string Format(string localPart, string domain)
     {
+        // VIOLATION: bugs/deterministic/normalize-to-lower-not-upper
         return $"{localPart}@{domain}".ToLowerInvariant();
     }
 }

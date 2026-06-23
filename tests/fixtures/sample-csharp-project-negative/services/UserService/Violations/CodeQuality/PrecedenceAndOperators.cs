@@ -1,5 +1,6 @@
 namespace UserServiceApp.Violations.CodeQuality;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal struct PriceBand
 {
     public int Value;

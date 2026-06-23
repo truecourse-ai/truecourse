@@ -27,6 +27,7 @@ internal sealed class HeaderNormalization
     {
         // Static string.Compare without a StringComparison is culture-sensitive.
         // VIOLATION: bugs/deterministic/culture-unaware-string-operation
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
         return string.Compare(a, b);
     }
 

@@ -9,6 +9,7 @@ namespace ApiGateway.Violations.Bugs;
 // VIOLATION: code-quality/deterministic/too-many-classes-per-file
 // VIOLATION: code-quality/deterministic/filename-class-mismatch
 // VIOLATION: bugs/deterministic/exception-missing-standard-constructors
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 public sealed class GatewayRoutingException : Exception
 {
     public GatewayRoutingException(int statusCode)

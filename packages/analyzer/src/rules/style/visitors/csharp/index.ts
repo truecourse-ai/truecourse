@@ -29,6 +29,7 @@ import { csharpFlagsEnumZeroNotNoneVisitor } from './flags-enum-zero-not-none.js
 import { csharpLoggerFieldNamingVisitor } from './logger-field-naming.js'
 import { csharpScopedIdentifierEscapeVisitor } from './scoped-identifier-escape.js'
 import { csharpTypeNameSuffixConventionVisitor } from './type-name-suffix-convention.js'
+import { csharpExtensionKeywordConflictVisitor } from './extension-keyword-conflict.js'
 
 export const STYLE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpCommentTagFormattingVisitor,
@@ -45,4 +46,5 @@ export const STYLE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpLoggerFieldNamingVisitor,
   csharpScopedIdentifierEscapeVisitor,
   csharpTypeNameSuffixConventionVisitor,
+  csharpExtensionKeywordConflictVisitor,
 ]

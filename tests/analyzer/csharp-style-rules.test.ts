@@ -738,3 +738,27 @@ internal sealed class RequiredAttribute : Attribute { }
     expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
   })
 })
+
+describe('style/deterministic/extension-keyword-conflict (C#)', () => {
+  const KEY = 'style/deterministic/extension-keyword-conflict'
+
+  it('flags a method named extension', () => {
+    const violations = check(`namespace N; public class C { void extension() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('flags a field named extension', () => {
+    const violations = check(`namespace N; public class C { int extension; }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('does not flag an escaped @extension identifier', () => {
+    const violations = check(`namespace N; public class C { void @extension() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+
+  it('does not flag an unrelated identifier', () => {
+    const violations = check(`namespace N; public class C { void Extend() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})

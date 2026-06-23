@@ -1,6 +1,7 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/unnecessary-record-braces
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal record RouteKey(string Method, string Path)
 {
 }

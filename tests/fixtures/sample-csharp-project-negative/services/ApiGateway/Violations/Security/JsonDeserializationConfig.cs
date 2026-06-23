@@ -34,6 +34,7 @@ internal sealed class JsonDeserializationConfig
         // VIOLATION: security/deterministic/insecure-jsonserializersettings
         // VIOLATION: reliability/deterministic/unsafe-json-parse
         // VIOLATION: code-quality/deterministic/non-null-assertion
+        // VIOLATION: security/deterministic/json-net-typenamehandling
         return JsonConvert.DeserializeObject<T>(payload, new JsonSerializerSettings { TypeNameHandling = TypeNameHandling.All })!;
     }
 }

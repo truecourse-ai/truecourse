@@ -1,6 +1,7 @@
 namespace ApiGateway.Violations.Bugs;
 
 // VIOLATION: code-quality/deterministic/enum-missing-zero-value
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal enum DispatchStage
 {
     Created = 1,

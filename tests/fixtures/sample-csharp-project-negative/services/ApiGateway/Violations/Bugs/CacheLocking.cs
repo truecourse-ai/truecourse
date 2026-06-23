@@ -10,6 +10,7 @@ internal sealed class CacheLocking
 {
     // Reassignable, so two threads can end up locking different objects.
     // VIOLATION: code-quality/deterministic/mutable-private-member
+    // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private object _gate = new object();
 
     private readonly Dictionary<string, int> _entries = new();

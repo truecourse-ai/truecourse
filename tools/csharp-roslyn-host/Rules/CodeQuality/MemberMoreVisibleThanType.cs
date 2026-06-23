@@ -4,11 +4,12 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace TrueCourse.RoslynHost;
 
 /// <summary>
-/// A `public` member declared on an `internal`/`private` type. The effective
-/// accessibility is capped by the containing type, so the broader modifier is
-/// misleading — readers think the member is part of the public surface when it
-/// cannot be. Needs the resolved declared accessibility of both member and type
-/// (which folds in containment).
+/// A `public` member declared on a `private`/`protected` nested type, where the
+/// member can never be reached through the type — the broader modifier is dead and
+/// misleading. Restricted to genuinely-capped types: an `internal` type's public
+/// member is still reachable across the assembly (and via InternalsVisibleTo), so
+/// `public` there carries real meaning and is NOT flagged. Needs the resolved
+/// declared accessibility of both member and type (which folds in containment).
 /// </summary>
 internal sealed class MemberMoreVisibleThanType : ISemanticRule
 {
@@ -19,12 +20,12 @@ internal sealed class MemberMoreVisibleThanType : ISemanticRule
         foreach (var typeDecl in tree.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>())
         {
             if (model.GetDeclaredSymbol(typeDecl) is not INamedTypeSymbol type) continue;
-            // Only when the declared accessibility of the TYPE is below public.
-            if (type.DeclaredAccessibility is Accessibility.Public) continue;
-            // Protected members of a public-base context are legitimately public-ish; we
-            // restrict to internal/private/file-scoped types where public truly can't escape.
-            if (type.DeclaredAccessibility is not (Accessibility.Internal or Accessibility.Private
-                or Accessibility.ProtectedAndInternal)) continue;
+            // Only a nested type whose own accessibility is private/protected truly caps
+            // its members: nobody outside the enclosing type can reach them, so `public`
+            // is dead. An `internal` type's members stay reachable across the assembly, so
+            // public there is meaningful and must not be flagged.
+            if (type.DeclaredAccessibility is not (Accessibility.Private or Accessibility.Protected
+                or Accessibility.ProtectedOrInternal or Accessibility.ProtectedAndInternal)) continue;
 
             foreach (var memberNode in typeDecl.Members)
             {

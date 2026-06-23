@@ -8,24 +8,31 @@ namespace UserServiceApp.Violations.CodeQuality;
 /// </summary>
 // VIOLATION: code-quality/deterministic/no-extraneous-class
 // VIOLATION: code-quality/deterministic/static-holder-type-not-sealed
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class AccountDefaults
 {
     // VIOLATION: code-quality/deterministic/public-const-versioning-hazard
     public const int FreeSeatLimit = 3;
 
     /// <summary>Lower-cases and trims an email for canonical storage.</summary>
+    // VIOLATION: bugs/deterministic/normalize-to-lower-not-upper
     public static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
-}
 
-internal class PlanCatalog
-{
-    // VIOLATION: code-quality/deterministic/member-more-visible-than-type
-    // VIOLATION: code-quality/deterministic/non-private-field
-    public string DefaultPlanId = "starter";
+    /// <summary>The id of the plan new accounts start on.</summary>
+    public static string DefaultPlan() => new PlanCatalog().DefaultPlanId;
 
-    // VIOLATION: code-quality/deterministic/missing-access-modifier
-    // VIOLATION: code-quality/deterministic/unused-private-method
-    string ResolvePlanName(string planId) => planId == DefaultPlanId ? "Starter" : "Custom";
+    // A private nested catalog: nothing outside AccountDefaults can reach PlanCatalog,
+    // so a `public` member on it is dead — exactly what member-more-visible flags.
+    private sealed class PlanCatalog
+    {
+        // VIOLATION: code-quality/deterministic/member-more-visible-than-type
+        // VIOLATION: code-quality/deterministic/non-private-field
+        public string DefaultPlanId = "starter";
+
+        // VIOLATION: code-quality/deterministic/missing-access-modifier
+        // VIOLATION: code-quality/deterministic/unused-private-method
+        string ResolvePlanName(string planId) => planId == DefaultPlanId ? "Starter" : "Custom";
+    }
 }
 
 // VIOLATION: code-quality/deterministic/attribute-missing-usage

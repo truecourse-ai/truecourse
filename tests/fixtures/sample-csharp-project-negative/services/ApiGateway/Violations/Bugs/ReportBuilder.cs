@@ -8,6 +8,7 @@ internal class ReportBuilder
     {
         _title = title;
         // VIOLATION: bugs/deterministic/virtual-call-in-constructor
+        // VIOLATION: bugs/deterministic/constructor-calls-virtual-method
         Initialize();
     }
 

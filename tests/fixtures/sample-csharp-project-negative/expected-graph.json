@@ -79,6 +79,12 @@
       "layer": "api"
     },
     {
+      "name": "BackgroundBatchRunner",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "BackingStore",
       "service": "ApiGateway",
       "kind": "class",
@@ -86,6 +92,12 @@
     },
     {
       "name": "BackoffKind",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BatchCompletedEventArgs",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -110,6 +122,12 @@
     },
     {
       "name": "BuildSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BulkImportProcessor",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -860,6 +878,12 @@
     },
     {
       "name": "PathJoiner",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PayloadInspector",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -1970,12 +1994,6 @@
     },
     {
       "name": "PermissionSet",
-      "service": "UserService",
-      "kind": "class",
-      "layer": "service"
-    },
-    {
-      "name": "PlanCatalog",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

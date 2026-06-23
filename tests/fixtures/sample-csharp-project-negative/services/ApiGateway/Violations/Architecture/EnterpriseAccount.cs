@@ -6,6 +6,7 @@ namespace ApiGateway.Violations.Architecture;
 /// inheritance tree above it.
 /// </summary>
 // VIOLATION: architecture/deterministic/deep-inheritance-tree
+// VIOLATION: architecture/deterministic/deep-inheritance-chain
 public sealed class EnterpriseAccount : Customer
 {
     /// <summary>Master service agreement reference.</summary>

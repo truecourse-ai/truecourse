@@ -5,9 +5,11 @@ namespace ApiGateway.Violations.Bugs;
 // A monetary value object. It implements IEquatable<Money> but is left unsealed,
 // so a derived type could break the equality contract (Equals not symmetric).
 // VIOLATION: bugs/deterministic/iequatable-class-not-sealed
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class Money : IEquatable<Money>
 {
     // VIOLATION: code-quality/deterministic/mutable-private-member
+    // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private int _cents;
 
     public Money(int cents)

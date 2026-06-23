@@ -1,5 +1,6 @@
 namespace UserServiceApp.Violations.CodeQuality;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class BaseFormatter
 {
     internal virtual string Render(string input)
@@ -22,6 +23,7 @@ internal sealed class PassthroughFormatter : BaseFormatter
     }
 
     // VIOLATION: code-quality/deterministic/params-not-on-override
+    // VIOLATION: bugs/deterministic/params-introduced-on-override
     internal override string Join(string separator, string[] parts)
     {
         return string.Join(separator, parts) + "!";

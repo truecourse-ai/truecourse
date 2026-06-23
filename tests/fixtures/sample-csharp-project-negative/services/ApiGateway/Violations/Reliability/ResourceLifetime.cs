@@ -4,6 +4,8 @@ using System.Threading;
 namespace ApiGateway.Violations.Reliability;
 
 /// <summary>Accumulates an upstream response in memory.</summary>
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
+// VIOLATION: reliability/deterministic/class-with-idisposable-members-not-disposable
 internal sealed class ResponseBuffer
 {
     // Owns a disposable buffer, but the class never implements IDisposable, so the
@@ -21,6 +23,7 @@ internal sealed class UpstreamProbe
     // The overloads are stubs in this fixture and have no body.
     // VIOLATION: code-quality/deterministic/empty-function
     // VIOLATION: code-quality/deterministic/no-empty-function
+    // VIOLATION: code-quality/deterministic/unused-this-parameter
     private void Ping(CancellationToken cancellationToken) { }
 
     private void Ping() { }

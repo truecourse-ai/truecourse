@@ -36,21 +36,35 @@ public sealed class DiagnosticsReportBuilder
     {
         var sb = new StringBuilder();
         sb.AppendLine(new ReportHeader("Diagnostics").Title);
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new CpuSection(0.0).Load.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new MemorySection(0).Bytes.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new DiskSection(0).FreeBytes.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new NetworkSection(0).OpenSockets.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new ThreadPoolSection(0).Busy.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new GcSection(0).Gen2.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new RequestSection(0).Count.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new ErrorSection(0).Count.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new CacheSection(0.0).HitRate.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new DatabaseSection(0).PoolSize.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new QueueSection(0).Depth.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new DependencySection(0).Down.ToString());
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new FeatureFlagSection(0).Active.ToString());
         sb.AppendLine(new ConfigSection("prod").Env);
         sb.AppendLine(new BuildSection("abc").Sha);
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         sb.AppendLine(new UptimeSection(0).Seconds.ToString());
         return sb.ToString();
     }

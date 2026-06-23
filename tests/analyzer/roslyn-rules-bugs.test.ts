@@ -1330,4 +1330,85 @@ class C { void M(ILogger log) { log.LogInformation("literal {{ and }} braces"); 
       expect(await keys(src, K)).not.toContain(K)
     })
   })
+
+  // ---- begininvoke-without-endinvoke -------------------------------------
+  describe('begininvoke-without-endinvoke', () => {
+    const K = 'bugs/deterministic/begininvoke-without-endinvoke'
+
+    it('flags a delegate BeginInvoke with no EndInvoke', async () => {
+      const src = `
+using System;
+class C {
+  delegate int Work(int x);
+  void M(Work w) { w.BeginInvoke(1, null, null); }
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag when EndInvoke is present', async () => {
+      const src = `
+using System;
+class C {
+  delegate int Work(int x);
+  void M(Work w) { var ar = w.BeginInvoke(1, null, null); w.EndInvoke(ar); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag Control.BeginInvoke (not a delegate receiver)', async () => {
+      const src = `
+using System;
+class Control { public object BeginInvoke(Delegate d) => null; }
+class C {
+  void M(Control ctrl) { ctrl.BeginInvoke(new Action(() => {})); }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- event-handler-wrong-signature -------------------------------------
+  describe('event-handler-wrong-signature', () => {
+    const K = 'bugs/deterministic/event-handler-wrong-signature'
+
+    it('flags a custom delegate event without object sender', async () => {
+      const src = `
+using System;
+class DataEventArgs : EventArgs { }
+delegate void DataHandler(string source, DataEventArgs e);
+class C { public event DataHandler Received; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('flags a custom delegate whose second arg is not EventArgs', async () => {
+      const src = `
+using System;
+delegate void Changed(object sender, int value);
+class C { public event Changed OnChanged; }`
+      expect(await keys(src, K)).toContain(K)
+    })
+
+    it('does not flag a conventional custom delegate', async () => {
+      const src = `
+using System;
+class DataEventArgs : EventArgs { }
+delegate void DataHandler(object sender, DataEventArgs e);
+class C { public event DataHandler Received; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag EventHandler<T>', async () => {
+      const src = `
+using System;
+class DataEventArgs : EventArgs { }
+class C { public event EventHandler<DataEventArgs> Received; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+
+    it('does not flag an Action-based event', async () => {
+      const src = `
+using System;
+class C { public event Action<int> Ticked; }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
 })

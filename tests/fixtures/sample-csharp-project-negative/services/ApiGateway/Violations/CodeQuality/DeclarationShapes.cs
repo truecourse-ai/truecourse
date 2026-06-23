@@ -1,6 +1,7 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/enum-missing-zero-value
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal enum GatewayMode
 {
     Primary = 1,

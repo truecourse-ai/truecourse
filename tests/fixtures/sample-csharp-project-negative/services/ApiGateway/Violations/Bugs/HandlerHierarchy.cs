@@ -2,6 +2,7 @@ namespace ApiGateway.Violations.Bugs;
 
 /// <summary>Base request handler with value-semantics Equals and a lifecycle hook.</summary>
 // VIOLATION: code-quality/deterministic/too-many-classes-per-file
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal class RequestHandlerBase
 {
     // VIOLATION: code-quality/deterministic/non-private-field
@@ -9,6 +10,7 @@ internal class RequestHandlerBase
 
     public override bool Equals(object obj) => obj is RequestHandlerBase other && other.RetryBudget == RetryBudget;
 
+    // VIOLATION: bugs/deterministic/gethashcode-uses-mutable-field
     public override int GetHashCode() => RetryBudget;
 
     /// <summary>Resets the retry budget before the handler runs.</summary>
@@ -66,6 +68,7 @@ internal class TelemetrySink : IDispatchSink
     private int _count;
 
     // VIOLATION: bugs/deterministic/interface-method-not-callable-by-derived
+    // VIOLATION: code-quality/deterministic/missing-access-modifier
     void IDispatchSink.Dispatch()
     {
         _count++;

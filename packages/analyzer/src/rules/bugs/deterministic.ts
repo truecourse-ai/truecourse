@@ -4975,4 +4975,72 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'high',
     type: 'deterministic',
   },
+  {
+    key: 'bugs/deterministic/irregular-number-pattern',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Irregular numeric digit grouping',
+    description:
+      'A numeric literal whose digit-group underscores are inconsistent (e.g. 1_23_456) — the grouping maps to no base, usually meaning a digit was added or dropped by mistake. A short leading group and any consistent group width are accepted.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/streamreader-endofstream-in-async',
+    category: 'code',
+    domain: 'bugs',
+    name: 'EndOfStream read in an async method',
+    description:
+      'StreamReader.EndOfStream performs a synchronous blocking read of the underlying stream, defeating the surrounding async code and risking thread-pool starvation. An async reader loop should drive on ReadLineAsync/ReadAsync instead of polling EndOfStream.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/datetime-now-for-timing',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Elapsed time measured with DateTime.Now',
+    description:
+      'Elapsed time computed by subtracting DateTime.Now/UtcNow readings. The wall clock is not monotonic (NTP, DST, manual changes can move it backward) and is low-resolution, so the duration can be wrong or negative. Use Stopwatch. Flagged only when the subtraction result is consumed as a duration.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/debug-assert-side-effect',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Side effect in a Debug.Assert condition',
+    description:
+      'A Debug.Assert/Trace.Assert condition mutates state via an assignment or increment/decrement. The [Conditional("DEBUG")] call is compiled out of release builds, so the mutation silently stops happening and behaviour diverges between Debug and Release.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/begininvoke-without-endinvoke',
+    category: 'code',
+    domain: 'bugs',
+    name: 'BeginInvoke without EndInvoke',
+    description:
+      "A delegate's BeginInvoke with no matching EndInvoke in the file. The async-delegate pattern requires EndInvoke to complete the call — otherwise the result and any thrown exception are lost and the IAsyncResult's wait handle leaks. The receiver is resolved semantically, so Control/Dispatcher.BeginInvoke (which need no EndInvoke) are never flagged.",
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
+    key: 'bugs/deterministic/event-handler-wrong-signature',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Event handler delegate with the wrong signature',
+    description:
+      'An event declared with a custom, user-defined delegate whose signature breaks the (object sender, TEventArgs e) convention. Handlers, += wiring and designer/weak-event tooling rely on that shape. EventHandler/EventHandler<T> and Action/Func are intentionally left alone — only a hand-written handler delegate that gets the shape wrong is flagged.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

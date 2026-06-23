@@ -3,6 +3,7 @@ using System.IO;
 
 namespace UserServiceApp.Violations.Reliability;
 
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class FileBackedCache
 {
     // VIOLATION: reliability/deterministic/disposable-field-without-idisposable

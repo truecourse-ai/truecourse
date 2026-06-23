@@ -37,6 +37,7 @@ internal sealed class NotificationDispatcher
         // VIOLATION: code-quality/deterministic/use-pattern-over-is-and-cast
         if (payload is EmailNotification)
         {
+            // VIOLATION: code-quality/deterministic/use-pattern-over-is-and-cast
             var email = (EmailNotification)payload;
             return email.Subject;
         }

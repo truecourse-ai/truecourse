@@ -4,6 +4,7 @@ namespace ApiGateway.Violations.Bugs;
 
 // A plain (non-[Flags]) enum of mutually exclusive request priorities. Combining
 // its members with bitwise OR is a category mistake.
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal enum RequestPriority
 {
     Low,
@@ -17,6 +18,7 @@ internal enum RequestPriority
 // VIOLATION: bugs/deterministic/non-flags-enum-with-flags-attribute
 // VIOLATION: code-quality/deterministic/flags-enum-singular-name
 [Flags]
+// VIOLATION: bugs/deterministic/non-flags-enum-with-flags-attribute
 internal enum AuditChannel
 {
     None,
@@ -29,6 +31,7 @@ internal enum AuditChannel
 // is not, and a composite member references a bit (8) no single member backs.
 // VIOLATION: code-quality/deterministic/flags-enum-singular-name
 [Flags]
+// VIOLATION: bugs/deterministic/non-flags-enum-with-flags-attribute
 internal enum NotificationScope
 {
     None = 0,
@@ -38,6 +41,7 @@ internal enum NotificationScope
     Legacy = 3,
     Security = 4,
     // VIOLATION: bugs/deterministic/enum-undefined-composite-flag
+    // VIOLATION: bugs/deterministic/flags-enum-non-power-of-two
     Everything = 1 | 2 | 8,
 }
 

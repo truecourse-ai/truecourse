@@ -52,6 +52,7 @@ internal class TenantResolver
         _registrations.Add(region);
         _registrations.Add(plan);
         _registrations.Add(owner);
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         _registrations.Add(seats.ToString());
         _registrations.Add(sandbox.ToString());
     }

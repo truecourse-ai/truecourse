@@ -9,6 +9,7 @@ internal sealed class UntrustedDeserialization
 {
     internal DataSet LoadDataSet(string xml)
     {
+        // VIOLATION: code-quality/deterministic/locale-not-set
         var dataSet = new DataSet();
         // VIOLATION: security/deterministic/dataset-readxml-untrusted
         dataSet.ReadXml(new StringReader(xml));
@@ -17,6 +18,7 @@ internal sealed class UntrustedDeserialization
 
     internal DataTable LoadDataTable(string xml)
     {
+        // VIOLATION: code-quality/deterministic/locale-not-set
         var dataTable = new DataTable();
         // VIOLATION: security/deterministic/datatable-readxml-untrusted
         dataTable.ReadXml(new StringReader(xml));

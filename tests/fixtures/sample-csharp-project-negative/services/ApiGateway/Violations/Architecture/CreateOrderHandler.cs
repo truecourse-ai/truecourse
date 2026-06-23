@@ -9,6 +9,7 @@ namespace ApiGateway.Violations.Architecture;
 /// the whole inheritance tower.
 /// </summary>
 // VIOLATION: architecture/deterministic/deep-inheritance-chain
+// VIOLATION: architecture/deterministic/deep-inheritance-tree
 public sealed class CreateOrderHandler : ValidationHandler
 {
     /// <inheritdoc />

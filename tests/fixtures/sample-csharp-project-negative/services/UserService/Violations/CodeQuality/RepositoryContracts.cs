@@ -8,6 +8,7 @@ namespace UserServiceApp.Violations.CodeQuality;
 /// </summary>
 
 // VIOLATION: code-quality/deterministic/missing-generic-variance
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal interface IUserReader<T>
 {
     T Load(string id);

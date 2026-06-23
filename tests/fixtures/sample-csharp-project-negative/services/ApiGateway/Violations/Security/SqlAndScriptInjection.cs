@@ -17,6 +17,7 @@ internal sealed class SqlAndScriptInjection
     internal string BuildLookupQuery(string tenant)
     {
         // VIOLATION: security/deterministic/hardcoded-sql-expression
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return string.Format("SELECT Id FROM Accounts WHERE Tenant = '{0}'", tenant);
     }
 

@@ -1,6 +1,7 @@
 namespace ApiGatewayApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/attribute-missing-usage
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 internal sealed class RouteTagAttribute : Attribute
 {
     public string Name { get; }
@@ -22,8 +23,10 @@ internal class RoutingFailureException
     }
 
     // VIOLATION: code-quality/deterministic/value-type-equals-without-operator
+    // VIOLATION: performance/deterministic/value-type-without-iequatable
     internal struct RouteOffset
     {
+        // VIOLATION: code-quality/deterministic/inner-member-shadows-outer
         public override bool Equals(object obj) => obj is RouteOffset;
         public override int GetHashCode() => 0;
     }

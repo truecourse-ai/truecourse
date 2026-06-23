@@ -3,6 +3,7 @@ namespace ApiGateway.Violations.Bugs;
 internal sealed class AccountProfile
 {
     // VIOLATION: code-quality/deterministic/mutable-private-member
+    // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private string _displayName = string.Empty;
     private int _retryBudget;
 

@@ -14,6 +14,8 @@ internal sealed class StatementResidue
     internal bool SameName(string a, string b)
     {
         // VIOLATION: code-quality/deterministic/string-compare-to-zero
+        // VIOLATION: bugs/deterministic/culture-unaware-string-operation
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
         return String.Compare(a, b) == 0;
     }
 

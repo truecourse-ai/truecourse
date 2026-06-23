@@ -151,7 +151,6 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
-    engine: 'roslyn-host',
   },
   {
     key: 'style/deterministic/partial-return-type-escape',

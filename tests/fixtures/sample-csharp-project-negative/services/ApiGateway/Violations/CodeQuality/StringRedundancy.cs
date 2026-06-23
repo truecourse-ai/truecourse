@@ -11,6 +11,7 @@ internal sealed class StringRedundancy
     internal string Describe(int code)
     {
         // VIOLATION: code-quality/deterministic/redundant-tostring-call
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return "code-" + code.ToString();
     }
 
