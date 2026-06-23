@@ -895,4 +895,15 @@ export const PERFORMANCE_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
     engine: 'roslyn-host',
   },
+  {
+    key: 'performance/deterministic/azure-function-client-recreated',
+    category: 'code',
+    domain: 'performance',
+    name: 'Client instances should not be recreated per Azure Function invocation',
+    description:
+      'A connection-owning SDK client (HttpClient, CosmosClient, …) constructed inside an Azure Function method. Functions run on a hot path and the host keeps the class alive across invocations, so a per-call client leaks sockets and exhausts the connection pool (SNAT exhaustion). Detected structurally — a client construction inside a [Function]/[FunctionName] method.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
 ]

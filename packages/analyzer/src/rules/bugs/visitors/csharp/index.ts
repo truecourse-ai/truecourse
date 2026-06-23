@@ -139,6 +139,9 @@ import { csharpSqlKeywordNotDelimitedVisitor } from './sql-keyword-not-delimited
 import { csharpAttributeStringLiteralParseVisitor } from './attribute-string-literal-parse.js'
 import { csharpJsInvokableNonPublicVisitor } from './jsinvokable-non-public.js'
 import { csharpBlazorUnsupportedQueryParamTypeVisitor } from './blazor-unsupported-query-param-type.js'
+import { csharpMefExportMissingCreationPolicyVisitor } from './mef-export-missing-creation-policy.js'
+import { csharpWinFormsMissingSTAThreadVisitor } from './winforms-missing-stathread.js'
+import { csharpTimeZoneConverterMisuseVisitor } from './timezoneconverter-misuse.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpEnumImplicitValuesVisitor,
@@ -280,4 +283,7 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpStreamReaderEndOfStreamInAsyncVisitor,
   csharpJsInvokableNonPublicVisitor,
   csharpBlazorUnsupportedQueryParamTypeVisitor,
+  csharpMefExportMissingCreationPolicyVisitor,
+  csharpWinFormsMissingSTAThreadVisitor,
+  csharpTimeZoneConverterMisuseVisitor,
 ]

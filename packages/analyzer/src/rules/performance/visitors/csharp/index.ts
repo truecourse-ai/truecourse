@@ -96,9 +96,11 @@ import { csharpPropertyReturnsCollectionCopyVisitor } from './property-returns-c
 import { csharpConstantArrayArgumentVisitor } from './constant-array-argument.js'
 import { csharpPreferAsSpanOverSubstringVisitor } from './prefer-asspan-over-substring.js'
 import { csharpExpensiveLoggingArgumentVisitor } from './expensive-logging-argument.js'
+import { csharpAzureFunctionClientRecreatedVisitor } from './azure-function-client-recreated.js'
 
 export const PERFORMANCE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpExpensiveLoggingArgumentVisitor,
+  csharpAzureFunctionClientRecreatedVisitor,
   csharpPreferAsSpanOverSubstringVisitor,
   csharpRegexInLoopVisitor,
   csharpSyncFsInRequestHandlerVisitor,

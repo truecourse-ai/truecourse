@@ -283,6 +283,12 @@
       "layer": "service"
     },
     {
+      "name": "DesktopLauncher",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "DiagnosticsHarness",
       "service": "ApiGateway",
       "kind": "class",
@@ -374,6 +380,12 @@
     },
     {
       "name": "FileSystemAccess",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FlatRatePricing",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -655,6 +667,12 @@
       "layer": "service"
     },
     {
+      "name": "IPricingStrategy",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "IProcessor",
       "service": "ApiGateway",
       "kind": "class",
@@ -863,6 +881,12 @@
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "NotifyFunction",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "external"
     },
     {
       "name": "NullableLongForm",
@@ -1258,6 +1282,12 @@
       "name": "ScheduleFormatter",
       "service": "ApiGateway",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ScheduleZones",
+      "service": "ApiGateway",
+      "kind": "standalone",
       "layer": "service"
     },
     {

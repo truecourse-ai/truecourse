@@ -6385,4 +6385,26 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
     engine: 'roslyn-host',
   },
+  {
+    key: 'code-quality/deterministic/incomplete-assertion',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Incomplete assertion',
+    description:
+      'A FluentAssertions .Should() call left as a whole statement with no constraint chained onto it (result.Should();). Should() only builds the assertion object — the check lives in the method chained after it — so a bare .Should() verifies nothing. Scoped to a statement-level Should() under a FluentAssertions using.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'code-quality/deterministic/invalid-test-method-signature',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Invalid test method signature',
+    description:
+      'A non-parameterized test ([Fact]/[Test]/[TestMethod]) that is not public (the runner skips it) or declares parameters with no data-source attribute (the runner cannot supply them). Detected by attribute name; a parameterized-test attribute ([Theory], [TestCase], [DataRow], …) makes parameters legitimate and clears the rule.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
 ]

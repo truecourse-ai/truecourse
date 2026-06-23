@@ -246,11 +246,15 @@ import { csharpFilenameTypeMismatchVisitor } from './csharp-filename-type-mismat
 import { csharpPreferPropertyOverMethodVisitor } from './prefer-property-over-method.js'
 import { csharpGetMethodShouldBePropertyVisitor } from './get-method-should-be-property.js'
 import { csharpPreferGenericsOverObjectVisitor } from './prefer-generics-over-object.js'
+import { csharpIncompleteAssertionVisitor } from './incomplete-assertion.js'
+import { csharpInvalidTestMethodSignatureVisitor } from './invalid-test-method-signature.js'
 
 export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpPreferPropertyOverMethodVisitor,
   csharpGetMethodShouldBePropertyVisitor,
   csharpPreferGenericsOverObjectVisitor,
+  csharpIncompleteAssertionVisitor,
+  csharpInvalidTestMethodSignatureVisitor,
   csharpAccessorPairsVisitor,
   csharpAmbiguousUnicodeCharacterVisitor,
   csharpBanTsCommentVisitor,

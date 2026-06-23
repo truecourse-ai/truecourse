@@ -5158,6 +5158,39 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'bugs/deterministic/mef-export-missing-creation-policy',
+    category: 'code',
+    domain: 'bugs',
+    name: 'PartCreationPolicy should be used with Export',
+    description:
+      'A MEF [Export] on a type with no [PartCreationPolicy] (S4428). The part\'s lifetime is left to the container default, so the same export can be a shared instance in one composition and a fresh instance in another. Matched by attribute name under a System.ComponentModel.Composition using.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/winforms-missing-stathread',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Windows Forms entry points should be marked STAThread',
+    description:
+      'A WinForms Main entry point that starts the message loop (Application.Run/EnableVisualStyles/…) but is not marked [STAThread]. Without it the clipboard, common dialogs, drag-and-drop and COM controls misbehave or throw. Detected structurally — no reference assemblies needed.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+  },
+  {
+    key: 'bugs/deterministic/timezoneconverter-misuse',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Use FindSystemTimeZoneById without TimeZoneConverter conversion',
+    description:
+      'A TimeZoneInfo.FindSystemTimeZoneById call fed a TZConvert conversion of the id. Since .NET 6 FindSystemTimeZoneById accepts both IANA and Windows time zone ids directly, so the TimeZoneConverter wrap is redundant work and an extra dependency. Detected by the TZConvert receiver.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
+  {
     key: 'bugs/deterministic/params-overload-ambiguity',
     category: 'code',
     domain: 'bugs',
