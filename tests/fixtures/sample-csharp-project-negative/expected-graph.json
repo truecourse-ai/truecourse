@@ -787,6 +787,12 @@
       "layer": "service"
     },
     {
+      "name": "MessageFormatter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "MetricsHandler",
       "service": "ApiGateway",
       "kind": "class",
@@ -1550,6 +1556,12 @@
     },
     {
       "name": "Account",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "AccountBalance",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

@@ -5135,4 +5135,16 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
     engine: 'roslyn-host',
   },
+  {
+    key: 'bugs/deterministic/params-overload-ambiguity',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Call resolves ambiguously between fixed and params overloads',
+    description:
+      'A call binds to a fixed-arity overload while a params overload with the same leading parameters would also accept the arguments — the M(a, b) vs M(a, params b[]) ladder, where the chosen overload is easy to misread and one extra argument silently switches it (S3220). Scoped to the author\'s own overloads, with the params sibling\'s fixed parameters a type-prefix of the bound overload\'s and the call supplying arguments that spill into the params array.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
 ]

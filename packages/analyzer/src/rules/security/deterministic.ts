@@ -1767,6 +1767,18 @@ export const SECURITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
+    key: 'security/deterministic/serializable-without-validation',
+    category: 'code',
+    domain: 'security',
+    name: 'Serializable type skips validation on deserialization',
+    description:
+      'A [Serializable] type whose ISerializable deserialization constructor rebuilds the object without the validation its ordinary constructors enforce (S5766) — a tampered payload resurrects an object the normal path would reject. Flagged only when a normal constructor throws and the (SerializationInfo, StreamingContext) constructor has no throw and no branching, so a differently-validating constructor is never misread.',
+    enabled: true,
+    severity: 'medium',
+    type: 'deterministic',
+    engine: 'roslyn-host',
+  },
+  {
     key: 'security/deterministic/fast-password-hash',
     category: 'code',
     domain: 'security',
