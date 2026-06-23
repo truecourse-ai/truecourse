@@ -1,3 +1,4 @@
+// VIOLATION: code-quality/deterministic/unnecessary-nullable-directive
 #nullable enable
 // VIOLATION: code-quality/deterministic/redundant-nullable-directive
 #nullable enable

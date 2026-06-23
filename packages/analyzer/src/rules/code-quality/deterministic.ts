@@ -6429,4 +6429,28 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'code-quality/deterministic/invalid-suppressmessage-target',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Invalid global SuppressMessage target',
+    description:
+      'A global [SuppressMessage(Target = "~…")] whose documentation-ID target does not resolve to any symbol in the compilation (IDE0076), so the suppression matches nothing and is silently ineffective. Resolved project-wide via DocumentationCommentId (workspace mode); scoped to documentation-ID targets so the legacy format (handled by legacy-suppressmessage-target) and resolving targets never fire.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-workspace',
+  },
+  {
+    key: 'code-quality/deterministic/unnecessary-nullable-directive',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Unnecessary nullable directive',
+    description:
+      'A leading #nullable enable/disable that merely restates the project-level nullable context (IDE0241), so the directive is noise. Needs the project NullableContextOptions, so it runs in workspace mode; scoped to the first directive with no annotations/warnings target (the file-local restatement case is covered by redundant-nullable-directive), and a directive that changes the context never fires.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+    engine: 'roslyn-workspace',
+  },
 ]

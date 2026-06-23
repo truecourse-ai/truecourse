@@ -649,6 +649,12 @@
       "layer": "service"
     },
     {
+      "name": "InvalidSuppressionTarget",
+      "service": "ApiGateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "IOrderQuery",
       "service": "ApiGateway",
       "kind": "class",
