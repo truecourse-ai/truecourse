@@ -17,11 +17,25 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
     }
     if (!expr) return null
 
-    // Unwrap parentheses for the function / JSX shape checks below.
+    // Unwrap parentheses and type-cast wrappers for the shape checks below.
     let target = expr
-    while (target.type === 'parenthesized_expression' && target.namedChildren[0]) {
+    while (
+      (target.type === 'parenthesized_expression'
+        || target.type === 'as_expression'
+        || target.type === 'satisfies_expression'
+        || target.type === 'non_null_expression')
+      && target.namedChildren[0]
+    ) {
       target = target.namedChildren[0]
     }
+
+    // Skip object / array literals. These are collections of independent
+    // members, not a single tangled expression — their keys/positions already
+    // name the parts, so "break it into named variables" does not apply.
+    // Summing operators across every property value or array element (e.g. a
+    // table of `{ value: 5 * 60 * 1000 }` rows, or `{ a: x - y, b: z - w }`
+    // perf maps) inflates the score for reasons unrelated to any one member.
+    if (target.type === 'object' || target.type === 'array') return null
 
     // Skip declarators / returns whose value is itself a function. The
     // function body is visited as its own statements, so counting
@@ -42,6 +56,15 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
       || target.type === 'jsx_self_closing_element') return null
 
     let operatorCount = 0
+    // Track which kinds of operator appear, to tell a flat boolean predicate
+    // list (`x === "a" || x === "b" || …`, `x.startsWith(p) || …`) apart from
+    // genuinely tangled arithmetic/mixed logic. The former reads like a set
+    // membership test — extracting intermediates does not improve it — so it
+    // is exempt; the latter (which mixes in `+`, `*`, etc.) is still flagged.
+    let hasLogical = false
+    let hasArithmetic = false
+    const LOGICAL_OPS = new Set(['&&', '||', '??'])
+    const ARITHMETIC_OPS = new Set(['+', '-', '*', '/', '%', '**', '&', '|', '^', '<<', '>>', '>>>'])
     const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
     // Don't recurse into nested function bodies. Each nested function's
     // expressions are visited as their own `expression_statement` /
@@ -61,6 +84,11 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
     function countOps(n: SyntaxNode) {
       if (BINARY_TYPES.has(n.type)) {
         operatorCount++
+        const op = n.childForFieldName('operator')?.text
+        if (op) {
+          if (LOGICAL_OPS.has(op)) hasLogical = true
+          else if (ARITHMETIC_OPS.has(op)) hasArithmetic = true
+        }
       }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
@@ -73,6 +101,9 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
     countOps(expr)
 
     if (operatorCount > 5) {
+      // Flat boolean predicate list (logical operators + comparisons only, no
+      // arithmetic): a readable membership/guard test, not tangled logic.
+      if (hasLogical && !hasArithmetic) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Complex expression',
