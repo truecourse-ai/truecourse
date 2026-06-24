@@ -15,14 +15,21 @@ It is the **kind-discovery sibling** of [`docs/drift-fp-automation`](../drift-fp
 This loop runs **split across two places** (the rest of this doc was written for an all-cloud design
 — where that conflicts with the split below, **this section wins**):
 
-- **LOCAL (your machine) — spec processing.** `generate`, `measure`, and `remeasure` run **locally**
-  via the Claude Code skills `/spec-coverage-generate`, `/spec-coverage-measure`,
-  `/spec-coverage-remeasure` (authoritative procedures: `prompts/{generate,measure,remeasure}.md`,
-  now written as **local** procedures). Your spec docs and the generated `.tc` contracts **never
-  leave your machine** — the LLM work is done by the Claude session you invoke the skill in
-  (`--llm-transport agent`; no `claude -p` spawn, no API key). There is **no storage branch, no
-  storage/measure/close PR, no `groups.yaml`** in the local flow. Outputs live in
-  `<spec-path>/.truecourse/`.
+- **LOCAL (your machine) — spec processing.** Two layers:
+  - **Generate**: you run the truecourse CLI **in your terminal** (`cd <spec-path>` then
+    `node <truecourse>/dist/cli.mjs spec scan` → `spec resolve --all-defaults` →
+    `contracts generate` → `contracts validate`). Default `cli` transport spawns parallel
+    `claude -p` workers — fast. No skill for this step; it's a manual CLI run because the LLM
+    stages are long-running and parallelize across workers.
+  - **Measure / Remeasure**: Claude Code skills `/spec-coverage-measure` and
+    `/spec-coverage-remeasure` (authoritative procedures: `prompts/measure.md`,
+    `prompts/remeasure.md`). They do the blind-reverse + coverage scoring in-session and emit
+    sanitized `new-kind` requests; remeasure also walks you through `git pull` + rebuild + re-running
+    the CLI block before re-scoring.
+
+  Your spec docs and the generated `.tc` contracts **never leave your machine** — outputs live in
+  `<spec-path>/.truecourse/`. There is **no storage branch, no storage/measure/close PR, no
+  `groups.yaml`** in the local flow.
 - **PUBLIC repo (`truecourse-ai/truecourse`) — kind-building only.** Exactly **two routines**:
   `spec-kind-propose` and `spec-kind-implement`. They consume the **sanitized `new-kind` issues** you
   file by hand (from local `measure`/`remeasure` output) and build the kind into the engine.
@@ -166,11 +173,11 @@ build + tests.
 
 ## Triggers (current split)
 
-**Local — no triggers; you invoke a slash command:**
+**Local — no triggers:**
 
 | Phase | Run it with | Prompt |
 |---|---|---|
-| generate | `/spec-coverage-generate` | `prompts/generate.md` |
+| generate | **terminal** — `cd <spec-path> && node <truecourse>/dist/cli.mjs spec scan && … resolve --all-defaults && … contracts generate && … contracts validate` | — (no skill; manual CLI run, default `cli` transport, parallel `claude -p`) |
 | measure | `/spec-coverage-measure` | `prompts/measure.md` |
 | remeasure | `/spec-coverage-remeasure` | `prompts/remeasure.md` |
 
@@ -237,14 +244,24 @@ is `pnpm install && pnpm build:dist`; no keys):
 
 Install the Claude GitHub App on `truecourse-ai/truecourse` and enable auto-delete head branches.
 
-**Local — use the skills** (no routines, nothing committed). On a local truecourse checkout:
-1. `pnpm install && pnpm build:dist` (builds `dist/cli.mjs`, which the skills invoke).
+**Local — manual CLI for generate, skills for measure/remeasure** (no routines, nothing committed):
+1. In the truecourse checkout: `pnpm install && pnpm build:dist` (builds `dist/cli.mjs`).
 2. Put your specs in a folder **outside** the repo (any `.md` folder; a whole repo is fine — the
-   scan's relevance filter curates).
-3. `/spec-coverage-generate` → give it the spec path + a group label.
-4. `/spec-coverage-measure` → same path/label; it prints sanitized `new-kind` requests for any gap.
+   scan's relevance filter curates). Add `.truecourse/` to that folder's `.gitignore`.
+3. **In your terminal**, generate contracts (this is the long, parallel part — don't run it in
+   the Claude chat):
+   ```bash
+   cd <spec-path>
+   node <truecourse>/dist/cli.mjs spec scan
+   node <truecourse>/dist/cli.mjs spec resolve --all-defaults
+   node <truecourse>/dist/cli.mjs contracts generate
+   node <truecourse>/dist/cli.mjs contracts validate
+   ```
+4. In a Claude Code session: `/spec-coverage-measure` → it prints sanitized `new-kind` requests for
+   any gap.
 5. File a request as a `[new-kind]` issue on the public repo → the two routines build the kind.
-6. After it merges: `git pull` + rebuild, then `/spec-coverage-remeasure` to re-score.
+6. After it merges: `/spec-coverage-remeasure` walks you through `git pull` + rebuild + the CLI
+   re-run, then re-scores.
 
 ## Resolved decisions
 

@@ -10,7 +10,7 @@ close PR — this is the loop's one manual hop (a public merge can't trigger a l
 
 ## Inputs
 
-- **`<SPEC_PATH>`** — the same folder used in `/spec-coverage-generate` + `/spec-coverage-measure`.
+- **`<SPEC_PATH>`** — the folder the user has been running the CLI generate sequence in.
 - **`<GROUP>`** — short label for output.
 - **`<TC_REPO>`** — local truecourse checkout.
 - Optionally, which **`<KIND>`** just merged (for the delta report).
@@ -33,9 +33,9 @@ rm -rf /tmp/llm-io && mkdir -p /tmp/llm-io/requests /tmp/llm-io/responses
 ```
 
 ### 3. Regenerate contracts fresh — hand the user the CLI block (don't run LLM stages in-session)
-Same model as `/spec-coverage-generate`: the LLM stages run via the CLI's default transport
-(parallel `claude -p` workers), not through this session. Print this block with real absolute paths
-for the user to run in their terminal:
+Same model as the manual generate step: the LLM stages run via the CLI's default transport
+(parallel `claude -p` workers), in the user's terminal — not through this session. Print this
+block with real absolute paths for the user to run:
 ```bash
 cd <SPEC_PATH>
 node <TC_REPO>/dist/cli.mjs spec scan

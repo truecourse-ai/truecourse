@@ -25,7 +25,6 @@ assets/*.pdf
 .claude/*
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/spec-coverage-generate/
 !.claude/skills/spec-coverage-measure/
 !.claude/skills/spec-coverage-remeasure/
 

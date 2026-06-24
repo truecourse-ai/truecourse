@@ -7,12 +7,23 @@ repo. **Local** run — everything stays on the machine except the sanitized kin
 chooses to file.
 
 Invoked by `/spec-coverage-measure`. No GitHub trigger, no branch, no PR, no `groups.yaml`. You do
-**not** run `spec scan` / `contracts generate` — `/spec-coverage-generate` already produced the
-contracts.
+**not** run `spec scan` / `contracts generate` — the user already produced the contracts by hand,
+in their terminal, with the truecourse CLI (default `cli` transport = parallel `claude -p` workers
+— fast). The expected pre-step they ran in `<SPEC_PATH>` is:
+
+```bash
+node <TC_REPO>/dist/cli.mjs spec scan
+node <TC_REPO>/dist/cli.mjs spec resolve --all-defaults
+node <TC_REPO>/dist/cli.mjs contracts generate
+node <TC_REPO>/dist/cli.mjs contracts validate
+```
+
+If `<SPEC_PATH>/.truecourse/contracts/` doesn't exist or is empty, tell them to run those four and
+stop — don't try to generate anything in-session.
 
 ## Inputs
 
-- **`<SPEC_PATH>`** — the same folder used in `/spec-coverage-generate`. Contracts are at
+- **`<SPEC_PATH>`** — the folder the user ran the CLI generate sequence in. Contracts are at
   `<SPEC_PATH>/.truecourse/contracts/`.
 - **`<GROUP>`** — short label for output.
 - **`<TC_REPO>`** — local truecourse checkout (to read the live kind catalog).
@@ -23,7 +34,8 @@ Collect `<SPEC_PATH>` and `<GROUP>` in one question. Don't probe files before st
 
 ### 1. Check prerequisites
 Confirm `<SPEC_PATH>/.truecourse/contracts/` exists and is non-empty. If not, tell the user to run
-`/spec-coverage-generate` first, and stop. Read the engine's current kind catalog from `<TC_REPO>`
+the four CLI commands shown above first (in their terminal), and stop. Read the engine's current
+kind catalog from `<TC_REPO>`
 (`packages/contract-verifier/src/types/index.ts` `ArtifactKind` union + `kinds.yaml`) so you can tell
 a live `structural` kind from a gap.
 
