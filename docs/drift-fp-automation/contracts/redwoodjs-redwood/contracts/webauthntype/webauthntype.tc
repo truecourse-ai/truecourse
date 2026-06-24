@@ -1,0 +1,4 @@
+enum WebAuthnType {
+  origin "docs/docs/auth/dbauth.md" "WebAuthn type Option" 616..624
+  values [any, platform, "cross-platform"]
+}

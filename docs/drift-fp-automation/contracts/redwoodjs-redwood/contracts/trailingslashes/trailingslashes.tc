@@ -1,0 +1,4 @@
+enum TrailingSlashes {
+  origin "docs/docs/router.md" "Trailing slashes" 468..482
+  values [never, always, preserve]
+}

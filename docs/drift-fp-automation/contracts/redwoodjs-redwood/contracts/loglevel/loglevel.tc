@@ -1,0 +1,4 @@
+enum LogLevel {
+  origin "docs/docs/logger.md" "Log Level" 82..94
+  values [fatal, error, warn, info, debug, trace, silent]
+}
