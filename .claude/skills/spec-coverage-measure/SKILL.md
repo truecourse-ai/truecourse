@@ -19,12 +19,15 @@ follow it exactly, with the LOCAL-MODE overrides below.
 
 ## LOCAL-MODE overrides
 
-1. **No GitHub event fired you.** Ask the user for the **group name** (and working-dir path if not
-   the `/spec-coverage-generate` default `/tmp/spec-cov/<group>/`). The generated contracts must
-   already exist there from a prior `/spec-coverage-generate` run.
-2. **No branches, no PRs.** Skip every step that pushes a `claude/*` branch or opens/updates a
-   measure PR. Keep the reconstruction (`reconstructed.md`), the coverage scoring, and any notes on
-   disk in the working dir.
+1. **No GitHub event fired you.** Ask the user for the **local spec path** (the same path they
+   passed to `/spec-coverage-generate`) and a short **group name** (label only). The generated
+   contracts live in-place at **`<spec-path>/.truecourse/contracts/`** — read them from there. Do
+   NOT copy anything anywhere.
+2. **No branches, no PRs, no extra writes to the user's path.** Skip every step that pushes a
+   `claude/*` branch or opens/updates a measure PR. The reconstruction (`reconstructed.md`) and the
+   coverage scoring are intermediate artifacts — keep them in `/tmp/spec-cov-measure/<group>/` (or
+   another `/tmp` path), not under the user's spec folder. Don't pollute their repo with measure
+   bookkeeping.
 3. **The `new-kind` issue step is MANUAL and SANITIZED — this is the only thing that may leave the
    machine.** The prompt's "file one `new-kind` issue per code-derivable gap on
    `truecourse-ai/truecourse`" step becomes: for each gap, **produce the issue body but do NOT file

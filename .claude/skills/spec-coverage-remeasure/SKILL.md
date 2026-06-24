@@ -26,17 +26,23 @@ loop's one human hop by design.
 
 ## LOCAL-MODE overrides
 
-1. **Sync the engine first.** Before measuring, pull the public engine into this checkout and
-   rebuild so the new kind is live: `git fetch origin && git merge --ff-only origin/main`
-   (or `git pull`), then `pnpm install && pnpm build:dist`. Confirm the new kind is present
-   (`node dist/cli.mjs contracts ...` / it appears in `kinds.yaml`).
-2. **No GitHub event fired you.** Ask the user for the **group name** (and working-dir path if not
-   the default `/tmp/spec-cov/<group>/`) and, optionally, which **kind** just merged (for the report).
-3. **Re-generate contracts if the kind changes extraction.** A new kind means
-   `contracts generate` may now lift more — re-run the deterministic generate stages on the group
-   (as in `/spec-coverage-generate`) before scoring, so the contracts reflect the new kind.
+1. **Sync the engine first.** Before measuring, pull the public engine into the **truecourse
+   checkout** (NOT the user's spec folder) and rebuild so the new kind is live:
+   `cd /path/to/truecourse && git fetch origin && git merge --ff-only origin/main`
+   (or `git pull`), then `pnpm install && pnpm build:dist`. Confirm the new kind is in
+   `packages/contract-extractor/src/kinds.yaml`.
+2. **No GitHub event fired you.** Ask the user for the **local spec path** (same one used in
+   `/spec-coverage-generate` and `/spec-coverage-measure`), a short **group name** (label only),
+   and optionally which **kind** just merged (for the report).
+3. **Scan in-place — same as `/spec-coverage-generate`.** `cd` into the user's spec path and
+   re-run the deterministic generate stages from there
+   (`node /path/to/truecourse/dist/cli.mjs spec scan` …). A new kind means `contracts generate` may
+   now lift more, so contracts are refreshed in **`<spec-path>/.truecourse/contracts/`** before
+   scoring. **Do NOT copy** the docs anywhere; **do NOT write** anything to the user's path
+   besides what `spec scan` / `contracts generate` write to `.truecourse/` themselves.
 4. **No branches, no PRs, no `groups.yaml`/`kinds.yaml` edits, nothing committed.** Keep the
-   re-scored result on disk. If a gap remains, emit a fresh **sanitized** `new-kind` request (same
+   re-scored result in `/tmp/spec-cov-measure/<group>/` (same place `/spec-coverage-measure`
+   parks its bookkeeping). If a gap remains, emit a fresh **sanitized** `new-kind` request (same
    rules as `/spec-coverage-measure` step 3) for the user to file on public by hand.
 
 ## Output
