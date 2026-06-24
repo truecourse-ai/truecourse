@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
+import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, runRoslynHost, runRoslynWorkspace, RoslynHostUnavailableError, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -21,6 +21,36 @@ import type { ResolvedViolationRef, ViolationRecord } from '../types/snapshot.js
 /** Throw if the abort signal has been triggered. */
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+}
+
+// Locate the C# project(s) to load for project-aware (MSBuildWorkspace) rules.
+// A single top-most .sln (loads every project at once) is preferred; otherwise
+// every .csproj is returned and analyzed independently. Heavy/output dirs are
+// skipped so we never descend into dependencies or build artifacts.
+function findCSharpProjectFiles(repoPath: string): string[] {
+  const SKIP = new Set(['node_modules', 'bin', 'obj', '.git', '.truecourse', 'dist', '.vs']);
+  const solutions: string[] = [];
+  const projects: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    if (depth > 8) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name) || e.name.startsWith('.')) continue;
+        walk(path.join(dir, e.name), depth + 1);
+      } else if (e.isFile()) {
+        if (e.name.endsWith('.sln')) solutions.push(path.join(dir, e.name));
+        else if (e.name.endsWith('.csproj')) projects.push(path.join(dir, e.name));
+      }
+    }
+  };
+  walk(repoPath, 0);
+  if (solutions.length > 0) {
+    solutions.sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
+    return [solutions[0]];
+  }
+  return projects;
 }
 
 /** Format an elapsed duration as "Ns" under a minute, "Nm Ns" otherwise. */
@@ -429,6 +459,94 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         // Re-check after yielding — the SIGINT handler runs during the
         // event-loop tick we just gave it, so the flag may have flipped.
         if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+      }
+    }
+  }
+
+  // C# semantic rules run in the out-of-process Roslyn host (build-required).
+  // Batch: one host invocation over all C# files. Fail-hard — if there are C#
+  // files and host rules but the host is unavailable, runRoslynHost throws and
+  // the analysis errors out (no tree-sitter fallback, by design).
+  const enabledHostRules = enabledCodeRules.filter((r) => r.engine === 'roslyn-host');
+  if (enabledHostRules.length > 0) {
+    const csharpFiles: { path: string; text: string }[] = [];
+    for (const { filePath, resolve } of filesToScan) {
+      if (detectLanguage(filePath) !== 'csharp') continue;
+      const absPath = resolve ? path.resolve(repoPath, filePath) : (path.isAbsolute(filePath) ? filePath : path.join(repoPath, filePath));
+      const key = changedFileSet ? absPath : filePath;
+      const fc = fileContents.get(key);
+      if (fc) csharpFiles.push({ path: key, text: fc.content });
+    }
+    if (csharpFiles.length > 0) {
+      const ruleByKey = new Map(enabledHostRules.map((r) => [r.key, r]));
+      const hostViolations = await runRoslynHost(csharpFiles, enabledHostRules.map((r) => r.key));
+      for (const v of hostViolations) {
+        const rule = ruleByKey.get(v.ruleKey);
+        if (!rule) continue;
+        const snippet = (fileContents.get(v.path)?.content.split('\n')[v.line - 1] ?? '').trim();
+        allCodeViolations.push({
+          ruleKey: v.ruleKey,
+          filePath: v.path,
+          lineStart: v.line,
+          lineEnd: v.line,
+          columnStart: v.column,
+          columnEnd: v.column,
+          severity: rule.severity,
+          title: rule.name,
+          content: v.message,
+          snippet,
+        });
+      }
+    }
+  }
+
+  // C# project-aware rules (engine 'roslyn-workspace') need the real project
+  // metadata — RootNamespace, references, output kind — so the host opens the
+  // actual .csproj/.sln via MSBuildWorkspace. This is the build-AND-restore
+  // tier on top of the zero-setup loose-text tier. Failure modes are distinct:
+  //   - host binary/runtime missing  -> fail-hard (rethrow), as for loose-text;
+  //   - no project found / project not loadable -> the workspace tier is simply
+  //     unavailable this run; warn and keep the loose-text + tree-sitter results
+  //     (the rule's precondition wasn't met — this is not a tree-sitter fallback).
+  const enabledWorkspaceRules = enabledCodeRules.filter((r) => r.engine === 'roslyn-workspace');
+  if (enabledWorkspaceRules.length > 0 && filesToScan.some((f) => detectLanguage(f.filePath) === 'csharp')) {
+    const projectFiles = findCSharpProjectFiles(repoPath);
+    if (projectFiles.length === 0) {
+      log.info('[Pipeline] C# present but no .csproj/.sln found — project-aware C# rules skipped');
+    } else {
+      const ruleByKey = new Map(enabledWorkspaceRules.map((r) => [r.key, r]));
+      const ruleKeys = enabledWorkspaceRules.map((r) => r.key);
+      for (const projectFile of projectFiles) {
+        let wsViolations;
+        try {
+          wsViolations = await runRoslynWorkspace(projectFile, ruleKeys);
+        } catch (err) {
+          if (err instanceof RoslynHostUnavailableError) throw err;
+          log.warn(`[Pipeline] Project-aware C# rules skipped for ${path.basename(projectFile)}: ${(err as Error).message}. Restore the project (\`dotnet restore\`) for full C# coverage.`);
+          continue;
+        }
+        for (const v of wsViolations) {
+          const rule = ruleByKey.get(v.ruleKey);
+          if (!rule) continue;
+          const relPath = path.isAbsolute(v.path) ? path.relative(repoPath, v.path) : v.path;
+          const fileKey = changedFileSet ? v.path : relPath;
+          let snippet = fileContents.get(fileKey)?.content.split('\n')[v.line - 1];
+          if (snippet === undefined) {
+            try { snippet = fs.readFileSync(v.path, 'utf-8').split('\n')[v.line - 1]; } catch { snippet = ''; }
+          }
+          allCodeViolations.push({
+            ruleKey: v.ruleKey,
+            filePath: relPath,
+            lineStart: v.line,
+            lineEnd: v.line,
+            columnStart: v.column,
+            columnEnd: v.column,
+            severity: rule.severity,
+            title: rule.name,
+            content: v.message,
+            snippet: (snippet ?? '').trim(),
+          });
+        }
       }
     }
   }

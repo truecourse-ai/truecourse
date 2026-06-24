@@ -141,6 +141,7 @@ internal class PayloadValidator
             return false;
         }
         // VIOLATION: bugs/deterministic/arguments-order-mismatch
+        // VIOLATION: bugs/deterministic/missing-stringcomparison-overload
         return route.StartsWith(route);
     }
 
@@ -161,6 +162,7 @@ internal class PayloadValidator
     internal string LabelKind(PayloadKind kind)
     {
         // VIOLATION: bugs/deterministic/switch-exhaustiveness
+        // VIOLATION: bugs/deterministic/switch-expression-missing-cases
         return kind switch
         {
             PayloadKind.Json => "json",

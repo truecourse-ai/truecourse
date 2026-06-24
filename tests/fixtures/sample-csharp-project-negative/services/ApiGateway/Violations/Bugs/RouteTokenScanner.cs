@@ -11,6 +11,7 @@ internal class RouteTokenScanner
     private static readonly Regex ReservedCharsPattern = new Regex("[]");
 
     // VIOLATION: bugs/deterministic/control-chars-in-regex
+    // VIOLATION: bugs/deterministic/literal-control-character
     private static readonly Regex RecordSeparatorPattern = new Regex("idname");
 
     // VIOLATION: bugs/deterministic/unraw-re-pattern
@@ -34,6 +35,7 @@ internal class RouteTokenScanner
     internal bool HasReportAnchor(string line)
     {
         // VIOLATION: bugs/deterministic/regex-boundary-unmatchable
+        // VIOLATION: code-quality/deterministic/unnecessary-verbatim-string
         return Regex.IsMatch(line, @"^report$id");
     }
 

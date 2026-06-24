@@ -56,6 +56,15 @@ const REQUIRES_TYPE_CHECKER: RuleLanguageSupport = {
  * adding them here without a visitor fails the enforcement test.
  */
 export const RULE_LANGUAGE_DISPOSITIONS: Record<string, Disposition> = {
+  // Deliberate C# duplicates: another rule already covers the hazard on C#, so
+  // we don't double-fire.
+  'code-quality/deterministic/debugger-statement': {
+    csharp: { status: 'not-applicable', reason: 'duplicate of no-debugger on C# (both detect Debugger.Break()/Launch())' },
+  },
+  'security/deterministic/hardcoded-ip': {
+    csharp: { status: 'not-applicable', reason: 'duplicate of hardcoded-ip-address on C# (the Roslyn-host rule, which excludes non-routable ranges)' },
+  },
+
   // --- Type-system rules the C# compiler enforces: the offending code does
   // --- not compile, so there is nothing for analyze to find.
   'bugs/deterministic/argument-type-mismatch': { csharp: NA_COMPILER('mismatched arguments are a compile error (CS1503)') },
@@ -2300,6 +2309,11 @@ const UNIVERSAL_NOT_AUDITED: RuleLanguageSupport = {
   reason: 'universal visitor not yet audited against the C# grammar (node-type names differ)',
 }
 
+const UNIVERSAL_EXCLUDED: RuleLanguageSupport = {
+  status: 'not-applicable',
+  reason: 'universal visitor deliberately excludes this language (covered by a more precise rule)',
+}
+
 const GRAPH_LEVEL_SUPPORTED: RuleLanguageSupport = { status: 'supported' }
 const LLM_SUPPORTED: RuleLanguageSupport = { status: 'supported' }
 
@@ -2311,9 +2325,16 @@ export function withLanguageSupport(rules: AnalysisRule[], visitors: CodeRuleVis
   // ruleKey → families covered by language-specific visitors / universal visitors
   const explicitFamilies = new Map<string, Set<AnalysisLanguage>>()
   const universalRuleKeys = new Set<string>()
+  // Families a universal visitor opts out of (e.g. superseded by a host rule).
+  const universalExcludedFamilies = new Map<string, Set<AnalysisLanguage>>()
   for (const visitor of visitors) {
     if (!visitor.languages) {
       universalRuleKeys.add(visitor.ruleKey)
+      if (visitor.excludeLanguages) {
+        const excluded = universalExcludedFamilies.get(visitor.ruleKey) ?? new Set<AnalysisLanguage>()
+        for (const lang of visitor.excludeLanguages) excluded.add(LANGUAGE_FAMILY[lang])
+        universalExcludedFamilies.set(visitor.ruleKey, excluded)
+      }
       continue
     }
     if (!explicitFamilies.has(visitor.ruleKey)) explicitFamilies.set(visitor.ruleKey, new Set())
@@ -2346,11 +2367,26 @@ export function withLanguageSupport(rules: AnalysisRule[], visitors: CodeRuleVis
         continue
       }
 
+      if (rule.engine === 'roslyn-host' || rule.engine === 'roslyn-workspace') {
+        // Implemented in the C# Roslyn semantic host (no tree-sitter visitor).
+        // These are C#-specific semantic defects, inexpressible elsewhere.
+        // `roslyn-workspace` additionally needs the real project loaded.
+        support[language] =
+          language === 'csharp'
+            ? { status: 'supported' }
+            : { status: 'not-applicable', reason: 'C# semantic rule (Roslyn host); no equivalent in this language' }
+        continue
+      }
+
       const hasExplicit = explicitFamilies.get(rule.key)?.has(language) ?? false
-      const hasUniversal = universalRuleKeys.has(rule.key) && UNIVERSAL_VISITOR_FAMILIES.includes(language)
+      const universalExcludesLang = universalExcludedFamilies.get(rule.key)?.has(language) ?? false
+      const hasUniversal =
+        universalRuleKeys.has(rule.key) && UNIVERSAL_VISITOR_FAMILIES.includes(language) && !universalExcludesLang
 
       if (hasExplicit || hasUniversal) {
         support[language] = { status: 'supported' }
+      } else if (universalExcludesLang) {
+        support[language] = UNIVERSAL_EXCLUDED
       } else if (universalRuleKeys.has(rule.key) && language === 'csharp') {
         support[language] = UNIVERSAL_NOT_AUDITED
       } else {

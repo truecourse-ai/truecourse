@@ -59,3 +59,37 @@ export function isWithinCSharpTestClass(node: SyntaxNode): boolean {
   }
   return false
 }
+
+/** True when an enum_declaration carries the `[Flags]` attribute. */
+export function isFlagsEnum(enumNode: SyntaxNode): boolean {
+  return getCSharpAttributeNames(enumNode).includes('Flags')
+}
+
+/** A type-member declaration (field/property/method/event/indexer). */
+const MEMBER_DECLARATION_TYPES = new Set([
+  'method_declaration',
+  'property_declaration',
+  'event_declaration',
+  'event_field_declaration',
+])
+
+/**
+ * True when `node` is the NAME being introduced by a type-member declaration:
+ * a field/property/method/event of a type — the positions where a member named
+ * `field` can shadow the C# 14 backing-field keyword inside a property
+ * accessor. Locals and parameters are out of scope (lower risk, high FP rate).
+ */
+export function isCSharpMemberDeclarationName(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (!parent) return false
+  // method/property/event expose the name in their `name` field.
+  if (MEMBER_DECLARATION_TYPES.has(parent.type)) {
+    return parent.childForFieldName('name')?.id === node.id
+  }
+  // A field: variable_declarator → variable_declaration → field_declaration.
+  if (parent.type === 'variable_declarator' && parent.childForFieldName('name')?.id === node.id) {
+    const declaration = parent.parent
+    return declaration?.parent?.type === 'field_declaration'
+  }
+  return false
+}

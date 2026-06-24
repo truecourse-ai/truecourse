@@ -33,6 +33,7 @@ import { csharpAsyncVoidFunctionVisitor } from './async-void-function.js'
 import { csharpMissingReturnAwaitVisitor } from './missing-return-await.js'
 import { csharpSwitchExhaustivenessVisitor } from './switch-exhaustiveness.js'
 import { csharpUnsafeFinallyVisitor } from './unsafe-finally.js'
+import { csharpEmptyFinalizerVisitor } from './empty-finalizer.js'
 import { csharpNestedTryCatchVisitor } from './nested-try-catch.js'
 import { csharpElementOverwriteVisitor } from './element-overwrite.js'
 import { csharpBaseToStringVisitor } from './base-to-string.js'
@@ -80,8 +81,74 @@ import { csharpLoopAtMostOneIterationVisitor } from './loop-at-most-one-iteratio
 import { csharpMissingFstringSyntaxVisitor } from './missing-fstring-syntax.js'
 import { csharpStaticKeyDictComprehensionVisitor } from './static-key-dict-comprehension.js'
 import { csharpUnrawRePatternVisitor } from './unraw-re-pattern.js'
+import { csharpAnonymousDelegateUnsubscribeVisitor } from './anonymous-delegate-unsubscribe.js'
+import { csharpArgumentExceptionWrongParameterNameVisitor } from './argumentexception-wrong-parameter-name.js'
+import { csharpAssertWithoutMessageVisitor } from './assert-without-message.js'
+import { csharpDebugFailWithoutMessageVisitor } from './debug-fail-without-message.js'
+import { csharpBaseCallOnObjectVisitor } from './base-call-on-object.js'
+import { csharpCallerInfoParamNotLastVisitor } from './caller-info-param-not-last.js'
+import { csharpCancellationTokenNotLastVisitor } from './cancellation-token-not-last.js'
+import { csharpCatchNullReferenceExceptionVisitor } from './catch-null-reference-exception.js'
+import { csharpChainedOrderByLosesOrderingVisitor } from './chained-orderby-loses-ordering.js'
+import { csharpCheckAgainstValueBeingAssignedVisitor } from './check-against-value-being-assigned.js'
+import { csharpCollectionPassedToOwnMethodVisitor } from './collection-passed-to-own-method.js'
+import { csharpDateTimeParseNoFormatProviderVisitor } from './datetime-parse-no-format-provider.js'
+import { csharpDoubledPrefixOperatorVisitor } from './doubled-prefix-operator.js'
+import { csharpEmptyGuidConstructorVisitor } from './empty-guid-constructor.js'
+import { csharpEmptyStatementVisitor } from './empty-statement.js'
+import { csharpEnumDuplicateExplicitValueVisitor } from './enum-duplicate-explicit-value.js'
+import { csharpFlagsEnumMissingZeroVisitor } from './flags-enum-missing-zero.js'
+import { csharpIsCheckOnThisVisitor } from './is-check-on-this.js'
+import { csharpLiteralControlCharacterVisitor } from './literal-control-character.js'
+import { csharpPropertyAssignmentInOwnSetterVisitor } from './property-assignment-in-own-setter.js'
+import { csharpUnusedValueKeywordInSetterVisitor } from './unused-value-keyword-in-setter.js'
+import { csharpRedundantBaseCallVisitor } from './redundant-base-call.js'
+import { csharpRouteTemplateBackslashVisitor } from './route-template-backslash.js'
+import { csharpSequentialSameConditionVisitor } from './sequential-same-condition.js'
+import { csharpStaticFieldInGenericTypeVisitor } from './static-field-in-generic-type.js'
+import { csharpStackallocInLoopVisitor } from './stackalloc-in-loop.js'
+import { csharpThreadStaticOnInstanceFieldVisitor } from './threadstatic-on-instance-field.js'
+import { csharpThreadStaticInlineInitializationVisitor } from './threadstatic-inline-initialization.js'
+import { csharpRecursiveTypeInheritanceVisitor } from './recursive-type-inheritance.js'
+import { csharpRaiseReservedExceptionTypeVisitor } from './raise-reserved-exception-type.js'
+import { csharpVirtualFieldLikeEventVisitor } from './virtual-field-like-event.js'
+import { csharpSuppressFinalizeMisuseVisitor } from './suppressfinalize-misuse.js'
+import { csharpClassOnlyPrivateConstructorsVisitor } from './class-only-private-constructors.js'
+import { csharpInvalidShiftCountVisitor } from './invalid-shift-count.js'
+import { csharpLockOnPublicReferenceVisitor } from './lock-on-public-reference.js'
+import { csharpInstanceWritesStaticFieldVisitor } from './instance-writes-static-field.js'
+import { csharpStaticFieldSetInConstructorVisitor } from './static-field-set-in-constructor.js'
+import { csharpNonConstantStaticFieldVisibleVisitor } from './non-constant-static-field-visible.js'
+import { csharpReadonlyMutableReferenceFieldVisitor } from './readonly-mutable-reference-field.js'
+import { csharpOneWayOperationNonVoidVisitor } from './oneway-operation-non-void.js'
+import { csharpFinalizerThrowsVisitor } from './finalizer-throws.js'
+import { csharpVirtualCallInConstructorVisitor } from './virtual-call-in-constructor.js'
+import { csharpOptionalOnRefOutParameterVisitor } from './optional-on-ref-out-parameter.js'
+import { csharpPureMethodReturnsVoidVisitor } from './pure-method-returns-void.js'
+import { csharpReturnNullTaskVisitor } from './return-null-task.js'
+import { csharpToStringReturnsNullVisitor } from './tostring-returns-null.js'
+import { csharpExceptionFromPropertyGetterVisitor } from './exception-from-property-getter.js'
+import { csharpForConditionNeverTrueVisitor } from './for-condition-never-true.js'
+import { csharpIrregularNumberPatternVisitor } from './irregular-number-pattern.js'
+import { csharpDebugAssertSideEffectVisitor } from './debug-assert-side-effect.js'
+import { csharpDateTimeNowForTimingVisitor } from './datetime-now-for-timing.js'
+import { csharpStreamReaderEndOfStreamInAsyncVisitor } from './streamreader-endofstream-in-async.js'
+import { csharpEnumImplicitValuesVisitor } from './enum-implicit-values.js'
+import { csharpMaxResponseHeadersLengthMissetVisitor } from './maxresponseheaderslength-misset.js'
+import { csharpSqlKeywordNotDelimitedVisitor } from './sql-keyword-not-delimited.js'
+import { csharpAttributeStringLiteralParseVisitor } from './attribute-string-literal-parse.js'
+import { csharpJsInvokableNonPublicVisitor } from './jsinvokable-non-public.js'
+import { csharpBlazorUnsupportedQueryParamTypeVisitor } from './blazor-unsupported-query-param-type.js'
+import { csharpMefExportMissingCreationPolicyVisitor } from './mef-export-missing-creation-policy.js'
+import { csharpWinFormsMissingSTAThreadVisitor } from './winforms-missing-stathread.js'
+import { csharpTimeZoneConverterMisuseVisitor } from './timezoneconverter-misuse.js'
+import { csharpConstructorArgumentNoMatchingPropertyVisitor } from './constructorargument-no-matching-property.js'
 
 export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
+  csharpEnumImplicitValuesVisitor,
+  csharpMaxResponseHeadersLengthMissetVisitor,
+  csharpSqlKeywordNotDelimitedVisitor,
+  csharpAttributeStringLiteralParseVisitor,
   csharpEmptyCatchVisitor,
   csharpSelfComparisonVisitor,
   csharpSelfAssignmentVisitor,
@@ -115,6 +182,7 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMissingReturnAwaitVisitor,
   csharpSwitchExhaustivenessVisitor,
   csharpUnsafeFinallyVisitor,
+  csharpEmptyFinalizerVisitor,
   csharpNestedTryCatchVisitor,
   csharpElementOverwriteVisitor,
   csharpBaseToStringVisitor,
@@ -162,4 +230,62 @@ export const BUGS_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMissingFstringSyntaxVisitor,
   csharpStaticKeyDictComprehensionVisitor,
   csharpUnrawRePatternVisitor,
+  csharpAnonymousDelegateUnsubscribeVisitor,
+  csharpArgumentExceptionWrongParameterNameVisitor,
+  csharpAssertWithoutMessageVisitor,
+  csharpDebugFailWithoutMessageVisitor,
+  csharpBaseCallOnObjectVisitor,
+  csharpCallerInfoParamNotLastVisitor,
+  csharpCancellationTokenNotLastVisitor,
+  csharpCatchNullReferenceExceptionVisitor,
+  csharpChainedOrderByLosesOrderingVisitor,
+  csharpCheckAgainstValueBeingAssignedVisitor,
+  csharpCollectionPassedToOwnMethodVisitor,
+  csharpDateTimeParseNoFormatProviderVisitor,
+  csharpDoubledPrefixOperatorVisitor,
+  csharpEmptyGuidConstructorVisitor,
+  csharpEmptyStatementVisitor,
+  csharpEnumDuplicateExplicitValueVisitor,
+  csharpFlagsEnumMissingZeroVisitor,
+  csharpIsCheckOnThisVisitor,
+  csharpLiteralControlCharacterVisitor,
+  csharpPropertyAssignmentInOwnSetterVisitor,
+  csharpUnusedValueKeywordInSetterVisitor,
+  csharpRedundantBaseCallVisitor,
+  csharpRouteTemplateBackslashVisitor,
+  csharpSequentialSameConditionVisitor,
+  csharpStaticFieldInGenericTypeVisitor,
+  csharpStackallocInLoopVisitor,
+  csharpThreadStaticOnInstanceFieldVisitor,
+  csharpThreadStaticInlineInitializationVisitor,
+  csharpRecursiveTypeInheritanceVisitor,
+  csharpRaiseReservedExceptionTypeVisitor,
+  csharpVirtualFieldLikeEventVisitor,
+  csharpSuppressFinalizeMisuseVisitor,
+  csharpClassOnlyPrivateConstructorsVisitor,
+  csharpInvalidShiftCountVisitor,
+  csharpLockOnPublicReferenceVisitor,
+  csharpInstanceWritesStaticFieldVisitor,
+  csharpStaticFieldSetInConstructorVisitor,
+  csharpNonConstantStaticFieldVisibleVisitor,
+  csharpReadonlyMutableReferenceFieldVisitor,
+  csharpOneWayOperationNonVoidVisitor,
+  csharpFinalizerThrowsVisitor,
+  csharpVirtualCallInConstructorVisitor,
+  csharpOptionalOnRefOutParameterVisitor,
+  csharpPureMethodReturnsVoidVisitor,
+  csharpReturnNullTaskVisitor,
+  csharpToStringReturnsNullVisitor,
+  csharpExceptionFromPropertyGetterVisitor,
+  csharpForConditionNeverTrueVisitor,
+  csharpIrregularNumberPatternVisitor,
+  csharpDebugAssertSideEffectVisitor,
+  csharpDateTimeNowForTimingVisitor,
+  csharpStreamReaderEndOfStreamInAsyncVisitor,
+  csharpJsInvokableNonPublicVisitor,
+  csharpBlazorUnsupportedQueryParamTypeVisitor,
+  csharpMefExportMissingCreationPolicyVisitor,
+  csharpWinFormsMissingSTAThreadVisitor,
+  csharpTimeZoneConverterMisuseVisitor,
+  csharpConstructorArgumentNoMatchingPropertyVisitor,
 ]

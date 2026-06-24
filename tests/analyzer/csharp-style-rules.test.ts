@@ -409,3 +409,356 @@ public partial class OrdersForm
     expect(matches).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// style/deterministic/builtin-type-alias (SA1121)
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/builtin-type-alias (C#)', () => {
+  const KEY = 'style/deterministic/builtin-type-alias'
+
+  it('flags framework type names in type positions', () => {
+    const violations = check(`namespace Billing;
+
+internal sealed class LedgerEntry
+{
+    private Int32 _sequence;
+    private readonly List<String> _tags = new();
+
+    internal Object Project(String key, Int64 count) => null!;
+
+    internal Decimal[] Buckets;
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    // Int32, String (generic arg), Object, String (param), Int64, Decimal (array)
+    expect(matches.length).toBe(6)
+    expect(matches.every((m) => m.content.includes('alias'))).toBe(true)
+  })
+
+  it('does not flag the language aliases or value/reflection references', () => {
+    const violations = check(`namespace Billing;
+
+internal sealed class LedgerEntry
+{
+    private int _sequence;
+    private readonly List<string> _tags = new();
+
+    internal object Project(string key, long count)
+    {
+        var blank = String.Empty;
+        var named = nameof(Int32);
+        var reflected = typeof(Boolean);
+        var fallback = default(Int64);
+        return blank;
+    }
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    expect(matches).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/enum-name-redundant-suffix
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/enum-name-redundant-suffix (C#)', () => {
+  const KEY = 'style/deterministic/enum-name-redundant-suffix'
+
+  it('flags a Flags enum whose name ends in Flags or Enum', () => {
+    const flags = check(`namespace Access;
+
+[Flags]
+internal enum PermissionFlags
+{
+    None = 0,
+    Read = 1,
+}
+`)
+    expect(flags.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+
+    const enumSuffix = check(`namespace Access;
+
+[Flags]
+internal enum PermissionEnum
+{
+    None = 0,
+    Read = 1,
+}
+`)
+    expect(enumSuffix.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('does not flag a well-named Flags enum or a non-Flags enum', () => {
+    const wellNamed = check(`namespace Access;
+
+[Flags]
+internal enum Permission
+{
+    None = 0,
+    Read = 1,
+}
+
+internal enum OrderStatusEnum
+{
+    Pending,
+    Shipped,
+}
+`)
+    expect(wellNamed.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/enum-naming-convention
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/enum-naming-convention (C#)', () => {
+  const KEY = 'style/deterministic/enum-naming-convention'
+
+  it('flags Flags enum members not in PascalCase', () => {
+    const violations = check(`namespace Access;
+
+[Flags]
+internal enum Permission
+{
+    None = 0,
+    read_only = 1,
+    Write = 2,
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]!.content).toContain('read_only')
+  })
+
+  it('does not flag PascalCase Flags members', () => {
+    const violations = check(`namespace Access;
+
+[Flags]
+internal enum Permission
+{
+    None = 0,
+    ReadOnly = 1,
+    Write = 2,
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/flags-enum-zero-not-none
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/flags-enum-zero-not-none (C#)', () => {
+  const KEY = 'style/deterministic/flags-enum-zero-not-none'
+
+  it('flags a Flags enum whose 0 value is not named None', () => {
+    const violations = check(`namespace Access;
+
+[Flags]
+internal enum Permission
+{
+    Default = 0,
+    Read = 1,
+    Write = 2,
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]!.content).toContain('Default')
+  })
+
+  it('does not flag a Flags enum whose 0 value is None', () => {
+    const violations = check(`namespace Access;
+
+[Flags]
+internal enum Permission
+{
+    None = 0,
+    Read = 1,
+    Write = 2,
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/field-keyword-conflict
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/field-keyword-conflict (C#)', () => {
+  const KEY = 'style/deterministic/field-keyword-conflict'
+
+  it('flags a type member named field', () => {
+    const violations = check(`namespace Forms;
+
+internal sealed class Renderer
+{
+    private int field;
+
+    internal void Bind(int field)
+    {
+        this.field = field;
+    }
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    // only the field MEMBER; the parameter and the member-access references
+    // (this.field) are out of scope.
+    expect(matches).toHaveLength(1)
+  })
+
+  it('does not flag parameters, locals, or references named field', () => {
+    const violations = check(`namespace Forms;
+
+internal sealed class Renderer
+{
+    internal int Compute(Form form)
+    {
+        var field = form.Width;
+        return field + form.field;
+    }
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/logger-field-naming
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/logger-field-naming (C#)', () => {
+  const KEY = 'style/deterministic/logger-field-naming'
+
+  it('flags logger fields/properties not following the convention', () => {
+    const violations = check(`namespace Ordering;
+
+internal sealed class OrderProcessor
+{
+    private readonly ILogger Logger;
+    public ILogger<OrderProcessor> AuditLog { get; }
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(2)
+  })
+
+  it('does not flag conventionally named loggers or non-logger fields', () => {
+    const violations = check(`namespace Ordering;
+
+internal sealed class OrderProcessor
+{
+    private readonly ILogger _logger;
+    private readonly ILogger<OrderProcessor> logger2;
+    private readonly ILoggerFactory LoggerFactory;
+    private readonly HttpClient Client;
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/scoped-identifier-escape
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/scoped-identifier-escape (C#)', () => {
+  const KEY = 'style/deterministic/scoped-identifier-escape'
+
+  it('flags scoped used as an untyped parenthesized lambda parameter', () => {
+    const violations = check(`namespace Pipelines;
+
+internal sealed class Stage
+{
+    internal void Wire()
+    {
+        Func<int, int> increment = (scoped) => scoped + 1;
+        Run(increment);
+    }
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('does not flag typed lambda params, method params, or escaped names', () => {
+    const violations = check(`namespace Pipelines;
+
+internal sealed class Stage
+{
+    internal void Wire(int scoped)
+    {
+        Func<int, int> a = (int scoped) => scoped + 1;
+        Func<int, int> b = @scoped => @scoped + 1;
+        Run(a, b);
+    }
+}
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// style/deterministic/type-name-suffix-convention (CA1710 / CA1711)
+// ---------------------------------------------------------------------------
+
+describe('style/deterministic/type-name-suffix-convention (C#)', () => {
+  const KEY = 'style/deterministic/type-name-suffix-convention'
+
+  it('flags types deriving from framework bases without the matching suffix', () => {
+    const violations = check(`namespace Domain;
+
+internal sealed class PaymentFailed : Exception { }
+
+internal sealed class OrderPlaced : EventArgs { }
+
+internal sealed class Required : Attribute { }
+`)
+    const matches = violations.filter((v) => v.ruleKey === KEY)
+    expect(matches).toHaveLength(3)
+    expect(matches.map((m) => m.title).sort()).toEqual([
+      "Type should end with 'Attribute'",
+      "Type should end with 'EventArgs'",
+      "Type should end with 'Exception'",
+    ])
+  })
+
+  it('does not flag types that already carry the suffix', () => {
+    const violations = check(`namespace Domain;
+
+internal sealed class PaymentFailedException : Exception { }
+
+internal sealed class OrderPlacedEventArgs : EventArgs { }
+
+internal sealed class RequiredAttribute : Attribute { }
+`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})
+
+describe('style/deterministic/extension-keyword-conflict (C#)', () => {
+  const KEY = 'style/deterministic/extension-keyword-conflict'
+
+  it('flags a method named extension', () => {
+    const violations = check(`namespace N; public class C { void extension() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('flags a field named extension', () => {
+    const violations = check(`namespace N; public class C { int extension; }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(1)
+  })
+
+  it('does not flag an escaped @extension identifier', () => {
+    const violations = check(`namespace N; public class C { void @extension() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+
+  it('does not flag an unrelated identifier', () => {
+    const violations = check(`namespace N; public class C { void Extend() { } }`)
+    expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
+  })
+})

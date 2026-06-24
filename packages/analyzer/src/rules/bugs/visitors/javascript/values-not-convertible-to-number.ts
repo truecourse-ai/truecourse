@@ -5,9 +5,7 @@ import { TS_LANGUAGES } from './_helpers.js'
 const RELATIONAL_OPS = new Set(['<', '>', '<=', '>='])
 
 /**
- * Detect: Values not convertible to numbers used in numeric comparisons.
- * Corresponds to sonarjs S3758 (values-not-convertible-to-numbers).
- */
+ * Detect: Values not convertible to numbers used in numeric comparisons. */
 export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/values-not-convertible-to-number',
   languages: TS_LANGUAGES,

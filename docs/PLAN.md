@@ -798,7 +798,7 @@ type DiffCheckResult = {
 
 ## Phase 7: Code-Level Analysis & Code Viewer `STATUS: DONE`
 
-Extend the analyzer to detect code-level issues (like SonarQube) and add a code viewer to the frontend for browsing source files with inline violation annotations.
+Extend the analyzer to detect code-level issues (like commercial static analyzers) and add a code viewer to the frontend for browsing source files with inline violation annotations.
 
 ### Code-Level Analysis
 
@@ -2892,7 +2892,7 @@ Architecture-level violations (service-level, no line number) appear in a dedica
 
 ## Phase 30: Comprehensive Code Rules `STATUS: DONE`
 
-Build all valuable ESLint, @typescript-eslint, eslint-plugin-security, eslint-plugin-sonarjs, Ruff, and SonarQube rules into TrueCourse's tree-sitter analysis engine. The goal is not to match these tools — it's to **beat them**: better detection, fewer false positives, one tool instead of four.
+Build all valuable ESLint, @typescript-eslint, eslint-plugin-security, Ruff, and other static-analyzer rules into TrueCourse's tree-sitter analysis engine. The goal is not to match these tools — it's to **beat them**: better detection, fewer false positives, one tool instead of four.
 
 Master rule catalog: `docs/research/ALL-RULES.md` (1,156 rules). Private sync repo for tracking linter releases: `truecourse-rules-sync`.
 
@@ -2977,9 +2977,9 @@ The fix prompt is part of the rule definition, not an LLM call.
 ### Verification (Phase 30)
 
 1. Run TrueCourse on benchmark repos → catches everything ESLint catches (minus formatting)
-2. Run TrueCourse on benchmark repos → catches everything SonarQube catches for JS/TS/Python
+2. Run TrueCourse on benchmark repos → catches everything the major code-quality analyzers catch for JS/TS/Python
 3. Head-to-head: FP rate lower than ESLint on same code
-4. Head-to-head: FP rate lower than SonarQube on same code
+4. Head-to-head: FP rate lower than the leading code-quality analyzer on same code
 5. `BEARER_TOKEN` in a type map → not flagged (the tester's original complaint)
 6. Duplicate code: 15-line copy-paste across files → flagged
 8. Cognitive complexity > 15 → flagged with specific refactoring suggestion
@@ -3016,7 +3016,7 @@ Add a Settings page to the web UI for per-repo configuration. Web UI counterpart
 
 ## Phase 32: Head-to-Head Competition Framework `STATUS: TODO`
 
-Prove TrueCourse is better than the tools it replaces. Systematic benchmarking against ESLint, SonarQube, madge, and gitleaks.
+Prove TrueCourse is better than the tools it replaces. Systematic benchmarking against ESLint, madge, gitleaks, and commercial static analyzers.
 
 ### Benchmark Repository Suite
 
@@ -3024,14 +3024,14 @@ Curate real-world open-source repos for head-to-head comparison:
 
 - **Repos with known circular deps** — compare madge vs TrueCourse
 - **Repos with planted/known secrets** — compare gitleaks vs TrueCourse
-- **Repos previously scanned by SonarQube** — compare findings
+- **Repos previously scanned by commercial static analyzers** — compare findings
 - **Test fixtures** — intentional bugs, security holes, code smells, and patterns that cause false positives in other tools
 
 ### Automated Comparison Test Suite
 
 For each rule, automated test that:
 
-1. Runs ESLint / SonarQube / madge / gitleaks on the same code
+1. Runs ESLint / madge / gitleaks / commercial analyzers on the same code
 2. Runs TrueCourse on the same code
 3. Compares: true positives, unique finds, false positives, false negatives
 
@@ -3053,7 +3053,7 @@ Runs in CI on every change to the rules engine. Any regression = build fails.
 ### Coverage Scorecard
 
 ```
-                        ESLint  SonarQube  madge  gitleaks  TrueCourse
+                        ESLint  Commercial madge  gitleaks  TrueCourse
 Bug detection             ✅       ✅       —       —         ✅
 Code smells               ✅       ✅       —       —         ✅
 Security (single-file)    ⚠️       ✅       —       —         ✅
@@ -3124,7 +3124,7 @@ You can safely remove ESLint.
 
 Build a taint tracking engine that follows untrusted data from where it enters the system (HTTP requests, user input) through function calls across files to where it's used dangerously (SQL queries, eval, file system, redirects). Upgrades existing security rules with deeper detection — same rule keys, no new rules.
 
-This is TrueCourse's competitive differentiator against SonarQube. Requires symbolic execution engine, inter-procedural analysis, object sensitivity, path sensitivity, and framework-specific models.
+This is TrueCourse's competitive differentiator against commercial static analyzers. Requires symbolic execution engine, inter-procedural analysis, object sensitivity, path sensitivity, and framework-specific models.
 
 **Architecture:**
 

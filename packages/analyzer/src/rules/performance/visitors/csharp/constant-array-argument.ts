@@ -1,0 +1,51 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
+import type { CodeRuleVisitor } from '../../../types.js'
+import { makeViolation } from '../../../types.js'
+import { getCSharpEnclosingFunction } from '../../../_shared/csharp-helpers.js'
+
+/**
+ * `Foo(new[] { 1, 2, 3 })` re-allocates the same constant array on every call.
+ * Promoting it to a `static readonly` field allocates it once. Fires when an
+ * array-creation expression whose elements are all literals is passed directly
+ * as a call argument inside a method body. The all-literal requirement keeps it
+ * to genuinely constant arrays; the enclosing-method check skips field/attribute
+ * initializers that already allocate once.
+ */
+const LITERAL_TYPES = new Set([
+  'integer_literal',
+  'real_literal',
+  'string_literal',
+  'verbatim_string_literal',
+  'character_literal',
+  'boolean_literal',
+  'null_literal',
+])
+
+function allElementsConstant(creation: SyntaxNode): boolean {
+  const init = creation.namedChildren.find((c) => c?.type === 'initializer_expression')
+  if (!init) return false
+  const elements = init.namedChildren.filter((c): c is SyntaxNode => !!c && c.type !== 'comment')
+  if (elements.length === 0) return false
+  return elements.every((e) => LITERAL_TYPES.has(e.type))
+}
+
+export const csharpConstantArrayArgumentVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/constant-array-argument',
+  languages: ['csharp'],
+  nodeTypes: ['array_creation_expression', 'implicit_array_creation_expression'],
+  visit(node, filePath, sourceCode) {
+    // Must be passed directly as a call argument.
+    if (node.parent?.type !== 'argument') return null
+    // Must live inside a method/local function/lambda, not a field initializer.
+    if (!getCSharpEnclosingFunction(node)) return null
+    if (!allElementsConstant(node)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Constant array passed as argument',
+      'A constant array literal passed as an argument is re-allocated on every call. A static readonly field allocates it once and reuses it.',
+      sourceCode,
+      'Hoist the constant array into a static readonly field and pass that field.',
+    )
+  },
+}

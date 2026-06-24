@@ -71,6 +71,7 @@ internal sealed class FileCacheRefresher
 
     private void FlushExpired()
     {
+        // VIOLATION: code-quality/deterministic/non-testable-datetime-provider
         _entries.RemoveAll(entry => entry.ExpiresAt < DateTime.UtcNow);
     }
 }

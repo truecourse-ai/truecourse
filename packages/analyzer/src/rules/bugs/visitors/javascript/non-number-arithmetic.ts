@@ -38,9 +38,7 @@ function isConfidentlyNonNumeric(t: string): boolean {
 }
 
 /**
- * Detect: Arithmetic operator used with non-numeric operands.
- * Corresponds to sonarjs S3760 (non-number-in-arithmetic-expression).
- */
+ * Detect: Arithmetic operator used with non-numeric operands. */
 export const nonNumberArithmeticVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/non-number-arithmetic',
   languages: TS_LANGUAGES,

@@ -1,9 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-/**
- * sonarjs/S5958 (test-check-exception)
- * Detects test cases that use expect().toThrow() or expect().rejects without
+/** * Detects test cases that use expect().toThrow() or expect().rejects without
  * verifying the specific exception type.
  *
  * e.g.:

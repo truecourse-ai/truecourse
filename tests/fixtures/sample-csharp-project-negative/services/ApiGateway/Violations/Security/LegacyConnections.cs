@@ -5,7 +5,7 @@ internal static class LegacyConnections
     // VIOLATION: security/deterministic/hardcoded-secret
     internal const string GithubToken = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
 
-    // VIOLATION: security/deterministic/hardcoded-ip
+    // VIOLATION: security/deterministic/hardcoded-ip-address
     internal const string ReportingHost = "192.168.144.21";
 
     // VIOLATION: security/deterministic/clear-text-protocol

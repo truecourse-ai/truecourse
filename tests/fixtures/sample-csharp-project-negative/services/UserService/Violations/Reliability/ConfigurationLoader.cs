@@ -9,6 +9,7 @@ internal sealed class ConfigurationLoader
     internal int ResolveCacheTtlSeconds()
     {
         // VIOLATION: reliability/deterministic/invalid-envvar-default
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         return int.Parse(Environment.GetEnvironmentVariable("CACHE_TTL_SECONDS"));
     }
 

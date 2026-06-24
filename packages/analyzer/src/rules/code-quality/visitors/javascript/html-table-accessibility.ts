@@ -4,14 +4,14 @@ import { makeViolation } from '../../../types.js'
 type SyntaxNode = import('web-tree-sitter').Node
 
 /**
- * sonarjs accessibility rules for HTML tables in JSX:
- * - S5257: HTML tables should not be used for layout purposes
- * - S5256: Tables should have header elements
- * - S5264: <object> tags should provide alternative content
+ * Accessibility rules for HTML tables in JSX:
+ * - HTML tables should not be used for layout purposes
+ * - tables should have header elements
+ * - <object> tags should provide alternative content
  *
  * Detects:
- * 1. <table> without any <th> or <thead> elements (S5256)
- * 2. <object> without fallback content (S5264)
+ * 1. <table> without any <th> or <thead> elements
+ * 2. <object> without fallback content
  */
 
 function getJsxElementName(node: SyntaxNode): string | null {
@@ -81,7 +81,7 @@ export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
     // Only apply to JSX files
     if (!filePath.endsWith('.tsx') && !filePath.endsWith('.jsx')) return null
 
-    // S5256: <table> should have <th> or <thead>
+    // <table> should have <th> or <thead>
     if (tagName === 'table') {
       // Skip generic reusable table wrapper components that forward content
       // via `{...props}` — accessibility is the consumer's responsibility.
@@ -111,7 +111,7 @@ export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
       }
     }
 
-    // S5264: <object> should have fallback content
+    // <object> should have fallback content
     if (tagName === 'object') {
       if (node.type === 'jsx_self_closing_element') {
         return makeViolation(

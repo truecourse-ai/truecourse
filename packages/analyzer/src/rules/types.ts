@@ -10,6 +10,14 @@ export interface CodeRuleVisitor {
   ruleKey: string
   nodeTypes: string[]
   languages?: SupportedLanguage[]
+  /**
+   * Languages a universal visitor opts out of. Use this — not a `languages`
+   * allowlist — when a visitor should cover every family except a few (e.g. a
+   * universal scan superseded by a more precise host rule on one language).
+   * An allowlist silently drops sibling languages in the same family (TS/TSX),
+   * whereas this names exactly what to skip.
+   */
+  excludeLanguages?: SupportedLanguage[]
   needsDataFlow?: boolean
   needsTypeQuery?: boolean
   needsSchemaIndex?: boolean
@@ -72,6 +80,7 @@ export function walkAstWithVisitors(
   const activeVisitors = visitors.filter((v) => {
     if (!enabledRuleKeys.has(v.ruleKey)) return false
     if (v.languages && language && !v.languages.includes(language)) return false
+    if (v.excludeLanguages && language && v.excludeLanguages.includes(language)) return false
     return true
   })
   if (activeVisitors.length === 0) return []

@@ -10,12 +10,12 @@ internal class DiagnosticsToolbox
     internal void PauseForInspection()
     {
         // VIOLATION: code-quality/deterministic/no-debugger
-        // VIOLATION: code-quality/deterministic/debugger-statement
         Debugger.Break();
     }
 
     internal string FetchLegacyExport(string target)
     {
+        // VIOLATION: code-quality/deterministic/in-source-suppression
         // VIOLATION: code-quality/deterministic/ban-ts-comment
 
 #pragma warning disable CS0618
@@ -28,6 +28,7 @@ internal class DiagnosticsToolbox
     internal string BuildSummary(List<string> rows)
     {
         // VIOLATION: code-quality/deterministic/unnecessary-namespace-qualifier
+        // VIOLATION: code-quality/deterministic/verbose-declaration-initialization
         StringBuilder builder = new System.Text.StringBuilder();
         foreach (var row in rows)
         {
@@ -48,6 +49,7 @@ internal class DiagnosticsToolbox
     internal string DescribeResponse(int code)
     {
         // VIOLATION: code-quality/deterministic/ambiguous-unicode-character
+        // VIOLATION: bugs/deterministic/missing-format-provider-overload
         var statuѕLabel = code.ToString();
         return $"status {statuѕLabel}";
     }
@@ -96,5 +98,48 @@ internal class DiagnosticsToolbox
     internal string? LookupZone(string zone)
     {
         return zone.Length > 0 ? zone : null;
+    }
+
+    internal Assembly LoadDiagnostics(string path)
+    {
+        _flushCount++;
+        // VIOLATION: code-quality/deterministic/prefer-assembly-load
+        return Assembly.LoadFrom(path);
+    }
+
+    internal void NarrateFlush()
+    {
+        _logger.LogInformation("flush 1");
+        _logger.LogInformation("flush 2");
+        _logger.LogInformation("flush 3");
+        _logger.LogInformation("flush 4");
+        _logger.LogInformation("flush 5");
+        _logger.LogInformation("flush 6");
+        _logger.LogInformation("flush 7");
+        // VIOLATION: code-quality/deterministic/too-many-logging-calls
+        _logger.LogInformation("flush 8");
+    }
+
+    private readonly ILogger _logger = null!;
+
+    internal int SumWithoutPointers(int seed)
+    {
+        // VIOLATION: code-quality/deterministic/unnecessary-unsafe-context
+        // VIOLATION: security/deterministic/unsafe-code-block
+        unsafe
+        {
+            var total = seed;
+            total += _flushCount;
+            return total;
+        }
+    }
+
+    internal static class TextExtensions
+    {
+        // VIOLATION: code-quality/deterministic/extension-method-on-object
+        public static string Dump(this object value)
+        {
+            return value?.ToString() ?? string.Empty;
+        }
     }
 }

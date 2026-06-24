@@ -40,7 +40,7 @@ function isCollectionInit(value: SyntaxNode, declaredType: SyntaxNode | null): b
 }
 
 /**
- * Sonar S4030 semantics: a local collection whose every subsequent reference
+ * A local collection whose every subsequent reference
  * only MUTATES it (Add/Push/Enqueue/indexer writes) — its contents are never
  * read, so all that work is dead. Locals with zero references are left to
  * unused-variable; this rule requires at least one write.

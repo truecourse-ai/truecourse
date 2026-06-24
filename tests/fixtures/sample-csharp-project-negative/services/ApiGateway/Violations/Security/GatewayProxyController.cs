@@ -22,6 +22,7 @@ internal sealed class GatewayProxyController : ControllerBase
     [HttpGet]
     [HttpPost]
     // VIOLATION: security/deterministic/mixed-http-methods
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     internal IActionResult Toggle(string id)
     {
         return Ok(id);
@@ -37,6 +38,7 @@ internal sealed class GatewayProxyController : ControllerBase
     [IgnoreAntiforgeryToken]
     [HttpPost]
     // VIOLATION: security/deterministic/csrf-disabled
+    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
     internal IActionResult DeleteAccount(string accountId)
     {
         return Ok(accountId);

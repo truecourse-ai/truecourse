@@ -3,17 +3,22 @@ namespace UserServiceApp.Violations.CodeQuality;
 internal class MemberHygiene
 {
     // VIOLATION: code-quality/deterministic/unused-private-member
+    // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private string _legacyToken = "seed-token";
 
     private DateTime _lastFailureAt;
 
     // VIOLATION: code-quality/deterministic/mutable-private-member
+    // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private List<string> _recentCodes = new List<string>();
 
     // VIOLATION: code-quality/deterministic/unused-private-nested-class
+    // VIOLATION: performance/deterministic/non-derived-private-class-not-sealed
     private class RetrySchedule
     {
+        // VIOLATION: code-quality/deterministic/member-more-visible-than-type
         public int Attempts { get; set; }
+        // VIOLATION: code-quality/deterministic/member-more-visible-than-type
         public int DelaySeconds { get; set; }
     }
 

@@ -18,11 +18,21 @@ jobs:
         with:
           node-version: 20
 
+      # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
+      # the SDK + a built host, every C# host test skips and analyze-csharp fails
+      # (the pipeline is host-required for C#). Build it so C# is actually tested.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
         run: pnpm build
+
+      - name: Build C# Roslyn host
+        run: dotnet build -c Release tools/csharp-roslyn-host
 
       - name: Run tests
         run: pnpm test

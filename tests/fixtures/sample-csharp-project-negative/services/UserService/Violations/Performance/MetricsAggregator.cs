@@ -53,6 +53,7 @@ internal sealed class MetricsAggregator
         foreach (var sample in _samples)
         {
             // VIOLATION: performance/deterministic/quadratic-list-summation
+            // VIOLATION: performance/deterministic/string-concat-in-loop
             report += $"{sample.Service}: {sample.LatencyMs}ms\n";
         }
         return report;
@@ -73,9 +74,11 @@ internal sealed class MetricsAggregator
     internal bool HasFailures()
     {
         // VIOLATION: performance/deterministic/list-comprehension-in-any-all
+        // VIOLATION: performance/deterministic/any-over-count-check
         return _samples.Where(s => !s.Succeeded).ToList().Any();
     }
 
+    // VIOLATION: code-quality/deterministic/nested-generic-parameter
     internal List<string> MergeTags(IEnumerable<List<string>> tagGroups)
     {
         // VIOLATION: performance/deterministic/spread-in-reduce

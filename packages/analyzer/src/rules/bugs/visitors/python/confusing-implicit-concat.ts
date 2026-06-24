@@ -4,9 +4,7 @@ import { makeViolation } from '../../../types.js'
 /**
  * Detects adjacent string/byte literals that are implicitly concatenated in contexts
  * where this looks like a mistake (e.g., inside a list or set, or as function arguments
- * where two separate strings were likely intended).
- * S5799: Confusing implicit string/byte concatenation.
- */
+ * where two separate strings were likely intended). */
 export const pythonConfusingImplicitConcatVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/confusing-implicit-concat',
   languages: ['python'],

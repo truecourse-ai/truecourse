@@ -43,9 +43,20 @@ import {
   type RegistryEntry,
 } from '../../packages/core/src/config/registry';
 import { updateProjectConfig } from '../../packages/core/src/config/project-config';
+import { resolveRoslynHostBinary } from '../../packages/analyzer/src/roslyn-host-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/sample-js-project-negative');
+const hostBuilt = resolveRoslynHostBinary() !== null;
+
+// One end-to-end pass per supported language: full analyze pipeline → store.
+// C# is host-required (the pipeline fail-hards without the Roslyn host), so it
+// runs only when the host is built. markerKey is a stable `// VIOLATION:` key
+// from each fixture — if the catalog renames it, update marker + assertion.
+const E2E_CASES: Array<{ lang: string; fixture: string; markerKey: string; skip: boolean }> = [
+  { lang: 'JS/TS', fixture: 'sample-js-project-negative', markerKey: 'code-quality/deterministic/missing-return-type', skip: false },
+  { lang: 'Python', fixture: 'sample-python-project-negative', markerKey: 'code-quality/deterministic/missing-type-hints', skip: false },
+  { lang: 'C#', fixture: 'sample-csharp-project-negative', markerKey: 'architecture/deterministic/duplicate-import', skip: !hostBuilt },
+];
 
 /**
  * Copy a directory recursively, skipping `.truecourse/` so fixture pollution
@@ -62,83 +73,83 @@ function copyDir(src: string, dest: string): void {
   }
 }
 
-describe('CLI analyze pipeline (e2e)', () => {
-  let workDir: string;
-  let project: RegistryEntry;
+for (const c of E2E_CASES) {
+  describe.skipIf(c.skip)(`CLI analyze pipeline (e2e) — ${c.lang}`, () => {
+    let workDir: string;
+    let project: RegistryEntry;
 
-  beforeAll(async () => {
-    // Copy fixture into a throwaway tmpdir. We avoid analyzing the fixture
-    // in-place so the shared fixture directory stays pristine across runs
-    // and parallel test invocations don't step on each other.
-    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-e2e-analyze-'));
-    copyDir(FIXTURE_SRC, workDir);
+    beforeAll(async () => {
+      // Copy fixture into a throwaway tmpdir. We avoid analyzing the fixture
+      // in-place so the shared fixture directory stays pristine across runs
+      // and parallel test invocations don't step on each other.
+      workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-e2e-analyze-'));
+      copyDir(path.resolve(__dirname, '../fixtures', c.fixture), workDir);
 
-    // Initialize a real (empty) git repo so analyzeInProcess can collect
-    // branch/commit metadata — that's what the CLI sees in production.
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 't@t',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 't@t',
-    };
-    execSync('git init -q -b main', { cwd: workDir, env });
-    execSync('git add -A', { cwd: workDir, env });
-    execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
+      // Initialize a real (empty) git repo so analyzeInProcess can collect
+      // branch/commit metadata — that's what the CLI sees in production.
+      const env = {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'test',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 'test',
+        GIT_COMMITTER_EMAIL: 't@t',
+      };
+      execSync('git init -q -b main', { cwd: workDir, env });
+      execSync('git add -A', { cwd: workDir, env });
+      execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
 
-    project = await registerProject(workDir);
+      project = await registerProject(workDir);
 
-    // Disable LLM rules so the pipeline is deterministic and network-free.
-    // Config takes precedence over the override inside analyze-core, so we
-    // set it here to be explicit about what's exercised.
-    await updateProjectConfig(workDir, { enableLlmRules: false });
+      // Disable LLM rules so the pipeline is deterministic and network-free.
+      await updateProjectConfig(workDir, { enableLlmRules: false });
 
-    clearLatestCache();
-  }, 30_000);
+      clearLatestCache();
+    }, 60_000);
 
-  afterAll(async () => {
-    if (project) await unregisterProject(project.slug);
-    if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
-    clearLatestCache();
+    afterAll(async () => {
+      if (project) await unregisterProject(project.slug);
+      if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
+      clearLatestCache();
+    });
+
+    it('writes a complete store and populates the registry', async () => {
+      const result = await analyzeInProcess(project, { enableLlmRulesOverride: false });
+      expect(result.analysisId).toBeTruthy();
+      expect(result.serviceCount).toBeGreaterThan(0);
+
+      const latest = await readLatest(workDir);
+      expect(latest).not.toBeNull();
+      expect(latest!.head).toBe(result.filename);
+      expect(latest!.analysis.id).toBe(result.analysisId);
+      expect(latest!.analysis.status).toBe('completed');
+      expect(latest!.graph.services.length).toBeGreaterThan(0);
+      expect(latest!.graph.modules.length).toBeGreaterThan(0);
+      expect(latest!.graph.methods.length).toBeGreaterThan(0);
+      expect(latest!.violations.length).toBeGreaterThan(0);
+
+      // Sanity: a stable rule key from a `// VIOLATION:` marker in the fixture
+      // should appear in the materialized violation set. If the rule catalog
+      // renames this key, update the marker + assertion together.
+      const ruleKeys = new Set(latest!.violations.map((v) => v.ruleKey));
+      expect(ruleKeys.has(c.markerKey)).toBe(true);
+
+      // Per-analysis snapshot file exists and its filename matches LATEST.head.
+      const analysisFiles = await listAnalyses(workDir);
+      expect(analysisFiles).toHaveLength(1);
+      expect(analysisFiles[0]).toBe(latest!.head);
+
+      // History has exactly one entry for the run.
+      const history = await readHistory(workDir);
+      expect(history.analyses).toHaveLength(1);
+      expect(history.analyses[0].id).toBe(result.analysisId);
+      expect(history.analyses[0].counts.services).toBe(latest!.graph.services.length);
+
+      // Registry `lastAnalyzed` got bumped.
+      const fresh = await getProjectBySlug(project.slug);
+      expect(fresh?.lastAnalyzed).toBeTruthy();
+    }, 180_000);
   });
-
-  it('writes a complete store and populates the registry', async () => {
-    const result = await analyzeInProcess(project, { enableLlmRulesOverride: false });
-    expect(result.analysisId).toBeTruthy();
-    expect(result.serviceCount).toBeGreaterThan(0);
-
-    const latest = await readLatest(workDir);
-    expect(latest).not.toBeNull();
-    expect(latest!.head).toBe(result.filename);
-    expect(latest!.analysis.id).toBe(result.analysisId);
-    expect(latest!.analysis.status).toBe('completed');
-    expect(latest!.graph.services.length).toBeGreaterThan(0);
-    expect(latest!.graph.modules.length).toBeGreaterThan(0);
-    expect(latest!.graph.methods.length).toBeGreaterThan(0);
-    expect(latest!.violations.length).toBeGreaterThan(0);
-
-    // Sanity: a stable rule key from a `// VIOLATION:` marker in the fixture
-    // should appear in the materialized violation set. If the rule catalog
-    // renames this key, update the marker + assertion together.
-    const ruleKeys = new Set(latest!.violations.map((v) => v.ruleKey));
-    expect(ruleKeys.has('code-quality/deterministic/missing-return-type')).toBe(true);
-
-    // Per-analysis snapshot file exists and its filename matches LATEST.head.
-    const analysisFiles = await listAnalyses(workDir);
-    expect(analysisFiles).toHaveLength(1);
-    expect(analysisFiles[0]).toBe(latest!.head);
-
-    // History has exactly one entry for the run.
-    const history = await readHistory(workDir);
-    expect(history.analyses).toHaveLength(1);
-    expect(history.analyses[0].id).toBe(result.analysisId);
-    expect(history.analyses[0].counts.services).toBe(latest!.graph.services.length);
-
-    // Registry `lastAnalyzed` got bumped.
-    const fresh = await getProjectBySlug(project.slug);
-    expect(fresh?.lastAnalyzed).toBeTruthy();
-  }, 120_000);
-});
+}
 
 // ---------------------------------------------------------------------------
 // Stash decision (issue #64) — the CLI must never silently stash a dirty

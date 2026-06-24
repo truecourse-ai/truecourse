@@ -16,9 +16,11 @@ import { performSplitAnalysis } from '../../packages/analyzer/src/split-analyzer
 import { checkModuleRules, checkMethodRules, checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules';
 import { checkCodeRules, parseFile, detectLanguage } from '../../packages/analyzer/src';
+import { runRoslynHost, resolveRoslynHostBinary } from '../../packages/analyzer/src/roslyn-host-client';
 import type { FileAnalysis, CodeViolation } from '../../packages/shared/src/types/analysis';
 
 const FIXTURE_PATH = new URL('../fixtures/sample-csharp-project-positive', import.meta.url).pathname;
+const hostBuilt = resolveRoslynHostBinary() !== null;
 
 function collectFiles(dir: string): string[] {
   const files: string[] = [];
@@ -101,4 +103,16 @@ describe('C# positive fixture — zero false positives', () => {
     }
     expect(archViolations).toHaveLength(0);
   });
+
+  // Roslyn semantic-host rules — same 0-FP bar, run only when the host is built.
+  it.skipIf(!hostBuilt)('produces zero Roslyn-host violations on clean code', async () => {
+    const hostKeys = DETERMINISTIC_RULES.filter((r) => r.enabled && r.engine === 'roslyn-host').map((r) => r.key);
+    const files = collectFiles(FIXTURE_PATH).map((p) => ({ path: p, text: readFileSync(p, 'utf-8') }));
+    const violations = await runRoslynHost(files, hostKeys);
+    if (violations.length > 0) {
+      console.log(`\nFALSE POSITIVES — Roslyn host (${violations.length}):`);
+      for (const v of violations) console.log(`  ${v.ruleKey} at ${relative(FIXTURE_PATH, v.path)}:${v.line}`);
+    }
+    expect(violations).toEqual([]);
+  }, 120_000);
 });

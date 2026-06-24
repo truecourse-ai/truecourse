@@ -3,7 +3,7 @@ import { makeViolation } from '../../../types.js'
 
 /**
  * Detects datetime/date/time constructor calls with out-of-range literal values.
- * S6882: datetime constructor with invalid values raises ValueError at runtime.
+ * Out-of-range values raise ValueError at runtime.
  */
 
 // datetime(year, month, day, hour=0, minute=0, second=0, microsecond=0)

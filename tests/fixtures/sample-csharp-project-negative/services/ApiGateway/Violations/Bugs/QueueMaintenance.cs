@@ -123,6 +123,7 @@ internal class QueueMaintenance
         return probe.Trim();
     }
 
+    // VIOLATION: style/deterministic/extension-keyword-conflict
     internal bool IsKnownExtension(string extension)
     {
         // VIOLATION: bugs/deterministic/in-empty-collection
@@ -167,6 +168,7 @@ internal class QueueMaintenance
     {
         // VIOLATION: bugs/deterministic/ignored-return-value
         topic.Trim();
+        // VIOLATION: bugs/deterministic/normalize-to-lower-not-upper
         return topic.ToLowerInvariant();
     }
 

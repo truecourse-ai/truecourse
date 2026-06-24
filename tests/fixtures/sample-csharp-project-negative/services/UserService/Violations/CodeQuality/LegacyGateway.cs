@@ -1,6 +1,7 @@
 namespace UserServiceApp.Violations.CodeQuality;
 
 // VIOLATION: code-quality/deterministic/filename-class-mismatch
+// VIOLATION: code-quality/deterministic/csharp-filename-type-mismatch
 public class PaymentRelay
 {
     private readonly List<string> _relayed = new List<string>();

@@ -7,6 +7,7 @@ internal class DispatchTables
     // VIOLATION: code-quality/deterministic/too-many-branches
     internal string ResolveShippingZone(string countryCode)
     {
+        // VIOLATION: code-quality/deterministic/prefer-string-empty
         var zone = "";
         switch (countryCode)
         {

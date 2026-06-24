@@ -10,7 +10,11 @@ export const todoFixmeVisitor: CodeRuleVisitor = {
   nodeTypes: ['comment'],
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const match = text.match(/\b(TODO|FIXME|HACK)\b/i)
+    // A genuine task marker stands alone (`TODO:`, `FIXME`, `HACK(name)`). A
+    // marker glued to another word by a hyphen is part of a compound — a rule
+    // key like `todo-fixme`, a noun like `todo-list` — not a task to do.
+    // `TODO-123` (a ticket ref) still fires: the digit isn't part of a word.
+    const match = text.match(/(?<![A-Za-z]-)\b(TODO|FIXME|HACK)\b(?!-[A-Za-z])/i)
     if (!match) return null
 
     const tag = match[1].toUpperCase()

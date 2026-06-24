@@ -7,6 +7,7 @@ export { csharpConnectionNotReleasedVisitor } from './connection-not-released.js
 export { csharpMissingTransactionVisitor } from './missing-transaction.js'
 export { csharpOrmLazyLoadInLoopVisitor } from './orm-lazy-load-in-loop.js'
 export { csharpUnvalidatedExternalDataVisitor } from './unvalidated-external-data.js'
+export { csharpDatetimePrimaryKeyVisitor } from './datetime-primary-key.js'
 
 import { csharpSelectStarVisitor } from './select-star.js'
 import { csharpUnsafeDeleteWithoutWhereVisitor } from './unsafe-delete-without-where.js'
@@ -15,6 +16,7 @@ import { csharpConnectionNotReleasedVisitor } from './connection-not-released.js
 import { csharpMissingTransactionVisitor } from './missing-transaction.js'
 import { csharpOrmLazyLoadInLoopVisitor } from './orm-lazy-load-in-loop.js'
 import { csharpUnvalidatedExternalDataVisitor } from './unvalidated-external-data.js'
+import { csharpDatetimePrimaryKeyVisitor } from './datetime-primary-key.js'
 
 export const DATABASE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpSelectStarVisitor,
@@ -24,4 +26,5 @@ export const DATABASE_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpMissingTransactionVisitor,
   csharpOrmLazyLoadInLoopVisitor,
   csharpUnvalidatedExternalDataVisitor,
+  csharpDatetimePrimaryKeyVisitor,
 ]

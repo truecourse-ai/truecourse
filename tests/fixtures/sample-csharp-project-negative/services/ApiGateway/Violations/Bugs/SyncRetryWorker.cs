@@ -42,6 +42,7 @@ internal class SyncRetryWorker
     }
 
     // VIOLATION: bugs/deterministic/async-void-function
+    // VIOLATION: code-quality/deterministic/async-method-naming
     internal async void RefreshCacheOnTimer()
     {
         await Task.Delay(FlushDelayMs);

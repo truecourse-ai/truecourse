@@ -62,29 +62,9 @@ public class Greeter
   })
 })
 
-describe('security/deterministic/hardcoded-ip (C#)', () => {
-  it('detects a hardcoded IP', () => {
-    const violations = check(`namespace App;
-public class Sync
-{
-    private const string Upstream = "http://10.20.30.40/api";
-}
-`)
-    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-ip')
-    expect(matches.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('does not flag loopback', () => {
-    const violations = check(`namespace App;
-public class Dev
-{
-    private const string Local = "127.0.0.1";
-}
-`)
-    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-ip')
-    expect(matches).toHaveLength(0)
-  })
-})
+// hardcoded-ip is JS/Python-only; C# hardcoded IPs are detected by the more
+// precise Roslyn-host rule hardcoded-ip-address (see roslyn-rules-security and
+// the C# fixtures) — no tree-sitter coverage here.
 
 describe('security/deterministic/clear-text-protocol (C#)', () => {
   it('detects an http:// connection target', () => {

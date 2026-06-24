@@ -21,15 +21,21 @@ import {
 
 const rules = getAllDefaultRules();
 
-// ruleKey → families with a visitor; universal visitors (no languages field)
-// cover the audited family set
+// ruleKey → families with a runtime visitor; universal visitors (no languages
+// field) cover the audited family set minus any they explicitly opt out of via
+// excludeLanguages — mirroring withLanguageSupport, so a visitor that excludes a
+// language genuinely does not count as covering it.
 const visitorFamilies = new Map<string, Set<AnalysisLanguage>>();
 for (const visitor of ALL_CODE_VISITORS) {
   if (!visitorFamilies.has(visitor.ruleKey)) visitorFamilies.set(visitor.ruleKey, new Set());
   const families = visitor.languages
     ? visitor.languages.map((l) => LANGUAGE_FAMILY[l])
     : [...UNIVERSAL_VISITOR_FAMILIES];
-  for (const family of families) visitorFamilies.get(visitor.ruleKey)!.add(family);
+  const excluded = new Set((visitor.excludeLanguages ?? []).map((l) => LANGUAGE_FAMILY[l]));
+  for (const family of families) {
+    if (excluded.has(family)) continue;
+    visitorFamilies.get(visitor.ruleKey)!.add(family);
+  }
 }
 
 describe('rule language-support matrix', () => {
@@ -49,6 +55,9 @@ describe('rule language-support matrix', () => {
     const phantom: string[] = [];
     for (const rule of rules) {
       if (rule.category !== 'code' || rule.type !== 'deterministic') continue;
+      // roslyn-host / roslyn-workspace rules are implemented by the C# semantic
+      // host (loose-text or MSBuildWorkspace), not a tree-sitter visitor
+      if (rule.engine === 'roslyn-host' || rule.engine === 'roslyn-workspace') continue;
       for (const language of ANALYSIS_LANGUAGES) {
         const entry = rule.languageSupport?.[language];
         if (!entry || (entry.status !== 'supported' && entry.status !== 'partial')) continue;
@@ -104,11 +113,10 @@ describe('rule language-support matrix', () => {
       const total = counts.supported + counts.partial + counts['not-applicable'] + counts.unsupported;
       expect(total).toBe(rules.length);
     }
-    // Every language has real coverage; C# trails until its visitor port lands
+    // Every language has real coverage. C# now leads after the full tree-sitter
+    // visitor port plus the Roslyn semantic-host rules.
     expect(summary.javascript.supported).toBeGreaterThan(0);
     expect(summary.python.supported).toBeGreaterThan(0);
     expect(summary.csharp.supported).toBeGreaterThan(0);
-    expect(summary.csharp.supported).toBeLessThanOrEqual(summary.javascript.supported);
-    expect(summary.csharp.supported).toBeLessThanOrEqual(summary.python.supported);
   });
 });
