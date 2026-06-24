@@ -28,9 +28,21 @@ Both store their results under `.truecourse/` and surface them in a shared [dash
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
 </p>
 
-Jump to: **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Verify](#2-spec--verify--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
+Jump to: **[Install](#install)** · **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Verify](#2-spec--verify--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
 
 No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. It uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for LLM-powered work — if `claude` isn't on your PATH, deterministic analysis still runs and LLM-dependent features are skipped.
+
+---
+
+# Install
+
+```bash
+npm install -g truecourse
+```
+
+This puts the `truecourse` command on your PATH — every example below uses it. Prefer not to install globally? Run any command one-off with `npx truecourse <command>` instead.
+
+See [Prerequisites](#prerequisites) for Node, Claude Code, and C# requirements.
 
 ---
 
@@ -42,8 +54,8 @@ Static + LLM analysis of your code: architecture, security, bugs, performance, a
 
 ```bash
 cd <your-repo>
-npx truecourse analyze      # Runs the full analysis in-process
-npx truecourse list         # Show the violations it found
+truecourse analyze          # Runs the full analysis in-process
+truecourse list             # Show the violations it found
 ```
 
 The first analyze creates `.truecourse/` and stores results as plain JSON. View them visually with [`truecourse dashboard`](#dashboard-web-ui).
