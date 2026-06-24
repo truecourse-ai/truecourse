@@ -179,10 +179,14 @@ manual gate before production rolls.
 
 Neither environment deploys on open or merge. You opt in each time:
 
-- **Dev (`deploy-dev.yml`)** — add the **`deploy-dev`** label to a PR. It builds
-  that PR's branch and rolls the shared Dev Container App. Pushing more commits
-  while the label is on re-deploys; remove the label to stop. (Create the label
-  once under the repo's Labels, or just type it when adding it to a PR.)
+- **Dev (`deploy-dev.yml`)** — two opt-in ways:
+  - **Label** a PR **`deploy-dev`** → builds that PR's branch and rolls the
+    shared Dev Container App. Pushing more commits while the label is on
+    re-deploys; remove the label to stop. (Create the label once under the
+    repo's Labels, or just type it when adding it to a PR.)
+  - **Manual:** Actions → Deploy (dev) → **Run workflow** → pick a branch
+    (usually `main`) → builds that branch's HEAD. Use this to roll merged main
+    onto Dev. Dev allows any branch and has no reviewer gate.
 - **Prod (`deploy-prod.yml`)** — **Actions → Deploy (prod) → Run workflow**, on
   the **`main`** branch. It builds main's current HEAD; a `main`-only guard
   refuses any other branch, and the `prod` Environment's required reviewer still

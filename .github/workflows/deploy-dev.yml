@@ -1,9 +1,12 @@
 name: Deploy (dev)
 
-# Opt-in: add the `deploy-dev` label to a PR to build its branch and
-# create-or-update the shared Dev Container App. Pushing new commits to a
-# still-labeled PR re-deploys; removing the label stops it. Nothing deploys
-# automatically on open/merge.
+# Two opt-in ways to deploy the shared Dev Container App — nothing auto-deploys:
+#   1. Label a PR `deploy-dev` → builds that PR's branch (pushes while labeled
+#      re-deploy; remove the label to stop).
+#   2. Actions → Deploy (dev) → Run workflow → pick a branch (usually main) →
+#      builds that branch's HEAD. Use this to roll merged main onto Dev.
+# Unlike prod, dev allows any branch and has no reviewer gate — it's the safe
+# place to try things.
 # The foundation resources (ACR, Container Apps env, identity, Key Vault) are
 # discovered from the resource group at runtime, so the only variables you set are
 # the OIDC identity + AZURE_RG + APP_NAME. GitHub touches nothing in the runtime
@@ -12,11 +15,12 @@ on:
   pull_request:
     branches: [main]
     types: [labeled, synchronize]
+  workflow_dispatch:
 
 permissions:
   id-token: write      # OIDC federated login to Azure (no stored secret)
   contents: read
-  pull-requests: write # post the Dev URL as a comment
+  pull-requests: write # post the Dev URL as a comment (PR runs only)
 
 concurrency:
   group: deploy-dev
@@ -24,7 +28,10 @@ concurrency:
 
 jobs:
   deploy:
-    if: contains(github.event.pull_request.labels.*.name, 'deploy-dev')
+    # Manual dispatch always runs; PR runs only when the `deploy-dev` label is on.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'deploy-dev')
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -51,7 +58,12 @@ jobs:
       - name: Build & push image (ACR builds it — no local Docker)
         id: build
         run: |
-          TAG="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::7}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAG="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::7}"
+          else
+            TAG="${{ github.ref_name }}-${GITHUB_SHA::7}"
+          fi
+          TAG="${TAG//\//-}"   # ref names can contain slashes; tags can't
           az acr build --registry "${{ steps.infra.outputs.acr_name }}" \
             --image "truecourse:${TAG}" --file Dockerfile .
           echo "image=${{ steps.infra.outputs.acr_login }}/truecourse:${TAG}" >> "$GITHUB_OUTPUT"
@@ -70,7 +82,14 @@ jobs:
             --query properties.outputs.url.value -o tsv)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+      - name: Job summary
+        run: |
+          echo "🚀 Deployed to **Dev**: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image: \`${{ steps.build.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment the Dev URL
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -81,5 +100,5 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: `🚀 Deployed to **Dev**: ${url}\n\nImage: \`${image}\`\n` +
-                `_The Dev environment is shared — the most recent PR push wins._`,
+                `_The Dev environment is shared — the most recent push wins._`,
             });
