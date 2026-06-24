@@ -1,4 +1,13 @@
-# Spec-coverage groups — source of truth for which spec-doc folders we run the
+# Spec-coverage groups roster.
+#
+# NOTE (current local split): this file is NOT used by the live loop. Spec
+# processing (generate/measure/remeasure) now runs LOCALLY via the
+# /spec-coverage-* skills against a private folder you name at runtime — there
+# is no cloud `generate` routine reading this roster, and groups never live in
+# this public repo. See README "Topology". Kept for reference. Leave `groups: []`.
+#
+# (Original all-cloud meaning, retained for that scenario:)
+# Source of truth for which spec-doc folders we run the
 # round-trip coverage loop against, in what order, and the results.
 #
 # Owned by the spec-coverage-automation routines. Humans add a group by committing

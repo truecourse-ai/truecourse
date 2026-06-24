@@ -8,8 +8,34 @@ kind at a time — until a group's code-derivable coverage clears the bar with *
 
 It is the **kind-discovery sibling** of [`docs/drift-fp-automation`](../drift-fp-automation/README.md)
 (which hunts verifier false-positives) and [`docs/fp-automation`](../fp-automation/README.md)
-(deterministic-rule FPs). Same skeleton — stateless cloud **[Claude Code Routines](https://code.claude.com/docs/en/routines)**,
-state in GitHub, contracts frozen on per-group storage branches — different goal.
+(deterministic-rule FPs). Same skeleton — state in GitHub, the same `.tc` engine — different goal.
+
+## Topology — spec processing is LOCAL; only kind-building is on the public repo (CURRENT)
+
+This loop runs **split across two places** (the rest of this doc was written for an all-cloud design
+— where that conflicts with the split below, **this section wins**):
+
+- **LOCAL (your machine) — spec processing.** `generate`, `measure`, and `remeasure` run **locally**
+  via the Claude Code skills `/spec-coverage-generate`, `/spec-coverage-measure`,
+  `/spec-coverage-remeasure` (authoritative procedures: `prompts/{generate,measure,remeasure}.md`,
+  now written as **local** procedures). Your spec docs and the generated `.tc` contracts **never
+  leave your machine** — the LLM work is done by the Claude session you invoke the skill in
+  (`--llm-transport agent`; no `claude -p` spawn, no API key). There is **no storage branch, no
+  storage/measure/close PR, no `groups.yaml`** in the local flow. Outputs live in
+  `<spec-path>/.truecourse/`.
+- **PUBLIC repo (`truecourse-ai/truecourse`) — kind-building only.** Exactly **two routines**:
+  `spec-kind-propose` and `spec-kind-implement`. They consume the **sanitized `new-kind` issues** you
+  file by hand (from local `measure`/`remeasure` output) and build the kind into the engine.
+- **The seam.** Local `measure` finds a code-derivable gap → emits a **sanitized** `new-kind` request
+  (paraphrased; no private spec text, doc paths, or revealing group names) → **you** file it on
+  public → `propose` → (you merge intent) → `implement` → (you merge) → the kind is in the engine.
+  Then locally you `git pull` + rebuild and run `/spec-coverage-remeasure` to re-score. That
+  public→local hop is **manual** (a public merge can't trigger a local run) — by design.
+
+So: **the only thing that crosses from private to public is an abstract, sanitized contract-kind
+request.** Private specs stay local. The "storage branch / measure PR / close PR / `groups.yaml`"
+machinery described below applies only to the original all-cloud design and is **not** used in this
+split.
 
 ## What this loop optimizes
 
@@ -81,9 +107,16 @@ that fail either test and notes them on the measure PR.
 
 ## Architecture
 
-Each box is a routine; arrows are GitHub events (head-branch prefix + label filters). Only
-`generate`, `measure`, and `remeasure` use the LLM (`--llm-transport agent`); `propose` is
-mechanical; `implement` is an engine build + tests.
+> **Historical (all-cloud design).** The diagram below shows the original design where all five
+> phases were cloud routines wired by GitHub events. In the **current split** (see
+> [Topology](#topology--spec-processing-is-local-only-kind-building-is-on-the-public-repo-current)),
+> only `spec-kind-propose` and `spec-kind-implement` are routines; `generate`/`measure`/`remeasure`
+> run locally via skills, with no storage branch / storage PR / measure PR / close PR. Read the
+> diagram for the *conceptual* flow; read Topology for what actually runs where.
+
+Each box is a phase; arrows are the conceptual hand-offs. Only `generate`, `measure`, and
+`remeasure` use the LLM (`--llm-transport agent`); `propose` is mechanical; `implement` is an engine
+build + tests.
 
 ```
   [push group folder / Run now]
@@ -131,22 +164,29 @@ mechanical; `implement` is an engine build + tests.
                                                      └─────────────────────────────────────────┘
 ```
 
-## Triggers
+## Triggers (current split)
 
-| PR/issue event | Branch / source | Label | Fires |
+**Local — no triggers; you invoke a slash command:**
+
+| Phase | Run it with | Prompt |
+|---|---|---|
+| generate | `/spec-coverage-generate` | `prompts/generate.md` |
+| measure | `/spec-coverage-measure` | `prompts/measure.md` |
+| remeasure | `/spec-coverage-remeasure` | `prompts/remeasure.md` |
+
+**Public repo — two routines:**
+
+| Event | Branch / source | Trigger filter | Fires |
 |---|---|---|---|
-| **push** (or Run now) | adds `docs/spec-coverage/groups/<g>/` | — | `spec-coverage-generate` |
-| PR **opened** | `claude/spec-cov-store/` | `spec-cov-store` | `spec-coverage-measure` |
-| **issue opened** | — | `new-kind` | `spec-kind-propose` |
-| PR **merged** | `claude/spec-kind-propose/` | `spec-kind-propose` | `spec-kind-implement` |
-| PR **merged** | `claude/spec-kind-implement/` | `spec-kind-implement` | `spec-coverage-remeasure` |
+| **issue opened** | — | label `new-kind` | `spec-kind-propose` |
+| PR **merged** | `claude/spec-kind-propose/` | merged + head-branch prefix (no label filter) | `spec-kind-implement` |
 
-The first group is bootstrapped with **Run now** on `spec-coverage-generate`. Push-based group
-ingestion uses a `push`/`pull_request` trigger filtered to paths under `docs/spec-coverage/groups/`.
+(Branch prefix is the unique trigger; a label filter on the merge trigger is redundant — same
+convention as the fp/drift-fp loops. The `new-kind` issue trigger needs the label since issues have
+no branch.)
 
-**Prompt convention** (same as drift-fp): the routine config holds a one-line bootstrap pointer;
-the authoritative instructions live under `docs/spec-coverage-automation/prompts/<routine>.md`,
-edited via PR.
+**Public-routine prompt convention:** the routine config holds a one-line bootstrap pointer; the
+authoritative instructions live under `prompts/<routine>.md`:
 
 > Execute the instructions in `docs/spec-coverage-automation/prompts/<routine>.md` from the cloned
 > `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every
@@ -189,17 +229,22 @@ a **re-baselined snapshot** (existing fixtures still byte-identical; new artifac
 
 ## Setup checklist
 
-1. Install the Claude GitHub App on `truecourse-ai/truecourse`; enable auto-delete head branches.
-2. Add a first group folder under `docs/spec-coverage/groups/<g>/` and an entry in `groups.yaml`.
-3. Create the routines at claude.ai/code/routines, each with the bootstrap pointer on the Default
-   environment (first step is `pnpm install && pnpm build:dist`; no keys — LLM stages use
-   `--llm-transport agent`):
-   - `spec-coverage-generate` → `generate.md`; trigger **push** on `docs/spec-coverage/groups/**` (+ Run now to bootstrap).
-   - `spec-coverage-measure` → `measure.md`; trigger PR **opened** `claude/spec-cov-store/` + `spec-cov-store`.
-   - `spec-kind-propose` → `propose.md`; trigger **issue opened** label `new-kind`.
-   - `spec-kind-implement` → `implement.md`; trigger PR **merged** `claude/spec-kind-propose/` + `spec-kind-propose`.
-   - `spec-coverage-remeasure` → `remeasure.md`; trigger PR **merged** `claude/spec-kind-implement/` + `spec-kind-implement`.
-4. **Run now** on `spec-coverage-generate` to start the first group.
+**Public repo — create two routines** at claude.ai/code/routines (Default environment; first step
+is `pnpm install && pnpm build:dist`; no keys):
+- `spec-kind-propose` → `propose.md`; trigger **issue opened**, label `new-kind`.
+- `spec-kind-implement` → `implement.md`; trigger PR **merged**, head-branch prefix
+  `claude/spec-kind-propose/` (no label filter needed).
+
+Install the Claude GitHub App on `truecourse-ai/truecourse` and enable auto-delete head branches.
+
+**Local — use the skills** (no routines, nothing committed). On a local truecourse checkout:
+1. `pnpm install && pnpm build:dist` (builds `dist/cli.mjs`, which the skills invoke).
+2. Put your specs in a folder **outside** the repo (any `.md` folder; a whole repo is fine — the
+   scan's relevance filter curates).
+3. `/spec-coverage-generate` → give it the spec path + a group label.
+4. `/spec-coverage-measure` → same path/label; it prints sanitized `new-kind` requests for any gap.
+5. File a request as a `[new-kind]` issue on the public repo → the two routines build the kind.
+6. After it merges: `git pull` + rebuild, then `/spec-coverage-remeasure` to re-score.
 
 ## Resolved decisions
 
