@@ -19,7 +19,15 @@ __pycache__/
 assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
-.claude/
+
+# Ignore .claude/ (local settings + CLI-installed skills) EXCEPT our own
+# committed Claude Code dev skills under .claude/skills/spec-coverage-*.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/spec-coverage-generate/
+!.claude/skills/spec-coverage-measure/
+!.claude/skills/spec-coverage-remeasure/
 
 # .NET build artifacts (fixture projects)
 tests/fixtures/**/bin/
