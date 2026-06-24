@@ -154,7 +154,7 @@ campaigns:
       - docs/docs                # 44 top-level + subdirs (skip versioned_docs/* — versioned snapshots, redundant)
     priority: 7
     status: discovering
-    baseline: { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
+    baseline: { verified_at: "2026-06-24", target_ref: "a7852fb92d0e4ac2bcce1d9a755717ba6cf53ffd", total_drifts: 10, tp: 0, fp: 7, info: 3, fp_rate: 1.00 }
     final:    { verified_at: null, target_ref: null, total_drifts: null, tp: null, fp: null, info: null, fp_rate: null }
     notes: ["Probe 2026-06-06: 121 .md/.mdx under docs/docs/ (current version). Strong behavioral surface in how-to (20), deploy (9), auth (9), graphql (5), tutorial/chapter1 (6). Note: versioned_docs/version-{8.2…8.8} are frozen snapshots of the same docs/docs/ content; doc_scope excludes them to avoid 8x duplication of every claim."]
 
