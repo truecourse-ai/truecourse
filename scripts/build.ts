@@ -61,17 +61,20 @@ fs.mkdirSync(DIST, { recursive: true });
 // files MUST exist before core compiles. The intra-package graph:
 //
 //   shared             ←  no truecourse deps
+//   llm                ←  no truecourse deps
 //   analyzer           ←  shared
-//   spec-consolidator  ←  shared
+//   spec-consolidator  ←  shared + llm
 //   contract-verifier  ←  shared + analyzer
-//   contract-extractor ←  shared + contract-verifier + spec-consolidator
+//   contract-extractor ←  shared + contract-verifier + spec-consolidator + llm
 //   core               ←  all of the above
 //
 // Sequential order below honors that graph. Prior to this, fresh-checkout
 // `pnpm build:dist` failed at core's tsc because the contract/spec
-// packages weren't built yet.
+// packages weren't built yet — and later at spec-consolidator's tsc because
+// its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
+run('pnpm --filter @truecourse/llm build');
 run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
