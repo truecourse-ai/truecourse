@@ -32,18 +32,21 @@ rm -rf <SPEC_PATH>/.truecourse
 rm -rf /tmp/llm-io && mkdir -p /tmp/llm-io/requests /tmp/llm-io/responses
 ```
 
-### 3. Regenerate contracts fresh, in-place (agent transport)
-Same as `/spec-coverage-generate` step 3: `cd <SPEC_PATH>` and run the LLM stages with
-`--llm-transport agent --io /tmp/llm-io`, answering the mailbox yourself (no `claude -p` spawn):
+### 3. Regenerate contracts fresh — hand the user the CLI block (don't run LLM stages in-session)
+Same model as `/spec-coverage-generate`: the LLM stages run via the CLI's default transport
+(parallel `claude -p` workers), not through this session. Print this block with real absolute paths
+for the user to run in their terminal:
 ```bash
 cd <SPEC_PATH>
-node <TC_REPO>/dist/cli.mjs spec scan                   --llm-transport agent --io /tmp/llm-io &
-node <TC_REPO>/dist/cli.mjs spec resolve --all-defaults  --llm-transport agent --io /tmp/llm-io &
-node <TC_REPO>/dist/cli.mjs contracts generate           --llm-transport agent --io /tmp/llm-io &
+node <TC_REPO>/dist/cli.mjs spec scan
+node <TC_REPO>/dist/cli.mjs spec resolve --all-defaults
+node <TC_REPO>/dist/cli.mjs contracts generate
 node <TC_REPO>/dist/cli.mjs contracts validate
 ```
-(See generate.md's "Mailbox protocol" for the request/response file format — it's identical.)
-Record `contracts list` counts; the new contracts are in `<SPEC_PATH>/.truecourse/contracts/`.
+Default transport = `claude -p` workers (no `--llm-transport` flag, no API key). After it completes,
+the refreshed contracts are in `<SPEC_PATH>/.truecourse/contracts/`; note the `contracts list` counts.
+(Only if `claude` isn't on PATH: fall back to `--llm-transport agent --io /tmp/llm-io` and answer
+the mailbox in-session — slow; avoid unless needed.)
 
 ### 4. Blind-reverse + re-score (exactly like measure)
 Run `/spec-coverage-measure`'s steps 2–3 against the regenerated contracts: reconstruct from the
@@ -63,8 +66,9 @@ Compare to the prior run:
   `truecourse-ai/truecourse` by hand. Report `code_derivable_pct` before→after and what's still missing.
 
 ## Hard rules
-- **Local only, no external worker.** LLM work via the agent mailbox in **this session** — never
-  `claude -p` / `--llm-transport cli`, never `npx truecourse`, never an API key.
+- **Local only.** Regeneration's LLM stages run via the **CLI** (`claude -p` workers) in the user's
+  terminal — hand them the block, don't run it in-session; never `npx truecourse`, never an API key.
+  The blind-reverse + scoring (steps 4–5) is this session's own reasoning.
 - Sync + rebuild happen in `<TC_REPO>`; regeneration happens in-place at `<SPEC_PATH>` (only
   `.truecourse/` is written there). Measure bookkeeping lives under `/tmp/spec-cov-measure/<GROUP>/`.
 - **Blind reverse is sacred** — reconstruct from contracts only, before reading the originals.

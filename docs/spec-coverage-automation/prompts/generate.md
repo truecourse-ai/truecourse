@@ -1,87 +1,71 @@
-# spec-coverage-generate — local procedure
+# spec-coverage-generate — local procedure (CLI-driven)
 
-Generate `.tc` contracts from a local folder of `.md` specs so coverage can be measured. This is a
-**local** run: everything happens on your machine, against a folder you point at. The specs and the
-generated contracts never leave the machine — the LLM work is done by **this Claude session itself**
-(agent transport), not by any external service or spawned process.
+Generate `.tc` contracts from a local folder of `.md` specs so coverage can be measured. The heavy
+LLM stages run via the **truecourse CLI's default transport**, which spawns **parallel `claude -p`
+workers** — far faster than this session hand-answering a mailbox. So this skill's job is to **set
+things up and hand you the exact commands to run in your terminal**, then point you at
+`/spec-coverage-measure`.
 
-Invoked by the `/spec-coverage-generate` skill. There is **no GitHub trigger, no branch, no PR, no
-storage branch, no `groups.yaml`** — none of the cloud-routine machinery. Just a local CLI run whose
-LLM prompts this session answers.
+Local run: specs and generated contracts stay on your machine. No GitHub trigger, branch, PR,
+storage branch, or `groups.yaml`.
 
 ## Inputs
 
-- **`<SPEC_PATH>`** — absolute path to the folder of `.md` specs. A clean spec folder **or** a whole
-  repo is fine; `spec scan`'s built-in LLM relevance filter classifies every `.md` and drops the
-  non-specs (READMEs, task logs, setup guides, agent prompts), so you don't pre-curate.
-- **`<GROUP>`** — a short label, used only in your output messages. Nothing is created under it.
+- **`<SPEC_PATH>`** — absolute path to the folder of `.md` specs. A clean folder OR a whole repo is
+  fine; `spec scan`'s relevance filter drops non-specs automatically — do not pre-curate or ask the
+  user which subfolder is "really" the specs.
+- **`<GROUP>`** — short label, output only.
 - **`<TC_REPO>`** — the local `truecourse` checkout (where `dist/cli.mjs` is built).
 
-Collect `<SPEC_PATH>` and `<GROUP>` from the user in one question. **Do not** interrogate them about
-which subfolder is "really" the specs — the relevance filter is the curator. **Do not** read source
-files or probe internals before running; take the inputs and go.
+Collect `<SPEC_PATH>` and `<GROUP>` in one question. Don't probe files first.
 
 ## Steps
 
 ### 1. Build the CLI if needed
 In `<TC_REPO>`: if `dist/cli.mjs` is missing or older than the lockfile, run
-`pnpm install && pnpm build:dist`. Invoke as `node <TC_REPO>/dist/cli.mjs`. Never `npx truecourse`.
+`pnpm install && pnpm build:dist`. (You can do this for the user.)
 
 ### 2. Gitignore the output dir
-`spec scan` writes its store to `<SPEC_PATH>/.truecourse/`. If `<SPEC_PATH>` is inside a git repo and
-`.truecourse/` isn't already ignored there, append a single `.truecourse/` line to that repo's
-`.gitignore`. Say you did it.
+`spec scan` writes to `<SPEC_PATH>/.truecourse/`. If `<SPEC_PATH>` is in a git repo and `.truecourse/`
+isn't ignored there, append `.truecourse/` to that repo's `.gitignore`. Say you did it.
 
-### 3. Run the pipeline in-place, answering the LLM mailbox yourself (agent transport)
+### 3. Hand the user the CLI commands to run (don't run the LLM stages yourself)
 
-The LLM stages use **`--llm-transport agent`**: the CLI writes each prompt to a filesystem mailbox
-and **this session answers it** — no `claude -p` subprocess, no second model, no API key. `cd
-<SPEC_PATH>` and run each LLM stage **in the background**, answering its mailbox until the process
-exits; `contracts validate` is deterministic (foreground).
+The LLM stages are long-running and parallelize across `claude -p` workers — running them through
+this session (agent transport) is slow and serial, so **do NOT** run them here. Instead print the
+exact block, with `<SPEC_PATH>` / `<TC_REPO>` substituted to real absolute paths, for the user to
+paste into a terminal:
 
 ```bash
-mkdir -p /tmp/llm-io/requests /tmp/llm-io/responses
 cd <SPEC_PATH>
-node <TC_REPO>/dist/cli.mjs spec scan                   --llm-transport agent --io /tmp/llm-io &
-#   …answer the mailbox until this exits, then:
-node <TC_REPO>/dist/cli.mjs spec resolve --all-defaults  --llm-transport agent --io /tmp/llm-io &
-node <TC_REPO>/dist/cli.mjs contracts generate           --llm-transport agent --io /tmp/llm-io &
-node <TC_REPO>/dist/cli.mjs contracts validate           # deterministic, foreground
+node <TC_REPO>/dist/cli.mjs spec scan
+node <TC_REPO>/dist/cli.mjs spec resolve --all-defaults
+node <TC_REPO>/dist/cli.mjs contracts generate
+node <TC_REPO>/dist/cli.mjs contracts validate
 ```
 
-**Mailbox protocol** (match exactly):
-- The tool writes each prompt to `/tmp/llm-io/requests/<id>.json` —
-  `{ id, stage, model, fallbackModel, responseFormat, schema, system, user }`.
-- You answer by writing `/tmp/llm-io/responses/<id>.json` (**same filename**) =
-  `{ "text": "<answer>" }`, where `text` is a JSON **string**:
-  - `responseFormat: "json"` (default) → `text` is the schema-satisfying JSON **serialized as a
-    string**, no code fences (e.g. `{"text":"{\"claims\":[…]}"}`). Satisfy the request's `schema`
-    exactly; invent no fields; **never** dump prose into a free-form obligation field to fake
-    coverage — the obligation count is driven to zero downstream. Answer faithfully to the spec text.
-  - `responseFormat: "text"` → free-form.
-  - To fail a request unrecoverably: write `{ "error": "<reason>" }`.
-- The tool polls every 200ms and times out an unanswered request after 10 min. Poll
-  `/tmp/llm-io/requests/` for any `<id>.json` with no `responses/<id>.json` sibling, answer in
-  parallel, and keep going until the background process exits. (`spec resolve --all-defaults` re-runs
-  the scan internally, so most prompts are cache hits — expect few new requests; just stay ready.)
+- These use the **default `cli` transport** — the CLI spawns `claude -p` workers for the LLM stages
+  (uses the user's local Claude auth; no API key, no `--llm-transport` flag needed). `validate` is
+  deterministic.
+- Tell the user this is the long part (minutes to longer on a big corpus) and to run it in their
+  terminal, not in this chat — it's parallel and shouldn't tie up the session.
+- **Do not** copy docs anywhere, build a temp workspace, or write a `.truecourseignore`. `spec scan`
+  runs against the cwd; the relevance filter curates.
 
-**Do not** copy the docs anywhere, **do not** build a temp workspace, **do not** write a
-`.truecourseignore`. `spec scan` runs against the cwd; the relevance filter handles curation.
+(Only if the user explicitly has no `claude` on PATH: fall back to `--llm-transport agent --io
+/tmp/llm-io` on the three LLM stages and answer the mailbox in-session — slow; avoid unless needed.)
 
-If a stage exits non-zero, stop and show the user the error tail — don't proceed with partial
-contracts.
+### 4. Tell the user what to do when it finishes
 
-### 4. Report
-- **Outputs:** `<SPEC_PATH>/.truecourse/contracts/` (and `<SPEC_PATH>/.truecourse/specs/`).
-- **Artifact counts:** `cd <SPEC_PATH> && node <TC_REPO>/dist/cli.mjs contracts list`.
-- **Curation:** how many docs the relevance filter kept vs. skipped (from the `spec scan` output),
-  with a few example skips so the user can sanity-check.
-- Tell the user to run **`/spec-coverage-measure`** with the same path/group to score coverage.
+Once their CLI run completes:
+- Outputs are at `<SPEC_PATH>/.truecourse/contracts/` (+ `specs/`).
+- They can check counts with `cd <SPEC_PATH> && node <TC_REPO>/dist/cli.mjs contracts list`, and the
+  `spec scan` output shows how many docs the relevance filter kept vs. skipped.
+- Then run **`/spec-coverage-measure`** with the same path/group to score coverage.
 
 ## Hard rules
-- **Local only, no external worker.** The LLM work is done by **this session** via the agent mailbox
-  — never spawn `claude -p` (no `--llm-transport cli`), never `npx truecourse`, never an API key.
-- Never push to git, never open a PR, never modify `<TC_REPO>` files. The only thing you write under
-  `<SPEC_PATH>` is the `.truecourse/` the CLI creates plus the one `.gitignore` line in step 2.
-- **Generate only produces contracts.** You do NOT reconstruct or score the spec here — that's
-  `/spec-coverage-measure`. Commit nothing.
+- **Don't run the LLM stages in-session.** Hand the user the CLI block; the CLI's parallel `claude
+  -p` workers do the heavy lifting. (Building the CLI + the gitignore line are fine to do here.)
+- Local only: never push to git, open a PR, or modify `<TC_REPO>` files. The only writes under
+  `<SPEC_PATH>` are the `.truecourse/` the CLI creates + the one `.gitignore` line.
+- Generate only produces contracts — reconstruction/scoring is `/spec-coverage-measure`. Commit nothing.
