@@ -63,8 +63,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // the failure summary below only prints once the whole run is done, so the
   // user sits through the entire scan just to learn their login was the
   // problem. Probe the CLI up front and bail with an actionable message before
-  // discovering a single doc.
-  await preflightClaudeOrExit();
+  // discovering a single doc. The `agent` transport answers every prompt via the
+  // filesystem mailbox (no `claude` subprocess), so the probe is irrelevant there.
+  if (opts.llm !== "agent") await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(SCAN_STEPS);
   // A hard failure inside the pipeline must exit non-zero — otherwise the
   // command reports success on a scan that produced nothing. The `.catch`
@@ -263,7 +264,9 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
 
   p.intro("Spec resolve — accepting all defaults");
   await requireGitRepo(root);
-  await preflightClaudeOrExit();
+  // The `agent` transport answers prompts via the filesystem mailbox (no
+  // `claude` subprocess), so skip the CLI probe there.
+  if (opts.llm !== "agent") await preflightClaudeOrExit();
   const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
     const { additions } = await resolveAllDefaultsInProcess(root, { tracker, llm: opts.llm, io: opts.io });

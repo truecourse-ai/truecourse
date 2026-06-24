@@ -50,7 +50,9 @@ export async function runContractsGenerate(
   // Extraction fans out one `claude` subprocess per spec slice, so a broken or
   // expired CLI would fail every slice and the user would only learn that at the
   // end. Probe once up front and bail with the CLI's own error if it isn't ready.
-  await preflightClaudeOrExit();
+  // The `agent` transport answers prompts via the filesystem mailbox (no `claude`
+  // subprocess), so the probe is irrelevant there.
+  if (options.llm !== "agent") await preflightClaudeOrExit();
 
   // Run the extraction pipeline against the canonical spec.
   const concurrency = defaultConcurrency();
