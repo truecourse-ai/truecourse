@@ -15,7 +15,8 @@
     <!-- MSBuildWorkspace project loading (the `analyze-project` op): opens a real
          .csproj/.sln with its actual references for full-fidelity semantics.
          Microsoft.Build.Locator must register an installed SDK before any MSBuild
-         type is touched — see Program.Main. -->
+         type is touched — see Program.AnalyzeProjectGuarded (lazy + guarded so the
+         runtime-only `analyze` op never needs an SDK). -->
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.8.0" />
     <!-- The C# language-specific workspace service; without it MSBuildWorkspace
          reports "language 'C#' is not supported". -->

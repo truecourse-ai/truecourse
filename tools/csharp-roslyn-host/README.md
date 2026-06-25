@@ -36,6 +36,15 @@ One JSON request per line in, one JSON response per line out. Two analysis modes
 `{"ok":false,"error":"..."}`. In `analyze-project`, an unrestored project (no
 reference set — `System.Object` unresolved) is reported as an error, not analyzed.
 
+## Working directory & SDK resolution
+`ping` and `analyze` need only the .NET **runtime** — they compile file texts with
+the runtime's own reference set and never build the target. So MSBuild/SDK resolution
+is deferred and **guarded**: it runs lazily only for `analyze-project`, and an
+SDK-resolution failure comes back as a normal `{"ok":false,...}` error rather than
+aborting the process. The Node client also spawns the host in a neutral working
+directory (`os.tmpdir()`), so a target repo's `global.json` SDK pin is never on the
+resolver's search path and can't block read-only analysis (issue #658).
+
 ## Adding a semantic rule
 Mirror the tree-sitter recipe, but in C#/Roslyn. Add a file under `Rules/<Domain>/`
 implementing one of:
