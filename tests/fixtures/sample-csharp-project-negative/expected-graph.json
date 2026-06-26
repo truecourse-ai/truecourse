@@ -1927,6 +1927,12 @@
       "layer": "service"
     },
     {
+      "name": "GroupedReportController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "GuardExpressions",
       "service": "UserService",
       "kind": "class",
@@ -2395,6 +2401,12 @@
       "layer": "service"
     },
     {
+      "name": "StatelessScoreCombiner",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "StatementResidue",
       "service": "UserService",
       "kind": "class",
@@ -2402,6 +2414,12 @@
     },
     {
       "name": "StockContext",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StringFormattingHelpers",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2443,6 +2461,12 @@
       "layer": "service"
     },
     {
+      "name": "TimestampFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Token",
       "service": "UserService",
       "kind": "class",
@@ -2468,6 +2492,12 @@
     },
     {
       "name": "TrialExpiryService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UnrelatedReportState",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2978,6 +3008,11 @@
       "method": "GET",
       "path": "/users/{userId}",
       "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "file": "services/UserService/Violations/Architecture/GroupedReportController.cs"
     },
     {
       "method": "GET",

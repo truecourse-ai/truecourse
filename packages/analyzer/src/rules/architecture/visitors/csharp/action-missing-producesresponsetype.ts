@@ -31,6 +31,11 @@ export const csharpActionMissingProducesResponseTypeVisitor: CodeRuleVisitor = {
     const classAttrs = attributeNames(cls)
     if (classAttrs.some((a) => a.startsWith('ProducesResponseType') || a === 'ProducesDefaultResponseType')) return null
 
+    // An action (or whole controller) marked [ApiExplorerSettings(IgnoreApi = true)]
+    // is excluded from the OpenAPI/API description, so [ProducesResponseType] would
+    // never surface anywhere — requiring it is a false positive.
+    if (excludedFromApiExplorer(node) || excludedFromApiExplorer(cls)) return null
+
     const name = node.childForFieldName('name')
     return makeViolation(
       this.ruleKey, name ?? node, filePath, 'low',
@@ -40,6 +45,25 @@ export const csharpActionMissingProducesResponseTypeVisitor: CodeRuleVisitor = {
       'Annotate the action with [ProducesResponseType] for each status code it can return.',
     )
   },
+}
+
+/**
+ * True when a declaration carries <c>[ApiExplorerSettings(IgnoreApi = true)]</c>,
+ * which hides the controller/action from the API description. Other
+ * <c>[ApiExplorerSettings(...)]</c> uses (e.g. <c>GroupName</c>) keep the action
+ * in the description and do not exempt it.
+ */
+function excludedFromApiExplorer(node: SyntaxNode): boolean {
+  for (const child of node.children) {
+    if (child?.type !== 'attribute_list') continue
+    for (const attr of child.namedChildren) {
+      if (attr?.type !== 'attribute') continue
+      const name = (attr.childForFieldName('name')?.text ?? '').split('.').pop()
+      if (name !== 'ApiExplorerSettings') continue
+      if (/\bIgnoreApi\s*=\s*true\b/i.test(attr.text)) return true
+    }
+  }
+  return false
 }
 
 /** Attribute names (last segment) applied directly to a declaration node. */
