@@ -97,12 +97,21 @@ export class LspClient {
       // Pyright logs to stderr — ignore unless debugging
     })
 
-    this.process.on('error', (err) => {
-      for (const pending of this.pendingRequests.values()) {
-        pending.reject(err)
-      }
-      this.pendingRequests.clear()
-    })
+    this.process.on('error', (err) => this.rejectAllPending(err))
+
+    // If the server dies, a write to its now-closed stdin emits an 'error' on the
+    // stream; without this listener that is an unhandled event that crashes the
+    // whole process (the same EPIPE defect class as issue #658). And a server that
+    // exits before answering would leave requests hanging forever, since requests
+    // have no per-call timeout — so reject anything still pending on either signal.
+    this.process.stdin!.on('error', (err) =>
+      this.rejectAllPending(new Error(`${this.config.name} LSP stdin error: ${err.message}`)),
+    )
+    this.process.on('exit', (code, signal) =>
+      this.rejectAllPending(
+        new Error(`${this.config.name} LSP server exited (${signal ?? `code ${code}`}) before responding`),
+      ),
+    )
 
     // Initialize
     const initResult = await this.sendRequest('initialize', {
@@ -339,19 +348,40 @@ export class LspClient {
   // Internal: JSON-RPC transport
   // -------------------------------------------------------------------------
 
+  /** Reject and clear every in-flight request — used when the server dies. */
+  private rejectAllPending(err: Error): void {
+    if (this.pendingRequests.size === 0) return
+    for (const pending of this.pendingRequests.values()) pending.reject(err)
+    this.pendingRequests.clear()
+  }
+
   private sendRequest(method: string, params: any): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = ++this.requestId
       this.pendingRequests.set(id, { resolve, reject })
 
       const msg: LspMessage = { jsonrpc: '2.0', id, method, params }
-      this.process!.stdin!.write(encodeMessage(msg))
+      // A synchronous throw here means the stream is already closed (write after
+      // end); reject this request rather than letting it hang. Async failures
+      // (EPIPE) arrive via the stdin 'error' handler wired in start().
+      try {
+        this.process!.stdin!.write(encodeMessage(msg))
+      } catch (err) {
+        this.pendingRequests.delete(id)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
     })
   }
 
   private sendNotification(method: string, params: any): void {
     const msg: LspMessage = { jsonrpc: '2.0', method, params }
-    this.process!.stdin!.write(encodeMessage(msg))
+    // Fire-and-forget: a closed stream just means the server is gone, which the
+    // stdin 'error' / process 'exit' handlers already surface to pending requests.
+    try {
+      this.process!.stdin!.write(encodeMessage(msg))
+    } catch {
+      /* server already exited — nothing waiting on this notification */
+    }
   }
 
   private onData(chunk: Buffer): void {

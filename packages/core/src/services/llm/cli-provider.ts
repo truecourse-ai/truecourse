@@ -273,9 +273,19 @@ export abstract class BaseCLIProvider implements LLMProvider {
         reject(new Error(`[CLI] Failed to spawn ${this.binaryName}: ${err.message}`));
       });
 
-      // Pipe prompt via stdin
-      child.stdin!.write(prompt);
-      child.stdin!.end();
+      // Pipe prompt via stdin. Guard against the child having already exited
+      // (early auth/crash failure): a write to a closed pipe emits an 'error' on
+      // the stdin stream, which without a listener is an unhandled event that
+      // crashes the whole process instead of surfacing via the 'close' handler
+      // above. The prompt routinely exceeds the OS pipe buffer (~64 KB), so this
+      // is a real path, not a corner case (same defect class as issue #658).
+      child.stdin!.on('error', () => {});
+      try {
+        child.stdin!.write(prompt);
+        child.stdin!.end();
+      } catch {
+        // Child already gone; the 'close'/'error' handlers above reject with the cause.
+      }
     });
   }
 
