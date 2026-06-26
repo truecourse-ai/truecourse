@@ -1717,6 +1717,12 @@
       "layer": "data"
     },
     {
+      "name": "AvatarLink",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "BaseFormatter",
       "service": "UserService",
       "kind": "class",
@@ -2185,6 +2191,12 @@
       "layer": "service"
     },
     {
+      "name": "PaymentReconciler",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PaymentRelay",
       "service": "UserService",
       "kind": "class",
@@ -2407,6 +2419,12 @@
       "layer": "service"
     },
     {
+      "name": "TagReducer",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TenantResolver",
       "service": "UserService",
       "kind": "class",
@@ -2450,6 +2468,12 @@
     },
     {
       "name": "TrialExpiryService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UpdateQuotaCommand",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

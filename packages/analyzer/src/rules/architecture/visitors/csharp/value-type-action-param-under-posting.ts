@@ -24,6 +24,29 @@ function isModelType(classDecl: SyntaxNode): boolean {
   return MODEL_NAME_SUFFIX.test(name)
 }
 
+/**
+ * A type that is constructed in code rather than model-bound from a request:
+ * it declares a parameterized constructor or a static factory method
+ * (`Create`/`From…`). Under-posting can only happen to request/binding models,
+ * which are parameterlessly constructed and populated through their setters;
+ * an output/response DTO built server-side (e.g. via a `Create(...)` factory or
+ * an all-args constructor) is never bound from the wire, so its non-nullable
+ * value types do not silently mask a missing field.
+ */
+function isServerConstructed(classDecl: SyntaxNode, body: SyntaxNode): boolean {
+  for (const member of body.namedChildren) {
+    if (member?.type === 'constructor_declaration') {
+      const params = member.childForFieldName('parameters')
+      if (params && params.namedChildCount > 0) return true
+    }
+    if (member?.type === 'method_declaration' && hasCSharpModifier(member, 'static')) {
+      const mName = member.childForFieldName('name')?.text ?? ''
+      if (mName === 'Create' || mName.startsWith('From')) return true
+    }
+  }
+  return false
+}
+
 function flaggablePropertyType(typeNode: SyntaxNode | null): string | null {
   if (typeNode?.type !== 'predefined_type') return null
   const t = typeNode.text
@@ -38,6 +61,8 @@ export const csharpValueTypeActionParamUnderPostingVisitor: CodeRuleVisitor = {
     if (!isModelType(node)) return null
     const body = node.childForFieldName('body')
     if (!body) return null
+    // Response/output DTOs are constructed server-side, never request-bound.
+    if (isServerConstructed(node, body)) return null
 
     for (const member of body.namedChildren) {
       if (member?.type !== 'property_declaration') continue
