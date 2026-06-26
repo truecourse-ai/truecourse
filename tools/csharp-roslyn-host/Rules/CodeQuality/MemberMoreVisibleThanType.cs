@@ -27,6 +27,14 @@ internal sealed class MemberMoreVisibleThanType : ISemanticRule
             if (type.DeclaredAccessibility is not (Accessibility.Private or Accessibility.Protected
                 or Accessibility.ProtectedOrInternal or Accessibility.ProtectedAndInternal)) continue;
 
+            // If any base type/interface can't be resolved — common when a nested type
+            // implements an external framework interface (e.g. a Razor SDK feature) that
+            // the loose-text host has no reference for — we cannot enumerate the type's
+            // contract surface, so we cannot prove a public member is dead. An implicit
+            // implementation of such an interface MUST be public; flagging it is a false
+            // positive. Be conservative and skip the whole type.
+            if (HasUnresolvedBaseType(typeDecl, model)) continue;
+
             foreach (var memberNode in typeDecl.Members)
             {
                 foreach (var member in DeclaredMembers(memberNode, model))
@@ -39,6 +47,10 @@ internal sealed class MemberMoreVisibleThanType : ISemanticRule
                     if (member.DeclaredAccessibility != Accessibility.Public) continue;
                     // Explicit interface implementations have no access modifier; skip.
                     if (member is IMethodSymbol { ExplicitInterfaceImplementations.Length: > 0 }) continue;
+                    // Implicit interface implementations MUST be public to satisfy the
+                    // contract — the modifier is required, not misleading. (Explicit ones
+                    // are handled above.)
+                    if (ImplementsInterfaceMember(member, type)) continue;
 
                     if (!HasExplicitPublicModifier(memberNode)) continue;
 
@@ -66,6 +78,43 @@ internal sealed class MemberMoreVisibleThanType : ISemanticRule
                 yield return model.GetDeclaredSymbol(node);
                 break;
         }
+    }
+
+    /// <summary>
+    /// True when any entry in the type's base list fails to resolve to a known type
+    /// (a null or error symbol). In loose-text analysis this happens whenever a type
+    /// derives from / implements something defined in an unreferenced assembly, so the
+    /// type's full interface set is unknown and deadness of a public member can't be proven.
+    /// </summary>
+    private static bool HasUnresolvedBaseType(TypeDeclarationSyntax typeDecl, SemanticModel model)
+    {
+        if (typeDecl.BaseList is null) return false;
+        foreach (var baseType in typeDecl.BaseList.Types)
+        {
+            var sym = model.GetTypeInfo(baseType.Type).Type;
+            if (sym is null || sym.TypeKind == TypeKind.Error) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="member"/> is the implicit implementation of an
+    /// interface member on <paramref name="type"/>. Such a member is forced to be
+    /// public by the language, so a `public` modifier there is mandated rather than
+    /// a dead/misleading widening. (Explicit implementations are filtered earlier.)
+    /// </summary>
+    private static bool ImplementsInterfaceMember(ISymbol member, INamedTypeSymbol type)
+    {
+        foreach (var iface in type.AllInterfaces)
+        {
+            foreach (var ifaceMember in iface.GetMembers())
+            {
+                var impl = type.FindImplementationForInterfaceMember(ifaceMember);
+                if (impl is not null && SymbolEqualityComparer.Default.Equals(impl, member))
+                    return true;
+            }
+        }
+        return false;
     }
 
     private static bool HasExplicitPublicModifier(MemberDeclarationSyntax node) =>
