@@ -19,6 +19,9 @@ export type {
   Decision,
   DecisionsFile,
   ManualChain,
+  Relation,
+  RelationType,
+  ManualArea,
   Scope,
   ModuleManifest,
 } from './types.js';
@@ -35,9 +38,77 @@ export {
   ResolutionSchema,
   DecisionSchema,
   DecisionsFileSchema,
+  RelationSchema,
+  RelationTypeSchema,
+  ManualAreaSchema,
   ScopeSchema,
   ModuleManifestSchema,
 } from './types.js';
+
+// --- Curated corpus (spec-scan redesign) -----------------------------------
+
+export {
+  DocRefSchema,
+  AreaTagSchema,
+  CorpusDocSchema,
+  OverlapSchema,
+  AreaSchema,
+  CuratedCorpusSchema,
+  normalizeArea,
+  splitArea,
+  slugifyAxis,
+  isProcessArea,
+  CORE_PRODUCT,
+  PROCESS_PRODUCT,
+  PROCESS_CONCERNS,
+} from './corpus-types.js';
+export type {
+  DocRef,
+  AreaTag,
+  CorpusDoc,
+  Overlap,
+  Area,
+  CuratedCorpus,
+  VocabMap,
+} from './corpus-types.js';
+
+export {
+  corpusFilePath,
+  hasCorpus,
+  readCorpus,
+  writeCorpus,
+} from './corpus-store.js';
+
+export { tagDocs, parseDocStatus, AREA_TAGGER_SYSTEM_PROMPT, buildAreaTaggerUserPrompt } from './area-tagger.js';
+export type { DocAreaTags, AreaTagRunner, AreaTagRunnerInput, AreaTaggerOptions } from './area-tagger.js';
+
+export { groupByArea } from './area-grouper.js';
+export type { GroupResult } from './area-grouper.js';
+
+export {
+  normalizeVocabulary,
+  VOCAB_NORMALIZER_SYSTEM_PROMPT,
+  buildVocabUserPrompt,
+} from './vocab-normalizer.js';
+export type { VocabRunner, VocabRunnerInput, VocabNormalizerOptions } from './vocab-normalizer.js';
+
+export { detectRelations, effectiveRelations } from './relation.js';
+export type { DetectRelationsOptions } from './relation.js';
+
+export {
+  flagOverlaps,
+  OVERLAP_DETECTOR_SYSTEM_PROMPT,
+  buildOverlapUserPrompt,
+} from './overlap-detector.js';
+export type {
+  OverlapRunner,
+  OverlapRunnerInput,
+  OverlapVerdict,
+  OverlapDetectorOptions,
+} from './overlap-detector.js';
+
+export { curate, readCorpusDecisions } from './curate.js';
+export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
 
 export { discoverDocs, classifyDoc } from './discovery.js';
 export type { DocCandidate, DiscoveryOptions } from './discovery.js';
@@ -45,7 +116,7 @@ export type { DocCandidate, DiscoveryOptions } from './discovery.js';
 export { sliceDoc } from './slicer.js';
 export type { Block } from './slicer.js';
 
-export { spawnRunner, defaultConcurrency } from './runner.js';
+export { spawnRunner, defaultConcurrency, defaultBatchSize } from './runner.js';
 export type { BlockRunner, BlockRunResult, SpawnRunnerOptions } from './runner.js';
 
 export {

@@ -309,3 +309,63 @@ export function buildUserPrompt(args: {
     '--- END BLOCK ---',
   ].join('\n');
 }
+
+// ---------------------------------------------------------------------------
+// Batch mode — many blocks per LLM call to amortize the fixed per-call agent
+// overhead. The per-block result is identical to single mode, so cached blocks
+// stay valid: batching changes OUTPUT PACKAGING, not WHAT is extracted, and the
+// cache fingerprint deliberately hashes SYSTEM_PROMPT alone (see cache.ts).
+// ---------------------------------------------------------------------------
+
+/** One element of a batch-mode response: a single block's extraction plus its id. */
+export const LlmBatchEntrySchema = z.object({
+  blockId: z.string().min(1),
+  topics: z.array(TopicSchema),
+  claims: z.array(LlmClaimSchema),
+});
+export type LlmBatchEntry = z.infer<typeof LlmBatchEntrySchema>;
+
+/**
+ * Appended to SYSTEM_PROMPT for batched calls only. Intentionally NOT part of
+ * the cache fingerprint — it overrides output shape, not extraction semantics.
+ */
+export const BATCH_SYSTEM_ADDENDUM = `
+
+# BATCH MODE — overrides the single-object output format above
+You will receive MULTIPLE blocks in one message. Each is wrapped in
+\`=== BLOCK <blockId> ===\` … \`=== END BLOCK <blockId> ===\` markers and has its
+own File / Heading / line header. Apply ALL the rules above to EACH block
+INDEPENDENTLY — never let one block's content influence another's claims.
+
+Return ONLY a JSON array (no prose, no code fences), with EXACTLY ONE element
+per input block, using each block's EXACT given id:
+
+[
+  { "blockId": "<id>", "topics": [...], "claims": [ ... ] }
+]
+
+Each element's "topics"/"claims" obey the same rules and content shapes as the
+single-block format. If a block asserts nothing concrete, emit
+{ "blockId": "<id>", "topics": [], "claims": [] }. Do not omit any block.`;
+
+/** Build the batch user prompt: all blocks, each fenced by its id. */
+export function buildBatchUserPrompt(
+  blocks: Array<{ id: string; filePath: string; headingPath: string[]; startLine: number; text: string }>,
+): string {
+  const sections = blocks.map((b) =>
+    [
+      `=== BLOCK ${b.id} ===`,
+      `File: ${b.filePath}`,
+      `Heading path: ${b.headingPath.join(' / ') || '(root)'}`,
+      `Block starts at line: ${b.startLine}`,
+      '--- BEGIN BLOCK ---',
+      b.text,
+      '--- END BLOCK ---',
+      `=== END BLOCK ${b.id} ===`,
+    ].join('\n'),
+  );
+  return [
+    `Extract claims for the ${blocks.length} blocks below. Return the JSON array described in your instructions — one element per block, in order.`,
+    ...sections,
+  ].join('\n\n');
+}

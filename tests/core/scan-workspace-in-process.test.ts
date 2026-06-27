@@ -103,7 +103,14 @@ describe('scanWorkspaceInProcess', () => {
     expect(claims?.claims.some((c) => c.subject === 'POST /api/orders')).toBe(true);
 
     const decisions = await getWorkspaceDecisions(ORG_A);
-    expect(decisions).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
+    expect(decisions).toEqual({
+      version: 1,
+      decisions: [],
+      manualChains: [],
+      manualIncludes: [],
+      relations: [],
+      manualAreas: [],
+    });
   });
 
   it('runs fully in memory — writes no local files (no temp dir, no cache dir)', async () => {

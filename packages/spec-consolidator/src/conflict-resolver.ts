@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
+import { defaultConcurrency } from './runner.js';
 
 const CACHE_NAME = 'consolidator/conflict-resolutions';
 
@@ -95,7 +96,7 @@ export async function resolveConflicts(
       model: opts.model,
       fallbackModel: opts.fallbackModel,
     });
-  const concurrency = opts.concurrency ?? 2;
+  const concurrency = opts.concurrency ?? defaultConcurrency();
   opts.onStart?.(conflicts.length);
   const tBatchStart = perfNow();
   debugLog(`resolve:batch start total=${conflicts.length} concurrency=${concurrency}`);

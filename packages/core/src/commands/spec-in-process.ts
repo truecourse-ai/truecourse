@@ -20,6 +20,7 @@
 import {
   candidateFingerprint,
   consolidate,
+  curate,
   remerge,
   readDecisions,
   writeDecisions,
@@ -29,6 +30,9 @@ import {
   type DocCandidate,
   type ConsolidateModels,
   type ConsolidateResult,
+  type CurateModels,
+  type CurateOptions,
+  type CurateResult,
   type Decision,
   type DecisionsFile,
   type ManualChain,
@@ -41,15 +45,30 @@ import {
   canonicalFromClaims,
   defaultConcurrency as defaultExtractorConcurrency,
   generateContracts,
+  generateContractsFromCorpus,
   generateContractsInMemory,
   hasCanonicalSpec,
+  hasCorpusSpec,
   spawnRunner as spawnExtractorRunner,
+  type CorpusGenerateModels,
+  type CorpusGenerateResult,
+  type EnumerateRunner,
   type ExtractModels,
+  type GenerateBatchRunner,
   type GenerateResult,
   type SliceRunner,
 } from '@truecourse/contract-extractor';
-import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
-import { agentTransport, getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
+import {
+  agentTransport,
+  getDefaultTransport,
+  getStageUsage,
+  resetStageUsage,
+  setLlmCallSink,
+  stageTokenTotal,
+  type LlmTransport,
+} from '@truecourse/shared/llm';
+import { createLlmCallLogger } from '../lib/llm-call-log.js';
 
 // Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
 function perfNow(): number {
@@ -151,6 +170,19 @@ export const RESOLVE_STEPS = [
 
 export const GENERATE_STEPS = [
   { key: 'il', label: 'Extracting TC contracts' },
+] as const;
+
+// Corpus path (spec-scan redesign): curate docs into corpus.json, then generate
+// contracts area-by-area. Distinct step sets from the claims path's SCAN/GENERATE.
+export const CURATE_STEPS = [
+  { key: 'discover', label: 'Discovering docs' },
+  { key: 'tag', label: 'Tagging doc areas' },
+  { key: 'relate', label: 'Detecting relations' },
+  { key: 'overlap', label: 'Flagging overlaps' },
+] as const;
+
+export const CORPUS_GENERATE_STEPS = [
+  { key: 'generate', label: 'Generating contracts from corpus' },
 ] as const;
 
 export const VERIFY_STEPS = [
@@ -388,6 +420,29 @@ function resolveExtractModels(repoRoot: string): ExtractModels {
   };
 }
 
+/** Per-stage models for the corpus-path curate pipeline. */
+function resolveCurateModels(repoRoot: string): CurateModels {
+  return {
+    relevance: resolveModel('spec.relevance', undefined, repoRoot),
+    areaTag: resolveModel('spec.areaTag', undefined, repoRoot),
+    vocab: resolveModel('spec.vocab', undefined, repoRoot),
+    overlap: resolveModel('spec.overlap', undefined, repoRoot),
+    relation: resolveModel('spec.relation', undefined, repoRoot),
+    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+  };
+}
+
+/** Per-stage models for the corpus-path generate pipeline (adds `enumerate`). */
+function resolveCorpusGenerateModels(repoRoot: string): CorpusGenerateModels {
+  return {
+    enumerate: resolveModel('contract.enumerate', undefined, repoRoot),
+    reconcile: resolveModel('contract.reconcile', undefined, repoRoot),
+    extract: resolveModel('contract.extract', undefined, repoRoot),
+    repair: resolveModel('contract.repair', undefined, repoRoot),
+    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+  };
+}
+
 interface ScanStateStats {
   docsScanned: number;
   blocksAttempted: number;
@@ -439,6 +494,55 @@ function buildScanState(result: ConsolidateResult): ScanState {
 // scanInProcess
 // ---------------------------------------------------------------------------
 
+/** Which LLM stage(s) feed each SCAN_STEPS line, for per-step usage rollup. */
+const STEP_STAGES: Record<string, StageId[]> = {
+  discover: ['spec.relevance', 'spec.chainDetect'],
+  extract: ['spec.claimExtract'],
+  merge: ['spec.chainRecheck'],
+  explain: ['spec.conflictExplain'],
+  resolve: ['spec.conflictResolve'],
+};
+
+function humanTokens(n: number): string {
+  // 999_500+ rounds to 1.0M, so switch units there (avoids "1000.0K").
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+/**
+ * ` · <model> · <tok> tok · $<cost>` suffix for a step. Tokens/cost appear
+ * only when real LLM calls were recorded this run (cache hits and the agent
+ * transport record nothing); the model always shows — resolved id when a call
+ * happened, else the configured alias. Empty string when there's nothing to add.
+ */
+function stepUsageTag(stepKey: string, repoRoot: string): string {
+  const stages = STEP_STAGES[stepKey] ?? [];
+  const usage = getStageUsage();
+  let tok = 0;
+  let cost = 0;
+  const models = new Set<string>();
+  for (const s of stages) {
+    const u = usage.get(s);
+    if (u && u.calls > 0) {
+      tok += stageTokenTotal(u);
+      cost += u.costUsd;
+      if (u.model) models.add(u.model);
+    }
+  }
+  let model = [...models].join(', ');
+  if (!model) {
+    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot)))].join(', ');
+  }
+  const parts: string[] = [];
+  if (model) parts.push(model);
+  if (tok > 0 || cost > 0) {
+    parts.push(`${humanTokens(tok)} tok`);
+    parts.push(`$${cost.toFixed(2)}`);
+  }
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+}
+
 /**
  * Run `consolidate()`, persist the result to
  * `.truecourse/.cache/consolidator/scan-state.json` (and write the
@@ -454,6 +558,18 @@ export async function scanInProcess(
   options: SpecInProcessOptions = {},
 ): Promise<SpecScanInProcessResult> {
   const { tracker } = options;
+  resetStageUsage();
+  // Opt-in per-call LLM logging (TRUECOURSE_LLM_LOG / _DUMP). Null + no overhead
+  // when unset. Installed process-globally for the duration of this consolidate;
+  // torn down in the `finally` below.
+  const llmLog = createLlmCallLogger(repoRoot, 'scan');
+  if (llmLog) setLlmCallSink(llmLog.sink);
+  // A step's final detail line: base text + its live usage tag (model/tokens/$).
+  const doneDetail = (key: string, base?: string): string | undefined => {
+    const tag = stepUsageTag(key, repoRoot);
+    if (base) return `${base}${tag}`;
+    return tag ? tag.replace(/^ · /, '') : undefined;
+  };
   const startedAt = Date.now();
   let docsSeen = 0;
   let blocksTotal = 0;
@@ -462,10 +578,11 @@ export async function scanInProcess(
   let mergeStarted = false;
 
   const renderExtractDetail = (): string => {
-    if (blocksTotal === 0) {
-      return `${docsSeen} docs`;
-    }
-    return `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
+    const base =
+      blocksTotal === 0
+        ? `${docsSeen} docs`
+        : `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
+    return `${base}${stepUsageTag('extract', repoRoot)}`;
   };
 
   let explainTotal = 0;
@@ -501,10 +618,13 @@ export async function scanInProcess(
       onRelevanceProgress: (doneCount, total) => {
         // Numbered progress while "Discovering docs" runs (LLM relevance
         // filter over the discovered candidates).
-        if (total > 0) tracker?.detail('discover', `${doneCount}/${total} docs`);
+        if (total > 0)
+          tracker?.detail('discover', `${doneCount}/${total} docs${stepUsageTag('discover', repoRoot)}`);
       },
       onDocStart: () => {
         if (!extractStarted) {
+          // No detail arg: preserves the relevance-progress detail
+          // ("N/total docs · <usage>") instead of clobbering it with model-only.
           tracker?.done('discover');
           tracker?.start('extract');
           extractStarted = true;
@@ -523,10 +643,12 @@ export async function scanInProcess(
       onMergeStart: () => {
         if (!mergeStarted) {
           if (!extractStarted) {
+            // No detail arg: preserves the relevance-progress detail
+            // ("N/total docs · <usage>") instead of clobbering it with model-only.
             tracker?.done('discover');
             tracker?.start('extract');
           }
-          tracker?.done('extract', `${blocksDone} blocks`);
+          tracker?.done('extract', doneDetail('extract', `${blocksDone} blocks`));
           tracker?.start('merge');
           mergeStarted = true;
         }
@@ -535,32 +657,38 @@ export async function scanInProcess(
         // Merge itself is fast — close it as soon as the explainer
         // takes over (whether it has work or not).
         if (mergeStarted) {
-          tracker?.done('merge');
+          tracker?.done('merge', doneDetail('merge'));
         }
         explainTotal = total;
         explainStarted = true;
         tracker?.start('explain');
-        tracker?.detail('explain', total === 0 ? 'no open conflicts' : `0/${total}`);
+        tracker?.detail(
+          'explain',
+          `${total === 0 ? 'no open conflicts' : `0/${total}`}${stepUsageTag('explain', repoRoot)}`,
+        );
       },
       onExplainDone: () => {
         explainDone++;
-        tracker?.detail('explain', `${explainDone}/${explainTotal}`);
+        tracker?.detail('explain', `${explainDone}/${explainTotal}${stepUsageTag('explain', repoRoot)}`);
       },
       onResolveStart: (total) => {
         if (explainStarted) {
           tracker?.done(
             'explain',
-            explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`,
+            doneDetail('explain', explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`),
           );
         }
         resolveTotal = total;
         resolveStarted = true;
         tracker?.start('resolve');
-        tracker?.detail('resolve', total === 0 ? 'no open conflicts' : `0/${total}`);
+        tracker?.detail(
+          'resolve',
+          `${total === 0 ? 'no open conflicts' : `0/${total}`}${stepUsageTag('resolve', repoRoot)}`,
+        );
       },
       onResolveDone: () => {
         resolveDone++;
-        tracker?.detail('resolve', `${resolveDone}/${resolveTotal}`);
+        tracker?.detail('resolve', `${resolveDone}/${resolveTotal}${stepUsageTag('resolve', repoRoot)}`);
       },
     });
   } catch (e) {
@@ -575,27 +703,34 @@ export async function scanInProcess(
             : 'discover';
     tracker?.error(activeKey, (e as Error).message);
     throw e;
+  } finally {
+    // All LLM work happens inside consolidate(); tear the sink down and emit the
+    // run summary on both success and failure (partial runs are still useful).
+    if (llmLog) {
+      setLlmCallSink(undefined);
+      llmLog.finish(perfNow() - tConsolidateStart);
+    }
   }
 
   // Stamp final detail on discover now that we have the full doc count.
-  tracker?.detail('discover', `${result.extract.docsScanned} docs`);
+  tracker?.detail('discover', `${result.extract.docsScanned} docs${stepUsageTag('discover', repoRoot)}`);
   // Close any steps that didn't get a callback (e.g. empty repo, no docs).
   if (!extractStarted) {
-    tracker?.done('discover', `${result.extract.docsScanned} docs`);
+    tracker?.done('discover', doneDetail('discover', `${result.extract.docsScanned} docs`));
     tracker?.start('extract');
   }
   if (!mergeStarted) {
-    tracker?.done('extract', `${result.extract.claims.length} claims`);
+    tracker?.done('extract', doneDetail('extract', `${result.extract.claims.length} claims`));
     tracker?.start('merge');
   }
   if (!explainStarted) {
-    tracker?.done('merge', `${result.merge.openConflicts.length} open`);
+    tracker?.done('merge', doneDetail('merge', `${result.merge.openConflicts.length} open`));
     tracker?.start('explain');
   }
   if (!resolveStarted) {
     tracker?.done(
       'explain',
-      explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`,
+      doneDetail('explain', explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`),
     );
     tracker?.start('resolve');
   }
@@ -603,7 +738,10 @@ export async function scanInProcess(
   debugLog(`scan: consolidate→tracker.done('resolve') gap=${(tBeforeDone - tConsolidateStart).toFixed(0)}ms (includes consolidate total)`);
   tracker?.done(
     'resolve',
-    `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
+    doneDetail(
+      'resolve',
+      `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
+    ),
   );
 
   const tBuildStart = perfNow();
@@ -1026,6 +1164,8 @@ function appendDefaults(repoRoot: string, conflicts: ConsolidateResult['merge'][
     decisions: [...existing.decisions, ...additions],
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
   writeDecisions(repoRoot, next);
   return additions.length;
@@ -1146,6 +1286,228 @@ export async function generateContractsInProcess(
     tracker?.error('il', (e as Error).message);
     const err = e instanceof Error ? e : new Error(String(e));
     return { il: { kind: 'failed', error: err } };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Corpus path drivers (spec-scan redesign) — the flag-gated counterparts to
+// scanInProcess / generateContractsInProcess. They run ALONGSIDE the claims
+// path so the corpus output can be exercised (the value gate) before the claims
+// path is removed. Shared by the CLI (`spec scan`, `contracts generate`, which
+// now default to the corpus path) and any future dashboard route.
+// ---------------------------------------------------------------------------
+
+export interface SpecCurateInProcessResult {
+  curate: CurateResult;
+}
+
+export interface CurateInProcessOptions {
+  tracker?: StepTracker;
+  source?: TelemetrySource;
+  /** LLM transport mode (`cli` default / `agent` mailbox). `agent` requires `io`. */
+  llm?: 'cli' | 'agent';
+  io?: string;
+  skipGit?: boolean;
+  // --- test seams (mirror curate(); production passes none) -----------------
+  relevanceRunner?: CurateOptions['relevanceRunner'];
+  areaTagRunner?: CurateOptions['areaTagRunner'];
+  overlapRunner?: CurateOptions['overlapRunner'];
+  relationChainRunner?: CurateOptions['relationChainRunner'];
+  disableRelevanceFilter?: boolean;
+  disableAreaTagging?: boolean;
+  disableOverlapDetection?: boolean;
+  disableLlmRelationDetection?: boolean;
+}
+
+/**
+ * Run the curate pipeline (corpus path) and drive a tracker through CURATE_STEPS.
+ * Writes `.truecourse/specs/corpus.json` (curate does). Idempotent: unchanged
+ * docs hit the per-doc tag cache and cost nothing.
+ */
+export async function curateInProcess(
+  repoRoot: string,
+  options: CurateInProcessOptions = {},
+): Promise<SpecCurateInProcessResult> {
+  const { tracker } = options;
+  resetStageUsage();
+  const startedAt = Date.now();
+
+  let tagStarted = false;
+  let overlapStarted = false;
+  const ensureTag = (): void => {
+    if (tagStarted) return;
+    tracker?.done('discover');
+    tracker?.start('tag');
+    tagStarted = true;
+  };
+  // Relations are detected between tagging and overlap with no progress signal of
+  // their own, so the `relate` step is opened+closed at the overlap boundary.
+  const ensureOverlap = (): void => {
+    ensureTag();
+    if (overlapStarted) return;
+    tracker?.done('tag');
+    tracker?.start('relate');
+    tracker?.done('relate');
+    tracker?.start('overlap');
+    overlapStarted = true;
+  };
+
+  tracker?.start('discover');
+  let result: CurateResult;
+  try {
+    result = await curate(repoRoot, {
+      models: resolveCurateModels(repoRoot),
+      transport: resolveTransport(options),
+      skipGit: options.skipGit,
+      relevanceRunner: options.relevanceRunner,
+      areaTagRunner: options.areaTagRunner,
+      overlapRunner: options.overlapRunner,
+      relationChainRunner: options.relationChainRunner,
+      disableRelevanceFilter: options.disableRelevanceFilter,
+      disableAreaTagging: options.disableAreaTagging,
+      disableOverlapDetection: options.disableOverlapDetection,
+      disableLlmRelationDetection: options.disableLlmRelationDetection,
+      onRelevanceProgress: (done, total) => {
+        if (total > 0) tracker?.detail('discover', `${done}/${total} docs`);
+      },
+      onTagProgress: (done, total) => {
+        ensureTag();
+        if (total > 0) tracker?.detail('tag', `${done}/${total} docs`);
+      },
+      onOverlapProgress: (done, total) => {
+        ensureOverlap();
+        tracker?.detail('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs');
+      },
+    });
+  } catch (e) {
+    const active = overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
+    tracker?.error(active, (e as Error).message);
+    throw e;
+  }
+
+  ensureOverlap();
+  tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+
+  if (options.source) {
+    await trackEvent('spec_scan', {
+      source: options.source,
+      docsScannedRange: bucketFileCount(result.stats.docsScanned),
+      claimsRange: bucketFileCount(result.stats.docsKept),
+      openConflicts: result.stats.overlapFlags,
+      durationRange: bucketDuration(Date.now() - startedAt),
+    });
+  }
+
+  return { curate: result };
+}
+
+export interface CorpusGenerateInProcessResult {
+  corpus:
+    | { kind: 'generated'; result: CorpusGenerateResult }
+    | { kind: 'skipped'; reason: string }
+    | { kind: 'failed'; error: Error };
+}
+
+export interface CorpusGenerateInProcessOptions {
+  tracker?: StepTracker;
+  source?: TelemetrySource;
+  llm?: 'cli' | 'agent';
+  io?: string;
+  dryRun?: boolean;
+  disableRepair?: boolean;
+  batchSize?: number;
+  // --- test seams ---
+  enumerateRunner?: EnumerateRunner;
+  generateRunner?: GenerateBatchRunner;
+}
+
+/**
+ * Generate the `.tc` corpus from `corpus.json` (corpus path). Returns
+ * `kind: 'skipped'` when no corpus exists (run `spec scan` first).
+ */
+export async function generateFromCorpusInProcess(
+  repoRoot: string,
+  options: CorpusGenerateInProcessOptions = {},
+): Promise<CorpusGenerateInProcessResult> {
+  const { tracker } = options;
+  const startedAt = Date.now();
+
+  if (!hasCorpusSpec(repoRoot)) {
+    tracker?.start('generate');
+    tracker?.done('generate', 'skipped — no corpus');
+    return { corpus: { kind: 'skipped', reason: 'no corpus' } };
+  }
+
+  tracker?.start('generate');
+  // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG) so wall time can be
+  // attributed per stage (enumerate / extract / repair). Null + zero overhead when unset.
+  resetStageUsage();
+  const llmLog = createLlmCallLogger(repoRoot, 'corpus-generate');
+  if (llmLog) setLlmCallSink(llmLog.sink);
+  const tGenStart = perfNow();
+  let areasTotal = 0;
+  let areasDone = 0;
+  let gaps = 0;
+  const render = (): void =>
+    tracker?.detail('generate', `${areasDone}/${areasTotal} areas${gaps > 0 ? ` · ${gaps} gaps` : ''}`);
+
+  try {
+    const result = await generateContractsFromCorpus({
+      repoRoot,
+      transport: resolveTransport(options),
+      models: resolveCorpusGenerateModels(repoRoot),
+      dryRun: options.dryRun,
+      disableRepair: options.disableRepair,
+      batchSize: options.batchSize,
+      enumerateRunner: options.enumerateRunner,
+      generateRunner: options.generateRunner,
+      onAreasReady: (n) => {
+        areasTotal = n;
+        render();
+      },
+      onAreaDone: (cov) => {
+        areasDone++;
+        gaps += cov.gaps.length;
+        render();
+      },
+    });
+    // A resolver-hard corpus (duplicate/conflicting identities) produced NO
+    // contracts — surface it as a failure to the tracker AND the discriminant, so
+    // a caller keying off `kind` (e.g. a dashboard route) can't read it as success.
+    if (result.resolverHard) {
+      tracker?.error('generate', 'corpus failed to resolve (duplicate or conflicting identities)');
+      return {
+        corpus: {
+          kind: 'failed',
+          error: resolverHardError(result) ?? new Error('Contract corpus failed to resolve.'),
+        },
+      };
+    }
+    // A dry run populates `proposed`, not `written` — report the right count.
+    const produced = options.dryRun ? result.write.proposed.length : result.write.written.length;
+    tracker?.done(
+      'generate',
+      `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}`,
+    );
+    // Stamp the staleness marker only on a real (non-dry) resolved write.
+    if (!options.dryRun) stampGeneratedMarker(repoRoot);
+    if (options.source && !options.dryRun) {
+      await trackEvent('contracts_generate', {
+        source: options.source,
+        artifactsWrittenRange: bucketFileCount(result.write.written.length),
+        validationIssues: result.validationIssues.length,
+        durationRange: bucketDuration(Date.now() - startedAt),
+      });
+    }
+    return { corpus: { kind: 'generated', result } };
+  } catch (e) {
+    tracker?.error('generate', (e as Error).message);
+    return { corpus: { kind: 'failed', error: e instanceof Error ? e : new Error(String(e)) } };
+  } finally {
+    if (llmLog) {
+      setLlmCallSink(undefined);
+      llmLog.finish(perfNow() - tGenStart);
+    }
   }
 }
 
@@ -2008,6 +2370,8 @@ const EMPTY_DECISIONS: DecisionsFile = {
   decisions: [],
   manualChains: [],
   manualIncludes: [],
+  relations: [],
+  manualAreas: [],
 };
 /** Sentinel commit for the per-repo "current" decisions document in EE. */
 const DECISIONS_REF = '_repo';
@@ -2404,6 +2768,8 @@ function applyUpsertDecision(
     decisions: [...filtered, decision],
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 
@@ -2415,6 +2781,8 @@ function applyRevokeDecision(existing: DecisionsFile, conflictId: string): Decis
     decisions: filtered,
     manualChains: existing.manualChains ?? [],
     manualIncludes: existing.manualIncludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 
@@ -2439,6 +2807,8 @@ function applyAddManualChain(
     decisions: existing.decisions,
     manualChains: [...dedup, chain],
     manualIncludes: existing.manualIncludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 
@@ -2453,6 +2823,8 @@ function applyRemoveManualChain(
       (c) => !(c.older === input.older && c.newer === input.newer),
     ),
     manualIncludes: existing.manualIncludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 
@@ -2464,6 +2836,8 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
     decisions: existing.decisions,
     manualChains: existing.manualChains ?? [],
     manualIncludes: [...current, docPath],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 
@@ -2473,6 +2847,8 @@ function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): Dec
     decisions: existing.decisions,
     manualChains: existing.manualChains ?? [],
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
   };
 }
 

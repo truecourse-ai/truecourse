@@ -428,7 +428,14 @@ describe('consolidate — caching', () => {
 
 describe('readDecisions / writeDecisions', () => {
   it('returns empty default when decisions.json is missing', () => {
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
+    expect(readDecisions(repo)).toEqual({
+      version: 1,
+      decisions: [],
+      manualChains: [],
+      manualIncludes: [],
+      relations: [],
+      manualAreas: [],
+    });
   });
 
   it('round-trips a written decisions file', () => {
@@ -442,6 +449,8 @@ describe('readDecisions / writeDecisions', () => {
       }],
       manualChains: [],
       manualIncludes: [],
+      relations: [],
+      manualAreas: [],
     };
     writeDecisions(repo, decisions);
     expect(readDecisions(repo)).toEqual(decisions);
@@ -451,6 +460,13 @@ describe('readDecisions / writeDecisions', () => {
     const decFile = path.join(repo, '.truecourse/specs/decisions.json');
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, '{ corrupt');
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
+    expect(readDecisions(repo)).toEqual({
+      version: 1,
+      decisions: [],
+      manualChains: [],
+      manualIncludes: [],
+      relations: [],
+      manualAreas: [],
+    });
   });
 });

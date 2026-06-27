@@ -44,8 +44,14 @@ Per-repo layout under `<repo>/.truecourse/`:
   - `verifier/LATEST.json` — materialized current verify state + diff baseline (committable, same convention as the analyze `LATEST.json`)
   - `verifier/history.json` — append-only per-run summaries (gitignored)
   - `verifier/diff.json` — optional current-vs-baseline drift diff, overwritten each `verify --diff` run (gitignored)
+- `specs/` — the spec-consolidation store for `truecourse spec scan`:
+  - `specs/corpus.json` — **committable** (LATEST.json convention). The curated doc corpus produced by the corpus-path scan (`curate()`): kept docs + their area tags, docs grouped by area, within-area overlap flags, and auto-detected doc→doc relations. Expensive to regenerate (LLM tagging) and not purely deterministic, so teammates inherit it from git. See `docs/SPEC_SCAN_REDESIGN_PLAN.md`.
+  - `specs/decisions.json` — **committable**, user-authored. Curated resolutions: corpus-path `relations[]` (replace/precedence/keep-both) + `manualAreas[]`, plus the legacy claims-path `decisions[]`/`manualChains[]`; both share `manualIncludes[]` (relevance-filter overrides). One file round-trips through both paths during the migration (Phases 1–3).
+  - `specs/claims.json` — **committable** (legacy claims path; removed in redesign Phase 3). Structured per-claim snapshot the contract-extractor reads.
+- `.cache/consolidator/` — derived, **gitignored**: `scan-state.json` (dashboard mount-time view) and the per-stage KV caches (`area-tags/`, `relevance/`, `overlap/`, `chain-detection/`, legacy `blocks/`). Safe to delete; re-derived on the next scan.
+- `contracts/` (+ `contracts/_inferred/`) — generated `.tc` contract corpus, **gitignored**.
 
-`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline).
+`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline) and `specs/corpus.json` / `specs/claims.json` (the spec snapshots): commit them only after merging to main.
 
 Global layout under `~/.truecourse/`:
 - `config.json` — LLM keys, provider

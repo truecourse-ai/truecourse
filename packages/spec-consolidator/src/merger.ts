@@ -85,7 +85,14 @@ export interface DecidedConflict {
  */
 export function mergeClaims(
   claims: Claim[],
-  decisions: DecisionsFile = { version: 1, decisions: [], manualChains: [], manualIncludes: [] },
+  decisions: DecisionsFile = {
+    version: 1,
+    decisions: [],
+    manualChains: [],
+    manualIncludes: [],
+    relations: [],
+    manualAreas: [],
+  },
 ): MergeResult {
   const groups = new Map<string, Claim[]>();
   for (const c of claims) {

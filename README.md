@@ -237,9 +237,8 @@ Like analyze, `verifier/LATEST.json` is the committable baseline — commit it a
 ## Commands
 
 ```bash
-# Spec consolidation (docs → canonical spec)
-truecourse spec scan                              # Read docs, extract claims, surface conflicts, write claims.json
-truecourse spec resolve --all-defaults            # Accept the engine's recommended pick on every open conflict
+# Spec consolidation (docs → curated corpus)
+truecourse spec scan                              # Curate docs into corpus.json (areas + doc relations + overlap flags)
 truecourse spec status                            # Summary: docs, claims, modules, pending decisions
 
 # Conflict resolution (also available in the dashboard Spec tab)
@@ -254,8 +253,8 @@ truecourse spec docs skipped                      # Docs the LLM relevance filte
 truecourse spec docs include <path>               # Force-include a skipped doc
 truecourse spec docs uninclude <path>
 
-# Contract extraction (canonical spec → .tc artifacts)
-truecourse contracts generate                     # Extract / re-extract TC contract files
+# Contract extraction (curated corpus → .tc artifacts)
+truecourse contracts generate                     # Generate .tc from corpus.json (enumerate → batch → completeness gate)
 truecourse contracts list                         # List artifacts (kind · identity · location)
 truecourse contracts list --inferred / --authored # Only reverse-engineered (_inferred/) / only authored
 truecourse contracts validate                     # Parse + resolve TC files; report unresolved refs
@@ -375,6 +374,22 @@ For a one-off override, prefix the command:
 ```bash
 CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
 ```
+
+### Per-stage model selection
+
+Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for contract generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › the built-in default. `truecourse config llm` prints the effective model + source for every stage.
+
+| stage | env override | default |
+|---|---|---|
+| doc relevance keep/drop | `TRUECOURSE_MODEL_SPEC_RELEVANCE` | haiku |
+| area tagging | `TRUECOURSE_MODEL_SPEC_AREA_TAG` | sonnet |
+| overlap flagging | `TRUECOURSE_MODEL_SPEC_OVERLAP` | haiku |
+| relation detection | `TRUECOURSE_MODEL_SPEC_RELATION` | sonnet |
+| target enumeration | `TRUECOURSE_MODEL_CONTRACT_ENUMERATE` | sonnet |
+| contract generate | `TRUECOURSE_MODEL_CONTRACT_EXTRACT` | opus |
+| contract repair | `TRUECOURSE_MODEL_CONTRACT_REPAIR` | opus |
+
+`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_GENERATE_BATCH` sets how many contracts each generate call targets (default ~10–20). `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis
 

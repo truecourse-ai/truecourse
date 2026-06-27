@@ -193,7 +193,7 @@ const contractsCmd = program
 
 contractsCmd
   .command("generate")
-  .description("Extract .tc artifacts from prose specs (LLM, cached)")
+  .description("Generate .tc artifacts from the curated corpus (corpus.json)")
   .option("--diff", "Dry run — show what would change without writing")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
@@ -224,7 +224,7 @@ const specCmd = program
 
 specCmd
   .command("scan")
-  .description("Walk docs, extract claims, surface conflicts (no writes)")
+  .description("Curate docs into corpus.json (areas + doc relations + overlap flags)")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {

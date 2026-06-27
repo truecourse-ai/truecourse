@@ -32,20 +32,14 @@ import {
   type CanonicalModuleInfo,
   type CanonicalReadResult,
 } from './claims-reader.js';
-import {
-  mergeRankedFragments,
-  type MergeDiagnostic,
-  type MergedArtifact,
-  type RankedFragment,
-} from './merger.js';
-import { propagateCrossCuttingTags } from './tag-propagator.js';
-import { normalizeMergedArtifacts } from './normalizer.js';
-import { repair, type RepairProgress } from './repair.js';
-import { validateMerged, type ValidationIssue } from './validator.js';
+import type { MergeDiagnostic, MergedArtifact, RankedFragment } from './merger.js';
+import type { RepairProgress } from './repair.js';
+import type { ValidationIssue } from './validator.js';
 import { composeContractFiles, writeContracts, type WriteResult } from './writer.js';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
 import type { Manifest, SpecSlice } from './types.js';
+import { assembleArtifacts } from './assemble.js';
 import crypto from 'node:crypto';
 
 /**
@@ -342,81 +336,22 @@ async function extractArtifacts(input: ExtractCoreInput): Promise<ExtractCoreRes
     for (const fragment of result.fragments) ranked.push({ fragment, rank: 0 });
   }
 
-  // ---- Merge + cross-cutting tag propagation + normalize + repair + validate
-  const merged = mergeRankedFragments(ranked);
-  merged.artifacts = propagateCrossCuttingTags(merged.artifacts, slices);
-  // Deterministic post-merge normalization — canonicalize Entity:<x>
-  // cross-references against declared entities, lift parseable
-  // `raw "<expr>"` query-rule predicates into the structured algebra,
-  // and dedup query-rules that bind to the same (entity, predicate set)
-  // under different identities. Runs before repair so the repair LLM
-  // sees the cleaned shape.
-  const normalized = normalizeMergedArtifacts(merged.artifacts);
-  merged.artifacts = normalized.artifacts;
-  if (
-    normalized.stats.entityRefsRewritten +
-      normalized.stats.rawPredicatesLifted +
-      normalized.stats.identitiesAssigned +
-      normalized.stats.artifactsDeduplicated >
-    0
-  ) {
-    merged.diagnostics.push({
-      artifactKey: 'normalize',
-      severity: 'info',
-      message: `normalize: entity-refs=${normalized.stats.entityRefsRewritten}, raw→structured=${normalized.stats.rawPredicatesLifted}, identities=${normalized.stats.identitiesAssigned}, dedup=${normalized.stats.artifactsDeduplicated}`,
-    });
-  }
-  // `repair` runs LLM-targeted re-prompts when an artifact references a
-  // missing cross-ref or violates a per-kind structural rule. Tests
-  // opt out via `disableRepair: true` because repair spawns `claude`
-  // directly and would bypass any injected stub runner.
-  if (slices.length > 0 && !input.disableRepair) {
-    const repaired = await repair(merged.artifacts, slices, {
-      transport: input.transport,
-      model: models.repair,
-      fallbackModel: models.fallback,
-      onProgress: input.onRepairProgress,
-    });
-    merged.artifacts = repaired.artifacts;
-    merged.diagnostics.push(
-      ...repaired.log.map((message) => ({
-        artifactKey: 'repair',
-        severity: 'info' as const,
-        message,
-      })),
-    );
-  }
-  const validation = validateMerged(merged.artifacts);
-
-  // Drop artifacts with HARD validation issues and keep the rest.
-  // A single bad artifact (a tcSource the LLM mangled, an identifier
-  // starting with a digit, etc.) should NOT block every other contract
-  // from being emitted. The dropped artifacts' diagnostics surface to
-  // the user so the spec can be fixed.
-  const badKeys = new Set(
-    validation.issues
-      .filter((i) => i.severity === 'hard' && i.artifactKey !== 'resolver')
-      .map((i) => i.artifactKey),
-  );
-  let artifactsToWrite = merged.artifacts;
-  if (badKeys.size > 0) {
-    artifactsToWrite = merged.artifacts.filter((a) => !badKeys.has(`${a.kind}:${a.identity}`));
-  }
-
-  // Resolver-level hard errors (duplicate identities) are still
-  // blocking — those indicate genuine corpus corruption.
-  const resolverHard = validation.issues.some(
-    (i) => i.severity === 'hard' && i.artifactKey === 'resolver',
-  );
+  // ---- Merge → normalize → repair → validate (shared with the corpus path) ----
+  const assembled = await assembleArtifacts(ranked, slices, {
+    transport: input.transport,
+    models,
+    disableRepair: input.disableRepair,
+    onRepairProgress: input.onRepairProgress,
+  });
 
   return {
     ran: misses.length > 0,
     outcomes,
-    artifactsToWrite,
-    validationIssues: validation.issues,
-    mergeDiagnostics: merged.diagnostics,
+    artifactsToWrite: assembled.artifactsToWrite,
+    validationIssues: assembled.validationIssues,
+    mergeDiagnostics: assembled.mergeDiagnostics,
     manifest,
-    resolverHard,
+    resolverHard: assembled.resolverHard,
   };
 }
 
@@ -508,3 +443,41 @@ export { validateMerged } from './validator.js';
 export type { ValidationIssue, ValidationResult } from './validator.js';
 export { writeContracts } from './writer.js';
 export type { WriteRequest, WriteResult, WriteOptions } from './writer.js';
+
+// --- Shared fragment→artifact tail + corpus generate path (spec-scan redesign) ---
+export { assembleArtifacts } from './assemble.js';
+export type { AssembleOptions, AssembleResult } from './assemble.js';
+export {
+  readCorpusForGenerate,
+  hasCorpusSpec,
+} from './corpus-reader.js';
+export type { AreaDoc, AreaGenInput, CorpusReadOptions } from './corpus-reader.js';
+export {
+  ENUMERATE_SYSTEM_PROMPT,
+  EnumerateResultSchema,
+  TargetSpecSchema,
+  buildEnumerateUserPrompt,
+  buildCorpusGenerateUserPrompt,
+  chunkByHeading,
+  coverageKey,
+} from './corpus-prompt.js';
+export type { TargetSpec, EnumerateResult } from './corpus-prompt.js';
+export {
+  reconcileTargets,
+  RECONCILE_SYSTEM_PROMPT,
+  buildReconcileUserPrompt,
+} from './target-reconciler.js';
+export type { ReconcileRunner, ReconcileRunnerInput, AreaTargets, TargetReconcilerOptions } from './target-reconciler.js';
+export {
+  generateContractsFromCorpus,
+  defaultGenerateBatch,
+} from './corpus-generate.js';
+export type {
+  EnumerateRunner,
+  GenerateBatchRunner,
+  CorpusGenerateModels,
+  CorpusGenerateOptions,
+  CorpusGenerateResult,
+  CoverageGap,
+  AreaCoverage,
+} from './corpus-generate.js';

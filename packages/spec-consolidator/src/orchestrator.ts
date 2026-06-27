@@ -862,7 +862,14 @@ function stitchChainConflicts(
 // Decisions file I/O
 // ---------------------------------------------------------------------------
 
-const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [], manualChains: [], manualIncludes: [] };
+const EMPTY_DECISIONS: DecisionsFile = {
+  version: 1,
+  decisions: [],
+  manualChains: [],
+  manualIncludes: [],
+  relations: [],
+  manualAreas: [],
+};
 
 export function decisionsPath(repoRoot: string): string {
   return path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');
@@ -923,9 +930,26 @@ function wrapBlockRunner(
       }
     }
     if (misses.length === 0) return out;
-    const innerResults = await inner(misses);
+    // Persist each block the moment it settles, not after the whole batch —
+    // so a kill mid-phase keeps everything already extracted. The `written`
+    // set lets the post-loop act as a safety net for any runner that ignores
+    // the per-result hook, without double-writing.
+    const written = new Set<string>();
+    const innerResults = await inner(misses, async (r) => {
+      if (!r.extraction) return;
+      try {
+        await writeBlockCache(repoRoot, r.block.id, r.extraction);
+        written.add(r.block.id);
+      } catch {
+        // Best-effort: leave it unwritten so the post-loop retries after the
+        // batch. A single block's write error must not reject the Promise.all
+        // and discard sibling blocks' (already-paid-for) extractions.
+      }
+    });
     for (const r of innerResults) {
-      if (r.extraction) await writeBlockCache(repoRoot, r.block.id, r.extraction);
+      if (r.extraction && !written.has(r.block.id)) {
+        await writeBlockCache(repoRoot, r.block.id, r.extraction);
+      }
       out.push(r);
     }
     return out;

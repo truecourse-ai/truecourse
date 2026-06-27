@@ -301,6 +301,72 @@ export const ManualChainSchema = z.object({
 });
 export type ManualChain = z.infer<typeof ManualChainSchema>;
 
+// ---------------------------------------------------------------------------
+// Doc-level relations — the corpus redesign's resolution verbs
+// ---------------------------------------------------------------------------
+
+/**
+ * The three doc→doc relations the curated-corpus pipeline resolves an
+ * overlap into (see docs/SPEC_SCAN_REDESIGN_PLAN.md "three doc-level
+ * relations"):
+ *
+ *   - "replace"    hard supersession — `newer` fully replaces `older`;
+ *                  `older` is excluded from generate. Real version chains.
+ *   - "precedence" soft / refine — both docs feed generate, `newer` wins
+ *                  WHERE THEY OVERLAP, `older`'s unique content survives.
+ *   - "keep-both"  peers — both current, combine. This is also the implicit
+ *                  default when no relation is recorded, so it is rarely
+ *                  stored; an explicit entry pins the intent.
+ */
+export const RelationTypeSchema = z.enum(['replace', 'precedence', 'keep-both']);
+export type RelationType = z.infer<typeof RelationTypeSchema>;
+
+/**
+ * A doc→doc relation. Replaces the old `ManualChain` (which generalizes
+ * into a `replace` relation). May be **area-scoped** so one doc can be
+ * authoritative for one area without burying another.
+ */
+export const RelationSchema = z.object({
+  type: RelationTypeSchema,
+  /** Repo-relative path / DocRef of the older / superseded doc. */
+  older: z.string(),
+  /** Repo-relative path / DocRef of the newer / authoritative doc. */
+  newer: z.string(),
+  /**
+   * Optional area id (`product/concern`) the relation is scoped to. Absent
+   * → the relation applies wherever both docs co-occur.
+   */
+  scope: z.string().optional(),
+  /** How the relation surfaced: deterministic filename, an LLM pass, or the user. */
+  detectedFrom: z.enum(['filename', 'llm', 'manual']).optional(),
+  /** Optional human-readable rationale. */
+  note: z.string().optional(),
+});
+export type Relation = z.infer<typeof RelationSchema>;
+
+/**
+ * A user override of a doc's auto-assigned area tags. Lets the user
+ * re-home a mis-tagged doc without re-running the classifier.
+ */
+export const ManualAreaSchema = z.object({
+  /** Repo-relative path / DocRef of the doc. */
+  doc: z.string(),
+  /** Area ids (`product/concern`) the doc should be tagged with instead. */
+  areas: z.array(z.string()),
+});
+export type ManualArea = z.infer<typeof ManualAreaSchema>;
+
+/**
+ * The decisions file. Holds two generations of user intent during the
+ * corpus migration (docs/SPEC_SCAN_REDESIGN_PLAN.md, Phases 1–3):
+ *
+ *   - claims path (legacy): `decisions[]`, `manualChains[]`
+ *   - corpus path (new):    `relations[]`, `manualAreas[]`
+ *
+ * Both share `manualIncludes[]`. The new fields are additive + optional so
+ * one file round-trips through both paths during the transition; Phase 3's
+ * migration shim folds `manualChains` → `relations` and bumps the version.
+ */
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
   decisions: z.array(DecisionSchema),
@@ -312,6 +378,10 @@ export const DecisionsFileSchema = z.object({
    * SKIP verdict. Repo-relative paths.
    */
   manualIncludes: z.array(z.string()).default([]),
+  /** Corpus path: user-authored doc→doc relations (replace/precedence/keep-both). */
+  relations: z.array(RelationSchema).default([]),
+  /** Corpus path: user overrides of a doc's auto-assigned area tags. */
+  manualAreas: z.array(ManualAreaSchema).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;
 

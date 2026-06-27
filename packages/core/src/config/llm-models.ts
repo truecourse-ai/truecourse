@@ -28,12 +28,20 @@ import fs from 'node:fs';
 import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
+  // --- claims path (legacy; removed in redesign Phase 3) ---
   | 'spec.chainDetect'
   | 'spec.claimExtract'
   | 'spec.chainRecheck'
   | 'spec.conflictExplain'
   | 'spec.conflictResolve'
+  // --- shared / corpus path (spec-scan redesign) ---
   | 'spec.relevance'
+  | 'spec.areaTag'
+  | 'spec.vocab'
+  | 'spec.overlap'
+  | 'spec.relation'
+  | 'contract.enumerate'
+  | 'contract.reconcile'
   | 'contract.extract'
   | 'contract.repair'
   | 'rules.violationGen';
@@ -50,6 +58,14 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'spec.conflictExplain': 'haiku',
   'spec.conflictResolve': 'opus',
   'spec.relevance': 'haiku',
+  // Area tagging is load-bearing (wrong tags → wrong generate inputs) and Haiku
+  // under-tagged terse docs like ADRs; Sonnet is worth the cost here.
+  'spec.areaTag': 'sonnet',
+  'spec.vocab': 'haiku',
+  'spec.overlap': 'haiku',
+  'spec.relation': 'sonnet',
+  'contract.enumerate': 'sonnet',
+  'contract.reconcile': 'sonnet',
   'contract.extract': 'opus',
   'contract.repair': 'opus',
   'rules.violationGen': 'opus',

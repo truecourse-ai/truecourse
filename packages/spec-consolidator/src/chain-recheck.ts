@@ -22,11 +22,13 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
+import pLimit from 'p-limit';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict, DocKind } from './types.js';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
+import { defaultConcurrency } from './runner.js';
 
 const CACHE_NAME = 'consolidator/chain-recheck';
 
@@ -204,28 +206,29 @@ export async function runChainRecheck(
       model: opts.model,
       fallbackModel: opts.fallbackModel,
     });
-  const confirmedChains: VersionChain[] = [];
+  // Concurrent over pairs, capped by the shared mechanism (TRUECOURSE_MAX_CONCURRENCY).
+  const limit = pLimit(opts.concurrency ?? defaultConcurrency());
+  const settled = await Promise.all(
+    pairs.map((pair) =>
+      limit(async (): Promise<VersionChain | null> => {
+        // In-memory body when present (connector/RAM source); else read the file.
+        const olderContent = pair.older.content ?? readSafe(pair.older.absPath);
+        const newerContent = pair.newer.content ?? readSafe(pair.newer.absPath);
+        if (olderContent === null || newerContent === null) return null;
 
-  for (const pair of pairs) {
-    // In-memory body when present (connector/RAM source); else read the file.
-    const olderContent = pair.older.content ?? readSafe(pair.older.absPath);
-    const newerContent = pair.newer.content ?? readSafe(pair.newer.absPath);
-    if (olderContent === null || newerContent === null) continue;
+        const cacheKey = computePairCacheKey(pair, olderContent, newerContent);
+        const cached = await readPairCache(repoRoot, cacheKey);
+        const result =
+          cached ?? (await safeRun(runner, { pair, olderContent, newerContent }));
+        if (!cached) await writePairCache(repoRoot, cacheKey, result);
 
-    const cacheKey = computePairCacheKey(pair, olderContent, newerContent);
-    const cached = await readPairCache(repoRoot, cacheKey);
-    const result =
-      cached ?? (await safeRun(runner, { pair, olderContent, newerContent }));
-    if (!cached) await writePairCache(repoRoot, cacheKey, result);
-
-    if (!result.superseded || !result.olderPath || !result.newerPath) continue;
-    if (result.olderPath === result.newerPath) continue;
-
-    confirmedChains.push(
-      makeChain(pair.older, pair.newer, result.olderPath, result.newerPath),
-    );
-  }
-  return confirmedChains;
+        if (!result.superseded || !result.olderPath || !result.newerPath) return null;
+        if (result.olderPath === result.newerPath) return null;
+        return makeChain(pair.older, pair.newer, result.olderPath, result.newerPath);
+      }),
+    ),
+  );
+  return settled.filter((c): c is VersionChain => c !== null);
 }
 
 function readSafe(absPath: string): string | null {

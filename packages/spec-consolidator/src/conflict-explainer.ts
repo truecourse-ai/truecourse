@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
 import type { Conflict } from './types.js';
+import { defaultConcurrency } from './runner.js';
 
 const CACHE_NAME = 'consolidator/conflict-explanations';
 
@@ -79,7 +80,7 @@ export async function explainConflicts(
       model: opts.model,
       fallbackModel: opts.fallbackModel,
     });
-  const concurrency = opts.concurrency ?? 4;
+  const concurrency = opts.concurrency ?? defaultConcurrency();
   opts.onStart?.(conflicts.length);
 
   // Hand-rolled limit (no need for an extra dep just for this).

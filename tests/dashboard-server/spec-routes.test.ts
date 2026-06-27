@@ -240,7 +240,14 @@ describe('GET /api/repos/:id/spec/decisions', () => {
     const res = await request(app)
       .get(`/api/repos/${fixture.project.slug}/spec/decisions`)
       .expect(200);
-    expect(res.body).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
+    expect(res.body).toEqual({
+      version: 1,
+      decisions: [],
+      manualChains: [],
+      manualIncludes: [],
+      relations: [],
+      manualAreas: [],
+    });
   });
 });
 
