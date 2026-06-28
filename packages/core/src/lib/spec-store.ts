@@ -30,6 +30,9 @@ export type { RepoRef, WorkspaceRef } from './contract-store.js';
  */
 export type SpecArtifact =
   | 'claims'
+  // The curated doc corpus (areas + relations + overlaps) — the corpus-path
+  // analog of `claims`. File impl reads/writes `specs/corpus.json`.
+  | 'corpus'
   | 'decisions'
   | 'scanState'
   | 'verifyState'

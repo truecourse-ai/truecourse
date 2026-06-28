@@ -31,6 +31,9 @@ import path from 'node:path';
 import {
   claimsFilePath,
   type ClaimsFile,
+  type CuratedCorpus,
+  type Relation,
+  type RelationType,
   type Resolution,
 } from '@truecourse/spec-consolidator';
 import type { AuthUser } from '@truecourse/shared';
@@ -49,11 +52,16 @@ import { isGitRepo, getGit, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/
 import {
   addManualChain,
   addManualInclude,
+  addRelation,
+  curateInProcess,
+  CURATE_STEPS,
   generatedMarkerPath,
+  getCorpus,
   getDecisions,
   getScanState,
   removeManualChain,
   removeManualInclude,
+  removeRelation,
   resolveAllDefaultsInProcess,
   resolveAllDefaultsRemerge,
   refreshRepoCanonicalSpec,
@@ -157,6 +165,144 @@ router.get(
           detail: (e as Error).message,
         });
       }
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Corpus path (spec-scan redesign) — corpus.json + doc→doc relations.
+//
+//   GET    /spec/corpus            read corpus.json (+ user relations). 404 if no scan.
+//   GET    /spec/corpus/scan       run curate(), persist corpus.json, return it (socket).
+//   GET    /spec/doc?ref=...       a doc's markdown (for the prose Spec tab).
+//   POST   /spec/relations         add a user relation; follow up with /spec/corpus/scan.
+//   DELETE /spec/relations         remove a user relation.
+// ---------------------------------------------------------------------------
+
+const RELATION_TYPES: RelationType[] = ['replace', 'precedence', 'keep-both'];
+
+async function corpusPayload(repoPath: string): Promise<{ corpus: CuratedCorpus | null; userRelations: Relation[] }> {
+  const corpus = await getCorpus(repoPath);
+  const decisions = await getDecisions(repoPath);
+  return { corpus, userRelations: decisions.relations ?? [] };
+}
+
+router.get(
+  '/:id/spec/corpus',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const payload = await corpusPayload(repo.path);
+      if (!payload.corpus) {
+        res.status(404).json({ error: 'No corpus has been scanned yet.' });
+        return;
+      }
+      res.json(payload);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/spec/corpus/scan',
+  async (req: Request, res: Response, next: NextFunction) => {
+    let repoIdForCleanup: string | null = null;
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      repoIdForCleanup = req.params.id as string;
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const tracker = createSocketSpecTracker(repoIdForCleanup, CURATE_STEPS.map((s) => ({ ...s })));
+      await curateInProcess(repo.path, { tracker, source: 'dashboard' });
+      emitSpecComplete(repoIdForCleanup, 'scan');
+      res.json(await corpusPayload(repo.path));
+    } catch (e) {
+      if (repoIdForCleanup) {
+        emitSpecProgress(repoIdForCleanup, { step: 'error', percent: 100, detail: (e as Error).message });
+      }
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/spec/doc',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const ref = String(req.query.ref ?? '');
+      if (!ref) {
+        res.status(400).json({ error: 'Missing ?ref=<doc path>.' });
+        return;
+      }
+      // Confine to the repo tree — no traversal outside it.
+      const repoAbs = path.resolve(repo.path);
+      const full = path.resolve(repoAbs, ref);
+      if (full !== repoAbs && !full.startsWith(repoAbs + path.sep)) {
+        res.status(400).json({ error: 'ref escapes the repository.' });
+        return;
+      }
+      if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+        res.status(404).json({ error: `Doc not found: ${ref}` });
+        return;
+      }
+      res.json({ ref, content: fs.readFileSync(full, 'utf-8') });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/:id/spec/relations',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { type?: RelationType; older?: string; newer?: string; scope?: string; note?: string };
+      if (!body.type || !body.older || !body.newer) {
+        res.status(400).json({ error: 'Missing type, older, or newer.' });
+        return;
+      }
+      if (!RELATION_TYPES.includes(body.type)) {
+        res.status(400).json({ error: `type must be one of ${RELATION_TYPES.join(', ')}.` });
+        return;
+      }
+      if (body.older === body.newer) {
+        res.status(400).json({ error: 'older and newer must differ.' });
+        return;
+      }
+      const decisions = await addRelation(repo.path, {
+        type: body.type,
+        older: body.older,
+        newer: body.newer,
+        scope: body.scope,
+        detectedFrom: 'manual',
+        note: body.note,
+      });
+      res.json({ relations: decisions.relations ?? [] });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/spec/relations',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { older?: string; newer?: string; scope?: string };
+      if (!body.older || !body.newer) {
+        res.status(400).json({ error: 'Missing older or newer.' });
+        return;
+      }
+      const decisions = await removeRelation(repo.path, { older: body.older, newer: body.newer, scope: body.scope });
+      res.json({ relations: decisions.relations ?? [] });
+    } catch (e) {
       next(e);
     }
   },

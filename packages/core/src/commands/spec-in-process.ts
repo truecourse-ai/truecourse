@@ -30,6 +30,7 @@ import {
   type DocCandidate,
   type ConsolidateModels,
   type ConsolidateResult,
+  type CuratedCorpus,
   type CurateModels,
   type CurateOptions,
   type CurateResult,
@@ -2400,6 +2401,16 @@ async function storeDecisions(repoKey: string, next: DecisionsFile): Promise<voi
 /** The repo's current decisions (dashboard read) — file in OSS, Postgres in EE. */
 export function getDecisions(repoKey: string): Promise<DecisionsFile> {
   return loadDecisions(repoKey);
+}
+
+/**
+ * The repo's current curated corpus (dashboard read), or null when no scan has
+ * run. Corpus-path analog of {@link getScanState}; no remerge needed since user
+ * relations are folded into corpus.json at curate time. OSS reads
+ * `specs/corpus.json`; EE reads the store (Phase 6).
+ */
+export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
+  return loadLatestSpec<CuratedCorpus>(repoKey, 'corpus');
 }
 
 /** The repo's current scan-state (dashboard read), or null. Fails closed on a
