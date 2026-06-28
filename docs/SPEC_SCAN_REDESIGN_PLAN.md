@@ -1,6 +1,6 @@
 # Spec Scan Redesign — Curated Doc Corpus, Not Extracted Claims
 
-STATUS: IN PROGRESS — Phase 0/1/2 engines DONE; the CLI (`spec scan`, `contracts generate`) now defaults to the corpus path (no flag). The claims ENGINE still backs the dashboard, EE, and legacy `spec conflicts/resolve/status` subcommands. Remaining: run the manual value-gate eval, then Phase 3 (delete claims engine) / Phase 4 (corpus conflict→relation CLI) / Phase 5 (dashboard) / Phase 6 (EE).
+STATUS: IN PROGRESS — Phase 0/1/2 engines DONE; the CLI (`spec scan`, `contracts generate`) now defaults to the corpus path (no flag). The claims ENGINE still backs the dashboard, EE, and legacy `spec conflicts/resolve/status` subcommands. **Value gate PASSED (2026-06-27)** — corpus-vs-claims head-to-head on two independent fixtures (Slate `sample-scheduling-saas`, js-il `sample-js-project-il`): the corpus path never loses spine coverage and is consistently more correct/complete (Slate: 9 endpoints vs claims' 0, + auth/validation rules claims dumped to `unenforceable`; js-il: same 9 real endpoints, and corpus correctly EXCLUDED 3 out-of-scope endpoints the claims path wrongly emitted). **Phase 4 (CLI) DONE (2026-06-27)** — the CLI is fully off the claims engine (corpus-native `spec conflicts`/`chains`/`status`/`docs`). Remaining: Phase 3 (delete claims engine) is still **gated by** Phase 5 (dashboard verify drift-origin resolution off `claims.json`) + Phase 6 (EE), which still call `scanInProcess`/`generateContractsInProcess`. After 5+6, the engine can be deleted.
 
 ## Implementation notes (as built)
 
@@ -391,16 +391,25 @@ bounded by the enumeration step's recall.
   before Phase 3):** prove contracts don't regress on the verifiable spine (endpoints/effects/auth/
   entities) AND that the gate reaches ~full coverage vs the enumerated checklist — a manual LLM run
   on the target repo, plus the Phase-4 CLI wiring to make it runnable.
-- **Phase 3 — remove claims path** STATUS: PLANNED. Delete `extractor`/`merger`/`conflict-*`/
-  `claims-store`/block cache + the claim schemas; migration shim maps old
-  `manualChains`/`manualIncludes` → relations/`manualIncludes`; old claims/scan-state/blocks are
-  derived → safe to delete.
-- **Phase 4 — CLI** STATUS: PARTIAL. DONE: `spec scan` (curation counts) and `contracts generate`
-  (area/target coverage + gaps) now default to the corpus path, no flag (see "CLI flipped to corpus"
-  above). REMAINING: the corpus conflict surface — `spec conflicts list` (flagged areas) /
-  `show <area>` (side-by-side **prose** excerpts) / `resolve <area> --replace|--precedence|--keep-both`,
-  repurpose `spec chains` as the relation surface, and remove the legacy claims subcommands
-  (`pick`/`custom`/`resolve --all-defaults`) once Phase 3 retires the claims engine.
+- **Phase 3 — remove claims path** STATUS: PLANNED, BLOCKED on consumer migration. Delete
+  `extractor`/`merger`/`conflict-*`/`claims-store`/block cache + the claim schemas; migration shim
+  maps old `manualChains`/`manualIncludes` → relations/`manualIncludes`; old claims/scan-state/blocks
+  are derived → safe to delete. **Blocker:** the engine is reached via `scanInProcess`/
+  `generateContractsInProcess`, still consumed by the dashboard (verify drift-origin resolution
+  against `claims.json`), EE (knowledge sync / job worker / github-app / ee-db), and the legacy CLI
+  subcommands (`spec docs`/`chains`/`conflicts`). Those (Phase 4/5/6) must move OFF the engine first,
+  so Phase 3 deletion lands LAST. Value gate confirming the corpus output is safe to switch to is
+  DONE (see STATUS).
+- **Phase 4 — CLI** STATUS: DONE (2026-06-27). `spec scan` + `contracts generate` default to corpus.
+  The conflict/relation surface is now corpus-native and the CLI no longer touches the claims engine:
+  `spec conflicts list` (flagged within-area overlaps awaiting a relation) / `show <area>` (prose
+  excerpts of the overlapping docs) / `resolve <area> --older P --newer P --replace|--precedence|
+  --keep-both` (records a scoped relation + re-scans); `spec chains list/add/remove` repurposed as the
+  doc→doc relation surface (`--type`/`--scope`); `spec status` is a pure corpus.json read; `spec docs`
+  re-points to `curateInProcess`. REMOVED: `spec resolve --all-defaults` + `spec conflicts pick/custom/
+  revoke` (claims auto-resolve has no corpus analog). New core write verbs `addRelation`/`removeRelation`
+  + `curateInProcess({skipCorpusWrite})`. Tests: `tests/core/relation-helpers.test.ts`,
+  `tests/cli/spec-corpus.test.ts`. CLI imports only `readCorpus`/`readCorpusDecisions` + corpus mutators.
 - **Phase 5 — UI** STATUS: PLANNED. Area-grouped **prose** Spec tab (markdown + relation
   badges); passage-based conflict UX; corpus server routes; remove claim/candidate types + JSON
   rendering.

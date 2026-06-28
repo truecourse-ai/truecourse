@@ -37,6 +37,8 @@ import {
   type DecisionsFile,
   type ManualChain,
   type MergeResult,
+  type Relation,
+  type RelationType,
   type Resolution,
   type ScanState,
   type VersionChain,
@@ -1308,6 +1310,8 @@ export interface CurateInProcessOptions {
   llm?: 'cli' | 'agent';
   io?: string;
   skipGit?: boolean;
+  /** Compute the corpus without overwriting corpus.json — for read-only callers. */
+  skipCorpusWrite?: boolean;
   // --- test seams (mirror curate(); production passes none) -----------------
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
@@ -1359,6 +1363,7 @@ export async function curateInProcess(
       models: resolveCurateModels(repoRoot),
       transport: resolveTransport(options),
       skipGit: options.skipGit,
+      skipCorpusWrite: options.skipCorpusWrite,
       relevanceRunner: options.relevanceRunner,
       areaTagRunner: options.areaTagRunner,
       overlapRunner: options.overlapRunner,
@@ -2828,6 +2833,48 @@ function applyRemoveManualChain(
   };
 }
 
+/** Dedup key for a user relation — a pair is unique per scope (area). */
+const relationKey = (r: { older: string; newer: string; scope?: string }): string =>
+  `${r.older} ${r.newer} ${r.scope ?? ''}`;
+
+function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
+  if (input.older === input.newer) {
+    throw new Error('addRelation: older and newer must be different docs');
+  }
+  const key = relationKey(input);
+  const dedup = (existing.relations ?? []).filter((r) => relationKey(r) !== key);
+  const relation: Relation = { ...input, detectedFrom: input.detectedFrom ?? 'manual' };
+  return {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: existing.manualIncludes ?? [],
+    relations: [...dedup, relation],
+    manualAreas: existing.manualAreas ?? [],
+  };
+}
+
+function applyRemoveRelation(
+  existing: DecisionsFile,
+  input: { older: string; newer: string; scope?: string },
+): DecisionsFile {
+  // Scope omitted → drop every user relation for the pair (either order).
+  const matches = (r: Relation): boolean => {
+    const samePair =
+      (r.older === input.older && r.newer === input.newer) ||
+      (r.older === input.newer && r.newer === input.older);
+    return samePair && (input.scope === undefined || r.scope === input.scope);
+  };
+  return {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: existing.manualIncludes ?? [],
+    relations: (existing.relations ?? []).filter((r) => !matches(r)),
+    manualAreas: existing.manualAreas ?? [],
+  };
+}
+
 function applyAddManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   const current = existing.manualIncludes ?? [];
   if (current.includes(docPath)) return existing;
@@ -2904,6 +2951,31 @@ export async function removeManualChain(
   input: { older: string; newer: string },
 ): Promise<DecisionsFile> {
   const next = applyRemoveManualChain(await loadDecisions(repoRoot), input);
+  await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Add (or replace) a user-authored doc→doc relation — the corpus-path verb that
+ * resolves a flagged overlap (replace / precedence / keep-both). When a relation
+ * for the same (older, newer, scope) already exists it's replaced. Self-pairs are
+ * rejected. Re-run `spec scan` (curate) to apply.
+ */
+export async function addRelation(repoRoot: string, input: Relation): Promise<DecisionsFile> {
+  const next = applyAddRelation(await loadDecisions(repoRoot), input);
+  await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Remove a user-authored relation by (older, newer) — either order, optionally
+ * scoped to one area. Idempotent.
+ */
+export async function removeRelation(
+  repoRoot: string,
+  input: { older: string; newer: string; scope?: string },
+): Promise<DecisionsFile> {
+  const next = applyRemoveRelation(await loadDecisions(repoRoot), input);
   await storeDecisions(repoRoot, next);
   return next;
 }

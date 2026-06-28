@@ -27,7 +27,6 @@ import {
 } from "./commands/contracts.js";
 import {
   runSpecScan,
-  runSpecResolve,
   runSpecStatus,
   runVerify,
   runInfer,
@@ -35,9 +34,7 @@ import {
 import {
   runSpecConflictsList,
   runSpecConflictsShow,
-  runSpecConflictsPick,
-  runSpecConflictsCustom,
-  runSpecConflictsRevoke,
+  runSpecConflictsResolve,
 } from "./commands/spec-conflicts.js";
 import {
   runSpecChainsList,
@@ -232,107 +229,96 @@ specCmd
   });
 
 specCmd
-  .command("resolve")
-  .description("Resolve open conflicts (interactive runs in the dashboard)")
-  .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
-  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
-  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
-  .action(async (options) => {
-    await runSpecResolve({ allDefaults: !!options.allDefaults, llm: options.llmTransport, io: options.io });
-  });
-
-specCmd
   .command("status")
-  .description("Summary of docs, claims, modules, and pending decisions")
+  .description("Summary of docs, areas, relations, and open vs resolved overlaps")
   .action(async () => {
     await runSpecStatus();
   });
 
-// -- Conflicts ---------------------------------------------------------------
+// -- Conflicts (within-area overlaps → relations) ---------------------------
 const conflictsCmd = specCmd
   .command("conflicts")
-  .description("Inspect and resolve open / decided conflicts (agent-friendly)");
+  .description("Inspect and resolve flagged within-area doc overlaps (agent-friendly)");
 
 conflictsCmd
   .command("list")
-  .description("List conflicts (open by default; --decided or --all to widen)")
-  .option("--decided", "Show decided conflicts instead of open")
-  .option("--all", "Show both open and decided conflicts")
-  .action(async (opts) => {
-    await runSpecConflictsList({ decided: !!opts.decided, all: !!opts.all });
+  .description("List flagged overlaps still awaiting a relation")
+  .action(async () => {
+    await runSpecConflictsList();
   });
 
 conflictsCmd
-  .command("show <id>")
-  .description("Show full detail for one conflict")
-  .option(
-    "--diff",
-    "Include precomputed field-level diffs (paths + values) between candidates",
-  )
-  .action(async (id, opts) => {
-    await runSpecConflictsShow(id, { diff: !!opts.diff });
+  .command("show <area>")
+  .description("Show an area's overlapping docs with prose excerpts")
+  .action(async (area) => {
+    await runSpecConflictsShow(area);
   });
 
 conflictsCmd
-  .command("pick <id> <candidateIndex>")
-  .description("Resolve a conflict by picking one of its candidates")
-  .option("--note <text>", "Optional human-readable rationale")
-  .action(async (id, idx, opts) => {
-    await runSpecConflictsPick(id, parseInt(idx, 10), {
-      note: opts.note,
-    });
+  .command("resolve <area>")
+  .description("Resolve an overlap by recording a doc→doc relation")
+  .requiredOption("--older <path>", "Repo-relative path of the older / superseded doc")
+  .requiredOption("--newer <path>", "Repo-relative path of the newer / authoritative doc")
+  .option("--replace", "`newer` fully supersedes `older` (excluded from generate)")
+  .option("--precedence", "Both feed generate; `newer` wins where they overlap")
+  .option("--keep-both", "Both are current peers (combine)")
+  .option("--note <text>", "Optional rationale")
+  .action(async (area, opts) => {
+    const type = opts.replace
+      ? "replace"
+      : opts.precedence
+        ? "precedence"
+        : opts.keepBoth
+          ? "keep-both"
+          : undefined;
+    if (!type) {
+      console.error("Pass one of --replace | --precedence | --keep-both");
+      process.exit(1);
+    }
+    await runSpecConflictsResolve(area, { older: opts.older, newer: opts.newer, type, note: opts.note });
   });
 
-conflictsCmd
-  .command("custom <id>")
-  .description("Resolve a conflict with a free-text custom answer")
-  .requiredOption("--text <text>", "The authoritative content for this subject")
-  .action(async (id, opts) => {
-    await runSpecConflictsCustom(id, opts.text);
-  });
-
-conflictsCmd
-  .command("revoke <id>")
-  .description("Remove a previously-saved decision (the conflict re-opens)")
-  .action(async (id) => {
-    await runSpecConflictsRevoke(id);
-  });
-
-// -- Chains (manual supersession) -------------------------------------------
+// -- Chains (doc→doc relations) ---------------------------------------------
 const chainsCmd = specCmd
   .command("chains")
-  .description("Manage manual version chains (supersession overrides)");
+  .description("Manage doc→doc relations (supersession / precedence overrides)");
 
 chainsCmd
   .command("list")
-  .description("List manual chains")
+  .description("List effective relations (auto-detected + user-authored)")
   .action(async () => {
     await runSpecChainsList();
   });
 
 chainsCmd
   .command("add")
-  .description("Mark `older` as superseded by `newer`")
+  .description("Record a relation between two docs")
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .option("--type <type>", "replace (default) | precedence | keep-both", "replace")
+  .option("--scope <area>", "Confine the relation to one area id (product/concern)")
   .option("--note <text>", "Optional rationale")
   .action(async (opts) => {
     await runSpecChainsAdd({
       older: opts.older,
       newer: opts.newer,
+      type: opts.type,
+      scope: opts.scope,
       note: opts.note,
     });
   });
 
 chainsCmd
   .command("remove")
-  .description("Remove a manual chain")
+  .description("Remove a relation")
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .option("--scope <area>", "Only the relation scoped to this area")
   .action(async (opts) => {
     await runSpecChainsRemove({
       older: opts.older,
       newer: opts.newer,
+      scope: opts.scope,
     });
   });
 

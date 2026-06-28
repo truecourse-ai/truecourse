@@ -1,28 +1,23 @@
 /**
  * `truecourse spec <subcommand>` — Spec Consolidation Module surface.
  *
- *   scan      docs → claims → conflicts → claims.json
- *   resolve   batch-apply default picks (CLI fast-path; the dashboard
- *             is the primary review surface per Q8)
- *   status    summary: docs walked, claims, modules, pending vs decided
+ *   scan      docs → curated corpus.json (areas + relations + overlap flags)
+ *   status    summary: docs, areas, relations, open vs resolved overlaps
  *
+ * Conflict/relation resolution lives in `spec conflicts` / `spec chains`.
  * Every command delegates the heavy lifting to
  * `@truecourse/core/commands/spec-in-process` so the CLI and the
  * dashboard server execute the same code path. The only thing the
  * CLI adds is a stdout step renderer; the dashboard server adds a
- * socket emitter. Scan-state persistence, decision writes, and IL
- * chaining live in core.
+ * socket emitter.
  */
 
 import * as p from "@clack/prompts";
 import path from "node:path";
-import type { Conflict } from "@truecourse/spec-consolidator";
+import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
+import type { Relation } from "@truecourse/spec-consolidator";
 import { StepTracker } from "@truecourse/core/progress";
 import {
-  RESOLVE_STEPS,
-  resolveAllDefaultsInProcess,
-  scanInProcess,
-  SCAN_STEPS,
   curateInProcess,
   CURATE_STEPS,
   verifyInProcess,
@@ -96,81 +91,56 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
 
 
 // ---------------------------------------------------------------------------
-// resolve --all-defaults  (CLI batch op; dashboard is primary review per Q8)
-// ---------------------------------------------------------------------------
-
-export interface RunSpecResolveOptions extends RunSpecOptions {
-  /** Accept the engine's pre-pick on every open conflict. */
-  allDefaults?: boolean;
-}
-
-export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<void> {
-  const root = repoRoot(opts);
-  if (!opts.allDefaults) {
-    p.intro("Spec resolve");
-    p.log.warn("Interactive resolve runs in the dashboard.");
-    p.log.message("CLI fast-path: pass --all-defaults to accept every engine pre-pick.");
-    p.outro("");
-    return;
-  }
-
-  p.intro("Spec resolve — accepting all defaults");
-  await requireGitRepo(root);
-  // The `agent` transport answers prompts via the filesystem mailbox (no
-  // `claude` subprocess), so skip the CLI probe there.
-  if (opts.llm !== "agent") await preflightClaudeOrExit();
-  const { renderer, tracker } = withTracker(RESOLVE_STEPS);
-  try {
-    const { additions } = await resolveAllDefaultsInProcess(root, { tracker, llm: opts.llm, io: opts.io });
-    renderer.dispose();
-    p.log.step(`accepted    ${additions} default${additions === 1 ? "" : "s"}`);
-    p.log.step(`written     ${path.relative(root, decisionsRelPath(root))}`);
-    p.outro(
-      additions === 0
-        ? "Nothing to resolve."
-        : "Done. Run `truecourse contracts generate` to produce TC contracts.",
-    );
-  } catch (e) {
-    renderer.dispose();
-    p.cancel(`Failed: ${(e as Error).message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// status
+// status — a pure read of corpus.json + decisions.json (no LLM, no re-scan)
 // ---------------------------------------------------------------------------
 
 export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec status");
-  const { renderer, tracker } = withTracker(SCAN_STEPS);
-  try {
-    const { consolidate } = await scanInProcess(root, { tracker, llm: opts.llm, io: opts.io });
-    renderer.dispose();
-    const { extract, merge, skippedDocs } = consolidate;
-    const rows: Array<[string, string]> = [
-      ["Docs scanned", String(extract.docsScanned)],
-      ["Claims extracted", String(extract.claims.length)],
-      ["Resolved (singletons + auto-merged)", String(merge.resolvedClaims.length)],
-      ["Decided (user-resolved)", String(merge.decidedConflicts.length)],
-      ["Open (pending decision)", String(merge.openConflicts.length)],
-      ["Skipped docs", String(skippedDocs?.length ?? 0)],
-    ];
-    for (const [k, v] of rows) p.log.step(`${k.padEnd(38)} ${v}`);
-
-    if (merge.openConflicts.length > 0) {
-      p.log.message("");
-      summarizeConflicts("Open", merge.openConflicts);
-    }
-    p.outro(
-      merge.openConflicts.length === 0
-        ? "Up to date — run `truecourse contracts generate`."
-        : "Pending decisions — see `truecourse spec conflicts list`.",
-    );
-  } catch (e) {
-    renderer.dispose();
-    p.cancel(`Failed: ${(e as Error).message}`);
+  const corpus = readCorpus(root);
+  if (!corpus) {
+    p.log.warn("No corpus — run `truecourse spec scan`.");
+    p.outro("");
+    return;
   }
+  const decisions = readCorpusDecisions(root);
+  const userRels = decisions.relations ?? [];
+  const allRels: Relation[] = [...corpus.relations, ...userRels];
+  const covered = (a: string, b: string, area: string): boolean =>
+    allRels.some((r) => {
+      const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
+      return samePair && (r.scope === undefined || r.scope === area);
+    });
+
+  let open = 0;
+  let resolved = 0;
+  for (const area of corpus.areas) {
+    for (const ov of area.overlaps) {
+      if (covered(ov.docs[0], ov.docs[1], area.id)) resolved++;
+      else open++;
+    }
+  }
+
+  const rows: Array<[string, string]> = [
+    ["Docs (kept)", String(corpus.docs.length)],
+    ["Areas", String(corpus.areas.length)],
+    ["Relations (auto + user)", `${corpus.relations.length} + ${userRels.length}`],
+    ["Overlaps", `${open} open · ${resolved} resolved`],
+    ["Manual includes", String((decisions.manualIncludes ?? []).length)],
+  ];
+  for (const [k, v] of rows) p.log.step(`${k.padEnd(28)} ${v}`);
+
+  p.log.message("");
+  for (const area of corpus.areas) {
+    const ov = area.overlaps.length ? ` · ${area.overlaps.length} overlap${area.overlaps.length === 1 ? "" : "s"}` : "";
+    p.log.message(`  ${area.id.padEnd(30)} ${area.docRefs.length} doc${area.docRefs.length === 1 ? "" : "s"}${ov}`);
+  }
+
+  p.outro(
+    open === 0
+      ? "No open overlaps — run `truecourse contracts generate`."
+      : "Open overlaps — see `truecourse spec conflicts list`.",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -333,20 +303,3 @@ export async function runInfer(opts: RunInferOptions = {}): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-function summarizeConflicts(label: string, conflicts: Conflict[]): void {
-  p.log.message(`${label}:`);
-  for (const c of conflicts.slice(0, 10)) {
-    p.log.message(`  • ${c.topic}/${c.subject}  (${c.candidates.length} candidates)`);
-  }
-  if (conflicts.length > 10) {
-    p.log.message(`  … (+${conflicts.length - 10} more)`);
-  }
-}
-
-function decisionsRelPath(root: string): string {
-  return path.join(root, ".truecourse", "specs", "decisions.json");
-}
