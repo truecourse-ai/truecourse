@@ -1167,3 +1167,96 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
   return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
 }
 
+// ---------------------------------------------------------------------------
+// Corpus path (spec-scan redesign) — the curated doc corpus + doc→doc relations
+// that replace claims/conflicts. Areas group docs; an overlap is two same-area
+// docs that may disagree, resolved by recording a relation.
+// ---------------------------------------------------------------------------
+
+export type SpecRelationType = 'replace' | 'precedence' | 'keep-both';
+
+export interface SpecRelation {
+  type: SpecRelationType;
+  older: string;
+  newer: string;
+  scope?: string;
+  detectedFrom?: 'filename' | 'llm' | 'manual';
+  note?: string;
+}
+
+export interface SpecOverlap {
+  docs: [string, string];
+  note: string;
+}
+
+export interface SpecCorpusDoc {
+  ref: string;
+  kind: string;
+  status?: string;
+  lastTouched: string;
+  areaTags: string[];
+}
+
+export interface SpecCorpusArea {
+  id: string;
+  product: string;
+  concern: string;
+  docRefs: string[];
+  overlaps: SpecOverlap[];
+}
+
+export interface SpecCorpus {
+  version: number;
+  generatedAt: string;
+  docs: SpecCorpusDoc[];
+  areas: SpecCorpusArea[];
+  /** Auto-detected relations (corpus-side). User relations come separately. */
+  relations: SpecRelation[];
+}
+
+export interface SpecCorpusResponse {
+  corpus: SpecCorpus;
+  userRelations: SpecRelation[];
+}
+
+/** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
+export async function getSpecCorpus(repoId: string): Promise<SpecCorpusResponse | null> {
+  try {
+    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Run a fresh corpus scan (curate), persist corpus.json, return it. */
+export function getSpecCorpusScan(repoId: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus/scan`);
+}
+
+/** A source doc's markdown (for the prose Spec tab). */
+export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
+  return fetchApi<{ ref: string; content: string }>(
+    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}`,
+  );
+}
+
+/** Record a user doc→doc relation (resolves an overlap). */
+export function postSpecRelation(repoId: string, payload: SpecRelation): Promise<{ relations: SpecRelation[] }> {
+  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Remove a user relation. */
+export function deleteSpecRelation(
+  repoId: string,
+  payload: { older: string; newer: string; scope?: string },
+): Promise<{ relations: SpecRelation[] }> {
+  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
