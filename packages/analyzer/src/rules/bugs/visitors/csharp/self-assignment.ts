@@ -11,6 +11,12 @@ export const csharpSelfAssignmentVisitor: CodeRuleVisitor = {
   languages: ['csharp'],
   nodeTypes: ['assignment_expression'],
   visit(node, filePath, sourceCode) {
+    // Inside an object/collection initializer (`new Dto { Name = Name }`), the
+    // left-hand side names a member of the *new* object while the right-hand
+    // side resolves in the enclosing scope (an implicit `this.Name` / local).
+    // `Name = Name` there copies a value across objects — not a self-assignment.
+    if (node.parent?.type === 'initializer_expression') return null
+
     const left = node.childForFieldName('left')
     const right = node.childForFieldName('right')
     const operator = node.childForFieldName('operator')

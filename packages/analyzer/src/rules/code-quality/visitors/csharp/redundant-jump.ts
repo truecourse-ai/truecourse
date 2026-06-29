@@ -17,7 +17,14 @@ export const csharpRedundantJumpVisitor: CodeRuleVisitor = {
     if (!grandparent) return null
 
     if (node.type === 'return_statement') {
-      if (node.namedChildren.length > 0) return null
+      // A `return <expr>;` carries a value and is never redundant. The returned
+      // expression is not always a *named* child — `this`, `null`, `true`, etc.
+      // parse as anonymous nodes — so detect any child that isn't the `return`
+      // keyword or the trailing `;`.
+      const hasExpression = node.children.some(
+        (c) => c != null && c.type !== 'return' && c.type !== ';',
+      )
+      if (hasExpression) return null
       if (!isCSharpFunctionBoundary(grandparent.type)) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
