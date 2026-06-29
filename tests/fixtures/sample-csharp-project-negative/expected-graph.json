@@ -2311,6 +2311,12 @@
       "layer": "service"
     },
     {
+      "name": "RedundantReturnAtEnd",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ReferenceInterner",
       "service": "UserService",
       "kind": "class",
@@ -2383,6 +2389,18 @@
       "layer": "service"
     },
     {
+      "name": "SelfAssignedField",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SelfInheritingType",
+      "service": "UserService",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
       "name": "SessionAuditLog",
       "service": "UserService",
       "kind": "class",
@@ -2410,6 +2428,12 @@
       "name": "StaleSnapshotError",
       "service": "UserService",
       "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "StandaloneStaticHolder",
+      "service": "UserService",
+      "kind": "class",
       "layer": "service"
     },
     {
