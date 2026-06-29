@@ -177,3 +177,9 @@ fp-next-fix; you do not need to fire it yourself.
 - If anything is ambiguous (cannot pick a campaign, analyze output
   unparseable, etc.), comment on the discovery PR with the ambiguity
   and stop. Do not invent state.
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

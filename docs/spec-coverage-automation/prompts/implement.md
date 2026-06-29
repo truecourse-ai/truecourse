@@ -299,3 +299,9 @@ issue (`cc @mushgev`), remove `spec-kind-in-progress`, and end. Never dead-end s
 - Never copy-paste OSS code into fixtures — paraphrase, generic domain names, anonymized.
 - If anything is ambiguous, document it on the issue and bail out cleanly (revert, un-flip
   `kinds.yaml`, unlock). Do not invent state, skip a gate, or "try one more thing."
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

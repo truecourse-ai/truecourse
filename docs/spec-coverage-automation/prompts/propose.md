@@ -197,3 +197,9 @@ Write `/tmp/intent-pr-body.md`. It **is** the plan the human approves — be con
   `pnpm install && pnpm build:dist` → `node $TRUECOURSE_DIR/dist/cli.mjs`.
 - If anything is ambiguous or the issue is malformed, post the blocker (label `needs-design`,
   `cc @mushgev`) and stop. Do not invent state or guess the proposal's intent.
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

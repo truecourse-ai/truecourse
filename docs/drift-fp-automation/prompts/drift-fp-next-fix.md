@@ -394,3 +394,9 @@ session that already produced fixes.
 - A skipped issue reverts **only its own** fixture/comparator changes, never earlier-batch work.
 - If anything is ambiguous, document it on the issue and continue (or end the loop if
   session-wide). Do not invent state, skip steps, or "try one more thing."
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

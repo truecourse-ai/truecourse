@@ -218,3 +218,9 @@ Use the shared TP/FP rubric (README "TP/FP rubric"):
 - A wrong contract (LLM mis-extraction) is **not** a verifier FP — `contract-quality:` note, not
   an issue.
 - If anything is ambiguous, comment on the discovery PR and stop. Do not invent state.
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.
