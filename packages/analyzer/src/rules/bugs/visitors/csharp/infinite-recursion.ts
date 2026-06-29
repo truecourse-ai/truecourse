@@ -29,9 +29,14 @@ export const csharpInfiniteRecursionVisitor: CodeRuleVisitor = {
     if (!name) return null
 
     if (node.type === 'property_declaration') {
-      // Expression-bodied property: `public int Age => Age;`
+      // Expression-bodied property: `public int Age => Age;`. Only an
+      // `arrow_expression_clause` is an expression body; an auto-property
+      // initializer (`public Color Color { get; set; } = Color.Default;`) also
+      // surfaces on the `value` field — as a `member_access_expression` whose
+      // leading type identifier can coincide with the property name — and that
+      // is a backing-field read, not self-recursion.
       const arrow = node.childForFieldName('value')
-      const arrowExpr = arrow?.namedChildren[0]
+      const arrowExpr = arrow?.type === 'arrow_expression_clause' ? arrow.namedChildren[0] : null
       if (arrowExpr?.type === 'identifier' && arrowExpr.text === name) {
         return makeViolation(
           this.ruleKey, node, filePath, 'critical',
