@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
-import type { Area, Overlap } from './corpus-types.js';
+import type { Area, Overlap, OverlapSection } from './corpus-types.js';
 import type { Relation } from './types.js';
 import { defaultConcurrency } from './runner.js';
 
@@ -33,6 +33,8 @@ export interface OverlapVerdict {
   overlap: boolean;
   /** Short note on what may disagree — shown to the user. */
   note: string;
+  /** The conflicting sections per doc (markdown headings), when identifiable. */
+  sections?: OverlapSection[];
 }
 
 export type OverlapRunner = (input: OverlapRunnerInput) => Promise<OverlapVerdict>;
@@ -126,7 +128,7 @@ export async function flagOverlaps(
           .then((verdict) => {
             if (verdict.overlap) {
               const list = result.get(pair.areaId) ?? [];
-              list.push({ docs: [pair.a.path, pair.b.path], note: verdict.note });
+              list.push({ docs: [pair.a.path, pair.b.path], note: verdict.note, sections: verdict.sections ?? [] });
               result.set(pair.areaId, list);
             }
           })
@@ -211,11 +213,17 @@ NOT a disagreement (do NOT flag):
 
 Bias: when there is a PLAUSIBLE contradiction a human should check, flag it. When the docs are clearly complementary or agree, do not.
 
+When you flag an overlap, also identify the SECTIONS that conflict: the nearest markdown heading (the \`#\`/\`##\`/\`###\` title, verbatim, WITHOUT the leading #s) above the conflicting text in EACH doc. List one entry per side; omit a side only if it genuinely has no heading.
+
+In the NOTE, refer to each doc by its FILENAME (the basename shown in the header, e.g. \`users.md\`) — NEVER "doc A" / "doc B", which mean nothing to the reader.
+
 Output ONLY a JSON object, no prose, no code fences:
 
-{ "overlap": true, "note": "doc A says auth0_id, doc B says auth0_sub for the same user column" }
+{ "overlap": true,
+  "note": "users.md uses auth0_id; identity.md uses auth0_sub for the same user column",
+  "sections": [ { "side": "A", "heading": "User model" }, { "side": "B", "heading": "Identity" } ] }
 
-Use { "overlap": false, "note": "" } when they are complementary or agree. The note is shown to the user — name the specific thing that differs.`;
+Use { "overlap": false, "note": "", "sections": [] } when they are complementary or agree. The note is shown to the user — name the specific thing that differs.`;
 
 /** How many lines of each doc to show the comparator. */
 const OVERLAP_PREVIEW_LINES = 120;
@@ -249,9 +257,21 @@ export function buildOverlapUserPrompt(areaId: string, a: DocCandidate, b: DocCa
   ].join('\n');
 }
 
+// What the LLM returns — sections keyed by SIDE (A/B), which the runner maps to
+// the concrete doc paths (more robust than asking it to echo the paths).
+const LlmOverlapSchema = z.object({
+  overlap: z.boolean(),
+  note: z.string().default(''),
+  sections: z
+    .array(z.object({ side: z.enum(['A', 'B']), heading: z.string() }))
+    .default([]),
+});
+
+// What we cache + return — sections carry the resolved doc ref.
 const OverlapVerdictSchema = z.object({
   overlap: z.boolean(),
   note: z.string().default(''),
+  sections: z.array(z.object({ doc: z.string(), heading: z.string() })).default([]),
 });
 
 function spawnOverlapRunner(
@@ -270,8 +290,12 @@ function spawnOverlapRunner(
       responseFormat: 'json',
       timeoutMs,
     });
-    const inner = JSON.parse(stripCodeFences(raw));
-    return OverlapVerdictSchema.parse(inner);
+    const inner = LlmOverlapSchema.parse(JSON.parse(stripCodeFences(raw)));
+    return {
+      overlap: inner.overlap,
+      note: inner.note,
+      sections: inner.sections.map((s) => ({ doc: s.side === 'A' ? a.path : b.path, heading: s.heading })),
+    };
   };
 }
 

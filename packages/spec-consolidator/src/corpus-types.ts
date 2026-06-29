@@ -229,11 +229,22 @@ export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
  * Carries refs only; the CLI/UI derive the prose passages at display time. The
  * user resolves it by recording a {@link RelationSchema}.
  */
+/** A specific section (markdown heading) in one doc that participates in an overlap. */
+export const OverlapSectionSchema = z.object({
+  /** The doc this section lives in, by ref (one of the overlap's two docs). */
+  doc: DocRefSchema,
+  /** The heading text of the conflicting section (verbatim from the doc). */
+  heading: z.string(),
+});
+export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
+
 export const OverlapSchema = z.object({
   /** The two docs that overlap, by ref. */
   docs: z.tuple([DocRefSchema, DocRefSchema]),
   /** Short note on what may disagree ("auth0_id vs auth0_sub"). */
   note: z.string().default(''),
+  /** The specific conflicting sections per doc (markdown headings), when known. */
+  sections: z.array(OverlapSectionSchema).default([]),
 });
 export type Overlap = z.infer<typeof OverlapSchema>;
 

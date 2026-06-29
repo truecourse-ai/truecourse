@@ -2846,7 +2846,7 @@ function applyRemoveManualChain(
 
 /** Dedup key for a user relation — a pair is unique per scope (area). */
 const relationKey = (r: { older: string; newer: string; scope?: string }): string =>
-  `${r.older} ${r.newer} ${r.scope ?? ''}`;
+  `${[r.older, r.newer].sort().join(' ')} ${r.scope ?? ''}`;
 
 function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
   if (input.older === input.newer) {

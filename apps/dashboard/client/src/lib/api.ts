@@ -1184,9 +1184,16 @@ export interface SpecRelation {
   note?: string;
 }
 
+export interface SpecOverlapSection {
+  doc: string;
+  heading: string;
+}
+
 export interface SpecOverlap {
   docs: [string, string];
   note: string;
+  /** Conflicting sections per doc (markdown headings), when known. */
+  sections?: SpecOverlapSection[];
 }
 
 export interface SpecCorpusDoc {

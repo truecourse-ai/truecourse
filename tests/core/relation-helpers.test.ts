@@ -43,6 +43,13 @@ describe('addRelation', () => {
     expect(rels()[0].type).toBe('precedence');
   });
 
+  it('re-resolving the same pair REPLACES it, even when the direction flips', async () => {
+    await addRelation(repo, { type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/auth' });
+    await addRelation(repo, { type: 'precedence', older: 'b.md', newer: 'a.md', scope: 'core/auth' }); // flipped + new type
+    expect(rels()).toHaveLength(1);
+    expect(rels()[0]).toMatchObject({ type: 'precedence', older: 'b.md', newer: 'a.md' });
+  });
+
   it('keeps relations for the same pair under DIFFERENT scopes', async () => {
     await addRelation(repo, { type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/auth' });
     await addRelation(repo, { type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/orders' });

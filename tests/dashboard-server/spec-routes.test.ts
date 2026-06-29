@@ -331,6 +331,38 @@ describe('corpus routes (spec-scan redesign)', () => {
   });
 });
 
+describe('POST /contracts/generate (corpus-vs-claims branch)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    gitInit(fixture.repoPath);
+    app = createApp({ serveStatic: false });
+  });
+  afterEach(async () => {
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('uses the CORPUS path when a corpus.json exists (empty corpus → 0 written, not skipped)', async () => {
+    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
+    fs.mkdirSync(specs, { recursive: true });
+    fs.writeFileSync(
+      path.join(specs, 'corpus.json'),
+      JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], relations: [] }),
+    );
+    const res = await request(app).post(`/api/repos/${fixture.project.slug}/contracts/generate`).expect(200);
+    // Corpus branch ran (generated, 0 written) rather than the claims "skipped — no canonical spec".
+    expect(res.body.il).toMatchObject({ written: 0 });
+    expect(res.body.il.skipped).toBeUndefined();
+  });
+
+  it('falls back to the CLAIMS path when there is no corpus (skips with no canonical spec)', async () => {
+    const res = await request(app).post(`/api/repos/${fixture.project.slug}/contracts/generate`).expect(200);
+    expect(res.body.il.skipped).toBeTruthy();
+  });
+});
+
 describe('POST /spec/decisions — hosted (enterprise) defers the contract refresh to the queue', () => {
   let app: Express;
   let fixture: TestFixture;

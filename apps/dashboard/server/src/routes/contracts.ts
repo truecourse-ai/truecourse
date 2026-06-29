@@ -32,7 +32,10 @@ import { diffContents } from '@truecourse/core/lib/artifact-diff';
 import { baselineCommit } from './diff-base.js';
 import {
   GENERATE_STEPS,
+  CORPUS_GENERATE_STEPS,
   generateContractsInProcess,
+  generateFromCorpusInProcess,
+  getCorpus,
 } from '@truecourse/core/commands/spec-in-process';
 import {
   createSocketSpecTracker,
@@ -305,23 +308,42 @@ router.post(
         res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
         return;
       }
+      // Data-driven path: a curated corpus → corpus generation; otherwise the
+      // legacy claims path. Keeps OSS corpus repos working end-to-end while EE /
+      // pre-corpus repos (claims, no corpus.json) keep generating from claims.
+      const useCorpus = (await getCorpus(repo.path)) !== null;
       const tracker = createSocketSpecTracker(
         repoIdForCleanup,
-        GENERATE_STEPS.map((s) => ({ ...s })),
+        (useCorpus ? CORPUS_GENERATE_STEPS : GENERATE_STEPS).map((s) => ({ ...s })),
       );
-      const outcome = await generateContractsInProcess(repo.path, { tracker, source: 'dashboard' });
 
       const response: Record<string, unknown> = {};
-      if (outcome.il.kind === 'extracted') {
-        response.il = {
-          written: outcome.il.result.write.written.length,
-          validationIssues: outcome.il.result.validationIssues,
-          mergeDiagnostics: outcome.il.result.mergeDiagnostics,
-        };
-      } else if (outcome.il.kind === 'failed') {
-        response.il = { error: outcome.il.error.message };
+      if (useCorpus) {
+        const { corpus } = await generateFromCorpusInProcess(repo.path, { tracker, source: 'dashboard' });
+        if (corpus.kind === 'generated') {
+          response.il = {
+            written: corpus.result.write.written.length,
+            validationIssues: corpus.result.validationIssues,
+            mergeDiagnostics: corpus.result.mergeDiagnostics ?? [],
+          };
+        } else if (corpus.kind === 'failed') {
+          response.il = { error: corpus.error.message };
+        } else {
+          response.il = { skipped: corpus.reason };
+        }
       } else {
-        response.il = { skipped: outcome.il.reason };
+        const outcome = await generateContractsInProcess(repo.path, { tracker, source: 'dashboard' });
+        if (outcome.il.kind === 'extracted') {
+          response.il = {
+            written: outcome.il.result.write.written.length,
+            validationIssues: outcome.il.result.validationIssues,
+            mergeDiagnostics: outcome.il.result.mergeDiagnostics,
+          };
+        } else if (outcome.il.kind === 'failed') {
+          response.il = { error: outcome.il.error.message };
+        } else {
+          response.il = { skipped: outcome.il.reason };
+        }
       }
 
       emitSpecComplete(repoIdForCleanup, 'generate');

@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, Network, Lightbulb } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, Network, Lightbulb, Play } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -70,6 +70,9 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecPanel } from '@/components/spec/SpecPanel';
+import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
+import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
+import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { SpecProvider, createRepoSpecDataSource } from '@/components/spec/SpecContext';
 import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
@@ -186,6 +189,10 @@ function RepoPageInner() {
     openCanonicalFiles,
     handleOpenCanonical,
     handleCloseCanonical,
+    activeSpecPath,
+    openSpecTabs,
+    handleOpenSpec,
+    handleCloseSpec,
     activeContractsPath,
     setActiveContractsPath,
     openContractsFiles,
@@ -1148,6 +1155,8 @@ function RepoPageInner() {
     activeSpecConflictId !== null &&
     (leftTab === 'spec' || leftTab === 'decisions');
   const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
+  // Corpus Spec tab: a selected doc / overlap opens in the right pane (`?spec=`).
+  const showingSpec = activeSpecPath !== null && leftTab === 'spec' && !blDriftDiffMode;
   const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
 
   const hasAnalysis = repo?.lastAnalyzed != null;
@@ -1165,11 +1174,25 @@ function RepoPageInner() {
       <DiffModeToggle diffMode={isDiffMode} onToggle={setIsDiffMode} subject={{ verb, plural }} />
     ) : null;
 
+  // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
+  // the panel) drives it, consistent with the other tabs. Only reads when the
+  // Spec tab is showing the normal (non-diff) corpus view.
+  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec' && !blDriftDiffMode);
+
   const sectionActionsNode =
     leftTab === 'spec' ? (
       <div className="flex items-center gap-2">
         {blDriftDiffToggle('scans', 'spec changes')}
-        <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} hosted={isEe} />
+        {/* Normal Spec view = corpus path: the header owns Scan/Rescan. Diff mode
+            is still the claims delta view, with its own header actions. */}
+        {blDriftDiffMode ? (
+          <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} hosted={isEe} />
+        ) : repo?.isGitRepo !== false ? (
+          <Button size="sm" variant="outline" onClick={() => void specCorpus.scan()} disabled={specCorpus.scanning}>
+            {specCorpus.scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
+            {specCorpus.data ? 'Rescan' : 'Scan'}
+          </Button>
+        ) : null}
       </div>
     ) : leftTab === 'contracts' ? (
       <div className="flex items-center gap-2">
@@ -1395,19 +1418,25 @@ function RepoPageInner() {
               }}
             />
           )}
-          {leftTab === 'spec' && (
-            <SpecPanel
-              canonicalTree={canonicalTree}
-              canonicalLoading={canonicalLoading}
-              canonicalError={canonicalError}
-              activeConflictId={activeSpecConflictId}
-              onSelectConflict={handleSelectSpecConflict}
-              activeCanonicalPath={activeCanonicalPath}
-              onOpenCanonicalFile={handleOpenCanonical}
-              prDiff={blDriftDiffMode ? specDiff : null}
-              diffMode={blDriftDiffMode}
-            />
-          )}
+          {leftTab === 'spec' &&
+            (blDriftDiffMode ? (
+              <SpecPanel
+                canonicalTree={canonicalTree}
+                canonicalLoading={canonicalLoading}
+                canonicalError={canonicalError}
+                activeConflictId={activeSpecConflictId}
+                onSelectConflict={handleSelectSpecConflict}
+                activeCanonicalPath={activeCanonicalPath}
+                onOpenCanonicalFile={handleOpenCanonical}
+                prDiff={specDiff}
+                diffMode
+              />
+            ) : (
+              // Corpus path (spec-scan redesign): the area-grouped prose Spec tab.
+              // Left = nav (areas → docs + overlaps); selecting opens the right
+              // pane (?spec=). Scan lives in the header.
+              <SpecCorpusView corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} />
+            ))}
           {leftTab === 'contracts' && (
             <ContractsPanel
               tree={contractsTree}
@@ -1546,8 +1575,8 @@ function RepoPageInner() {
                   </div>
                 );
               })}
-              {/* Canonical spec tabs */}
-              {leftTab === 'spec' && openCanonicalFiles.map((f) => {
+              {/* Canonical spec tabs (claims diff-mode only; corpus uses spec tabs below) */}
+              {leftTab === 'spec' && blDriftDiffMode && openCanonicalFiles.map((f) => {
                 const fileName = f.path.split('/').pop() || f.path;
                 const isActive = activeCanonicalPath === f.path;
                 return (
@@ -1567,6 +1596,41 @@ function RepoPageInner() {
                       onClick={(e) => {
                         e.stopPropagation();
                         handleCloseCanonical(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Corpus Spec tabs (docs + overlaps) */}
+              {leftTab === 'spec' && !blDriftDiffMode && openSpecTabs.map((f) => {
+                const k = parseSpecKey(f.path);
+                const label =
+                  k.kind === 'overlap'
+                    ? `${k.a.split('/').pop()} ↔ ${k.b.split('/').pop()}`
+                    : k.ref.split('/').pop() || k.ref;
+                const isActive = activeSpecPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => handleOpenSpec(f.path, f.pinned)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{label}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseSpec(f.path);
                       }}
                       className={`rounded p-0.5 hover:bg-muted transition-opacity ${
                         isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -1668,6 +1732,30 @@ function RepoPageInner() {
               violations={violations}
               isTab
             />
+          ) : showingSpec && activeSpecPath ? (
+            (() => {
+              const k = parseSpecKey(activeSpecPath);
+              if (k.kind === 'overlap') {
+                return specCorpus.data ? (
+                  <SpecOverlapDetail
+                    repoId={repoId}
+                    area={k.area}
+                    docA={k.a}
+                    docB={k.b}
+                    data={specCorpus.data}
+                    onResolved={specCorpus.refetch}
+                  />
+                ) : (
+                  <SpecPanePlaceholder />
+                );
+              }
+              // Show the doc's full area-tag set in the detail header (concern
+              // names; product prefix only when there are multiple products).
+              const doc = specCorpus.data?.corpus.docs.find((d) => d.ref === k.ref);
+              const multiProduct = new Set((specCorpus.data?.corpus.areas ?? []).map((a) => a.product)).size > 1;
+              const docTags = doc?.areaTags.map((id) => (multiProduct ? id : id.split('/').pop() ?? id));
+              return <SpecDocViewer repoId={repoId} docRef={k.ref} tags={docTags} />;
+            })()
           ) : showingCanonicalFile && activeCanonicalPath ? (
             <SpecCanonicalFile filePath={activeCanonicalPath} />
           ) : showingSpecConflict && activeSpecConflictId ? (

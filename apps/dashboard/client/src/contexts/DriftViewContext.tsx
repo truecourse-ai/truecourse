@@ -44,6 +44,14 @@ export interface DriftViewContextValue {
   handleOpenCanonical: (path: string, pinned: boolean) => void;
   handleCloseCanonical: (path: string) => void;
 
+  // Corpus Spec tab viewer — a source doc (markdown) or an overlap (resolution),
+  // keyed by a doc ref / `overlap::…` key. URL-synced as `?spec=`.
+  activeSpecPath: string | null;
+  setActiveSpecPath: (path: string | null) => void;
+  openSpecTabs: ViewerTab[];
+  handleOpenSpec: (path: string, pinned: boolean) => void;
+  handleCloseSpec: (path: string) => void;
+
   // Contracts file viewer
   activeContractsPath: string | null;
   setActiveContractsPath: (path: string | null) => void;
@@ -80,6 +88,7 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
 
   const canonicalFromUrl = searchParams?.get('canonical') || null;
   const contractFromUrl = searchParams?.get('contract') || null;
+  const specFromUrl = searchParams?.get('spec') || null;
 
   // EE ref switcher (default branch vs a PR head), URL-synced as `?ref=`.
   const [selectedRef, setSelectedRefState] = useState<string>(
@@ -200,6 +209,46 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
     [openCanonicalFiles, activeCanonicalPath],
   );
 
+  // --- Corpus Spec tab viewer (`?spec=`) — same transient/pinned tab model ----
+  const [activeSpecPath, setActiveSpecPathState] = useState<string | null>(specFromUrl);
+  const [openSpecTabs, setOpenSpecTabs] = useState<ViewerTab[]>(() =>
+    specFromUrl ? [{ path: specFromUrl, pinned: true }] : [],
+  );
+  const setActiveSpecPath = useCallback(
+    (path: string | null) => {
+      setActiveSpecPathState(path);
+      const url = new URL(window.location.href);
+      if (path) url.searchParams.set('spec', path);
+      else url.searchParams.delete('spec');
+      navigate(url.pathname + url.search);
+    },
+    [navigate],
+  );
+  const handleOpenSpec = useCallback(
+    (path: string, pinned: boolean) => {
+      setOpenSpecTabs((prev) => {
+        const existing = prev.find((f) => f.path === path);
+        if (existing) return prev.map((f) => (f.path === path ? { ...f, pinned: pinned || f.pinned } : f));
+        if (pinned) return [...prev, { path, pinned: true }];
+        const hasUnpinned = prev.find((f) => !f.pinned);
+        if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+        return [...prev, { path, pinned: false }];
+      });
+      setActiveSpecPath(path);
+    },
+    [setActiveSpecPath],
+  );
+  const handleCloseSpec = useCallback(
+    (path: string) => {
+      setOpenSpecTabs((prev) => prev.filter((f) => f.path !== path));
+      if (activeSpecPath === path) {
+        const remaining = openSpecTabs.filter((f) => f.path !== path);
+        setActiveSpecPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+      }
+    },
+    [openSpecTabs, activeSpecPath, setActiveSpecPath],
+  );
+
   // --- Verify drift tabs -------------------------------------------
   // The selected drift mirrors to ?drift. Drift ids are stable within a run
   // (persisted in LATEST) so they survive reloads; a new verify run
@@ -256,6 +305,7 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setActiveCanonicalPathState(searchParams?.get('canonical') ?? null);
     setActiveContractsPathState(searchParams?.get('contract') ?? null);
+    setActiveSpecPathState(searchParams?.get('spec') ?? null);
     setActiveDriftId(searchParams?.get('drift') ?? null);
   }, [searchParams]);
 
@@ -281,6 +331,11 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       openCanonicalFiles,
       handleOpenCanonical,
       handleCloseCanonical,
+      activeSpecPath,
+      setActiveSpecPath,
+      openSpecTabs,
+      handleOpenSpec,
+      handleCloseSpec,
       activeContractsPath,
       setActiveContractsPath,
       openContractsFiles,
@@ -302,6 +357,11 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       openCanonicalFiles,
       handleOpenCanonical,
       handleCloseCanonical,
+      activeSpecPath,
+      setActiveSpecPath,
+      openSpecTabs,
+      handleOpenSpec,
+      handleCloseSpec,
       activeContractsPath,
       openContractsFiles,
       handleOpenContracts,

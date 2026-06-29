@@ -51,7 +51,24 @@ describe('flagOverlaps', () => {
   it('flags a disagreeing pair', async () => {
     const docs = [doc('a.md'), doc('b.md')];
     const out = await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], docs, { runner: flagAll });
-    expect(out.get('core/auth')).toEqual([{ docs: ['a.md', 'b.md'], note: 'a.md vs b.md' }]);
+    expect(out.get('core/auth')).toEqual([{ docs: ['a.md', 'b.md'], note: 'a.md vs b.md', sections: [] }]);
+  });
+
+  it('carries the conflicting sections the runner reports', async () => {
+    const docs = [doc('a.md'), doc('b.md')];
+    const runner: OverlapRunner = async ({ a, b }) => ({
+      overlap: true,
+      note: 'window differs',
+      sections: [
+        { doc: a.path, heading: 'Cancellation' },
+        { doc: b.path, heading: 'Refunds' },
+      ],
+    });
+    const out = await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], docs, { runner });
+    expect(out.get('core/auth')?.[0].sections).toEqual([
+      { doc: 'a.md', heading: 'Cancellation' },
+      { doc: 'b.md', heading: 'Refunds' },
+    ]);
   });
 
   it('does not flag complementary docs', async () => {

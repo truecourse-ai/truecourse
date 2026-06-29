@@ -38,7 +38,7 @@ const areas: Area[] = [
     product: 'core',
     concern: 'users-entity',
     docRefs: ['docs/0003-users.md'],
-    overlaps: [{ docs: ['docs/0003-users.md', 'docs/0008-users.md'], note: 'auth0_id vs auth0_sub' }],
+    overlaps: [{ docs: ['docs/0003-users.md', 'docs/0008-users.md'], note: 'auth0_id vs auth0_sub', sections: [] }],
   },
 ];
 const relations: Relation[] = [
