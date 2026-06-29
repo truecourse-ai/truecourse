@@ -217,6 +217,12 @@
       "layer": "service"
     },
     {
+      "name": "ConstantArrayArgumentInline",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CoordinateLabel",
       "service": "ApiGateway",
       "kind": "class",
@@ -2090,6 +2096,12 @@
     },
     {
       "name": "MemberHygiene",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MemberMoreVisibleThanTypeMisleading",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
