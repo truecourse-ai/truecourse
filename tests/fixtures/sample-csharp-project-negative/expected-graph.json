@@ -625,6 +625,12 @@
       "layer": "service"
     },
     {
+      "name": "InfiniteRecursionExpressionBodyProperty",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "INotificationContract",
       "service": "ApiGateway",
       "kind": "class",
@@ -1094,6 +1100,12 @@
     },
     {
       "name": "RateCache",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RecursionGuardMode",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
