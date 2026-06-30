@@ -44,18 +44,30 @@ function truthyEnv(v: string | undefined): boolean {
   return s !== '0' && s !== 'false' && s !== 'no' && s !== '';
 }
 
+/** Env flag with a default when unset (so an explicit `0`/`false` can opt out). */
+function envBool(v: string | undefined, dflt: boolean): boolean {
+  return v === undefined ? dflt : truthyEnv(v);
+}
+
 /** Filesystem-safe id for the io dump filenames. */
 function sanitize(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
 }
 
 /**
- * Create a logger when `TRUECOURSE_LLM_LOG` or `TRUECOURSE_LLM_DUMP` is set;
+ * Create a logger when `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` is set —
  * otherwise null so the caller installs no sink and pays nothing.
+ *
+ * In dev (the dashboard's `pnpm dev` sets `TRUECOURSE_DEV=1`) both default ON,
+ * including full I/O dumps, so a generate run is always inspectable without
+ * exporting env vars. Set `TRUECOURSE_LLM_DUMP=0` / `TRUECOURSE_LLM_LOG=0` to opt
+ * out. Production (no `TRUECOURSE_DEV`) is unchanged: off unless explicitly set.
  */
 export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLogger | null {
-  const dump = truthyEnv(process.env.TRUECOURSE_LLM_DUMP);
-  if (!truthyEnv(process.env.TRUECOURSE_LLM_LOG) && !dump) return null;
+  const dev = truthyEnv(process.env.TRUECOURSE_DEV);
+  const dump = envBool(process.env.TRUECOURSE_LLM_DUMP, dev);
+  const log = envBool(process.env.TRUECOURSE_LLM_LOG, dev);
+  if (!log && !dump) return null;
 
   const logDir = path.join(repoRoot, '.truecourse', 'logs');
   fs.mkdirSync(logDir, { recursive: true });

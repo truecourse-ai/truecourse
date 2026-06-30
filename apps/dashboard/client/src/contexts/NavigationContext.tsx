@@ -34,7 +34,7 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'canonical', 'contract', 'drift'];
+const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'spec', 'contract', 'drift'];
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
   return searchParams?.get('section') === 'verification' ? 'verification' : 'codequality';
@@ -49,7 +49,7 @@ function resolveTab(searchParams: URLSearchParams | null): LeftTab {
   if (tabParam && allTabIds().has(tabParam)) return tabParam;
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
-  if (searchParams?.get('canonical')) return 'spec';
+  if (searchParams?.get('spec')) return 'spec';
   if (searchParams?.get('contract')) return 'contracts';
   if (searchParams?.get('drift')) return 'verify';
   return defaultTabForSection(resolveSection(searchParams));

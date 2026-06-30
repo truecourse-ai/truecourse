@@ -1,6 +1,6 @@
 /**
- * Corpus generate orchestrator (spec-scan redesign, Phase 2) — the corpus-path
- * counterpart to `generateContracts()`. Per area:
+ * Corpus generate orchestrator — turns the curated corpus into `.tc` contracts.
+ * Per area:
  *
  *   1. ENUMERATE the area's targets (cheap, cached) — the work plan + the
  *      completeness checklist.
@@ -11,10 +11,10 @@
  *
  * All areas' fragments then flow through the shared `assembleArtifacts` tail
  * (merge dedups identities across areas, normalize/repair/validate), and the
- * survivors are written to `.truecourse/contracts/`. Runs ALONGSIDE the claims
- * path (`generateContracts`) during the migration.
+ * survivors are written to `.truecourse/contracts/`.
  */
 
+import os from 'node:os';
 import { createHash } from 'node:crypto';
 import pLimit from 'p-limit';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
@@ -33,9 +33,10 @@ import {
 import { readCorpusForGenerate, type AreaDoc, type AreaGenInput, type CorpusReadOptions } from './corpus-reader.js';
 import { reconcileTargets, type ReconcileRunner } from './target-reconciler.js';
 import { assembleArtifacts } from './assemble.js';
-import { sliceHash } from './claims-reader.js';
+import type { RepairProgress } from './repair.js';
+import { judgeGaps, type GapJudgeRunner } from './judge-gaps.js';
+import { sliceHash } from './hash.js';
 import { writeContracts, type WriteResult } from './writer.js';
-import { defaultConcurrency } from './claude-runner.js';
 import type { MergedArtifact, MergeDiagnostic } from './merger.js';
 import type { ValidationIssue } from './validator.js';
 
@@ -51,6 +52,8 @@ export interface CorpusGenerateModels {
   reconcile?: string;
   extract?: string;
   repair?: string;
+  repairParse?: string;
+  gapJudge?: string;
   /** Forwarded as `--fallback-model` to every stage. */
   fallback?: string;
 }
@@ -59,6 +62,14 @@ export interface CoverageGap {
   areaId: string;
   kind: string;
   identity: string;
+  /** The enumerator's one-line hint for this target (context for the gap judge). */
+  hint?: string;
+  /** Set by the gap judge: false = a genuine miss kept after judging. */
+  justified?: boolean;
+  /** The gap judge's reason for keeping it (genuine miss) — shown in the UI. */
+  reason?: string;
+  /** When the judge closed it as "covered elsewhere", the artifact that covers it. */
+  coveredBy?: { kind: string; identity: string };
 }
 
 export interface AreaCoverage {
@@ -87,6 +98,15 @@ export interface CorpusGenerateOptions {
   /** Max concurrent LLM calls across all areas. Default {@link defaultConcurrency}. */
   concurrency?: number;
   disableRepair?: boolean;
+  /** Skip the LLM gap-judge pass (gaps reported raw, none auto-closed). */
+  disableGapJudge?: boolean;
+  gapJudge?: GapJudgeRunner;
+  /**
+   * Skip the per-area extract cache (always re-generate). The cache is on by
+   * default so re-runs only regenerate areas whose docs/targets changed; tests
+   * that assert call counts disable it.
+   */
+  disableExtractCache?: boolean;
   dryRun?: boolean;
   /** Inject the per-area inputs instead of reading the corpus (tests / EE). */
   corpusInput?: AreaGenInput[];
@@ -96,6 +116,10 @@ export interface CorpusGenerateOptions {
   onAreasReady?: (count: number) => void;
   onAreaEnumerated?: (areaId: string, targetCount: number) => void;
   onAreaDone?: (coverage: AreaCoverage) => void;
+  /** Fired per generate batch with the number of NEW unique contracts emitted. */
+  onContractsEmitted?: (delta: number) => void;
+  /** Forwarded from the repair pass (one re-prompt at a time). */
+  onRepairProgress?: (e: RepairProgress) => void;
 }
 
 export interface CorpusGenerateResult {
@@ -118,6 +142,16 @@ export function defaultGenerateBatch(): number {
     if (Number.isFinite(parsed) && parsed >= 1) return parsed;
   }
   return 12;
+}
+
+/** Default cap on concurrent generate LLM calls — `TRUECOURSE_MAX_CONCURRENCY` or `min(cpus, 4)`. */
+export function defaultConcurrency(): number {
+  const env = process.env.TRUECOURSE_MAX_CONCURRENCY;
+  if (env) {
+    const parsed = parseInt(env, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return Math.min(os.cpus().length, 4);
 }
 
 /**
@@ -172,6 +206,9 @@ export async function generateContractsFromCorpus(
         maxRounds,
         limit,
         onAreaDone: opts.onAreaDone,
+        onContractsEmitted: opts.onContractsEmitted,
+        scope: opts.repoRoot,
+        cacheEnabled: opts.disableExtractCache !== true,
       }),
     ),
   );
@@ -183,8 +220,9 @@ export async function generateContractsFromCorpus(
 
   const assembled = await assembleArtifacts(ranked, slices, {
     transport: opts.transport,
-    models: { extract: models.extract, repair: models.repair, fallback: models.fallback },
+    models: { extract: models.extract, repair: models.repair, repairParse: models.repairParse, fallback: models.fallback },
     disableRepair: opts.dryRun || opts.disableRepair,
+    onRepairProgress: opts.onRepairProgress,
   });
 
   if (assembled.resolverHard) {
@@ -205,6 +243,11 @@ export async function generateContractsFromCorpus(
     prune: !opts.dryRun,
   });
 
+  // Gap auto-close: judge each area's gaps against its docs + the full written
+  // corpus, drop the justified ones, keep genuine misses (with a reason). Only on
+  // the resolved/written path (the corpus is meaningless when resolverHard).
+  const judgedGaps = await closeJustifiedGaps(opts, planned, coverage, gaps, assembled.artifactsToWrite);
+
   return {
     ran: ranked.length > 0,
     write,
@@ -213,8 +256,57 @@ export async function generateContractsFromCorpus(
     validationIssues: assembled.validationIssues,
     mergeDiagnostics: assembled.mergeDiagnostics,
     areas: coverage,
-    gaps,
+    gaps: judgedGaps,
   };
+}
+
+/**
+ * Run the per-area gap judge (one call per area-with-gaps; skipped when disabled
+ * or zero gaps). Mutates `coverage[].gaps` so `result.areas` agrees with the
+ * returned flat list. Best-effort: a judge failure keeps that area's gaps.
+ */
+async function closeJustifiedGaps(
+  opts: CorpusGenerateOptions,
+  planned: { area: AreaGenInput; targets: TargetSpec[] }[],
+  coverage: AreaCoverage[],
+  gaps: CoverageGap[],
+  written: MergedArtifact[],
+): Promise<CoverageGap[]> {
+  if (opts.disableGapJudge === true || gaps.length === 0) return gaps;
+
+  const byArea = new Map<string, CoverageGap[]>();
+  for (const g of gaps) {
+    const list = byArea.get(g.areaId);
+    if (list) list.push(g);
+    else byArea.set(g.areaId, [g]);
+  }
+  const areaById = new Map(planned.map((p) => [p.area.areaId, p.area]));
+  const corpusIds = written.map((a) => ({ kind: a.kind, identity: a.identity }));
+
+  const judged = await Promise.all(
+    [...byArea.entries()].map(([areaId, areaGaps]) => {
+      const area = areaById.get(areaId);
+      if (!area) return Promise.resolve(areaGaps);
+      return judgeGaps(opts.repoRoot, area, areaGaps, corpusIds, {
+        runner: opts.gapJudge,
+        transport: opts.transport,
+        model: opts.models?.gapJudge,
+        fallbackModel: opts.models?.fallback,
+      });
+    }),
+  );
+  const kept = judged.flat();
+
+  // Reflect the kept set back into per-area coverage.
+  const keptByArea = new Map<string, CoverageGap[]>();
+  for (const g of kept) {
+    const list = keptByArea.get(g.areaId);
+    if (list) list.push(g);
+    else keptByArea.set(g.areaId, [g]);
+  }
+  for (const cov of coverage) cov.gaps = keptByArea.get(cov.areaId) ?? [];
+
+  return kept;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +319,11 @@ interface AreaRunContext {
   maxRounds: number;
   limit: <T>(fn: () => Promise<T>) => Promise<T>;
   onAreaDone?: (coverage: AreaCoverage) => void;
+  onContractsEmitted?: (delta: number) => void;
+  /** Repo root — the KV cache scope. */
+  scope: string;
+  /** When false, always re-generate (skip the per-area extract cache). */
+  cacheEnabled: boolean;
 }
 
 interface AreaRunResult {
@@ -235,7 +332,34 @@ interface AreaRunResult {
   coverage: AreaCoverage;
 }
 
+/** Coverage stats for an area from its targets + the fragments emitted for them. */
+function coverageFor(area: AreaGenInput, targets: TargetSpec[], fragments: Fragment[]): AreaCoverage {
+  const have = new Set(fragments.map((f) => coverageKey(f.kind, f.identity)));
+  const gaps: CoverageGap[] = targets
+    .filter((t) => !have.has(coverageKey(t.kind, t.identity)))
+    .map((t) => ({ areaId: area.areaId, kind: t.kind, identity: t.identity, hint: t.hint }));
+  return { areaId: area.areaId, targets: targets.length, emitted: fragments.length, gaps };
+}
+
 async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ctx: AreaRunContext): Promise<AreaRunResult> {
+  // Incremental extract cache: an area whose docs + reconciled targets + prompt
+  // are unchanged returns its prior fragments without any LLM call. Progress
+  // still advances so the UI reflects the cached contracts immediately.
+  const cacheKey = ctx.cacheEnabled ? extractCacheKey(area, targets, ctx.maxRounds) : null;
+  if (cacheKey) {
+    const cached = await getCacheEntry(ctx.scope, EXTRACT_CACHE_NAME, cacheKey);
+    if (cached) {
+      const parsed = ExtractionResultSchema.safeParse(cached);
+      if (parsed.success) {
+        const fragments = parsed.data.fragments;
+        if (fragments.length > 0) ctx.onContractsEmitted?.(fragments.length);
+        const coverage = coverageFor(area, targets, fragments);
+        ctx.onAreaDone?.(coverage);
+        return { fragments, slice: synthesizeAreaSlice(area), coverage };
+      }
+    }
+  }
+
   const fragments: Fragment[] = [];
   const emitted = new Set<string>();
   const emit = (res: ExtractionResult): void => {
@@ -249,24 +373,37 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
   const missing = (): TargetSpec[] => targets.filter((t) => !emitted.has(coverageKey(t.kind, t.identity)));
 
   // Round 0: generate every target in batches. Rounds 1..max: re-prompt the
-  // misses in focused calls until covered or no progress is made.
+  // misses in focused calls until covered or no progress is made. Each batch
+  // emits as it resolves (not after the whole round) so the running contract
+  // count climbs continuously — emit() is synchronous, so the shared `emitted`
+  // set is never touched concurrently.
   let pending = targets;
   for (let round = 0; round <= ctx.maxRounds && pending.length > 0; round++) {
     const batches = chunk(pending, ctx.batchSize);
-    const results = await Promise.all(
+    await Promise.all(
       batches.map((batch) =>
-        ctx.limit(() => ctx.generate({ area, targets: batch })).catch(() => ({ fragments: [] }) as ExtractionResult),
+        ctx
+          .limit(() => ctx.generate({ area, targets: batch }))
+          .then((res) => {
+            const before = fragments.length;
+            emit(res);
+            const delta = fragments.length - before;
+            if (delta > 0) ctx.onContractsEmitted?.(delta);
+          })
+          .catch(() => {}),
       ),
     );
-    for (const res of results) emit(res);
     const next = missing();
     if (next.length === pending.length) break; // no progress this round — stop retrying
     pending = next;
   }
 
-  const gaps: CoverageGap[] = missing().map((t) => ({ areaId: area.areaId, kind: t.kind, identity: t.identity }));
-  const coverage: AreaCoverage = { areaId: area.areaId, targets: targets.length, emitted: fragments.length, gaps };
+  const coverage = coverageFor(area, targets, fragments);
   ctx.onAreaDone?.(coverage);
+  // Cache the final fragments so the next unchanged run skips every LLM call for
+  // this area. We cache even partial coverage (gaps) — re-running won't recover
+  // misses unless the docs/targets change, which busts the key anyway.
+  if (cacheKey) await setCacheEntry(ctx.scope, EXTRACT_CACHE_NAME, cacheKey, { fragments });
   return { fragments, slice: synthesizeAreaSlice(area), coverage };
 }
 
@@ -303,6 +440,23 @@ function synthesizeAreaSlice(area: AreaGenInput): SpecSlice {
 
 const ENUMERATE_CACHE_NAME = 'contract/enumerate';
 const ENUMERATE_PROMPT_FINGERPRINT = createHash('sha256').update(ENUMERATE_SYSTEM_PROMPT).digest('hex').slice(0, 16);
+
+// Per-area extract cache — the incremental seam. Unchanged docs + targets +
+// prompt → the same key → a cache hit that skips the (expensive) generate calls.
+const EXTRACT_CACHE_NAME = 'contract/extract';
+const EXTRACT_PROMPT_FINGERPRINT = createHash('sha256').update(SYSTEM_PROMPT).digest('hex').slice(0, 16);
+
+function extractCacheKey(area: AreaGenInput, targets: TargetSpec[], maxRounds: number): string {
+  const docMaterial = area.docs
+    .map((d) => `${d.ref}:${createHash('sha256').update(d.content).digest('hex')}`)
+    .join('|');
+  // Reconciled identities decide what we generate; sorted so batch ordering
+  // doesn't perturb the key. maxRounds affects how completely gaps get retried.
+  const targetMaterial = targets.map((t) => coverageKey(t.kind, t.identity)).sort().join('|');
+  return createHash('sha256')
+    .update(`${EXTRACT_PROMPT_FINGERPRINT}::r${maxRounds}::${area.areaId}::${docMaterial}::${targetMaterial}`)
+    .digest('hex');
+}
 
 function enumerateCacheKey(area: AreaGenInput): string {
   const material = area.docs.map((d) => `${d.ref}:${createHash('sha256').update(d.content).digest('hex')}`).join('|');
@@ -372,6 +526,17 @@ async function enumerateCached(
   }
   await setCacheEntry(scope, ENUMERATE_CACHE_NAME, key, { targets });
   return targets;
+}
+
+/**
+ * Whether an area's enumerate result is already cached — i.e. its docs are
+ * unchanged. The pre-flight estimate uses this as a proxy for "generate will
+ * skip this area": unchanged docs ⇒ same enumerate ⇒ same reconciled targets ⇒
+ * an extract-cache hit, so the area costs ~nothing on a re-run.
+ */
+export async function isAreaEnumerateCached(repoRoot: string, area: AreaGenInput): Promise<boolean> {
+  const cached = await getCacheEntry(repoRoot, ENUMERATE_CACHE_NAME, enumerateCacheKey(area));
+  return cached != null && EnumerateResultSchema.safeParse(cached).success;
 }
 
 // ---------------------------------------------------------------------------

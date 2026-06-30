@@ -138,9 +138,37 @@ describe('generateContractsFromCorpus', () => {
       maxRetryRounds: 2,
       disableRepair: true,
       disableTargetReconciliation: true,
+      disableGapJudge: true, // raw gap reporting, no auto-close
     });
     expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Real']);
-    expect(result.gaps).toEqual([{ areaId: 'core/x', kind: 'Entity', identity: 'Ghost' }]);
+    expect(result.gaps).toMatchObject([{ areaId: 'core/x', kind: 'Entity', identity: 'Ghost' }]);
+  });
+
+  it('gap judge auto-closes a justified gap and keeps a genuine one with a reason', async () => {
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => ({
+      fragments: targets
+        .filter((t) => t.identity !== 'Ghost' && t.identity !== 'Covered')
+        .map((t) => entityFragment(area.docs[0].ref, t.identity)),
+    });
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['Real', 'Covered', 'Ghost'] }),
+      generateRunner,
+      maxRetryRounds: 0,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      gapJudge: async () => ({
+        verdicts: {
+          'Entity:Covered': { justified: true, reason: 'written elsewhere' },
+          'Entity:Ghost': { justified: false, reason: 'doc requires it, not written' },
+        },
+      }),
+    });
+    // Covered is auto-closed; Ghost survives with the judge's reason.
+    expect(result.gaps.map((g) => g.identity)).toEqual(['Ghost']);
+    expect(result.gaps[0].reason).toContain('not written');
+    expect(result.areas[0].gaps.map((g) => g.identity)).toEqual(['Ghost']);
   });
 
   it('dedups an identity defined in two areas down to one artifact', async () => {
@@ -169,6 +197,84 @@ describe('generateContractsFromCorpus', () => {
     expect(enumCalls).toBe(1);
     await generateContractsFromCorpus(opts);
     expect(enumCalls).toBe(1); // served from the enumerate cache
+  });
+
+  it('caches extraction — a second run with unchanged docs makes no generate calls', async () => {
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {
+      genCalls++;
+      return generateAll({ area, targets });
+    };
+    const opts = {
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['A', 'B'] }),
+      generateRunner,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    };
+    const first = await generateContractsFromCorpus(opts);
+    expect(genCalls).toBeGreaterThan(0);
+    const afterFirst = genCalls;
+
+    const second = await generateContractsFromCorpus(opts);
+    expect(genCalls).toBe(afterFirst); // served from the extract cache — no new LLM calls
+    expect(second.artifactsToWrite.map((a) => a.identity).sort()).toEqual(
+      first.artifactsToWrite.map((a) => a.identity).sort(),
+    );
+    expect(second.areas[0]).toMatchObject({ areaId: 'core/x', targets: 2, emitted: 2 });
+    expect(second.gaps).toEqual([]);
+  });
+
+  it('re-generates an area whose doc content changed (cache key busts)', async () => {
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {
+      genCalls++;
+      return generateAll({ area, targets });
+    };
+    const mk = (content: string) => ({
+      repoRoot: repo,
+      corpusInput: [
+        {
+          areaId: 'core/x',
+          product: 'core',
+          concern: 'x',
+          docs: [{ ref: 'x.md', content, lastTouched: '2026-01-01T00:00:00Z', status: 'shipped' as const, kind: 'prd' as const }],
+        },
+      ],
+      enumerateRunner: enumerateStub({ 'core/x': ['A'] }),
+      generateRunner,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    await generateContractsFromCorpus(mk('# X\noriginal body'));
+    const afterFirst = genCalls;
+    await generateContractsFromCorpus(mk('# X\nCHANGED body'));
+    expect(genCalls).toBeGreaterThan(afterFirst); // changed doc → cache miss → regenerate
+  });
+
+  it('disableExtractCache re-generates every run', async () => {
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {
+      genCalls++;
+      return generateAll({ area, targets });
+    };
+    const opts = {
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['A'] }),
+      generateRunner,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+      disableExtractCache: true,
+    };
+    await generateContractsFromCorpus(opts);
+    const afterFirst = genCalls;
+    await generateContractsFromCorpus(opts);
+    expect(genCalls).toBeGreaterThan(afterFirst); // cache off → generated again
   });
 
   it('matches coverage tolerantly across enumerator/generator format drift (no false gap)', async () => {

@@ -11,12 +11,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import {
-  scanInProcess,
-  generateContractsInProcess,
+  curateInProcess,
+  generateFromCorpusInProcess,
 } from '@truecourse/core/commands/spec-in-process';
+import { saveSpec } from '@truecourse/core/lib/spec-store';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
-import type { RepoRef } from '@truecourse/core/lib/contract-store';
+import { saveContracts, type RepoRef } from '@truecourse/core/lib/contract-store';
 import {
   getInstallationToken,
   cloneUrl,
@@ -28,19 +29,20 @@ import {
 /** The expensive spec→contract pipeline, abstracted for injection in tests. */
 export interface SpecScanPipeline {
   /**
-   * Consolidate spec docs and persist them under `ref` (`saveSpec`). Returns the
-   * number of OPEN conflicts the merge couldn't resolve — these were
-   * auto-defaulted to keep the pipeline moving, so a positive count means the
-   * generated contracts encode a guess that a human should confirm.
+   * Curate the repo's spec docs into a corpus and persist it under `ref`
+   * (`saveSpec(ref, 'corpus', …)`). Returns the number of within-area OVERLAPS
+   * the curation flagged but no relation resolved — the corpus-path analog of
+   * "open conflicts": a positive count means docs in an area may disagree and a
+   * human should pick a relation.
    */
   scan(
     repoRoot: string,
     ref: RepoRef,
     tracker?: StepTracker,
   ): Promise<{ openConflicts: number }>;
-  /** Generate contracts and persist them under `ref` (`saveContracts`). Returns the
-   *  file count. `onSliceProgress(done, total)` reports per-slice progress for the
-   *  EE job popup (the same "N/M slices" the OSS popup shows). */
+  /** Generate contracts from the corpus and persist them under `ref`
+   *  (`saveContracts`). Returns the file count. The progress callbacks are kept
+   *  for interface compatibility (corpus generate reports per-area, not per-slice). */
   generate(
     repoRoot: string,
     ref: RepoRef,
@@ -52,37 +54,25 @@ export interface SpecScanPipeline {
 export const defaultSpecScanPipeline: SpecScanPipeline = {
   async scan(repoRoot, ref, tracker) {
     // Fail loudly BEFORE any LLM work when no provider is configured — otherwise
-    // the consolidator's fail-open handling swallows it and the gate "completes"
-    // with no contracts (and EE must never fall back to the `claude` CLI).
+    // the curate fail-open handling swallows it and the gate "completes" with no
+    // corpus (and EE must never fall back to the `claude` CLI).
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-    // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). The
-    // explicit `ref` makes scan/generate ingest into the server-side store.
-    const { scanState } = await scanInProcess(repoRoot, { skipGit: true, ref, tracker });
-    return { openConflicts: scanState.openConflicts.length };
+    // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
+    // writes corpus.json into the clone; we persist it under `ref` for the store.
+    const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker });
+    await saveSpec(ref, 'corpus', curate.corpus);
+    return { openConflicts: curate.stats.overlapFlags };
   },
-  async generate(repoRoot, ref, onSliceProgress, onRepairProgress) {
+  async generate(repoRoot, ref) {
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-    const res = await generateContractsInProcess(repoRoot, {
-      skipGit: true,
-      ref,
-      onSliceProgress,
-      onRepairProgress,
-    });
-    if (res.il.kind === 'failed') throw res.il.error;
-    if (res.il.kind === 'extracted') {
-      // A resolver-hard corpus error wrote nothing — surface it as a failure
-      // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
-      if (res.il.result.resolverHard) {
-        const reasons = res.il.result.validationIssues
-          .filter((i) => i.severity === 'hard')
-          .map((i) => i.message);
-        throw new Error(
-          `Contract corpus failed to resolve — ${reasons.slice(0, 3).join('; ') || 'duplicate or conflicting artifact identities'}`,
-        );
-      }
-      return { fileCount: res.il.result.write.written.length };
-    }
-    return { fileCount: 0 };
+    const { corpus } = await generateFromCorpusInProcess(repoRoot);
+    // A resolver-hard / failed corpus wrote nothing — surface it as a failure
+    // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
+    if (corpus.kind === 'failed') throw corpus.error;
+    if (corpus.kind === 'skipped') return { fileCount: 0 };
+    // Persist the freshly generated `.tc` tree into the server-side store under `ref`.
+    await saveContracts(ref, 'contracts', path.join(repoRoot, '.truecourse', 'contracts'));
+    return { fileCount: corpus.result.write.written.length };
   },
 };
 
@@ -129,7 +119,7 @@ export async function runSpecScan(
     // though we never write back.
     await stripEmbeddedAuth(simpleGit(tmp));
 
-    // spec docs → claims.json → contracts/*.tc, all persisted server-side under
+    // spec docs → corpus.json → contracts/*.tc, all persisted server-side under
     // `ref`. The clone is read-only output; it is discarded below.
     const { openConflicts } = await pipeline.scan(tmp, ref);
     const { fileCount } = await pipeline.generate(tmp, ref);

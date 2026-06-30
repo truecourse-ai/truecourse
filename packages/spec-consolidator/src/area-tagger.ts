@@ -1,9 +1,8 @@
 /**
- * Per-doc AREA tagger — the curated-corpus classifier (spec-scan redesign,
- * Phase 1). For each kept doc it asks an LLM "which AREAS does this doc cover?"
- * and returns a list of two-level `{product, concern}` tags plus the doc's
- * lifecycle status. It NEVER disassembles the doc into claims — the whole doc
- * stays the unit; tagging only annotates it.
+ * Per-doc AREA tagger — the curated-corpus classifier. For each kept doc it
+ * asks an LLM "which AREAS does this doc cover?" and returns a list of
+ * two-level `{product, concern}` tags plus the doc's lifecycle status. The
+ * whole doc stays the unit; tagging only annotates it.
  *
  * Cheap (Haiku-tier) and cached per-doc by (path, contentHash, prompt
  * fingerprint) through the pluggable KV seam — re-running a scan with unchanged
@@ -313,4 +312,13 @@ async function readCache(scope: string, cacheKey: string): Promise<DocAreaTags |
 
 async function writeCache(scope: string, cacheKey: string, verdict: DocAreaTags): Promise<void> {
   await setCacheEntry(scope, CACHE_NAME, cacheKey, verdict);
+}
+
+/**
+ * Whether a doc's area-tags are already cached (an unchanged doc ⇒ no LLM call
+ * next run). Reuses the runtime cache key so the estimate matches the next scan
+ * exactly.
+ */
+export async function isAreaTagCached(repoRoot: string, doc: DocCandidate): Promise<boolean> {
+  return (await readCache(repoRoot, computeCacheKey(doc))) !== null;
 }

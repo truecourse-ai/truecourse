@@ -25,10 +25,12 @@ import {
   VERIFY_STEPS,
   inferInProcess,
   INFER_STEPS,
+  EstimateDeclined,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { resolveStashDecision } from "./analyze.js";
+import { promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
 
 export interface RunSpecOptions {
@@ -37,6 +39,8 @@ export interface RunSpecOptions {
   llm?: "cli" | "agent";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+  /** Skip the pre-flight cost-estimate confirm (`--yes`). */
+  yes?: boolean;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
@@ -59,14 +63,21 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // fail every doc. Probe once up front (the `agent` transport answers via the
   // filesystem mailbox, so the probe is irrelevant there).
   if (opts.llm !== "agent") await preflightClaudeOrExit();
+  // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
+  const autoApprove = !!opts.yes || opts.llm === "agent";
   const { renderer, tracker } = withTracker(CURATE_STEPS);
   const { curate } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
     io: opts.io,
+    onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Scan" } }),
   }).catch((e: unknown) => {
     renderer.dispose();
+    if (e instanceof EstimateDeclined) {
+      p.cancel("Scan cancelled.");
+      process.exit(0);
+    }
     p.cancel(`Failed: ${(e as Error).message}`);
     process.exit(1);
   });

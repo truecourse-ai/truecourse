@@ -118,8 +118,8 @@ export interface ContractStore {
   deleteContractFile(ref: RepoRef, kind: ContractKind, relPath: string): Promise<void>;
 
   // --- Workspace scope (enterprise only; always-latest, keyed by org) --------
-  // Workspace contracts are generated IN MEMORY from the workspace's canonical
-  // claims (no repo tree, no scratch dir), so the save takes a `{ relPath →
+  // Workspace contracts are generated IN MEMORY from the workspace's curated
+  // corpus (no repo tree, no scratch dir), so the save takes a `{ relPath →
   // content }` map rather than a source directory. The file default throws on
   // save and is empty on read, so an effective read degrades to repo-only in OSS.
 

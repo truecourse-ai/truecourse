@@ -151,9 +151,10 @@ export interface CommitDrifts {
  * store with code from `checkoutDir`. Cold (no contracts yet): scan+generate on
  * the checkout, persist under the commit, verify. Warm (contracts already
  * stored): verify directly. Either way the open-conflict count is the
- * AUTHORITATIVE one for this commit — fresh from the scan on the cold path, read
- * back from the persisted scan-state on the warm path — so the gate refuses to
- * trust an auto-defaulted spec regardless of whether it generated it this run.
+ * AUTHORITATIVE one for this commit — fresh from the scan on the cold path,
+ * recovered from the persisted corpus's flagged overlaps on the warm path — so
+ * the gate refuses to trust an unresolved spec regardless of whether it
+ * generated it this run.
  * No spec at all → drifts null (neutral `no-contracts`). A generation throw
  * PROPAGATES (so the gate posts an error Check) — never collapse to neutral.
  */
@@ -186,10 +187,10 @@ export async function driftsForCommit(
     await scanPipeline.generate(checkoutDir, ref);
   } else {
     // Already generated (e.g. an earlier gate run or the scan checkbox). The
-    // scan persisted its conflict count under the ref; recover it so a warm
-    // cache can't silently downgrade a conflicted spec to "trusted".
-    const ss = await loadSpec<{ openConflicts?: unknown[] }>(ref, 'scanState');
-    openConflicts = ss?.openConflicts?.length ?? 0;
+    // scan persisted the curated corpus under the ref; recover its flagged-overlap
+    // count so a warm cache can't silently downgrade a disagreeing spec to "trusted".
+    const corpus = await loadSpec<{ areas?: Array<{ overlaps?: unknown[] }> }>(ref, 'corpus');
+    openConflicts = corpus?.areas?.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
   }
   // Neutral ONLY when the repo has neither its own contracts nor any workspace
   // contracts to inherit — otherwise the repo is verified against its EFFECTIVE

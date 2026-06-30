@@ -80,6 +80,34 @@ export interface RelevanceFilterOutcome {
 // Top-level entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * The deterministic (no-LLM) pre-filter: which docs would be dropped before the
+ * LLM classifier runs, and why. Shared by `filterByRelevance` (the real pass)
+ * and the scan cost estimator, so both agree on exactly how many docs reach the
+ * LLM. Manual includes bypass it unconditionally.
+ */
+export function prefilterDocs(
+  docs: DocCandidate[],
+  manualIncludes: string[] = [],
+): { toClassify: DocCandidate[]; skipped: Array<{ path: string; reason: string }> } {
+  const manualSet = new Set(manualIncludes);
+  const reasons = new Map<string, string>();
+  for (const doc of docs) {
+    if (manualSet.has(doc.path)) continue;
+    const reason = deterministicSkip(doc);
+    if (reason) reasons.set(doc.path, reason);
+  }
+  for (const { path, reason } of dedupeNearDuplicates(
+    docs.filter((d) => !manualSet.has(d.path) && !reasons.has(d.path)),
+  )) {
+    reasons.set(path, reason);
+  }
+  return {
+    toClassify: docs.filter((d) => !reasons.has(d.path)),
+    skipped: [...reasons].map(([path, reason]) => ({ path, reason })),
+  };
+}
+
 export async function filterByRelevance(
   repoRoot: string,
   docs: DocCandidate[],
@@ -96,18 +124,8 @@ export async function filterByRelevance(
 
   // Deterministic pre-filter (no LLM): drop archived/agent-instruction files by
   // path, then near-duplicate copies. Manual includes bypass it unconditionally.
-  const prefilterReason = new Map<string, string>();
-  for (const doc of docs) {
-    if (manualSet.has(doc.path)) continue;
-    const reason = deterministicSkip(doc);
-    if (reason) prefilterReason.set(doc.path, reason);
-  }
-  for (const { path, reason } of dedupeNearDuplicates(
-    docs.filter((d) => !manualSet.has(d.path) && !prefilterReason.has(d.path)),
-  )) {
-    prefilterReason.set(path, reason);
-  }
-  const toClassify = docs.filter((d) => !prefilterReason.has(d.path));
+  const { toClassify, skipped: prefilterSkipped } = prefilterDocs(docs, opts.manualIncludes ?? []);
+  const prefilterReason = new Map(prefilterSkipped.map((s) => [s.path, s.reason]));
 
   const total = docs.length;
   let done = 0;
@@ -392,4 +410,13 @@ async function readCache(scope: string, cacheKey: string): Promise<RelevanceVerd
 
 async function writeCache(scope: string, cacheKey: string, verdict: RelevanceVerdict): Promise<void> {
   await setCacheEntry(scope, CACHE_NAME, cacheKey, verdict);
+}
+
+/**
+ * The cached relevance verdict for a doc, or null on a cache miss (the doc will
+ * need an LLM classify on the next run). Reuses the runtime cache key, so the
+ * pre-flight estimate sees exactly what the next scan will hit.
+ */
+export async function readRelevanceCache(repoRoot: string, doc: DocCandidate): Promise<RelevanceVerdict | null> {
+  return readCache(repoRoot, computeCacheKey(doc));
 }

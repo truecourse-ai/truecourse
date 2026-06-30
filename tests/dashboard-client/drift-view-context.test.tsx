@@ -1,14 +1,12 @@
 /**
- * DriftViewContext owns the BL-Drift panes (spec conflict, canonical
- * viewer, contracts viewer, verify drift tabs) lifted from
- * RepoGraphPage. The canonical/contracts viewers mirror their active path
- * to the URL (?canonical / ?contract), so the harness renders under a
- * BrowserRouter and resets the URL per test.
+ * DriftViewContext owns the BL-Drift panes (corpus Spec tab viewer,
+ * contracts viewer, verify drift tabs) lifted from RepoGraphPage. The
+ * spec/contracts viewers mirror their active path to the URL
+ * (?spec / ?contract), so the harness renders under a BrowserRouter and
+ * resets the URL per test.
  *
  * Key behaviours pinned here:
- *   - the right pane is single-slot: selecting a conflict clears the
- *     active canonical file and vice-versa;
- *   - canonical/contracts viewers use the transient/pinned tab model and
+ *   - spec/contracts viewers use the transient/pinned tab model and
  *     mirror the active path to the URL;
  *   - reconcileDriftTabs prunes open drift tabs to still-valid ids
  *     (and clears everything when passed null).
@@ -25,16 +23,14 @@ function Probe() {
   const d = api;
   return (
     <div>
-      <span data-testid="conflict">{d.activeSpecConflictId ?? '∅'}</span>
-      <span data-testid="canonical">{d.activeCanonicalPath ?? '∅'}</span>
-      <span data-testid="canonTabs">{d.openCanonicalFiles.map((f) => `${f.path}${f.pinned ? '*' : ''}`).join(',')}</span>
+      <span data-testid="spec">{d.activeSpecPath ?? '∅'}</span>
+      <span data-testid="specTabs">{d.openSpecTabs.map((f) => `${f.path}${f.pinned ? '*' : ''}`).join(',')}</span>
       <span data-testid="contracts">{d.activeContractsPath ?? '∅'}</span>
       <span data-testid="contractTabs">{d.openContractsFiles.map((f) => f.path).join(',')}</span>
       <span data-testid="drift">{d.activeDriftId ?? '∅'}</span>
       <span data-testid="driftTabs">{d.openDriftTabs.map((t) => t.id).join(',')}</span>
 
-      <button onClick={() => d.handleSelectSpecConflict('c1')}>select-c1</button>
-      <button onClick={() => d.handleOpenCanonical('spec/a.md', true)}>open-canon-a</button>
+      <button onClick={() => d.handleOpenSpec('spec/a.md', true)}>open-spec-a</button>
       <button onClick={() => d.handleOpenContracts('contracts/x.ts', false)}>open-contract-x</button>
       <button onClick={() => d.handleOpenContracts('contracts/y.ts', false)}>open-contract-y</button>
       <button onClick={() => d.handleOpenDrift('d1', true)}>open-d1</button>
@@ -55,28 +51,6 @@ function renderProvider() {
   );
 }
 
-describe('DriftViewContext — single-slot right pane', () => {
-  it('selecting a conflict clears the active canonical file', async () => {
-    const user = userEvent.setup();
-    renderProvider();
-    await user.click(screen.getByText('open-canon-a'));
-    expect(screen.getByTestId('canonical')).toHaveTextContent('spec/a.md');
-    await user.click(screen.getByText('select-c1'));
-    expect(screen.getByTestId('conflict')).toHaveTextContent('c1');
-    expect(screen.getByTestId('canonical')).toHaveTextContent('∅');
-  });
-
-  it('opening a canonical file clears the active conflict', async () => {
-    const user = userEvent.setup();
-    renderProvider();
-    await user.click(screen.getByText('select-c1'));
-    expect(screen.getByTestId('conflict')).toHaveTextContent('c1');
-    await user.click(screen.getByText('open-canon-a'));
-    expect(screen.getByTestId('canonical')).toHaveTextContent('spec/a.md');
-    expect(screen.getByTestId('conflict')).toHaveTextContent('∅');
-  });
-});
-
 describe('DriftViewContext — viewer tabs', () => {
   it('contracts viewer replaces the transient tab', async () => {
     const user = userEvent.setup();
@@ -87,11 +61,12 @@ describe('DriftViewContext — viewer tabs', () => {
     expect(screen.getByTestId('contracts')).toHaveTextContent('contracts/y.ts');
   });
 
-  it('canonical pinned tab is kept', async () => {
+  it('spec pinned tab is kept', async () => {
     const user = userEvent.setup();
     renderProvider();
-    await user.click(screen.getByText('open-canon-a'));
-    expect(screen.getByTestId('canonTabs')).toHaveTextContent('spec/a.md*');
+    await user.click(screen.getByText('open-spec-a'));
+    expect(screen.getByTestId('specTabs')).toHaveTextContent('spec/a.md*');
+    expect(screen.getByTestId('spec')).toHaveTextContent('spec/a.md');
   });
 });
 
@@ -130,17 +105,17 @@ describe('DriftViewContext — verify drift tabs', () => {
 });
 
 describe('DriftViewContext — URL sync', () => {
-  it('mirrors the open canonical / contracts file to the URL', async () => {
+  it('mirrors the open spec / contracts file to the URL', async () => {
     const user = userEvent.setup();
     renderProvider();
-    await user.click(screen.getByText('open-canon-a'));
-    expect(new URLSearchParams(window.location.search).get('canonical')).toBe('spec/a.md');
+    await user.click(screen.getByText('open-spec-a'));
+    expect(new URLSearchParams(window.location.search).get('spec')).toBe('spec/a.md');
     await user.click(screen.getByText('open-contract-x'));
     expect(new URLSearchParams(window.location.search).get('contract')).toBe('contracts/x.ts');
   });
 
-  it('restores the active canonical file from the URL on mount', () => {
-    window.history.replaceState({}, '', '/repos/abc?canonical=spec/from-url.md');
+  it('restores the active spec file from the URL on mount', () => {
+    window.history.replaceState({}, '', '/repos/abc?spec=spec/from-url.md');
     render(
       <BrowserRouter>
         <DriftViewProvider>
@@ -148,8 +123,8 @@ describe('DriftViewContext — URL sync', () => {
         </DriftViewProvider>
       </BrowserRouter>,
     );
-    expect(screen.getByTestId('canonical')).toHaveTextContent('spec/from-url.md');
-    expect(screen.getByTestId('canonTabs')).toHaveTextContent('spec/from-url.md*');
+    expect(screen.getByTestId('spec')).toHaveTextContent('spec/from-url.md');
+    expect(screen.getByTestId('specTabs')).toHaveTextContent('spec/from-url.md*');
   });
 
   it('mirrors the selected drift to ?drift and clears it when reconciled away', async () => {

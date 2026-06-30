@@ -1,7 +1,7 @@
 /**
  * Content-addressed store over the `content` table — the single dedup pool for
  * immutable bodies in the hosted edition: contract `.tc` files, immutable spec
- * artifacts (claims, scan-state, chains), and LLM trace payloads. One row per
+ * artifacts (corpus, decisions), and LLM trace payloads. One row per
  * (scope, sha): identical content under a scope is written once; manifests / refs
  * elsewhere point in by sha.
  *

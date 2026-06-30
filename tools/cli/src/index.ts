@@ -192,10 +192,11 @@ contractsCmd
   .command("generate")
   .description("Generate .tc artifacts from the curated corpus (corpus.json)")
   .option("--diff", "Dry run — show what would change without writing")
+  .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runContractsGenerate({ diff: !!options.diff, llm: options.llmTransport, io: options.io });
+    await runContractsGenerate({ diff: !!options.diff, yes: !!options.yes, llm: options.llmTransport, io: options.io });
   });
 
 contractsCmd
@@ -214,18 +215,19 @@ contractsCmd
     await runContractsValidate();
   });
 
-// Spec consolidation — docs → claims → conflicts → canonical .truecourse/specs/.
+// Spec scan — docs → curated corpus (areas + doc relations + overlaps) in .truecourse/specs/.
 const specCmd = program
   .command("spec")
-  .description("Consolidate scattered docs into a canonical spec");
+  .description("Curate scattered docs into a corpus of areas and doc relations");
 
 specCmd
   .command("scan")
   .description("Curate docs into corpus.json (areas + doc relations + overlap flags)")
+  .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runSpecScan({ llm: options.llmTransport, io: options.io });
+    await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
   });
 
 specCmd

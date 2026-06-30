@@ -2,10 +2,10 @@
  * Shared fragment→artifact tail: merge by (kind,identity) → cross-cutting tag
  * propagation → deterministic normalize → LLM repair → validate → drop hard-bad.
  *
- * Both the claims (slice) path and the corpus (area) path build a RankedFragment
- * list + context slices and finish here, so dedup/normalize/repair/validate stay
- * identical across paths. Lives in its own module so the corpus generator can
- * reuse it without an import cycle through `index.ts`.
+ * The corpus (area) path builds a RankedFragment list + context slices and
+ * finishes here, so dedup/normalize/repair/validate live in one place. In its
+ * own module so the corpus generator can reuse it without an import cycle
+ * through `index.ts`.
  */
 
 import { mergeRankedFragments, type MergeDiagnostic, type MergedArtifact, type RankedFragment } from './merger.js';
@@ -69,6 +69,7 @@ export async function assembleArtifacts(
     const repaired = await repair(merged.artifacts, slices, {
       transport: opts.transport,
       model: models.repair,
+      parseModel: models.repairParse,
       fallbackModel: models.fallback,
       onProgress: opts.onRepairProgress,
     });

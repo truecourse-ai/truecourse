@@ -32,7 +32,6 @@ import {
   BookOpen,
   FileCode2,
   ShieldCheck,
-  GitMerge,
   GitPullRequest,
   Settings,
   BarChart3,
@@ -142,7 +141,6 @@ export const SECTIONS: SectionDescriptor[] = [
         requiredCapability: 'github-gate',
       },
       { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
-      { id: 'decisions', label: 'Decisions', icon: GitMerge },
       // Reverse-engineered undocumented decisions (OSS + EE). Sidebar list +
       // main-pane detail tabs, like Contracts; Promote / Dismiss in the detail.
       { id: 'inferred', label: 'Inferred', icon: Lightbulb },

@@ -79,8 +79,8 @@ Rules:
 
 /**
  * Rotates whenever the prompt changes, invalidating stale cache entries. Mirrors
- * the `PROMPT_FINGERPRINT` convention in `spec-consolidator/conflict-resolver.ts`
- * and `contract-extractor/cache.ts`.
+ * the `PROMPT_FINGERPRINT` convention used across the spec-consolidator LLM
+ * stages and `contract-extractor/cache.ts`.
  */
 const PROMPT_FINGERPRINT = createHash('sha256')
   .update(DRIFT_ENRICHMENT_SYSTEM_PROMPT)

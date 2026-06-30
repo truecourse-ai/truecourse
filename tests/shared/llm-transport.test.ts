@@ -6,10 +6,7 @@ import {
   agentTransport,
   stripCodeFences,
   extractJsonValue,
-  type LlmTransport,
 } from '../../packages/shared/src/llm/transport.js';
-import { spawnRunner } from '../../packages/spec-consolidator/src/runner.js';
-import type { Block } from '../../packages/spec-consolidator/src/slicer.js';
 
 function tmpIo(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llmio-'));
@@ -100,27 +97,5 @@ describe('agentTransport (filesystem mailbox)', () => {
     await expect(
       agentTransport(io, { pollMs: 5 })({ id: 'slow-1', system: 's', user: 'u', timeoutMs: 40 }),
     ).rejects.toThrow(/timed out/);
-  });
-});
-
-describe('runner ↔ transport seam', () => {
-  it('block runner parses the transport response into an extraction', async () => {
-    const transport: LlmTransport = async (req) => {
-      // the runner should pass the block's prompt through
-      expect(req.stage).toBe('spec.claimExtract');
-      expect(req.user).toContain('hello world');
-      return '```json\n{"topics":[],"claims":[]}\n```';
-    };
-    const block: Block = {
-      id: 'b1',
-      filePath: 'a.md',
-      headingPath: ['Intro'],
-      startLine: 1,
-      text: 'hello world',
-    } as Block;
-    const runner = spawnRunner({ transport });
-    const [result] = await runner([block]);
-    expect(result.error).toBeUndefined();
-    expect(result.extraction).toEqual({ topics: [], claims: [] });
   });
 });

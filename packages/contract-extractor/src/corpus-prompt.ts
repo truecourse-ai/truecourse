@@ -64,7 +64,7 @@ A target is one artifact the docs define. Output its kind + identity. The "kind"
   - StateMachine        — a field's lifecycle (states + transitions). identity = "<Entity>.<field>", e.g. "Order.status".
   - AuthRequirement     — an auth scheme an operation requires (bearer, api-key). identity = a short slug.
   - AuthorizationRule   — who may call which operations (ownership/role checks across endpoints). identity = a short slug, e.g. "order.owner-only".
-  - ValidationRule      — a field-level constraint/requiredness on an entity (when/effect). identity = a short slug.
+  - ValidationRule      — CONDITIONAL field requiredness ONLY: a field is required/optional/forbidden depending on another field's value or the actor's role ("X required when Y = Z"). identity = a short slug. NOT for a field being immutable, server-assigned, unique, a format/regex, a min/max range, or having a default — those are Entity field attributes (see below), never ValidationRules.
   - ErrorEnvelope       — the shared error response shape. identity = a short slug.
   - PaginationContract  — a shared list-pagination contract. identity = a short slug.
   - IdempotencyContract — an idempotency-key contract for write operations. identity = a short slug.
@@ -82,6 +82,13 @@ Pick the kind that MATCHES the doc's intent — do NOT force everything into Val
   - "field X is required when Y" → ValidationRule.
   - "this endpoint requires a bearer token" → AuthRequirement.
   - "total = subtotal + tax − discount" (a computed value) → Formula.
+
+Field ATTRIBUTES are NOT separate targets — they are properties of the Entity, captured when that Entity is generated. Do NOT enumerate them as ValidationRule (or any standalone) targets:
+  - "X is immutable / never changes after creation / set once" → an attribute of Entity.X. List the Entity, not "X-immutable".
+  - "X is server-assigned / server-generated" → an attribute of Entity.X. List the Entity.
+  - "X must be a valid email / uuid / match <format>" → a format attribute of Entity.X. List the Entity.
+  - "X must be unique" / "X must be between A and B" / "X is non-empty" → field attributes of Entity.X. List the Entity.
+  - "X defaults to <value>" → that IS a real target: Fallback. (Use Fallback, not ValidationRule.)
 
 Rules:
   - Be EXHAUSTIVE within the area: list EVERY distinct entity, endpoint, event, enum, and rule the docs actually specify. The downstream generator produces a contract for each item you list, and a completeness gate checks coverage against THIS list — a target you omit will never be generated.

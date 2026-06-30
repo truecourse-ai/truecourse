@@ -16,7 +16,6 @@ import { Loader2, AlertCircle } from 'lucide-react';
 import * as api from '@/lib/api';
 import { CodeViewer } from '@/components/code/CodeViewer';
 import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
-import { useSpec } from '@/components/spec/SpecContext';
 import { useDriftView } from '@/contexts/DriftViewContext';
 
 interface ContractsFileProps {
@@ -28,7 +27,6 @@ export function ContractsFile({ repoId, filePath }: ContractsFileProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { canonicalVersion } = useSpec();
   const { selectedRef } = useDriftView();
 
   useEffect(() => {
@@ -50,7 +48,7 @@ export function ContractsFile({ repoId, filePath }: ContractsFileProps) {
     return () => {
       cancelled = true;
     };
-  }, [repoId, filePath, canonicalVersion, selectedRef]);
+  }, [repoId, filePath, selectedRef]);
 
   return (
     <div className="flex h-full flex-col">

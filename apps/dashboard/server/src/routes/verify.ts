@@ -27,10 +27,10 @@ import {
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { loadSpec } from '@truecourse/core/lib/spec-store';
 import {
+  resolveWorkspaceDocLinks,
   collectOriginSources,
   attachOriginLinks,
-} from '@truecourse/core/lib/spec-origin-resolver';
-import { resolveWorkspaceDocLinks } from '@truecourse/core/lib/workspace-doc-links';
+} from '@truecourse/core/lib/workspace-doc-links';
 import { diffDrifts, type VerifyDiff } from '@truecourse/core/types/verify-snapshot';
 import { getGit, isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import { enrichDrift, type DriftLike } from '@truecourse/core/lib/drift-enrichment';

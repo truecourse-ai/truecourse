@@ -147,11 +147,11 @@ describe('PgTraceStore (pglite + fs blob)', () => {
 
   it('filters list by stage and status', async () => {
     await store.record(mkInput({ callId: 'a:1', stage: 'contract.extract', status: 'ok' }));
-    await store.record(mkInput({ callId: 'b:1', stage: 'spec.claimExtract', status: 'ok' }));
+    await store.record(mkInput({ callId: 'b:1', stage: 'spec.relevance', status: 'ok' }));
     await store.record(mkInput({ callId: 'c:1', stage: 'contract.extract', status: 'error', output: null }));
     expect(await store.list({ org: 'org_1', stage: 'contract.extract' })).toHaveLength(2);
     expect(await store.list({ org: 'org_1', status: 'error' })).toHaveLength(1);
-    expect(await store.list({ org: 'org_1', stage: 'spec.claimExtract', status: 'ok' })).toHaveLength(1);
+    expect(await store.list({ org: 'org_1', stage: 'spec.relevance', status: 'ok' })).toHaveLength(1);
   });
 
   it('aggregates per-stage stats', async () => {

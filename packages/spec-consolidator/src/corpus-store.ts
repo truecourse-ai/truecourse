@@ -1,8 +1,7 @@
 /**
  * Persistence for the curated corpus: a single
  * `.truecourse/specs/corpus.json` snapshot of every kept doc, its area tags,
- * the area groups, and the auto-detected doc→doc relations (spec-scan redesign,
- * Phase 1). Replaces `claims-store.ts` (whole) in the corpus path.
+ * the area groups, and the auto-detected doc→doc relations.
  *
  * Committable (LATEST.json convention): expensive to regenerate (LLM tagging)
  * and not purely deterministic, so teammates inherit it from git. The per-doc
@@ -16,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { CuratedCorpusSchema, type Area, type CorpusDoc, type CuratedCorpus } from './corpus-types.js';
+import { CuratedCorpusSchema, type Area, type CorpusDoc, type CuratedCorpus, type SkippedDoc } from './corpus-types.js';
 import type { Relation } from './types.js';
 
 const CORPUS_FILE = 'corpus.json';
@@ -42,7 +41,13 @@ export function readCorpus(repoRoot: string): CuratedCorpus | null {
 
 export function writeCorpus(
   repoRoot: string,
-  input: { docs: CorpusDoc[]; areas: Area[]; relations: Relation[]; generatedAt?: string },
+  input: {
+    docs: CorpusDoc[];
+    areas: Area[];
+    relations: Relation[];
+    skippedDocs?: SkippedDoc[];
+    generatedAt?: string;
+  },
 ): void {
   const file = corpusFilePath(repoRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -54,6 +59,7 @@ export function writeCorpus(
     docs: input.docs,
     areas: input.areas,
     relations: input.relations,
+    skippedDocs: input.skippedDocs ?? [],
   };
   fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
 }

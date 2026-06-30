@@ -4,12 +4,14 @@ import path from "node:path";
 import {
   generateFromCorpusInProcess,
   CORPUS_GENERATE_STEPS,
+  EstimateDeclined,
 } from "@truecourse/core/commands/spec-in-process";
 import { StepTracker } from "@truecourse/core/progress";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { syncShippedTcSyntax } from "./helpers.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { promptLlmEstimate } from "./llm-prompt.js";
 
 export interface RunContractsGenerateOptions {
   /** When true, perform a dry run — write nothing, show what would change. */
@@ -20,6 +22,8 @@ export interface RunContractsGenerateOptions {
   llm?: "cli" | "agent";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+  /** Skip the pre-flight cost-estimate confirm (`--yes`). */
+  yes?: boolean;
 }
 
 export async function runContractsGenerate(
@@ -39,15 +43,28 @@ export async function runContractsGenerate(
   // (the `agent` transport answers via the filesystem mailbox, so skip it there).
   if (options.llm !== "agent") await preflightClaudeOrExit();
 
+  // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
+  const autoApprove = !!options.yes || options.llm === "agent";
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, CORPUS_GENERATE_STEPS.map((s) => ({ ...s })));
-  const { corpus } = await generateFromCorpusInProcess(repoRoot, {
-    tracker,
-    source: "cli",
-    llm: options.llm,
-    io: options.io,
-    dryRun: !!options.diff,
-  });
+  let corpus;
+  try {
+    ({ corpus } = await generateFromCorpusInProcess(repoRoot, {
+      tracker,
+      source: "cli",
+      llm: options.llm,
+      io: options.io,
+      dryRun: !!options.diff,
+      onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } }),
+    }));
+  } catch (e: unknown) {
+    renderer.dispose();
+    if (e instanceof EstimateDeclined) {
+      p.cancel("Generate cancelled.");
+      process.exit(0);
+    }
+    throw e;
+  }
   renderer.dispose();
 
   if (corpus.kind === "skipped") {

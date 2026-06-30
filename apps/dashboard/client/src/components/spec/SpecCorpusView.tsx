@@ -1,19 +1,28 @@
 /**
  * SpecCorpusView — the curated-corpus Spec tab's LEFT NAV (spec-scan redesign).
  *
- * Mirrors the canonical/contracts tree: a list of AREAS, each expanding to its
- * source docs and within-area OVERLAPS. Selecting a row opens it in the RIGHT
- * pane (single-click = preview, double-click = pin), URL-synced as `?canonical=`
- * via the shared `handleOpenCanonical` machinery — a doc opens the markdown
- * viewer, an overlap opens the resolution detail.
+ * Mirrors the contracts tree: a list of AREAS, each expanding to its source
+ * docs and within-area OVERLAPS. Selecting a row opens it in the RIGHT pane
+ * (single-click = preview, double-click = pin), URL-synced as `?spec=` via the
+ * shared `handleOpenSpec` machinery — a doc opens the markdown viewer, an
+ * overlap opens the resolution detail.
  *
  * State (fetch + scan) lives in `useSpecCorpus` so the page header owns Scan.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge } from 'lucide-react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation } from '@/lib/api';
 
@@ -59,6 +68,9 @@ export interface SpecCorpusState {
   scan: () => Promise<void>;
   /** Re-read corpus + relations after an inline resolution. */
   refetch: () => Promise<void>;
+  /** True after a rescan that found no doc changes — drives the "nothing changed" notice. */
+  noChangesNotice: boolean;
+  dismissNoChanges: () => void;
 }
 
 /**
@@ -70,6 +82,7 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
   const [hydrating, setHydrating] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noChangesNotice, setNoChangesNotice] = useState(false);
 
   useEffect(() => {
     if (!enabled) {
@@ -91,14 +104,22 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
+    setNoChangesNotice(false);
     try {
-      setData(await api.getSpecCorpusScan(repoId));
+      const res = await api.getSpecCorpusScan(repoId);
+      // User dismissed the cost-estimate confirm — leave existing data untouched.
+      if ('cancelled' in res) return;
+      setData(res);
+      // Every doc was unchanged (no LLM calls) — tell the user nothing happened.
+      if (res.noChanges) setNoChangesNotice(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setScanning(false);
     }
   }, [repoId]);
+
+  const dismissNoChanges = useCallback(() => setNoChangesNotice(false), []);
 
   const refetch = useCallback(async () => {
     try {
@@ -108,24 +129,43 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
     }
   }, [repoId]);
 
-  return { data, hydrating, scanning, error, scan, refetch };
+  return { data, hydrating, scanning, error, scan, refetch, noChangesNotice, dismissNoChanges };
 }
 
 export function SpecCorpusView({
+  repoId,
   corpus,
   activeKey,
   onOpen,
 }: {
+  repoId: string;
   corpus: SpecCorpusState;
-  /** The `?canonical=` value (a doc ref or an overlap key), or null. */
+  /** The `?spec=` value (a doc ref or an overlap key), or null. */
   activeKey: string | null;
   /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
 }) {
   const { data, hydrating, scanning } = corpus;
-  // Active tag filters for the Documents list (empty = show all). Declared before
-  // the early returns to satisfy the rules of hooks.
+  // Declared before the early returns to satisfy the rules of hooks.
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set());
+  // The doc ref currently being force-included / un-included (disables its row).
+  const [togglingInclude, setTogglingInclude] = useState<string | null>(null);
+
+  // Force-include a dropped doc / undo it, then re-scan to apply (the scan's own
+  // cost-estimate confirm applies). Re-tagging unchanged docs is cache-cheap.
+  const setInclude = useCallback(
+    async (ref: string, include: boolean) => {
+      setTogglingInclude(ref);
+      try {
+        if (include) await api.addSpecInclude(repoId, ref);
+        else await api.removeSpecInclude(repoId, ref);
+        await corpus.scan();
+      } finally {
+        setTogglingInclude(null);
+      }
+    },
+    [repoId, corpus],
+  );
 
   if (hydrating || (scanning && !data)) {
     return (
@@ -147,6 +187,8 @@ export function SpecCorpusView({
 
   const { corpus: c, userRelations } = data;
   const effectiveRels = [...c.relations, ...userRelations];
+  const skippedDocs = c.skippedDocs ?? [];
+  const manualIncludes = data.manualIncludes ?? [];
   // Single-product repos tag everything `core/*`; drop the redundant product in
   // area/tag labels so they read as their concern (e.g. "auth", not "core/auth").
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
@@ -182,6 +224,27 @@ export function SpecCorpusView({
 
   return (
     <div className="flex h-full flex-col">
+      <Dialog
+        open={corpus.noChangesNotice}
+        onOpenChange={(open) => {
+          if (!open) corpus.dismissNoChanges();
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>No spec changes</DialogTitle>
+            <DialogDescription>
+              Every doc is unchanged since the last scan, so there was nothing to re-analyze — your
+              corpus is already up to date.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" onClick={corpus.dismissNoChanges}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {corpus.error && (
         <div className="border-b border-border px-4 py-2">
           <Alert variant="destructive">
@@ -245,6 +308,45 @@ export function SpecCorpusView({
             />
           ))}
         </Section>
+        {skippedDocs.length > 0 && (
+          <Section
+            title="Not included"
+            count={skippedDocs.length}
+            icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
+          >
+            {skippedDocs.map((doc) => (
+              <IncludeRow
+                key={doc.ref}
+                docRef={doc.ref}
+                reason={doc.reason}
+                active={activeKey === doc.ref}
+                actionLabel="include"
+                toggling={togglingInclude === doc.ref}
+                onOpen={(pinned) => onOpen(doc.ref, pinned)}
+                onAction={() => setInclude(doc.ref, true)}
+              />
+            ))}
+          </Section>
+        )}
+        {manualIncludes.length > 0 && (
+          <Section
+            title="Force-included"
+            count={manualIncludes.length}
+            icon={<FileText className="h-3.5 w-3.5 shrink-0" />}
+          >
+            {manualIncludes.map((ref) => (
+              <IncludeRow
+                key={ref}
+                docRef={ref}
+                active={activeKey === ref}
+                actionLabel="remove"
+                toggling={togglingInclude === ref}
+                onOpen={(pinned) => onOpen(ref, pinned)}
+                onAction={() => setInclude(ref, false)}
+              />
+            ))}
+          </Section>
+        )}
       </div>
     </div>
   );
@@ -318,6 +420,66 @@ function DocRow({
         )}
       </span>
     </button>
+  );
+}
+
+/**
+ * A dropped-doc row (the "Not included" + "Force-included" sections). Previewable
+ * like every other list row — single-click previews the doc's markdown in the
+ * right pane, double-click pins it (the doc viewer reads the file from disk, so a
+ * dropped doc still previews). It also carries an inline action (include /
+ * remove) that re-scans; the action button stops propagation so it doesn't open
+ * the preview. A div (not a button) so the nested action button is valid.
+ */
+function IncludeRow({
+  docRef,
+  reason,
+  active,
+  actionLabel,
+  toggling,
+  onOpen,
+  onAction,
+}: {
+  docRef: string;
+  reason?: string;
+  active: boolean;
+  actionLabel: string;
+  toggling: boolean;
+  onOpen: (pinned: boolean) => void;
+  onAction: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(false)}
+      onDoubleClick={() => onOpen(true)}
+      title={`${docRef} — click to preview, double-click to pin`}
+      className={`flex w-full cursor-pointer items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
+        active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+      }`}
+    >
+      <FileText className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate">{base(docRef)}</span>
+        {reason && (
+          <span className="truncate text-[10px] text-muted-foreground/70" title={reason}>
+            {reason}
+          </span>
+        )}
+      </span>
+      <button
+        type="button"
+        disabled={toggling}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAction();
+        }}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
+      >
+        {toggling ? '…' : actionLabel}
+      </button>
+    </div>
   );
 }
 

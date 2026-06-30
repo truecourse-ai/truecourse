@@ -267,6 +267,13 @@ export type Area = z.infer<typeof AreaSchema>;
  * Holds docs + area tags + auto-detected relations; user-authored relations live
  * in `decisions.json`. The effective relation set at generate time is the union.
  */
+/** A doc the relevance filter dropped, with the reason — surfaced so the user can force-include it. */
+export const SkippedDocSchema = z.object({
+  ref: z.string(),
+  reason: z.string(),
+});
+export type SkippedDoc = z.infer<typeof SkippedDocSchema>;
+
 export const CuratedCorpusSchema = z.object({
   version: z.literal(3),
   generatedAt: z.string(),
@@ -274,5 +281,7 @@ export const CuratedCorpusSchema = z.object({
   areas: z.array(AreaSchema),
   /** Auto-detected doc→doc relations (filename / llm provenance). */
   relations: z.array(RelationSchema).default([]),
+  /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
+  skippedDocs: z.array(SkippedDocSchema).default([]),
 });
 export type CuratedCorpus = z.infer<typeof CuratedCorpusSchema>;

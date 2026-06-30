@@ -21,20 +21,18 @@ export interface RunConfigLlmShowOptions {
 }
 
 const STAGE_LABEL: Record<StageId, string> = {
-  "spec.chainDetect": "Spec   · chain detect",
-  "spec.claimExtract": "Spec   · claim extract",
-  "spec.chainRecheck": "Spec   · chain recheck",
-  "spec.conflictExplain": "Spec   · conflict explain",
-  "spec.conflictResolve": "Spec   · conflict resolve",
   "spec.relevance": "Spec   · doc relevance",
   "spec.areaTag": "Spec   · area tag",
   "spec.vocab": "Spec   · vocab reconcile",
+  "spec.chainDetect": "Spec   · chain detect",
   "spec.overlap": "Spec   · overlap flag",
   "spec.relation": "Spec   · relation detect",
   "contract.enumerate": "Contract · enumerate",
   "contract.reconcile": "Contract · reconcile",
   "contract.extract": "Contract · extract",
   "contract.repair": "Contract · repair",
+  "contract.repairParse": "Contract · repair (syntax)",
+  "contract.gapJudge": "Contract · gap judge",
   "rules.violationGen": "Rules  · violation gen",
 };
 

@@ -30,6 +30,9 @@ export function ContractsGenerateResultToaster({
     }
 
     if ('skipped' in result.il) {
+      // The user dismissing the cost-estimate confirm is not worth a toast — they
+      // initiated it. Other skips (e.g. "no corpus") still surface.
+      if (result.il.skipped === 'cancelled') return;
       toast.warning('Generate skipped', {
         description: result.il.skipped,
         });

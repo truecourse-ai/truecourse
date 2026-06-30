@@ -61,7 +61,6 @@ describe('navigation registry — pure lookups', () => {
       'verify',
       'driftanalytics',
       'runs',
-      'decisions',
       'inferred',
       'settings',
     ]);
@@ -79,7 +78,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['pulls', 'spec', 'contracts', 'verify', 'runs', 'decisions']) {
+    for (const t of ['pulls', 'spec', 'contracts', 'verify', 'runs', 'inferred']) {
       expect(ids.has(t)).toBe(true);
     }
   });

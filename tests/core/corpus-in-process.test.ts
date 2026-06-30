@@ -12,6 +12,7 @@ import { resetKvCacheStore } from '@truecourse/llm';
 import {
   curateInProcess,
   generateFromCorpusInProcess,
+  readGeneratedSummary,
 } from '../../packages/core/src/commands/spec-in-process.js';
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
 import type { Fragment } from '../../packages/contract-extractor/src/index.js';
@@ -58,6 +59,25 @@ describe('curateInProcess', () => {
     const corpus = readCorpus(repo);
     expect(corpus).not.toBeNull();
     expect(corpus!.areas.map((a) => a.id).sort()).toEqual(['core/auth', 'core/users-entity']);
+  });
+
+  it('persists relevance-dropped docs as skippedDocs (for the dashboard force-include UI)', async () => {
+    const { curate } = await curateInProcess(repo, {
+      // Drop auth.md; keep users.md.
+      relevanceRunner: async ({ doc }: { doc: { path: string } }) => ({
+        path: doc.path,
+        include: !doc.path.includes('auth'),
+        reason: doc.path.includes('auth') ? 'not a spec' : 'ok',
+      }),
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      disableLlmRelationDetection: true,
+      skipGit: true,
+    });
+    expect(curate.skippedDocs.some((s) => s.path.includes('auth'))).toBe(true);
+    // …and it round-trips through corpus.json so the dashboard can read it.
+    const corpus = readCorpus(repo);
+    expect(corpus!.skippedDocs.some((s) => s.ref.includes('auth') && s.reason === 'not a spec')).toBe(true);
   });
 });
 
@@ -119,6 +139,48 @@ describe('generateFromCorpusInProcess', () => {
       expect(corpus.result.write.proposed.length).toBeGreaterThan(0);
     }
     expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts'))).toBe(false);
-    expect(fs.existsSync(path.join(repo, '.truecourse', '.cache', '.last-generated.json'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts', 'result.json'))).toBe(false);
+  });
+
+  it('persists the run summary (written + gaps) so it survives a reload', async () => {
+    await curateInProcess(repo, {
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      disableLlmRelationDetection: true,
+      skipGit: true,
+    });
+    // Enumerate a target the generate runner never emits → a coverage gap.
+    const { corpus } = await generateFromCorpusInProcess(repo, {
+      enumerateRunner: async ({ area }) =>
+        area.concern === 'auth'
+          ? [{ kind: 'Entity', identity: 'Session' }]
+          : [
+              { kind: 'Entity', identity: 'User' },
+              { kind: 'Entity', identity: 'Ghost' },
+            ],
+      generateRunner: async ({ area, targets }) => ({
+        fragments: targets
+          .filter((t) => t.identity !== 'Ghost')
+          .map((t) => entityFragment(area.docs[0].ref, t.identity)),
+      }),
+      disableRepair: true,
+      disableGapJudge: true, // test raw gap persistence, not the judge
+    });
+    expect(corpus.kind).toBe('generated');
+
+    const summary = readGeneratedSummary(repo);
+    expect(summary).not.toBeNull();
+    expect(summary!.written).toBeGreaterThan(0);
+    expect(summary!.gaps).toContainEqual({
+      areaId: 'core/users-entity',
+      kind: 'Entity',
+      identity: 'Ghost',
+    });
+    // What the run returned and what we persisted agree.
+    if (corpus.kind === 'generated') {
+      expect(summary!.written).toBe(corpus.result.write.written.length);
+      expect(summary!.gaps).toEqual(corpus.result.gaps);
+    }
   });
 });

@@ -26,11 +26,16 @@ import {
   createSocketLlmEstimateHandler,
   createSocketStashConfirmHandler,
   createSocketTracker,
+  createSocketSpecTracker,
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
+  emitSpecProgress,
+  emitSpecComplete,
 } from '../socket/handlers.js';
+import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
+import { inferInProcess, INFER_STEPS } from '@truecourse/core/commands/spec-in-process';
 import {
   cancelAnalysis,
   registerAnalysis,
@@ -277,6 +282,30 @@ router.post('/:id/inferred/diff', async (req: Request, res: Response, next: Next
     const { added, changed, resolved, fellBack } = await inferDiffInProcess(repo.path);
     res.json({ added, changed, resolved, fellBack });
   } catch (error) {
+    next(error);
+  }
+});
+
+// Run inference: reverse-engineer undocumented decisions from code into
+// `_inferred/` + the `inferredDecisions` artifact. Drives the spec progress popup
+// (kind `infer`); the client refetches the inferred list on `spec:complete`.
+router.post('/:id/inferred/run', async (req: Request, res: Response, next: NextFunction) => {
+  let repoIdForCleanup: string | null = null;
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    repoIdForCleanup = req.params.id as string;
+    if (!(await isGitRepo(repo.path))) {
+      res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+      return;
+    }
+    const tracker = createSocketSpecTracker(repoIdForCleanup, INFER_STEPS.map((s) => ({ ...s })));
+    const { infer, written } = await inferInProcess(repo.path, { tracker, source: 'dashboard' });
+    emitSpecComplete(repoIdForCleanup, 'infer');
+    res.json({ decisions: infer.decisions.length, written: written.length });
+  } catch (error) {
+    if (repoIdForCleanup) {
+      emitSpecProgress(repoIdForCleanup, { step: 'error', percent: 100, detail: (error as Error).message });
+    }
     next(error);
   }
 });

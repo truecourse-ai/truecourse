@@ -37,8 +37,8 @@ const DB_PACKAGES = new Set(Object.keys(DATABASE_IMPORT_MAP));
 
 const TEST_PATTERNS = getAllTestPatterns();
 
-const CHARS_PER_TOKEN = 4; // rough estimate for token counting
-const PROMPT_OVERHEAD_TOKENS = 500; // prompt template + instructions per LLM call
+export const CHARS_PER_TOKEN = 4; // rough estimate for token counting
+export const PROMPT_OVERHEAD_TOKENS = 500; // prompt template + instructions per LLM call
 const TOKENS_PER_RULE = 50; // rule key + name + prompt line in the system message
 const TOKENS_PER_FILE_PATH = 25; // "=== /path/to/file.ts ===\nRead this file..." per file in CLI mode
 const MAX_CHARS_PER_BATCH = 100_000;

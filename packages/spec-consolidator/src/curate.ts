@@ -1,17 +1,15 @@
 /**
- * The curated-corpus pipeline (spec-scan redesign, Phase 1) — the corpus-path
- * counterpart to `orchestrator.ts:consolidate()`. It NEVER extracts claims,
- * merges, detects conflicts, or auto-resolves. It curates docs:
+ * The curated-corpus pipeline — `spec scan`'s engine. It curates whole docs
+ * into a corpus of areas, doc relations, and overlap flags:
  *
  *   discover → relevance keep/drop → tag each DOC with its AREAS →
  *   group docs by area → detect doc→doc RELATIONS (filename + one LLM pass) →
  *   flag within-area OVERLAPS (skipping pairs a relation already resolves) →
  *   assemble + persist a CuratedCorpus (corpus.json).
  *
- * Runs ALONGSIDE the legacy `consolidate()` during the migration (both paths
- * live across Phases 1–2). It reuses the kept stages — discovery, the relevance
- * filter, the deterministic filename detector, the LLM chain pass — and adds the
- * three corpus stages (area-tagger, area-grouper, overlap-detector).
+ * Stages: discovery, the relevance filter, the deterministic filename
+ * detector + LLM chain pass (relations), and the corpus stages
+ * (area-tagger, area-grouper, overlap-detector).
  */
 
 import fs from 'node:fs';
@@ -92,7 +90,7 @@ export interface CurateResult {
   skippedDocs: Array<{ path: string; reason: string }>;
   /** The decisions file that informed the run. */
   decisions: DecisionsFile;
-  /** Summary counts for scan-state / CLI output. */
+  /** Summary counts for CLI output / dashboard status. */
   stats: CurateStats;
 }
 
@@ -171,6 +169,9 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     docs: grouped.docs,
     areas,
     relations: autoRelations,
+    // Persist the dropped docs so the dashboard can surface them (force-include)
+    // without re-running the scan. Map the candidate path to a DocRef.
+    skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason })),
   };
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
@@ -178,6 +179,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       docs: corpus.docs,
       areas: corpus.areas,
       relations: corpus.relations,
+      skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
     });
   }
@@ -199,15 +201,13 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
 }
 
 // ---------------------------------------------------------------------------
-// Decisions I/O — the corpus path reads the SAME decisions.json the claims path
-// uses (relations/manualAreas are additive fields); kept here so curate() is
-// self-contained. Writes stay the caller's job (CLI / dashboard).
+// Decisions I/O — curate() reads decisions.json for the user's relations and
+// manualAreas; kept here so the pipeline is self-contained. Writes stay the
+// caller's job (CLI / dashboard).
 // ---------------------------------------------------------------------------
 
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
-  decisions: [],
-  manualChains: [],
   manualIncludes: [],
   relations: [],
   manualAreas: [],

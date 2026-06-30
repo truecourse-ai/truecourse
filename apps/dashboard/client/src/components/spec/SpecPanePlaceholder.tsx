@@ -1,15 +1,13 @@
 /**
- * Right-pane empty state for the Spec tab — shown when no conflict
- * or canonical section is selected.
+ * Right-pane empty state for the Spec tab — shown when no document or
+ * overlap is selected in the corpus view.
  */
 
-import { useSpec } from './SpecContext';
-
-export function SpecPanePlaceholder() {
-  const { scan } = useSpec();
-  const message = scan && scan.openConflicts.length === 0
-    ? 'Select a section from the canonical spec to view it.'
-    : 'Select a conflict from the list to review its candidates, or pick a canonical section below.';
+export function SpecPanePlaceholder({
+  message = 'Select a document or conflict from the list to view it.',
+}: {
+  message?: string;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
       <p>{message}</p>

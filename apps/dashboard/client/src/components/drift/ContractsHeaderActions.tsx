@@ -1,8 +1,8 @@
 /**
  * Section-level action button for the Contracts tab — kicks off IL
- * extraction (`POST /contracts/generate`). Mirrors `SpecHeaderActions`
- * and `VerifyHeaderActions`: rendered inside the page Header
- * alongside Analyze, never below the per-tab strip.
+ * extraction (`POST /contracts/generate`). Like `VerifyHeaderActions`:
+ * rendered inside the page Header alongside Analyze, never below the
+ * per-tab strip.
  */
 
 import { Loader2, Wand2 } from 'lucide-react';
@@ -12,7 +12,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 interface ContractsHeaderActionsProps {
   isGenerating: boolean;
   onGenerate: () => void;
-  /** When true, the canonical spec has moved on past the last Generate —
+  /** When true, the spec corpus has moved on past the last Generate —
    *  show an amber dot to flag ungenerated changes. */
   stale?: boolean;
   /** Generate requires a git repo (like Analyze); hide it when absent. */
@@ -34,7 +34,7 @@ export function ContractsHeaderActions({
       width="narrow"
       content={
         stale
-          ? 'Canonical spec has changed since the last Generate. Click to re-extract TC contracts.'
+          ? 'The spec corpus has changed since the last Generate. Click to re-extract TC contracts.'
           : null
       }
     >

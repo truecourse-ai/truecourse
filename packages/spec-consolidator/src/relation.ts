@@ -1,10 +1,7 @@
 /**
- * Doc→doc RELATION detection (spec-scan redesign, Phase 1) — the single stage
- * that collapses the old version-chain machinery (`version-chain` filename
- * detector + `version-chain-llm` pass + the conflict-triggered `chain-recheck`)
- * into one place. The conflict-triggered recheck is dropped: it existed only
- * because the old pipeline re-checked off content conflicts, which the corpus
- * path no longer produces.
+ * Doc→doc RELATION detection — the single stage that combines the
+ * `version-chain` filename detector and the `version-chain-llm` pass into one
+ * place.
  *
  * Output is a flat `Relation[]`. Auto-detected supersessions become `replace`
  * relations carrying their provenance (`filename` | `llm`). The deterministic

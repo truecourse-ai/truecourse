@@ -28,10 +28,10 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 
 export interface LlmRequest {
-  /** Stable id (the runner's natural id, e.g. `spec.claimExtract:<block.id>`).
+  /** Stable id (the runner's natural id, e.g. `contract.extract:<sliceId>`).
    *  Falls back to a content hash when absent. */
   id?: string;
-  /** Pipeline stage, e.g. `spec.claimExtract` / `contract.extract` — informational. */
+  /** Pipeline stage, e.g. `spec.relevance` / `contract.extract` — informational. */
   stage?: string;
   /** Primary model (cli passes `--model`; agent treats it as a hint). */
   model?: string;

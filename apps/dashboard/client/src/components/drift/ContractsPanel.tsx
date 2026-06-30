@@ -12,16 +12,22 @@
 import { useState } from 'react';
 import { Loader2, AlertCircle, Folder, FileCode2, ChevronRight, ChevronDown } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import type { ContractsTree, IlValidationIssue } from '@/lib/api';
+import type { ContractsTree, IlValidationIssue, IlCoverageGap } from '@/lib/api';
 
 interface ContractsPanelProps {
   tree: ContractsTree | null;
   isLoading: boolean;
   error: string | null;
   activePath: string | null;
-  /** Validation issues from the last Generate run; shown persistently at top. */
+  /** Validation issues from the last Generate run; shown as a compact list. */
   validationIssues?: IlValidationIssue[];
-  /** Single-click opens a transient tab; double-click pins it. */
+  /** Coverage gaps (enumerated targets with no contract) from the last Generate run. */
+  gaps?: IlCoverageGap[];
+  /**
+   * Single-click opens a transient tab; double-click pins it. Used for both
+   * `.tc` file paths and result keys (`issue::<i>` / `gap::<i>`) — they share
+   * the contracts right-pane tab set.
+   */
   onOpen: (path: string, pinned: boolean) => void;
   /** Hosted (EE): contracts are generated server-side, not via an Apply/Generate button. */
   hosted?: boolean;
@@ -37,6 +43,7 @@ export function ContractsPanel({
   error,
   activePath,
   validationIssues,
+  gaps,
   onOpen,
   hosted = false,
   prDiff,
@@ -85,8 +92,9 @@ export function ContractsPanel({
   }
 
   const issues = validationIssues ?? [];
-  const hardIssues = issues.filter((i) => i.severity === 'hard');
-  const softIssues = issues.filter((i) => i.severity === 'soft');
+  // Keep each issue's index in the original array so the `issue::<i>` key is stable.
+  const indexedIssues = issues.map((issue, i) => ({ issue, i }));
+  const coverageGaps = gaps ?? [];
 
   const added = new Set(prDiff?.added ?? []);
   const modified = new Set(prDiff?.modified ?? []);
@@ -95,7 +103,10 @@ export function ContractsPanel({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {issues.length > 0 && (
-        <ValidationIssuesSection hardIssues={hardIssues} softIssues={softIssues} />
+        <ValidationIssuesSection indexedIssues={indexedIssues} activePath={activePath} onOpen={onOpen} />
+      )}
+      {coverageGaps.length > 0 && (
+        <GapsSection gaps={coverageGaps} activePath={activePath} onOpen={onOpen} />
       )}
       <div className="flex-1 overflow-auto">
         {removed.length > 0 && (
@@ -349,18 +360,23 @@ function ModuleGroup({
 }
 
 function ValidationIssuesSection({
-  hardIssues,
-  softIssues,
+  indexedIssues,
+  activePath,
+  onOpen,
 }: {
-  hardIssues: IlValidationIssue[];
-  softIssues: IlValidationIssue[];
+  indexedIssues: { issue: IlValidationIssue; i: number }[];
+  activePath: string | null;
+  onOpen: (path: string, pinned: boolean) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const total = hardIssues.length + softIssues.length;
-  const hasHard = hardIssues.length > 0;
+  const hasHard = indexedIssues.some((x) => x.issue.severity === 'hard');
   const headerTone = hasHard ? 'text-red-400' : 'text-amber-400';
   const borderTone = hasHard ? 'border-red-500/30' : 'border-amber-500/30';
   const bgTone = hasHard ? 'bg-red-500/5' : 'bg-amber-500/5';
+  // Hard first, then soft — both keyed by original index for a stable `issue::<i>`.
+  const ordered = [...indexedIssues].sort(
+    (a, b) => Number(b.issue.severity === 'hard') - Number(a.issue.severity === 'hard'),
+  );
 
   return (
     <div className={`shrink-0 border-b ${borderTone} ${bgTone}`}>
@@ -374,63 +390,116 @@ function ValidationIssuesSection({
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           <span>Validation issues</span>
         </div>
-        <span>{total}</span>
+        <span>{indexedIssues.length}</span>
       </button>
       {open && (
         <ul className="max-h-72 overflow-auto px-2 pb-2">
-          {hardIssues.map((issue, i) => (
-            <IssueRow key={`hard-${issue.artifactKey}-${i}`} issue={issue} />
-          ))}
-          {softIssues.map((issue, i) => (
-            <IssueRow key={`soft-${issue.artifactKey}-${i}`} issue={issue} />
-          ))}
+          {ordered.map(({ issue, i }) => {
+            const key = `issue::${i}`;
+            return (
+              <ResultRow
+                key={key}
+                badge={issue.severity}
+                badgeTone={
+                  issue.severity === 'hard'
+                    ? 'bg-red-500/20 text-red-700 dark:text-red-300'
+                    : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
+                }
+                label={issue.artifactKey}
+                active={activePath === key}
+                onOpen={onOpen}
+                openKey={key}
+              />
+            );
+          })}
         </ul>
       )}
     </div>
   );
 }
 
-function IssueRow({ issue }: { issue: IlValidationIssue }) {
+function GapsSection({
+  gaps,
+  activePath,
+  onOpen,
+}: {
+  gaps: IlCoverageGap[];
+  activePath: string | null;
+  onOpen: (path: string, pinned: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const tone =
-    issue.severity === 'hard'
-      ? 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-300'
-      : 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200';
   return (
-    <li className={`mt-1.5 rounded border ${tone} px-2 py-1.5`}>
-      <div className="flex items-start gap-2">
-        <span
-          className={`mt-0.5 shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider ${
-            issue.severity === 'hard'
-              ? 'bg-red-500/20 text-red-700 dark:text-red-300'
-              : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
-          }`}
-        >
-          {issue.severity}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-mono text-[11px] text-foreground">
-              {issue.artifactKey}
-            </span>
-            {issue.tcSource && (
-              <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                {open ? 'hide' : 'source'}
-              </button>
-            )}
-          </div>
-          <div className="mt-0.5 break-words text-[11px]">{issue.message}</div>
-          {open && issue.tcSource && (
-            <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/40 p-2 font-mono text-[10px] text-muted-foreground">
-              {issue.tcSource}
-            </pre>
-          )}
+    <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-1.5 text-[10px] uppercase tracking-wider text-amber-400 hover:opacity-80"
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-1.5">
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <span>Coverage gaps</span>
         </div>
-      </div>
+        <span>{gaps.length}</span>
+      </button>
+      {open && (
+        <ul className="max-h-72 overflow-auto px-2 pb-2">
+          {gaps.map((g, i) => {
+            const key = `gap::${i}`;
+            return (
+              <ResultRow
+                key={key}
+                label={`${g.kind}:${g.identity}`}
+                active={activePath === key}
+                onOpen={onOpen}
+                openKey={key}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A compact, clickable result row — opens its detail in the right pane via the
+ * shared contracts tab model: single-click = transient preview, double-click =
+ * pin (same as `.tc` files and spec docs).
+ */
+function ResultRow({
+  badge,
+  badgeTone,
+  label,
+  active,
+  onOpen,
+  openKey,
+}: {
+  /** Optional leading badge — used for issue severity (hard/soft); omitted for gaps. */
+  badge?: string;
+  badgeTone?: string;
+  label: string;
+  active: boolean;
+  onOpen: (path: string, pinned: boolean) => void;
+  openKey: string;
+}) {
+  return (
+    <li className="mt-1">
+      <button
+        type="button"
+        onClick={() => onOpen(openKey, false)}
+        onDoubleClick={() => onOpen(openKey, true)}
+        className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left ${
+          active ? 'bg-accent' : 'hover:bg-muted/50'
+        }`}
+      >
+        {badge && (
+          <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider ${badgeTone}`}>
+            {badge}
+          </span>
+        )}
+        <span className="truncate font-mono text-[11px] text-foreground">{label}</span>
+      </button>
     </li>
   );
 }

@@ -1,10 +1,8 @@
 /**
- * Corpus-driven generation input for the contract extractor (spec-scan redesign,
- * Phase 2). Replaces `claims-reader.ts` in the corpus path: instead of grouping
- * pre-extracted claims into slices, it reads the curated corpus
- * (`.truecourse/specs/corpus.json`), applies the effective doc→doc relations,
- * and builds one `AreaGenInput` per area — the area's relevant docs (full
- * markdown), `replace`-d docs dropped, ordered by precedence.
+ * Corpus-driven generation input for the contract extractor. Reads the curated
+ * corpus (`.truecourse/specs/corpus.json`), applies the effective doc→doc
+ * relations, and builds one `AreaGenInput` per area — the area's relevant docs
+ * (full markdown), `replace`-d docs dropped, ordered by precedence.
  *
  * Generate then reads MULTIPLE docs per area and consolidates across them (the
  * model does the merge + ignores non-spec prose). The corpus stores only DocRefs;

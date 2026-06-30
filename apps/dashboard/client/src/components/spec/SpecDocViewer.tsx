@@ -1,12 +1,12 @@
 /**
  * SpecDocViewer — right-pane viewer for one corpus source doc, rendered as
  * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
- * double-click) the same way canonical/contract files open, URL-synced as
- * `?canonical=<docRef>`.
+ * double-click) the same way spec/contract files open, URL-synced as
+ * `?spec=<docRef>`.
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import * as api from '@/lib/api';
 import { DocMarkdown } from './DocMarkdown';
@@ -18,6 +18,7 @@ export function SpecDocViewer({
   scrollTo,
   highlight,
   tags,
+  notIncludedReason,
 }: {
   repoId: string;
   docRef: string;
@@ -30,6 +31,8 @@ export function SpecDocViewer({
   highlight?: string[];
   /** The doc's area tags — shown in full in the header (the list caps them). */
   tags?: string[];
+  /** When set, this doc was dropped by the relevance filter — show why, above the content. */
+  notIncludedReason?: string;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +86,15 @@ export function SpecDocViewer({
           </div>
         )}
       </div>
+      {notIncludedReason && (
+        <div className="flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+          <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <span className="font-medium">Not included in the corpus.</span> {notIncludedReason} — use{' '}
+            <span className="font-medium">include</span> in the list to pull it in.
+          </span>
+        </div>
+      )}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-5 py-4">
         {loading ? (
           <div className="flex h-full items-center justify-center">

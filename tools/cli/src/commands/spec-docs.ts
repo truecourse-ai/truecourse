@@ -25,9 +25,9 @@ const repoRoot = (opts: RunSpecDocsOptions): string => opts.cwd ?? process.cwd()
 
 export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise<void> {
   const root = repoRoot(opts);
-  // The corpus path doesn't persist the skipped list, so recompute it — the
-  // relevance verdicts are cached, so this is cheap, and skipCorpusWrite keeps
-  // it side-effect-free (corpus.json is not rewritten).
+  // Recompute the skipped list so it's always fresh against the current docs
+  // (corpus.json persists a snapshot, but it can be stale). The relevance
+  // verdicts are cached so this is cheap; skipCorpusWrite keeps it side-effect-free.
   const { curate } = await curateInProcess(root, { skipCorpusWrite: true });
   const skipped = curate.skippedDocs ?? [];
   const manualIncludes = readCorpusDecisions(root).manualIncludes ?? [];

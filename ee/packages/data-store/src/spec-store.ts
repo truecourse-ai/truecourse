@@ -1,7 +1,7 @@
 /**
  * Postgres implementation of core's `SpecStore`. Routes each artifact to its
  * proper home:
- *   - immutable per-commit artifacts (claims / scanState / rawClaims / chains)
+ *   - immutable per-commit artifacts (corpus / inferredDecisions)
  *     → content-addressed in `content`, with a `spec_sets` manifest row pointing
  *       in by sha (deduped: an unchanged artifact across commits is stored once);
  *   - decisions → the per-scope `decisions` ledger (mutable, always-latest, NOT
@@ -107,15 +107,13 @@ export class PgSpecStore implements SpecStore {
     return this.content.getJson<T>(contentScope.spec(repoKey), rows[0].contentSha);
   }
 
-  // The commit of the latest stored `rawClaims` — i.e. the commit a body-free
-  // re-merge reads from, so a decision-driven contract regen writes back to the
-  // SAME commit (keeping the dashboard-latest and the gate's per-commit lookup
-  // consistent).
+  // The commit of the latest stored `corpus` — i.e. the latest scanned commit,
+  // so per-commit lookups (the gate) and the dashboard-latest stay consistent.
   async latestCommit(repoKey: string): Promise<string | null> {
     const rows = await this.db
       .select({ commitSha: specSets.commitSha })
       .from(specSets)
-      .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, 'rawClaims')))
+      .where(and(eq(specSets.repoKey, repoKey), eq(specSets.artifact, 'corpus')))
       .orderBy(desc(specSets.createdAt))
       .limit(1);
     return rows[0]?.commitSha ?? null;

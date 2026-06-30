@@ -1,13 +1,9 @@
 /**
- * System + user prompt construction for the per-slice extraction call.
- *
- * The prompt briefs the LLM on the .tc grammar, the artifact catalog,
- * the JSON output schema, and includes a few-shot example so structural
- * patterns transfer. The runner combines the system prompt with a
- * per-slice user prompt to produce the final Claude Code invocation.
+ * The extraction system prompt — the briefing on the .tc grammar, the artifact
+ * catalog, the JSON output schema, and a few-shot example so structural patterns
+ * transfer. The corpus-generate path pairs it with a per-area user prompt
+ * (`buildCorpusGenerateUserPrompt` in `corpus-prompt.ts`).
  */
-
-import type { SpecSlice } from './types.js';
 
 export const SYSTEM_PROMPT = `\
 You translate prose API specifications into TrueCourse contract artifacts (.tc files).
@@ -127,7 +123,7 @@ real artifacts; copy block-vs-inline form exactly. Comments use \`//\`.
 
 \`\`\`
 operation POST "/api/orders" {
-  origin SPEC.md "POST /api/orders" 100..113
+  origin "docs/orders.md" "POST /api/orders" 100..113
   status shipped
   request {
     header content-type required value "application/json"
@@ -152,7 +148,7 @@ operation POST "/api/orders" {
 
 // Planned operation — spec marks it as "planned", "(planned)", or "coming soon":
 operation GET "/api/orders/export" {
-  origin SPEC.md "GET /api/orders/export — *planned*" 120..125
+  origin "docs/orders.md" "GET /api/orders/export — *planned*" 120..125
   status planned
   request {
     query {
@@ -165,7 +161,7 @@ operation GET "/api/orders/export" {
 // request{} — NOT a nested \`path { … }\` block. Only \`query\` and \`body\` are
 // nested blocks; \`path-param\` and \`header\` are flat one-line statements.
 operation POST "/api/orders/{id}/pay" {
-  origin SPEC.md "POST /api/orders/{id}/pay" 130..140
+  origin "docs/orders.md" "POST /api/orders/{id}/pay" 130..140
   request {
     path-param id: uuid
     header Idempotency-Key required
@@ -176,7 +172,7 @@ operation POST "/api/orders/{id}/pay" {
 }
 
 entity Order {
-  origin SPEC.md "Entities/Order" 60..67
+  origin "docs/orders.md" "Entities/Order" 60..67
   field id: uuid {
     origin server-assigned
     immutable
@@ -195,7 +191,7 @@ enum OrderStatus {
 }
 
 state-machine Order.status {
-  origin SPEC.md "Order lifecycle" 81..96
+  origin "docs/orders.md" "Order lifecycle" 81..96
   scope {
     entity Entity:Order
     field status
@@ -211,7 +207,7 @@ state-machine Order.status {
 }
 
 auth-requirement auth.bearer.api {
-  origin SPEC.md "Authentication" 11..16
+  origin "docs/orders.md" "Authentication" 11..16
   scheme Bearer
   selector path-glob "/api/**"
   except {
@@ -226,7 +222,7 @@ auth-requirement auth.bearer.api {
 }
 
 authorization-rule order.owner-only {
-  origin SPEC.md "Order ownership" 178..189
+  origin "docs/orders.md" "Order ownership" 178..189
   applies-to {
     operations [
       Operation:"GET /api/orders/{id}",
@@ -285,7 +281,7 @@ idempotency-contract idempotency.key.standard {
 }
 
 effect-group order.lifecycle.events {
-  origin SPEC.md "Effects" 160..174
+  origin "docs/orders.md" "Effects" 160..174
   channel event-bus
   payload-shape {
     id: uuid
@@ -304,13 +300,19 @@ effect-group order.lifecycle.events {
   }
 }
 
+// An effect-group's ONLY statements are: origin, channel, payload-shape,
+// effect <name> { ... }, and forbids { ... }. There is NO retry / delivery /
+// timeout / max-attempts clause — retry & delivery policy are not part of an
+// effect-group; omit them (or, for an idempotency/retry guarantee, that's a
+// separate concern). Emitting a 'retry ...' line inside the group does not parse.
+//
 // Single-event slice — when the spec section you're given only
 // describes ONE event, still wrap it in an effect-group. The group
 // name should be derived from the event itself (e.g.,
 // "order.placed.event" or just "order.placed"). Never emit
 // "Effect:name { ... }" at the top level.
 effect-group order.placed.event {
-  origin SPEC.md "order.placed" 160..170
+  origin "docs/orders.md" "order.placed" 160..170
   channel event-bus
   effect order.placed {
     emit-when {
@@ -321,7 +323,7 @@ effect-group order.placed.event {
 }
 
 formula order.discount-cents {
-  origin SPEC.md "Pricing" 200..210
+  origin "docs/orders.md" "Pricing" 200..210
   output Entity:Order field discountCents
   inputs [
     Entity:Order.subtotalCents,
@@ -342,13 +344,13 @@ formula order.discount-cents {
 }
 
 constant ApiVersion {
-  origin SPEC.md "Versioning" 40..45
+  origin "docs/orders.md" "Versioning" 40..45
   type string
   expected-value "v2"
 }
 
 constant DiscountTiers {
-  origin SPEC.md "Pricing" 100..120
+  origin "docs/orders.md" "Pricing" 100..120
   type object
   expected-value {
     bronze: 5
@@ -358,27 +360,27 @@ constant DiscountTiers {
 }
 
 constant MAX_RETRY {
-  origin SPEC.md "Retry policy" 200..210
+  origin "docs/orders.md" "Retry policy" 200..210
   type number
   expected-value 3
 }
 
 forbidden-artifact legacy-downloader {
-  origin SPEC.md "Out of Scope" 590..600
+  origin "docs/orders.md" "Out of Scope" 590..600
   category file-glob
   pattern "modules/**/legacy_downloader.*"
   reason "Legacy downloader module is explicitly out of scope for v1"
 }
 
 forbidden-artifact prod-debug-flag {
-  origin SPEC.md "Config" 160..170
+  origin "docs/orders.md" "Config" 160..170
   category env-var
   pattern "PROD_DEBUG"
   reason "Spec forbids any code path that enables debug output in production"
 }
 
 forbidden-artifact deprecated-http-client {
-  origin SPEC.md "Tech Stack" 290..310
+  origin "docs/orders.md" "Tech Stack" 290..310
   category dependency
   pattern "request"
   reason "Spec mandates the native fetch API; the deprecated request package must not appear in package.json"
@@ -412,7 +414,7 @@ architecture-decision persistence.requiresReason {
 }
 
 query-rule active-customers.tenant-scoped {
-  origin SPEC.md "Tenant scoping" 35..40
+  origin "docs/orders.md" "Tenant scoping" 35..40
   // Bind to a specific endpoint OR leave unbound to apply to any query
   // against the entity. The verifier matches by entity identity.
   bound-to Operation:"GET /api/v1/customers/active"
@@ -451,7 +453,7 @@ query-rule active-customers.tenant-scoped {
 // (eq/neq/in/not-in/is-null/is-not-null/gt/gte/lt/lte/between/like/ilike).
 // The condition column is 'settingObject.field' (split on the last dot).
 validation-rule booking.reason-required-when-mandatory {
-  origin SPEC.md "Cancellation policy" 40..52
+  origin "docs/orders.md" "Cancellation policy" 40..52
   target cancellationReason
   when eq eventType.requiresCancellationReason "MANDATORY"
   actor host
@@ -470,14 +472,14 @@ validation-rule booking.reason-required-when-mandatory {
 // constant/enum member). Do NOT use this for a persisted SCHEMA default —
 // that's a 'field … default' on an Entity.
 fallback reservation.currency-default {
-  origin SPEC.md "Reservation defaults" 30..36
+  origin "docs/orders.md" "Reservation defaults" 30..36
   target Entity:Reservation.currency
   when null-or-absent
   default "USD"
 }
 
 fallback reservation.timezone-default {
-  origin SPEC.md "Reservation defaults" 37..40
+  origin "docs/orders.md" "Reservation defaults" 37..40
   target timezone
   when null-or-absent
   default DEFAULT_TIMEZONE
@@ -492,7 +494,7 @@ fallback reservation.timezone-default {
 // the spec names one, a bare ident otherwise). Do NOT use this for a field's
 // mere existence (that's an Entity field) nor for UI prop-threading.
 field-exposure order.total-cents-exposed {
-  origin SPEC.md "Order read API" 40..48
+  origin "docs/orders.md" "Order read API" 40..48
   field Entity:Order.totalCents
   via query-select
   via api-response
@@ -500,13 +502,13 @@ field-exposure order.total-cents-exposed {
 }
 
 field-exposure order.status-exposed {
-  origin SPEC.md "Order read API" 49..52
+  origin "docs/orders.md" "Order read API" 49..52
   field Entity:Order.status
   via api-response
 }
 
 unenforceable-obligation encryption.at-rest {
-  origin SPEC.md "Compliance" 220..222
+  origin "docs/orders.md" "Compliance" 220..222
   spec-text "customer data must be encrypted at rest"
   category compliance
   rationale "no structural encoding for storage-layer encryption"
@@ -522,15 +524,19 @@ unenforceable-obligation encryption.at-rest {
        Entity:Order                          ✓ (no special chars)
        AuthRequirement:auth.bearer.api       ✓ (dot is fine)
 
-   The same rule applies to the \`origin\` line's source name. Bare
-   filenames work; paths with \`/\` MUST be quoted:
-       origin SPEC.md "Section" 1..10                ✓
-       origin "docs/API.md" "Section" 1..10          ✓
-       origin docs/API.md "Section" 1..10            ✗ (parser chokes on slash)
+   The same rule applies to the \`origin\` line's source name. Real doc
+   paths contain \`/\`, so ALWAYS quote the source — quote it unconditionally:
+       origin "docs/orders.md" "Section" 1..10       ✓
        origin "server/docs/CONTRACT.md" "P1" 5..20   ✓
+       origin docs/orders.md "Section" 1..10         ✗ (unquoted slash — parser chokes)
+       origin SPEC.md "Section" 1..10                ✗ (don't rely on bare names; just quote)
 
 2. **Block forms are real blocks**, not inline lists. The fixture above
-   shows the correct shape for each — copy it.
+   shows the correct shape for each — copy it. In particular a response's
+   \`body envelope <ErrorEnvelope-ref>\` ALWAYS takes a trailing \`{ … }\` block —
+   use an empty \`{}\` if there are no per-response error-codes. \`body envelope
+   ErrorEnvelope:x\` with no block does NOT parse; either add the block or use
+   the plain \`body <ref>\` form (no \`envelope\` keyword).
 
 3. **No JSON in tcSource.** The DSL is its own grammar — no \`{"key": "value"}\`,
    no string-quoted keys, no commas separating statements within blocks.
@@ -587,7 +593,7 @@ Output:
     {
       "kind": "Operation",
       "identity": "POST /api/orders",
-      "tcSource": "operation POST \\"/api/orders\\" {\\n  origin SPEC.md \\"POST /api/orders\\" 100..115\\n  request {\\n    header content-type required value \\"application/json\\"\\n    body {\\n      subtotalCents: integer >= 0\\n      customerId: uuid references Entity:Customer\\n    }\\n  }\\n  response 201 on success {\\n    body Entity:Order\\n    header location required format \\"/api/orders/{id}\\"\\n    effect emits Effect:order.placed\\n  }\\n  response 400 on validation_failure {\\n    body envelope ErrorEnvelope:error.envelope.standard {\\n      error-code one-of [validation_failed, customer_not_found]\\n    }\\n  }\\n  response 401 inherits AuthRequirement:auth.bearer.api\\n  tags []\\n}",
+      "tcSource": "operation POST \\"/api/orders\\" {\\n  origin \\"docs/orders.md\\" \\"POST /api/orders\\" 100..115\\n  request {\\n    header content-type required value \\"application/json\\"\\n    body {\\n      subtotalCents: integer >= 0\\n      customerId: uuid references Entity:Customer\\n    }\\n  }\\n  response 201 on success {\\n    body Entity:Order\\n    header location required format \\"/api/orders/{id}\\"\\n    effect emits Effect:order.placed\\n  }\\n  response 400 on validation_failure {\\n    body envelope ErrorEnvelope:error.envelope.standard {\\n      error-code one-of [validation_failed, customer_not_found]\\n    }\\n  }\\n  response 401 inherits AuthRequirement:auth.bearer.api\\n  tags []\\n}",
       "origin": { "source": "SPEC.md", "section": "POST /api/orders", "lines": [100, 115] },
       "obligationKeys": ["response.201", "response.201.headers.location", "response.400", "response.401"]
     }
@@ -1440,24 +1446,3 @@ When the spec lists multiple events under one heading ("Events", "Effects",
 4. Don't invent artifacts that aren't supported by the slice text.
 5. Cross-references must point to artifacts that exist (or will exist) elsewhere in the corpus — match identity exactly.
 `;
-
-
-/**
- * Build the user prompt for one slice. Includes the slice's heading
- * path, line range, and full text — everything the LLM needs to produce
- * fragments with the correct origin block.
- */
-export function buildUserPrompt(slice: SpecSlice): string {
-  const sectionPath = slice.headingPath.join(' → ');
-  return [
-    `Spec file: ${slice.specPath}`,
-    `Heading: ${sectionPath}`,
-    `Lines: ${slice.lineRange[0]}..${slice.lineRange[1]}`,
-    '',
-    '--- slice ---',
-    slice.text,
-    '--- end slice ---',
-    '',
-    'Produce the JSON object as specified.',
-  ].join('\n');
-}

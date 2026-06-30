@@ -5,6 +5,7 @@ import {
   StepTracker,
   type AnalysisProgressPayload,
 } from '@truecourse/core/progress';
+import type { LlmEstimate } from '@truecourse/core/commands/analyze-in-process';
 
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
@@ -200,6 +201,51 @@ export function createSocketStashConfirmHandler(repoId: string):
     });
 }
 
+/**
+ * `onLlmEstimate` for `spec scan` / `contracts generate`: reuses the analyze
+ * estimate event + client modal (the payload is the same `LlmEstimate`, now
+ * carrying an optional per-stage breakdown). Unlike the analyze handler, it does
+ * NOT default to `true` after a short timeout — scan/generate are expensive and
+ * entirely LLM-driven, so a forgotten dialog must NOT auto-spend. It blocks until
+ * the user answers, with a long backstop that aborts (resolves `false`).
+ */
+export function createSocketSpecEstimateHandler(
+  repoId: string,
+): (estimate: LlmEstimate) => Promise<boolean> {
+  return (estimate) =>
+    new Promise<boolean>((resolve) => {
+      const io = getIO();
+      const room = `repo:${repoId}`;
+
+      io.to(room).emit('analysis:llm-estimate', { repoId, estimate });
+
+      // Backstop: abort (not proceed) if unanswered for 10 minutes.
+      const timeout = setTimeout(() => {
+        cleanup();
+        io.to(room).emit('analysis:llm-resolved', { repoId, proceed: false });
+        resolve(false);
+      }, 600_000);
+
+      function onProceed(data: { repoId: string; proceed: boolean }) {
+        if (data.repoId !== repoId) return;
+        cleanup();
+        io.to(room).emit('analysis:llm-resolved', { repoId, proceed: data.proceed });
+        resolve(data.proceed);
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        for (const [, socket] of io.sockets.sockets) {
+          socket.removeListener('analysis:llm-proceed', onProceed);
+        }
+      }
+
+      for (const [, socket] of io.sockets.sockets) {
+        socket.on('analysis:llm-proceed', onProceed);
+      }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // BL Drift / Spec progress
 // ---------------------------------------------------------------------------
@@ -227,7 +273,7 @@ export function emitSpecProgress(
 
 export function emitSpecComplete(
   repoId: string,
-  kind: 'scan' | 'apply' | 'verify' | 'generate',
+  kind: 'scan' | 'apply' | 'verify' | 'generate' | 'infer',
 ): void {
   activeSpec.delete(repoId);
   const io = getIO();

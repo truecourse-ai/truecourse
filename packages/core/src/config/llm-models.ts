@@ -28,22 +28,19 @@ import fs from 'node:fs';
 import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
-  // --- claims path (legacy; removed in redesign Phase 3) ---
-  | 'spec.chainDetect'
-  | 'spec.claimExtract'
-  | 'spec.chainRecheck'
-  | 'spec.conflictExplain'
-  | 'spec.conflictResolve'
-  // --- shared / corpus path (spec-scan redesign) ---
+  // --- spec scan (corpus path) ---
   | 'spec.relevance'
   | 'spec.areaTag'
   | 'spec.vocab'
+  | 'spec.chainDetect'
   | 'spec.overlap'
   | 'spec.relation'
   | 'contract.enumerate'
   | 'contract.reconcile'
   | 'contract.extract'
   | 'contract.repair'
+  | 'contract.repairParse'
+  | 'contract.gapJudge'
   | 'rules.violationGen';
 
 /**
@@ -52,22 +49,23 @@ export type StageId =
  * difficulty. Tunable here without touching the runners.
  */
 export const STAGE_DEFAULTS: Record<StageId, string> = {
-  'spec.chainDetect': 'haiku',
-  'spec.claimExtract': 'sonnet',
-  'spec.chainRecheck': 'sonnet',
-  'spec.conflictExplain': 'haiku',
-  'spec.conflictResolve': 'opus',
   'spec.relevance': 'haiku',
   // Area tagging is load-bearing (wrong tags → wrong generate inputs) and Haiku
   // under-tagged terse docs like ADRs; Sonnet is worth the cost here.
   'spec.areaTag': 'sonnet',
   'spec.vocab': 'haiku',
+  'spec.chainDetect': 'haiku',
   'spec.overlap': 'haiku',
   'spec.relation': 'sonnet',
   'contract.enumerate': 'sonnet',
   'contract.reconcile': 'sonnet',
   'contract.extract': 'opus',
   'contract.repair': 'opus',
+  // Mechanical syntax fixing — cheap early attempts; the final attempt escalates
+  // to the opus `contract.repair` model in the repair loop.
+  'contract.repairParse': 'sonnet',
+  // Auditing already-written gaps is a judgement call, not generation — sonnet.
+  'contract.gapJudge': 'sonnet',
   'rules.violationGen': 'opus',
 };
 

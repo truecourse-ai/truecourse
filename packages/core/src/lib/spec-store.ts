@@ -1,5 +1,5 @@
 /**
- * Spec store — the two consolidated spec JSON documents (`claims.json`,
+ * Spec store — the curated spec JSON documents (`corpus.json`,
  * `decisions.json`). File-backed by default (raw JSON under
  * `<repo>/.truecourse/specs/`, where the IL `spec-consolidator` writes them);
  * the enterprise edition injects a Postgres-backed impl via `setSpecStore`.
@@ -16,28 +16,19 @@ import type { RepoRef, WorkspaceRef } from './contract-store.js';
 export type { RepoRef, WorkspaceRef } from './contract-store.js';
 
 /**
- * Per-(repo, commit) JSON artifacts. `claims`/`decisions`/`scanState` are the
- * consolidated spec; `verifyState` is the verifier's drift snapshot for that
- * commit — persisted by the gate so the dashboard's ref switcher can show a PR's
- * drift (the verify-store's LATEST is per-repo, not per-commit). Written only in
- * EE (the gate passes a `ref`); OSS never stores it.
- *
- * `rawClaims`/`chains` are the pre-merge extracted claim set + detected version
- * chains. They are persisted under WORKSPACE scope only, so a decision can be
- * re-applied via a body-free `remerge()` without re-reading the source docs
- * (workspace Knowledge never stores the bodies). Repos re-derive these from the
- * working tree on each scan, so they don't persist them.
+ * Per-(repo, commit) JSON artifacts. `corpus`/`decisions` are the curated spec
+ * (areas + relations + overlaps, and the user's curation intent); `verifyState`
+ * is the verifier's drift snapshot for that commit — persisted by the gate so the
+ * dashboard's ref switcher can show a PR's drift (the verify-store's LATEST is
+ * per-repo, not per-commit). Written only in EE (the gate passes a `ref`); OSS
+ * never stores it.
  */
 export type SpecArtifact =
-  | 'claims'
-  // The curated doc corpus (areas + relations + overlaps) — the corpus-path
-  // analog of `claims`. File impl reads/writes `specs/corpus.json`.
+  // The curated doc corpus (areas + relations + overlaps). File impl reads/writes
+  // `specs/corpus.json`.
   | 'corpus'
   | 'decisions'
-  | 'scanState'
   | 'verifyState'
-  | 'rawClaims'
-  | 'chains'
   // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
   // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
   // (file) and EE (Postgres).
@@ -73,14 +64,11 @@ export interface SpecStore {
 }
 
 /**
- * On-disk location per artifact. claims/decisions live under `specs/`;
- * scan-state lives under the consolidator's cache (`.cache/consolidator/`),
- * exactly where the IL writes them — so the file impl is byte-identical.
+ * On-disk location per artifact — `corpus.json` / `decisions.json` /
+ * `inferredDecisions.json` under `specs/`, exactly where the IL writers put
+ * them, so the file impl is byte-identical.
  */
 function specPath(repoKey: string, artifact: SpecArtifact): string {
-  if (artifact === 'scanState') {
-    return path.join(repoKey, '.truecourse', '.cache', 'consolidator', 'scan-state.json');
-  }
   return path.join(repoKey, '.truecourse', 'specs', `${artifact}.json`);
 }
 
