@@ -912,43 +912,9 @@ public class PagingService
 })
 
 // ---------------------------------------------------------------------------
-// unused-function-parameter
+// unused-function-parameter — now a roslyn-host rule for C#; tested in
+// roslyn-rules-code-quality.test.ts
 // ---------------------------------------------------------------------------
-
-describe('code-quality/deterministic/unused-function-parameter (C#)', () => {
-  it('detects a parameter never used in the body', () => {
-    const found = matches(`namespace App;
-public class PricingService
-{
-    public decimal ApplyDiscount(decimal price, string promoCode)
-    {
-        return price * 0.9m;
-    }
-}
-`, 'unused-function-parameter')
-    expect(found.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('does not flag overrides, event handlers, or NotImplemented stubs', () => {
-    const found = matches(`namespace App;
-public class ExportJob : JobBase
-{
-    public override Task RunAsync(JobContext context) => Task.CompletedTask;
-
-    private void OnTimer(object sender, ElapsedEventArgs e)
-    {
-        _ticks++;
-    }
-
-    public void Rollback(string reason)
-    {
-        throw new NotImplementedException();
-    }
-}
-`, 'unused-function-parameter')
-    expect(found).toHaveLength(0)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // parameter-reassignment

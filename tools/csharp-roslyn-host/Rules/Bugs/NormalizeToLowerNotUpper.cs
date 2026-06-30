@@ -4,11 +4,15 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace TrueCourse.RoslynHost;
 
 /// <summary>
-/// A string is normalized with ToLower/ToLowerInvariant. Lowercasing for normalization has
-/// a documented round-trip data-loss problem (the Turkish dotless-I), so the guidance is to
-/// normalize with ToUpperInvariant instead. We require the receiver to resolve to
-/// System.String (so this is a real string op, not some user method named ToLower) — hence
-/// the semantic model. CA1308.
+/// A string is normalized with ToLower/ToLowerInvariant. Lowercasing for normalization
+/// has a documented round-trip data-loss problem (the Turkish dotless-I), so the
+/// guidance is to normalize with ToUpperInvariant instead. CA1308.
+///
+/// We require the receiver to resolve to System.String so user-defined methods named
+/// ToLower on other types are not flagged. One narrow exemption: ToLower/ToLowerInvariant
+/// embedded as an interpolation hole inside a string literal ($"prefix-{s.ToLower()}")
+/// is display-only output (CSS class names, HTML attributes) where the case-fold is
+/// intentional and switching to ToUpperInvariant would produce wrong output.
 /// </summary>
 internal sealed class NormalizeToLowerNotUpper : ISemanticRule
 {
@@ -21,6 +25,11 @@ internal sealed class NormalizeToLowerNotUpper : ISemanticRule
             if (model.GetSymbolInfo(inv).Symbol is not IMethodSymbol m) continue;
             if (m.ContainingType?.SpecialType != SpecialType.System_String) continue;
             if (m.Name is not ("ToLower" or "ToLowerInvariant")) continue;
+
+            // Exempt: the lowercased value is directly embedded inside a string
+            // interpolation hole — a display/markup context (CSS class, HTML attribute)
+            // where the lowercase is intentional and ToUpperInvariant would be wrong.
+            if (inv.Parent is InterpolationSyntax) continue;
 
             var pos = TargetLocation(inv).GetLineSpan().StartLinePosition;
             yield return new Violation(

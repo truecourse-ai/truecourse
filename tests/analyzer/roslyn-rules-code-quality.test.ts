@@ -578,6 +578,24 @@ using System.Collections.Generic;
 class C { public List<int> Items { get; init; } }`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag a [Parameter] collection property (Blazor binding)', async () => {
+      const src = `
+using System.Collections.Generic;
+class ParameterAttribute : System.Attribute {}
+class C {
+  [Parameter] public List<string> BreadcrumbItems { get; set; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a [CascadingParameter] collection property', async () => {
+      const src = `
+using System.Collections.Generic;
+class CascadingParameterAttribute : System.Attribute {}
+class C {
+  [CascadingParameter] public List<string> Items { get; set; }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- write-only-property -----------------------------------------------
@@ -1035,6 +1053,21 @@ interface IB { void Stop(); }
 interface IC : IA, IB {}`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag diamond inheritance (single member declaration via two paths)', async () => {
+      const src = `
+interface IBase { void Run(); }
+interface IA : IBase {}
+interface IB : IBase {}
+interface IC : IA, IB {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag overloads with different signatures from the same base', async () => {
+      const src = `
+interface IA { void Fetch(int id); void Fetch(int id, string filter); }
+interface IB { void Other(); }
+interface IC : IA, IB {}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- inline-single-use-local --------------------------------------------
@@ -1384,6 +1417,12 @@ namespace Logging { class Sink {} }
 namespace App { class Reporter {} }`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag a nested type even when a sibling namespace shares the name', async () => {
+      const src = `
+namespace App.Bundles { class Styles {} }
+namespace App { class StandardBundles { class Styles {} } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- property-matches-get-method ----------------------------------------
@@ -1437,6 +1476,54 @@ class C { void M() { IList<int> xs = new List<int>(); xs.Add(1); } }`
       const src = `
 using System.Collections.Generic;
 class C { void M() { List<int> xs = new(); xs.Add(1); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+  })
+
+  // ---- unused-function-parameter ------------------------------------------
+  describe('unused-function-parameter', () => {
+    const K = 'code-quality/deterministic/unused-function-parameter'
+    it('flags a parameter never read in the body', async () => {
+      const src = `
+class C {
+  public decimal ApplyDiscount(decimal price, string promoCode) => price * 0.9m;
+}`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag a parameter that is read', async () => {
+      const src = `
+class C {
+  public decimal ApplyDiscount(decimal price, string code) {
+    if (code == "HALF") return price * 0.5m;
+    return price * 0.9m;
+  }
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an implicit interface implementation (mandated signature)', async () => {
+      const src = `
+interface IProvider { string Get(string category); }
+class NullProvider : IProvider {
+  public string Get(string category) => "default";
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag an override', async () => {
+      const src = `
+class Base { public virtual void Run(string ctx) {} }
+class Derived : Base { public override void Run(string ctx) { } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a parameter prefixed with _', async () => {
+      const src = `
+class C { public void Handle(string _reason) { System.Console.WriteLine("done"); } }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a NotImplementedException stub', async () => {
+      const src = `
+class C {
+  public void Process(string input) { throw new System.NotImplementedException(); }
+}`
       expect(await keys(src, K)).not.toContain(K)
     })
   })

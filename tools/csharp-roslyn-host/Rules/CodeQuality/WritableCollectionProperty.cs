@@ -26,6 +26,13 @@ internal sealed class WritableCollectionProperty : ISemanticRule
             // init-only setters already prevent post-construction replacement.
             if (sym.SetMethod.IsInitOnly) continue;
             if (sym.IsStatic) continue;
+            // Framework binding attributes mandate a public setter so the binding
+            // model can assign through it (Blazor [Parameter], [CascadingParameter]).
+            // The setter does not expose a replaceable backing collection — it is
+            // contract-required by the framework, not a CA2227 hazard.
+            if (sym.GetAttributes().Any(a =>
+                    a.AttributeClass?.Name is "ParameterAttribute" or "CascadingParameterAttribute"))
+                continue;
 
             var type = sym.Type;
             // Arrays are intentionally assignable and out of CA2227's scope.

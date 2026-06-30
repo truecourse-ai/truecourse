@@ -4,12 +4,19 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace TrueCourse.RoslynHost;
 
 /// <summary>
-/// A type whose name collides with the name of a namespace declared in the same
-/// compilation (e.g. `class Logging` alongside `namespace Logging`). The collision
-/// forces awkward fully qualified references and ambiguous resolution. We collect the
-/// simple names of all namespaces declared in this compilation and flag a type that
-/// shares one. Limiting the namespace set to the compilation's own (rather than every
-/// referenced assembly's namespace) keeps this free of false positives. CA1724.
+/// A top-level type whose name matches a sibling or parent namespace, forcing
+/// awkward fully qualified references when both are in scope. CA1724.
+///
+/// Three collision patterns are detected:
+/// 1. Sibling namespace: `class Foo` in `App` when `App.Foo` also exists.
+/// 2. Top-level namespace: `class Logging` in `App` when root namespace `Logging` exists.
+/// 3. Self-containing namespace: `class Logging` inside `namespace X.Y.Logging` — the
+///    class name matches the simple name of its own enclosing namespace, producing the
+///    qualified name `X.Y.Logging.Logging` and creating ambiguity for any caller who
+///    imports `X.Y`.
+///
+/// Scoping rule: nested types are always skipped — a nested type is accessed through
+/// its enclosing type and cannot cause namespace ambiguity at the use site.
 /// </summary>
 internal sealed class TypeNameMatchesNamespace : ISemanticRule
 {
@@ -17,39 +24,55 @@ internal sealed class TypeNameMatchesNamespace : ISemanticRule
 
     public IEnumerable<Violation> Analyze(SemanticModel model, SyntaxTree tree)
     {
-        var namespaceNames = CollectNamespaceSimpleNames(model.Compilation);
-        if (namespaceNames.Count == 0) yield break;
-
         foreach (var typeDecl in tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
         {
             if (model.GetDeclaredSymbol(typeDecl) is not INamedTypeSymbol type) continue;
-            // A type whose own enclosing namespace shares its name is the offender; but a
-            // type *inside* namespace Foo named Foo is the canonical CA1724 case too.
-            var name = type.Name;
-            if (!namespaceNames.Contains(name)) continue;
+            // Nested types are accessed through their enclosing type and cannot create
+            // namespace ambiguity — skip them.
+            if (type.ContainingType != null) continue;
 
-            // Don't flag when the only matching "namespace" is this type's own segment
-            // path — i.e. require a genuine namespace named `name` to exist independently.
+            var name = type.Name;
+            var containingNs = type.ContainingNamespace;
+
+            // A genuine CA1724 collision: the type's containing namespace has a direct
+            // child namespace with the same simple name as the type. For example:
+            //   namespace App { class Logging { } }   +   namespace App.Logging { ... }
+            // This is the scenario that forces `App.Logging` to be ambiguous between
+            // the type and the sub-namespace when `using App;` is in scope.
+            if (!HasConflictingNamespace(type, name)) continue;
+
             var pos = typeDecl.Identifier.GetLocation().GetLineSpan().StartLinePosition;
             yield return new Violation(
                 RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
-                $"Type '{name}' has the same name as a namespace, forcing awkward fully qualified references; rename the type.");
+                $"Type '{name}' collides with a namespace of the same name, forcing awkward fully qualified references; rename the type.");
         }
     }
 
-    private static HashSet<string> CollectNamespaceSimpleNames(Compilation compilation)
+    private static bool HasConflictingNamespace(INamedTypeSymbol type, string typeName)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        Walk(compilation.Assembly.GlobalNamespace, names);
-        return names;
-    }
+        var containingNs = type.ContainingNamespace;
 
-    private static void Walk(INamespaceSymbol ns, HashSet<string> names)
-    {
-        foreach (var child in ns.GetNamespaceMembers())
-        {
-            if (!string.IsNullOrEmpty(child.Name)) names.Add(child.Name);
-            Walk(child, names);
-        }
+        // Pattern 1 — same-level sibling: the type's direct parent namespace has a
+        // child namespace with the same name (e.g. class Foo in App when App.Foo
+        // also exists as a namespace). Both the type and the sub-namespace are
+        // exposed by the same using directive, forcing awkward disambiguation.
+        if (containingNs.GetNamespaceMembers().Any(child => child.Name == typeName))
+            return true;
+
+        // Pattern 2 — top-level namespace: a root namespace matches the type's
+        // simple name. High-impact: any file with `using RootNs;` faces ambiguity.
+        var root = containingNs;
+        while (!root.IsGlobalNamespace) root = root.ContainingNamespace!;
+        if (root.GetNamespaceMembers().Any(child => child.Name == typeName))
+            return true;
+
+        // Pattern 3 — self-containing namespace: the type's own enclosing namespace
+        // has the same simple name (e.g. class Logging inside namespace X.Y.Logging).
+        // The fully qualified name becomes X.Y.Logging.Logging, and any caller
+        // importing X.Y sees `Logging` as both the namespace and the type name.
+        if (!containingNs.IsGlobalNamespace && containingNs.Name == typeName)
+            return true;
+
+        return false;
     }
 }

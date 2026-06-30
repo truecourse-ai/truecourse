@@ -798,18 +798,42 @@ class C { int M(string s) => int.Parse(s, CultureInfo.InvariantCulture); }`
       const src = `class T {} class C { string M(T t) => t.ToString(); }`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag DateTime.ToString("r") — RFC1123 is always culture-invariant', async () => {
+      const src = `
+using System;
+class C { string M(DateTimeOffset d) => d.ToString("r"); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag DateTime.ToString("O") — round-trip is always culture-invariant', async () => {
+      const src = `
+using System;
+class C { string M(DateTime d) => d.ToString("O"); }`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- normalize-to-lower-not-upper --------------------------------------
   describe('normalize-to-lower-not-upper', () => {
     const K = 'bugs/deterministic/normalize-to-lower-not-upper'
-    it('flags string.ToLowerInvariant for normalization', async () => {
-      const src = `class C { string M(string s) => s.ToLowerInvariant(); }`
+    it('flags ToLower used in a binary equality comparison', async () => {
+      const src = `class C { bool M(string s) => s.ToLower() == "hello"; }`
       expect(await keys(src, K)).toContain(K)
     })
-    it('flags string.ToLower', async () => {
-      const src = `class C { string M(string s) => s.ToLower(); }`
+    it('flags ToLowerInvariant chained to .Equals()', async () => {
+      const src = `class C { bool M(string s, string t) => s.ToLowerInvariant().Equals(t); }`
       expect(await keys(src, K)).toContain(K)
+    })
+    it('flags ToLower passed to string.Equals', async () => {
+      const src = `class C { bool M(string s, string t) => string.Equals(s.ToLower(), t); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('flags ToLower returned as a normalization result', async () => {
+      const src = `class C { string Normalize(string s) => s.ToLower(); }`
+      expect(await keys(src, K)).toContain(K)
+    })
+    it('does not flag ToLower embedded inside a string interpolation hole', async () => {
+      const src = `class C { string M(string s) => $"class-{s.ToLower()}"; }`
+      expect(await keys(src, K)).not.toContain(K)
     })
     it('does not flag ToUpperInvariant', async () => {
       const src = `class C { string M(string s) => s.ToUpperInvariant(); }`
