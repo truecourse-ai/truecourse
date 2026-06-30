@@ -2017,6 +2017,12 @@
       "layer": "service"
     },
     {
+      "name": "ImplicitlyInternalAccessibility",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ImportJob",
       "service": "UserService",
       "kind": "class",
@@ -2324,6 +2330,12 @@
     },
     {
       "name": "RedundantReturnAtEnd",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RedundantValueGuard",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

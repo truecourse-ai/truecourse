@@ -44,11 +44,16 @@ export const csharpMissingAccessModifierVisitor: CodeRuleVisitor = {
     // Members of an interface are implicitly public.
     if (node.parent?.parent?.type === 'interface_declaration') return null
 
+    // Explicit interface implementations take no access modifier — C# forbids
+    // one (it is a compile error). This holds for every member kind: methods
+    // (`void IFoo.Bar()`), properties (`T IFoo.Prop`), indexers
+    // (`T IFoo.this[..]`) and events. Each carries an `explicit_interface_specifier`
+    // child, so a single check covers them all.
+    if (node.namedChildren.some((c) => c?.type === 'explicit_interface_specifier')) return null
     if (node.type === 'method_declaration') {
-      // Explicit interface implementations (`void IFoo.Bar()`) take no modifier.
+      // Some grammars surface the qualified name without an explicit specifier node.
       const nm = node.childForFieldName('name')
       if (nm?.type === 'qualified_name' || (nm?.text ?? '').includes('.')) return null
-      if (node.namedChildren.some((c) => c?.type === 'explicit_interface_specifier')) return null
     }
     if (node.type === 'constructor_declaration' && mods.includes('static')) return null
 

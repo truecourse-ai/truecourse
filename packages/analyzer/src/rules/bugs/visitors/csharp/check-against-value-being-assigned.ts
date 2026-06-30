@@ -12,6 +12,41 @@ function singleStatement(consequence: SyntaxNode): SyntaxNode | null {
 }
 
 /**
+ * The simple member name an assignment target refers to within the enclosing
+ * type: a bare `Name` identifier or an explicit `this.Name`. Anything else
+ * (indexers, other-object member access, calls) yields undefined.
+ */
+function selfMemberName(target: SyntaxNode): string | undefined {
+  if (target.type === 'identifier') return target.text
+  if (
+    target.type === 'member_access_expression' &&
+    target.childForFieldName('expression')?.type === 'this_expression'
+  ) {
+    return target.childForFieldName('name')?.text
+  }
+  return undefined
+}
+
+/** True if the type enclosing `node` declares a property named `name`. */
+function enclosingTypeHasProperty(node: SyntaxNode, name: string): boolean {
+  for (let cur = node.parent; cur; cur = cur.parent) {
+    if (
+      cur.type === 'class_declaration' ||
+      cur.type === 'record_declaration' ||
+      cur.type === 'struct_declaration'
+    ) {
+      const body = cur.childForFieldName('body')
+      return (
+        body?.namedChildren.some(
+          (m) => m?.type === 'property_declaration' && m.childForFieldName('name')?.text === name,
+        ) ?? false
+      )
+    }
+  }
+  return false
+}
+
+/**
  * `if (x != v) x = v;` — guarding a plain assignment with an inequality check
  * against the very value being assigned is redundant: assigning `v` to `x` when
  * they already differ has the identical effect as assigning unconditionally.
@@ -51,6 +86,14 @@ export const csharpCheckAgainstValueBeingAssignedVisitor: CodeRuleVisitor = {
     const sameAB = condLeft.text === target.text && condRight.text === value.text
     const sameBA = condLeft.text === value.text && condRight.text === target.text
     if (!sameAB && !sameBA) return null
+
+    // A property setter is observable (EF/ORM change tracking, validation,
+    // INotifyPropertyChanged), so `if (Prop != v) Prop = v;` deliberately avoids
+    // invoking the setter when unchanged — it is NOT a redundant no-op. The rule's
+    // "assigning unconditionally is identical" premise only holds for a plain
+    // field/local. Skip when the target is a property of the enclosing type.
+    const targetName = selfMemberName(target)
+    if (targetName && enclosingTypeHasProperty(node, targetName)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
