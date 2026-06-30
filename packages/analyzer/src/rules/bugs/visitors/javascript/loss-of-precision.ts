@@ -17,6 +17,19 @@ export const lossOfPrecisionVisitor: CodeRuleVisitor = {
     const num = Number(text)
     if (!Number.isFinite(num)) return null
 
+    // `BigInt(<literal>)` is an explicit, intentional conversion — the
+    // developer has opted into big-integer handling, so the generic
+    // large-literal precision warning is noise here. Skip when the literal is
+    // a direct argument of a BigInt(...) call.
+    const parent = node.parent
+    if (parent?.type === 'arguments') {
+      const call = parent.parent
+      if (call?.type === 'call_expression') {
+        const fn = call.childForFieldName('function')
+        if (fn?.type === 'identifier' && fn.text === 'BigInt') return null
+      }
+    }
+
     if (!Number.isSafeInteger(num)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
