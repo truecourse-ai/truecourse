@@ -1,0 +1,11 @@
+target_repo: redwoodjs/redwood
+target_ref: a7852fb92d0e4ac2bcce1d9a755717ba6cf53ffd   # AUTHORITATIVE — discover/next-fix verify at this SHA (HEAD of main)
+code_dir: "."
+generated_at: "2026-06-24"
+tool_version: 0.6.9
+llm: agent                                              # transport used
+doc_scope:
+  - docs/docs
+notes:
+  - "redwoodjs/redwood was renamed upstream to redwoodjs/graphql; GitHub redirects the old name. target_ref a7852fb is the HEAD of main on the (renamed) repo. The doc surface is unchanged (120 .md under docs/docs, versioned_docs excluded)."
+  - "Contracts generated via the agent transport (no claude subprocess). 7 artifacts: 6 Enum (LogLevel, SupportedVerifiers, TrailingSlashes, WebAuthnType, RouteParameterType, EmptyAs) + 1 Operation (GET /graphql/readiness)."

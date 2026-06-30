@@ -1,0 +1,4 @@
+enum SupportedVerifiers {
+  origin "docs/docs/webhooks.md" "Webhook Signature Verifiers" 47..62
+  values [skipVerifier, secretKeyVerifier, sha1Verifier, sha256Verifier, base64Sha1Verifier, base64Sha256Verifier, timestampSchemeVerifier, jwtVerifier]
+}

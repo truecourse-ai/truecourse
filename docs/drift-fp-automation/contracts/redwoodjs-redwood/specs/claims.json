@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-24T00:41:57.575Z",
+  "modules": [
+    {
+      "name": "_shared",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/auth/dbauth.md",
+        "docs/docs/forms.md",
+        "docs/docs/logger.md",
+        "docs/docs/router.md",
+        "docs/docs/webhooks.md"
+      ],
+      "scope": {
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    {
+      "name": "graphql",
+      "status": "shipped",
+      "sourceDocs": [
+        "docs/docs/graphql.md"
+      ],
+      "scope": {
+        "paths": [
+          "/graphql/**"
+        ]
+      },
+      "description": "graphql module — GET /graphql/readiness."
+    }
+  ],
+  "claims": [
+    {
+      "id": "c4f6fd99f0353f7cf73cd7a38120d68589852ae7d3747222c0cc56659afa7f67",
+      "topic": "data",
+      "subject": "SupportedVerifiers",
+      "content": {
+        "fields": {
+          "skipVerifier": "bypass verification / no verification",
+          "secretKeyVerifier": "checks that an expected secret key or token is present (Custom, Orbit)",
+          "sha1Verifier": "SHA1 signature verification (Vercel)",
+          "sha256Verifier": "SHA256 signature verification (GitHub, Discourse)",
+          "base64Sha1Verifier": "Base64-encoded SHA1 signature verification",
+          "base64Sha256Verifier": "Base64 SHA256 signature verification (Svix, Clerk)",
+          "timestampSchemeVerifier": "timestamped SHA256 scheme to prevent replay attacks (Stripe / Redwood default)",
+          "jwtVerifier": "JWT signature verification with issuer and expires claims (Netlify)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/webhooks.md",
+        "line": 47,
+        "quote": "### Webhook Signature Verifiers\n\nCommon signature verification methods are:\n\n- SHA256 ([GitHub](https://docs.github.com/en/developers/webhooks-and-events/securing-your-webhooks#validating-payloads-from-github) and [Discourse](https://meta.discourse.org/t/setting-up-webhooks/49045))\n- Base64 SHA256 ([Svix](https://docs.svix.com/receiving/verifying-payloads/how-manual) and [Clerk](https://docs.clerk.dev/reference/webhooks#verifying-requests))\n- SHA1 ([Vercel](https://vercel.com/docs/integrations?query=webhook%20sha1#webhooks/securing-webhooks))\n- JWT ([Netlify](https://docs.netlify.com/site-deploys/notifications/#outgoing-webhooks))\n- Timestamp Scheme ([Stripe](https://stripe.com/docs/webhooks/best-practices) / Redwood default)\n- Secret Key (Custom, [Orbit](https://docs.orbit.love/docs/webhooks))\n\nRedwoodJS adds a way to do no verification as well of testing or in the case your third party doesn't sign the payload.\n\n- SkipVerifier (bypass verification, or no verification)\n\nRedwoodJS implements [signatureVerifiers](https://github.com/redwoodjs/redwood/tree/main/packages/api/src/auth/verifiers) for each of these so you can get started integrating your app with third-parties right away.\n\n```jsx\nexport type SupportedVerifiers =\n  | SkipVerifier\n  | SecretKeyVerifier\n  | Sha1Verifier\n  | Sha256Verifier\n  | Base64Sha1Verifier\n  | Base64Sha256Verifier\n  | TimestampSchemeVerifier\n  | JwtVerifier\n```\n\nEach `SupportedVerifier` implements a method to `sign` and `verify` a payload with a secret (if needed).\n\nWhen the webhook needs [creates a verifier](https://github.com/redwoodjs/redwood/blob/main/packages/api/src/auth/verifiers/index.ts#L12) in order to `verifyEvent`, `verifySignature` or `signPayload` it does so via:\n\n```jsx\ncreateVerifier(type, options)\n```\n\nwhere type is one of the supported verifiers and `VerifyOptions` sets the\noptions the verifier needs to sign or verify.\n\n… (+30 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "fb6311f0cd3deb09c727207728d1763ef2ea0aeb248b6558165c8ba357085fd0",
+      "topic": "data",
+      "subject": "core route parameter types",
+      "content": {
+        "fields": {
+          "Int": "matches and converts an integer",
+          "Float": "matches and converts a Float",
+          "Boolean": "matches and converts Boolean (true or false only)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/router.md",
+        "line": 418,
+        "quote": "## Core route parameter types\n\nWe call built-in parameter types _core parameter types_. All core parameter types begin with a capital letter. Here are the types:\n\n- `Int` - Matches and converts an integer.\n- `Float` - Matches and converts a Float.\n- `Boolean` - Matches and converts Boolean (true or false only)\n\n> Note on TypeScript support\n> Redwood will automatically generate types for your named routes, but you do have to run `yarn redwood dev` or `yarn redwood build` at least once for your `Routes.{js,ts}` to be parsed\n\n### Glob Type\n\nThere is one more core type that is a bit different: the glob type. Instead of matching to the next `/` or the end of the string, it will greedily match as much as possible (including `/` characters) and capture the match as a string.\n\n```jsx title=\"Routes.jsx\"\n<Route path=\"/file/{filePath...}\" page={FilePage} name=\"file\" />\n```\n\nIn this example, we want to take everything after `/file/` and have it sent to the Page as `filePath`. So for the path `/file/api/src/lib/auth.js`, `filePath` would contain `api/src/lib/auth.js`.\n\nYou can use multiple globs in your paths:\n\n```jsx title=\"Routes.jsx\"\n<Route path=\"/from/{fromDate...}/to/{toDate...}\" page={DatePage} name=\"dateRange\" />\n```\n\nThis will match a path like `/from/2021/11/03/to/2021/11/17`. Note that for this to work, there must be some static string between the globs so the router can determine where the boundaries of the matches should be.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "9e89cb2c3376c0c1017720f98a69f438b5094bf63cbc9c50cee2ae594c0c94c5",
+      "topic": "data",
+      "subject": "emptyAs",
+      "content": {
+        "fields": {
+          "0": "field value is 0 when empty",
+          "null": "field value is null when empty",
+          "'undefined'": "field value is undefined when empty",
+          "''": "field value is an empty string when empty"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/forms.md",
+        "line": 325,
+        "quote": "### emptyAs prop\n\nThe `emptyAs` prop allows the user to override the default value for an input field if the field is empty. Provided that a `setValueAs` prop is not specified, Redwood will allow you to override the default empty value returned.\nThe possible values for `emptyAs` are:\n\n- `null`\n- `'undefined'`\n- `0`\n- `''` (empty string)\n\nFor example:\n\n```\n<NumberField name=\"quantity\" emptyAs=\"undefined\" />\n<NumberField name=\"score\" emptyAs={null} />\n```\n\nwill return `undefined` if the field is empty.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c7f3b276d8426e6ef43cfcb21fdb9f22c2ee4abbbb3afe60287765a48de39903",
+      "topic": "data",
+      "subject": "log level",
+      "content": {
+        "fields": {
+          "fatal": "fatal log level",
+          "error": "error log level",
+          "warn": "warn log level",
+          "info": "info log level",
+          "debug": "debug log level",
+          "trace": "trace log level",
+          "silent": "disables logging"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/logger.md",
+        "line": 82,
+        "quote": "### Log Level\n\nOne of 'fatal', 'error', 'warn', 'info', 'debug', 'trace' or 'silent'.\n\nThe logger detects your current environment and will default to a sensible minimum log level.\n\n> **_NOTE:_** In Development, the default is `trace` while in Production, the default is `warn`.\n> This means that output in your dev server can be verbose, but when you deploy you won't miss out on critical issues.\n\nYou can override the default log level via the `LOG_LEVEL` environment variable or the `level` LoggerOption.\n\nThe 'silent' level disables logging.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "c753e473985a5c2403f509a47690d44417ccb467a2f62499393efe9e40dd3d6c",
+      "topic": "data",
+      "subject": "trailingSlashes",
+      "content": {
+        "fields": {
+          "never": "strips trailing slashes before matching (default)",
+          "always": "always adds trailing slashes before matching",
+          "preserve": "paths without a slash won't match paths with a slash"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/router.md",
+        "line": 468,
+        "quote": "## Trailing slashes\n\nThe router by default removes all trailing slashes before attempting to match the route you are trying to navigate to.\n\nFor example, if you attempt to navigate to `/about` and you enter `/about/`, the router will remove the trailing `/` and will match `path=\"/about\"`\n\nThere are 3 values that can be used with the `trailingSlashes` prop\n\n1. **never** (default): strips trailing slashes before matching (\"/about/\" -> \"/about\")\n2. **always**: always adds trailing slashes before matching (\"/about\" -> \"/about/\")\n3. **preserve** -> paths without a slash won't match paths with a slash (\"/about\" -> \"/about\", \"/about/\" -> \"/about/\")\n\nIf you need to match trailing slashes exactly, use the `preserve` value.\nIn the following example, `/about/` will _not_ match `/about` and you will be sent to the `NotFoundPage`\n\n```jsx\n<Router trailingSlashes={'preserve'}>\n  <Route path=\"/\" page={HomePage} name=\"home\" />\n  <Route path=\"/about\" page={AboutPage} name=\"about\" />\n  <Route notfound page={NotFoundPage} />\n</Router>\n```\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "2cf41a535952c7a6360fb44dfa2036485679017f69e4064424112b6164de6bbd",
+      "topic": "data",
+      "subject": "webAuthn.type",
+      "content": {
+        "fields": {
+          "any": "allow both platform and cross-platform devices",
+          "platform": "only allow embedded devices (TouchID, FaceID, Windows Hello)",
+          "cross-platform": "only allow third party devices (like a Yubikey USB fingerprint reader)"
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/auth/dbauth.md",
+        "line": 618,
+        "quote": "### WebAuthn `type` Option\n\nThe config option `webAuthn.type` can be set to `any`, `platform` or `cross-platform`:\n\n- `platform` means to _only_ allow embedded devices (TouchID, FaceID, Windows Hello) to be used\n- `cross-platform` means to _only_ allow third party devices (like a Yubikey USB fingerprint reader)\n- `any` means to allow both platform and cross-platform devices\n\nIn some browsers this can lead to a pretty drastic UX difference. For example, here is the interface in Chrome on macOS with the included TouchID sensor on a Macbook Pro:\n\n#### **any**\n\n<img width=\"446\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174896660-c2960921-046c-49ad-8ff0-38c019569371.png\" />\n\nIf you pick \"Add a new Android Phone\" you're presented with a QR code:\n\n<img width=\"445\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174896265-bb513c82-56a7-4bbc-892e-97aa8a57f525.png\" />\n\nIf you pick \"USB Security Key\" you're given the chance to scan your fingerprint in a 3rd party USB device:\n\n<img width=\"445\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174896250-a0c447e7-c238-47bb-ab14-86b63385178e.png\" />\n\nAnd finally if you pick \"This device\" you're presented with the standard interface you'd get if used `platform` as your type:\n\n<img width=\"251\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174895503-de913272-f219-4d28-9e86-ac6190785dfd.png\" />\n\nYou'll have to decide if this UX tradeoff is worth it for your customers, as it can be pretty confusing when first presented with all of these options when someone is just used to using TouchID or FaceID.\n\n#### **platform**\n\nThe `platform` option provides the simplest UI and one that users with a TouchID or FaceID will be immediately familiar with:\n\n<img width=\"251\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174895503-de913272-f219-4d28-9e86-ac6190785dfd.png\" />\n\nNote that you can also fallback to use your user account password (on the computer itself) in addition to TouchID:\n\n<img width=\"251\" alt=\"image\" src=\"https://user-images.githubusercontent.com/300/174895743-24042578-4461-4c3b-b51c-8abc0325f065.png\" />\n\nBoth the password and TouchID scan will count as the same device, so users can alternate between them if they want.\n\n… (+10 more lines)"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "_shared",
+      "source": "extracted"
+    },
+    {
+      "id": "3aada4ab703f7838d58161ab7fa3619096cb55b67c8e3fa85fc8ddca71b49014",
+      "topic": "endpoints",
+      "subject": "GET /graphql/readiness",
+      "content": {
+        "method": "GET",
+        "path": "/graphql/readiness",
+        "headers": {
+          "x-yoga-id": "must match the server's healthCheckId"
+        },
+        "responses": {
+          "200": {
+            "description": "server is ready"
+          },
+          "503": {
+            "description": "Service Unavailable — server is not ready"
+          }
+        }
+      },
+      "kind": "definition",
+      "provenance": {
+        "file": "docs/docs/graphql.md",
+        "line": 598,
+        "quote": "#### Perform a Readiness Check\n\nA readiness check confirms that your GraphQL server can accept requests and serve **your server's** traffic.\n\nIt forwards a request to the health check with a header that must match your `healthCheckId` in order to succeed.\nIf the `healthCheckId` doesn't match or the request fails, then your GraphQL server isn't \"ready\".\n\nTo perform a readiness check, make a HTTP GET request to the `/graphql/readiness` endpoint with the appropriate `healthCheckId` header.\nFor local development, you can make a request to the proxy:\n\n```bash\ncurl \"http://localhost:8910/.redwood/functions/graphql/readiness\" \\\n  -H 'x-yoga-id: yoga' \\\n  -i\n```\n\nor directly invoke the graphql function:\n\n```bash\ncurl \"http://localhost:8911/graphql/readiness\" \\\n  -H 'x-yoga-id: yoga' \\\n  -i\n```\n\nEither way, you should get a `200 OK` HTTP status if ready, or a `503 Service Unavailable` if not.\n\nFor production, make a request wherever your `/graphql` function exists.\n\n> These examples use `curl` but you can perform a readiness check via any HTTP GET request with the proper headers.\n"
+      },
+      "metadata": {
+        "docKind": "unknown",
+        "lastTouched": "2026-06-24T00:13:26+00:00"
+      },
+      "module": "graphql",
+      "source": "extracted"
+    }
+  ]
+}

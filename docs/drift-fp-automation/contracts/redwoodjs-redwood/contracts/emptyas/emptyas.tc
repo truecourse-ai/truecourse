@@ -1,0 +1,4 @@
+enum EmptyAs {
+  origin "docs/docs/forms.md" "emptyAs prop" 320..335
+  values [null, undefined, 0, ""]
+}

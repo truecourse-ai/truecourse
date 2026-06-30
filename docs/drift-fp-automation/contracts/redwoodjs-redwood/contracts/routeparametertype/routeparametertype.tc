@@ -1,0 +1,4 @@
+enum RouteParameterType {
+  origin "docs/docs/router.md" "Core route parameter types" 418..432
+  values [Int, Float, Boolean]
+}

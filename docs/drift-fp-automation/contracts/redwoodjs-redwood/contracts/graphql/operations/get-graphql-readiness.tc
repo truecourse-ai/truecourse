@@ -1,0 +1,10 @@
+operation GET "/graphql/readiness" {
+  origin "docs/docs/graphql.md" "Perform a Readiness Check" 598..630
+  request {
+    header x-yoga-id required
+  }
+  response 200 on success {
+  }
+  response 503 on service_unavailable {
+  }
+}
