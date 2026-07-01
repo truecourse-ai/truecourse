@@ -9,12 +9,8 @@ namespace Positive.Boundary.CodeQuality;
 public sealed class TypeNameMatchesNamespaceNestedTypeSafe
 {
     // SAFE: code-quality/deterministic/type-name-matches-namespace
-    private sealed class CodeQuality
-    {
-        /// <summary>The enclosing marker value.</summary>
-        public int Marker { get; init; }
-    }
+    private sealed class CodeQuality { }
 
-    /// <summary>Uses the nested type so it is not an unused private member.</summary>
-    public int NestedMarker() => new CodeQuality { Marker = 1 }.Marker;
+    /// <summary>Instantiates the nested type so it is not an unused private member.</summary>
+    public object NestedMarker() => new CodeQuality();
 }

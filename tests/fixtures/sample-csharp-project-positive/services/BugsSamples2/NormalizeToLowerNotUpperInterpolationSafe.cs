@@ -1,11 +1,11 @@
 namespace Positive.Boundary.Bugs;
 
 /// <summary>
-/// Lowercases a value ONLY to embed it in display/markup output (a CSS class name) via a
+/// Case-folds a value ONLY to embed it in display/markup output (a CSS class name) via a
 /// string-interpolation hole. This is a presentation context, not storage/comparison
-/// normalization, and switching to <c>ToUpperInvariant</c> would produce the wrong markup,
-/// so normalize-to-lower-not-upper must not fire on a <c>ToLower</c> that sits directly
-/// inside an interpolation hole.
+/// normalization, so normalize-to-lower-not-upper must not fire on a case-fold that sits
+/// directly inside an interpolation hole. <c>ToLowerInvariant</c> is used so the fold is
+/// culture-independent (no culture-unaware-string-operation concern).
 /// </summary>
 public sealed class NormalizeToLowerNotUpperInterpolationSafe
 {
@@ -13,6 +13,6 @@ public sealed class NormalizeToLowerNotUpperInterpolationSafe
     public string StatusCssClass(string status)
     {
         // SAFE: bugs/deterministic/normalize-to-lower-not-upper
-        return $"badge-{status.ToLower()}";
+        return $"badge-{status.ToLowerInvariant()}";
     }
 }
