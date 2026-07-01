@@ -12,10 +12,11 @@ internal sealed class ImplicitPrivateMembersBug
     // VIOLATION: code-quality/deterministic/unused-private-member
     private readonly string _unusedTag = "n/a";
 
-    // VIOLATION: code-quality/deterministic/missing-access-modifier
-    // VIOLATION: code-quality/deterministic/static-method-candidate
-    decimal Subtotal(decimal net, decimal rate) => net * rate;
+    private readonly decimal _rate = decimal.One;
 
-    /// <summary>Grosses up the net amount at the given rate.</summary>
-    public decimal Total(decimal net, decimal rate) => Subtotal(net, rate);
+    // VIOLATION: code-quality/deterministic/missing-access-modifier
+    decimal Subtotal(decimal net) => net * _rate;
+
+    /// <summary>Grosses up the net amount at the captured rate.</summary>
+    public decimal Total(decimal net) => Subtotal(net);
 }
