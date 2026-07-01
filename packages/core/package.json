@@ -104,6 +104,10 @@
       "types": "./dist/lib/workspace-doc-links.d.ts",
       "import": "./dist/lib/workspace-doc-links.js"
     },
+    "./lib/repo-doc-reader": {
+      "types": "./dist/lib/repo-doc-reader.d.ts",
+      "import": "./dist/lib/repo-doc-reader.js"
+    },
     "./lib/background-tasks": {
       "types": "./dist/lib/background-tasks.d.ts",
       "import": "./dist/lib/background-tasks.js"

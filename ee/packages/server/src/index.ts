@@ -14,7 +14,8 @@ import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
 import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { registerGithubApp, selectGateStore, loadGithubAppConfig } from '@truecourse/ee-github-app';
+import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
+import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
@@ -72,7 +73,8 @@ const plugin: EePlugin = {
     // repo, gate its pull requests — so EE cannot run without it. Validated up
     // front (env-only, no deps) so a misconfigured deploy fails fast rather than
     // booting half-wired. registerGithubApp below then always lights up.
-    if (!loadGithubAppConfig()) {
+    const githubAppConfig = loadGithubAppConfig();
+    if (!githubAppConfig) {
       throw new Error(
         '[ee-server] GitHub App is required: the enterprise edition gates pull requests through a GitHub App (there is no SSO-only mode). Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_WEBHOOK_SECRET, and GITHUB_APP_SLUG.',
       );
@@ -133,6 +135,13 @@ const plugin: EePlugin = {
       codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     plugin.capabilities.push('github-gate');
+
+    // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
+    // working tree; EE has no checkout, so fetch them from GitHub via the App
+    // installation (at the repo's baseline commit). Reuses the gate store above.
+    setRepoDocReader((repoKey, docPath) =>
+      readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath),
+    );
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on
     // a CLI binary) + the Models settings API. Reuses the validated masterSecret.

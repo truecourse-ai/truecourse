@@ -26,6 +26,7 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
 import { readVerifyLatest } from '@truecourse/core/lib/verify-store';
+import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addManualInclude,
@@ -131,18 +132,19 @@ router.get(
         res.status(400).json({ error: 'Missing ?ref=<doc path>.' });
         return;
       }
-      // Confine to the repo tree — no traversal outside it.
-      const repoAbs = path.resolve(repo.path);
-      const full = path.resolve(repoAbs, ref);
-      if (full !== repoAbs && !full.startsWith(repoAbs + path.sep)) {
+      // Confine to the repo tree — no traversal outside it. Path-agnostic so it
+      // holds in EE too, where repo.path is a repoKey, not a filesystem path.
+      if (path.isAbsolute(ref) || ref.split(/[\\/]/).includes('..')) {
         res.status(400).json({ error: 'ref escapes the repository.' });
         return;
       }
-      if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+      // Read through the seam: local working tree in OSS, GitHub (App) in EE.
+      const content = await readRepoDoc(repo.path, ref);
+      if (content == null) {
         res.status(404).json({ error: `Doc not found: ${ref}` });
         return;
       }
-      res.json({ ref, content: fs.readFileSync(full, 'utf-8') });
+      res.json({ ref, content });
     } catch (e) {
       next(e);
     }

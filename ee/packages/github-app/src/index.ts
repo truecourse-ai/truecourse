@@ -194,6 +194,7 @@ export {
   findComment,
   type OctokitClient,
 } from './octokit.js';
+export { readRepoDocFromGithub } from './repo-doc.js';
 
 // Phase 3: infer undocumented decisions
 export {
