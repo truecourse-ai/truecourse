@@ -1449,6 +1449,22 @@ class C {
 }`
       expect(await keys(src, K)).not.toContain(K)
     })
+    it('does not flag a property that delegates to GetFoo() (expression-bodied)', async () => {
+      const src = `
+class C {
+  public string BrowserInfo => GetBrowserInfo();
+  protected string GetBrowserInfo() => "";
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
+    it('does not flag a property whose get accessor returns GetFoo()', async () => {
+      const src = `
+class C {
+  public string Theme { get { return GetTheme(); } }
+  protected string GetTheme() => "";
+}`
+      expect(await keys(src, K)).not.toContain(K)
+    })
   })
 
   // ---- verbose-declaration-initialization ---------------------------------
