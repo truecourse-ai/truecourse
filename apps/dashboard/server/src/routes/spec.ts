@@ -27,6 +27,7 @@ import {
 import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
 import { readVerifyLatest } from '@truecourse/core/lib/verify-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
+import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addManualInclude,
@@ -151,6 +152,21 @@ router.get(
   },
 );
 
+// Resolving a conflict changes the curated spec, so the contracts must be
+// regenerated. EE defers this to the background job queue (repo.contracts →
+// re-baseline: clone → curate → generate → verify); OSS has no runner installed,
+// so this is a no-op and the user regenerates via the Contracts "Generate"
+// button. Best-effort: a failed enqueue never fails the resolution save.
+async function enqueueContractsRefresh(repoKey: string): Promise<void> {
+  const runner = getBackgroundTaskRunner();
+  if (!runner) return;
+  try {
+    await runner({ type: 'repo.contracts', repoKey });
+  } catch {
+    /* best-effort — the resolution is already saved */
+  }
+}
+
 router.post(
   '/:id/spec/relations',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -177,6 +193,7 @@ router.post(
         detectedFrom: 'manual',
         note: body.note,
       });
+      await enqueueContractsRefresh(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
       next(e);
@@ -195,6 +212,7 @@ router.delete(
         return;
       }
       const decisions = await removeRelation(repo.path, { older: body.older, newer: body.newer, scope: body.scope });
+      await enqueueContractsRefresh(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
       next(e);

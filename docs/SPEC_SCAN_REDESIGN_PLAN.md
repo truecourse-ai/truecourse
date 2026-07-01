@@ -439,3 +439,36 @@ bounded by the enumeration step's recall.
 - The Spec UI is readable. No fragile structured intermediate at any grain. The LLM never
   silently picks a conflict winner (modulo the named, shrinking tail). The contract stays the
   only structured output.
+
+## Known gaps / follow-ups
+
+### Workspace Knowledge conflict resolution (EE) — NOT BUILT
+The repo Spec tab has full conflict resolution (overlaps → doc→doc relations → decisions →
+regenerated contracts). **Workspace Knowledge (Confluence sync) does not.** The Knowledge page
+(`ee/packages/client/src/KnowledgePage.tsx`) has only Sources + Contracts tabs — no corpus/overlap
+view and no relations editor. Overlaps are computed during the sync curate and land in the workspace
+`corpus.json`, but they're never surfaced, so a workspace conflict is only ever resolved by the
+engine's automatic defaults.
+
+Root cause is deeper than a missing UI: `syncWorkspaceCorpusInProcess`
+(`packages/core/src/commands/spec-in-process.ts`) curates the synced docs but **never loads or
+applies any user decisions**, and it persists only `corpus` + `contracts` (no `decisions`). Workspace
+doc bodies are not stored (only the provenance ledger), so a resolution can only take effect by
+**re-curating on a fresh Confluence re-sync**. A working feature therefore needs:
+
+1. **Engine** — `syncWorkspaceCorpusInProcess` loads the stored `ws:<org>` decisions and materializes
+   them into the scratch tree (as `decisions.json`) before curate so relations are folded in; persist
+   the `decisions` artifact.
+2. **Store** — a workspace-scoped decisions read/write API (the repo `addRelation`/`removeRelation`
+   are repo-path-scoped).
+3. **Routes** — `GET /api/ee/knowledge/corpus` (with overlaps) + `POST`/`DELETE
+   /api/ee/knowledge/relations`.
+4. **Regeneration** — enqueue a `knowledge.sync` on resolve (re-fetch → re-curate with the new
+   decision → regenerate; ~0 LLM for unchanged docs via the content-addressed KV cache).
+5. **Client** — surface overlaps + a resolution control on the existing Sources tab (no redundant
+   doc list — Sources already lists the synced docs).
+6. **Tests** for the above.
+
+Related fix already shipped: resolving a conflict on a **repo** now enqueues `repo.contracts`
+regeneration (the shared `/spec/relations` routes defer via the `background-tasks` seam; no-op in
+OSS). The workspace path is the remaining half.

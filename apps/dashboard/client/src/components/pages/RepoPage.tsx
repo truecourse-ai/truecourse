@@ -13,7 +13,7 @@ import { useInferredDecisions, inferredKey } from '@/hooks/useInferredDecisions'
 import type { InferredDecisionView } from '@truecourse/shared';
 
 /** EE repo tab bar: BL-Drift only, curated order. Analytics leads + is default. */
-const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'inferred', 'contracts', 'settings'];
+const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'contracts', 'inferred', 'settings'];
 /** EE Code Quality (analysis) tab bar: Analytics · Violations, then the common
  *  Settings. The analytics/violations tabs are EE-only (gated on `workspace`);
  *  `settings` is sourced from the drift section (section-neutral, repo-wide
@@ -1175,7 +1175,9 @@ function RepoPageInner() {
     leftTab === 'spec' ? (
       // The Spec tab is the curated corpus: the header owns Scan/Rescan, which
       // curates the docs into areas, detects relations, and flags overlaps.
-      repo?.isGitRepo !== false ? (
+      // Hidden in EE — hosted repos have no working tree and re-scan
+      // automatically on merge to the default branch / when a PR is opened.
+      !isEe && repo?.isGitRepo !== false ? (
         <Button size="sm" variant="outline" onClick={() => void specCorpus.scan()} disabled={specCorpus.scanning}>
           {specCorpus.scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
           {specCorpus.data ? 'Rescan' : 'Scan'}

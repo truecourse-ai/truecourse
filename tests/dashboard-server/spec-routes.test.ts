@@ -34,6 +34,10 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 
 import { createApp } from '../../apps/dashboard/server/src/app';
 import {
+  setBackgroundTaskRunner,
+  type BackgroundTask,
+} from '@truecourse/core/lib/background-tasks';
+import {
   setupTestFixture,
   teardownTestFixture,
   type TestFixture,
@@ -100,6 +104,7 @@ describe('corpus routes (spec-scan redesign)', () => {
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
+    setBackgroundTaskRunner(null);
     await teardownTestFixture(fixture.project.slug);
   });
 
@@ -170,6 +175,43 @@ describe('corpus routes (spec-scan redesign)', () => {
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
     expect(res.body.manualIncludes).toContain('docs/v1.md');
     expect(res.body.corpus.skippedDocs).toContainEqual({ ref: 'docs/archived.md', reason: 'archived directory' });
+  });
+
+  // Resolving a conflict must regenerate contracts. The shared route defers to the
+  // background-task seam (EE runner installed → enqueues repo.contracts; OSS → none).
+  it('POST /spec/relations enqueues repo.contracts when a runner is installed', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
+      .expect(200);
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+  });
+
+  it('DELETE /spec/relations also enqueues repo.contracts', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
+    await request(app)
+      .delete(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ older: 'docs/v1.md', newer: 'docs/v2.md' })
+      .expect(200);
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+  });
+
+  it('POST /spec/relations is a no-op (no throw) when no runner is installed (OSS)', async () => {
+    setBackgroundTaskRunner(null);
+    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
+      .expect(200);
   });
 });
 

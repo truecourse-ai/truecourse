@@ -26,12 +26,14 @@ import {
 type Tab = 'contracts' | 'sources';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
-  { id: 'contracts', label: 'Contracts', icon: BookOpen },
+  // Sources first (the synced docs, the workspace analog of the repo Spec tab),
+  // then Contracts — matching the repo's Spec → Contracts order.
   { id: 'sources', label: 'Sources', icon: FileText },
+  { id: 'contracts', label: 'Contracts', icon: BookOpen },
 ];
 
 export default function KnowledgePage() {
-  const [tab, setTab] = useState<Tab>('contracts');
+  const [tab, setTab] = useState<Tab>('sources');
 
   return (
     <div className="flex h-full flex-col">
