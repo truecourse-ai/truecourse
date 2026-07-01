@@ -481,6 +481,12 @@
       "layer": "api"
     },
     {
+      "name": "GuardedLocalAssignmentBug",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "HandlerBase",
       "service": "ApiGateway",
       "kind": "class",
@@ -620,6 +626,12 @@
     },
     {
       "name": "IMetricsRecorder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ImplicitPrivateMembersBug",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -896,6 +908,12 @@
     },
     {
       "name": "NetworkSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NonDelegatingGetAccessors",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
