@@ -206,10 +206,26 @@ function humanTokens(n: number): string {
 }
 
 /**
+ * Whether progress may fall back to the per-stage *resolved* model when no real
+ * usage was recorded. OSS honors per-stage model tiers (CLI `--model`), so the
+ * fallback is accurate there. EE runs ONE model for every stage (the AI-SDK
+ * transport ignores the per-stage hint) and records no per-stage usage, so the
+ * fallback would show a misleading OSS tier — EE turns this off at boot
+ * ({@link setShowResolvedStageModel}), and progress then shows no model name.
+ */
+let showResolvedStageModel = true;
+
+/** EE calls this at boot (`false`) so progress doesn't show OSS per-stage tiers. */
+export function setShowResolvedStageModel(show: boolean): void {
+  showResolvedStageModel = show;
+}
+
+/**
  * ` · <model> · <tok> tok · $<cost>` suffix for a step. Tokens/cost appear only
  * when real LLM calls were recorded this run (cache hits and the agent transport
- * record nothing); the model always shows — the resolved id once a call happened,
- * else the configured alias. Empty string when there's nothing to add.
+ * record nothing). The model shows the resolved id once a call happened; absent
+ * that, it falls back to the configured per-stage alias UNLESS the single-model
+ * (EE) transport is active. Empty string when there's nothing to add.
  */
 function stepUsageTag(stepKey: string, repoRoot: string): string {
   const stages = STEP_STAGES[stepKey] ?? [];
@@ -227,7 +243,9 @@ function stepUsageTag(stepKey: string, repoRoot: string): string {
     }
   }
   let model = [...models].join(', ');
-  if (!model) model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot)))].join(', ');
+  if (!model && showResolvedStageModel) {
+    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot)))].join(', ');
+  }
   const parts: string[] = [];
   if (model) parts.push(model);
   if (tok > 0 || cost > 0) {
@@ -483,6 +501,14 @@ export interface CurateInProcessOptions {
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
+   * User resolutions (relations / manual areas / includes) to fold into curate.
+   * EE MUST pass the stored decisions here: its re-scan runs on a fresh clone with
+   * no `.truecourse/specs/decisions.json` (resolutions live in Postgres), so
+   * without this the re-scan re-detects already-resolved conflicts. Omit in OSS —
+   * curate then reads them from the repo tree.
+   */
+  decisions?: CurateOptions['decisions'];
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Omit to
    * run without confirmation.
@@ -558,6 +584,7 @@ export async function curateInProcess(
       transport: resolveTransport(options),
       skipGit: options.skipGit,
       skipCorpusWrite: options.skipCorpusWrite,
+      decisions: options.decisions,
       relevanceRunner: options.relevanceRunner,
       areaTagRunner: options.areaTagRunner,
       overlapRunner: options.overlapRunner,

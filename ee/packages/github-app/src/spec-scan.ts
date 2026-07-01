@@ -13,6 +13,7 @@ import { simpleGit } from 'simple-git';
 import {
   curateInProcess,
   generateFromCorpusInProcess,
+  getDecisions,
 } from '@truecourse/core/commands/spec-in-process';
 import { saveSpec } from '@truecourse/core/lib/spec-store';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
@@ -57,9 +58,15 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     // the curate fail-open handling swallows it and the gate "completes" with no
     // corpus (and EE must never fall back to the `claude` CLI).
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
+    // The user's resolutions (relations / manual areas / includes) live in the
+    // server store (Postgres), keyed by repoKey — NOT in this fresh clone. Load
+    // them and fold them into curate, else the re-scan re-detects already-resolved
+    // conflicts and never generates contracts (the dashboard resolve → regenerate
+    // loop). Empty on the first (connect) scan, so conflicts surface as expected.
+    const decisions = await getDecisions(ref.repoKey);
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
     // writes corpus.json into the clone; we persist it under `ref` for the store.
-    const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker });
+    const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker, decisions });
     await saveSpec(ref, 'corpus', curate.corpus);
     return { openConflicts: curate.stats.overlapFlags };
   },

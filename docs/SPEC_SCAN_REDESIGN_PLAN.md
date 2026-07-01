@@ -472,3 +472,28 @@ doc bodies are not stored (only the provenance ledger), so a resolution can only
 Related fix already shipped: resolving a conflict on a **repo** now enqueues `repo.contracts`
 regeneration (the shared `/spec/relations` routes defer via the `background-tasks` seam; no-op in
 OSS). The workspace path is the remaining half.
+
+### EE ignores per-stage model tiers — one model runs every stage
+OSS assigns a model **per stage** via `resolveModel(stageId)` → `STAGE_DEFAULTS`
+(`packages/core/src/config/llm-models.ts`): `haiku` for the cheap stages (relevance, vocab,
+chain-detect, overlap), `sonnet` for the mid stages (area-tag, relation, contract
+enumerate/reconcile/gap-judge), `opus` for the expensive ones (contract extract, repair,
+rule-gen). These are passed to `claude --model <tier>`.
+
+**EE does not do this.** The AI-SDK transport (`ee/packages/llm/src/transport.ts`) explicitly
+**ignores the request's per-stage `model`/`fallbackModel` hint** and runs **every** stage on the
+single model configured on the workspace Models page (`cfg.model`, `cfg.fallbackModel` on overload;
+built once via `buildModel(cfg, cfg.model)`). The provider can be Anthropic / OpenAI / Bedrock /
+Copilot. So an EE workspace runs relevance, tagging, extraction, and repair all on one model —
+no cheap-vs-expensive tiering.
+
+Consequence — the per-stage model name must NOT be shown in EE progress. The `stepUsageTag`
+(`packages/core/src/commands/spec-in-process.ts`) fallback derives the label from `resolveModel()`
+(the OSS tiers, e.g. "sonnet, haiku") because the EE transport records no per-stage usage — which is
+misleading since EE actually calls one `cfg.model`. **FIXED:** EE suppresses that fallback via
+`setShowResolvedStageModel(false)` (called in `registerLlmProviders`), so EE progress shows the
+step detail with no model name. OSS is unchanged (per-stage tiers are real there).
+
+Remaining follow-up (product call, not done):
+- Honor per-stage tiers in EE — map the OSS tier (`haiku`/`sonnet`/`opus`) to a provider model
+  per stage instead of a single `cfg.model`, so hosted gets the same cost/quality profile as OSS.

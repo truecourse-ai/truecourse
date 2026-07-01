@@ -13,6 +13,7 @@ import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
 import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm';
+import { setShowResolvedStageModel } from '@truecourse/core/commands/spec-in-process';
 import type { LlmTraceRecorder } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
 import {
@@ -180,6 +181,10 @@ export async function registerLlmProviders(
   registry: EeServerRegistry,
   opts: RegisterLlmOptions,
 ): Promise<void> {
+  // EE runs a single configured model for every stage (the AI-SDK transport
+  // ignores the per-stage hint), so progress must NOT show the OSS per-stage
+  // model tiers — they'd be misleading. Suppress the resolved-model fallback.
+  setShowResolvedStageModel(false);
   const store = new LlmConfigStore(opts.db, opts.masterSecret);
   const recorder = opts.recorder;
   const stored = await store.getProviderConfig().catch((err) => {
