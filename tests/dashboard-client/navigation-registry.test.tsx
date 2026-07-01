@@ -55,13 +55,13 @@ describe('navigation registry — pure lookups', () => {
     // `pulls` + `settings` are EE-only (capability-gated; the raw lookup is
     // unfiltered, so they appear here — visibility filtering happens elsewhere).
     expect(tabs).toEqual([
+      'verify',
       'pulls',
       'spec',
       'contracts',
-      'verify',
       'driftanalytics',
-      'runs',
       'inferred',
+      'runs',
       'settings',
     ]);
     expect(tabsForSection('nope')).toEqual([]);
@@ -69,7 +69,7 @@ describe('navigation registry — pure lookups', () => {
 
   it('defaultTabForSection returns the registered default', () => {
     expect(defaultTabForSection('codequality')).toBe('home');
-    expect(defaultTabForSection('verification')).toBe('spec');
+    expect(defaultTabForSection('verification')).toBe('verify');
     expect(defaultTabForSection('nope')).toBe('');
   });
 

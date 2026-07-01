@@ -85,7 +85,6 @@ export type { GapJudgeRunner, GapJudgeInput, GapJudgeResult, GapVerdict, GapJudg
 export {
   generateContractsFromCorpus,
   defaultGenerateBatch,
-  isAreaEnumerateCached,
 } from './corpus-generate.js';
 export type {
   EnumerateRunner,
@@ -96,3 +95,11 @@ export type {
   CoverageGap,
   AreaCoverage,
 } from './corpus-generate.js';
+export {
+  areaSpecHash,
+  buildManifest,
+  readManifest,
+  writeManifest,
+  classifyAreas,
+} from './manifest.js';
+export type { CorpusManifest, AreaDiff } from './manifest.js';

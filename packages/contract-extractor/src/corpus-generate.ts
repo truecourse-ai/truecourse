@@ -35,6 +35,7 @@ import { reconcileTargets, type ReconcileRunner } from './target-reconciler.js';
 import { assembleArtifacts } from './assemble.js';
 import type { RepairProgress } from './repair.js';
 import { judgeGaps, type GapJudgeRunner } from './judge-gaps.js';
+import { classifyAreas, readManifest, writeManifest, buildManifest } from './manifest.js';
 import { sliceHash } from './hash.js';
 import { writeContracts, type WriteResult } from './writer.js';
 import type { MergedArtifact, MergeDiagnostic } from './merger.js';
@@ -107,6 +108,12 @@ export interface CorpusGenerateOptions {
    * that assert call counts disable it.
    */
   disableExtractCache?: boolean;
+  /**
+   * Skip the committed-manifest no-op short-circuit (always run the pipeline).
+   * On by default so an unchanged corpus is a 0-LLM no-op (clone-safe); tests
+   * that want to force a run despite an existing manifest set this.
+   */
+  disableManifest?: boolean;
   dryRun?: boolean;
   /** Inject the per-area inputs instead of reading the corpus (tests / EE). */
   corpusInput?: AreaGenInput[];
@@ -133,6 +140,12 @@ export interface CorpusGenerateResult {
   areas: AreaCoverage[];
   /** All residual gaps across areas (enumerated but never generated). */
   gaps: CoverageGap[];
+  /**
+   * True when the manifest showed an unchanged corpus and generation was skipped
+   * entirely (0 LLM, committed contracts reused). Lets the CLI/dashboard say
+   * "nothing changed" instead of running.
+   */
+  noChanges?: boolean;
 }
 
 export function defaultGenerateBatch(): number {
@@ -161,6 +174,26 @@ export async function generateContractsFromCorpus(
   opts: CorpusGenerateOptions,
 ): Promise<CorpusGenerateResult> {
   const areas = opts.corpusInput ?? readCorpusForGenerate(opts.repoRoot, opts.readOptions);
+
+  // Committed-manifest no-op: if every area's specs hash-match the manifest (and
+  // none were deleted), the committed `.tc` corpus is already current — skip the
+  // whole pipeline (0 LLM, no repair). Clone-safe: the manifest is tracked, so a
+  // teammate who clones with unchanged specs gets the same skip. dryRun never
+  // reuses (it must produce its proposal); tests can force a run via disableManifest.
+  if (!opts.dryRun && !opts.disableManifest && classifyAreas(areas, readManifest(opts.repoRoot)).allUnchanged) {
+    return {
+      ran: false,
+      write: { written: [], proposed: [] },
+      resolverHard: false,
+      artifactsToWrite: [],
+      validationIssues: [],
+      mergeDiagnostics: [],
+      areas: [],
+      gaps: [],
+      noChanges: true,
+    };
+  }
+
   opts.onAreasReady?.(areas.length);
 
   const models = opts.models ?? {};
@@ -242,6 +275,10 @@ export async function generateContractsFromCorpus(
     dryRun: opts.dryRun,
     prune: !opts.dryRun,
   });
+
+  // Record the spec hashes we just generated from, so the next unchanged run (or
+  // a teammate's clone) is a deterministic no-op. Only on a real (written) run.
+  if (!opts.dryRun) writeManifest(opts.repoRoot, buildManifest(areas));
 
   // Gap auto-close: judge each area's gaps against its docs + the full written
   // corpus, drop the justified ones, keep genuine misses (with a reason). Only on
@@ -526,17 +563,6 @@ async function enumerateCached(
   }
   await setCacheEntry(scope, ENUMERATE_CACHE_NAME, key, { targets });
   return targets;
-}
-
-/**
- * Whether an area's enumerate result is already cached — i.e. its docs are
- * unchanged. The pre-flight estimate uses this as a proxy for "generate will
- * skip this area": unchanged docs ⇒ same enumerate ⇒ same reconciled targets ⇒
- * an extract-cache hit, so the area costs ~nothing on a re-run.
- */
-export async function isAreaEnumerateCached(repoRoot: string, area: AreaGenInput): Promise<boolean> {
-  const cached = await getCacheEntry(repoRoot, ENUMERATE_CACHE_NAME, enumerateCacheKey(area));
-  return cached != null && EnumerateResultSchema.safeParse(cached).success;
 }
 
 // ---------------------------------------------------------------------------

@@ -56,8 +56,6 @@ const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
   error: null,
   scan: vi.fn(),
   refetch: vi.fn(),
-  noChangesNotice: false,
-  dismissNoChanges: vi.fn(),
   ...over,
 });
 
@@ -114,16 +112,6 @@ describe('SpecCorpusView (left nav)', () => {
   it('shows the empty state when there is no corpus', () => {
     render(<SpecCorpusView corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
-  });
-
-  it('shows the "no spec changes" notice after a no-op rescan', () => {
-    render(<SpecCorpusView corpus={state({ noChangesNotice: true })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.getByText('No spec changes')).toBeInTheDocument();
-  });
-
-  it('hides the notice when there were changes', () => {
-    render(<SpecCorpusView corpus={state({ noChangesNotice: false })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.queryByText('No spec changes')).not.toBeInTheDocument();
   });
 });
 

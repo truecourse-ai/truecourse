@@ -213,6 +213,7 @@ describe('generateContractsFromCorpus', () => {
       disableRepair: true,
       disableTargetReconciliation: true,
       disableGapJudge: true,
+      disableManifest: true, // exercise the extract cache, not the manifest no-op skip
     };
     const first = await generateContractsFromCorpus(opts);
     expect(genCalls).toBeGreaterThan(0);
@@ -270,11 +271,37 @@ describe('generateContractsFromCorpus', () => {
       disableTargetReconciliation: true,
       disableGapJudge: true,
       disableExtractCache: true,
+      disableManifest: true, // also bypass the manifest no-op skip, so it truly re-runs
     };
     await generateContractsFromCorpus(opts);
     const afterFirst = genCalls;
     await generateContractsFromCorpus(opts);
     expect(genCalls).toBeGreaterThan(afterFirst); // cache off → generated again
+  });
+
+  it('manifest: a second run with an unchanged corpus is a no-op (noChanges, 0 calls)', async () => {
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {
+      genCalls++;
+      return generateAll({ area, targets });
+    };
+    const opts = {
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['A', 'B'] }),
+      generateRunner,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    };
+    const first = await generateContractsFromCorpus(opts);
+    expect(first.noChanges).toBeFalsy();
+    const afterFirst = genCalls;
+
+    const second = await generateContractsFromCorpus(opts);
+    expect(second.noChanges).toBe(true); // manifest matched → whole pipeline skipped
+    expect(genCalls).toBe(afterFirst); // 0 LLM calls — not even enumerate
+    expect(second.ran).toBe(false);
   });
 
   it('matches coverage tolerantly across enumerator/generator format drift (no false gap)', async () => {

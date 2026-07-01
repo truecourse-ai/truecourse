@@ -79,6 +79,11 @@ export async function runContractsGenerate(
   }
 
   const result = corpus.result;
+  if (result.noChanges) {
+    p.log.success("Nothing changed — specs are unchanged since the last generate; contracts are up to date.");
+    p.outro("Done.");
+    return;
+  }
   const totalTargets = result.areas.reduce((n, a) => n + a.targets, 0);
   const totalEmitted = result.areas.reduce((n, a) => n + a.emitted, 0);
   p.log.step(`areas       ${result.areas.length}`);

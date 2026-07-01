@@ -66,7 +66,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
   const autoApprove = !!opts.yes || opts.llm === "agent";
   const { renderer, tracker } = withTracker(CURATE_STEPS);
-  const { curate } = await curateInProcess(root, {
+  const { curate, noChanges } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
@@ -82,6 +82,11 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     process.exit(1);
   });
   renderer.dispose();
+  if (noChanges) {
+    p.log.success("Nothing changed — no new or updated docs since the last scan; corpus is up to date.");
+    p.outro("Done.");
+    return;
+  }
   const s = curate.stats;
   p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
   p.log.step(`areas       ${s.areaCount}`);

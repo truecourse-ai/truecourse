@@ -214,8 +214,8 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
 
   it('generate estimate is cache-aware: an unchanged area is skipped', async () => {
     writeCorpusFixture();
-    // First, a real generate (stubbed runners, dry-run) to populate the
-    // enumerate cache so the area counts as "unchanged" on the next estimate.
+    // A real generate (stubbed runners) writes the committed manifest, so the
+    // area counts as "unchanged" on the next estimate.
     const enumerateRunner: EnumerateRunner = async () => [{ kind: 'Entity', identity: 'Appointment' }];
     const generateRunner: GenerateBatchRunner = async ({ area, targets }) => ({
       fragments: targets.map((t) => ({
@@ -230,7 +230,6 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       repoRoot: repo,
       enumerateRunner,
       generateRunner,
-      dryRun: true,
       disableRepair: true,
       disableTargetReconciliation: true,
       disableGapJudge: true,

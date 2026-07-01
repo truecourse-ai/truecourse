@@ -694,6 +694,8 @@ export type ContractsGenerateResponse = {
         gaps: IlCoverageGap[];
         validationIssues: IlValidationIssue[];
         mergeDiagnostics: unknown[];
+        /** True when the corpus was unchanged and generation was a 0-LLM no-op. */
+        noChanges?: boolean;
       }
     | { error: string }
     | { skipped: string };

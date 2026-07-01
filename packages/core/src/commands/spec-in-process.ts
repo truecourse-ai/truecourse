@@ -31,6 +31,9 @@ import {
 import {
   generateContractsFromCorpus,
   hasCorpusSpec,
+  readCorpusForGenerate,
+  classifyAreas,
+  readManifest,
   type CorpusGenerateModels,
   type CorpusGenerateResult,
   type CoverageGap,
@@ -175,6 +178,83 @@ export const INFER_STEPS = [
   { key: 'scan', label: 'Reverse-engineering decisions from code' },
   { key: 'write', label: 'Writing inferred contracts' },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Live per-step usage tag (` · <model> · <tok> tok · $<cost>`)
+// ---------------------------------------------------------------------------
+
+/** Which LLM stage(s) each UI progress step covers — so a step line can show the
+ *  model + live tokens/$ of the work it's doing. Shared by the terminal renderer
+ *  and the dashboard popup (both render the same step `detail`). */
+const STEP_STAGES: Record<string, StageId[]> = {
+  // scan (curate)
+  discover: ['spec.relevance'],
+  tag: ['spec.areaTag', 'spec.vocab'],
+  relate: ['spec.relation', 'spec.chainDetect'],
+  overlap: ['spec.overlap'],
+  // generate (corpus)
+  enumerate: ['contract.enumerate'],
+  reconcile: ['contract.reconcile'],
+  generate: ['contract.extract', 'contract.gapJudge'],
+  repair: ['contract.repairParse', 'contract.repair'],
+};
+
+function humanTokens(n: number): string {
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+/**
+ * ` · <model> · <tok> tok · $<cost>` suffix for a step. Tokens/cost appear only
+ * when real LLM calls were recorded this run (cache hits and the agent transport
+ * record nothing); the model always shows — the resolved id once a call happened,
+ * else the configured alias. Empty string when there's nothing to add.
+ */
+function stepUsageTag(stepKey: string, repoRoot: string): string {
+  const stages = STEP_STAGES[stepKey] ?? [];
+  if (stages.length === 0) return '';
+  const usage = getStageUsage();
+  let tok = 0;
+  let cost = 0;
+  const models = new Set<string>();
+  for (const s of stages) {
+    const u = usage.get(s);
+    if (u && u.calls > 0) {
+      tok += stageTokenTotal(u);
+      cost += u.costUsd;
+      if (u.model) models.add(u.model);
+    }
+  }
+  let model = [...models].join(', ');
+  if (!model) model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot)))].join(', ');
+  const parts: string[] = [];
+  if (model) parts.push(model);
+  if (tok > 0 || cost > 0) {
+    parts.push(`${humanTokens(tok)} tok`);
+    parts.push(`$${cost.toFixed(2)}`);
+  }
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+}
+
+/**
+ * Whether the corpus has spec changes not yet reflected in the generated
+ * contracts — the deterministic staleness signal for the Generate dot. Uses the
+ * committed manifest (content hashes), NOT file mtimes: a no-op scan that
+ * rewrites `corpus.json` doesn't falsely mark contracts stale, and this exactly
+ * matches whether `contracts generate` would do any work. True when there's a
+ * corpus and its areas don't all match the manifest (new / edited / deleted).
+ */
+export function isCorpusStale(repoRoot: string): boolean {
+  let areas;
+  try {
+    areas = readCorpusForGenerate(repoRoot);
+  } catch {
+    return false; // no readable corpus → nothing to generate → not stale
+  }
+  if (areas.length === 0) return false;
+  return !classifyAreas(areas, readManifest(repoRoot)).allUnchanged;
+}
 
 // ---------------------------------------------------------------------------
 // Results
@@ -432,6 +512,13 @@ export async function curateInProcess(
   resetStageUsage();
   const startedAt = Date.now();
 
+  // A step's detail line = base text + its live usage tag (model/tokens/$).
+  const withUsage = (key: string, base?: string): string | undefined => {
+    const tag = stepUsageTag(key, repoRoot);
+    if (base !== undefined) return `${base}${tag}`;
+    return tag ? tag.replace(/^ · /, '') : undefined;
+  };
+
   // Pre-flight cost estimate + confirm, before any LLM call. Skip the prompt when
   // there's no LLM work to do (nothing to spend). Decline → abort.
   if (options.onLlmEstimate) {
@@ -447,7 +534,7 @@ export async function curateInProcess(
   let overlapStarted = false;
   const ensureTag = (): void => {
     if (tagStarted) return;
-    tracker?.done('discover');
+    tracker?.done('discover', withUsage('discover'));
     tracker?.start('tag');
     tagStarted = true;
   };
@@ -456,9 +543,9 @@ export async function curateInProcess(
   const ensureOverlap = (): void => {
     ensureTag();
     if (overlapStarted) return;
-    tracker?.done('tag');
+    tracker?.done('tag', withUsage('tag'));
     tracker?.start('relate');
-    tracker?.done('relate');
+    tracker?.done('relate', withUsage('relate'));
     tracker?.start('overlap');
     overlapStarted = true;
   };
@@ -480,15 +567,15 @@ export async function curateInProcess(
       disableOverlapDetection: options.disableOverlapDetection,
       disableLlmRelationDetection: options.disableLlmRelationDetection,
       onRelevanceProgress: (done, total) => {
-        if (total > 0) tracker?.detail('discover', `${done}/${total} docs`);
+        if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
       },
       onTagProgress: (done, total) => {
         ensureTag();
-        if (total > 0) tracker?.detail('tag', `${done}/${total} docs`);
+        if (total > 0) tracker?.detail('tag', withUsage('tag', `${done}/${total} docs`)!);
       },
       onOverlapProgress: (done, total) => {
         ensureOverlap();
-        tracker?.detail('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs');
+        tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
       },
     });
   } catch (e) {
@@ -498,7 +585,7 @@ export async function curateInProcess(
   }
 
   ensureOverlap();
-  tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+  tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`));
 
   if (options.source) {
     await trackEvent('spec_scan', {
@@ -593,15 +680,24 @@ export async function generateFromCorpusInProcess(
   let gaps = 0;
   let repairDone = 0;
   let repairTotal = 0;
+  // A step's detail line = base text + its live usage tag (model/tokens/$).
+  const withUsage = (key: string, base?: string): string | undefined => {
+    const tag = stepUsageTag(key, repoRoot);
+    if (base !== undefined) return `${base}${tag}`;
+    return tag ? tag.replace(/^ · /, '') : undefined;
+  };
   const advanceTo = (key: (typeof STEPS)[number]): void => {
     const ni = STEPS.indexOf(key);
     if (ni <= cur) return; // only ever move forward
-    for (let i = cur; i < ni; i++) tracker?.done(STEPS[i]);
+    for (let i = cur; i < ni; i++) tracker?.done(STEPS[i], withUsage(STEPS[i]));
     tracker?.start(key);
     cur = ni;
   };
   const genDetail = (): string =>
-    `${areasDone}/${areasTotal} areas · ${contractsEmitted} contracts` + (gaps > 0 ? ` · ${gaps} gaps` : '');
+    withUsage(
+      'generate',
+      `${areasDone}/${areasTotal} areas · ${contractsEmitted} contracts` + (gaps > 0 ? ` · ${gaps} gaps` : ''),
+    )!;
 
   tracker?.start('enumerate');
 
@@ -619,11 +715,11 @@ export async function generateFromCorpusInProcess(
       gapJudge: options.gapJudgeRunner,
       onAreasReady: (n) => {
         areasTotal = n;
-        tracker?.detail('enumerate', `0/${n} areas`);
+        tracker?.detail('enumerate', withUsage('enumerate', `0/${n} areas`)!);
       },
       onAreaEnumerated: () => {
         enumeratedAreas++;
-        tracker?.detail('enumerate', `${enumeratedAreas}/${areasTotal} areas`);
+        tracker?.detail('enumerate', withUsage('enumerate', `${enumeratedAreas}/${areasTotal} areas`)!);
         // All areas enumerated → the (silent) reconcile pass runs next.
         if (enumeratedAreas >= areasTotal) advanceTo('reconcile');
       },
@@ -642,7 +738,7 @@ export async function generateFromCorpusInProcess(
         advanceTo('repair');
         repairDone = e.done;
         repairTotal = e.total;
-        tracker?.detail('repair', `${repairDone}/${repairTotal}`);
+        tracker?.detail('repair', withUsage('repair', `${repairDone}/${repairTotal}`)!);
       },
     });
     // A resolver-hard corpus (duplicate/conflicting identities) produced NO
@@ -660,15 +756,20 @@ export async function generateFromCorpusInProcess(
     // A dry run populates `proposed`, not `written` — report the right count.
     const produced = options.dryRun ? result.write.proposed.length : result.write.written.length;
     // Mark every remaining step done; the file/gap summary lands on `generate`.
-    for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i]);
+    for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], withUsage(STEPS[i]));
     tracker?.done(
       'generate',
-      `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}`,
+      withUsage(
+        'generate',
+        `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}`,
+      ),
     );
     // Stamp the staleness marker only on a real (non-dry) resolved write, and
     // persist the run summary so the dashboard can show written/gaps/issues after
     // a reload (the run result is otherwise transient).
-    if (!options.dryRun)
+    // Skip on a no-op run (noChanges) — it wrote nothing, so don't overwrite the
+    // prior run's summary with zeros.
+    if (!options.dryRun && !result.noChanges)
       stampGeneratedMarker(repoRoot, {
         written: result.write.written.length,
         gaps: result.gaps,

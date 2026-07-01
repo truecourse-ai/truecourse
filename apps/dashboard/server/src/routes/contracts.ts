@@ -331,6 +331,9 @@ router.post(
           gaps: corpus.result.gaps,
           validationIssues: corpus.result.validationIssues,
           mergeDiagnostics: corpus.result.mergeDiagnostics ?? [],
+          // Unchanged corpus → skipped generation (0 LLM). The toaster shows
+          // "nothing changed" instead of "wrote 0".
+          noChanges: corpus.result.noChanges ?? false,
         };
       } else if (corpus.kind === 'failed') {
         response.il = { error: corpus.error.message };

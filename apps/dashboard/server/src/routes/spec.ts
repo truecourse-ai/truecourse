@@ -34,6 +34,7 @@ import {
   CURATE_STEPS,
   EstimateDeclined,
   generatedMarkerPath,
+  isCorpusStale,
   getCorpus,
   getDecisions,
   removeManualInclude,
@@ -276,16 +277,15 @@ router.get(
         return;
       }
 
-      // OSS: cheap mtime probe (the IL writers stamp files in place, and the
-      // scan/generate/verify steps run independently, so they can drift).
+      // OSS. Contracts staleness is content-based via the generate manifest, so a
+      // no-op scan that rewrites corpus.json doesn't falsely flag it (mtimes lie).
+      // Verify staleness stays an mtime probe (its own write stamps).
       const corpusMtime = mtimeIfExists(corpusFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
       // Verifier store's LATEST.json is the verify marker (its own write stamp).
       const verifiedMtime = mtimeIfExists(verifyLatestPath(repo.path));
 
-      const contractsStale =
-        corpusMtime !== null &&
-        (generatedMtime === null || corpusMtime > generatedMtime);
+      const contractsStale = isCorpusStale(repo.path);
       const verifyStale =
         generatedMtime !== null &&
         (verifiedMtime === null || generatedMtime > verifiedMtime);

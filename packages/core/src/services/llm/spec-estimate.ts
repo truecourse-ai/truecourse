@@ -22,7 +22,8 @@ import { discoverDocs, prefilterDocs, readRelevanceCache, isAreaTagCached } from
 import {
   readCorpusForGenerate,
   defaultGenerateBatch,
-  isAreaEnumerateCached,
+  classifyAreas,
+  readManifest,
   type AreaGenInput,
 } from '@truecourse/contract-extractor';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
@@ -179,21 +180,15 @@ function areaChars(area: AreaGenInput): number {
  * Pre-flight token estimate for `contracts generate` (heuristic). Pass `prices`
  * to add a ceiling cost.
  *
- * Cache-aware: areas whose docs are unchanged are already generated (extract
- * cache hit), so a re-run only pays for the CHANGED areas. We exclude the cached
- * ones up front and label how many of the total are in play.
- *
- * Known limitation: the cache signal is the ENUMERATE cache used as a proxy for
- * "this area's extract is cached". On the very first run after the extract cache
- * was introduced the enumerate cache can already be warm while the extract cache
- * is still empty, so this estimate can UNDER-count that one run; estimate and
- * reality agree from the next run on. (We deliberately don't add a separate
- * marker to paper over this — it's a one-time transition, not a standing bug.)
+ * Change-aware via the committed manifest: only areas whose specs changed since
+ * the last generate (or are new) cost anything; unchanged areas are reused from
+ * the committed `.tc`. Deterministic and clone-safe — the manifest is tracked, so
+ * the estimate matches what generate will actually do (no first-run skew).
  */
 export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
   const allAreas = readCorpusForGenerate(repoRoot);
-  const cachedFlags = await Promise.all(allAreas.map((a) => isAreaEnumerateCached(repoRoot, a)));
-  const areas = allAreas.filter((_, i) => !cachedFlags[i]);
+  const changed = new Set(classifyAreas(allAreas, readManifest(repoRoot)).changed);
+  const areas = allAreas.filter((a) => changed.has(a.areaId));
   const batchSize = defaultGenerateBatch();
 
   let enumerateCalls = 0;

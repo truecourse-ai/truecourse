@@ -39,6 +39,15 @@ export function ContractsGenerateResultToaster({
       return;
     }
 
+    // Unchanged corpus → generation was a no-op (0 LLM). Say so instead of
+    // "Wrote 0 contracts".
+    if (result.il.noChanges) {
+      toast.success('Nothing changed', {
+        description: 'Specs are unchanged since the last generate — contracts are up to date.',
+      });
+      return;
+    }
+
     const issues = result.il.validationIssues ?? [];
     const written = result.il.written;
     const hardCount = issues.filter((i) => i.severity === 'hard').length;

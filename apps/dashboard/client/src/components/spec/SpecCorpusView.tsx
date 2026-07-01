@@ -12,17 +12,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff } from 'lucide-react';
+import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation } from '@/lib/api';
 
@@ -68,9 +60,6 @@ export interface SpecCorpusState {
   scan: () => Promise<void>;
   /** Re-read corpus + relations after an inline resolution. */
   refetch: () => Promise<void>;
-  /** True after a rescan that found no doc changes — drives the "nothing changed" notice. */
-  noChangesNotice: boolean;
-  dismissNoChanges: () => void;
 }
 
 /**
@@ -82,7 +71,6 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
   const [hydrating, setHydrating] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [noChangesNotice, setNoChangesNotice] = useState(false);
 
   useEffect(() => {
     if (!enabled) {
@@ -104,22 +92,23 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
-    setNoChangesNotice(false);
     try {
       const res = await api.getSpecCorpusScan(repoId);
       // User dismissed the cost-estimate confirm — leave existing data untouched.
       if ('cancelled' in res) return;
       setData(res);
-      // Every doc was unchanged (no LLM calls) — tell the user nothing happened.
-      if (res.noChanges) setNoChangesNotice(true);
+      // Every doc was unchanged (no LLM calls) — toast it, mirroring generate.
+      if (res.noChanges) {
+        toast.success('Nothing changed', {
+          description: 'No new or updated docs since the last scan — corpus is up to date.',
+        });
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setScanning(false);
     }
   }, [repoId]);
-
-  const dismissNoChanges = useCallback(() => setNoChangesNotice(false), []);
 
   const refetch = useCallback(async () => {
     try {
@@ -129,7 +118,7 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
     }
   }, [repoId]);
 
-  return { data, hydrating, scanning, error, scan, refetch, noChangesNotice, dismissNoChanges };
+  return { data, hydrating, scanning, error, scan, refetch };
 }
 
 export function SpecCorpusView({
@@ -224,27 +213,6 @@ export function SpecCorpusView({
 
   return (
     <div className="flex h-full flex-col">
-      <Dialog
-        open={corpus.noChangesNotice}
-        onOpenChange={(open) => {
-          if (!open) corpus.dismissNoChanges();
-        }}
-      >
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>No spec changes</DialogTitle>
-            <DialogDescription>
-              Every doc is unchanged since the last scan, so there was nothing to re-analyze — your
-              corpus is already up to date.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button size="sm" onClick={corpus.dismissNoChanges}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       {corpus.error && (
         <div className="border-b border-border px-4 py-2">
           <Alert variant="destructive">
