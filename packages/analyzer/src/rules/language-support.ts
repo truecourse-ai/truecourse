@@ -2368,13 +2368,25 @@ export function withLanguageSupport(rules: AnalysisRule[], visitors: CodeRuleVis
       }
 
       if (rule.engine === 'roslyn-host' || rule.engine === 'roslyn-workspace') {
-        // Implemented in the C# Roslyn semantic host (no tree-sitter visitor).
-        // These are C#-specific semantic defects, inexpressible elsewhere.
+        // Implemented in the C# Roslyn semantic host.
         // `roslyn-workspace` additionally needs the real project loaded.
-        support[language] =
-          language === 'csharp'
-            ? { status: 'supported' }
-            : { status: 'not-applicable', reason: 'C# semantic rule (Roslyn host); no equivalent in this language' }
+        if (language === 'csharp') {
+          support[language] = { status: 'supported' }
+          continue
+        }
+        // A small number of rules are hybrid: Roslyn for C#, tree-sitter for
+        // other languages (e.g. unused-function-parameter detects implicit
+        // interface implementations in C# via Roslyn while JS uses a visitor).
+        // If a visitor exists for this non-C# language, honour it as supported.
+        const hasExplicitForLang = explicitFamilies.get(rule.key)?.has(language) ?? false
+        const universalExcludesLang = universalExcludedFamilies.get(rule.key)?.has(language) ?? false
+        const hasUniversalForLang =
+          universalRuleKeys.has(rule.key) && UNIVERSAL_VISITOR_FAMILIES.includes(language) && !universalExcludesLang
+        if (hasExplicitForLang || hasUniversalForLang) {
+          support[language] = { status: 'supported' }
+          continue
+        }
+        support[language] = { status: 'not-applicable', reason: 'C# semantic rule (Roslyn host); no equivalent in this language' }
         continue
       }
 

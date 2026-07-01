@@ -132,7 +132,6 @@ import { csharpUnnecessaryElseAfterReturnVisitor } from './unnecessary-else-afte
 import { csharpUnnecessaryNamespaceQualifierVisitor } from './unnecessary-namespace-qualifier.js'
 import { csharpUnsafeAnyUsageVisitor } from './unsafe-any-usage.js'
 import { csharpUnusedCollectionVisitor } from './unused-collection.js'
-import { csharpUnusedFunctionParameterVisitor } from './unused-function-parameter.js'
 import { csharpUnusedPrivateMemberVisitor } from './unused-private-member.js'
 import { csharpUnusedPrivateMethodVisitor } from './unused-private-method.js'
 import { csharpUnusedPrivateNestedClassVisitor } from './unused-private-nested-class.js'
@@ -392,7 +391,6 @@ export const CODE_QUALITY_CSHARP_VISITORS: CodeRuleVisitor[] = [
   csharpUnnecessaryNamespaceQualifierVisitor,
   csharpUnsafeAnyUsageVisitor,
   csharpUnusedCollectionVisitor,
-  csharpUnusedFunctionParameterVisitor,
   csharpUnusedPrivateMemberVisitor,
   csharpUnusedPrivateMethodVisitor,
   csharpUnusedPrivateNestedClassVisitor,
