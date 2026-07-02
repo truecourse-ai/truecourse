@@ -45,12 +45,17 @@ export const csharpEmptyCatchVisitor: CodeRuleVisitor = {
           const stmt = tryStatements[0]!
           // tryParse pattern: a single parse/deserialize attempt
           if (/\b(Parse|TryParse|Deserialize)\s*[<(]/.test(stmt.text)) return null
-          // Best-effort cleanup: a single Dispose/Close/Delete-style call
-          const expr = stmt.namedChildren[0]
-          if (expr?.type === 'invocation_expression' && BEST_EFFORT_METHODS.has(getCSharpMethodName(expr))) {
+          // Best-effort cleanup: a single Dispose/Close/Delete-style call. The
+          // call may be awaited (`await stream.DisposeAsync()`), so unwrap the
+          // `await_expression` and treat the `…Async` variant of a best-effort
+          // method as best-effort too.
+          let expr = stmt.namedChildren[0]
+          if (expr?.type === 'await_expression') expr = expr.namedChildren[0]
+          const isBestEffort = (name: string): boolean => BEST_EFFORT_METHODS.has(name.replace(/Async$/, ''))
+          if (expr?.type === 'invocation_expression' && isBestEffort(getCSharpMethodName(expr))) {
             return null
           }
-          if (expr?.type === 'conditional_access_expression' && BEST_EFFORT_METHODS.has((expr.text.match(/\.(\w+)\s*\([^()]*\)\s*$/) ?? [])[1] ?? '')) {
+          if (expr?.type === 'conditional_access_expression' && isBestEffort((expr.text.match(/\.(\w+)\s*\([^()]*\)\s*$/) ?? [])[1] ?? '')) {
             return null
           }
         }
