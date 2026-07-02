@@ -1,84 +1,39 @@
 /**
- * Workspace Knowledge — the enterprise console surface for specs/contracts
- * derived from connected tools (or, in Phase 1, manually uploaded docs) and
- * shared by every repo in the workspace.
+ * Workspace Knowledge — the enterprise console surface for the contracts derived
+ * from connected tools (Confluence, …) and shared by every repo in the workspace.
  *
- * It reuses the REAL repo Spec panels (`SpecPanel` / `SpecConflictDetail` /
- * `SpecCanonicalFile` / `DecisionsPanel` / `ContractsPanel`) — identical
- * components — by wrapping them in a `SpecProvider` backed by a WORKSPACE data
- * source (`/api/ee/knowledge/*`) instead of a repo one. The only differences are
- * the capability-based exceptions you'd expect: the on-demand "Scan" button is
- * hidden (content comes from connector syncs), plus a Knowledge-only Sources tab.
+ * Knowledge is curated on the corpus path: a connector sync curates the synced
+ * docs into a corpus and generates the `.tc` contracts, persisted under workspace
+ * scope. This page shows those generated contracts (reusing the repo
+ * ContractsPanel + CodeViewer) and the provenance ledger of synced source docs.
+ * (Re)processing happens on a sync (Settings → Integrations), so there is no
+ * on-demand scan/conflict surface here.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, BookOpen, FileText, GitBranch, Loader2 } from 'lucide-react';
-import { SpecProvider, useSpec } from '@/components/spec/SpecContext';
-import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
-import { SpecPanel } from '@/components/spec/SpecPanel';
-import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
-import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
-import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
+import { useEffect, useState } from 'react';
+import { AlertCircle, BookOpen, FileText, Loader2 } from 'lucide-react';
 import { ContractsPanel } from '@/components/drift/ContractsPanel';
 import { CodeViewer } from '@/components/code/CodeViewer';
 import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
-import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
 import type { ContractsTree } from '@/lib/api';
 import {
-  createWorkspaceSpecDataSource,
   getWorkspaceContractsTree,
   getWorkspaceContractsFile,
   listKnowledgeDocuments,
   type KnowledgeDocRow,
 } from './knowledge-source';
 
-type Tab = 'spec' | 'decisions' | 'contracts' | 'sources';
+type Tab = 'contracts' | 'sources';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
-  { id: 'spec', label: 'Spec', icon: FileText },
-  { id: 'decisions', label: 'Decisions', icon: GitBranch },
-  { id: 'contracts', label: 'Contracts', icon: BookOpen },
+  // Sources first (the synced docs, the workspace analog of the repo Spec tab),
+  // then Contracts — matching the repo's Spec → Contracts order.
   { id: 'sources', label: 'Sources', icon: FileText },
+  { id: 'contracts', label: 'Contracts', icon: BookOpen },
 ];
 
 export default function KnowledgePage() {
-  const source = useMemo(() => createWorkspaceSpecDataSource(), []);
-  return (
-    <SpecProvider source={source}>
-      <KnowledgeBody source={source} />
-    </SpecProvider>
-  );
-}
-
-function KnowledgeBody({ source }: { source: ReturnType<typeof createWorkspaceSpecDataSource> }) {
-  const [tab, setTab] = useState<Tab>('spec');
-  const [activeConflictId, setActiveConflictId] = useState<string | null>(null);
-  const [activeCanonicalPath, setActiveCanonicalPath] = useState<string | null>(null);
-
-  const {
-    tree: canonicalTree,
-    isLoading: canonicalLoading,
-    error: canonicalError,
-    refetch: refetchCanonical,
-  } = useCanonicalSpecTree(source);
-  const { canonicalVersion } = useSpec();
-
-  // The canonical tree is derived from claims.json; re-fetch whenever the scan
-  // completes or a decision re-merges (the provider bumps canonicalVersion).
-  useEffect(() => {
-    refetchCanonical();
-  }, [canonicalVersion, refetchCanonical]);
-
-  const selectConflict = useCallback((id: string | null) => {
-    setActiveConflictId(id);
-    setActiveCanonicalPath(null);
-  }, []);
-  const openCanonical = useCallback((filePath: string) => {
-    setActiveCanonicalPath(filePath);
-    setActiveConflictId(null);
-  }, []);
-
-  const showCanonical = activeCanonicalPath !== null && tab === 'spec';
+  const [tab, setTab] = useState<Tab>('sources');
 
   return (
     <div className="flex h-full flex-col">
@@ -87,12 +42,9 @@ function KnowledgeBody({ source }: { source: ReturnType<typeof createWorkspaceSp
         <div className="flex-1">
           <h1 className="text-lg font-semibold">Knowledge</h1>
           <p className="text-xs text-muted-foreground">
-            Workspace specs &amp; contracts, shared by every repo.
+            Workspace contracts, shared by every repo. Synced from your connected sources.
           </p>
         </div>
-        {/* supportsRescan is false for workspace → only "Accept all defaults"
-            shows; the on-demand Scan button is hidden (re-upload to re-process). */}
-        <SpecHeaderActions />
       </header>
 
       <nav className="flex gap-1 border-b px-4">
@@ -113,57 +65,7 @@ function KnowledgeBody({ source }: { source: ReturnType<typeof createWorkspaceSp
       </nav>
 
       <div className="min-h-0 flex-1">
-        {tab === 'spec' && (
-          <div className="flex h-full">
-            <div className="w-[380px] shrink-0 overflow-auto border-r">
-              <SpecPanel
-                canonicalTree={canonicalTree}
-                canonicalLoading={canonicalLoading}
-                canonicalError={canonicalError}
-                activeConflictId={activeConflictId}
-                onSelectConflict={selectConflict}
-                activeCanonicalPath={activeCanonicalPath}
-                onOpenCanonicalFile={(filePath) => openCanonical(filePath)}
-              />
-            </div>
-            <div className="min-w-0 flex-1 overflow-auto">
-              {showCanonical && activeCanonicalPath ? (
-                <SpecCanonicalFile filePath={activeCanonicalPath} />
-              ) : activeConflictId ? (
-                <SpecConflictDetail
-                  conflictId={activeConflictId}
-                  onClose={() => setActiveConflictId(null)}
-                />
-              ) : (
-                <DetailPlaceholder text="Select a conflict or a spec section." />
-              )}
-            </div>
-          </div>
-        )}
-
-        {tab === 'decisions' && (
-          <div className="flex h-full">
-            <div className="w-[380px] shrink-0 overflow-auto border-r">
-              <DecisionsPanel
-                activeConflictId={activeConflictId}
-                onSelectConflict={setActiveConflictId}
-              />
-            </div>
-            <div className="min-w-0 flex-1 overflow-auto">
-              {activeConflictId ? (
-                <SpecConflictDetail
-                  conflictId={activeConflictId}
-                  onClose={() => setActiveConflictId(null)}
-                />
-              ) : (
-                <DetailPlaceholder text="Select a decided conflict to review or change it." />
-              )}
-            </div>
-          </div>
-        )}
-
         {tab === 'contracts' && <KnowledgeContracts />}
-
         {tab === 'sources' && <SourcesTab />}
       </div>
     </div>

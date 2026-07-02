@@ -1,19 +1,16 @@
 /**
- * BL-Drift view state: the spec/canonical/contracts/verify panes.
+ * BL-Drift view state: the spec/contracts/verify panes.
  *
- * Holds which spec conflict is being reviewed, the canonical-spec and
- * contracts file viewers (same transient/pinned tab model as the code
- * viewers), and the verify drift tabs. The right pane is single-slot,
- * so selecting a conflict and opening a canonical section are mutually
- * exclusive (each clears the other).
+ * Holds the corpus Spec tab viewer, the contracts file viewer (same
+ * transient/pinned tab model as the code viewers), and the verify drift tabs.
  *
- * The canonical-spec and contracts file viewers mirror their active path
- * to the URL (?canonical / ?contract), matching how the analysis-section
- * viewers mirror ?file / ?flow — so a reload or deep link restores the open
- * file. Spec conflicts and verify drift tabs stay local (drift ids are
- * regenerated each run, so they aren't URL-stable). The verify run lives
- * outside this context (useVerifyState in RepoPage); `reconcileDriftTabs`
- * lets the page prune open drift tabs whose ids no longer exist after a re-run.
+ * The corpus Spec tab and contracts file viewers mirror their active path to
+ * the URL (?spec / ?contract), matching how the analysis-section viewers mirror
+ * ?file / ?flow — so a reload or deep link restores the open item. Verify drift
+ * tabs stay local (drift ids are regenerated each run, so they aren't
+ * URL-stable). The verify run lives outside this context (useVerifyState in
+ * RepoPage); `reconcileDriftTabs` lets the page prune open drift tabs whose ids
+ * no longer exist after a re-run.
  */
 
 import {
@@ -31,20 +28,17 @@ export type ViewerTab = { path: string; pinned: boolean };
 export type DriftTab = { id: string; pinned: boolean };
 
 export interface DriftViewContextValue {
-  // Spec conflict (right pane)
-  activeSpecConflictId: string | null;
-  setActiveSpecConflictId: (id: string | null) => void;
-  /** Select a conflict; clears any active canonical file (single-slot pane). */
-  handleSelectSpecConflict: (id: string | null) => void;
+  // Corpus Spec tab viewer — a source doc (markdown) or an overlap (resolution),
+  // keyed by a doc ref / `overlap::…` key. URL-synced as `?spec=`.
+  activeSpecPath: string | null;
+  setActiveSpecPath: (path: string | null) => void;
+  openSpecTabs: ViewerTab[];
+  handleOpenSpec: (path: string, pinned: boolean) => void;
+  handleCloseSpec: (path: string) => void;
 
-  // Canonical-spec file viewer
-  activeCanonicalPath: string | null;
-  setActiveCanonicalPath: (path: string | null) => void;
-  openCanonicalFiles: ViewerTab[];
-  handleOpenCanonical: (path: string, pinned: boolean) => void;
-  handleCloseCanonical: (path: string) => void;
-
-  // Contracts file viewer
+  // Contracts right pane: holds both `.tc` file paths and generate-result keys
+  // (`issue::<i>` / `gap::<i>`) in one transient/pinned tab set — the viewer
+  // switches on the key. URL-synced as `?contract=`.
   activeContractsPath: string | null;
   setActiveContractsPath: (path: string | null) => void;
   openContractsFiles: ViewerTab[];
@@ -78,8 +72,8 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const canonicalFromUrl = searchParams?.get('canonical') || null;
   const contractFromUrl = searchParams?.get('contract') || null;
+  const specFromUrl = searchParams?.get('spec') || null;
 
   // EE ref switcher (default branch vs a PR head), URL-synced as `?ref=`.
   const [selectedRef, setSelectedRefState] = useState<string>(
@@ -91,27 +85,6 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       const url = new URL(window.location.href);
       if (ref) url.searchParams.set('ref', ref);
       else url.searchParams.delete('ref');
-      navigate(url.pathname + url.search);
-    },
-    [navigate],
-  );
-
-  const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(
-    null,
-  );
-
-  const [activeCanonicalPath, setActiveCanonicalPathState] = useState<string | null>(
-    canonicalFromUrl,
-  );
-  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<ViewerTab[]>(() =>
-    canonicalFromUrl ? [{ path: canonicalFromUrl, pinned: true }] : [],
-  );
-  const setActiveCanonicalPath = useCallback(
-    (path: string | null) => {
-      setActiveCanonicalPathState(path);
-      const url = new URL(window.location.href);
-      if (path) url.searchParams.set('canonical', path);
-      else url.searchParams.delete('canonical');
       navigate(url.pathname + url.search);
     },
     [navigate],
@@ -163,41 +136,44 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
     [openContractsFiles, activeContractsPath],
   );
 
-  const handleOpenCanonical = useCallback((path: string, pinned: boolean) => {
-    setOpenCanonicalFiles((prev) => {
-      const existing = prev.find((f) => f.path === path);
-      if (existing) {
-        return prev.map((f) =>
-          f.path === path ? { ...f, pinned: pinned || f.pinned } : f,
-        );
-      }
-      if (pinned) return [...prev, { path, pinned: true }];
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
-      return [...prev, { path, pinned: false }];
-    });
-    setActiveCanonicalPath(path);
-    // Right pane is single-slot: opening a canonical section deselects
-    // any active conflict so the new selection wins display priority.
-    setActiveSpecConflictId(null);
-  }, []);
-
-  const handleSelectSpecConflict = useCallback((id: string | null) => {
-    setActiveSpecConflictId(id);
-    if (id !== null) setActiveCanonicalPath(null);
-  }, []);
-
-  const handleCloseCanonical = useCallback(
+  // --- Corpus Spec tab viewer (`?spec=`) — same transient/pinned tab model ----
+  const [activeSpecPath, setActiveSpecPathState] = useState<string | null>(specFromUrl);
+  const [openSpecTabs, setOpenSpecTabs] = useState<ViewerTab[]>(() =>
+    specFromUrl ? [{ path: specFromUrl, pinned: true }] : [],
+  );
+  const setActiveSpecPath = useCallback(
+    (path: string | null) => {
+      setActiveSpecPathState(path);
+      const url = new URL(window.location.href);
+      if (path) url.searchParams.set('spec', path);
+      else url.searchParams.delete('spec');
+      navigate(url.pathname + url.search);
+    },
+    [navigate],
+  );
+  const handleOpenSpec = useCallback(
+    (path: string, pinned: boolean) => {
+      setOpenSpecTabs((prev) => {
+        const existing = prev.find((f) => f.path === path);
+        if (existing) return prev.map((f) => (f.path === path ? { ...f, pinned: pinned || f.pinned } : f));
+        if (pinned) return [...prev, { path, pinned: true }];
+        const hasUnpinned = prev.find((f) => !f.pinned);
+        if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+        return [...prev, { path, pinned: false }];
+      });
+      setActiveSpecPath(path);
+    },
+    [setActiveSpecPath],
+  );
+  const handleCloseSpec = useCallback(
     (path: string) => {
-      setOpenCanonicalFiles((prev) => prev.filter((f) => f.path !== path));
-      if (activeCanonicalPath === path) {
-        const remaining = openCanonicalFiles.filter((f) => f.path !== path);
-        setActiveCanonicalPath(
-          remaining.length > 0 ? remaining[remaining.length - 1].path : null,
-        );
+      setOpenSpecTabs((prev) => prev.filter((f) => f.path !== path));
+      if (activeSpecPath === path) {
+        const remaining = openSpecTabs.filter((f) => f.path !== path);
+        setActiveSpecPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
       }
     },
-    [openCanonicalFiles, activeCanonicalPath],
+    [openSpecTabs, activeSpecPath, setActiveSpecPath],
   );
 
   // --- Verify drift tabs -------------------------------------------
@@ -252,10 +228,10 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
     setActiveDriftId((prev) => (prev && validIds.has(prev) ? prev : null));
   }, []);
 
-  // Mirror ?canonical / ?contract / ?drift into state on Back/Forward + deep links.
+  // Mirror ?spec / ?contract / ?drift into state on Back/Forward + deep links.
   useEffect(() => {
-    setActiveCanonicalPathState(searchParams?.get('canonical') ?? null);
     setActiveContractsPathState(searchParams?.get('contract') ?? null);
+    setActiveSpecPathState(searchParams?.get('spec') ?? null);
     setActiveDriftId(searchParams?.get('drift') ?? null);
   }, [searchParams]);
 
@@ -273,14 +249,11 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<DriftViewContextValue>(
     () => ({
-      activeSpecConflictId,
-      setActiveSpecConflictId,
-      handleSelectSpecConflict,
-      activeCanonicalPath,
-      setActiveCanonicalPath,
-      openCanonicalFiles,
-      handleOpenCanonical,
-      handleCloseCanonical,
+      activeSpecPath,
+      setActiveSpecPath,
+      openSpecTabs,
+      handleOpenSpec,
+      handleCloseSpec,
       activeContractsPath,
       setActiveContractsPath,
       openContractsFiles,
@@ -296,12 +269,11 @@ export function DriftViewProvider({ children }: { children: ReactNode }) {
       setSelectedRef,
     }),
     [
-      activeSpecConflictId,
-      handleSelectSpecConflict,
-      activeCanonicalPath,
-      openCanonicalFiles,
-      handleOpenCanonical,
-      handleCloseCanonical,
+      activeSpecPath,
+      setActiveSpecPath,
+      openSpecTabs,
+      handleOpenSpec,
+      handleCloseSpec,
       activeContractsPath,
       openContractsFiles,
       handleOpenContracts,

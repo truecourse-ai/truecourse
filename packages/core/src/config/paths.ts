@@ -3,12 +3,27 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
-// `LATEST.json` is intentionally tracked: it travels with the repo via git so
-// fresh clones and `git worktree add` checkouts inherit a baseline without
-// having to cold-start `truecourse analyze`. Convention: only commit it after
-// merging to main (post-merge analyze). Branch-local analyzes shouldn't
-// commit it, to avoid PR conflicts on a generated JSON.
-const GITIGNORE_CONTENTS = 'analyses/\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
+// Committable (NOT ignored): `config.json`, `LATEST.json`, `specs/corpus.json`,
+// `specs/decisions.json`, `verifier/LATEST.json` — and the `contracts/` `.tc`
+// tree, which is git-tracked ON PURPOSE: the OSS Contracts BL-Drift view diffs
+// working-tree `.tc` against HEAD (`/contracts/diff`), so committing your
+// contracts is how PRs review spec changes. `LATEST.json` travels so fresh clones
+// inherit a baseline; commit it (and the other LATEST-convention files) only
+// after merging to main, to avoid PR conflicts on generated JSON.
+//
+// Ignored below: the analyze store snapshots, the `.cache/` re-run caches, and
+// `contracts/result.json` — the last-generate run result (transient run output
+// the dashboard reads back; the rest of `contracts/` stays tracked).
+const GITIGNORE_CONTENTS = [
+  'analyses/',
+  'history.json',
+  'diff.json',
+  'ui-state.json',
+  'logs/',
+  '.analyze.lock',
+  '.cache/',
+  'contracts/result.json',
+].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------
 // Global paths (user-level)

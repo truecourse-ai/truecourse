@@ -10,10 +10,10 @@
  *           Return one .tc file's content. Refuses path traversal.
  *
  *   POST  /api/repos/:id/contracts/generate
- *           Run `generateContractsInProcess` against the canonical spec
- *           on disk. Returns the IL extraction outcome (extracted /
- *           failed / skipped). Drives `spec:progress` / `spec:complete`
- *           socket events with `kind: 'generate'`.
+ *           Generate the IL contracts from `corpus.json` on disk. Returns
+ *           the extraction outcome (extracted / failed / skipped). Drives
+ *           `spec:progress` / `spec:complete` socket events with
+ *           `kind: 'generate'`.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -31,11 +31,14 @@ import { promotedContractPaths } from '@truecourse/core/lib/inferred-decisions';
 import { diffContents } from '@truecourse/core/lib/artifact-diff';
 import { baselineCommit } from './diff-base.js';
 import {
-  GENERATE_STEPS,
-  generateContractsInProcess,
+  CORPUS_GENERATE_STEPS,
+  generateFromCorpusInProcess,
+  readGeneratedSummary,
+  EstimateDeclined,
 } from '@truecourse/core/commands/spec-in-process';
 import {
   createSocketSpecTracker,
+  createSocketSpecEstimateHandler,
   emitSpecComplete,
   emitSpecProgress,
 } from '../socket/handlers.js';
@@ -164,7 +167,13 @@ router.get(
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
       const files = await effectiveContractFiles(repo.path, workspaceOrgOf(req), refOf(req));
-      res.json({ hasContracts: files.length > 0, modules: groupByModule(files) });
+      // `lastGenerate` (gaps + validation issues from the last run) is persisted to
+      // the local repo only; absent → null (e.g. EE, or never generated).
+      res.json({
+        hasContracts: files.length > 0,
+        modules: groupByModule(files),
+        lastGenerate: readGeneratedSummary(repo.path),
+      });
     } catch (e) {
       next(e);
     }
@@ -195,9 +204,9 @@ router.get(
       // A code-only PR head regenerates NO spec/contracts (the gate reuses the base),
       // and may even carry a PARTIAL authored-contracts manifest from a reapplied
       // promotion — which would wrongly report the whole base as "removed". The
-      // presence of a `claims` artifact at the head is the "head regenerated" signal;
+      // presence of a `corpus` artifact at the head is the "head regenerated" signal;
       // without it, use the base (head == base → no contract delta).
-      const headRegenerated = (await loadSpec<unknown>({ repoKey: repo.path, commitSha: ref }, 'claims')) != null;
+      const headRegenerated = (await loadSpec<unknown>({ repoKey: repo.path, commitSha: ref }, 'corpus')) != null;
       const headMap = headRegenerated ? await toMap(ref) : baseMap;
       const { added, removed, modified } = diffContents(baseMap, headMap);
       res.json({ added, removed, modified });
@@ -307,26 +316,40 @@ router.post(
       }
       const tracker = createSocketSpecTracker(
         repoIdForCleanup,
-        GENERATE_STEPS.map((s) => ({ ...s })),
+        CORPUS_GENERATE_STEPS.map((s) => ({ ...s })),
       );
-      const outcome = await generateContractsInProcess(repo.path, { tracker, source: 'dashboard' });
 
       const response: Record<string, unknown> = {};
-      if (outcome.il.kind === 'extracted') {
+      const { corpus } = await generateFromCorpusInProcess(repo.path, {
+        tracker,
+        source: 'dashboard',
+        onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup),
+      });
+      if (corpus.kind === 'generated') {
         response.il = {
-          written: outcome.il.result.write.written.length,
-          validationIssues: outcome.il.result.validationIssues,
-          mergeDiagnostics: outcome.il.result.mergeDiagnostics,
+          written: corpus.result.write.written.length,
+          gaps: corpus.result.gaps,
+          validationIssues: corpus.result.validationIssues,
+          mergeDiagnostics: corpus.result.mergeDiagnostics ?? [],
+          // Unchanged corpus → skipped generation (0 LLM). The toaster shows
+          // "nothing changed" instead of "wrote 0".
+          noChanges: corpus.result.noChanges ?? false,
         };
-      } else if (outcome.il.kind === 'failed') {
-        response.il = { error: outcome.il.error.message };
+      } else if (corpus.kind === 'failed') {
+        response.il = { error: corpus.error.message };
       } else {
-        response.il = { skipped: outcome.il.reason };
+        response.il = { skipped: corpus.reason };
       }
 
       emitSpecComplete(repoIdForCleanup, 'generate');
       res.json(response);
     } catch (e) {
+      // User declined the cost estimate — a clean cancel, not an error.
+      if (e instanceof EstimateDeclined) {
+        if (repoIdForCleanup) emitSpecComplete(repoIdForCleanup, 'generate');
+        res.json({ il: { skipped: 'cancelled' } });
+        return;
+      }
       if (repoIdForCleanup) {
         emitSpecProgress(repoIdForCleanup, {
           step: 'error',

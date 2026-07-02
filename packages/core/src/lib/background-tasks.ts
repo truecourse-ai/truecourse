@@ -13,8 +13,12 @@
 export interface BackgroundTask {
   /** Task kind, e.g. `repo.contracts`. */
   type: string;
-  /** Workspace org — scopes the job + any notification it emits. */
-  workspaceOrgId: string;
+  /**
+   * Workspace org — scopes the job + any notification it emits. Optional: an OSS
+   * adapter (e.g. the shared spec routes) knows the `repoKey` but not the org, so
+   * the EE runner resolves the org from `repoKey` when this is omitted.
+   */
+  workspaceOrgId?: string;
   /** The repo the task acts on, when applicable (`owner/repo`). */
   repoKey?: string;
 }

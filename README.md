@@ -191,15 +191,15 @@ pre-commit:
 
 TrueCourse builds a machine-readable spec from your docs and verifies the code against it — catching where the implementation has drifted from documented intent. This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
-> **Prerequisite:** the contract extractor and conflict resolver shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `contracts generate`.
+> **Prerequisite:** the spec scan and contract extractor shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `contracts generate`.
 
 ## Quick Start
 
 ```bash
 cd <your-repo>
-truecourse spec scan                    # Read docs → extract claims → surface conflicts
-truecourse spec resolve --all-defaults  # Accept the recommended pick on each conflict
-truecourse contracts generate           # Canonical spec → .tc contract artifacts
+truecourse spec scan                    # Curate docs → corpus (areas + relations + overlap flags)
+truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
+truecourse contracts generate           # Curated corpus → .tc contract artifacts
 truecourse verify                       # Check code against the contracts → drifts
 ```
 
@@ -211,11 +211,11 @@ Resolve conflicts and review drifts visually in the [dashboard](#dashboard-web-u
 
 Three stages run in order, each producing artifacts the next consumes:
 
-**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM extracts structured claims per block and groups them by `(topic, subject)`. Agreements auto-merge; genuine disagreements surface as **conflicts** in the dashboard with a plain-English explanation of what differs. Output: `.truecourse/specs/claims.json` (the structured snapshot every downstream stage consumes — modules + per-claim content + provenance) and `.truecourse/specs/decisions.json` (the user's resolutions, version chains, and overrides — committable).
+**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`), auto-detects doc→doc **relations** (version chains, supersession), and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, relations, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: doc→doc `relations`, `manualAreas`, `manualIncludes`, and `manualExcludes` — committable).
 
-Auto-resolve rules cut the conflict count substantially: byte-identical content, status-tolerant duplicates, same-file consolidation, docKind-dominance pickups, and detected version chains. [Plan](docs/contracts/PLAN_CONFLICT_RESOLUTION.md).
+Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. Version chains (e.g. `v1`→`v2`) are auto-detected; you resolve the rest with doc→doc relations, in the dashboard Spec tab or via `spec conflicts` / `spec chains`. [Plan](docs/SPEC_SCAN_REDESIGN_PLAN.md).
 
-**2. Contract extraction** — Reads `claims.json` and emits `.truecourse/contracts/*.tc` files in a hand-written DSL covering 13 artifact kinds: `operation`, `entity`, `enum`, `state-machine`, `auth-requirement`, `authorization-rule`, `error-envelope`, `pagination-contract`, `idempotency-contract`, `effect-group`, `formula`, plus `unenforceable-obligation` for prose the verifier can't structurally check. A post-extraction **repair pass** validates structural completeness and re-prompts the LLM to fix deficient artifacts (missing forbids clauses, broad role selectors, unresolved cross-references). On the bundled fixture this hits **22/22 planted bugs with 0 false positives**.
+**2. Contract extraction** — Reads `corpus.json` and emits `.truecourse/contracts/*.tc` files in a hand-written DSL covering 13 artifact kinds: `operation`, `entity`, `enum`, `state-machine`, `auth-requirement`, `authorization-rule`, `error-envelope`, `pagination-contract`, `idempotency-contract`, `effect-group`, `formula`, plus `unenforceable-obligation` for prose the verifier can't structurally check. A post-extraction **repair pass** validates structural completeness and re-prompts the LLM to fix deficient artifacts (missing forbids clauses, broad role selectors, unresolved cross-references). On the bundled fixture this hits **22/22 planted bugs with 0 false positives**.
 
 **3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations, and on the CLI through `truecourse verify`. It's its own command — not a stage of `truecourse analyze`.
 
@@ -231,9 +231,9 @@ The spec and a verify baseline are committable so they travel with the repo; eve
 
 ```
 .truecourse/
-├── specs/                  ← canonical spec (committable)
-│   ├── claims.json          ← structured snapshot: modules + claims + provenance
-│   └── decisions.json       ← user resolutions + version chains + manual includes
+├── specs/                  ← curated corpus (committable)
+│   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, relations, dropped docs
+│   └── decisions.json       ← user resolutions: doc→doc relations + manual areas + manual includes/excludes
 ├── contracts/               ← generated TC contract artifacts (gitignored by default)
 │   └── _inferred/            ← reverse-engineered, undocumented decisions (`truecourse infer`)
 ├── verifier/                ← drift store (mirrors analyze; `truecourse verify`)
@@ -249,25 +249,28 @@ Like analyze, `verifier/LATEST.json` is the committable baseline — commit it a
 ## Commands
 
 ```bash
-# Spec consolidation (docs → canonical spec)
-truecourse spec scan                              # Read docs, extract claims, surface conflicts, write claims.json
-truecourse spec resolve --all-defaults            # Accept the engine's recommended pick on every open conflict
-truecourse spec status                            # Summary: docs, claims, modules, pending decisions
+# Spec consolidation (docs → curated corpus)
+truecourse spec scan                              # Curate docs into corpus.json (areas + doc relations + overlap flags)
+truecourse spec status                            # Summary: docs, areas, relations, open vs resolved overlaps
 
-# Conflict resolution (also available in the dashboard Spec tab)
-truecourse spec conflicts list                    # List open conflicts (add --decided / --all)
-truecourse spec conflicts show <id>               # Full detail for one conflict
-truecourse spec conflicts pick <id> <index>       # Resolve by picking a candidate
-truecourse spec conflicts custom <id> --text "…"  # Resolve with a custom answer
-truecourse spec conflicts revoke <id>             # Re-open a decided conflict
-truecourse spec chains add --older A --newer B    # Manually mark a version chain (escape hatch)
-truecourse spec chains list / remove …
-truecourse spec docs skipped                      # Docs the LLM relevance filter excluded
-truecourse spec docs include <path>               # Force-include a skipped doc
-truecourse spec docs uninclude <path>
+# Conflict resolution — flagged within-area overlaps → doc→doc relations
+# (agent-friendly; also available in the dashboard Spec tab)
+truecourse spec conflicts list                    # List flagged within-area overlaps
+truecourse spec conflicts show <area>             # An area's overlapping docs with prose excerpts
+truecourse spec conflicts resolve <area> \        # Resolve one by recording a relation
+  --older <doc> --newer <doc> --replace|--precedence|--keep-both
+truecourse spec chains list                       # List doc→doc relations
+truecourse spec chains add --older A --newer B [--type replace|precedence|keep-both]
+truecourse spec chains remove --older A --newer B
+truecourse spec docs list                         # List the kept (corpus) docs + area tags
+truecourse spec docs skipped                      # Docs the relevance filter excluded
+truecourse spec docs include <path>               # Force-include a skipped doc (re-scans)
+truecourse spec docs uninclude <path>             # Remove a force-include override
+truecourse spec docs exclude <path>               # Force-exclude a kept doc (re-scans)
+truecourse spec docs unexclude <path>             # Remove a force-exclude override
 
-# Contract extraction (canonical spec → .tc artifacts)
-truecourse contracts generate                     # Extract / re-extract TC contract files
+# Contract extraction (curated corpus → .tc artifacts)
+truecourse contracts generate                     # Generate .tc from corpus.json (enumerate → batch → completeness gate)
 truecourse contracts list                         # List artifacts (kind · identity · location)
 truecourse contracts list --inferred / --authored # Only reverse-engineered (_inferred/) / only authored
 truecourse contracts validate                     # Parse + resolve TC files; report unresolved refs
@@ -342,7 +345,7 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 
 ## LLM transport (`--llm-transport`)
 
-Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Verify pipeline (`spec scan`, `spec resolve`, `contracts generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
+Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Verify pipeline (`spec scan`, `contracts generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
 
 | Mode | How it reaches the model | Needs |
 |---|---|---|
@@ -362,7 +365,7 @@ truecourse spec scan          --llm-transport agent --io ./io
 truecourse contracts generate --llm-transport agent --io ./io
 ```
 
-Accepted by: `analyze`, `spec scan`, `spec resolve`, `contracts generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
+Accepted by: `analyze`, `spec scan`, `contracts generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
 
 ## Configuration
 
@@ -378,7 +381,7 @@ CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failu
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
 ```
 
-Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `spec resolve`, `contracts generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
+Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `contracts generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
 
 **`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single run. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
 
@@ -387,6 +390,22 @@ For a one-off override, prefix the command:
 ```bash
 CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
 ```
+
+### Per-stage model selection
+
+Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for contract generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › the built-in default. `truecourse config llm` prints the effective model + source for every stage.
+
+| stage | env override | default |
+|---|---|---|
+| doc relevance keep/drop | `TRUECOURSE_MODEL_SPEC_RELEVANCE` | haiku |
+| area tagging | `TRUECOURSE_MODEL_SPEC_AREA_TAG` | sonnet |
+| overlap flagging | `TRUECOURSE_MODEL_SPEC_OVERLAP` | haiku |
+| relation detection | `TRUECOURSE_MODEL_SPEC_RELATION` | sonnet |
+| target enumeration | `TRUECOURSE_MODEL_CONTRACT_ENUMERATE` | sonnet |
+| contract generate | `TRUECOURSE_MODEL_CONTRACT_EXTRACT` | opus |
+| contract repair | `TRUECOURSE_MODEL_CONTRACT_REPAIR` | opus |
+
+`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_GENERATE_BATCH` sets how many contracts each generate call targets (default ~10–20). `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis
 

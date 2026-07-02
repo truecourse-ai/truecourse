@@ -2,19 +2,16 @@ import * as p from "@clack/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  CanonicalSpecMissingError,
-  defaultConcurrency,
-  generateContracts,
-  hasCanonicalSpec,
-  spawnRunner,
-} from "@truecourse/contract-extractor";
-import { agentTransport } from "@truecourse/shared/llm";
-import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
-import { trackEvent, bucketFileCount, bucketDuration } from "@truecourse/core/services/telemetry";
-import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
+  generateFromCorpusInProcess,
+  CORPUS_GENERATE_STEPS,
+  EstimateDeclined,
+} from "@truecourse/core/commands/spec-in-process";
+import { StepTracker } from "@truecourse/core/progress";
+import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { syncShippedTcSyntax } from "./helpers.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
+import { promptLlmEstimate } from "./llm-prompt.js";
 
 export interface RunContractsGenerateOptions {
   /** When true, perform a dry run — write nothing, show what would change. */
@@ -25,209 +22,111 @@ export interface RunContractsGenerateOptions {
   llm?: "cli" | "agent";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+  /** Skip the pre-flight cost-estimate confirm (`--yes`). */
+  yes?: boolean;
 }
 
 export async function runContractsGenerate(
   options: RunContractsGenerateOptions = {},
 ): Promise<void> {
   const repoRoot = options.cwd ?? process.cwd();
-  const startedAt = Date.now();
 
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
   await requireGitRepo(repoRoot);
 
-  // Module 2 reads the canonical spec produced by Module 1. If
-  // `.truecourse/specs/` doesn't exist, the user hasn't run the
-  // consolidator yet — tell them and bail.
-  if (!hasCanonicalSpec(repoRoot)) {
-    p.log.error(
-      "No .truecourse/specs/claims.json found. Run `truecourse spec scan` first to build the canonical claim set.",
-    );
-    p.outro("Aborted.");
-    process.exit(1);
-  }
-
-  // Extraction fans out one `claude` subprocess per spec slice, so a broken or
-  // expired CLI would fail every slice and the user would only learn that at the
-  // end. Probe once up front and bail with the CLI's own error if it isn't ready.
-  await preflightClaudeOrExit();
-
-  // Run the extraction pipeline against the canonical spec.
-  const concurrency = defaultConcurrency();
-  const extractModel = resolveModel("contract.extract", undefined, repoRoot);
-  const repairModel = resolveModel("contract.repair", undefined, repoRoot);
-  const fallbackModel = resolveFallbackModel(repoRoot) ?? undefined;
-  // Slice counter — `totalSlices` comes from generateContracts's onSlicesReady
-  // (fired before extraction). We tick on *completion* (onSliceDone), not start:
-  // extraction is concurrent, so start events all fire up-front and the counter
-  // would race to the total then sit silent through the LLM calls. Counting
-  // completions makes the count reflect real, finished work.
-  let totalSlices = 0;
-  let doneSlices = 0;
   if (options.llm === "agent" && !options.io) {
     p.log.error("--llm agent requires --io <dir> (the request/response mailbox directory).");
     p.outro("Aborted.");
     process.exit(1);
   }
-  const transport =
-    options.llm === "agent" ? agentTransport(options.io as string) : undefined;
-  const runner = spawnRunner({
-    transport,
-    concurrency,
-    model: extractModel,
-    fallbackModel,
-    onSliceDone: (s, ok) => {
-      p.log.step(
-        `extracted  ${++doneSlices}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}${ok ? "" : "  (failed)"}`,
-      );
-    },
-  });
+  // The enumerate + generate stages shell out to `claude`; probe once up front
+  // (the `agent` transport answers via the filesystem mailbox, so skip it there).
+  if (options.llm !== "agent") await preflightClaudeOrExit();
 
-  let result;
+  // Agent transport is headless (no TTY to confirm) → auto-approve the estimate.
+  const autoApprove = !!options.yes || options.llm === "agent";
+  const renderer = createStdoutStepRenderer();
+  const tracker = new StepTracker(renderer.onProgress, CORPUS_GENERATE_STEPS.map((s) => ({ ...s })));
+  let corpus;
   try {
-    result = await generateContracts({
-      repoRoot,
-      transport,
-      runner,
-      models: { extract: extractModel, repair: repairModel, fallback: fallbackModel },
+    ({ corpus } = await generateFromCorpusInProcess(repoRoot, {
+      tracker,
+      source: "cli",
+      llm: options.llm,
+      io: options.io,
       dryRun: !!options.diff,
-      onSlicesReady: (t) => {
-        totalSlices = t;
-      },
-      onSliceCacheHit: (s) => {
-        p.log.message(`  cache hit  ${++doneSlices}/${totalSlices}  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
-      },
-      // The repair pass runs sequential `claude` re-prompts after extraction —
-      // stream each one so the terminal isn't silent through the LLM calls.
-      onRepairProgress: (e) => {
-        p.log.step(`repairing  ${e.done}/${e.total}  ${e.message}`);
-      },
-    });
-  } catch (e) {
-    if (e instanceof CanonicalSpecMissingError) {
-      p.log.error(e.message);
-      process.exit(1);
+      onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } }),
+    }));
+  } catch (e: unknown) {
+    renderer.dispose();
+    if (e instanceof EstimateDeclined) {
+      p.cancel("Generate cancelled.");
+      process.exit(0);
     }
-    const message = e instanceof Error ? e.message : String(e);
-    p.log.error(`Extraction failed: ${message}`);
+    throw e;
+  }
+  renderer.dispose();
+
+  if (corpus.kind === "skipped") {
+    p.log.error("No .truecourse/specs/corpus.json found. Run `truecourse spec scan` first.");
+    p.outro("Aborted.");
+    process.exit(1);
+  }
+  if (corpus.kind === "failed") {
+    p.log.error(`Generation failed: ${corpus.error.message}`);
+    p.outro("Aborted.");
     process.exit(1);
   }
 
-  // Surface per-slice run results (failures only — successes are quiet).
-  const failures = result.slices.filter(
-    (o) => o.cache === "miss" && o.run && !o.run.result,
-  );
-  if (failures.length > 0) {
-    p.log.warn(`${failures.length} slice extraction${failures.length === 1 ? "" : "s"} failed:`);
-    for (const f of failures) {
-      console.log(`  ${f.slice.specPath} :: ${f.slice.headingPath.join(" → ")}`);
-      if (f.run?.error) console.log(`    → ${f.run.error}`);
-    }
+  const result = corpus.result;
+  if (result.noChanges) {
+    p.log.success("Nothing changed — specs are unchanged since the last generate; contracts are up to date.");
+    p.outro("Done.");
+    return;
+  }
+  const totalTargets = result.areas.reduce((n, a) => n + a.targets, 0);
+  const totalEmitted = result.areas.reduce((n, a) => n + a.emitted, 0);
+  p.log.step(`areas       ${result.areas.length}`);
+  p.log.step(`targets     ${totalTargets} enumerated · ${totalEmitted} generated`);
+
+  if (result.gaps.length > 0) {
+    p.log.warn(`${result.gaps.length} gap${result.gaps.length === 1 ? "" : "s"} (enumerated but not generated):`);
+    for (const g of result.gaps.slice(0, 20)) console.log(`  • ${g.areaId}  ${g.kind}:${g.identity}`);
+    if (result.gaps.length > 20) console.log(`  … and ${result.gaps.length - 20} more`);
   }
 
-  // Surface validation issues by severity. The orchestrator already
-  // honors this split: it writes every artifact that resolved, dropping
-  // only the ones with HARD issues (parse errors, duplicate identities).
-  // SOFT issues (an unresolved cross-reference — e.g. two slices coined
-  // different identities for the same artifact, or a reference to an
-  // artifact the spec never defined) do NOT block the write and must NOT
-  // be reported as a fatal gate failure. We abort only when the run
-  // genuinely produced nothing.
-  const hardIssues = result.validationIssues.filter((i) => i.severity === "hard");
-  const softIssues = result.validationIssues.filter((i) => i.severity === "soft");
-
-  // Soft issues → warnings. The resolver reports every occurrence of an
-  // unresolved ref separately, so collapse identical lines and show the
-  // count instead of repeating the same message.
-  if (softIssues.length > 0) {
+  // Surface dropped-artifact validation issues, same split as the legacy path:
+  // soft = unresolved cross-ref (non-blocking), hard = invalid .tc (dropped).
+  const soft = result.validationIssues.filter((i) => i.severity === "soft");
+  const hard = result.validationIssues.filter((i) => i.severity === "hard" && i.artifactKey !== "resolver");
+  if (soft.length > 0) {
     const counts = new Map<string, number>();
-    for (const issue of softIssues) {
-      const line = `${issue.artifactKey}: ${issue.message}`;
+    for (const i of soft) {
+      const line = `${i.artifactKey}: ${i.message}`;
       counts.set(line, (counts.get(line) ?? 0) + 1);
     }
-    p.log.warn(
-      `${counts.size} unresolved cross-reference${counts.size === 1 ? "" : "s"} (non-blocking — the referenced artifact wasn't generated; \`truecourse verify\` will flag any real drift):`,
-    );
+    p.log.warn(`${counts.size} unresolved cross-reference${counts.size === 1 ? "" : "s"} (non-blocking — \`truecourse verify\` flags real drift):`);
     for (const [line, n] of counts) console.log(`  ${line}${n > 1 ? `  (×${n})` : ""}`);
   }
-
-  // Hard issues → errors. These artifacts were dropped, but the rest
-  // still reached disk, so this is not necessarily a failed run.
-  if (hardIssues.length > 0) {
-    p.log.error(
-      `${hardIssues.length} artifact${hardIssues.length === 1 ? " was" : "s were"} dropped (invalid \`.tc\` — parse error or duplicate identity):`,
-    );
-    for (const issue of hardIssues) console.log(`  ${issue.artifactKey}: ${issue.message}`);
+  if (hard.length > 0) {
+    p.log.error(`${hard.length} artifact${hard.length === 1 ? " was" : "s were"} dropped (invalid \`.tc\`):`);
+    for (const i of hard) console.log(`  ${i.artifactKey}: ${i.message}`);
   }
 
-  // Abort ONLY when the run produced nothing at all despite having issues
-  // — e.g. duplicate identities that corrupt the whole corpus. A normal
-  // run measures output by `write.written`; a dry run by `write.proposed`.
-  // (A clean "nothing to write because everything is up to date" run has
-  // no issues and falls through to the up-to-date summary below.)
-  const produced = options.diff ? result.write.proposed.length : result.write.written.length;
-  if (produced === 0 && result.validationIssues.length > 0) {
-    p.outro("No contracts were written. Edit the spec or re-run after fixing.");
-    process.exit(1);
-  }
-
-  // Surface merge diagnostics (non-blocking). Repair "re-prompting" lines were
-  // already streamed live via onRepairProgress, so skip them here to avoid
-  // printing each twice — repair failures/skips (also repair-kind) still show.
-  for (const d of result.mergeDiagnostics) {
-    if (d.artifactKey === "repair" && d.message.includes("re-prompting")) continue;
-    p.log.warn(d.message);
-  }
-
-  // List files with a cap so large generations don't flood the terminal —
-  // the count line above always reports the true total.
-  const LIST_CAP = 20;
-  const printFileList = (files: string[], marker: string): void => {
-    for (const f of files.slice(0, LIST_CAP)) console.log(`  ${marker} ${path.relative(repoRoot, f)}`);
-    if (files.length > LIST_CAP) console.log(`  … and ${files.length - LIST_CAP} more`);
-  };
-
-  // Final summary.
   if (options.diff) {
-    if (result.write.proposed.length === 0) {
-      p.outro("No changes — every contract is already up to date.");
-      return;
-    }
-    p.log.info(`Would write ${result.write.proposed.length} file${result.write.proposed.length === 1 ? "" : "s"}:`);
-    printFileList(result.write.proposed, "+");
+    p.log.info(`Would write ${result.write.proposed.length} file${result.write.proposed.length === 1 ? "" : "s"}.`);
     p.outro("Run `truecourse contracts generate` to apply.");
     return;
   }
-
-  // Stamp the generate marker on every successful run (including the
-  // "nothing to write" case — we confirmed contracts match the claim
-  // set). Keeps the dashboard's `contractsStale` dot honest when
-  // generation is driven from the terminal.
-  stampGeneratedMarker(repoRoot);
-
-  // CLI generate goes through the package runner directly (not the core
-  // in-process wrapper the dashboard uses), so emit the telemetry event here.
-  await trackEvent("contracts_generate", {
-    source: "cli",
-    artifactsWrittenRange: bucketFileCount(result.write.written.length),
-    validationIssues: result.validationIssues.length,
-    durationRange: bucketDuration(Date.now() - startedAt),
-  });
-
   if (result.write.written.length === 0) {
     p.outro("Up to date — run `truecourse verify`.");
     return;
   }
   p.log.success(`Wrote ${result.write.written.length} contract file${result.write.written.length === 1 ? "" : "s"}.`);
-  printFileList(result.write.written, "•");
-
-  // Install the bundled VS Code grammar for `.tc` files. We do this on
-  // `contracts generate` because that's the command that actually
-  // writes `.tc` artifacts. No prompt, idempotent across runs.
   syncShippedTcSyntax();
-
-  p.outro(`Run \`truecourse verify\` to check code against the new contracts.`);
+  p.outro("Run `truecourse verify` to check code against the new contracts.");
 }
+
 
 // ---------------------------------------------------------------------------
 // `truecourse contracts list`

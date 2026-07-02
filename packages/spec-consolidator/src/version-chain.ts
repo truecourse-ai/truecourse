@@ -2,14 +2,13 @@
  * Version chain detection.
  *
  * When two docs in the same directory follow a v1/v2 naming pattern,
- * they form a version chain. The consolidator surfaces the chain as
- * a single high-level decision ("v2 supersedes v1?") rather than
- * letting per-claim conflicts proliferate across the same content
- * said two different ways.
+ * they form a version chain — a strong signal that the newer doc
+ * supersedes the older. The corpus path feeds these into relation
+ * detection so the pair surfaces as one doc→doc relation rather than a
+ * spray of within-area overlaps.
  *
- * Scope for v1: pairwise chains only. Three-step chains (v1→v2→v3)
- * register as multiple pairs and the user resolves each. Future work
- * can collapse them into one decision.
+ * Pairwise chains only. Three-step chains (v1→v2→v3) register as
+ * multiple pairs.
  *
  * Signals beyond filename versioning (e.g. content-based successor
  * detection) come from the LLM-augmented detector in
@@ -28,33 +27,6 @@ export interface VersionChain {
   docs: DocCandidate[];
   /** Which signal surfaced this chain. */
   detectedFrom: 'filename' | 'llm' | 'manual';
-}
-
-/**
- * Materialize user-marked chains (from `decisions.json#manualChains`)
- * into VersionChain objects so they merge with the auto-detected ones.
- * Drops entries whose referenced docs aren't in the discovered set —
- * the user may have marked a chain against a doc that no longer
- * exists; surfacing that as a hard error would be worse UX than
- * silently dropping.
- *
- * Cross-directory chains ARE allowed here (unlike the filename
- * detector's same-dir rule) — the user explicitly knows their docs.
- */
-export function materializeManualChains(
-  manualChains: Array<{ older: string; newer: string }>,
-  docs: DocCandidate[],
-): VersionChain[] {
-  const byPath = new Map(docs.map((d) => [d.path, d]));
-  const out: VersionChain[] = [];
-  for (const m of manualChains) {
-    const olderDoc = byPath.get(m.older);
-    const newerDoc = byPath.get(m.newer);
-    if (!olderDoc || !newerDoc) continue;
-    if (olderDoc.path === newerDoc.path) continue;
-    out.push(makeChain([olderDoc, newerDoc], 'manual'));
-  }
-  return out;
 }
 
 export function detectVersionChains(docs: DocCandidate[]): VersionChain[] {

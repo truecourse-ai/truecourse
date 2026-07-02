@@ -84,7 +84,7 @@ export class PgKnowledgeStore {
       .sort((a, b) => (a.lastSyncedAt < b.lastSyncedAt ? 1 : a.lastSyncedAt > b.lastSyncedAt ? -1 : 0));
   }
 
-  /** Remove one source doc's provenance row (its derived claims drop on the next sync). */
+  /** Remove one source doc's provenance row (its derived contracts drop on the next sync). */
   async deleteDocument(workspaceOrgId: string, sourceKind: string, externalId: string): Promise<void> {
     await this.db
       .delete(knowledgeDocuments)

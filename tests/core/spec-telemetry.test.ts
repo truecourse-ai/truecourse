@@ -11,7 +11,7 @@ vi.mock('../../packages/core/src/services/telemetry.service', async (importOrigi
 });
 
 import { trackEvent } from '../../packages/core/src/services/telemetry.service';
-import { scanInProcess, verifyInProcess } from '../../packages/core/src/commands/spec-in-process';
+import { curateInProcess, verifyInProcess } from '../../packages/core/src/commands/spec-in-process';
 import { clearVerifyLatestCache } from '../../packages/core/src/lib/verify-store';
 
 const FIXTURE = path.resolve(__dirname, '../fixtures/sample-js-project-il');
@@ -30,13 +30,13 @@ afterEach(() => {
 });
 
 describe('spec → verify telemetry', () => {
-  it('scanInProcess emits a spec_scan event when source is set', async () => {
-    await scanInProcess(repo, { source: 'cli' });
+  it('curateInProcess emits a spec_scan event when source is set', async () => {
+    await curateInProcess(repo, { source: 'cli', skipGit: true });
     expect(trackEvent).toHaveBeenCalledWith('spec_scan', expect.objectContaining({ source: 'cli' }));
   });
 
-  it('scanInProcess emits nothing when source is omitted (tests, internal re-scans)', async () => {
-    await scanInProcess(repo, {});
+  it('curateInProcess emits nothing when source is omitted (tests, internal re-scans)', async () => {
+    await curateInProcess(repo, { skipGit: true });
     expect(trackEvent).not.toHaveBeenCalled();
   });
 

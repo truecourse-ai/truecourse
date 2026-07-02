@@ -57,10 +57,10 @@ describe('NavigationContext — initial state from URL', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
   });
 
-  it('reads ?section=verification and defaults its tab to spec', () => {
+  it('reads ?section=verification and defaults its tab to verify', () => {
     renderAt('/repos/abc?section=verification');
     expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
+    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
   });
 
   it('reads an explicit ?tab', () => {
@@ -89,21 +89,21 @@ describe('NavigationContext — initial state from URL', () => {
     // `files` belongs to analysis, not drift → expect the drift default.
     renderAt('/repos/abc?section=verification&tab=files');
     expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
+    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
   });
 });
 
 describe('NavigationContext — setters write the URL', () => {
-  it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=spec', async () => {
+  it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=verify', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc');
     await user.click(screen.getByText('to-drift'));
 
     expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
+    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
     const search = screen.getByTestId('search').textContent ?? '';
     expect(search).toContain('section=verification');
-    expect(search).toContain('tab=spec');
+    expect(search).toContain('tab=verify');
   });
 
   it('setSection(codequality) clears ?section and lands on home (no ?tab)', async () => {

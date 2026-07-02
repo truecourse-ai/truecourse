@@ -15,8 +15,7 @@
 
 import { createHash } from 'node:crypto';
 import {
-  scanWorkspaceInProcess,
-  generateWorkspaceContractsInProcess,
+  syncWorkspaceCorpusInProcess,
   type WorkspaceDocInput,
 } from '@truecourse/core/commands/spec-in-process';
 import type { StepTracker } from '@truecourse/core/progress';
@@ -72,8 +71,12 @@ export async function consolidateAndReconcile(
     onSliceProgress?: (done: number, total: number) => void;
     onRepairProgress?: (done: number, total: number) => void;
   } = {},
-): Promise<{ scanState: unknown }> {
-  const { scanState } = await scanWorkspaceInProcess({
+): Promise<void> {
+  // Curate the synced docs into a workspace corpus and generate the `.tc`
+  // contracts (corpus path), persisted under workspace scope. So a repo's
+  // EFFECTIVE contracts reflect this sync. Unchanged docs hit the per-doc /
+  // per-slice caches → ~0 LLM on re-sync.
+  await syncWorkspaceCorpusInProcess({
     workspaceOrgId: org,
     docs: docs.map((d) => d.doc),
     tracker: progress.tracker,
@@ -98,16 +101,6 @@ export async function consolidateAndReconcile(
       contentHash: d.contentHash,
     });
   }
-
-  // Re-generate the workspace contract corpus from the freshly consolidated
-  // claims, so a repo's EFFECTIVE contracts (Phase 3) reflect this sync. Runs
-  // fully in memory; unchanged claims hit the Postgres slice cache → 0 LLM.
-  await generateWorkspaceContractsInProcess(org, {
-    onSliceProgress: progress.onSliceProgress,
-    onRepairProgress: progress.onRepairProgress,
-  });
-
-  return { scanState };
 }
 
 /** Run a connector sync end-to-end. `opts.onProgress` (job runs) reports per-doc progress. */
@@ -117,7 +110,7 @@ export async function syncWorkspaceKnowledge<Cfg extends ConnectorConfig>(
   connector: KnowledgeConnector<Cfg>,
   cfg: Cfg,
   opts: SyncOptions = {},
-): Promise<{ scanState: unknown; synced: number }> {
+): Promise<{ synced: number }> {
   const progress = opts.onProgress;
   const refs = await connector.list(cfg);
   const total = refs.length;
@@ -142,10 +135,10 @@ export async function syncWorkspaceKnowledge<Cfg extends ConnectorConfig>(
     await progress?.(docs.length, total, SYNC_MSG_FETCH);
   }
   await progress?.(total, total, SYNC_MSG_CONSOLIDATE);
-  const { scanState } = await consolidateAndReconcile(org, knowledge, connector.kind, docs, {
+  await consolidateAndReconcile(org, knowledge, connector.kind, docs, {
     tracker: opts.tracker,
     onSliceProgress: opts.onSliceProgress,
     onRepairProgress: opts.onRepairProgress,
   });
-  return { scanState, synced: docs.length };
+  return { synced: docs.length };
 }

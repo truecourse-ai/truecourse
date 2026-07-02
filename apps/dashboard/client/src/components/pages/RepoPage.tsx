@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, Network, Lightbulb } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, Network, Lightbulb, Play } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -12,9 +12,8 @@ import { InferredPanel, InferredDecisionDetail } from '@/ee/InferredPanel';
 import { useInferredDecisions, inferredKey } from '@/hooks/useInferredDecisions';
 import type { InferredDecisionView } from '@truecourse/shared';
 
-/** EE repo tab bar: BL-Drift only, curated order. Analytics leads + is default.
- *  Spec → Decisions → Contracts mirrors the workspace Knowledge page order. */
-const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'decisions', 'inferred', 'contracts', 'settings'];
+/** EE repo tab bar: BL-Drift only, curated order. Analytics leads + is default. */
+const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'contracts', 'inferred', 'settings'];
 /** EE Code Quality (analysis) tab bar: Analytics · Violations, then the common
  *  Settings. The analytics/violations tabs are EE-only (gated on `workspace`);
  *  `settings` is sourced from the drift section (section-neutral, repo-wide
@@ -42,7 +41,6 @@ import {
   ViewModeProvider,
   useViewMode,
 } from '@/contexts/ViewModeContext';
-import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
 import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
 import { ContractsPanel } from '@/components/drift/ContractsPanel';
@@ -58,8 +56,8 @@ import { useVerifyState } from '@/hooks/useVerifyState';
 import { useContractsGenerate } from '@/hooks/useContractsGenerate';
 import { useSpecStaleness } from '@/hooks/useSpecStaleness';
 import { ContractsHeaderActions } from '@/components/drift/ContractsHeaderActions';
+import { InferHeaderActions } from '@/components/drift/InferHeaderActions';
 import { ContractsGenerateResultToaster } from '@/components/drift/ContractsGenerateResultToaster';
-import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
@@ -69,13 +67,12 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
-import { SpecPanel } from '@/components/spec/SpecPanel';
-import { SpecProvider, createRepoSpecDataSource } from '@/components/spec/SpecContext';
-import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
-import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
+import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
+import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
+import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
+import { GenerateResultDetail } from '@/components/drift/GenerateResultDetail';
 import { useGraph } from '@/hooks/useGraph';
 import { useContractsTree } from '@/hooks/useContractsTree';
-import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -88,6 +85,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
 import type { RepoResponse, DriftSeverity, VerifyState } from '@/lib/api';
+import { toast } from 'sonner';
 import type { Node, Edge } from '@xyflow/react';
 
 // Outer shell: mounts the navigation context (top-level section +
@@ -175,17 +173,13 @@ function RepoPageInner() {
     handleLeftTabChange,
   } = useOpenTabs();
 
-  // Spec / canonical / contracts / verify-drift view state lives in
+  // Spec / contracts / verify-drift view state lives in
   // DriftViewContext; bound to the same local names used below.
   const {
-    activeSpecConflictId,
-    setActiveSpecConflictId,
-    handleSelectSpecConflict,
-    activeCanonicalPath,
-    setActiveCanonicalPath,
-    openCanonicalFiles,
-    handleOpenCanonical,
-    handleCloseCanonical,
+    activeSpecPath,
+    openSpecTabs,
+    handleOpenSpec,
+    handleCloseSpec,
     activeContractsPath,
     setActiveContractsPath,
     openContractsFiles,
@@ -365,21 +359,6 @@ function RepoPageInner() {
     error: contractsError,
     refetch: refetchContracts,
   } = useContractsTree(repoId, refForTabs);
-  // The repo-scoped spec data seam — shared by the SpecProvider below and the
-  // canonical tree hook so both read the same source (the EE Knowledge page
-  // passes a workspace source instead).
-  const specSource = useMemo(
-    // EE repos are hosted (Postgres store, no working tree) — the source then
-    // refreshes via the server's re-merge instead of an on-demand rescan.
-    () => createRepoSpecDataSource(repoId, refForTabs, isEe),
-    [repoId, isEe, refForTabs],
-  );
-  const {
-    tree: canonicalTree,
-    isLoading: canonicalLoading,
-    error: canonicalError,
-    refetch: refetchCanonical,
-  } = useCanonicalSpecTree(specSource);
   const {
     state: verifyState,
     diff: verifyDiff,
@@ -409,8 +388,8 @@ function RepoPageInner() {
   // A ref holds the latest refetchers so the effect depends ONLY on `leftTab` —
   // it fires on a tab change, never on a refetcher's identity (so no refetch loop).
   // Cheap reads only; we deliberately don't trigger a re-scan here.
-  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchCanonical, refetchStaleness });
-  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchCanonical, refetchStaleness };
+  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchStaleness });
+  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchStaleness };
   useEffect(() => {
     const r = tabRefetchersRef.current;
     if (leftTab === 'verify') {
@@ -419,8 +398,6 @@ function RepoPageInner() {
     } else if (leftTab === 'contracts') {
       void r.refetchContracts();
       void r.refetchStaleness();
-    } else if (leftTab === 'spec') {
-      void r.refetchCanonical();
     }
   }, [leftTab]);
   // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
@@ -533,12 +510,10 @@ function RepoPageInner() {
       // not a repo file — never splice that into a blob path. The caller links it
       // directly instead.
       if (/^[a-z][\w+.-]*:\/\//i.test(path)) return null;
-      // Generated spec artifacts (claims.json / decisions.json) and synced workspace
-      // KB docs (knowledge/<connector>/…) are not committed repo files. The server
-      // re-points real claims pointers to their repo doc before we get here; anything
-      // still synthetic is genuinely not in the repo, so emit no link (plain text)
-      // rather than a 404.
-      if (/(^|\/)(claims|decisions)\.json(#|$)/i.test(path)) return null;
+      // Generated spec artifacts (corpus.json / decisions.json) and synced workspace
+      // KB docs (knowledge/<connector>/…) are not committed repo files, so emit no
+      // link (plain text) rather than a 404.
+      if (/(^|\/)(corpus|decisions)\.json(#|$)/i.test(path)) return null;
       if (path.startsWith('.truecourse/') || path.startsWith('knowledge/')) return null;
       const segments = path.split('/').map((s) => encodeURIComponent(s)).join('/');
       let url = `https://github.com/${repoFullName}/blob/${ref}/${segments}`;
@@ -671,27 +646,24 @@ function RepoPageInner() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
-  // Refresh BL Drift trees after a successful Scan / Generate /
-  // Verify. The server emits `spec:complete` with one of three kinds —
-  // we fan out to the relevant hook's refetch so each tree stays in
-  // sync without polling. Scan rewrites claims.json (refetchCanonical),
-  // Generate writes contracts (refetchContracts), Verify writes the
-  // drift state (refetchVerify).
+  // Refresh BL Drift trees after a successful Scan / Generate / Verify. The
+  // server emits `spec:complete` with one of three kinds — we fan out to the
+  // relevant hook's refetch so each tree stays in sync without polling.
+  // Generate writes contracts (refetchContracts), Verify writes the drift state
+  // (refetchVerify). (The corpus Scan updates its view directly via the GET.)
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
         | { kind?: 'scan' | 'generate' | 'verify' }
         | undefined;
-      if (payload?.kind === 'scan') {
-        refetchCanonical();
-      } else if (payload?.kind === 'generate') {
+      if (payload?.kind === 'generate') {
         refetchContracts();
       } else if (payload?.kind === 'verify') {
         refetchVerify();
       }
-      // Every lifecycle event can flip a staleness dot — a scan
-      // rewrites claims.json (contractsStale on), a generate clears it,
-      // a verify clears verifyStale.
+      // Every lifecycle event can flip a staleness dot — a scan rewrites the
+      // corpus (contractsStale on), a generate clears it, a verify clears
+      // verifyStale.
       if (
         payload?.kind === 'scan' ||
         payload?.kind === 'generate' ||
@@ -701,7 +673,7 @@ function RepoPageInner() {
       }
     });
     return unsub;
-  }, [onEvent, refetchCanonical, refetchContracts, refetchVerify, refetchStaleness]);
+  }, [onEvent, refetchContracts, refetchVerify, refetchStaleness]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -726,8 +698,30 @@ function RepoPageInner() {
     prNumber != null ? refForTabs : undefined,
     !isEe && isDiffMode,
   );
+
+  // Run inference from the dashboard (OSS): reverse-engineer undocumented
+  // decisions into _inferred/. The spec progress popup shows it; refetch on done.
+  const [isInferring, setIsInferring] = useState(false);
+  const runInfer = useCallback(async () => {
+    if (!repoId) return;
+    setIsInferring(true);
+    try {
+      await api.runInferContracts(repoId);
+    } catch (e) {
+      toast.error('Infer failed', { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setIsInferring(false);
+      inferred.refetch();
+    }
+  }, [repoId, inferred.refetch]);
+  useEffect(() => {
+    const unsub = onEvent('spec:complete', (data) => {
+      if ((data as { kind?: string })?.kind === 'infer') inferred.refetch();
+    });
+    return unsub;
+  }, [onEvent, inferred.refetch]);
   // The open inferred decision lives in `?inferred=<key>` so it survives a refresh
-  // and is deep-linkable — same as the spec (`?canonical=`) and contract (`?contract=`)
+  // and is deep-linkable — same as the spec (`?spec=`) and contract (`?contract=`)
   // tabs. `key` is `${kind} ${identity}`; the identity (for the tab label) is the
   // part after the leading kind word.
   const inferredFromUrl = searchParams.get('inferred') || null;
@@ -798,27 +792,20 @@ function RepoPageInner() {
     if (await inferred.act(d, action)) handleCloseInferred(inferredKey(d));
   };
 
-  // Contracts + Spec diffs: EE PR view (head-at-headSha vs baseline, GET by ref)
-  // or OSS Git-Diff (working tree vs the committed baseline, POST run).
+  // Contracts diff: EE PR view (head-at-headSha vs baseline, GET by ref) or OSS
+  // Git-Diff (working tree vs the committed baseline, POST run).
   const [contractsDiff, setContractsDiff] = useState<api.ContractsDiff | null>(null);
-  const [specDiff, setSpecDiff] = useState<api.SpecDiff | null>(null);
   useEffect(() => {
     const ee = prNumber != null && !!refForTabs;
     const oss = !isEe && isDiffMode;
     if (!ee && !oss) {
       setContractsDiff(null);
-      setSpecDiff(null);
       return;
     }
     let cancelled = false;
     if (leftTab === 'contracts') {
       (ee ? api.getContractsDiff(repoId, refForTabs!) : api.postContractsDiff(repoId))
         .then((d) => !cancelled && setContractsDiff(d))
-        .catch(() => {});
-    }
-    if (leftTab === 'spec') {
-      (ee ? api.getSpecDiff(repoId, refForTabs!) : api.postSpecDiff(repoId))
-        .then((d) => !cancelled && setSpecDiff(d))
         .catch(() => {});
     }
     return () => {
@@ -1144,11 +1131,26 @@ function RepoPageInner() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
-  const showingSpecConflict =
-    activeSpecConflictId !== null &&
-    (leftTab === 'spec' || leftTab === 'decisions');
-  const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
+  // Corpus Spec tab: a selected doc / overlap opens in the right pane (`?spec=`).
+  const showingSpec = activeSpecPath !== null && leftTab === 'spec';
   const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
+  // Generate result (validation issues + gaps): prefer the live run, else the
+  // persisted last-generate summary. Detail opens in the Contracts right pane.
+  const genIl = contractsGenerateResult && 'il' in contractsGenerateResult ? contractsGenerateResult.il : null;
+  const resultIssues =
+    (genIl && 'validationIssues' in genIl ? genIl.validationIssues : null) ??
+    contractsTree?.lastGenerate?.validationIssues ??
+    [];
+  const resultGaps =
+    (genIl && 'gaps' in genIl ? genIl.gaps : null) ?? contractsTree?.lastGenerate?.gaps ?? [];
+  // Result keys (issue/gap) share the contracts tab set with `.tc` paths.
+  const isResultKey = (p: string): boolean => p.startsWith('issue::') || p.startsWith('gap::');
+  const resultTabLabel = (key: string): string => {
+    const idx = Number(key.slice(key.indexOf('::') + 2));
+    if (key.startsWith('issue::')) return resultIssues[idx]?.artifactKey ?? 'issue';
+    const g = resultGaps[idx];
+    return g ? `${g.kind}:${g.identity}` : 'gap';
+  };
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
@@ -1165,12 +1167,22 @@ function RepoPageInner() {
       <DiffModeToggle diffMode={isDiffMode} onToggle={setIsDiffMode} subject={{ verb, plural }} />
     ) : null;
 
+  // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
+  // the panel) drives it, consistent with the other tabs.
+  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec');
+
   const sectionActionsNode =
     leftTab === 'spec' ? (
-      <div className="flex items-center gap-2">
-        {blDriftDiffToggle('scans', 'spec changes')}
-        <SpecHeaderActions isGitRepo={repo?.isGitRepo !== false} hosted={isEe} />
-      </div>
+      // The Spec tab is the curated corpus: the header owns Scan/Rescan, which
+      // curates the docs into areas, detects relations, and flags overlaps.
+      // Hidden in EE — hosted repos have no working tree and re-scan
+      // automatically on merge to the default branch / when a PR is opened.
+      !isEe && repo?.isGitRepo !== false ? (
+        <Button size="sm" variant="outline" onClick={() => void specCorpus.scan()} disabled={specCorpus.scanning}>
+          {specCorpus.scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
+          {specCorpus.data ? 'Rescan' : 'Scan'}
+        </Button>
+      ) : null
     ) : leftTab === 'contracts' ? (
       <div className="flex items-center gap-2">
         {blDriftDiffToggle('generates', 'contract changes')}
@@ -1182,7 +1194,10 @@ function RepoPageInner() {
         />
       </div>
     ) : leftTab === 'inferred' ? (
-      blDriftDiffToggle('infers', 'undocumented decisions')
+      <div className="flex items-center gap-2">
+        {blDriftDiffToggle('infers', 'undocumented decisions')}
+        <InferHeaderActions isRunning={isInferring} onRun={runInfer} isGitRepo={repo?.isGitRepo !== false} />
+      </div>
     ) : leftTab === 'verify' ? (
       <VerifyHeaderActions
         isRunning={isDiffMode ? verifyDiffing : verifyRunning}
@@ -1199,7 +1214,6 @@ function RepoPageInner() {
     ) : null;
 
   return (
-    <SpecProvider source={specSource}>
     <div className="flex h-screen flex-col">
       {isEe ? (
         // EE has no working tree, so the git-only actions (Scan / Generate /
@@ -1396,17 +1410,10 @@ function RepoPageInner() {
             />
           )}
           {leftTab === 'spec' && (
-            <SpecPanel
-              canonicalTree={canonicalTree}
-              canonicalLoading={canonicalLoading}
-              canonicalError={canonicalError}
-              activeConflictId={activeSpecConflictId}
-              onSelectConflict={handleSelectSpecConflict}
-              activeCanonicalPath={activeCanonicalPath}
-              onOpenCanonicalFile={handleOpenCanonical}
-              prDiff={blDriftDiffMode ? specDiff : null}
-              diffMode={blDriftDiffMode}
-            />
+            // The curated corpus Spec tab: an area-grouped prose nav (areas →
+            // docs + overlaps); selecting opens the right pane (?spec=). Scan
+            // lives in the header.
+            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} />
           )}
           {leftTab === 'contracts' && (
             <ContractsPanel
@@ -1414,23 +1421,11 @@ function RepoPageInner() {
               isLoading={contractsLoading}
               error={contractsError}
               activePath={activeContractsPath}
-              validationIssues={
-                contractsGenerateResult &&
-                'il' in contractsGenerateResult &&
-                'validationIssues' in contractsGenerateResult.il
-                  ? contractsGenerateResult.il.validationIssues
-                  : undefined
-              }
+              validationIssues={resultIssues}
+              gaps={resultGaps}
               onOpen={handleOpenContracts}
               hosted={isEe}
               prDiff={blDriftDiffMode ? contractsDiff : null}
-              diffMode={blDriftDiffMode}
-            />
-          )}
-          {leftTab === 'decisions' && (
-            <DecisionsPanel
-              activeConflictId={activeSpecConflictId}
-              onSelectConflict={handleSelectSpecConflict}
               diffMode={blDriftDiffMode}
             />
           )}
@@ -1449,10 +1444,10 @@ function RepoPageInner() {
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical/Contracts/Verify) */}
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec/Contracts/Verify) */}
           {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
-          (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
+          (leftTab === 'spec' && openSpecTabs.length > 0) ||
           (leftTab === 'contracts' && openContractsFiles.length > 0) ||
           (leftTab === 'inferred' && openInferredTabs.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
@@ -1546,14 +1541,18 @@ function RepoPageInner() {
                   </div>
                 );
               })}
-              {/* Canonical spec tabs */}
-              {leftTab === 'spec' && openCanonicalFiles.map((f) => {
-                const fileName = f.path.split('/').pop() || f.path;
-                const isActive = activeCanonicalPath === f.path;
+              {/* Corpus Spec tabs (docs + overlaps) */}
+              {leftTab === 'spec' && openSpecTabs.map((f) => {
+                const k = parseSpecKey(f.path);
+                const label =
+                  k.kind === 'overlap'
+                    ? `${k.a.split('/').pop()} ↔ ${k.b.split('/').pop()}`
+                    : k.ref.split('/').pop() || k.ref;
+                const isActive = activeSpecPath === f.path;
                 return (
                   <div
                     key={f.path}
-                    onClick={() => setActiveCanonicalPath(f.path)}
+                    onClick={() => handleOpenSpec(f.path, f.pinned)}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
@@ -1562,11 +1561,11 @@ function RepoPageInner() {
                     title={f.path}
                   >
                     <FileText className="h-3 w-3 shrink-0" />
-                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{label}</span>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleCloseCanonical(f.path);
+                        handleCloseSpec(f.path);
                       }}
                       className={`rounded p-0.5 hover:bg-muted transition-opacity ${
                         isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -1577,9 +1576,11 @@ function RepoPageInner() {
                   </div>
                 );
               })}
-              {/* Contracts tabs */}
+              {/* Contracts tabs (`.tc` files + generate-result issue/gap details) */}
               {leftTab === 'contracts' && openContractsFiles.map((f) => {
-                const fileName = f.path.split('/').pop() || f.path;
+                const fileName = isResultKey(f.path)
+                  ? resultTabLabel(f.path)
+                  : f.path.split('/').pop() || f.path;
                 const isActive = activeContractsPath === f.path;
                 return (
                   <div
@@ -1668,17 +1669,47 @@ function RepoPageInner() {
               violations={violations}
               isTab
             />
-          ) : showingCanonicalFile && activeCanonicalPath ? (
-            <SpecCanonicalFile filePath={activeCanonicalPath} />
-          ) : showingSpecConflict && activeSpecConflictId ? (
-            <SpecConflictDetail
-              conflictId={activeSpecConflictId}
-              onClose={() => setActiveSpecConflictId(null)}
-            />
+          ) : showingSpec && activeSpecPath ? (
+            (() => {
+              const k = parseSpecKey(activeSpecPath);
+              if (k.kind === 'overlap') {
+                return specCorpus.data ? (
+                  <SpecOverlapDetail
+                    repoId={repoId}
+                    area={k.area}
+                    docA={k.a}
+                    docB={k.b}
+                    data={specCorpus.data}
+                    onResolved={specCorpus.refetch}
+                  />
+                ) : (
+                  <SpecPanePlaceholder />
+                );
+              }
+              // Show the doc's full area-tag set in the detail header (concern
+              // names; product prefix only when there are multiple products).
+              const doc = specCorpus.data?.corpus.docs.find((d) => d.ref === k.ref);
+              const multiProduct = new Set((specCorpus.data?.corpus.areas ?? []).map((a) => a.product)).size > 1;
+              const docTags = doc?.areaTags.map((id) => (multiProduct ? id : id.split('/').pop() ?? id));
+              // A dropped doc (not in the kept set) still previews — show why it was excluded.
+              const skipped = specCorpus.data?.corpus.skippedDocs?.find((s) => s.ref === k.ref);
+              return (
+                <SpecDocViewer
+                  repoId={repoId}
+                  docRef={k.ref}
+                  tags={docTags}
+                  notIncludedReason={skipped?.reason}
+                />
+              );
+            })()
           ) : leftTab === 'spec' ? (
             <SpecPanePlaceholder />
           ) : showingContractsFile && activeContractsPath ? (
-            <ContractsFile repoId={repoId} filePath={activeContractsPath} />
+            isResultKey(activeContractsPath) ? (
+              <GenerateResultDetail itemKey={activeContractsPath} issues={resultIssues} gaps={resultGaps} />
+            ) : (
+              <ContractsFile repoId={repoId} filePath={activeContractsPath} />
+            )
           ) : leftTab === 'contracts' ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
               <p>Select a contract file from the list to view it.</p>
@@ -1809,14 +1840,6 @@ function RepoPageInner() {
                 </div>
               );
             })()
-          ) : leftTab === 'decisions' ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-              <p className="max-w-md">
-                Every conflict you've resolved in the Spec tab lives in the
-                ledger on the left. Revoke a decision to re-open its
-                conflict — your other candidates are preserved.
-              </p>
-            </div>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -2057,40 +2080,109 @@ function RepoPageInner() {
           aria-modal="true"
         >
           <div
-            className="w-96 rounded-lg border border-border bg-card p-4 shadow-lg"
+            className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card p-5 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3 flex items-start justify-between">
-              <span className="text-xs font-medium text-foreground">Run LLM rules?</span>
-              <button
-                onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Skip"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <p className="mb-4 text-[11px] text-muted-foreground">
-              {(() => {
-                const totalRules = llmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
-                const totalFiles = llmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-                return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens).`;
-              })()}
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
-                onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
-              >
-                Run LLM rules
-              </button>
-              <button
-                className="rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-                onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-              >
-                Skip — deterministic rules only
-              </button>
-            </div>
+            {(() => {
+              const est = llmEstimate.estimate;
+              const staged = !!est.stages && est.stages.length > 0;
+              const tokensK = Math.round(est.totalEstimatedTokens / 1000);
+              const totalCalls = staged ? est.stages!.reduce((s, x) => s + x.calls, 0) : 0;
+              const fmtUsd = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`);
+              return (
+                <>
+                  <div className="mb-4 flex items-start justify-between">
+                    <span className="text-sm font-semibold text-foreground">
+                      {staged ? 'Proceed with this run?' : 'Run LLM rules?'}
+                    </span>
+                    <button
+                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title="Cancel"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {staged ? (
+                    <div className="mb-5 text-xs text-muted-foreground">
+                      <p className="mb-3 leading-relaxed">
+                        {est.subjectLabel ? `${est.subjectLabel} · ` : ''}~{totalCalls} LLM calls · ~
+                        {tokensK}k tokens
+                        {est.estimatedCostUsd != null && (
+                          <>
+                            {' '}
+                            · up to{' '}
+                            <span className="font-semibold text-foreground">
+                              {fmtUsd(est.estimatedCostUsd)}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                      <div className="overflow-hidden rounded-md border border-border/60">
+                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 border-b border-border/60 bg-muted/40 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                          <span>Stage</span>
+                          <span className="text-right">Calls</span>
+                          <span className="text-right">Model</span>
+                          <span className="text-right">Cost</span>
+                        </div>
+                        {est.stages!.map((s, i) => (
+                          <div
+                            key={s.stage}
+                            className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2 ${
+                              i > 0 ? 'border-t border-border/40' : ''
+                            }`}
+                          >
+                            <span className="text-foreground">{s.label ?? s.stage}</span>
+                            <span className="text-right tabular-nums">
+                              {s.callsRange && s.callsRange.high !== s.calls
+                                ? `${s.callsRange.low}–${s.callsRange.high}`
+                                : s.calls}
+                            </span>
+                            <span className="text-right text-muted-foreground/70">{s.model}</span>
+                            <span className="text-right tabular-nums text-foreground">
+                              {s.estimatedCostUsd != null ? fmtUsd(s.estimatedCostUsd) : '—'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-3 leading-relaxed text-[11px] text-muted-foreground/80">
+                        Ranges (e.g. 12–24) show fewest–most calls — the actual count depends on what
+                        the run finds.
+                        {est.estimatedCostUsd != null && (
+                          <>
+                            {' '}
+                            Cost is a ceiling; prompt caching may lower it
+                            {est.costSource === 'bundled' ? ' (prices approximate)' : ''}.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
+                      {(() => {
+                        const totalRules = est.tiers.reduce((s, t) => s + t.ruleCount, 0);
+                        const totalFiles = est.tiers.reduce((s, t) => s + t.fileCount, 0);
+                        return `${totalFiles} files, ${totalRules} rules (~${tokensK}k tokens).`;
+                      })()}
+                    </p>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    <button
+                      className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
+                    >
+                      {staged ? 'Proceed' : 'Run LLM rules'}
+                    </button>
+                    <button
+                      className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
+                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+                    >
+                      {staged ? 'Cancel' : 'Skip — deterministic rules only'}
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2195,6 +2287,5 @@ function RepoPageInner() {
         <SpecProgressPopup progress={specProgress} onDismiss={clearSpecProgress} />
       )}
     </div>
-    </SpecProvider>
   );
 }

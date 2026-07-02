@@ -8,7 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
-import { getScanState } from '@truecourse/core/commands/spec-in-process';
+import { getCorpus } from '@truecourse/core/commands/spec-in-process';
 import { latestSpecCommit } from '@truecourse/core/lib/spec-store';
 import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import type {
@@ -126,15 +126,17 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       deps.store.listReposForWorkspace(orgId),
     ]);
     // Resolve each repo's dashboard slug (registered on link) so the UI can
-    // deep-link to `/repos/:slug`, plus its open-conflict count (re-merged from
-    // stored claims — no LLM) so the list can flag repos that need review.
+    // deep-link to `/repos/:slug`, plus its flagged-overlap count (within-area
+    // doc disagreements awaiting a relation) so the list can flag repos that need review.
     const repoSummaries = await Promise.all(
       repos.map(async (r) => {
-        const [project, scan, commit] = await Promise.all([
+        const [project, corpus, commit] = await Promise.all([
           getProjectByPath(r.repoFullName),
-          getScanState(r.repoFullName).catch(() => null),
+          getCorpus(r.repoFullName).catch(() => null),
           latestSpecCommit(r.repoFullName).catch(() => null),
         ]);
+        const overlapCount =
+          corpus?.areas.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
         // hasContracts: any generated contract files at the latest scanned commit.
         const files = commit
           ? await listContractFiles(r.repoFullName, 'contracts', commit).catch(() => [])
@@ -142,7 +144,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         return toRepoSummary(
           r,
           project?.slug ?? null,
-          scan?.openConflicts.length ?? 0,
+          overlapCount,
           files.length > 0,
         );
       }),

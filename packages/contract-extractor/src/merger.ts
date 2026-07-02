@@ -43,6 +43,12 @@ export interface MergedArtifact {
   overridden: RankedFragment[];
   /** Other same-rank fragments with different bodies — flagged as conflicts. */
   sameRankConflicts: Fragment[];
+  /**
+   * Set by the repair pass when the artifact's tcSource still wouldn't parse after
+   * the bounded retry — carries the last parser error so the dropped-artifact
+   * validation issue can say WHY repair failed.
+   */
+  repairFailReason?: string;
 }
 
 export interface MergeDiagnostic {

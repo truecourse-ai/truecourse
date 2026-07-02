@@ -27,7 +27,6 @@ import {
 } from "./commands/contracts.js";
 import {
   runSpecScan,
-  runSpecResolve,
   runSpecStatus,
   runVerify,
   runInfer,
@@ -35,9 +34,7 @@ import {
 import {
   runSpecConflictsList,
   runSpecConflictsShow,
-  runSpecConflictsPick,
-  runSpecConflictsCustom,
-  runSpecConflictsRevoke,
+  runSpecConflictsResolve,
 } from "./commands/spec-conflicts.js";
 import {
   runSpecChainsList,
@@ -45,9 +42,12 @@ import {
   runSpecChainsRemove,
 } from "./commands/spec-chains.js";
 import {
+  runSpecDocsList,
   runSpecDocsSkipped,
   runSpecDocsInclude,
   runSpecDocsUninclude,
+  runSpecDocsExclude,
+  runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
 import { runConfigLlmShow } from "./commands/config.js";
@@ -193,12 +193,13 @@ const contractsCmd = program
 
 contractsCmd
   .command("generate")
-  .description("Extract .tc artifacts from prose specs (LLM, cached)")
+  .description("Generate .tc artifacts from the curated corpus (corpus.json)")
   .option("--diff", "Dry run — show what would change without writing")
+  .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runContractsGenerate({ diff: !!options.diff, llm: options.llmTransport, io: options.io });
+    await runContractsGenerate({ diff: !!options.diff, yes: !!options.yes, llm: options.llmTransport, io: options.io });
   });
 
 contractsCmd
@@ -217,129 +218,126 @@ contractsCmd
     await runContractsValidate();
   });
 
-// Spec consolidation — docs → claims → conflicts → canonical .truecourse/specs/.
+// Spec scan — docs → curated corpus (areas + doc relations + overlaps) in .truecourse/specs/.
 const specCmd = program
   .command("spec")
-  .description("Consolidate scattered docs into a canonical spec");
+  .description("Curate scattered docs into a corpus of areas and doc relations");
 
 specCmd
   .command("scan")
-  .description("Walk docs, extract claims, surface conflicts (no writes)")
+  .description("Curate docs into corpus.json (areas + doc relations + overlap flags)")
+  .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
   .action(async (options) => {
-    await runSpecScan({ llm: options.llmTransport, io: options.io });
-  });
-
-specCmd
-  .command("resolve")
-  .description("Resolve open conflicts (interactive runs in the dashboard)")
-  .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
-  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
-  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
-  .action(async (options) => {
-    await runSpecResolve({ allDefaults: !!options.allDefaults, llm: options.llmTransport, io: options.io });
+    await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
   });
 
 specCmd
   .command("status")
-  .description("Summary of docs, claims, modules, and pending decisions")
+  .description("Summary of docs, areas, relations, and open vs resolved overlaps")
   .action(async () => {
     await runSpecStatus();
   });
 
-// -- Conflicts ---------------------------------------------------------------
+// -- Conflicts (within-area overlaps → relations) ---------------------------
 const conflictsCmd = specCmd
   .command("conflicts")
-  .description("Inspect and resolve open / decided conflicts (agent-friendly)");
+  .description("Inspect and resolve flagged within-area doc overlaps (agent-friendly)");
 
 conflictsCmd
   .command("list")
-  .description("List conflicts (open by default; --decided or --all to widen)")
-  .option("--decided", "Show decided conflicts instead of open")
-  .option("--all", "Show both open and decided conflicts")
-  .action(async (opts) => {
-    await runSpecConflictsList({ decided: !!opts.decided, all: !!opts.all });
+  .description("List flagged overlaps still awaiting a relation")
+  .action(async () => {
+    await runSpecConflictsList();
   });
 
 conflictsCmd
-  .command("show <id>")
-  .description("Show full detail for one conflict")
-  .option(
-    "--diff",
-    "Include precomputed field-level diffs (paths + values) between candidates",
-  )
-  .action(async (id, opts) => {
-    await runSpecConflictsShow(id, { diff: !!opts.diff });
+  .command("show <area>")
+  .description("Show an area's overlapping docs with prose excerpts")
+  .action(async (area) => {
+    await runSpecConflictsShow(area);
   });
 
 conflictsCmd
-  .command("pick <id> <candidateIndex>")
-  .description("Resolve a conflict by picking one of its candidates")
-  .option("--note <text>", "Optional human-readable rationale")
-  .action(async (id, idx, opts) => {
-    await runSpecConflictsPick(id, parseInt(idx, 10), {
-      note: opts.note,
-    });
+  .command("resolve <area>")
+  .description("Resolve an overlap by recording a doc→doc relation")
+  .requiredOption("--older <path>", "Repo-relative path of the older / superseded doc")
+  .requiredOption("--newer <path>", "Repo-relative path of the newer / authoritative doc")
+  .option("--replace", "`newer` fully supersedes `older` (excluded from generate)")
+  .option("--precedence", "Both feed generate; `newer` wins where they overlap")
+  .option("--keep-both", "Both are current peers (combine)")
+  .option("--note <text>", "Optional rationale")
+  .action(async (area, opts) => {
+    const type = opts.replace
+      ? "replace"
+      : opts.precedence
+        ? "precedence"
+        : opts.keepBoth
+          ? "keep-both"
+          : undefined;
+    if (!type) {
+      console.error("Pass one of --replace | --precedence | --keep-both");
+      process.exit(1);
+    }
+    await runSpecConflictsResolve(area, { older: opts.older, newer: opts.newer, type, note: opts.note });
   });
 
-conflictsCmd
-  .command("custom <id>")
-  .description("Resolve a conflict with a free-text custom answer")
-  .requiredOption("--text <text>", "The authoritative content for this subject")
-  .action(async (id, opts) => {
-    await runSpecConflictsCustom(id, opts.text);
-  });
-
-conflictsCmd
-  .command("revoke <id>")
-  .description("Remove a previously-saved decision (the conflict re-opens)")
-  .action(async (id) => {
-    await runSpecConflictsRevoke(id);
-  });
-
-// -- Chains (manual supersession) -------------------------------------------
+// -- Chains (doc→doc relations) ---------------------------------------------
 const chainsCmd = specCmd
   .command("chains")
-  .description("Manage manual version chains (supersession overrides)");
+  .description("Manage doc→doc relations (supersession / precedence overrides)");
 
 chainsCmd
   .command("list")
-  .description("List manual chains")
+  .description("List effective relations (auto-detected + user-authored)")
   .action(async () => {
     await runSpecChainsList();
   });
 
 chainsCmd
   .command("add")
-  .description("Mark `older` as superseded by `newer`")
+  .description("Record a relation between two docs")
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .option("--type <type>", "replace (default) | precedence | keep-both", "replace")
+  .option("--scope <area>", "Confine the relation to one area id (product/concern)")
   .option("--note <text>", "Optional rationale")
   .action(async (opts) => {
     await runSpecChainsAdd({
       older: opts.older,
       newer: opts.newer,
+      type: opts.type,
+      scope: opts.scope,
       note: opts.note,
     });
   });
 
 chainsCmd
   .command("remove")
-  .description("Remove a manual chain")
+  .description("Remove a relation")
   .requiredOption("--older <path>", "Repo-relative path of the older doc")
   .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
+  .option("--scope <area>", "Only the relation scoped to this area")
   .action(async (opts) => {
     await runSpecChainsRemove({
       older: opts.older,
       newer: opts.newer,
+      scope: opts.scope,
     });
   });
 
 // -- Docs (relevance filter overrides) --------------------------------------
 const docsCmd = specCmd
   .command("docs")
-  .description("Manage LLM relevance-filter overrides (skipped docs)");
+  .description("Manage corpus doc overrides — force-include skipped docs or force-exclude kept ones");
+
+docsCmd
+  .command("list")
+  .description("List the kept (corpus) docs with their area tags")
+  .action(async () => {
+    await runSpecDocsList();
+  });
 
 docsCmd
   .command("skipped")
@@ -360,6 +358,20 @@ docsCmd
   .description("Remove a force-include override")
   .action(async (docPath) => {
     await runSpecDocsUninclude(docPath);
+  });
+
+docsCmd
+  .command("exclude <path>")
+  .description("Force-exclude a kept doc from the corpus and re-scan")
+  .action(async (docPath) => {
+    await runSpecDocsExclude(docPath);
+  });
+
+docsCmd
+  .command("unexclude <path>")
+  .description("Remove a force-exclude override")
+  .action(async (docPath) => {
+    await runSpecDocsUnexclude(docPath);
   });
 
 // Verify — compares generated TC contracts against the code.

@@ -32,7 +32,6 @@ import {
   BookOpen,
   FileCode2,
   ShieldCheck,
-  GitMerge,
   GitPullRequest,
   Settings,
   BarChart3,
@@ -117,8 +116,9 @@ export const SECTIONS: SectionDescriptor[] = [
     label: 'BL Drift',
     description: 'Spec consolidation, contracts, verification',
     icon: ShieldCheck,
-    defaultTab: 'spec',
+    defaultTab: 'verify',
     tabs: [
+      { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
       // EE-only: the PR gate's runs for this repo. OSS filters it out.
       {
         id: 'pulls',
@@ -129,7 +129,6 @@ export const SECTIONS: SectionDescriptor[] = [
       },
       { id: 'spec', label: 'Spec', icon: BookOpen },
       { id: 'contracts', label: 'Contracts', icon: FileCode2 },
-      { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
       // EE-only: the drift analytics (charts/hotspots/trend) as a standalone tab.
       // In OSS the same `VerifyStatsColumn` stays as the Verify view's left aside.
       {
@@ -141,11 +140,10 @@ export const SECTIONS: SectionDescriptor[] = [
         noPanel: true,
         requiredCapability: 'github-gate',
       },
-      { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
-      { id: 'decisions', label: 'Decisions', icon: GitMerge },
       // Reverse-engineered undocumented decisions (OSS + EE). Sidebar list +
       // main-pane detail tabs, like Contracts; Promote / Dismiss in the detail.
       { id: 'inferred', label: 'Inferred', icon: Lightbulb },
+      { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
       // EE-only: per-repo gate settings (notify emails, blocking, notification
       // toggles). Rendered as a tab in the EE repo console; OSS filters it out.
       {

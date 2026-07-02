@@ -665,153 +665,41 @@ export function getAnalyticsResolution(
 // Spec Consolidation (Module 1)
 // ---------------------------------------------------------------------------
 
-export type SpecClaim = {
-  id: string;
-  topic: string;
-  subject: string;
-  content: unknown;
-  /** 'definition' = the section's primary subject; 'constraint' = narrowing rule. */
-  kind?: 'definition' | 'constraint';
-  provenance: { file: string; line: number; quote: string };
-  metadata: { docKind: string; status?: string; lastTouched: string };
-  /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
-  layer?: 'workspace' | 'repo';
-};
-
-export type SpecConflictCandidate = {
-  index: number;
-  weight: 'newest' | 'newer' | 'older' | 'oldest';
-  claim: SpecClaim;
-};
-
-export type SpecConflict = {
-  id: string;
-  topic: string;
-  subject: string;
-  module?: string;
-  candidates: SpecConflictCandidate[];
-  defaultPick: number;
-  /** Plain-English LLM-generated explanation of how candidates differ. */
-  explanation?: string;
-  /**
-   * Opus (LLM resolver) verdict for this open conflict — present only
-   * when the resolver returned medium/low confidence. High-confidence
-   * verdicts auto-applied and the conflict is in decidedConflicts.
-   */
-  resolverVerdict?: {
-    confidence: 'high' | 'medium' | 'low';
-    reasoning: string;
-    pick: number;
-  };
-  /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
-  candidateFingerprint: string;
-};
-
-export type SpecResolution =
-  | { kind: 'pick'; candidateIndex: number }
-  | { kind: 'custom'; content: string };
-
-export type SpecDecision = {
-  conflictId: string;
-  resolution: SpecResolution;
-  resolvedAt: string;
-  candidateFingerprint: string;
-  note?: string;
-};
-
-export type SpecDecisionsFile = {
-  version: 1;
-  decisions: SpecDecision[];
-};
-
-export type SpecScanResponse = {
-  /** Set on persisted state and on fresh scans. Absent on legacy responses. */
-  scannedAt?: string;
-  docsScanned: number;
-  blocksAttempted: number;
-  claimsExtracted: number;
-  resolved: number;
-  decided: number;
-  openConflicts: SpecConflict[];
-  decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
-  /**
-   * Docs the LLM relevance filter excluded from extraction. Each has a
-   * short reason. User can force-include via the include endpoint.
-   * Absent on older scan-state files; treat as [].
-   */
-  skippedDocs?: Array<{ path: string; reason: string }>;
-};
-
 export type IlValidationIssue = {
   artifactKey: string;
   message: string;
   severity: 'hard' | 'soft';
   tcSource?: string;
+  /** Repair tried and failed to fix this artifact's syntax. */
+  repairAttempted?: boolean;
+  /** The last parser error after repair gave up. */
+  repairFailReason?: string;
+};
+
+/** An enumerated target that never got a contract written (a genuine miss after the gap judge). */
+export type IlCoverageGap = {
+  areaId: string;
+  kind: string;
+  identity: string;
+  /** The enumerator's hint for this target. */
+  hint?: string;
+  /** The gap judge's reason for keeping it as a genuine miss. */
+  reason?: string;
 };
 
 export type ContractsGenerateResponse = {
   il:
     | {
         written: number;
+        gaps: IlCoverageGap[];
         validationIssues: IlValidationIssue[];
         mergeDiagnostics: unknown[];
+        /** True when the corpus was unchanged and generation was a 0-LLM no-op. */
+        noChanges?: boolean;
       }
     | { error: string }
     | { skipped: string };
 };
-
-export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
-  return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
-}
-
-export type CanonicalSpecTopic = {
-  topic: string;
-  claimCount: number;
-  /** Every claim in this topic is inherited from workspace Knowledge (enterprise). */
-  inherited?: boolean;
-};
-
-export type CanonicalSpecModule = {
-  name: string;
-  manifest: Record<string, unknown>;
-  topics: CanonicalSpecTopic[];
-  /** Every topic in this module is entirely workspace-inherited (enterprise). */
-  inherited?: boolean;
-};
-
-export type CanonicalSpecTree = {
-  hasCanonical: boolean;
-  generatedAt?: string;
-  modules: CanonicalSpecModule[];
-};
-
-export type CanonicalSpecSection = {
-  module: string;
-  topic: string;
-  manifest: Record<string, unknown>;
-  claims: SpecClaim[];
-};
-
-export function getSpecCanonicalTree(
-  repoId: string,
-  ref?: string,
-): Promise<CanonicalSpecTree> {
-  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree${q}`);
-}
-
-export function getSpecCanonicalSection(
-  repoId: string,
-  moduleName: string,
-  topic: string,
-  ref?: string,
-): Promise<CanonicalSpecSection> {
-  const params = new URLSearchParams({ module: moduleName, topic });
-  if (ref) params.set('ref', ref);
-  return fetchApi<CanonicalSpecSection>(
-    `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Contracts (Module 2)
@@ -830,6 +718,16 @@ export type ContractsTree = {
       inferred?: boolean;
     }>;
   }>;
+  /**
+   * The last `contracts generate` run's outcome, persisted so it survives a
+   * reload. Null when never generated (or EE, where generate runs server-side).
+   */
+  lastGenerate?: {
+    generatedAt: string;
+    written: number;
+    gaps: IlCoverageGap[];
+    validationIssues: IlValidationIssue[];
+  } | null;
 };
 
 export type ContractsFile = {
@@ -851,22 +749,6 @@ export function getContractsDiff(repoId: string, ref: string): Promise<Contracts
 /** OSS Git-Diff: run the working-tree-vs-committed contracts diff. */
 export function postContractsDiff(repoId: string): Promise<ContractsDiff> {
   return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff`, { method: 'POST' });
-}
-
-export type SpecDiff = {
-  added: Array<{ id: string; module: string; topic: string; subject: string }>;
-  removed: Array<{ id: string; module: string; topic: string; subject: string }>;
-  openConflicts: Array<{ id: string; topic: string; subject: string }>;
-  newConflictCount: number;
-};
-
-export function getSpecDiff(repoId: string, ref: string): Promise<SpecDiff> {
-  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff?ref=${encodeURIComponent(ref)}`);
-}
-
-/** OSS Git-Diff: run the working-tree-vs-committed spec (claims) diff. */
-export function postSpecDiff(repoId: string): Promise<SpecDiff> {
-  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff`, { method: 'POST' });
 }
 
 export function getContractsFile(
@@ -1058,94 +940,6 @@ export function deleteVerifyRun(repoId: string, runId: string): Promise<{ delete
   });
 }
 
-/**
- * Read the persisted scan-state. Returns null when the server
- * responds 404 (no scan has been run yet) — any other error
- * propagates so the caller can show it.
- */
-export async function getSpecScanState(repoId: string): Promise<SpecScanResponse | null> {
-  try {
-    return await fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan-state`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
-}
-
-export function deleteSpecDecision(
-  repoId: string,
-  conflictId: string,
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(
-    `/api/repos/${repoId}/spec/decisions/${encodeURIComponent(conflictId)}`,
-    { method: 'DELETE' },
-  );
-}
-
-export function postSpecDecision(
-  repoId: string,
-  payload: { conflictId: string; resolution: SpecResolution; candidateFingerprint: string; note?: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecManualInclude(
-  repoId: string,
-  payload: { path: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function deleteSpecManualInclude(
-  repoId: string,
-  payload: { path: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
-    method: 'DELETE',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecManualChain(
-  repoId: string,
-  payload: { older: string; newer: string; note?: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function deleteSpecManualChain(
-  repoId: string,
-  payload: { older: string; newer: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
-    method: 'DELETE',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecDecisionsBatch(
-  repoId: string,
-  mode: 'all-defaults',
-): Promise<{ added: number; decisions: SpecDecisionsFile }> {
-  return fetchApi(`/api/repos/${repoId}/spec/decisions/batch`, {
-    method: 'POST',
-    body: JSON.stringify({ mode }),
-  });
-}
-
 export function postContractsGenerate(
   repoId: string,
 ): Promise<ContractsGenerateResponse> {
@@ -1158,12 +952,177 @@ export function postContractsGenerate(
 export type SpecStalenessResponse = {
   contractsStale: boolean;
   verifyStale: boolean;
-  hasClaims: boolean;
+  hasCorpus: boolean;
   hasGenerated: boolean;
   hasVerified: boolean;
 };
 
 export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
   return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
+}
+
+// ---------------------------------------------------------------------------
+// Corpus path (spec-scan redesign) — the curated doc corpus + doc→doc relations
+// that replace claims/conflicts. Areas group docs; an overlap is two same-area
+// docs that may disagree, resolved by recording a relation.
+// ---------------------------------------------------------------------------
+
+export type SpecRelationType = 'replace' | 'precedence' | 'keep-both';
+
+export interface SpecRelation {
+  type: SpecRelationType;
+  older: string;
+  newer: string;
+  scope?: string;
+  detectedFrom?: 'filename' | 'llm' | 'manual';
+  note?: string;
+}
+
+export interface SpecOverlapSection {
+  doc: string;
+  heading: string;
+}
+
+export interface SpecOverlap {
+  docs: [string, string];
+  note: string;
+  /** Conflicting sections per doc (markdown headings), when known. */
+  sections?: SpecOverlapSection[];
+}
+
+export interface SpecCorpusDoc {
+  ref: string;
+  kind: string;
+  status?: string;
+  lastTouched: string;
+  areaTags: string[];
+}
+
+export interface SpecCorpusArea {
+  id: string;
+  product: string;
+  concern: string;
+  docRefs: string[];
+  overlaps: SpecOverlap[];
+}
+
+export interface SpecSkippedDoc {
+  ref: string;
+  reason: string;
+}
+
+export interface SpecCorpus {
+  version: number;
+  generatedAt: string;
+  docs: SpecCorpusDoc[];
+  areas: SpecCorpusArea[];
+  /** Auto-detected relations (corpus-side). User relations come separately. */
+  relations: SpecRelation[];
+  /** Docs the relevance filter dropped (path + reason). */
+  skippedDocs?: SpecSkippedDoc[];
+}
+
+export interface SpecCorpusResponse {
+  corpus: SpecCorpus;
+  userRelations: SpecRelation[];
+  /** Doc refs the user force-included (bypass the relevance filter). */
+  manualIncludes?: string[];
+  /** Doc refs the user force-excluded (dropped from the corpus). */
+  manualExcludes?: string[];
+  /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
+  noChanges?: boolean;
+}
+
+/** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
+export interface SpecScanCancelled {
+  cancelled: true;
+}
+
+/** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
+export async function getSpecCorpus(repoId: string): Promise<SpecCorpusResponse | null> {
+  try {
+    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * Run a fresh corpus scan (curate), persist corpus.json, return it — or
+ * `{ cancelled: true }` when the user dismisses the cost-estimate confirm.
+ */
+export function getSpecCorpusScan(
+  repoId: string,
+): Promise<SpecCorpusResponse | SpecScanCancelled> {
+  return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
+}
+
+/** A source doc's markdown (for the prose Spec tab). */
+export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
+  return fetchApi<{ ref: string; content: string }>(
+    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}`,
+  );
+}
+
+/** Run inference — reverse-engineer undocumented decisions from code into `_inferred/`. */
+export function runInferContracts(repoId: string): Promise<{ decisions: number; written: number }> {
+  return fetchApi<{ decisions: number; written: number }>(`/api/repos/${repoId}/inferred/run`, {
+    method: 'POST',
+  });
+}
+
+// Include/exclude mutations re-curate server-side and return the fresh corpus
+// (with recomputed overlaps) — no separate scan call.
+
+/** Force-include a relevance-dropped doc. Returns the re-curated corpus. */
+export function addSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Remove a force-include override. Returns the re-curated corpus. */
+export function removeSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Force-exclude an otherwise-kept doc (drops it + its conflicts). Returns the re-curated corpus. */
+export function addSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Remove a force-exclude override (restore the doc). Returns the re-curated corpus. */
+export function removeSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Record a user doc→doc relation (resolves an overlap). */
+export function postSpecRelation(repoId: string, payload: SpecRelation): Promise<{ relations: SpecRelation[] }> {
+  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Remove a user relation. */
+export function deleteSpecRelation(
+  repoId: string,
+  payload: { older: string; newer: string; scope?: string },
+): Promise<{ relations: SpecRelation[] }> {
+  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
 }
 

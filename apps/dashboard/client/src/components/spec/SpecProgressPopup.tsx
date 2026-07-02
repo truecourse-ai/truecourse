@@ -16,7 +16,7 @@ export function SpecProgressPopup({ progress, onDismiss }: SpecProgressPopupProp
   const isError = progress.step === 'error';
   return (
     <div
-      className={`fixed bottom-4 left-1/2 z-40 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${
+      className={`fixed bottom-4 left-1/2 z-40 w-[30rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${
         isError ? 'border-destructive/50' : 'border-border'
       }`}
     >

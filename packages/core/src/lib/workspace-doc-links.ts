@@ -53,3 +53,52 @@ export async function resolveWorkspaceDocLinks(
     return new Map();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Origin-link attachment — pair a drift's `specOrigin.source` with the resolved
+// workspace-doc link so the dashboard "Source" can deep-link out. Generic over a
+// minimal `specOrigin` shape; repo-doc origins (no matching link) pass through.
+// ---------------------------------------------------------------------------
+
+interface SpecOriginLike {
+  source: string;
+  section: string;
+  lines: [number, number];
+  sourceUrl?: string | null;
+  sourceLabel?: string | null;
+}
+
+interface DriftLike {
+  specOrigin?: SpecOriginLike;
+}
+
+/** Distinct `specOrigin.source` values across drifts — the lookup batch for links. */
+export function collectOriginSources(drifts: DriftLike[]): string[] {
+  const sources = new Set<string>();
+  for (const d of drifts) {
+    if (d.specOrigin?.source) sources.add(d.specOrigin.source);
+  }
+  return [...sources];
+}
+
+/**
+ * Attach an external `sourceUrl` (+ `sourceLabel`) to drifts whose origin source is
+ * a workspace-KB doc — keyed by `source` against the resolved link map. Origins with
+ * no matching workspace link (repo docs, unknowns) are left untouched.
+ */
+export function attachOriginLinks<T extends DriftLike>(
+  drifts: T[],
+  links: Map<string, { url: string | null; title: string | null }>,
+): T[] {
+  if (links.size === 0) return drifts;
+  return drifts.map((d) => {
+    const origin = d.specOrigin;
+    if (!origin) return d;
+    const link = links.get(origin.source);
+    if (!link?.url) return d;
+    return {
+      ...d,
+      specOrigin: { ...origin, sourceUrl: link.url, sourceLabel: link.title ?? origin.sourceLabel ?? null },
+    };
+  });
+}

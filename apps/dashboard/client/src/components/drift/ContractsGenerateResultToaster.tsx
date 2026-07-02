@@ -30,9 +30,21 @@ export function ContractsGenerateResultToaster({
     }
 
     if ('skipped' in result.il) {
+      // The user dismissing the cost-estimate confirm is not worth a toast — they
+      // initiated it. Other skips (e.g. "no corpus") still surface.
+      if (result.il.skipped === 'cancelled') return;
       toast.warning('Generate skipped', {
         description: result.il.skipped,
         });
+      return;
+    }
+
+    // Unchanged corpus → generation was a no-op (0 LLM). Say so instead of
+    // "Wrote 0 contracts".
+    if (result.il.noChanges) {
+      toast.success('Nothing changed', {
+        description: 'Specs are unchanged since the last generate — contracts are up to date.',
+      });
       return;
     }
 

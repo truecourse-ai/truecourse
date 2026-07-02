@@ -44,15 +44,29 @@ Per-repo layout under `<repo>/.truecourse/`:
   - `verifier/LATEST.json` — materialized current verify state + diff baseline (committable, same convention as the analyze `LATEST.json`)
   - `verifier/history.json` — append-only per-run summaries (gitignored)
   - `verifier/diff.json` — optional current-vs-baseline drift diff, overwritten each `verify --diff` run (gitignored)
+- `specs/` — the spec-consolidation store for `truecourse spec scan`:
+  - `specs/corpus.json` — **committable** (LATEST.json convention). The curated doc corpus produced by the corpus-path scan (`curate()`): kept docs + their area tags, docs grouped by area, within-area overlap flags, auto-detected doc→doc relations, and the relevance-dropped docs (`skippedDocs`: path + reason) so the dashboard can surface "not included" docs for force-include. Expensive to regenerate (LLM tagging) and not purely deterministic, so teammates inherit it from git. See `docs/SPEC_SCAN_REDESIGN_PLAN.md`.
+  - `specs/decisions.json` — **committable**, user-authored. Curated resolutions: doc→doc `relations[]` (replace/precedence/keep-both), `manualAreas[]` (area-tag overrides), `manualIncludes[]` (relevance force-includes), and `manualExcludes[]` (force-excludes — drop an otherwise-kept doc).
+- `.cache/` — derived, **gitignored**, safe to delete (re-derived on the next run): the per-stage LLM KV caches that make re-runs cheap — `consolidator/{area-tags,relevance,overlap,vocab,chain-detection}/` (scan), `contract/{enumerate,reconcile,extract}/` (generate), plus `drift/` and `verifier/` (verify). The `contract/extract` cache is keyed on each area's prompt + doc-content hash + reconciled target identities, so `contracts generate` only re-runs the (expensive Opus) extraction for areas whose specs actually changed — unchanged areas are cache hits. **Not** for run-result data — that's `contracts/result.json` below.
+- `contracts/` (+ `contracts/_inferred/`, `contracts/_shared/`) — the generated `.tc` contract corpus, **committable / git-tracked**. Although it's a materialization of `specs/corpus.json`, it's kept in git on purpose: the OSS Contracts BL-Drift view diffs working-tree `.tc` against HEAD (`/contracts/diff`), so committing your contracts is how PRs review spec changes.
+- `contracts/manifest.json` — **committable / git-tracked**. The spec→contract map: each area's spec content-hash from the last generate. Travels with the repo so `contracts generate` is a deterministic no-op when specs are unchanged (a cloner re-running generate regenerates nothing) — only new/edited areas call the LLM, deleted specs drop their contracts. The estimate reads it too (deterministic, clone-safe). See `packages/contract-extractor/src/manifest.ts`.
+- `contracts/result.json` — **gitignored** run-result of the last `contracts generate` (written count, coverage gaps, validation issues), living next to the `.tc` tree it describes. The dashboard reads it back so a page reload still shows them, and its mtime drives the staleness dots. (The rest of `contracts/` is tracked; this one file is ignored.)
 
-`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline).
+The gitignored vs committable split is materialized by the `.truecourse/.gitignore` template in `packages/core/src/config/paths.ts` (`GITIGNORE_CONTENTS`) — keep it in sync when adding store files.
+
+`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline) and `specs/corpus.json` (the spec snapshot): commit it only after merging to main.
 
 Global layout under `~/.truecourse/`:
 - `config.json` — LLM keys, provider
 - `registry.json` — known project paths + `lastAnalyzed`
 - `logs/` — dashboard + install logs
+- `cache/openrouter-prices.json` — cached model prices (per-token, fetched daily from OpenRouter) for the pre-flight cost estimate. Derived, safe to delete. Set `TRUECOURSE_NO_PRICE_FETCH=1` to skip the network and use bundled list prices (air-gapped; the test suite sets this).
 
 The server walks up from `cwd` looking for `.truecourse/`. Set `TRUECOURSE_HOME` to relocate the user-level dir (tests do this).
+
+The pre-flight LLM estimate (spec scan / contracts generate) is **token + ceiling-cost**: token math is deterministic and offline; cost multiplies the high end of each stage's call range by per-token prices and ignores prompt-caching discounts, so the real bill lands at or below it. The single source is `packages/core/src/services/llm/{token-estimator,spec-estimate,model-prices}.ts` — the CLI prompt and dashboard modal render identical numbers. Both estimates are **cache-aware** and label the subject "N of M … changed"; when nothing changed the estimate has no stages and the confirm prompt is skipped:
+- **Scan** — exact: relevance + area-tags are cached per doc (content-keyed) and each cache directly gates its own call, so the estimate reads the real caches (`readRelevanceCache`/`isAreaTagCached`) and counts only the misses.
+- **Generate** — uses the enumerate cache as a proxy for the extract cache (docs unchanged ⇒ both cached). One caveat documented in `spec-estimate.ts`: on the first run after the extract cache was introduced the enumerate cache can be warm while the extract cache is empty, so that single run can under-count.
 
 ## Rules
 

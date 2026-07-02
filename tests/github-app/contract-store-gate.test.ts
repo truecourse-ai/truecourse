@@ -76,16 +76,19 @@ describe('driftsForCommit — gate contract sourcing (warm/cold/null/fail)', () 
     expect(result.openConflicts).toBe(0); // no persisted scan-state → 0 conflicts
   });
 
-  it('WARM with persisted conflicts → recovers the open-conflict count from scan-state', async () => {
-    // Contracts were generated earlier (e.g. the scan checkbox) but the spec had
-    // unresolved conflicts. A warm gate run must NOT trust the cached, auto-
-    // defaulted contracts — it recovers the conflict count from the stored scan-
-    // state so decideGate still goes neutral.
+  it('WARM with flagged overlaps → recovers the open-conflict count from the corpus', async () => {
+    // Contracts were generated earlier (e.g. the scan checkbox) but the curated
+    // corpus had unresolved within-area overlaps. A warm gate run must NOT trust the
+    // cached contracts — it recovers the overlap count from the stored corpus so
+    // decideGate still goes neutral.
     const ref: RepoRef = { repoKey: REPO, commitSha: 'warmc' };
     await saveContracts(ref, 'contracts', fixtureDir);
-    await saveSpec(ref, 'scanState', {
-      openConflicts: [{ id: 'c1' }, { id: 'c2' }],
-      decidedConflicts: [],
+    await saveSpec(ref, 'corpus', {
+      version: 3,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      docs: [],
+      areas: [{ id: 'a/b', product: 'a', concern: 'b', docRefs: [], overlaps: [{}, {}] }],
+      relations: [],
     });
     const scan = cleanScan();
     const result = await driftsForCommit(
@@ -97,7 +100,7 @@ describe('driftsForCommit — gate contract sourcing (warm/cold/null/fail)', () 
     );
     expect(scan).not.toHaveBeenCalled(); // warm → no re-scan
     expect(result.drifts).toHaveLength(1);
-    expect(result.openConflicts).toBe(2); // recovered from the persisted scan-state
+    expect(result.openConflicts).toBe(2); // recovered from the persisted corpus overlaps
   });
 
   it('COLD: no contracts → scans + generates on the checkout, persists, then verifies', async () => {

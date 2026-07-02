@@ -4,18 +4,15 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 
-// The consolidation + contract generation are covered by their own tests; here
-// we verify the sync engine's wiring: full-set consolidate → ledger reconcile →
-// regenerate workspace contracts.
+// The curate + contract generation are covered by their own tests; here we verify
+// the sync engine's wiring: full-set curate+generate → ledger reconcile.
 vi.mock('@truecourse/core/commands/spec-in-process', () => ({
-  scanWorkspaceInProcess: vi.fn().mockResolvedValue({ scanState: { scannedAt: 'now' } }),
-  generateWorkspaceContractsInProcess: vi.fn().mockResolvedValue({ kind: 'skipped' }),
+  syncWorkspaceCorpusInProcess: vi
+    .fn()
+    .mockResolvedValue({ areaCount: 0, contractFileCount: 0, validationIssues: 0 }),
 }));
 
-import {
-  scanWorkspaceInProcess,
-  generateWorkspaceContractsInProcess,
-} from '@truecourse/core/commands/spec-in-process';
+import { syncWorkspaceCorpusInProcess } from '@truecourse/core/commands/spec-in-process';
 import { PgKnowledgeStore } from '../../ee/packages/data-store/src/index';
 import { syncWorkspaceKnowledge } from '../../ee/packages/server/src/knowledge/sync';
 import type {
@@ -58,8 +55,7 @@ describe('syncWorkspaceKnowledge', () => {
   beforeEach(async () => {
     client = new PGlite();
     knowledge = new PgKnowledgeStore(await makeDb(client));
-    vi.mocked(scanWorkspaceInProcess).mockClear();
-    vi.mocked(generateWorkspaceContractsInProcess).mockClear();
+    vi.mocked(syncWorkspaceCorpusInProcess).mockClear();
   });
   afterEach(async () => {
     await client.close();
@@ -69,8 +65,9 @@ describe('syncWorkspaceKnowledge', () => {
     const result = await syncWorkspaceKnowledge(ORG, knowledge, fakeConnector([ref('101', '3'), ref('102', '1')]), {});
     expect(result.synced).toBe(2);
 
-    // The driver got the FULL set, with namespaced, stable doc paths.
-    expect(vi.mocked(scanWorkspaceInProcess)).toHaveBeenCalledWith(
+    // The driver got the FULL set, with namespaced, stable doc paths, and curates +
+    // generates the workspace contract corpus in one pass.
+    expect(vi.mocked(syncWorkspaceCorpusInProcess)).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceOrgId: ORG,
         docs: expect.arrayContaining([
@@ -79,10 +76,6 @@ describe('syncWorkspaceKnowledge', () => {
         ]),
       }),
     );
-
-    // The sync regenerates the workspace contract corpus from the fresh claims.
-    // (2nd arg carries optional progress hooks — present but unused in this test.)
-    expect(vi.mocked(generateWorkspaceContractsInProcess)).toHaveBeenCalledWith(ORG, expect.anything());
 
     const docs = await knowledge.listDocuments(ORG);
     expect(docs.map((d) => d.externalId).sort()).toEqual(['101', '102']);

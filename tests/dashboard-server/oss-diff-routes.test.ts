@@ -10,9 +10,9 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
- * OSS Git-Diff: the BL-Drift tabs diff the working tree against the committed
- * baseline (no per-commit store). Contracts = git status of `.tc`; Spec = current
- * `claims.json` vs `git show HEAD:claims.json`. (EE uses the per-commit `?ref` GET.)
+ * OSS Git-Diff: the BL-Drift Contracts tab diffs the working tree against the
+ * committed baseline (no per-commit store) — git status of `.tc`. (EE uses the
+ * per-commit `?ref` GET.)
  */
 
 function git(dir: string, cmd: string) {
@@ -63,24 +63,5 @@ describe('OSS Git-Diff routes', () => {
     expect(res.body.added).toEqual(['orders/add.tc']);
     expect(res.body.removed).toEqual(['orders/drop.tc']);
     expect(res.body.modified).toEqual(['orders/edit.tc']);
-  });
-
-  it('spec/diff: working-tree claims added / removed vs the committed claims.json', async () => {
-    const root = fixture.repoPath;
-    const claim = (module: string, topic: string, subject: string) => ({ module, topic, subject });
-    const claimsFile = (claims: ReturnType<typeof claim>[]) =>
-      JSON.stringify({ generatedAt: '2026-01-01T00:00:00.000Z', modules: [], claims });
-
-    write(root, '.truecourse/specs/claims.json', claimsFile([claim('auth', 'login', 'kept'), claim('auth', 'login', 'gone')]));
-    gitInitCommit(root);
-
-    // Working tree: drop `gone`, add `new`.
-    write(root, '.truecourse/specs/claims.json', claimsFile([claim('auth', 'login', 'kept'), claim('billing', 'tax', 'new')]));
-
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/diff`)
-      .expect(200);
-    expect(res.body.added.map((c: { subject: string }) => c.subject)).toEqual(['new']);
-    expect(res.body.removed.map((c: { subject: string }) => c.subject)).toEqual(['gone']);
   });
 });

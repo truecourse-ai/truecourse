@@ -45,12 +45,12 @@ export interface BaselineDeps {
   inferPipeline?: InferPipeline;
   /** Phase callback for the stepped progress popup (EE jobs). */
   onPhase?: (phase: 'clone' | 'spec' | 'contracts' | 'drift' | 'analyze') => void | Promise<void>;
-  /** Per-slice contract-gen progress (`done`, `total`) for the popup's "N/M slices". */
-  onSliceProgress?: (done: number, total: number) => void;
-  /** Repair-pass progress (`done`, `total`) for the popup's "repairing N/M". */
-  onRepairProgress?: (done: number, total: number) => void;
-  /** Spec-scan tracker — driven through SCAN_STEPS for the popup's "Extracting spec" detail. */
+  /** Spec-scan tracker — driven through CURATE_STEPS for the popup's "Extracting spec" detail. */
   specTracker?: StepTracker;
+  /** Contract-generation tracker — driven through CORPUS_GENERATE_STEPS for the "Generating contracts" detail (per-area counts). */
+  generateTracker?: StepTracker;
+  /** Drift-verify tracker — driven through VERIFY_STEPS for the "Computing drift baseline" detail (drift counts). */
+  driftTracker?: StepTracker;
 }
 
 export interface BaselineRequest {
@@ -131,7 +131,7 @@ export async function runBaseline(
       // resolved in the dashboard, which regenerates contracts (repo.contracts).
       if (openConflicts === 0) {
         await deps.onPhase?.('contracts');
-        await scanPipeline.generate(tmp, ref, deps.onSliceProgress, deps.onRepairProgress);
+        await scanPipeline.generate(tmp, ref, deps.generateTracker);
       } else {
         log.info(
           `[github-app] ${req.repoFullName}@${req.commitSha.slice(0, 7)} has ${openConflicts} open conflict(s) — skipping contract generation (neutral baseline until resolved)`,
@@ -151,7 +151,7 @@ export async function runBaseline(
     let drifts: GateDrift[] | null = null;
     if (repoHas || wsHas) {
       await deps.onPhase?.('drift');
-      const { verify } = await verifyInProcess(tmp, { skipStash: true, ref, workspaceOrgId });
+      const { verify } = await verifyInProcess(tmp, { skipStash: true, ref, workspaceOrgId, tracker: deps.driftTracker });
       drifts = verify.drifts;
     }
 

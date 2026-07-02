@@ -78,7 +78,7 @@ export interface DetectedChainOutput {
   }>;
 }
 
-const DetectedChainOutputSchema = z.object({
+export const DetectedChainOutputSchema = z.object({
   chains: z.array(
     z.object({
       members: z.array(z.string().min(1)).min(2),

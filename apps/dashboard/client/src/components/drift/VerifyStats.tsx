@@ -1,7 +1,6 @@
 /**
  * Compact stats strip shown at the top of the Verify sidebar panel.
- * Mirror of `SpecStats`. The Run/Re-run verify button lives in the
- * page Header.
+ * The Run/Re-run verify button lives in the page Header.
  */
 
 import { formatRelativeTime } from '@truecourse/shared';

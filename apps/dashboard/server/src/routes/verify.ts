@@ -25,14 +25,12 @@ import {
   type VerifyState,
 } from '@truecourse/core/commands/spec-in-process';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
+import { loadSpec } from '@truecourse/core/lib/spec-store';
 import {
-  resolveDriftOrigins,
+  resolveWorkspaceDocLinks,
   collectOriginSources,
   attachOriginLinks,
-} from '@truecourse/core/lib/spec-origin-resolver';
-import { resolveWorkspaceDocLinks } from '@truecourse/core/lib/workspace-doc-links';
-import type { ClaimsFile } from '@truecourse/spec-consolidator';
+} from '@truecourse/core/lib/workspace-doc-links';
 import { diffDrifts, type VerifyDiff } from '@truecourse/core/types/verify-snapshot';
 import { getGit, isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import { enrichDrift, type DriftLike } from '@truecourse/core/lib/drift-enrichment';
@@ -72,13 +70,12 @@ async function resolveVerifyStashDecision(
 }
 
 /**
- * Re-point each drift's `specOrigin` from the synthetic `claims.json#<module>/<topic>`
- * pointer the contract was authored against to the REAL source doc the originating
- * claim came from (its `provenance.{file,line}`), so the dashboard "Source" link
- * resolves instead of 404-ing on the generated claims snapshot. Reads the repo's
- * `claims.json` at the drift commit (falling back to the repo's latest) — so it
- * works on ALREADY-STORED snapshots, no re-generate/re-verify. Best-effort: real-doc
- * origins are left untouched, and any load failure returns the drifts unchanged.
+ * Attach an external `sourceUrl` to drifts whose spec-origin is a synced
+ * workspace-KB doc (e.g. a Confluence page) so the dashboard "Source" deep-links
+ * out. Corpus-path contracts already carry the REAL source-doc origin (the `.tc`
+ * artifact's `origin` points at the repo doc), so no claims→doc remapping is
+ * needed. No-op in OSS (no link resolver) and for repos with no workspace; any
+ * failure returns the drifts unchanged.
  */
 async function withResolvedOrigins<
   T extends {
@@ -90,18 +87,10 @@ async function withResolvedOrigins<
       sourceLabel?: string | null;
     };
   },
->(repoKey: string, commitSha: string | null | undefined, drifts: T[]): Promise<T[]> {
+>(repoKey: string, drifts: T[]): Promise<T[]> {
   try {
-    const claims =
-      (commitSha ? await loadSpec<ClaimsFile>({ repoKey, commitSha }, 'claims') : null) ??
-      (await loadLatestSpec<ClaimsFile>(repoKey, 'claims'));
-    let resolved = resolveDriftOrigins(drifts, claims);
-    // Then attach external links for sources that are synced workspace-KB docs
-    // (e.g. a Confluence page) — not repo files, so they deep-link out instead.
-    // No-op in OSS (no resolver installed) and for repos with no workspace.
-    const links = await resolveWorkspaceDocLinks(repoKey, collectOriginSources(resolved));
-    resolved = attachOriginLinks(resolved, links);
-    return resolved;
+    const links = await resolveWorkspaceDocLinks(repoKey, collectOriginSources(drifts));
+    return attachOriginLinks(drifts, links);
   } catch {
     return drifts;
   }
@@ -123,7 +112,7 @@ router.get(
         return;
       }
       const commitHash = state.commitHash ?? (ref || null);
-      state.drifts = await withResolvedOrigins(repo.path, commitHash, state.drifts);
+      state.drifts = await withResolvedOrigins(repo.path, state.drifts);
       // `?ref` IS the commit being viewed — backfill it for per-commit snapshots
       // persisted before `commitHash` was stored, so the EE deep-link resolves on
       // existing data too. The base (no-ref) state already carries its baseline
@@ -202,7 +191,7 @@ router.get(
         res.status(404).json({ error: 'Verify run not found.' });
         return;
       }
-      state.drifts = await withResolvedOrigins(repo.path, state.commitHash, state.drifts);
+      state.drifts = await withResolvedOrigins(repo.path, state.drifts);
       res.json(state);
     } catch (e) {
       next(e);
@@ -254,8 +243,8 @@ router.get(
           branch: null,
           commitHash: ref,
           // The diff's added drifts live on the head; resolved ones on the baseline.
-          added: await withResolvedOrigins(repo.path, ref, added),
-          resolved: await withResolvedOrigins(repo.path, baseline.commitHash, resolved),
+          added: await withResolvedOrigins(repo.path, added),
+          resolved: await withResolvedOrigins(repo.path, resolved),
           unchangedCount,
           changedFiles: [],
           summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },

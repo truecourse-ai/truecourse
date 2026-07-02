@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MergedArtifact } from './merger.js';
+import { slugIdentity } from './identity.js';
 
 const CONTRACTS_DIR = path.join('.truecourse', 'contracts');
 
@@ -146,7 +147,7 @@ function composeTcSource(artifact: MergedArtifact): string {
 }
 
 function pickFilePath(root: string, artifact: MergedArtifact): string {
-  const slug = slugifyIdentity(artifact.identity);
+  const slug = slugIdentity(artifact.identity);
   if (SHARED_KINDS.has(artifact.kind)) {
     return path.join(root, '_shared', `${slug}.tc`);
   }
@@ -180,14 +181,6 @@ function inferKindDomain(artifact: MergedArtifact): string {
   const dot = artifact.identity.indexOf('.');
   const stem = dot >= 0 ? artifact.identity.slice(0, dot) : artifact.identity;
   return stem.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-}
-
-function slugifyIdentity(identity: string): string {
-  return identity
-    .toLowerCase()
-    .replace(/[\s/]+/g, '-')
-    .replace(/[^a-z0-9.-]+/g, '')
-    .replace(/^-+|-+$/g, '');
 }
 
 // ---------------------------------------------------------------------------

@@ -33,26 +33,27 @@ import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from '../knowledge/connectors/registry.js';
 import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
 import { syncWorkspaceKnowledge, SYNC_MSG_CONSOLIDATE } from '../knowledge/sync.js';
-import {
-  regenerateRepoContractsFromDecisions,
-  generateWorkspaceContractsInProcess,
-  SCAN_STEPS,
-} from '@truecourse/core/commands/spec-in-process';
+import { CURATE_STEPS, CORPUS_GENERATE_STEPS, VERIFY_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { publishEvent } from './events.js';
 import { JobStepTracker, type StepEmit } from './steps.js';
 
 /**
- * Bridge an OSS spec-scan StepTracker onto one EE job step: each SCAN_STEPS
- * transition (discover docs / extract blocks / resolve conflicts) is forwarded as
- * the EE step's inline detail, so the popup shows the same numbered sub-phases the
- * OSS popup does. Returns a StepTracker to hand to the spec scan.
+ * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
+ * transition is forwarded as the EE step's inline detail, so the popup shows the
+ * same numbered sub-phases the OSS popup does. `stepDefs` is the inner phase set
+ * to mirror — CURATE_STEPS (scan) by default, CORPUS_GENERATE_STEPS (generate),
+ * VERIFY_STEPS (drift), or a union. Returns a StepTracker to hand to the callee.
  */
-function specScanBridge(eeTracker: JobStepTracker, stepKey: string): StepTracker {
+function specScanBridge(
+  eeTracker: JobStepTracker,
+  stepKey: string,
+  stepDefs: ReadonlyArray<{ key: string; label: string }> = CURATE_STEPS,
+): StepTracker {
   return new StepTracker((p: AnalysisProgressPayload) => {
     const text = p.detail ? `${p.step} · ${p.detail}` : p.step;
     void eeTracker.detail(stepKey, text);
-  }, [...SCAN_STEPS]);
+  }, [...stepDefs]);
 }
 import {
   KNOWLEDGE_SYNC_TASK,
@@ -233,12 +234,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
           if (message === SYNC_MSG_CONSOLIDATE) await tracker.advance('consolidate');
           else await tracker.advance('fetch', total > 0 ? `${current}/${total} docs` : undefined);
         },
-        // Spec sub-phases + contract slices both surface on the "consolidate" step.
-        tracker: specScanBridge(tracker, 'consolidate'),
-        onSliceProgress: (done, total) =>
-          void tracker.detail('consolidate', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('consolidate', `repairing ${done}/${total}`),
+        // Curate sub-phases + contract generation both surface on the "consolidate"
+        // step (the bridge mirrors both step sets, so it shows N/M docs then the
+        // per-area contract counts). The old onSlice/onRepair callbacks were dead —
+        // corpus generate reports via the tracker, not per-slice — so they're gone.
+        tracker: specScanBridge(tracker, 'consolidate', [...CURATE_STEPS, ...CORPUS_GENERATE_STEPS]),
       });
 
       const reverified = await reverifyReposIfWorkspaceChanged(org, beforeHash);
@@ -320,10 +320,8 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
           auth,
           onPhase: (phase) => tracker.advance(phase),
           specTracker: specScanBridge(tracker, 'spec'),
-          onSliceProgress: (done, total) =>
-            void tracker.detail('contracts', `${done}/${total} slices`),
-          onRepairProgress: (done, total) =>
-            void tracker.detail('contracts', `repairing ${done}/${total}`),
+          generateTracker: specScanBridge(tracker, 'contracts', CORPUS_GENERATE_STEPS),
+          driftTracker: specScanBridge(tracker, 'drift', VERIFY_STEPS),
         },
         req,
       );
@@ -368,11 +366,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
-  // Debounced contract refresh after a decision, off the request path. Tracked: a
-  // jobs row + a stepped progress popup (the single-flight key coalesces a burst of
-  // decisions onto one row). Notifies on BOTH outcomes — every user-triggered
-  // background op confirms itself (success or failure). The job reads the latest
-  // persisted decisions when it runs (final state wins).
+  // Refresh a repo's contracts after a relation/decision change, off the request
+  // path. On the corpus path the spec is re-derived from the source docs (relations
+  // are folded in at curate time), so a contract refresh means re-running the scan
+  // over a fresh clone — i.e. a forced re-baseline (clone → curate → generate →
+  // verify), which `onContractsRegenerated` queues. Notifies on BOTH outcomes.
   const repoContracts: Task = async (rawPayload) => {
     const { jobId, repoKey, workspaceOrgId } = rawPayload as ContractsJobPayload;
 
@@ -380,41 +378,26 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
 
     const tracker = new JobStepTracker(
-      [
-        { key: 'spec', label: 'Re-merging spec' },
-        { key: 'contracts', label: 'Generating contracts' },
-      ],
+      [{ key: 'contracts', label: 'Refreshing contracts' }],
       stepEmit(jobId, workspaceOrgId),
     );
 
     try {
-      await regenerateRepoContractsFromDecisions(repoKey, {
-        onPhase: (phase) => tracker.advance(phase),
-        onSliceProgress: (done, total) =>
-          void tracker.detail('contracts', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('contracts', `repairing ${done}/${total}`),
-      });
+      await tracker.advance('contracts');
+      // Re-baseline the repo so its corpus + contracts are regenerated from the
+      // current docs and verify re-runs against them.
+      await deps.onContractsRegenerated?.(repoKey, workspaceOrgId);
       const done = await jobStore.markSucceeded(jobId, { repoKey });
       const note = await notifications.add({
         org: workspaceOrgId,
         kind: REPO_CONTRACTS_TASK,
         level: 'success',
-        title: 'Contracts updated',
-        body: `${repoKey} — contracts regenerated from your resolved spec.`,
+        title: 'Contracts refresh queued',
+        body: `${repoKey} — re-scanning the repo to regenerate contracts from the current spec.`,
         data: { jobId, repoKey },
       });
       if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
       await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      // Chain a drift-baseline refresh so verify runs against the freshly
-      // generated contracts (best-effort — never flips this succeeded job).
-      try {
-        await deps.onContractsRegenerated?.(repoKey, workspaceOrgId);
-      } catch (chainErr) {
-        log.warn(
-          `[ee-jobs] post-contracts baseline chain failed for ${repoKey}: ${(chainErr as Error).message}`,
-        );
-      }
     } catch (err) {
       const message = (err as Error).message;
       const failed = await jobStore.markFailed(jobId, message);
@@ -438,9 +421,10 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
-  // The workspace analogue of repo.contracts: refresh the workspace `.tc` corpus
-  // after a Knowledge decision (the spec re-merge already ran synchronously, so the
-  // job is generate-only — one step). Same tracked model; notifies on success + failure.
+  // Workspace contracts are (re)generated as part of a connector SYNC on the corpus
+  // path (the sync curates the synced docs + generates the `.tc` corpus together),
+  // so there is no standalone generate-from-stored-state step. This job now only
+  // re-verifies connected repos if the workspace contracts changed since enqueue.
   const workspaceContracts: Task = async (rawPayload) => {
     const { jobId, workspaceOrgId } = rawPayload as WorkspaceContractsJobPayload;
 
@@ -448,27 +432,20 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
 
     const tracker = new JobStepTracker(
-      [{ key: 'contracts', label: 'Generating contracts' }],
+      [{ key: 'contracts', label: 'Refreshing contracts' }],
       stepEmit(jobId, workspaceOrgId),
     );
 
     try {
       await tracker.advance('contracts');
-      const beforeHash = await wsContractsHash(workspaceOrgId);
-      await generateWorkspaceContractsInProcess(workspaceOrgId, {
-        onSliceProgress: (done, total) =>
-          void tracker.detail('contracts', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('contracts', `repairing ${done}/${total}`),
-      });
-      const reverified = await reverifyReposIfWorkspaceChanged(workspaceOrgId, beforeHash);
+      const reverified = await reverifyReposIfWorkspaceChanged(workspaceOrgId, null);
       const done = await jobStore.markSucceeded(jobId, {});
       const note = await notifications.add({
         org: workspaceOrgId,
         kind: WORKSPACE_CONTRACTS_TASK,
         level: 'success',
-        title: 'Workspace contracts updated',
-        body: `Knowledge contracts regenerated from your resolved spec.${
+        title: 'Workspace contracts refreshed',
+        body: `Knowledge contracts are regenerated on sync.${
           reverified > 0 ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'}.` : ''
         }`,
         data: { jobId, reverified },

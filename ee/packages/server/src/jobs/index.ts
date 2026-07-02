@@ -258,11 +258,19 @@ export async function registerJobs(
   setBackgroundTaskRunner(async (task) => {
     if (!runner) throw new Error('the background job worker is not running');
     if (task.type === REPO_CONTRACTS_TASK && task.repoKey) {
+      // OSS adapters (the shared spec routes) pass only repoKey — resolve the
+      // owning workspace from the gate link so the job is scoped + notified.
+      const workspaceOrgId =
+        task.workspaceOrgId ?? (await gateStore.getRepo(task.repoKey))?.workspaceOrgId;
+      if (!workspaceOrgId) {
+        log.warn(`[ee-jobs] repo.contracts skipped: ${task.repoKey} is not a connected repo`);
+        return;
+      }
       const key = `${REPO_CONTRACTS_TASK}:${task.repoKey}`;
-      const jobId = await ensureContractsJob(REPO_CONTRACTS_TASK, key, task.workspaceOrgId);
+      const jobId = await ensureContractsJob(REPO_CONTRACTS_TASK, key, workspaceOrgId);
       await runner.addJob(
         REPO_CONTRACTS_TASK,
-        { jobId, repoKey: task.repoKey, workspaceOrgId: task.workspaceOrgId },
+        { jobId, repoKey: task.repoKey, workspaceOrgId },
         { jobKey: key, maxAttempts: 1 },
       );
     }

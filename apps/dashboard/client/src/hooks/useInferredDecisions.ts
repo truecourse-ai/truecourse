@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { GithubInferredResponse, InferredDiffResponse, InferredDecisionView } from '@truecourse/shared';
 import { getServerUrl } from '@/lib/server-url';
 
@@ -15,6 +15,8 @@ export interface InferredDecisions {
   act: (d: InferredDecisionView, action: 'dismiss' | 'promote') => Promise<boolean>;
   /** Un-dismiss a decision — moves it back from the dismissed list to active. */
   restore: (d: InferredDecisionView) => Promise<void>;
+  /** Re-read the inferred set (e.g. after a fresh infer run). */
+  refetch: () => void;
 }
 
 /**
@@ -35,6 +37,7 @@ export function useInferredDecisions(
   const [dismissed, setDismissed] = useState<InferredDecisionView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const base = `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/inferred`;
   const diffMode = !!prRef || ossDiff;
@@ -78,7 +81,7 @@ export function useInferredDecisions(
     return () => {
       cancelled = true;
     };
-  }, [base, enabled, prRef, ossDiff]);
+  }, [base, enabled, prRef, ossDiff, reloadNonce]);
 
   const act = async (d: InferredDecisionView, action: 'dismiss' | 'promote'): Promise<boolean> => {
     if (busyKey) return false;
@@ -130,5 +133,7 @@ export function useInferredDecisions(
     }
   };
 
-  return { decisions, dismissed, error, busyKey, diffMode, act, restore };
+  const refetch = useCallback((): void => setReloadNonce((n) => n + 1), []);
+
+  return { decisions, dismissed, error, busyKey, diffMode, act, restore, refetch };
 }
