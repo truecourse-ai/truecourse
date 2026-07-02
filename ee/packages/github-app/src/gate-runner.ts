@@ -166,6 +166,7 @@ export async function driftsForCommit(
   checkoutDir: string,
   workspaceOrgId?: string | null,
   contractsRef?: RepoRef,
+  anchorRef?: RepoRef,
 ): Promise<CommitDrifts> {
   const ref: RepoRef = { repoKey: repoFullName, commitSha: sha };
   // Base-reuse: the PR changed no specs, so the head's spec == the base's. Verify
@@ -184,7 +185,7 @@ export async function driftsForCommit(
   let openConflicts: number;
   if (!(await hasContracts(ref, 'contracts'))) {
     ({ openConflicts } = await scanPipeline.scan(checkoutDir, ref));
-    await scanPipeline.generate(checkoutDir, ref);
+    await scanPipeline.generate(checkoutDir, ref, undefined, anchorRef);
   } else {
     // Already generated (e.g. an earlier gate run or the scan checkbox). The
     // scan persisted the curated corpus under the ref; recover its flagged-overlap
@@ -213,8 +214,8 @@ export async function runGateVerify(
   const scanPipeline = deps.scanPipeline ?? defaultSpecScanPipeline;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-verify-'));
 
-  const driftsAt = (sha: string, contractsRef?: RepoRef): Promise<CommitDrifts> =>
-    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId, contractsRef);
+  const driftsAt = (sha: string, contractsRef?: RepoRef, anchorRef?: RepoRef): Promise<CommitDrifts> =>
+    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId, contractsRef, anchorRef);
 
   try {
     const token = await getInstallationToken(deps.auth, req.installationId);
@@ -263,7 +264,13 @@ export async function runGateVerify(
       !req.specChanged && baselineCommit
         ? { repoKey: req.repoFullName, commitSha: baselineCommit }
         : undefined;
-    const head = await driftsAt(headSha, headContractsRef);
+    // When the head DOES regenerate (spec changed), anchor it to the base
+    // baseline's contracts so unchanged areas reproduce them (Phase 4).
+    const headAnchorRef: RepoRef | undefined =
+      !headContractsRef && baselineCommit
+        ? { repoKey: req.repoFullName, commitSha: baselineCommit }
+        : undefined;
+    const head = await driftsAt(headSha, headContractsRef, headAnchorRef);
 
     // Code Quality signal — run the OSS analyze pass on the SAME PR-head checkout,
     // diffed against the baseline analysis. analyzeCore is STATELESS (no persist,

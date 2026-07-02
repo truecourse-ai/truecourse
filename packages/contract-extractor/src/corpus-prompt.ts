@@ -130,25 +130,54 @@ function renderAreaDocs(area: AreaGenInput, cap: number): string {
   return lines.join('\n');
 }
 
-export function buildEnumerateUserPrompt(area: AreaGenInput): string {
-  return [
+export function buildEnumerateUserPrompt(
+  area: AreaGenInput,
+  priorTargets?: { kind: string; identity: string }[],
+  correction?: { invalidKinds: string[] },
+): string {
+  const lines = [
     `Area: ${area.areaId}  (product: ${area.product}, concern: ${area.concern})`,
     `Docs: ${area.docs.length} (listed in precedence order, highest authority first).`,
     '',
     renderAreaDocs(area, ENUMERATE_DOC_CHAR_CAP),
-    'List the contract targets this area specifies. Return the JSON object as specified.',
-  ].join('\n');
+  ];
+  if (priorTargets && priorTargets.length > 0) {
+    lines.push(
+      '',
+      'KNOWN EXISTING CONTRACT IDENTITIES (from the last generation of this system). If a thing THIS area\'s docs specify already appears here, REUSE its exact kind + identity spelling — never re-slug or re-word an identity that has not changed (keep "api-version", do NOT emit "apiversion"; keep "order.placed", do NOT rename it). Only ADD a target the spec newly introduces, DROP one the spec removed, or RENAME one the spec explicitly renamed. Do NOT list a target merely because it appears here — list only what this area\'s docs actually specify:',
+      ...priorTargets.map((t) => `  - ${t.kind}: ${t.identity}`),
+    );
+  }
+  if (correction && correction.invalidKinds.length > 0) {
+    lines.push(
+      '',
+      `CORRECTION — your previous response used kinds that are NOT in the catalog: ${correction.invalidKinds.join(', ')}. Re-emit the corrected JSON, choosing each target's kind ONLY from the catalog kinds in the system prompt (pick the kind whose capability actually fits; if a mis-kinded item has no fitting catalog kind, drop it). Do not repeat an invalid kind.`,
+    );
+  }
+  lines.push('', 'List the contract targets this area specifies. Return the JSON object as specified.');
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
 // Generate (goal-directed) — uses prompt.ts SYSTEM_PROMPT for the catalog/grammar
 // ---------------------------------------------------------------------------
 
-export function buildCorpusGenerateUserPrompt(area: AreaGenInput, targets: TargetSpec[]): string {
+export function buildCorpusGenerateUserPrompt(
+  area: AreaGenInput,
+  targets: TargetSpec[],
+  priorBodies?: (string | undefined)[],
+  errorHints?: (string | undefined)[],
+): string {
   const targetList = targets
-    .map((t) => `  - ${t.kind}: ${t.identity}${t.hint ? ` — ${t.hint}` : ''}`)
+    .map((t, i) => {
+      const base = `  - ${t.kind}: ${t.identity}${t.hint ? ` — ${t.hint}` : ''}`;
+      const err = errorHints?.[i];
+      return err
+        ? `${base}\n      ↳ your previous attempt for this target did NOT parse — fix the syntax. Parser error: ${err}`
+        : base;
+    })
     .join('\n');
-  return [
+  const parts = [
     `You are generating .tc contracts for ONE area of a software system.`,
     `Area: ${area.areaId}  (product: ${area.product}, concern: ${area.concern})`,
     '',
@@ -160,8 +189,30 @@ export function buildCorpusGenerateUserPrompt(area: AreaGenInput, targets: Targe
     `Shared artifacts (cross-cutting enums, the auth scheme, the error envelope) may be defined in OTHER areas — REFERENCE them by cross-ref, do NOT redefine them here.`,
     `Set each fragment's origin.source to the doc ref you drew it from. Ignore non-spec prose.`,
     `Do NOT emit contracts for anything outside the target list above.`,
+  ];
+  const anchors = targets
+    .map((t, i) => ({ t, body: priorBodies?.[i] }))
+    .filter((a): a is { t: TargetSpec; body: string } => typeof a.body === 'string' && a.body.length > 0);
+  if (anchors.length > 0) {
+    parts.push(
+      '',
+      `EXISTING CONTRACTS (from the last generation). For every target below that the docs have NOT changed, reproduce its existing contract EXACTLY — same identity, same fields, same wording, same order. Only change what the docs above actually changed. The docs are the source of truth: if the docs no longer specify a target, do not emit it; if a field changed, change it. This keeps unchanged contracts byte-stable across runs. Existing contracts:`,
+      ...anchors.map((a) => `\n--- ${a.t.kind}: ${a.t.identity} ---\n${stripOriginForAnchor(a.body)}`),
+    );
+  }
+  parts.push(
     '',
     renderAreaDocs(area, GENERATE_DOC_CHAR_CAP),
     'Return the ExtractionResult JSON ({ "fragments": [ … ] }) as specified by the system prompt.',
-  ].join('\n');
+  );
+  return parts.join('\n');
+}
+
+/** Drop `origin` lines from an anchor body: their line ranges are volatile and
+ *  the generator recomputes origin fresh, so showing the old ones only confuses. */
+function stripOriginForAnchor(tc: string): string {
+  return tc
+    .split('\n')
+    .filter((l) => !/^\s*origin\s/.test(l))
+    .join('\n');
 }

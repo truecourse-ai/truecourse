@@ -12,6 +12,7 @@ import { resetKvCacheStore } from '@truecourse/llm';
 import {
   generateContractsFromCorpus,
   chunkByHeading,
+  coverageKey,
   type AreaGenInput,
   type EnumerateRunner,
   type GenerateBatchRunner,
@@ -51,6 +52,17 @@ function entityFragment(src: string, identity: string): Fragment {
     identity,
     tcSource: `entity ${identity} {\n  origin "${src}" "${identity}" 1..2\n  field id: string immutable\n}`,
     origin: { source: src, section: identity, lines: [1, 2] },
+    obligationKeys: [],
+  };
+}
+
+/** An Entity fragment whose tcSource does NOT parse under the grammar. */
+function unparseableFragment(identity: string): Fragment {
+  return {
+    kind: 'Entity',
+    identity,
+    tcSource: `entity ${identity} { this is not valid tc }`,
+    origin: { source: 'x.md', section: identity, lines: [1, 2] },
     obligationKeys: [],
   };
 }
@@ -221,6 +233,35 @@ describe('generateContractsFromCorpus', () => {
     const ids = result.artifactsToWrite.map((a) => a.identity).sort();
     expect(ids).toEqual(['A1', 'B1', 'Shared']);
     expect(ids.filter((i) => i === 'Shared')).toHaveLength(1);
+  });
+
+  it('Phase 4: passes the prior contracts as an anchor to enumerate + extract', async () => {
+    let seenPriorTargets: { kind: string; identity: string }[] | undefined;
+    let seenPriorBodies: (string | undefined)[] | undefined;
+    const enumerateRunner: EnumerateRunner = async ({ priorTargets }) => {
+      seenPriorTargets = priorTargets;
+      return [{ kind: 'Entity', identity: 'User' }];
+    };
+    const generateRunner: GenerateBatchRunner = async ({ area, targets, priorBodies }) => {
+      seenPriorBodies = priorBodies;
+      return { fragments: targets.map((t) => entityFragment(area.docs[0].ref, t.identity)) };
+    };
+    const priorBody = 'entity User {\n  field id: string immutable\n}';
+    await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/users-entity', ['users.md'])],
+      enumerateRunner,
+      generateRunner,
+      prior: {
+        targets: [{ kind: 'Entity', identity: 'User' }],
+        bodyByKey: new Map([[coverageKey('Entity', 'User'), priorBody]]),
+      },
+      disableRepair: true,
+      disableTargetReconciliation: true,
+    });
+    // Enumerate saw the known identities; extract saw the User target's existing body.
+    expect(seenPriorTargets).toEqual([{ kind: 'Entity', identity: 'User' }]);
+    expect(seenPriorBodies).toEqual([priorBody]);
   });
 
   it('caches enumeration — a second run with unchanged docs does not re-enumerate', async () => {
@@ -399,6 +440,221 @@ describe('generateContractsFromCorpus', () => {
     // Both A (head) and B (tail) targets were enumerated → both generated.
     expect(result.areas[0].targets).toBe(2);
     expect(result.artifactsToWrite.map((a) => a.identity).sort()).toEqual(['A', 'B']);
+  });
+
+  it('re-asks once when enumerate returns a kind outside the catalog, then keeps the corrected target', async () => {
+    let corrections = 0;
+    let lastCorrection: string[] | undefined;
+    const enumerateRunner: EnumerateRunner = async ({ correction }) => {
+      if (correction) {
+        corrections++;
+        lastCorrection = correction.invalidKinds;
+        return [{ kind: 'Entity', identity: 'Version' }]; // corrected to a real catalog kind
+      }
+      return [{ kind: 'ServiceMetadata', identity: 'Version' }]; // not in the catalog
+    };
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    expect(corrections).toBe(1);
+    expect(lastCorrection).toEqual(['ServiceMetadata']);
+    expect(result.enumerateFailures ?? []).toEqual([]);
+    expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Version']);
+  });
+
+  it('treats UnenforceableObligation as an invalid enumerate kind (never a target) and re-asks', async () => {
+    let corrections = 0;
+    let lastCorrection: string[] | undefined;
+    const enumerateRunner: EnumerateRunner = async ({ correction }) => {
+      if (correction) {
+        corrections++;
+        lastCorrection = correction.invalidKinds;
+        return [{ kind: 'Entity', identity: 'Thing' }];
+      }
+      return [{ kind: 'UnenforceableObligation', identity: 'must-encrypt' }];
+    };
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    expect(corrections).toBe(1);
+    expect(lastCorrection).toEqual(['UnenforceableObligation']);
+    expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Thing']);
+  });
+
+  it('drops a target whose kind is still invalid after the corrective re-ask, keeping the valid ones', async () => {
+    // The re-ask keeps the bogus kind; only the valid target survives.
+    const enumerateRunner: EnumerateRunner = async () => [
+      { kind: 'Entity', identity: 'Good' },
+      { kind: 'BogusKind', identity: 'Bad' },
+    ];
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    expect(result.enumerateFailures ?? []).toEqual([]);
+    expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Good']);
+  });
+
+  it('does not re-ask when every enumerated kind is valid', async () => {
+    let corrections = 0;
+    const enumerateRunner: EnumerateRunner = async ({ correction }) => {
+      if (correction) corrections++;
+      return [{ kind: 'Entity', identity: 'A' }, { kind: 'Operation', identity: 'POST /api/a' }];
+    };
+    await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner,
+      // Emit a fragment whose kind/identity match each valid target so both are covered.
+      generateRunner: async ({ area, targets }) => ({
+        fragments: targets.map((t) =>
+          t.kind === 'Operation'
+            ? {
+                kind: 'Operation',
+                identity: t.identity,
+                tcSource: `operation POST "/api/a" {\n  origin "${area.docs[0].ref}" "${t.identity}" 1..2\n  tags []\n}`,
+                origin: { source: area.docs[0].ref, section: t.identity, lines: [1, 2] },
+                obligationKeys: [],
+              }
+            : entityFragment(area.docs[0].ref, t.identity),
+        ),
+      }),
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    expect(corrections).toBe(0);
+  });
+
+  it('retries a failed enumerate view once, then succeeds — area not failed, result cached', async () => {
+    let calls = 0;
+    const enumerateRunner: EnumerateRunner = async () => {
+      calls++;
+      if (calls === 1) throw new Error('simulated enumerate timeout');
+      return [{ kind: 'Entity', identity: 'Order' }];
+    };
+    const opts = {
+      repoRoot: repo,
+      corpusInput: [areaInput('core/orders', ['orders.md'])],
+      enumerateRunner,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+      disableManifest: true, // keep the pipeline running so the enumerate cache is exercised on rerun
+    };
+    const r1 = await generateContractsFromCorpus(opts);
+    expect(calls).toBe(2); // failed once, retried, succeeded
+    expect(r1.enumerateFailures ?? []).toEqual([]);
+    expect(r1.artifactsToWrite.map((a) => a.identity)).toEqual(['Order']);
+
+    // The successful enumeration was cached — the runner isn't called again.
+    await generateContractsFromCorpus(opts);
+    expect(calls).toBe(2);
+  });
+
+  it('an enumerate view that fails both attempts marks the area failed and is not cached', async () => {
+    let calls = 0;
+    const enumerateRunner: EnumerateRunner = async () => {
+      calls++;
+      throw new Error('persistent enumerate timeout');
+    };
+    const opts = {
+      repoRoot: repo,
+      corpusInput: [areaInput('core/orders', ['orders.md'])],
+      enumerateRunner,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    };
+    const r1 = await generateContractsFromCorpus(opts);
+    expect(calls).toBe(2); // two attempts, both failed
+    expect(r1.enumerateFailures).toEqual(['core/orders']);
+    expect(r1.write.written).toEqual([]);
+
+    // Nothing was cached or manifested — a re-run re-attempts (two more calls).
+    const r2 = await generateContractsFromCorpus(opts);
+    expect(calls).toBe(4);
+    expect(r2.enumerateFailures).toEqual(['core/orders']);
+  });
+
+  it('re-requests an unparseable fragment with the parser error, then emits it once it parses', async () => {
+    let sawHint: string | undefined;
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets, errorHints }) => {
+      genCalls++;
+      return {
+        fragments: targets.map((t, i) => {
+          const hint = errorHints?.[i];
+          if (hint) sawHint = hint;
+          // Round 0: unparseable body. Round 1 (with the hint): a valid one.
+          return hint ? entityFragment(area.docs[0].ref, t.identity) : unparseableFragment(t.identity);
+        }),
+      };
+    };
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['Broken'] }),
+      generateRunner,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    expect(genCalls).toBe(2); // round 0 (unparseable) + round 1 (recovered)
+    expect(sawHint).toBeTruthy();
+    expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Broken']);
+    expect(result.gaps).toEqual([]);
+    expect(result.validationIssues.filter((iss) => iss.severity === 'hard')).toEqual([]);
+  });
+
+  it('emits the last unparseable version when a fragment never recovers (yield preserved, no infinite retry)', async () => {
+    let genCalls = 0;
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {
+      genCalls++;
+      return {
+        fragments: targets.map((t) =>
+          t.identity === 'Ghost' ? unparseableFragment('Ghost') : entityFragment(area.docs[0].ref, t.identity),
+        ),
+      };
+    };
+    const result = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/x', ['x.md'])],
+      enumerateRunner: enumerateStub({ 'core/x': ['Real', 'Ghost'] }),
+      generateRunner,
+      maxRetryRounds: 2,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+      disableGapJudge: true,
+    });
+    // The loop feeds the error back once (round 1) then stops — a round that only
+    // reproduces the same unparseable fragment is not treated as progress, so it
+    // does not burn round 2 nor loop forever.
+    expect(genCalls).toBe(2);
+    // Ghost never parsed, but its last version was still emitted (counted, no gap)
+    // so downstream repair could attempt it; here the validator drops it (hard).
+    expect(result.areas[0]).toMatchObject({ targets: 2, emitted: 2, gaps: [] });
+    expect(result.artifactsToWrite.map((a) => a.identity)).toEqual(['Real']);
+    expect(result.validationIssues.some((iss) => iss.severity === 'hard')).toBe(true);
   });
 
   it('does not write when dryRun', async () => {

@@ -131,7 +131,10 @@ export async function runBaseline(
       // resolved in the dashboard, which regenerates contracts (repo.contracts).
       if (openConflicts === 0) {
         await deps.onPhase?.('contracts');
-        await scanPipeline.generate(tmp, ref, deps.generateTracker);
+        // Anchor this (re)baseline to the PRIOR baseline's contracts so unchanged
+        // areas reproduce them instead of drifting run-to-run (Phase 4).
+        const anchorRef = existing ? { repoKey: req.repoFullName, commitSha: existing.commitSha } : undefined;
+        await scanPipeline.generate(tmp, ref, deps.generateTracker, anchorRef);
       } else {
         log.info(
           `[github-app] ${req.repoFullName}@${req.commitSha.slice(0, 7)} has ${openConflicts} open conflict(s) — skipping contract generation (neutral baseline until resolved)`,

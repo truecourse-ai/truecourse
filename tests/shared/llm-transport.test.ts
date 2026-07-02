@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   agentTransport,
+  cliTransport,
+  resolveTimeoutScale,
   stripCodeFences,
   extractJsonValue,
 } from '../../packages/shared/src/llm/transport.js';
@@ -12,6 +14,25 @@ function tmpIo(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llmio-'));
 }
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** A stand-in `claude` binary that ignores its args and blocks well past any
+ *  test timeout, so the transport's own timer is what settles the call. */
+function fakeSleepBin(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-fakebin-'));
+  const p = path.join(dir, 'claude-sleep.sh');
+  fs.writeFileSync(p, '#!/bin/sh\nsleep 30\n');
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
+const SCALE_ENV = 'TRUECOURSE_LLM_TIMEOUT_SCALE';
+function withScaleEnvRestore(): void {
+  const orig = process.env[SCALE_ENV];
+  afterEach(() => {
+    if (orig === undefined) delete process.env[SCALE_ENV];
+    else process.env[SCALE_ENV] = orig;
+  });
+}
 
 describe('stripCodeFences', () => {
   it('strips a fenced JSON block', () => {
@@ -97,5 +118,74 @@ describe('agentTransport (filesystem mailbox)', () => {
     await expect(
       agentTransport(io, { pollMs: 5 })({ id: 'slow-1', system: 's', user: 'u', timeoutMs: 40 }),
     ).rejects.toThrow(/timed out/);
+  });
+});
+
+describe('resolveTimeoutScale', () => {
+  withScaleEnvRestore();
+
+  it('defaults to 1 when unset', () => {
+    delete process.env[SCALE_ENV];
+    expect(resolveTimeoutScale()).toBe(1);
+  });
+  it('parses a float', () => {
+    process.env[SCALE_ENV] = '2.5';
+    expect(resolveTimeoutScale()).toBe(2.5);
+  });
+  it('parses an integer', () => {
+    process.env[SCALE_ENV] = '3';
+    expect(resolveTimeoutScale()).toBe(3);
+  });
+  it('falls back to 1 on non-numeric garbage', () => {
+    process.env[SCALE_ENV] = 'slow';
+    expect(resolveTimeoutScale()).toBe(1);
+  });
+  it('falls back to 1 on an empty string', () => {
+    process.env[SCALE_ENV] = '';
+    expect(resolveTimeoutScale()).toBe(1);
+  });
+  it('falls back to 1 on zero', () => {
+    process.env[SCALE_ENV] = '0';
+    expect(resolveTimeoutScale()).toBe(1);
+  });
+  it('falls back to 1 on a negative value', () => {
+    process.env[SCALE_ENV] = '-2';
+    expect(resolveTimeoutScale()).toBe(1);
+  });
+});
+
+describe('cliTransport timeout scaling', () => {
+  withScaleEnvRestore();
+
+  it('reports the raw timeout when the scale is unset', async () => {
+    delete process.env[SCALE_ENV];
+    const transport = cliTransport({ bin: fakeSleepBin() });
+    await expect(
+      transport({ system: 's', user: 'u', timeoutMs: 60 }),
+    ).rejects.toThrow(/timed out after 60ms/);
+  });
+
+  it('scales the SIGKILL deadline and reports the effective timeout', async () => {
+    process.env[SCALE_ENV] = '2';
+    const transport = cliTransport({ bin: fakeSleepBin() });
+    // 120ms × 2 = 240ms effective; the message must reflect the scaled value.
+    await expect(
+      transport({ system: 's', user: 'u', timeoutMs: 120 }),
+    ).rejects.toThrow(/timed out after 240ms/);
+  });
+});
+
+describe('agentTransport timeout scaling', () => {
+  withScaleEnvRestore();
+
+  it('applies the scale to the deadline (a fractional scale shortens it)', async () => {
+    process.env[SCALE_ENV] = '0.02';
+    const io = tmpIo();
+    const t0 = Date.now();
+    await expect(
+      // 1000ms × 0.02 = 20ms effective — must reject far sooner than the raw 1000ms.
+      agentTransport(io, { pollMs: 5 })({ id: 'scaled-1', system: 's', user: 'u', timeoutMs: 1000 }),
+    ).rejects.toThrow(/timed out/);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 });

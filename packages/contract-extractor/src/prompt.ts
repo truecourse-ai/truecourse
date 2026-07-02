@@ -4,6 +4,15 @@
  * transfer. The corpus-generate path pairs it with a per-area user prompt
  * (`buildCorpusGenerateUserPrompt` in `corpus-prompt.ts`).
  */
+import { parserOhm } from '@truecourse/contract-verifier';
+
+/**
+ * The closed keyword sets of the `.tc` grammar, generated from the grammar
+ * source so this reference can never drift from the keywords the parser
+ * accepts. Adding or removing a keyword in the grammar changes this block with
+ * no edit here. Embedded in `SYSTEM_PROMPT` below.
+ */
+const CLOSED_KEYWORD_SETS = parserOhm.renderGrammarKeywordReference();
 
 /**
  * The single per-kind capability sheet — the one source of truth for what each
@@ -17,22 +26,22 @@
 export const KIND_CAPABILITIES = `\
 - Operation — an HTTP endpoint: method, path, responses, headers, request/response body shapes. OWNS its body/query fields; do not split a body field into its own target.
 - Entity — a domain object and ALL its field attributes: type, immutability, server-assigned, format (email/uuid/regex), uniqueness, min/max range, non-empty, and schema/persisted defaults. A field attribute is NEVER a standalone target (not a ValidationRule, not a Fallback) — capture it on the Entity.
-- Enum — a closed value set referenced by other artifacts.
+- Enum — a closed value set referenced by other artifacts. Individual values, and a subset that triggers downstream behavior (a trigger-subset), are facets OF the enum — never their own target.
 - StateMachine — the legal transitions over an entity's state field. Individual transitions are not standalone targets.
-- AuthRequirement — an auth scheme an operation requires (bearer, api-key).
-- AuthorizationRule — who may act on which rows/operations (an ownership or role predicate).
+- AuthRequirement — an auth scheme and path-scope an operation requires (bearer, api-key), optionally a required-role. A predicate over WHICH rows/records a user may act on (ownership, attribute checks) is NOT here — that's an AuthorizationRule.
+- AuthorizationRule — who may act on which rows/operations (an ownership or role predicate). The auth SCHEME and path-scope (e.g. bearer on /api/**) is an AuthRequirement, not here.
 - ErrorEnvelope — the shared error RESPONSE SHAPE. Its fields (code/message/details) belong to the envelope; never enumerate them separately.
 - PaginationContract — the WHOLE list-pagination behavior: the cursor param, the limit param with its default/min/max and clamp-vs-reject rule, the response shape, and forbidden offset/page. These are facets of ONE PaginationContract — never enumerate a limit default or clamp as its own Fallback/ValidationRule.
 - IdempotencyContract — routes that must honor an idempotency key.
 - EffectGroup — the events that must (or must-not) fire on a code path. ALWAYS the top-level kind; individual effects are MEMBERS, never standalone targets (there is no bare Effect target).
-- Formula — a business-logic calculation/derivation (e.g. a pricing total or discount).
+- Formula — a business-logic calculation/derivation of a field's value (e.g. a pricing total or discount). A persisted/schema default is an Entity field default and a null/absent → default is a Fallback — neither is a Formula.
 - QueryRule — predicates a data query MUST or MUST NOT include (tenant scoping, a date anchor, a row-class filter).
 - ForbiddenArtifact — something the spec says MUST NOT exist in code (a file, dependency, env-var read, or feature flag).
 - NamedConstant — a literal value the spec pins (a threshold, weight, retry budget, or version constant).
 - ArchitectureDecision — a system-wide platform/data choice (Postgres, REST-not-GraphQL, Kafka), including storage / persistence-strategy decisions (dedicated column vs JSON blob).
 - ValidationRule — CONDITIONAL field requiredness ONLY: input X is required/optional/forbidden WHEN another field equals a value (optionally also gated on the actor's role). NOT for immutability, format, uniqueness, ranges, or defaults — those are Entity field attributes.
 - Fallback — a RUNTIME null/absent → default ONLY: "when X is missing/null, use <value>". It CANNOT express a comparison, clamp, or range (never "when > 50"). A clamp/min/max is a facet of its parent (an Entity field or the PaginationContract); a persisted/schema default is an Entity field default, not a Fallback.
-- FieldExposure — a field that MUST be exposed on a read path (a query projection and/or an API response). NOT a field's existence — that's an Entity field.
+- FieldExposure — a field that MUST be exposed on a read path. The ONLY two channels are a query projection (via query-select) and an API response body (via api-response); emit one or both. A value surfaced via response HEADERS, service metadata, logs, or events is NOT a FieldExposure — if the spec pins the value itself that is a NamedConstant, otherwise it has no structural encoding (emit an UnenforceableObligation). NOT a field's mere existence — that's an Entity field.
 - UnenforceableObligation — a spec sentence with no structural encoding. Emit-only, a last resort during generation; NEVER enumerated as a target.`;
 
 export const SYSTEM_PROMPT = `\
@@ -492,6 +501,27 @@ unenforceable-obligation encryption.at-rest {
   category compliance
   rationale "no structural encoding for storage-layer encryption"
 }
+\`\`\`
+
+# Closed keyword sets — the ONLY legal keywords per clause
+
+The block below is generated directly from the grammar and lists, for each
+rule, the COMPLETE set of legal keywords with a simplified argument shape.
+These sets are CLOSED: never write a keyword that is not listed for a clause,
+and never invent a new one. If what the spec says has no legal encoding in the
+target kind — no listed keyword captures it — do NOT bend the syntax to fit;
+emit an \`unenforceable-obligation\` fragment instead.
+
+Read each line as \`RuleName: form | form | …\`. A bare word is a literal
+keyword you type verbatim; \`<…>\` is a value slot (\`<ref>\` a cross-reference,
+\`<ident>\` a bare identifier, \`<string>\` a quoted string, \`<number>\`,
+\`<list>\`, \`<column>\`); \`a|b|c\` are alternative keywords for the same slot;
+\`{ … }\` is a nested block. For example \`FldExpChannel\` is the closed set for a
+field-exposure \`via\`, and \`OpFieldMod\` the modifiers a request/response body
+field admits.
+
+\`\`\`
+${CLOSED_KEYWORD_SETS}
 \`\`\`
 
 # Critical syntax rules — read carefully

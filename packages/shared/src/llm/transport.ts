@@ -385,6 +385,27 @@ export function jsonSchemaHint(schema: ZodTypeAny): string {
 }
 
 // ---------------------------------------------------------------------------
+// per-call timeout scaling
+// ---------------------------------------------------------------------------
+
+/**
+ * Multiplier applied to every per-call timeout (`TRUECOURSE_LLM_TIMEOUT_SCALE`,
+ * a float; default 1). Scaling here — the single point every stage's ceiling
+ * flows through — preserves the per-stage relative ceilings while letting a
+ * slow model or proxy widen them all with one knob (e.g. `2`–`3`). Invalid,
+ * zero, or negative values fall back to 1. Read per call so tests and long-run
+ * env changes take effect without a restart.
+ */
+export function resolveTimeoutScale(): number {
+  const env = process.env.TRUECOURSE_LLM_TIMEOUT_SCALE;
+  if (env) {
+    const parsed = parseFloat(env);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 1;
+}
+
+// ---------------------------------------------------------------------------
 // cli backend — spawn `claude -p`
 // ---------------------------------------------------------------------------
 
@@ -464,12 +485,14 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      timer = req.timeoutMs
+      // Effective (scaled) deadline; the error message reports it so logs stay truthful.
+      const timeoutMs = req.timeoutMs ? req.timeoutMs * resolveTimeoutScale() : undefined;
+      timer = timeoutMs
         ? setTimeout(() => {
             proc.kill('SIGKILL');
-            fail(`claude timed out after ${req.timeoutMs}ms`, null);
-            reject(new Error(`claude timed out after ${req.timeoutMs}ms`));
-          }, req.timeoutMs)
+            fail(`claude timed out after ${timeoutMs}ms`, null);
+            reject(new Error(`claude timed out after ${timeoutMs}ms`));
+          }, timeoutMs)
         : null;
       proc.stdout.on('data', (b: Buffer) => out.push(b));
       proc.stderr.on('data', (b: Buffer) => err.push(b));
@@ -575,7 +598,7 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
       );
     }
 
-    const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout);
+    const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
     for (;;) {
       if (fs.existsSync(resPath)) {
         let parsed: { text?: string; error?: string };

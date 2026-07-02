@@ -18,7 +18,7 @@ import {
 import { saveSpec } from '@truecourse/core/lib/spec-store';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
-import { saveContracts, type RepoRef } from '@truecourse/core/lib/contract-store';
+import { saveContracts, listContractFiles, readContractFile, type RepoRef } from '@truecourse/core/lib/contract-store';
 import {
   getInstallationToken,
   cloneUrl,
@@ -48,6 +48,9 @@ export interface SpecScanPipeline {
     repoRoot: string,
     ref: RepoRef,
     tracker?: StepTracker,
+    /** Phase 4: materialize this stored contract set into the clone first so an
+     *  unchanged area anchors to it and reproduces its prior output. */
+    anchorRef?: RepoRef,
   ): Promise<{ fileCount: number }>;
 }
 
@@ -69,8 +72,12 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     await saveSpec(ref, 'corpus', curate.corpus);
     return { openConflicts: curate.stats.overlapFlags };
   },
-  async generate(repoRoot, ref, tracker) {
+  async generate(repoRoot, ref, tracker, anchorRef) {
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
+    // Phase 4 anchor: the clone has no committed contracts, so materialize the
+    // base baseline's stored `.tc` into it before generating — then an unchanged
+    // area reproduces its prior contract instead of drifting run-to-run.
+    if (anchorRef) await materializeAnchorContracts(anchorRef, repoRoot);
     const { corpus } = await generateFromCorpusInProcess(repoRoot, { tracker });
     // A resolver-hard / failed corpus wrote nothing — surface it as a failure
     // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
@@ -81,6 +88,24 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     return { fileCount: corpus.result.write.written.length };
   },
 };
+
+/** Write a stored contract set's `.tc` files into `<repoRoot>/.truecourse/contracts/`
+ *  so generation can anchor to them (the clone carries no committed contracts).
+ *  Best-effort: a missing/unreadable base never fails generation. */
+async function materializeAnchorContracts(anchorRef: RepoRef, repoRoot: string): Promise<void> {
+  try {
+    const dir = path.join(repoRoot, '.truecourse', 'contracts');
+    for (const rel of await listContractFiles(anchorRef.repoKey, 'contracts', anchorRef.commitSha)) {
+      const content = await readContractFile(anchorRef.repoKey, 'contracts', rel, anchorRef.commitSha);
+      if (content == null) continue;
+      const abs = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    }
+  } catch {
+    // Anchor is a bias, never a hard dependency — swallow and generate cold.
+  }
+}
 
 export interface SpecScanDeps {
   auth: GithubAuth;

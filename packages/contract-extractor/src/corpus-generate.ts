@@ -19,8 +19,9 @@ import { createHash } from 'node:crypto';
 import pLimit from 'p-limit';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { parserOhm } from '@truecourse/contract-verifier';
 import { ExtractionResultSchema, type ExtractionResult, type Fragment, type SpecSlice } from './types.js';
-import { SYSTEM_PROMPT } from './prompt.js';
+import { SYSTEM_PROMPT, KIND_CAPABILITIES } from './prompt.js';
 import {
   ENUMERATE_SYSTEM_PROMPT,
   EnumerateResultSchema,
@@ -46,8 +47,44 @@ import type { ValidationIssue } from './validator.js';
 // Runners (injectable; production spawns the LLM, tests stub)
 // ---------------------------------------------------------------------------
 
-export type EnumerateRunner = (input: { area: AreaGenInput }) => Promise<TargetSpec[]>;
-export type GenerateBatchRunner = (input: { area: AreaGenInput; targets: TargetSpec[] }) => Promise<ExtractionResult>;
+/** Corrective context for a re-ask after an enumerate view returned a target
+ *  whose kind isn't in the catalog. Carried on the runner input, alongside
+ *  `priorTargets`, so every runner (spawn + injected) can surface it. */
+export interface EnumerateCorrection {
+  /** The offending kinds the previous response used that aren't in the catalog. */
+  invalidKinds: string[];
+}
+
+export type EnumerateRunner = (input: {
+  area: AreaGenInput;
+  priorTargets?: PriorTarget[];
+  correction?: EnumerateCorrection;
+}) => Promise<TargetSpec[]>;
+export type GenerateBatchRunner = (input: {
+  area: AreaGenInput;
+  targets: TargetSpec[];
+  priorBodies?: (string | undefined)[];
+  /** Per-target parser error from a prior round's unparseable fragment (parallel
+   *  to `targets`) — attached to that target's line so the model fixes the syntax. */
+  errorHints?: (string | undefined)[];
+}) => Promise<ExtractionResult>;
+
+/** A previously-generated artifact's identity — anchors the enumerate step so it
+ *  reuses the exact spelling instead of re-slugging/re-wording it. */
+export interface PriorTarget {
+  kind: string;
+  identity: string;
+}
+
+/** The existing contracts a regeneration anchors to (Phase 4), so unchanged areas
+ *  reproduce their prior output instead of drifting run-to-run. Best-effort: the
+ *  spec is still the source of truth — a target the spec dropped is not resurrected. */
+export interface PriorContracts {
+  /** Existing artifact identities — anchor the enumerate step. */
+  targets: PriorTarget[];
+  /** `coverageKey(kind, identity)` → existing `.tc` body — anchors the extract step. */
+  bodyByKey: Map<string, string>;
+}
 
 export interface CorpusGenerateModels {
   enumerate?: string;
@@ -90,6 +127,13 @@ export interface CorpusGenerateOptions {
   enumerateRunner?: EnumerateRunner;
   reconcileRunner?: ReconcileRunner;
   generateRunner?: GenerateBatchRunner;
+  /**
+   * Existing contracts to anchor this regeneration to (Phase 4): an area whose
+   * spec is unchanged reproduces its prior contracts instead of drifting. Passed
+   * to the enumerate + extract prompts only — never folded into a cache key, so
+   * it biases the LLM on a cache MISS without re-busting unchanged areas.
+   */
+  prior?: PriorContracts;
   /** Skip the LLM target-reconciliation pass (deterministic cross-area de-dup still runs). */
   disableTargetReconciliation?: boolean;
   models?: CorpusGenerateModels;
@@ -222,7 +266,7 @@ export async function generateContractsFromCorpus(
   // shared limit; the area task itself is not a slot, avoiding a nested-limit deadlock.
   const enumerated = await Promise.all(
     areas.map(async (area) => {
-      const { targets: rawTargets, failed } = await enumerateCached(opts.repoRoot, area, enumerate, limit);
+      const { targets: rawTargets, failed } = await enumerateCached(opts.repoRoot, area, enumerate, limit, opts.prior?.targets);
       // Canonicalize identities at the parse boundary so every downstream use
       // (reconcile, extract cache key, filenames) sees one stable identity.
       const targets = rawTargets.map((t) => ({ ...t, identity: canonicalIdentity(t.kind, t.identity) }));
@@ -258,6 +302,7 @@ export async function generateContractsFromCorpus(
         onContractsEmitted: opts.onContractsEmitted,
         scope: opts.repoRoot,
         cacheEnabled: opts.disableExtractCache !== true,
+        prior: opts.prior,
       }),
     ),
   );
@@ -387,6 +432,8 @@ interface AreaRunContext {
   scope: string;
   /** When false, always re-generate (skip the per-area extract cache). */
   cacheEnabled: boolean;
+  /** Existing contracts to anchor extraction (Phase 4); undefined = no anchor. */
+  prior?: PriorContracts;
 }
 
 interface AreaRunResult {
@@ -424,30 +471,70 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
   }
 
   const fragments: Fragment[] = [];
-  const emitted = new Set<string>();
+  const emitted = new Set<string>(); // targets with a PARSING fragment in `fragments`
+  const parseErrors = new Map<string, string>(); // coverageKey → last parser error (fed into the next round's prompt)
+  const lastFailed = new Map<string, Fragment>(); // coverageKey → last unparseable fragment (flushed if never recovered)
+  // A fragment counts as produced only if its tcSource parses under the strict
+  // grammar (the same oracle repair uses). A failing fragment is NOT counted:
+  // its target stays in missing() and is re-requested with the parser error, so
+  // the model can fix the syntax before the fragment travels the whole pipeline.
   const emit = (res: ExtractionResult): void => {
     for (const raw of res.fragments) {
       const f = canonFragment(raw);
       const key = coverageKey(f.kind, f.identity);
       if (emitted.has(key)) continue;
-      emitted.add(key);
-      fragments.push(f);
+      const check = parseFragmentTc(f.kind, f.identity, f.tcSource);
+      if (check.ok) {
+        emitted.add(key);
+        fragments.push(f);
+        parseErrors.delete(key);
+        lastFailed.delete(key);
+      } else {
+        parseErrors.set(key, truncateParseError(check.error ?? 'parse failed'));
+        lastFailed.set(key, f);
+      }
     }
   };
   const missing = (): TargetSpec[] => targets.filter((t) => !emitted.has(coverageKey(t.kind, t.identity)));
 
+  // Progress signature for the no-progress early-break: parsing-fragment count
+  // plus each still-pending target's current parser error. A round that only
+  // produced UNPARSEABLE fragments still changes this (new errors to feed back
+  // next round), so it is not mistaken for progress-less; a round that reproduced
+  // the identical failing output leaves it unchanged and breaks — no infinite loop.
+  const signature = (pending: TargetSpec[]): string =>
+    `${emitted.size}#` +
+    pending
+      .map((t) => {
+        const k = coverageKey(t.kind, t.identity);
+        return `${k}=${parseErrors.get(k) ?? ''}`;
+      })
+      .sort()
+      .join('|');
+
   // Round 0: generate every target in batches. Rounds 1..max: re-prompt the
-  // misses in focused calls until covered or no progress is made. Each batch
-  // emits as it resolves (not after the whole round) so the running contract
-  // count climbs continuously — emit() is synchronous, so the shared `emitted`
-  // set is never touched concurrently.
+  // misses (unparseable or never-returned) in focused calls, attaching each
+  // target's parser error, until covered or the round makes no change. Each
+  // batch emits as it resolves (not after the whole round) so the running
+  // contract count climbs continuously — emit() is synchronous, so the shared
+  // `emitted` set is never touched concurrently.
   let pending = targets;
+  let prevSig = signature(targets);
   for (let round = 0; round <= ctx.maxRounds && pending.length > 0; round++) {
     const batches = chunk(pending, ctx.batchSize);
     await Promise.all(
       batches.map((batch) =>
         ctx
-          .limit(() => ctx.generate({ area, targets: batch }))
+          .limit(() =>
+            ctx.generate({
+              area,
+              targets: batch,
+              priorBodies: ctx.prior
+                ? batch.map((t) => ctx.prior!.bodyByKey.get(coverageKey(t.kind, t.identity)))
+                : undefined,
+              errorHints: batch.map((t) => parseErrors.get(coverageKey(t.kind, t.identity))),
+            }),
+          )
           .then((res) => {
             const before = fragments.length;
             emit(res);
@@ -458,9 +545,23 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
       ),
     );
     const next = missing();
-    if (next.length === pending.length) break; // no progress this round — stop retrying
+    const sig = signature(next);
+    if (sig === prevSig) break; // no parsing progress and no new error to feed back — stop retrying
+    prevSig = sig;
     pending = next;
   }
+
+  // Yield floor: any target we never got a PARSING fragment for keeps its last
+  // unparseable version, so downstream repair (pass 0) can still attempt it —
+  // the parse gate adds earlier feedback and must never reduce yield versus
+  // emitting blindly.
+  let flushed = 0;
+  for (const [key, frag] of lastFailed) {
+    if (emitted.has(key)) continue;
+    fragments.push(frag);
+    flushed += 1;
+  }
+  if (flushed > 0) ctx.onContractsEmitted?.(flushed);
 
   const coverage = coverageFor(area, targets, fragments);
   ctx.onAreaDone?.(coverage);
@@ -516,6 +617,47 @@ function canonFragment(f: Fragment): Fragment {
   return { ...f, identity: canonicalIdentity(f.kind, f.identity) };
 }
 
+/** Parse-check a fragment's tcSource under the strict grammar (the same oracle
+ *  repair uses). A body that produces zero statements is a failure. */
+function parseFragmentTc(kind: string, identity: string, tcSource: string): { ok: boolean; error?: string } {
+  try {
+    const node = parserOhm.parseTcFile(`<llm:${kind}:${identity}>`, tcSource);
+    return node.statements.length > 0 ? { ok: true } : { ok: false, error: 'tcSource produced zero statements' };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Collapse a parser error to one short line so a re-prompt hint stays compact. */
+function truncateParseError(msg: string): string {
+  const oneLine = msg.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine;
+}
+
+/**
+ * The catalog kinds an enumerate target may use — every `- <Kind> — …` line in
+ * the shared capability sheet EXCEPT `UnenforceableObligation` (emit-only during
+ * generation, never enumerated as a target). Deriving from KIND_CAPABILITIES
+ * keeps one source of truth: a kind added to the catalog is accepted with no
+ * change here. Lower-cased for tolerant matching (the enumerate prompt asks for
+ * exact casing, but a case slip must not fail an otherwise-valid target).
+ */
+const VALID_ENUMERATE_KINDS: ReadonlySet<string> = deriveValidEnumerateKinds();
+
+function deriveValidEnumerateKinds(): Set<string> {
+  const kinds = new Set<string>();
+  for (const line of KIND_CAPABILITIES.split('\n')) {
+    const m = /^\s*-\s+([A-Za-z][A-Za-z0-9]*)\s+[—–-]/.exec(line);
+    if (!m || m[1] === 'UnenforceableObligation') continue;
+    kinds.add(m[1].toLowerCase());
+  }
+  return kinds;
+}
+
+function isValidEnumerateKind(kind: string): boolean {
+  return VALID_ENUMERATE_KINDS.has(kind.trim().toLowerCase());
+}
+
 function extractCacheKey(area: AreaGenInput, targets: TargetSpec[], maxRounds: number): string {
   const docMaterial = area.docs
     .map((d) => `${d.ref}:${createHash('sha256').update(d.content).digest('hex')}`)
@@ -568,6 +710,7 @@ async function enumerateCached(
   area: AreaGenInput,
   runner: EnumerateRunner,
   limit: <T>(fn: () => Promise<T>) => Promise<T>,
+  priorTargets?: PriorTarget[],
 ): Promise<{ targets: TargetSpec[]; failed: boolean }> {
   const key = enumerateCacheKey(area);
   const cached = await getCacheEntry(scope, ENUMERATE_CACHE_NAME, key);
@@ -582,27 +725,77 @@ async function enumerateCached(
   const targets: TargetSpec[] = [];
   let failed = false;
   for (const view of enumerateViews(area)) {
-    let part: TargetSpec[];
-    try {
-      part = await limit(() => runner({ area: view }));
-    } catch {
-      // A view failed (e.g. a 180s timeout) — this area's target list is now
-      // incomplete. Keep going for the other views, but remember it failed.
+    // Run the view, retrying ONCE on failure (timeout / transport error) before
+    // giving up on it — enumerate is otherwise the only single-attempt stage.
+    const part = await runViewWithRetry(view, runner, limit, priorTargets);
+    if (part === null) {
+      // Both attempts failed — this area's target list is now incomplete. Keep
+      // going for the other views, but remember it failed (so it isn't cached).
       failed = true;
       continue;
     }
-    for (const t of part) {
+    // Validate the returned kinds against the closed catalog; one corrective
+    // re-ask on any invalid kind, then drop whatever is still invalid.
+    const validated = await validateEnumerateKinds(part, view, runner, limit, priorTargets);
+    for (const t of validated) {
       const k = coverageKey(t.kind, t.identity);
       if (seen.has(k)) continue;
       seen.add(k);
       targets.push(t);
     }
   }
-  // Only cache a COMPLETE enumeration. Caching after a failed view would poison
-  // the cache: a re-run would return the partial/empty list as a hit and never
-  // retry, silently dropping the area's contracts forever.
+  // Only cache a COMPLETE, validated enumeration. Caching after a failed view
+  // would poison the cache: a re-run would return the partial/empty list as a
+  // hit and never retry, silently dropping the area's contracts forever.
   if (!failed) await setCacheEntry(scope, ENUMERATE_CACHE_NAME, key, { targets });
   return { targets, failed };
+}
+
+/** Run one enumerate view, retrying once on failure. Returns null only when
+ *  both attempts fail — the view is then a loss for this run. */
+async function runViewWithRetry(
+  view: AreaGenInput,
+  runner: EnumerateRunner,
+  limit: <T>(fn: () => Promise<T>) => Promise<T>,
+  priorTargets?: PriorTarget[],
+): Promise<TargetSpec[] | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await limit(() => runner({ area: view, priorTargets }));
+    } catch {
+      // fall through — retry once, then give up after the last attempt
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate a view's targets against the closed kind catalog. If any target's
+ * kind isn't in the catalog, re-ask ONCE with the offending kinds listed, then
+ * drop whatever is STILL invalid — the valid targets are always kept, so an
+ * invented kind never fails the whole area. Returns only valid targets.
+ */
+async function validateEnumerateKinds(
+  part: TargetSpec[],
+  view: AreaGenInput,
+  runner: EnumerateRunner,
+  limit: <T>(fn: () => Promise<T>) => Promise<T>,
+  priorTargets?: PriorTarget[],
+): Promise<TargetSpec[]> {
+  const valid = part.filter((t) => isValidEnumerateKind(t.kind));
+  const invalid = part.filter((t) => !isValidEnumerateKind(t.kind));
+  if (invalid.length === 0) return valid;
+  const invalidKinds = [...new Set(invalid.map((t) => t.kind))];
+  let corrected: TargetSpec[];
+  try {
+    corrected = await limit(() => runner({ area: view, priorTargets, correction: { invalidKinds } }));
+  } catch {
+    // The corrective re-ask itself failed — keep the valid targets already in hand.
+    return valid;
+  }
+  // Union the originally-valid targets with the re-ask's valid targets (the
+  // caller de-dups by coverage key); still-invalid kinds are never resurrected.
+  return [...valid, ...corrected.filter((t) => isValidEnumerateKind(t.kind))];
 }
 
 // ---------------------------------------------------------------------------
@@ -617,14 +810,14 @@ function spawnEnumerateRunner(
   // model/proxy can run an enumerate prompt in 140–180s+ (observed on gpt-5.5 via
   // a proxy), which blew past the old 180s ceiling — so 300s.
   const timeoutMs = opts.timeoutMs ?? 300_000;
-  return async ({ area }) => {
+  return async ({ area, priorTargets, correction }) => {
     const raw = await transport({
       id: `contract.enumerate:${area.areaId}`,
       stage: 'contract.enumerate',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: ENUMERATE_SYSTEM_PROMPT,
-      user: buildEnumerateUserPrompt(area),
+      user: buildEnumerateUserPrompt(area, priorTargets, correction),
       responseFormat: 'json',
       timeoutMs,
     });
@@ -638,14 +831,14 @@ function spawnGenerateRunner(
 ): GenerateBatchRunner {
   const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 600_000;
-  return async ({ area, targets }) => {
+  return async ({ area, targets, priorBodies, errorHints }) => {
     const raw = await transport({
       id: `contract.extract:corpus:${area.areaId}:${targets.map((t) => t.identity).join(',').slice(0, 80)}`,
       stage: 'contract.extract',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: SYSTEM_PROMPT,
-      user: buildCorpusGenerateUserPrompt(area, targets),
+      user: buildCorpusGenerateUserPrompt(area, targets, priorBodies, errorHints),
       responseFormat: 'json',
       timeoutMs,
     });

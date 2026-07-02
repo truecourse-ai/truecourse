@@ -39,7 +39,10 @@ import {
   type CoverageGap,
   type EnumerateRunner,
   type GapJudgeRunner,
+  coverageKey,
   type GenerateBatchRunner,
+  type PriorContracts,
+  type PriorTarget,
   type ValidationIssue,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
@@ -83,6 +86,8 @@ import {
   infer,
   writeInferred,
   renderDecision,
+  parserOhm,
+  resolver,
   type ContractDrift,
   type VerifyResult,
   type InferResult,
@@ -675,10 +680,60 @@ export interface CorpusGenerateInProcessOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /** Skip the LLM gap-judge auto-close pass (gaps reported raw). */
   disableGapJudge?: boolean;
+  /**
+   * Skip the Phase-4 existing-contract anchor (regenerate from scratch). The
+   * anchor is on by default: an area whose spec is unchanged reproduces its prior
+   * contracts instead of drifting. Reads the `.tc` already at
+   * `<repoRoot>/.truecourse/contracts/` (OSS: committed; EE: the base contracts
+   * the gate materialized into the clone).
+   */
+  disableAnchor?: boolean;
   // --- test seams ---
   enumerateRunner?: EnumerateRunner;
   generateRunner?: GenerateBatchRunner;
   gapJudgeRunner?: GapJudgeRunner;
+}
+
+/**
+ * Build the Phase-4 anchor from the contracts ALREADY on disk at
+ * `<repoRoot>/.truecourse/contracts/`. Parsing each `.tc` yields its
+ * (kind, identity) — for the enumerate anchor — and the file body — for the
+ * extract anchor. Best-effort: unparseable files are skipped, and a cold repo
+ * (no prior contracts) returns undefined so generation runs exactly as before.
+ * `_inferred/` is excluded — we never anchor authored generation to inferred output.
+ */
+function buildPriorContracts(repoRoot: string): PriorContracts | undefined {
+  const dir = path.join(repoRoot, '.truecourse', 'contracts');
+  if (!fs.existsSync(dir)) return undefined;
+  const targets: PriorTarget[] = [];
+  const bodyByKey = new Map<string, string>();
+  const walk = (d: string): void => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) {
+        if (e.name === '_inferred') continue;
+        walk(path.join(d, e.name));
+      } else if (e.name.endsWith('.tc')) {
+        const abs = path.join(d, e.name);
+        const src = fs.readFileSync(abs, 'utf-8');
+        try {
+          const file = parserOhm.parseTcFile(path.relative(dir, abs), src);
+          // index is keyed "<Kind>:<identity>" (PascalCase kind).
+          for (const key of resolver.resolve([file]).index.keys()) {
+            const colon = key.indexOf(':');
+            if (colon < 0) continue;
+            const kind = key.slice(0, colon);
+            const identity = key.slice(colon + 1);
+            targets.push({ kind, identity });
+            bodyByKey.set(coverageKey(kind, identity), src);
+          }
+        } catch {
+          // Best-effort anchor — a malformed prior file is skipped, never fatal.
+        }
+      }
+    }
+  };
+  walk(dir);
+  return targets.length > 0 ? { targets, bodyByKey } : undefined;
 }
 
 /**
@@ -762,6 +817,9 @@ export async function generateFromCorpusInProcess(
       enumerateRunner: options.enumerateRunner,
       generateRunner: options.generateRunner,
       gapJudge: options.gapJudgeRunner,
+      // Phase 4: anchor regeneration to the contracts already on disk so an
+      // unchanged area reproduces its prior output instead of drifting.
+      prior: options.disableAnchor ? undefined : buildPriorContracts(repoRoot),
       onAreasReady: (n) => {
         areasTotal = n;
         tracker?.detail('enumerate', withUsage('enumerate', `0/${n} areas`)!);

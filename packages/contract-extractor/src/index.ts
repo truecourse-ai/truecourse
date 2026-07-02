@@ -89,12 +89,15 @@ export {
 } from './corpus-generate.js';
 export type {
   EnumerateRunner,
+  EnumerateCorrection,
   GenerateBatchRunner,
   CorpusGenerateModels,
   CorpusGenerateOptions,
   CorpusGenerateResult,
   CoverageGap,
   AreaCoverage,
+  PriorContracts,
+  PriorTarget,
 } from './corpus-generate.js';
 export {
   areaSpecHash,
