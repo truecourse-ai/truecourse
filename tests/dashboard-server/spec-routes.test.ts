@@ -32,7 +32,17 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
+// Include/exclude routes re-curate server-side. The curate engine has its own
+// suite (tests/spec-consolidator), so stub it to a no-op here — leaving the
+// seeded corpus.json intact — and assert the routes INVOKE it (the recheck is
+// server-driven, not client-driven).
+vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
+  return { ...actual, curateInProcess: vi.fn(async () => ({ noChanges: false })) };
+});
+
 import { createApp } from '../../apps/dashboard/server/src/app';
+import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import {
   setBackgroundTaskRunner,
   type BackgroundTask,
@@ -101,6 +111,8 @@ describe('corpus routes (spec-scan redesign)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
+    gitInit(fixture.repoPath); // include/exclude re-curate → route guards require git
+    vi.mocked(curateInProcess).mockClear();
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
@@ -151,19 +163,52 @@ describe('corpus routes (spec-scan redesign)', () => {
       .expect(400);
   });
 
-  it('POST then DELETE /spec/includes round-trips a force-include', async () => {
+  it('POST then DELETE /spec/includes round-trips a force-include + re-curates', async () => {
     seedCorpus([]);
     const add = await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/includes`)
       .send({ ref: 'docs/v1.md' })
       .expect(200);
     expect(add.body.manualIncludes).toContain('docs/v1.md');
+    // The route drives the recheck server-side — not the client.
+    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
 
     const del = await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/includes`)
       .send({ ref: 'docs/v1.md' })
       .expect(200);
     expect(del.body.manualIncludes).toEqual([]);
+    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(2);
+  });
+
+  it('POST then DELETE /spec/excludes round-trips a force-exclude + re-curates', async () => {
+    seedCorpus([]);
+    const add = await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(add.body.manualExcludes).toContain('docs/v2.md');
+    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
+
+    const del = await request(app)
+      .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(del.body.manualExcludes).toEqual([]);
+  });
+
+  it('force-exclude clears a force-include for the same doc (mutually exclusive)', async () => {
+    seedCorpus([]);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/includes`)
+      .send({ ref: 'docs/v1.md' })
+      .expect(200);
+    const res = await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v1.md' })
+      .expect(200);
+    expect(res.body.manualExcludes).toContain('docs/v1.md');
+    expect(res.body.manualIncludes ?? []).not.toContain('docs/v1.md');
   });
 
   it('GET /spec/corpus exposes manualIncludes + skippedDocs', async () => {

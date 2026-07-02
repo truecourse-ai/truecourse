@@ -84,6 +84,44 @@ describe('generateContractsFromCorpus', () => {
     expect(result.gaps).toEqual([]);
   });
 
+  it('surfaces an enumerate failure without caching or manifesting it (a re-run retries)', async () => {
+    const corpusInput = [areaInput('core/orders-entity', ['orders.md'])];
+    let failing = true;
+    const flaky: EnumerateRunner = async () => {
+      if (failing) throw new Error('simulated enumerate timeout');
+      return [{ kind: 'Entity', identity: 'Order' }];
+    };
+
+    // Run 1: enumerate times out → failure surfaced, nothing written, and
+    // (critically) nothing cached or recorded in the manifest.
+    const r1 = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput,
+      enumerateRunner: flaky,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+    });
+    expect(r1.enumerateFailures).toEqual(['core/orders-entity']);
+    expect(r1.write.written).toEqual([]);
+
+    // Run 2: same specs, but the LLM recovers. Because run 1 poisoned neither the
+    // enumerate cache nor the manifest, this run re-attempts and succeeds.
+    failing = false;
+    const r2 = await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput,
+      enumerateRunner: flaky,
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+    });
+    expect(r2.noChanges).not.toBe(true);
+    expect(r2.enumerateFailures ?? []).toEqual([]);
+    expect(r2.artifactsToWrite.map((a) => a.identity)).toEqual(['Order']);
+    expect(r2.write.written.length).toBeGreaterThan(0);
+  });
+
   it('batches targets by batchSize', async () => {
     const batchSizes: number[] = [];
     const generateRunner: GenerateBatchRunner = async ({ area, targets }) => {

@@ -141,6 +141,14 @@ export interface CorpusGenerateResult {
   /** All residual gaps across areas (enumerated but never generated). */
   gaps: CoverageGap[];
   /**
+   * Area ids whose enumeration hit a failed view (e.g. an LLM timeout), so their
+   * target list — and therefore their contracts — may be incomplete. Distinct
+   * from `gaps` (which only covers *enumerated* targets that weren't generated):
+   * a fully-failed enumeration produces zero targets and zero gaps, so this is
+   * the only signal that an area silently dropped out. Non-empty ⇒ re-run.
+   */
+  enumerateFailures?: string[];
+  /**
    * True when the manifest showed an unchanged corpus and generation was skipped
    * entirely (0 LLM, committed contracts reused). Lets the CLI/dashboard say
    * "nothing changed" instead of running.
@@ -213,11 +221,15 @@ export async function generateContractsFromCorpus(
   // shared limit; the area task itself is not a slot, avoiding a nested-limit deadlock.
   const enumerated = await Promise.all(
     areas.map(async (area) => {
-      const targets = await enumerateCached(opts.repoRoot, area, enumerate, limit);
+      const { targets, failed } = await enumerateCached(opts.repoRoot, area, enumerate, limit);
       opts.onAreaEnumerated?.(area.areaId, targets.length);
-      return { area, targets };
+      return { area, targets, failed };
     }),
   );
+  // Areas whose enumeration hit a failed view (e.g. an LLM timeout) — their target
+  // list is incomplete, so their contracts may be partial or missing. Surfaced on
+  // the result (and NOT cached above) so the caller can warn and a re-run retries.
+  const enumerateFailures = enumerated.filter((e) => e.failed).map((e) => e.area.areaId);
 
   // Phase 2 — reconcile the GLOBAL target list: de-dup across areas + collapse
   // semantic duplicates (different identities, same artifact) so each artifact is
@@ -268,6 +280,7 @@ export async function generateContractsFromCorpus(
       mergeDiagnostics: assembled.mergeDiagnostics,
       areas: coverage,
       gaps,
+      enumerateFailures,
     };
   }
 
@@ -277,8 +290,16 @@ export async function generateContractsFromCorpus(
   });
 
   // Record the spec hashes we just generated from, so the next unchanged run (or
-  // a teammate's clone) is a deterministic no-op. Only on a real (written) run.
-  if (!opts.dryRun) writeManifest(opts.repoRoot, buildManifest(areas));
+  // a teammate's clone) is a deterministic no-op. Only on a real (written) run —
+  // and EXCLUDE any area whose enumeration failed, so its incomplete contracts
+  // aren't recorded as "done": leaving it out of the manifest makes the next run
+  // treat it as changed and re-attempt it, instead of no-opping past it forever.
+  if (!opts.dryRun) {
+    const complete = enumerateFailures.length
+      ? areas.filter((a) => !enumerateFailures.includes(a.areaId))
+      : areas;
+    writeManifest(opts.repoRoot, buildManifest(complete));
+  }
 
   // Gap auto-close: judge each area's gaps against its docs + the full written
   // corpus, drop the justified ones, keep genuine misses (with a reason). Only on
@@ -294,6 +315,7 @@ export async function generateContractsFromCorpus(
     mergeDiagnostics: assembled.mergeDiagnostics,
     areas: coverage,
     gaps: judgedGaps,
+    enumerateFailures,
   };
 }
 
@@ -535,24 +557,28 @@ async function enumerateCached(
   area: AreaGenInput,
   runner: EnumerateRunner,
   limit: <T>(fn: () => Promise<T>) => Promise<T>,
-): Promise<TargetSpec[]> {
+): Promise<{ targets: TargetSpec[]; failed: boolean }> {
   const key = enumerateCacheKey(area);
   const cached = await getCacheEntry(scope, ENUMERATE_CACHE_NAME, key);
   if (cached) {
     const parsed = EnumerateResultSchema.safeParse(cached);
-    if (parsed.success) return parsed.data.targets;
+    if (parsed.success) return { targets: parsed.data.targets, failed: false };
   }
   // Enumerate every heading-chunk view of the area and UNION the target lists
   // (de-duped by coverage key) — exhaustive over big docs, and tolerant of the
   // enumerator listing the same target twice.
   const seen = new Set<string>();
   const targets: TargetSpec[] = [];
+  let failed = false;
   for (const view of enumerateViews(area)) {
     let part: TargetSpec[];
     try {
       part = await limit(() => runner({ area: view }));
     } catch {
-      continue; // a failed chunk contributes nothing rather than aborting the area
+      // A view failed (e.g. a 180s timeout) — this area's target list is now
+      // incomplete. Keep going for the other views, but remember it failed.
+      failed = true;
+      continue;
     }
     for (const t of part) {
       const k = coverageKey(t.kind, t.identity);
@@ -561,8 +587,11 @@ async function enumerateCached(
       targets.push(t);
     }
   }
-  await setCacheEntry(scope, ENUMERATE_CACHE_NAME, key, { targets });
-  return targets;
+  // Only cache a COMPLETE enumeration. Caching after a failed view would poison
+  // the cache: a re-run would return the partial/empty list as a hit and never
+  // retry, silently dropping the area's contracts forever.
+  if (!failed) await setCacheEntry(scope, ENUMERATE_CACHE_NAME, key, { targets });
+  return { targets, failed };
 }
 
 // ---------------------------------------------------------------------------
@@ -573,7 +602,10 @@ function spawnEnumerateRunner(
   opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): EnumerateRunner {
   const transport = opts.transport ?? cliTransport({ bin: opts.bin });
-  const timeoutMs = opts.timeoutMs ?? 180_000;
+  // Enumerate is meant to be a quick "list the targets" call, but a slow
+  // model/proxy can run an enumerate prompt in 140–180s+ (observed on gpt-5.5 via
+  // a proxy), which blew past the old 180s ceiling — so 300s.
+  const timeoutMs = opts.timeoutMs ?? 300_000;
   return async ({ area }) => {
     const raw = await transport({
       id: `contract.enumerate:${area.areaId}`,

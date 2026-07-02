@@ -42,9 +42,12 @@ import {
   runSpecChainsRemove,
 } from "./commands/spec-chains.js";
 import {
+  runSpecDocsList,
   runSpecDocsSkipped,
   runSpecDocsInclude,
   runSpecDocsUninclude,
+  runSpecDocsExclude,
+  runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
 import { runConfigLlmShow } from "./commands/config.js";
@@ -327,7 +330,14 @@ chainsCmd
 // -- Docs (relevance filter overrides) --------------------------------------
 const docsCmd = specCmd
   .command("docs")
-  .description("Manage LLM relevance-filter overrides (skipped docs)");
+  .description("Manage corpus doc overrides — force-include skipped docs or force-exclude kept ones");
+
+docsCmd
+  .command("list")
+  .description("List the kept (corpus) docs with their area tags")
+  .action(async () => {
+    await runSpecDocsList();
+  });
 
 docsCmd
   .command("skipped")
@@ -348,6 +358,20 @@ docsCmd
   .description("Remove a force-include override")
   .action(async (docPath) => {
     await runSpecDocsUninclude(docPath);
+  });
+
+docsCmd
+  .command("exclude <path>")
+  .description("Force-exclude a kept doc from the corpus and re-scan")
+  .action(async (docPath) => {
+    await runSpecDocsExclude(docPath);
+  });
+
+docsCmd
+  .command("unexclude <path>")
+  .description("Remove a force-exclude override")
+  .action(async (docPath) => {
+    await runSpecDocsUnexclude(docPath);
   });
 
 // Verify — compares generated TC contracts against the code.

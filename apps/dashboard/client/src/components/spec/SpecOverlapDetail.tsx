@@ -7,8 +7,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecRelation, SpecRelationType } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
@@ -21,6 +22,30 @@ const RESOLVED_VERB: Record<SpecRelationType, string> = {
   precedence: 'overridden (where overlapping) by',
   'keep-both': 'kept alongside',
 };
+
+/** One-glance explanation of the resolution modes — shown in the header info popover. */
+const RESOLUTION_HELP = (
+  <div className="space-y-1.5 text-left">
+    <p className="font-medium text-popover-foreground">How resolution works</p>
+    <p>
+      Your choice is recorded for this pair <span className="font-medium">in this area</span> and applies
+      to the <span className="font-medium">whole document</span> — not just the highlighted section.
+    </p>
+    <ul className="space-y-1">
+      <li>
+        <span className="font-medium">Use newer / older only</span> — drops the other document entirely
+        from this area's generation.
+      </li>
+      <li>
+        <span className="font-medium">Prefer newer / older</span> — keeps both; the preferred one wins only
+        where they overlap, and each keeps its unique content.
+      </li>
+      <li>
+        <span className="font-medium">Keep both</span> — no supersession; combine them as equal peers.
+      </li>
+    </ul>
+  </div>
+);
 
 function coveringRelation(rels: SpecRelation[], a: string, b: string, area: string): SpecRelation | undefined {
   return rels.find((r) => {
@@ -147,6 +172,11 @@ export function SpecOverlapDetail({
                 {a.label}
               </Button>
             ))}
+            <HoverPopover content={RESOLUTION_HELP} width="wide" align="end">
+              <button type="button" aria-label="How conflict resolution works" className="ml-0.5 text-muted-foreground transition-colors hover:text-foreground">
+                <Info className="h-4 w-4" />
+              </button>
+            </HoverPopover>
             {editing && relation && (
               <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setEditing(false)}>
                 Cancel

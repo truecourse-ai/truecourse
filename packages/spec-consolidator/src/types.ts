@@ -109,6 +109,7 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  *   - `relations[]`     doc→doc relations (replace/precedence/keep-both)
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
+ *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
  */
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
@@ -118,6 +119,13 @@ export const DecisionsFileSchema = z.object({
    * SKIP verdict. Repo-relative paths.
    */
   manualIncludes: z.array(z.string()).default([]),
+  /**
+   * Doc paths the user has manually marked "always exclude" — force-dropped
+   * from the corpus even when the relevance filter would keep them, so the
+   * user can remove a doc (and any conflicts it drives). Wins over an include
+   * for the same path. Repo-relative paths.
+   */
+  manualExcludes: z.array(z.string()).default([]),
   /** User-authored doc→doc relations (replace/precedence/keep-both). */
   relations: z.array(RelationSchema).default([]),
   /** User overrides of a doc's auto-assigned area tags. */

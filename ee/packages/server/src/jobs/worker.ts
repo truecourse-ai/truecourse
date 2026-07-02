@@ -33,22 +33,27 @@ import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from '../knowledge/connectors/registry.js';
 import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
 import { syncWorkspaceKnowledge, SYNC_MSG_CONSOLIDATE } from '../knowledge/sync.js';
-import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
+import { CURATE_STEPS, CORPUS_GENERATE_STEPS, VERIFY_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { publishEvent } from './events.js';
 import { JobStepTracker, type StepEmit } from './steps.js';
 
 /**
- * Bridge an OSS spec-scan StepTracker onto one EE job step: each CURATE_STEPS
- * transition (discover docs / tag areas / detect relations / flag overlaps) is
- * forwarded as the EE step's inline detail, so the popup shows the same numbered
- * sub-phases the OSS popup does. Returns a StepTracker to hand to the spec scan.
+ * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
+ * transition is forwarded as the EE step's inline detail, so the popup shows the
+ * same numbered sub-phases the OSS popup does. `stepDefs` is the inner phase set
+ * to mirror — CURATE_STEPS (scan) by default, CORPUS_GENERATE_STEPS (generate),
+ * VERIFY_STEPS (drift), or a union. Returns a StepTracker to hand to the callee.
  */
-function specScanBridge(eeTracker: JobStepTracker, stepKey: string): StepTracker {
+function specScanBridge(
+  eeTracker: JobStepTracker,
+  stepKey: string,
+  stepDefs: ReadonlyArray<{ key: string; label: string }> = CURATE_STEPS,
+): StepTracker {
   return new StepTracker((p: AnalysisProgressPayload) => {
     const text = p.detail ? `${p.step} · ${p.detail}` : p.step;
     void eeTracker.detail(stepKey, text);
-  }, [...CURATE_STEPS]);
+  }, [...stepDefs]);
 }
 import {
   KNOWLEDGE_SYNC_TASK,
@@ -229,12 +234,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
           if (message === SYNC_MSG_CONSOLIDATE) await tracker.advance('consolidate');
           else await tracker.advance('fetch', total > 0 ? `${current}/${total} docs` : undefined);
         },
-        // Spec sub-phases + contract slices both surface on the "consolidate" step.
-        tracker: specScanBridge(tracker, 'consolidate'),
-        onSliceProgress: (done, total) =>
-          void tracker.detail('consolidate', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('consolidate', `repairing ${done}/${total}`),
+        // Curate sub-phases + contract generation both surface on the "consolidate"
+        // step (the bridge mirrors both step sets, so it shows N/M docs then the
+        // per-area contract counts). The old onSlice/onRepair callbacks were dead —
+        // corpus generate reports via the tracker, not per-slice — so they're gone.
+        tracker: specScanBridge(tracker, 'consolidate', [...CURATE_STEPS, ...CORPUS_GENERATE_STEPS]),
       });
 
       const reverified = await reverifyReposIfWorkspaceChanged(org, beforeHash);
@@ -316,10 +320,8 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
           auth,
           onPhase: (phase) => tracker.advance(phase),
           specTracker: specScanBridge(tracker, 'spec'),
-          onSliceProgress: (done, total) =>
-            void tracker.detail('contracts', `${done}/${total} slices`),
-          onRepairProgress: (done, total) =>
-            void tracker.detail('contracts', `repairing ${done}/${total}`),
+          generateTracker: specScanBridge(tracker, 'contracts', CORPUS_GENERATE_STEPS),
+          driftTracker: specScanBridge(tracker, 'drift', VERIFY_STEPS),
         },
         req,
       );

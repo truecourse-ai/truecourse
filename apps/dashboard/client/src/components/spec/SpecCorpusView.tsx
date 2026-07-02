@@ -51,6 +51,44 @@ export function coveringRelation(rels: SpecRelation[], a: string, b: string, are
   });
 }
 
+type DecisionAction = 'exclude' | 'unexclude' | 'include' | 'uninclude';
+
+/**
+ * Optimistically reflect a force-include/exclude before the server re-curate
+ * returns, so only the DOC jumps immediately — out of Documents into
+ * Force-excluded (or between the include lists). Conflicts are deliberately left
+ * untouched here: they're the authoritative product of the recompute, so they
+ * appear/disappear only when the server corpus lands (the progress popup covers
+ * that window).
+ */
+function optimisticDecision(data: SpecCorpusResponse, ref: string, action: DecisionAction): SpecCorpusResponse {
+  const without = (arr?: string[]): string[] => (arr ?? []).filter((r) => r !== ref);
+  const withRef = (arr?: string[]): string[] => [...new Set([...(arr ?? []), ref])];
+  let manualIncludes = data.manualIncludes;
+  let manualExcludes = data.manualExcludes;
+  let corpus = data.corpus;
+  switch (action) {
+    case 'exclude':
+      manualExcludes = withRef(manualExcludes);
+      manualIncludes = without(manualIncludes);
+      // Move the doc out of Documents only — leave overlaps for the re-curate.
+      corpus = { ...corpus, docs: corpus.docs.filter((d) => d.ref !== ref) };
+      break;
+    case 'unexclude':
+      manualExcludes = without(manualExcludes);
+      break;
+    case 'include':
+      manualIncludes = withRef(manualIncludes);
+      manualExcludes = without(manualExcludes);
+      corpus = { ...corpus, skippedDocs: (corpus.skippedDocs ?? []).filter((s) => s.ref !== ref) };
+      break;
+    case 'uninclude':
+      manualIncludes = without(manualIncludes);
+      break;
+  }
+  return { ...data, corpus, manualIncludes, manualExcludes };
+}
+
 export interface SpecCorpusState {
   data: SpecCorpusResponse | null;
   hydrating: boolean;
@@ -60,6 +98,8 @@ export interface SpecCorpusState {
   scan: () => Promise<void>;
   /** Re-read corpus + relations after an inline resolution. */
   refetch: () => Promise<void>;
+  /** Replace corpus data from a mutation response (include/exclude re-curate server-side). */
+  apply: (res: SpecCorpusResponse) => void;
 }
 
 /**
@@ -118,7 +158,9 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
     }
   }, [repoId]);
 
-  return { data, hydrating, scanning, error, scan, refetch };
+  const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
+
+  return { data, hydrating, scanning, error, scan, refetch, apply };
 }
 
 export function SpecCorpusView({
@@ -137,23 +179,43 @@ export function SpecCorpusView({
   const { data, hydrating, scanning } = corpus;
   // Declared before the early returns to satisfy the rules of hooks.
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set());
-  // The doc ref currently being force-included / un-included (disables its row).
-  const [togglingInclude, setTogglingInclude] = useState<string | null>(null);
+  // The doc ref currently mutating — while set, every include/exclude action is
+  // disabled (one re-curate at a time) and this ref's row shows a spinner.
+  const [busyRef, setBusyRef] = useState<string | null>(null);
 
-  // Force-include a dropped doc / undo it, then re-scan to apply (the scan's own
-  // cost-estimate confirm applies). Re-tagging unchanged docs is cache-cheap.
-  const setInclude = useCallback(
-    async (ref: string, include: boolean) => {
-      setTogglingInclude(ref);
+  // Force-include / exclude. Move the row optimistically so it jumps immediately,
+  // then let the server-driven re-curate run (its step-progress popup shows via
+  // the socket, since removing/adding a doc re-runs the relation + vocab stages
+  // and can take tens of seconds) and apply the authoritative corpus it returns.
+  const runDecision = useCallback(
+    async (ref: string, action: DecisionAction, call: () => Promise<SpecCorpusResponse>) => {
+      setBusyRef(ref);
+      if (corpus.data) corpus.apply(optimisticDecision(corpus.data, ref, action));
       try {
-        if (include) await api.addSpecInclude(repoId, ref);
-        else await api.removeSpecInclude(repoId, ref);
-        await corpus.scan();
+        corpus.apply(await call());
+      } catch {
+        await corpus.refetch(); // re-curate failed — resync to server truth
       } finally {
-        setTogglingInclude(null);
+        setBusyRef(null);
       }
     },
-    [repoId, corpus],
+    [corpus],
+  );
+
+  const setInclude = useCallback(
+    (ref: string, include: boolean) =>
+      runDecision(ref, include ? 'include' : 'uninclude', () =>
+        include ? api.addSpecInclude(repoId, ref) : api.removeSpecInclude(repoId, ref),
+      ),
+    [repoId, runDecision],
+  );
+
+  const setExclude = useCallback(
+    (ref: string, exclude: boolean) =>
+      runDecision(ref, exclude ? 'exclude' : 'unexclude', () =>
+        exclude ? api.addSpecExclude(repoId, ref) : api.removeSpecExclude(repoId, ref),
+      ),
+    [repoId, runDecision],
   );
 
   if (hydrating || (scanning && !data)) {
@@ -178,6 +240,7 @@ export function SpecCorpusView({
   const effectiveRels = [...c.relations, ...userRelations];
   const skippedDocs = c.skippedDocs ?? [];
   const manualIncludes = data.manualIncludes ?? [];
+  const manualExcludes = data.manualExcludes ?? [];
   // Single-product repos tag everything `core/*`; drop the redundant product in
   // area/tag labels so they read as their concern (e.g. "auth", not "core/auth").
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
@@ -272,7 +335,9 @@ export function SpecCorpusView({
               doc={doc}
               tags={doc.areaTags.map(fmtArea)}
               active={activeKey === doc.ref}
+              busy={busyRef !== null}
               onOpen={(pinned) => onOpen(doc.ref, pinned)}
+              onSkip={() => setExclude(doc.ref, true)}
             />
           ))}
         </Section>
@@ -289,7 +354,7 @@ export function SpecCorpusView({
                 reason={doc.reason}
                 active={activeKey === doc.ref}
                 actionLabel="include"
-                toggling={togglingInclude === doc.ref}
+                busy={busyRef !== null}
                 onOpen={(pinned) => onOpen(doc.ref, pinned)}
                 onAction={() => setInclude(doc.ref, true)}
               />
@@ -308,9 +373,29 @@ export function SpecCorpusView({
                 docRef={ref}
                 active={activeKey === ref}
                 actionLabel="remove"
-                toggling={togglingInclude === ref}
+                busy={busyRef !== null}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setInclude(ref, false)}
+              />
+            ))}
+          </Section>
+        )}
+        {manualExcludes.length > 0 && (
+          <Section
+            title="Force-excluded"
+            count={manualExcludes.length}
+            icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
+          >
+            {manualExcludes.map((ref) => (
+              <IncludeRow
+                key={ref}
+                docRef={ref}
+                reason="manually excluded"
+                active={activeKey === ref}
+                actionLabel="restore"
+                busy={busyRef !== null}
+                onOpen={(pinned) => onOpen(ref, pinned)}
+                onAction={() => setExclude(ref, false)}
               />
             ))}
           </Section>
@@ -350,24 +435,35 @@ function Section({
   );
 }
 
+/**
+ * A kept-doc row (the "Documents" section). Previewable like every list row —
+ * single-click previews, double-click pins. Carries an inline "skip" action
+ * (force-exclude) revealed on hover; the action button stops propagation so it
+ * doesn't open the preview. A div (not a button) so the nested action is valid.
+ */
 function DocRow({
   doc,
   tags,
   active,
+  busy,
   onOpen,
+  onSkip,
 }: {
   doc: SpecCorpusDoc;
   tags: string[];
   active: boolean;
+  busy: boolean;
   onOpen: (pinned: boolean) => void;
+  onSkip: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onOpen(false)}
       onDoubleClick={() => onOpen(true)}
       title={`${doc.ref} — click to preview, double-click to pin`}
-      className={`flex w-full items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
+      className={`group flex w-full cursor-pointer items-start gap-1.5 px-3 py-1.5 pl-7 text-left text-[13px] transition-colors ${
         active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
       }`}
     >
@@ -387,7 +483,19 @@ function DocRow({
           </span>
         )}
       </span>
-    </button>
+      <button
+        type="button"
+        disabled={busy}
+        title="Exclude this doc from the corpus"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSkip();
+        }}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100 disabled:opacity-50 disabled:hover:bg-transparent"
+      >
+        skip
+      </button>
+    </div>
   );
 }
 
@@ -404,7 +512,7 @@ function IncludeRow({
   reason,
   active,
   actionLabel,
-  toggling,
+  busy,
   onOpen,
   onAction,
 }: {
@@ -412,7 +520,7 @@ function IncludeRow({
   reason?: string;
   active: boolean;
   actionLabel: string;
-  toggling: boolean;
+  busy: boolean;
   onOpen: (pinned: boolean) => void;
   onAction: () => void;
 }) {
@@ -438,14 +546,14 @@ function IncludeRow({
       </span>
       <button
         type="button"
-        disabled={toggling}
+        disabled={busy}
         onClick={(e) => {
           e.stopPropagation();
           onAction();
         }}
         className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
       >
-        {toggling ? '…' : actionLabel}
+        {actionLabel}
       </button>
     </div>
   );

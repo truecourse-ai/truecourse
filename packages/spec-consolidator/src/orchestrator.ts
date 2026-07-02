@@ -15,6 +15,7 @@ import { DecisionsFileSchema, type DecisionsFile } from './types.js';
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
+  manualExcludes: [],
   relations: [],
   manualAreas: [],
 };

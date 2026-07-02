@@ -42,13 +42,12 @@ export interface SpecScanPipeline {
     tracker?: StepTracker,
   ): Promise<{ openConflicts: number }>;
   /** Generate contracts from the corpus and persist them under `ref`
-   *  (`saveContracts`). Returns the file count. The progress callbacks are kept
-   *  for interface compatibility (corpus generate reports per-area, not per-slice). */
+   *  (`saveContracts`). Returns the file count. `tracker` (driven through
+   *  CORPUS_GENERATE_STEPS) surfaces the popup's per-area contract progress. */
   generate(
     repoRoot: string,
     ref: RepoRef,
-    onSliceProgress?: (done: number, total: number) => void,
-    onRepairProgress?: (done: number, total: number) => void,
+    tracker?: StepTracker,
   ): Promise<{ fileCount: number }>;
 }
 
@@ -70,9 +69,9 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     await saveSpec(ref, 'corpus', curate.corpus);
     return { openConflicts: curate.stats.overlapFlags };
   },
-  async generate(repoRoot, ref) {
+  async generate(repoRoot, ref, tracker) {
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-    const { corpus } = await generateFromCorpusInProcess(repoRoot);
+    const { corpus } = await generateFromCorpusInProcess(repoRoot, { tracker });
     // A resolver-hard / failed corpus wrote nothing — surface it as a failure
     // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
     if (corpus.kind === 'failed') throw corpus.error;

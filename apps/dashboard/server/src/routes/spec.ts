@@ -30,6 +30,7 @@ import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
+  addManualExclude,
   addManualInclude,
   addRelation,
   curateInProcess,
@@ -39,6 +40,7 @@ import {
   isCorpusStale,
   getCorpus,
   getDecisions,
+  removeManualExclude,
   removeManualInclude,
   removeRelation,
   verifyLatestPath,
@@ -60,13 +62,19 @@ const RELATION_TYPES: RelationType[] = ['replace', 'precedence', 'keep-both'];
 
 async function corpusPayload(
   repoPath: string,
-): Promise<{ corpus: CuratedCorpus | null; userRelations: Relation[]; manualIncludes: string[] }> {
+): Promise<{
+  corpus: CuratedCorpus | null;
+  userRelations: Relation[];
+  manualIncludes: string[];
+  manualExcludes: string[];
+}> {
   const corpus = await getCorpus(repoPath);
   const decisions = await getDecisions(repoPath);
   return {
     corpus,
     userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
+    manualExcludes: decisions.manualExcludes ?? [],
   };
 }
 
@@ -220,8 +228,32 @@ router.delete(
   },
 );
 
-// Force-include / un-include a relevance-dropped doc. Writes decisions only; the
-// client re-scans (`/spec/corpus/scan`) afterward to actually re-curate the doc.
+// A force-include/exclude changes the curated corpus, so the recheck runs
+// server-side and atomically — the client no longer drives a separate scan. It
+// re-curates with the socket tracker so the dashboard shows the same step-progress
+// popup as a scan (removing/adding a doc changes the doc set, so the relation +
+// vocab stages re-run and this can take tens of seconds). No cost-estimate gate:
+// there's no confirm on include/exclude. Returns the freshly-curated corpus.
+async function mutateAndRecurate(
+  repoPath: string,
+  repoId: string,
+  mutate: () => Promise<unknown>,
+): Promise<Awaited<ReturnType<typeof corpusPayload>>> {
+  await mutate();
+  const tracker = createSocketSpecTracker(repoId, CURATE_STEPS.map((s) => ({ ...s })));
+  try {
+    await curateInProcess(repoPath, { tracker, source: 'dashboard' });
+    emitSpecComplete(repoId, 'scan');
+  } catch (e) {
+    emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
+    throw e;
+  }
+  await enqueueContractsRefresh(repoPath);
+  return corpusPayload(repoPath);
+}
+
+// Force-include / un-include a relevance-dropped doc, then re-curate so the
+// corpus + overlaps reflect it immediately.
 router.post(
   '/:id/spec/includes',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -232,8 +264,12 @@ router.post(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      const decisions = await addManualInclude(repo.path, body.ref);
-      res.json({ manualIncludes: decisions.manualIncludes ?? [] });
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const ref = body.ref;
+      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => addManualInclude(repo.path, ref)));
     } catch (e) {
       next(e);
     }
@@ -250,8 +286,58 @@ router.delete(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      const decisions = await removeManualInclude(repo.path, body.ref);
-      res.json({ manualIncludes: decisions.manualIncludes ?? [] });
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const ref = body.ref;
+      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => removeManualInclude(repo.path, ref)));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// Force-exclude / restore an otherwise-kept doc, then re-curate. Excluding a doc
+// removes it (and any conflicts it drives) from the corpus.
+router.post(
+  '/:id/spec/excludes',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { ref?: string };
+      if (!body.ref) {
+        res.status(400).json({ error: 'Missing ref.' });
+        return;
+      }
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const ref = body.ref;
+      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => addManualExclude(repo.path, ref)));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/spec/excludes',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { ref?: string };
+      if (!body.ref) {
+        res.status(400).json({ error: 'Missing ref.' });
+        return;
+      }
+      if (!(await isGitRepo(repo.path))) {
+        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      const ref = body.ref;
+      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => removeManualExclude(repo.path, ref)));
     } catch (e) {
       next(e);
     }

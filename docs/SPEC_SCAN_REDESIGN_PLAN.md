@@ -497,3 +497,98 @@ step detail with no model name. OSS is unchanged (per-stage tiers are real there
 Remaining follow-up (product call, not done):
 - Honor per-stage tiers in EE — map the OSS tier (`haiku`/`sonnet`/`opus`) to a provider model
   per stage instead of a single `cfg.model`, so hosted gets the same cost/quality profile as OSS.
+
+### Contract generation is non-deterministic — CORE BUG (OSS + EE)
+
+**The bug.** Contract generation is not a deterministic function of the corpus: the *same* specs
+produce different `.tc` run-to-run. Generation lives in one shared engine (`packages/contract-extractor`),
+used identically by OSS and EE, so **this affects both editions** — it is NOT edition-specific.
+
+**How it surfaces (same bug, two symptoms):**
+- **OSS:** `contracts generate` rewrites the whole `.tc` tree; with non-deterministic output, `git diff`
+  churns across the *entire* tree whenever you regenerate, not just the doc you edited.
+- **EE:** every spec-touching PR fully regenerates the head and diffs it against a separately-generated
+  base, so the PR contracts view churns wholesale (live case: ~57 of 60 contracts marked
+  added/removed/changed when only one area's doc changed).
+
+**Root causes (confirmed, with file:line):**
+1. **Identity floats.** The artifact identity is taken raw from the LLM (`corpus-generate.ts:610`,
+   `types.ts:60` `identity: z.string()`), merged by that raw string (`merger.ts:71`), and slugified only
+   at filename time by **two divergent** functions (`writer.ts:185-191` strips punctuation → `maxretry`;
+   `normalizer.ts:279-281` dashes → `max-retry`). → `max-retry`↔`maxretry`, `api-version`↔`apiversion`
+   rename churn (a rename reads as delete+create in `artifact-diff`).
+2. **Global reconcile.** Reconcile is one global LLM call whose cache key is the sorted list of *every*
+   target across *all* areas (`target-reconciler.ts:204-206`). One doc edit changes that list → cache
+   miss → it re-clusters/renames globally, non-deterministically. Its reconciled identities feed the
+   per-area extract cache key (`corpus-generate.ts:486-496`), so **unchanged areas' extract cache also
+   misses** → they re-generate with drifted content.
+3. **Origin flips.** A cross-cutting artifact's `origin` area is "whichever area enumerated it first"
+   (`target-reconciler.ts:64-75,106`; repair keeps the first slice on ties, `repair.ts:292`) — so when
+   reconcile reorders, `origin` flips (e.g. `core/api-conventions`↔`core/auth`) with a byte-identical body.
+
+**The fix (deterministic-*enough* = unchanged inputs reproduce byte-identically via stable cache keys —
+the LLM stays non-deterministic; we keep unchanged areas hitting the cache):**
+1. **Canonical identity at parse** — one shared slugifier applied right after the LLM parse, used as the
+   merge key + filename + `.tc` identity token (collapse `writer.ts` + `normalizer.ts` slug funcs into one).
+2. **Deterministic + scoped reconcile** — canonical-id dedup collapses most duplicates with no LLM; key
+   the residual semantic-dedup cache per-target/cluster (not the global list) so unchanged targets keep
+   their reconciled identity across runs → their extract cache key stays constant → cache hit → same body.
+3. **Deterministic origin tie-break** — pick the origin area by sorted `areaId`, in reconciler + repair.
+- **Guardrail test:** generate → edit one doc in one area → generate again → assert *only that area's
+  contracts changed, everything else byte-identical*. That's the concrete definition of "fixed."
+- **Honest limit:** a cold regen of a brand-new area's *body* still varies until cached; canonical
+  identity pins its filename/identity, and the diff only needs *unchanged* areas stable — which 1–3 give.
+- Central files: `corpus-generate.ts:486-496,610`; `target-reconciler.ts:64-75,106,204-206`;
+  `merger.ts:71`; `writer.ts:185-191`; `normalizer.ts:279-281`; `repair.ts:292`.
+
+### Spec diff — NOT BUILT (design)
+
+**The gap.** Spec is the only BL-Drift artifact without a diff view. Verify, Contracts, and Inferred
+each have one; Spec — the source of truth for the whole pipeline — does not. There is no
+`/spec/diff` route and no Spec-tab diff mode; the Spec tab shows only the *current* `corpus.json`.
+
+**Why it matters.** The pipeline is doc → **corpus** → contract. A reviewer can already see the raw
+`.md` changes (plain git) and the contract changes (the Contracts diff), but **not the corpus layer
+in between** — which is where the meaningful consolidation happens and what explains *why* contracts
+changed. The spec diff should surface the **curated/semantic delta**, NOT the raw doc text:
+- **docs** added to / removed from the corpus (by `ref`), incl. relevance-dropped ↔ kept transitions;
+- **area membership** changes (a doc re-tagged into different `product/concern` areas);
+- **overlaps** newly flagged / resolved (by doc-pair within an area);
+- **relations** added / removed (`replace` / `precedence` / `keep-both`).
+
+**How (OSS) — mirror the contract diff exactly.** `corpus.json` is committed, so the diff is
+git-based, the same shape as `POST /contracts/diff`:
+- Add `POST /:id/spec/diff`: read the working-tree `corpus.json` and the HEAD-committed `corpus.json`
+  (via `getGit(...).show('HEAD:.truecourse/specs/corpus.json')`, mirroring `contracts.ts`), then diff
+  the two corpora with the shared `packages/core/src/lib/artifact-diff.ts` primitives
+  (`diffByKey` on `docs[].ref`, on `areas[]` membership, on overlap doc-pairs, on relations).
+- Wire a Spec-tab **diff mode** through the existing `DiffModeToggle` (as Contracts/Verify do in
+  `RepoPage.tsx`), rendering added/removed/changed corpus entries (removed struck-through, severity
+  not status — per the diff-list convention).
+
+**How (EE) — mirror the EE contract diff.** EE has no `corpus.json` on disk; the corpus is stored
+server-side per commit (`spec_sets`, keyed by `(repoKey, commitSha)`). So the EE spec diff compares the
+**head commit's stored `corpus` vs the base commit's** (`baselineCommit`), loading each via
+`loadSpec(ref, 'corpus')` and running the *same* `artifact-diff` keys as OSS (docs by `ref`, area
+membership, overlap doc-pairs, relations). Add a PR-aware `GET /:id/spec/diff` mirroring
+`GET /:id/contracts/diff`.
+
+There are actually **two EE sub-gaps** here, not one:
+1. **No spec diff** (same as OSS) — no `/spec/diff`, no Spec-tab diff mode.
+2. **The Spec tab isn't even PR-aware.** `GET /:id/spec/corpus` (`spec.ts:73`) takes no `ref` and does
+   no diff — it returns the *latest* stored corpus (`getCorpus`/`loadLatestSpec`) regardless of which PR
+   you're viewing. So in a PR the Spec tab shows the current corpus, unlabeled and undiffed — you can't
+   tell base from head. The PR-aware read + diff must be added together.
+
+**One pattern, both editions.** Same diff keys (`artifact-diff`), same `DiffModeToggle` UI; only the
+*source* of the two corpora differs — git-committed `corpus.json` (OSS: working-tree vs HEAD) vs
+per-commit server-stored `corpus` (EE: head commit vs base commit) — exactly the OSS/EE split the
+contract diff already uses.
+
+**Dependency.** The spec diff is only as clean as the corpus is stable across runs. Spec is more
+stable than contracts (per-doc + per-pair caches, no global reconcile), but a fresh-clone re-scan can
+re-tag docs non-deterministically. So this rides on the same determinism work called for above
+(stable area-tagging / no spurious re-tag), or it will be noisy the way the contract diff is today.
+
+**Cost.** Low. `corpus.json` is already committed (the baseline exists) and `artifact-diff` +
+`DiffModeToggle` already exist — this is a new route + a Spec-tab diff view, not new engine work.

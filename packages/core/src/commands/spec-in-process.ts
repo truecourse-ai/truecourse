@@ -421,11 +421,18 @@ export interface GeneratedSummary {
   gaps: CoverageGap[];
   /** Structural validation diagnostics (hard = dropped, soft = kept). */
   validationIssues: ValidationIssue[];
+  /** Areas whose enumeration failed (e.g. LLM timeout) — contracts may be incomplete; re-run. */
+  enumerateFailures: string[];
 }
 
 export function stampGeneratedMarker(
   repoRoot: string,
-  summary?: { written: number; gaps: CoverageGap[]; validationIssues: ValidationIssue[] },
+  summary?: {
+    written: number;
+    gaps: CoverageGap[];
+    validationIssues: ValidationIssue[];
+    enumerateFailures?: string[];
+  },
 ): void {
   const file = generatedMarkerPath(repoRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -434,6 +441,7 @@ export function stampGeneratedMarker(
     written: summary?.written ?? 0,
     gaps: summary?.gaps ?? [],
     validationIssues: summary?.validationIssues ?? [],
+    enumerateFailures: summary?.enumerateFailures ?? [],
   };
   fs.writeFileSync(file, JSON.stringify(body, null, 2) + '\n');
 }
@@ -447,6 +455,7 @@ export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null 
       written: typeof raw.written === 'number' ? raw.written : 0,
       gaps: Array.isArray(raw.gaps) ? raw.gaps : [],
       validationIssues: Array.isArray(raw.validationIssues) ? raw.validationIssues : [],
+      enumerateFailures: Array.isArray(raw.enumerateFailures) ? raw.enumerateFailures : [],
     };
   } catch {
     return null;
@@ -576,59 +585,72 @@ export async function curateInProcess(
     overlapStarted = true;
   };
 
-  tracker?.start('discover');
-  let result: CurateResult;
+  // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG, or on by default
+  // under TRUECOURSE_DEV) so each scan stage's model and wall time are recorded
+  // — same as the generate path. Null + zero overhead when unset.
+  const llmLog = createLlmCallLogger(repoRoot, 'spec-scan');
+  if (llmLog) setLlmCallSink(llmLog.sink);
+  const tScanStart = perfNow();
   try {
-    result = await curate(repoRoot, {
-      models: resolveCurateModels(repoRoot),
-      transport: resolveTransport(options),
-      skipGit: options.skipGit,
-      skipCorpusWrite: options.skipCorpusWrite,
-      decisions: options.decisions,
-      relevanceRunner: options.relevanceRunner,
-      areaTagRunner: options.areaTagRunner,
-      overlapRunner: options.overlapRunner,
-      relationChainRunner: options.relationChainRunner,
-      disableRelevanceFilter: options.disableRelevanceFilter,
-      disableAreaTagging: options.disableAreaTagging,
-      disableOverlapDetection: options.disableOverlapDetection,
-      disableLlmRelationDetection: options.disableLlmRelationDetection,
-      onRelevanceProgress: (done, total) => {
-        if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
-      },
-      onTagProgress: (done, total) => {
-        ensureTag();
-        if (total > 0) tracker?.detail('tag', withUsage('tag', `${done}/${total} docs`)!);
-      },
-      onOverlapProgress: (done, total) => {
-        ensureOverlap();
-        tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
-      },
-    });
-  } catch (e) {
-    const active = overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
-    tracker?.error(active, (e as Error).message);
-    throw e;
+    tracker?.start('discover');
+    let result: CurateResult;
+    try {
+      result = await curate(repoRoot, {
+        models: resolveCurateModels(repoRoot),
+        transport: resolveTransport(options),
+        skipGit: options.skipGit,
+        skipCorpusWrite: options.skipCorpusWrite,
+        decisions: options.decisions,
+        relevanceRunner: options.relevanceRunner,
+        areaTagRunner: options.areaTagRunner,
+        overlapRunner: options.overlapRunner,
+        relationChainRunner: options.relationChainRunner,
+        disableRelevanceFilter: options.disableRelevanceFilter,
+        disableAreaTagging: options.disableAreaTagging,
+        disableOverlapDetection: options.disableOverlapDetection,
+        disableLlmRelationDetection: options.disableLlmRelationDetection,
+        onRelevanceProgress: (done, total) => {
+          if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
+        },
+        onTagProgress: (done, total) => {
+          ensureTag();
+          if (total > 0) tracker?.detail('tag', withUsage('tag', `${done}/${total} docs`)!);
+        },
+        onOverlapProgress: (done, total) => {
+          ensureOverlap();
+          tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
+        },
+      });
+    } catch (e) {
+      const active = overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
+      tracker?.error(active, (e as Error).message);
+      throw e;
+    }
+
+    ensureOverlap();
+    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`));
+
+    if (options.source) {
+      await trackEvent('spec_scan', {
+        source: options.source,
+        docsScannedRange: bucketFileCount(result.stats.docsScanned),
+        claimsRange: bucketFileCount(result.stats.docsKept),
+        openConflicts: result.stats.overlapFlags,
+        durationRange: bucketDuration(Date.now() - startedAt),
+      });
+    }
+
+    // "Nothing changed" = the scan made zero real LLM calls (every stage was a
+    // cache hit — cache hits don't reach the transport, so they don't record
+    // usage). Lets the dashboard tell the user a rescan found no doc changes.
+    const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
+    return { curate: result, noChanges: llmCalls === 0 };
+  } finally {
+    if (llmLog) {
+      setLlmCallSink(undefined);
+      llmLog.finish(perfNow() - tScanStart);
+    }
   }
-
-  ensureOverlap();
-  tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`));
-
-  if (options.source) {
-    await trackEvent('spec_scan', {
-      source: options.source,
-      docsScannedRange: bucketFileCount(result.stats.docsScanned),
-      claimsRange: bucketFileCount(result.stats.docsKept),
-      openConflicts: result.stats.overlapFlags,
-      durationRange: bucketDuration(Date.now() - startedAt),
-    });
-  }
-
-  // "Nothing changed" = the scan made zero real LLM calls (every stage was a
-  // cache hit — cache hits don't reach the transport, so they don't record
-  // usage). Lets the dashboard tell the user a rescan found no doc changes.
-  const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
-  return { curate: result, noChanges: llmCalls === 0 };
 }
 
 export interface CorpusGenerateInProcessResult {
@@ -782,15 +804,25 @@ export async function generateFromCorpusInProcess(
     }
     // A dry run populates `proposed`, not `written` — report the right count.
     const produced = options.dryRun ? result.write.proposed.length : result.write.written.length;
+    const enumFailures = result.enumerateFailures ?? [];
     // Mark every remaining step done; the file/gap summary lands on `generate`.
     for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], withUsage(STEPS[i]));
     tracker?.done(
       'generate',
       withUsage(
         'generate',
-        `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}`,
+        `${options.dryRun ? 'would write ' : ''}${produced} file${produced === 1 ? '' : 's'} · ${result.gaps.length} gap${result.gaps.length === 1 ? '' : 's'}${enumFailures.length ? ` · ⚠ ${enumFailures.length} area${enumFailures.length === 1 ? '' : 's'} failed to enumerate` : ''}`,
       ),
     );
+    // An enumerate failure (e.g. an LLM timeout) means an area's contracts may be
+    // incomplete — and it's invisible to the gap count, so surface it loudly. The
+    // cache no longer persists a failed enumeration, so a re-run retries it.
+    if (enumFailures.length > 0) {
+      process.stderr.write(
+        `[truecourse] WARNING: ${enumFailures.length} area(s) failed to enumerate — their contracts may be incomplete. ` +
+          `Re-run \`contracts generate\` to retry: ${enumFailures.join(', ')}\n`,
+      );
+    }
     // Stamp the staleness marker only on a real (non-dry) resolved write, and
     // persist the run summary so the dashboard can show written/gaps/issues after
     // a reload (the run result is otherwise transient).
@@ -801,6 +833,7 @@ export async function generateFromCorpusInProcess(
         written: result.write.written.length,
         gaps: result.gaps,
         validationIssues: result.validationIssues,
+        enumerateFailures: enumFailures,
       });
     if (options.source && !options.dryRun) {
       await trackEvent('contracts_generate', {
@@ -904,6 +937,7 @@ export async function syncWorkspaceCorpusInProcess(options: {
     const { corpus } = await generateFromCorpusInProcess(tmp, {
       llm: options.llm,
       io: options.io,
+      tracker: options.tracker,
     });
     if (corpus.kind === 'failed') throw corpus.error;
     if (corpus.kind === 'skipped') {
@@ -1659,6 +1693,7 @@ function autodetectCodeDir(repoRoot: string): string {
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
+  manualExcludes: [],
   relations: [],
   manualAreas: [],
 };
@@ -1724,6 +1759,7 @@ function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFi
   return {
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
+    manualExcludes: existing.manualExcludes ?? [],
     relations: [...dedup, relation],
     manualAreas: existing.manualAreas ?? [],
   };
@@ -1743,17 +1779,23 @@ function applyRemoveRelation(
   return {
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
+    manualExcludes: existing.manualExcludes ?? [],
     relations: (existing.relations ?? []).filter((r) => !matches(r)),
     manualAreas: existing.manualAreas ?? [],
   };
 }
 
+// Include and exclude are mutually exclusive per doc: adding one clears the
+// other for that path, so decisions.json can never hold a contradictory pair.
+
 function applyAddManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
-  const current = existing.manualIncludes ?? [];
-  if (current.includes(docPath)) return existing;
+  const includes = existing.manualIncludes ?? [];
+  const excludes = existing.manualExcludes ?? [];
+  if (includes.includes(docPath) && !excludes.includes(docPath)) return existing;
   return {
     version: 1,
-    manualIncludes: [...current, docPath],
+    manualIncludes: includes.includes(docPath) ? includes : [...includes, docPath],
+    manualExcludes: excludes.filter((p) => p !== docPath),
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
   };
@@ -1763,6 +1805,30 @@ function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): Dec
   return {
     version: 1,
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
+    manualExcludes: existing.manualExcludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
+  };
+}
+
+function applyAddManualExclude(existing: DecisionsFile, docPath: string): DecisionsFile {
+  const includes = existing.manualIncludes ?? [];
+  const excludes = existing.manualExcludes ?? [];
+  if (excludes.includes(docPath) && !includes.includes(docPath)) return existing;
+  return {
+    version: 1,
+    manualIncludes: includes.filter((p) => p !== docPath),
+    manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
+  };
+}
+
+function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): DecisionsFile {
+  return {
+    version: 1,
+    manualIncludes: existing.manualIncludes ?? [],
+    manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
   };
@@ -1811,6 +1877,29 @@ export async function removeManualInclude(
   docPath: string,
 ): Promise<DecisionsFile> {
   const next = applyRemoveManualInclude(await loadDecisions(repoRoot), docPath);
+  await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Force-exclude a doc the relevance filter would keep — drops it from the corpus
+ * on the next curate. Clears any force-include for the same path. Idempotent.
+ */
+export async function addManualExclude(repoRoot: string, docPath: string): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot);
+  const next = applyAddManualExclude(existing, docPath);
+  if (next !== existing) await storeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Remove a force-exclude override (restore the doc). Idempotent.
+ */
+export async function removeManualExclude(
+  repoRoot: string,
+  docPath: string,
+): Promise<DecisionsFile> {
+  const next = applyRemoveManualExclude(await loadDecisions(repoRoot), docPath);
   await storeDecisions(repoRoot, next);
   return next;
 }

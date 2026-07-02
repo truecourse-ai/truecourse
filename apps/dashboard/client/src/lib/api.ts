@@ -1027,6 +1027,8 @@ export interface SpecCorpusResponse {
   userRelations: SpecRelation[];
   /** Doc refs the user force-included (bypass the relevance filter). */
   manualIncludes?: string[];
+  /** Doc refs the user force-excluded (dropped from the corpus). */
+  manualExcludes?: string[];
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
 }
@@ -1070,17 +1072,36 @@ export function runInferContracts(repoId: string): Promise<{ decisions: number; 
   });
 }
 
-/** Force-include a relevance-dropped doc (caller re-scans afterward to apply it). */
-export function addSpecInclude(repoId: string, ref: string): Promise<{ manualIncludes: string[] }> {
-  return fetchApi<{ manualIncludes: string[] }>(`/api/repos/${repoId}/spec/includes`, {
+// Include/exclude mutations re-curate server-side and return the fresh corpus
+// (with recomputed overlaps) — no separate scan call.
+
+/** Force-include a relevance-dropped doc. Returns the re-curated corpus. */
+export function addSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
     method: 'POST',
     body: JSON.stringify({ ref }),
   });
 }
 
-/** Remove a force-include override (caller re-scans afterward). */
-export function removeSpecInclude(repoId: string, ref: string): Promise<{ manualIncludes: string[] }> {
-  return fetchApi<{ manualIncludes: string[] }>(`/api/repos/${repoId}/spec/includes`, {
+/** Remove a force-include override. Returns the re-curated corpus. */
+export function removeSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Force-exclude an otherwise-kept doc (drops it + its conflicts). Returns the re-curated corpus. */
+export function addSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Remove a force-exclude override (restore the doc). Returns the re-curated corpus. */
+export function removeSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
     method: 'DELETE',
     body: JSON.stringify({ ref }),
   });

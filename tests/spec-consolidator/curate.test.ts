@@ -169,6 +169,20 @@ describe('curate', () => {
     expect(usersArea.overlaps).toHaveLength(0);
   });
 
+  it('force-excludes a doc via manualExcludes — dropped from the corpus + its overlaps', async () => {
+    const decisions: DecisionsFile = { ...EMPTY_DECISIONS, manualExcludes: ['docs/auth.md'] };
+    const result = await run({ decisions });
+
+    // auth.md is gone entirely: not a kept doc, its core/auth area vanishes, and
+    // the two overlaps it drove are gone (v1/v2 stays resolved by the replace).
+    expect(result.corpus.docs.map((d) => d.ref)).not.toContain('docs/auth.md');
+    expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/users-entity']);
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    expect(usersArea.overlaps).toHaveLength(0);
+    expect(result.stats.docsKept).toBe(2);
+  });
+
   it('reads relations + manualAreas from decisions.json on disk when not injected', async () => {
     const specsDir = path.join(repo, '.truecourse', 'specs');
     fs.mkdirSync(specsDir, { recursive: true });

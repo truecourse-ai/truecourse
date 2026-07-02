@@ -115,7 +115,14 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     fallbackModel,
     onProgress: opts.onRelevanceProgress,
   });
-  const docs = relevance.included;
+  // Force-excludes drop an otherwise-kept doc from the corpus entirely (not
+  // tagged, not grouped, not overlap-checked) so the user can remove a doc and
+  // the conflicts it drives. Applied after relevance so it also overrides a
+  // force-include for the same path (exclude wins).
+  const manualExcludes = new Set(decisions.manualExcludes ?? []);
+  const docs = manualExcludes.size
+    ? relevance.included.filter((d) => !manualExcludes.has(d.path))
+    : relevance.included;
   const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
 
   // ---- Tag each doc with its areas ------------------------------------
@@ -209,6 +216,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
+  manualExcludes: [],
   relations: [],
   manualAreas: [],
 };
