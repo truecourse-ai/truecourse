@@ -5,6 +5,36 @@
  * (`buildCorpusGenerateUserPrompt` in `corpus-prompt.ts`).
  */
 
+/**
+ * The single per-kind capability sheet — the one source of truth for what each
+ * contract kind is FOR and, crucially, what it CANNOT express or what belongs to
+ * a PARENT contract instead. Shared by BOTH prompts: enumerate uses it to pick
+ * the right kind, and extract's grammar builds on the same semantics — so the
+ * two can't drift. A wrong kind is unrecoverable downstream (extract honors the
+ * kind, repair can't re-classify), so the CANNOT / belongs-to constraints are
+ * the load-bearing part.
+ */
+export const KIND_CAPABILITIES = `\
+- Operation — an HTTP endpoint: method, path, responses, headers, request/response body shapes. OWNS its body/query fields; do not split a body field into its own target.
+- Entity — a domain object and ALL its field attributes: type, immutability, server-assigned, format (email/uuid/regex), uniqueness, min/max range, non-empty, and schema/persisted defaults. A field attribute is NEVER a standalone target (not a ValidationRule, not a Fallback) — capture it on the Entity.
+- Enum — a closed value set referenced by other artifacts.
+- StateMachine — the legal transitions over an entity's state field. Individual transitions are not standalone targets.
+- AuthRequirement — an auth scheme an operation requires (bearer, api-key).
+- AuthorizationRule — who may act on which rows/operations (an ownership or role predicate).
+- ErrorEnvelope — the shared error RESPONSE SHAPE. Its fields (code/message/details) belong to the envelope; never enumerate them separately.
+- PaginationContract — the WHOLE list-pagination behavior: the cursor param, the limit param with its default/min/max and clamp-vs-reject rule, the response shape, and forbidden offset/page. These are facets of ONE PaginationContract — never enumerate a limit default or clamp as its own Fallback/ValidationRule.
+- IdempotencyContract — routes that must honor an idempotency key.
+- EffectGroup — the events that must (or must-not) fire on a code path. ALWAYS the top-level kind; individual effects are MEMBERS, never standalone targets (there is no bare Effect target).
+- Formula — a business-logic calculation/derivation (e.g. a pricing total or discount).
+- QueryRule — predicates a data query MUST or MUST NOT include (tenant scoping, a date anchor, a row-class filter).
+- ForbiddenArtifact — something the spec says MUST NOT exist in code (a file, dependency, env-var read, or feature flag).
+- NamedConstant — a literal value the spec pins (a threshold, weight, retry budget, or version constant).
+- ArchitectureDecision — a system-wide platform/data choice (Postgres, REST-not-GraphQL, Kafka), including storage / persistence-strategy decisions (dedicated column vs JSON blob).
+- ValidationRule — CONDITIONAL field requiredness ONLY: input X is required/optional/forbidden WHEN another field equals a value (optionally also gated on the actor's role). NOT for immutability, format, uniqueness, ranges, or defaults — those are Entity field attributes.
+- Fallback — a RUNTIME null/absent → default ONLY: "when X is missing/null, use <value>". It CANNOT express a comparison, clamp, or range (never "when > 50"). A clamp/min/max is a facet of its parent (an Entity field or the PaginationContract); a persisted/schema default is an Entity field default, not a Fallback.
+- FieldExposure — a field that MUST be exposed on a read path (a query projection and/or an API response). NOT a field's existence — that's an Entity field.
+- UnenforceableObligation — a spec sentence with no structural encoding. Emit-only, a last resort during generation; NEVER enumerated as a target.`;
+
 export const SYSTEM_PROMPT = `\
 You translate prose API specifications into TrueCourse contract artifacts (.tc files).
 
@@ -63,58 +93,7 @@ Return ONE JSON object matching this shape — no prose, no code fences:
 
 # ArtifactKind catalog
 
-- Operation:            HTTP endpoint contract — method + path + responses + headers + body shapes + effects
-- Entity:               domain object — fields with types/mutability/normalization rules
-- Enum:                 closed value set referenced by other artifacts
-- StateMachine:         legal transitions over an entity's state field
-- AuthRequirement:      "these endpoints require this auth"
-- AuthorizationRule:    per-row authz predicate
-- ErrorEnvelope:        standard error response shape
-- PaginationContract:   how list endpoints paginate
-- IdempotencyContract:  routes that must read an idempotency key
-- EffectGroup:          events that must (or must-not) fire on specific code paths.
-                        ALWAYS the top-level kind — even when the slice describes a
-                        single event. \`Effect\` is only a reference prefix (e.g.
-                        \`effect emits Effect:order.placed\`), never a top-level
-                        declaration. A slice with one event becomes a one-effect
-                        effect-group; never emit a bare \`Effect:name { ... }\` block.
-- Formula:              business-logic calculation
-- QueryRule:            predicates a data-fetching query MUST / MUST NOT include
-                        (date anchors, tenant scoping, row-class inclusion
-                        rules)
-- ForbiddenArtifact:    something the spec says MUST NOT exist in code —
-                        a file, a dependency, an env-var read, a feature flag
-- NamedConstant:        a literal value the spec asserts — identifier,
-                        weights/coefficients, threshold constants, default values
-- ArchitectureDecision: a system-wide platform/framework/data choice the spec
-                        asserts (Postgres, REST-not-GraphQL, Kafka) — usually
-                        from an ADR or a "Tech Stack" section. ALSO covers
-                        data-modeling / STORAGE-STRATEGY decisions: "store
-                        setting X as a dedicated column vs. in the metadata
-                        JSON blob" (category persistence-strategy). Do NOT
-                        send storage/data-modeling decisions to
-                        UnenforceableObligation — they ARE structural
-- ValidationRule:       a conditional field-requiredness rule — "input X is
-                        REQUIRED | OPTIONAL | FORBIDDEN WHEN <some setting field>
-                        equals/matches <value> [and the actor/role is <Y>]". Use
-                        it for setting-gated input requirements that aren't tied
-                        to a single endpoint
-- Fallback:             a RUNTIME null/absent → default rule — "when input/field
-                        X is missing, fall back to <value>". This is the code
-                        that coalesces a missing value at read/use time
-                        (\`x ?? DEFAULT\`, a default parameter, an
-                        \`if (x == null) x = DEFAULT\` guard). Distinct from a
-                        SCHEMA default (a persisted column default → that's a
-                        \`field … default\` on an Entity, NOT a Fallback)
-- FieldExposure:        a field that MUST be EXPOSED on a read path — included
-                        in a data-access projection (ORM \`select\`) and/or
-                        returned in an API response shape. Use it for "field
-                        <Entity>.<field> is returned by / visible on the read
-                        API". \`via\` is one or more of query-select |
-                        api-response. NOT for a field's existence (that's an
-                        Entity field) and NOT for prop-threading through UI
-                        files — only the projection/response site
-- UnenforceableObligation: spec sentence with no structural encoding
+${KIND_CAPABILITIES}
 
 # .tc grammar (essentials)
 

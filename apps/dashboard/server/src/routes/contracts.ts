@@ -28,7 +28,7 @@ import {
 import { loadSpec } from '@truecourse/core/lib/spec-store';
 import { isGitRepo, getGit, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import { promotedContractPaths } from '@truecourse/core/lib/inferred-decisions';
-import { diffContents } from '@truecourse/core/lib/artifact-diff';
+import { diffContents, stripOriginLines } from '@truecourse/core/lib/artifact-diff';
 import { baselineCommit } from './diff-base.js';
 import {
   CORPUS_GENERATE_STEPS,
@@ -208,7 +208,9 @@ router.get(
       // without it, use the base (head == base → no contract delta).
       const headRegenerated = (await loadSpec<unknown>({ repoKey: repo.path, commitSha: ref }, 'corpus')) != null;
       const headMap = headRegenerated ? await toMap(ref) : baseMap;
-      const { added, removed, modified } = diffContents(baseMap, headMap);
+      // Ignore `.tc` origin lines: their line ranges shift when the source doc
+      // moves, which would churn the diff without any real contract change.
+      const { added, removed, modified } = diffContents(baseMap, headMap, stripOriginLines);
       res.json({ added, removed, modified });
     } catch (e) {
       next(e);

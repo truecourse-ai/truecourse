@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type { AreaGenInput } from './corpus-reader.js';
 import { canonicalIdentity } from './identity.js';
+import { KIND_CAPABILITIES } from './prompt.js';
 
 // ---------------------------------------------------------------------------
 // Enumerate
@@ -50,39 +51,13 @@ export function coverageKey(kind: string, identity: string): string {
 
 export const ENUMERATE_SYSTEM_PROMPT = `You read the documentation for ONE AREA of a software system and LIST the contract TARGETS its docs specify — names only, never the contract bodies.
 
-A target is one artifact the docs define. Output its kind + identity. The "kind" MUST be one of these EXACT values (the only valid contract kinds — never invent others):
+A target is one artifact the docs define. Output its kind + identity. The "kind" MUST be one of these EXACT values — never invent others. Pick the kind whose capability actually FITS; do NOT force everything into ValidationRule, and do NOT split a facet of a structured contract (see each kind's "belongs to" note) into its own target:
 
-  - Operation           — an HTTP endpoint. identity = "<METHOD> <path>", e.g. "POST /api/orders".
-  - Entity              — a domain object / table. identity = the type name, e.g. "Order".
-  - Enum                — a closed value set. identity = the enum name, e.g. "OrderStatus".
-  - StateMachine        — a field's lifecycle (states + transitions). identity = "<Entity>.<field>", e.g. "Order.status".
-  - AuthRequirement     — an auth scheme an operation requires (bearer, api-key). identity = a short slug.
-  - AuthorizationRule   — who may call which operations (ownership/role checks across endpoints). identity = a short slug, e.g. "order.owner-only".
-  - ValidationRule      — CONDITIONAL field requiredness ONLY: a field is required/optional/forbidden depending on another field's value or the actor's role ("X required when Y = Z"). identity = a short slug. NOT for a field being immutable, server-assigned, unique, a format/regex, a min/max range, or having a default — those are Entity field attributes (see below), never ValidationRules.
-  - ErrorEnvelope       — the shared error response shape. identity = a short slug.
-  - PaginationContract  — a shared list-pagination contract. identity = a short slug.
-  - IdempotencyContract — an idempotency-key contract for write operations. identity = a short slug.
-  - EffectGroup         — the events/side-effects that fire (or must-not fire) on a code path. ONE group per logical event source; individual effects are MEMBERS of a group, never standalone targets. identity = a short slug.
-  - Formula             — a computed value/derivation (pricing total, discount). identity = a short slug.
-  - QueryRule           — a filtering/visibility/scoping rule on a query. identity = a short slug.
-  - ForbiddenArtifact   — something the spec says MUST NOT exist (forbidden path/dep/flag). identity = a short slug.
-  - NamedConstant       — a named constant/threshold the spec pins. identity = a short slug.
-  - ArchitectureDecision— an ADR-style decision (data store, messaging). identity = a short slug.
-  - Fallback            — a default/fallback value rule. identity = a short slug.
-  - FieldExposure       — which entity fields are exposed on a read/response. identity = a short slug.
+${KIND_CAPABILITIES}
 
-Pick the kind that MATCHES the doc's intent — do NOT force everything into ValidationRule:
-  - "only the owner / admins may call these endpoints" → AuthorizationRule.
-  - "field X is required when Y" → ValidationRule.
-  - "this endpoint requires a bearer token" → AuthRequirement.
-  - "total = subtotal + tax − discount" (a computed value) → Formula.
+Identity: an Operation is "<METHOD> <path>" (e.g. "POST /api/orders"); an Entity or Enum is its type name; a StateMachine is "<Entity>.<field>"; every other kind is a short slug.
 
-Field ATTRIBUTES are NOT separate targets — they are properties of the Entity, captured when that Entity is generated. Do NOT enumerate them as ValidationRule (or any standalone) targets:
-  - "X is immutable / never changes after creation / set once" → an attribute of Entity.X. List the Entity, not "X-immutable".
-  - "X is server-assigned / server-generated" → an attribute of Entity.X. List the Entity.
-  - "X must be a valid email / uuid / match <format>" → a format attribute of Entity.X. List the Entity.
-  - "X must be unique" / "X must be between A and B" / "X is non-empty" → field attributes of Entity.X. List the Entity.
-  - "X defaults to <value>" → that IS a real target: Fallback. (Use Fallback, not ValidationRule.)
+Quick disambiguators: "only the owner / admins may call these" → AuthorizationRule; "field X is required when Y" → ValidationRule; "requires a bearer token" → AuthRequirement; "total = subtotal + tax − discount" → Formula.
 
 Rules:
   - Be EXHAUSTIVE within the area: list EVERY distinct entity, endpoint, event, enum, and rule the docs actually specify. The downstream generator produces a contract for each item you list, and a completeness gate checks coverage against THIS list — a target you omit will never be generated.
