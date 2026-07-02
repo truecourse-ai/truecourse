@@ -30,6 +30,7 @@ import {
   coverageKey,
   type TargetSpec,
 } from './corpus-prompt.js';
+import { canonicalIdentity } from './identity.js';
 import { readCorpusForGenerate, type AreaDoc, type AreaGenInput, type CorpusReadOptions } from './corpus-reader.js';
 import { reconcileTargets, type ReconcileRunner } from './target-reconciler.js';
 import { assembleArtifacts } from './assemble.js';
@@ -221,7 +222,10 @@ export async function generateContractsFromCorpus(
   // shared limit; the area task itself is not a slot, avoiding a nested-limit deadlock.
   const enumerated = await Promise.all(
     areas.map(async (area) => {
-      const { targets, failed } = await enumerateCached(opts.repoRoot, area, enumerate, limit);
+      const { targets: rawTargets, failed } = await enumerateCached(opts.repoRoot, area, enumerate, limit);
+      // Canonicalize identities at the parse boundary so every downstream use
+      // (reconcile, extract cache key, filenames) sees one stable identity.
+      const targets = rawTargets.map((t) => ({ ...t, identity: canonicalIdentity(t.kind, t.identity) }));
       opts.onAreaEnumerated?.(area.areaId, targets.length);
       return { area, targets, failed };
     }),
@@ -410,7 +414,7 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
     if (cached) {
       const parsed = ExtractionResultSchema.safeParse(cached);
       if (parsed.success) {
-        const fragments = parsed.data.fragments;
+        const fragments = parsed.data.fragments.map(canonFragment);
         if (fragments.length > 0) ctx.onContractsEmitted?.(fragments.length);
         const coverage = coverageFor(area, targets, fragments);
         ctx.onAreaDone?.(coverage);
@@ -422,7 +426,8 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
   const fragments: Fragment[] = [];
   const emitted = new Set<string>();
   const emit = (res: ExtractionResult): void => {
-    for (const f of res.fragments) {
+    for (const raw of res.fragments) {
+      const f = canonFragment(raw);
       const key = coverageKey(f.kind, f.identity);
       if (emitted.has(key)) continue;
       emitted.add(key);
@@ -504,6 +509,12 @@ const ENUMERATE_PROMPT_FINGERPRINT = createHash('sha256').update(ENUMERATE_SYSTE
 // prompt → the same key → a cache hit that skips the (expensive) generate calls.
 const EXTRACT_CACHE_NAME = 'contract/extract';
 const EXTRACT_PROMPT_FINGERPRINT = createHash('sha256').update(SYSTEM_PROMPT).digest('hex').slice(0, 16);
+
+/** Canonicalize a freshly-parsed fragment's identity so it matches its merge
+ *  key and the filename it will be written to (see identity.ts). */
+function canonFragment(f: Fragment): Fragment {
+  return { ...f, identity: canonicalIdentity(f.kind, f.identity) };
+}
 
 function extractCacheKey(area: AreaGenInput, targets: TargetSpec[], maxRounds: number): string {
   const docMaterial = area.docs

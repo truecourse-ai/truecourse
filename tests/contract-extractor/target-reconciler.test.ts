@@ -72,15 +72,63 @@ describe('reconcileTargets', () => {
     expect(allTargets(out)).toEqual(['AuthRequirement:bearer-jwt', 'AuthRequirement:okta']);
   });
 
-  it('caches the reconciliation (runner called once across two passes)', async () => {
+  it('caches each cluster (runner called once per cluster across two passes)', async () => {
     let calls = 0;
     const runner: ReconcileRunner = async () => {
       calls++;
       return { merges: {} };
     };
-    const byArea = [{ area: area('core/a'), targets: [t('Entity', 'A'), t('Entity', 'B')] }];
+    // Two same-kind targets sharing a token ("outbox") form ONE candidate cluster.
+    const byArea = [
+      { area: area('core/architecture'), targets: [t('ArchitectureDecision', 'outbox-pattern'), t('ArchitectureDecision', 'transactional-outbox')] },
+    ];
     await reconcileTargets(scope, byArea, { runner });
     await reconcileTargets(scope, byArea, { runner });
-    expect(calls).toBe(1);
+    expect(calls).toBe(1); // first pass reconciles the cluster; second pass is a cache hit
+  });
+
+  it('never calls the LLM for targets that cannot merge (distinct kinds / no shared token)', async () => {
+    let calls = 0;
+    const runner: ReconcileRunner = async () => {
+      calls++;
+      return { merges: {} };
+    };
+    // Two distinct entities with no shared token → no candidate cluster → no LLM.
+    const byArea = [{ area: area('core/model'), targets: [t('Entity', 'Order'), t('Entity', 'Customer')] }];
+    const out = await reconcileTargets(scope, byArea, { runner });
+    expect(calls).toBe(0);
+    expect(allTargets(out)).toEqual(['Entity:Customer', 'Entity:Order']);
+  });
+
+  it('assigns a shared target to the lexicographically-smallest area (deterministic origin)', async () => {
+    const shared = t('ArchitectureDecision', 'outbox');
+    const homeOf = (out: { area: AreaGenInput; targets: TargetSpec[] }[]) =>
+      out.find((p) => p.targets.length > 0)!.area.areaId;
+    // Same two areas, opposite input orders — the origin must NOT depend on order.
+    const out1 = await reconcileTargets(scope, [{ area: area('core/zeta'), targets: [shared] }, { area: area('core/alpha'), targets: [shared] }], { enabled: false });
+    const out2 = await reconcileTargets(scope, [{ area: area('core/alpha'), targets: [shared] }, { area: area('core/zeta'), targets: [shared] }], { enabled: false });
+    expect(homeOf(out1)).toBe('core/alpha');
+    expect(homeOf(out2)).toBe('core/alpha');
+  });
+
+  it('per-cluster cache: changing one cluster does not re-reconcile the others', async () => {
+    const calls: string[][] = [];
+    const runner: ReconcileRunner = async (input) => {
+      calls.push(input.targets.map((x) => `${x.kind}:${x.identity}`).sort());
+      return { merges: {} };
+    };
+    const auth = (ids: string[]) => ({ area: area('core/auth'), targets: ids.map((i) => t('AuthRequirement', i)) });
+    const arch = (ids: string[]) => ({ area: area('core/architecture'), targets: ids.map((i) => t('ArchitectureDecision', i)) });
+
+    // Two independent clusters: an auth one (…-bearer-jwt) and an arch one (…-outbox).
+    await reconcileTargets(scope, [auth(['bearer-jwt', 'customer-bearer-jwt']), arch(['outbox-pattern', 'transactional-outbox'])], { runner });
+    expect(calls).toHaveLength(2); // both clusters reconciled once
+
+    calls.length = 0;
+    // Add a member to ONLY the auth cluster; the arch cluster is byte-identical.
+    await reconcileTargets(scope, [auth(['bearer-jwt', 'customer-bearer-jwt', 'booking-bearer-jwt']), arch(['outbox-pattern', 'transactional-outbox'])], { runner });
+    // The arch cluster is a cache hit → only the changed auth cluster re-runs.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].every((k) => k.startsWith('AuthRequirement'))).toBe(true);
   });
 });

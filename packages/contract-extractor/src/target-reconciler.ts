@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
 import { coverageKey, type TargetSpec } from './corpus-prompt.js';
+import { slugIdentity } from './identity.js';
 import type { AreaGenInput } from './corpus-reader.js';
 
 /** Per-area enumerated targets — the input and output shape of reconciliation. */
@@ -53,44 +54,57 @@ export interface TargetReconcilerOptions {
 
 /**
  * Reconcile the enumerated targets globally. Returns per-area target lists where
- * each unique artifact appears exactly once (assigned to the first area that
- * enumerated it), with canonical identities.
+ * each unique artifact appears exactly once (assigned to the lexicographically
+ * smallest area that enumerated it — a deterministic origin), with canonical identities.
  */
 export async function reconcileTargets(
   scope: string,
   byArea: AreaTargets[],
   opts: TargetReconcilerOptions = {},
 ): Promise<AreaTargets[]> {
-  // Flatten, remembering the first area each coverage key came from.
-  const firstArea = new Map<string, string>(); // coverageKey → areaId
+  // Flatten. For each coverage key remember the LEXICOGRAPHICALLY SMALLEST area id
+  // that enumerated it — a deterministic origin, so a shared target's home area
+  // (and therefore its generated `origin` line) can't flip when the corpus
+  // re-groups and area order changes.
+  const originArea = new Map<string, string>(); // coverageKey → min areaId
   const distinct = new Map<string, TargetSpec>(); // coverageKey → target (first seen)
   for (const { area, targets } of byArea) {
     for (const t of targets) {
       const k = coverageKey(t.kind, t.identity);
-      if (!distinct.has(k)) {
-        distinct.set(k, t);
-        firstArea.set(k, area.areaId);
-      }
+      if (!distinct.has(k)) distinct.set(k, t);
+      const cur = originArea.get(k);
+      if (cur === undefined || area.areaId < cur) originArea.set(k, area.areaId);
     }
   }
 
   // (b) Semantic reconciliation — map duplicate identities onto a canonical one.
-  let merges: Record<string, { kind: string; identity: string }> = {};
+  // SCOPED + CACHED PER CLUSTER: only same-kind targets that share a token are
+  // candidates to merge, so we form small deterministic clusters and reconcile
+  // each on its own, cached by that cluster's own members. Editing one doc only
+  // busts the cluster(s) its targets join — every other cluster is a cache hit,
+  // so unchanged targets keep their canonical identity and unchanged areas keep
+  // hitting the extract cache. (The old single global call re-clustered the whole
+  // corpus on any edit, which is what churned unrelated areas.)
+  const merges: Record<string, { kind: string; identity: string }> = {};
   if (opts.enabled !== false && distinct.size >= 2) {
-    const input: ReconcileRunnerInput = {
-      targets: [...distinct.values()].map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
-    };
-    const key = computeCacheKey(input);
-    const cached = await readCache(scope, key);
-    if (cached) {
-      merges = cached;
-    } else {
-      const runner = opts.runner ?? spawnReconcileRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
+    const runner =
+      opts.runner ?? spawnReconcileRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
+    for (const cluster of clusterCandidates(distinct)) {
+      const input: ReconcileRunnerInput = {
+        targets: cluster.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
+      };
+      const key = computeCacheKey(input);
+      const cached = await readCache(scope, key);
+      if (cached) {
+        Object.assign(merges, cached);
+        continue;
+      }
       try {
-        merges = sanitize((await runner(input)).merges, distinct);
-        await writeCache(scope, key, merges);
+        const m = sanitize((await runner(input)).merges, distinct);
+        await writeCache(scope, key, m);
+        Object.assign(merges, m);
       } catch {
-        merges = {}; // best-effort — fall back to deterministic-only de-dup
+        // best-effort — a failed cluster just falls back to deterministic de-dup
       }
     }
   }
@@ -103,7 +117,7 @@ export async function reconcileTargets(
     const canon = merges[k];
     const target: TargetSpec = canon ? { kind: canon.kind, identity: canon.identity, hint: t.hint } : t;
     const ck = coverageKey(target.kind, target.identity);
-    const areaId = firstArea.get(canon ? coverageKey(canon.kind, canon.identity) : k) ?? firstArea.get(k)!;
+    const areaId = originArea.get(canon ? coverageKey(canon.kind, canon.identity) : k) ?? originArea.get(k)!;
     const m = canonByArea.get(areaId) ?? new Map<string, TargetSpec>();
     if (!m.has(ck)) m.set(ck, target);
     canonByArea.set(areaId, m);
@@ -111,6 +125,67 @@ export async function reconcileTargets(
 
   // Rebuild per-area lists in the original area order.
   return byArea.map(({ area }) => ({ area, targets: [...(canonByArea.get(area.areaId)?.values() ?? [])] }));
+}
+
+/**
+ * Group distinct targets into deterministic candidate clusters for the semantic
+ * merge: same KIND, connected (transitively) by a shared significant token
+ * (>=3 chars). Only clusters with >=2 members are returned — a lone target has
+ * nothing to merge, so it never reaches the LLM. A cluster's membership is a pure
+ * function of its own targets' identities, so an unrelated edit can't reshape it.
+ */
+function clusterCandidates(distinct: Map<string, TargetSpec>): TargetSpec[][] {
+  const byKind = new Map<string, TargetSpec[]>();
+  for (const t of distinct.values()) {
+    const k = t.kind.trim().toLowerCase();
+    const bucket = byKind.get(k);
+    if (bucket) bucket.push(t);
+    else byKind.set(k, [t]);
+  }
+
+  const significantTokens = (t: TargetSpec): Set<string> =>
+    new Set(slugIdentity(t.identity).split(/[.-]+/).filter((tok) => tok.length >= 3));
+
+  const clusters: TargetSpec[][] = [];
+  for (const targets of byKind.values()) {
+    if (targets.length < 2) continue;
+    // Union-find over "shares a significant token".
+    const parent = targets.map((_, i) => i);
+    const find = (i: number): number => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
+      return i;
+    };
+    const toks = targets.map(significantTokens);
+    for (let i = 0; i < targets.length; i++) {
+      for (let j = i + 1; j < targets.length; j++) {
+        let shared = false;
+        for (const tok of toks[i]) {
+          if (toks[j].has(tok)) {
+            shared = true;
+            break;
+          }
+        }
+        if (shared) parent[find(i)] = find(j);
+      }
+    }
+    const groups = new Map<number, TargetSpec[]>();
+    for (let i = 0; i < targets.length; i++) {
+      const r = find(i);
+      const g = groups.get(r);
+      if (g) g.push(targets[i]);
+      else groups.set(r, [targets[i]]);
+    }
+    for (const g of groups.values()) if (g.length >= 2) clusters.push(g);
+  }
+
+  // Stable order — doesn't affect correctness, keeps the pass reproducible.
+  clusters.sort((a, b) =>
+    coverageKey(a[0].kind, a[0].identity).localeCompare(coverageKey(b[0].kind, b[0].identity)),
+  );
+  return clusters;
 }
 
 /** Keep only safe merges: canonical must itself be one of the input targets; drop self-merges. */

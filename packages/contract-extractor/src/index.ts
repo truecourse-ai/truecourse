@@ -70,6 +70,7 @@ export {
   coverageKey,
 } from './corpus-prompt.js';
 export type { TargetSpec, EnumerateResult } from './corpus-prompt.js';
+export { canonicalIdentity, slugIdentity } from './identity.js';
 export {
   reconcileTargets,
   RECONCILE_SYSTEM_PROMPT,

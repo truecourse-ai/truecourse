@@ -257,9 +257,18 @@ function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSl
     else if (slice.text.includes(sourceFile)) score += 2;
     if (section && slice.text.includes(section)) score += 2;
     if (slice.text.includes(artifact.identity)) score += 1;
-    if (score > 0 && (!best || score > best.score)) best = { slice, score };
+    if (score > 0 && (!best || score > best.score || (score === best.score && sliceTieKey(slice) < sliceTieKey(best.slice)))) {
+      best = { slice, score };
+    }
   }
   return best?.slice ?? null;
+}
+
+/** Deterministic tiebreaker so two equal-scoring slices pick the SAME one every
+ *  run, independent of input order: lexicographically smallest specPath, then
+ *  start line. Keeps a repair re-prompt's `origin` from flipping on re-grouping. */
+function sliceTieKey(s: SpecSlice): string {
+  return `${s.specPath}:${String(s.lineRange?.[0] ?? 0).padStart(9, '0')}`;
 }
 
 const SLICE_HINT_KEYWORDS: Partial<Record<ArtifactKind, string[]>> = {
@@ -289,7 +298,9 @@ export function findSliceForMissing(missingKey: string, slices: SpecSlice[]): Sp
     // as the fallback when no slice declares the subject.
     if (sliceDeclaresSubject(slice, id)) score += 100;
     for (const kw of keywords) if (lowered.includes(kw)) score++;
-    if (!best || score > best.score) best = { slice, score };
+    if (!best || score > best.score || (score === best.score && sliceTieKey(slice) < sliceTieKey(best.slice))) {
+      best = { slice, score };
+    }
   }
   return best && best.score > 0 ? best.slice : null;
 }

@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 import type { AreaGenInput } from './corpus-reader.js';
+import { canonicalIdentity } from './identity.js';
 
 // ---------------------------------------------------------------------------
 // Enumerate
@@ -42,16 +43,9 @@ export type EnumerateResult = z.infer<typeof EnumerateResultSchema>;
  * (completeness gate) and the target reconciler.
  */
 export function coverageKey(kind: string, identity: string): string {
-  const k = kind.trim().toLowerCase();
-  let id = identity.trim().replace(/\s+/g, ' ');
-  const op = /^(get|post|put|patch|delete|head|options)\s+(\S.*)$/i.exec(id);
-  if (op) {
-    // Docs use colon params (`:id`, Express/Rails), generators emit brace params
-    // (`{id}`, OpenAPI) — fold both to one form so they don't read as distinct.
-    const p = op[2].replace(/\/+$/, '').replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, '{$1}');
-    id = `${op[1].toUpperCase()} ${p}`;
-  }
-  return `${k}:${id}`;
+  // The match key and the canonical identity fold the SAME benign drift, so they
+  // can never disagree — both go through canonicalIdentity.
+  return `${kind.trim().toLowerCase()}:${canonicalIdentity(kind, identity)}`;
 }
 
 export const ENUMERATE_SYSTEM_PROMPT = `You read the documentation for ONE AREA of a software system and LIST the contract TARGETS its docs specify — names only, never the contract bodies.
