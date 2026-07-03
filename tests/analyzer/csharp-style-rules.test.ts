@@ -635,19 +635,19 @@ internal sealed class Renderer
 describe('style/deterministic/logger-field-naming (C#)', () => {
   const KEY = 'style/deterministic/logger-field-naming'
 
-  it('flags logger fields/properties not following the convention', () => {
+  it('flags logger fields not following the convention', () => {
     const violations = check(`namespace Ordering;
 
 internal sealed class OrderProcessor
 {
     private readonly ILogger Logger;
-    public ILogger<OrderProcessor> AuditLog { get; }
+    private readonly ILogger<OrderProcessor> AuditLog;
 }
 `)
     expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(2)
   })
 
-  it('does not flag conventionally named loggers or non-logger fields', () => {
+  it('does not flag logger properties, conventionally named loggers, or non-logger fields', () => {
     const violations = check(`namespace Ordering;
 
 internal sealed class OrderProcessor
@@ -656,6 +656,8 @@ internal sealed class OrderProcessor
     private readonly ILogger<OrderProcessor> logger2;
     private readonly ILoggerFactory LoggerFactory;
     private readonly HttpClient Client;
+    public ILogger<OrderProcessor> AuditLog { get; }
+    protected ILogger Logger => _logger;
 }
 `)
     expect(violations.filter((v) => v.ruleKey === KEY)).toHaveLength(0)
