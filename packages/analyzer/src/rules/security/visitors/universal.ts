@@ -2,6 +2,7 @@
  * Security domain language-agnostic visitors.
  */
 
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../types.js'
 import { makeViolation } from '../../types.js'
 import { scanForSecrets, isSensitiveFile } from '../secret-scanner.js'
@@ -544,6 +545,59 @@ const HASH_FUNCTIONS_NEEDING_SALT = new Set([
   'createHash', 'md5', 'sha1', 'sha256', 'sha512',
 ])
 
+// Node types that bound a single statement across the JS/TS, Python and C#
+// grammars. The password signal is scoped to the statement performing the
+// hash so that an unrelated `password` token in a *sibling* statement (e.g. a
+// cache/redis connection option) does not turn a request-fingerprinting hash
+// into a false "unsalted password hash".
+const STATEMENT_NODE_TYPES = new Set([
+  'expression_statement', 'return_statement', 'lexical_declaration',
+  'variable_declaration', 'variable_declarator', 'local_declaration_statement',
+  'assignment', 'augmented_assignment', 'assignment_expression',
+  'augmented_assignment_expression',
+])
+
+// Function/method node types across the three grammars.
+const FUNCTION_NODE_TYPES = new Set([
+  'function_declaration', 'function_expression', 'arrow_function',
+  'generator_function_declaration', 'method_definition', 'function_definition',
+  'method_declaration', 'local_function_statement', 'constructor_declaration',
+])
+
+function hasPasswordToken(text: string): boolean {
+  const lower = text.toLowerCase()
+  return lower.includes('password') || lower.includes('passwd')
+}
+
+/**
+ * Decide whether a hash call sits in a password-hashing context. Two signals
+ * count, and only these two — scanning the whole enclosing function's text is
+ * too coarse and produces false positives:
+ *   1. the statement that performs the hash (e.g. `.update(password)`), and
+ *   2. the enclosing function's signature — its name and parameters
+ *      (e.g. `hashPassword(string password)`), never its body.
+ */
+function isPasswordHashingContext(node: SyntaxNode): boolean {
+  // (1) the statement performing the hash
+  let stmt: SyntaxNode | null = node.parent
+  while (stmt && !STATEMENT_NODE_TYPES.has(stmt.type) && !FUNCTION_NODE_TYPES.has(stmt.type)) {
+    stmt = stmt.parent
+  }
+  if (stmt && STATEMENT_NODE_TYPES.has(stmt.type) && hasPasswordToken(stmt.text)) return true
+
+  // (2) the enclosing function's signature (name + parameters only)
+  let fnNode: SyntaxNode | null = node.parent
+  while (fnNode && !FUNCTION_NODE_TYPES.has(fnNode.type)) fnNode = fnNode.parent
+  if (fnNode) {
+    const nameNode = fnNode.childForFieldName('name')
+    const paramsNode = fnNode.childForFieldName('parameters') ?? fnNode.childForFieldName('parameter_list')
+    const signature = `${nameNode?.text ?? ''} ${paramsNode?.text ?? ''}`
+    if (hasPasswordToken(signature)) return true
+  }
+
+  return false
+}
+
 export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/unpredictable-salt-missing',
   nodeTypes: ['call_expression', 'call', 'invocation_expression'],
@@ -561,30 +615,20 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
 
     if (!HASH_FUNCTIONS_NEEDING_SALT.has(methodName)) return null
 
-    // Only flag if this is in a password-hashing context
-    let parent = node.parent
-    while (parent) {
-      const parentText = parent.text.toLowerCase()
-      if (parentText.includes('password') || parentText.includes('passwd')) {
-        const args = node.childForFieldName('arguments')
-        if (args && args.namedChildren.length < 2) {
-          return makeViolation(
-            this.ruleKey, node, filePath, 'high',
-            'Missing salt in hash',
-            `${methodName}() called without a salt in a password context. This allows rainbow table attacks.`,
-            sourceCode,
-            'Use a password hashing function like bcrypt, argon2, or PBKDF2 which handle salting automatically.',
-          )
-        }
-        return null
-      }
-      if (parent.type === 'function_declaration' || parent.type === 'function_definition' ||
-          parent.type === 'method_definition' || parent.type === 'program' ||
-          parent.type === 'method_declaration' || parent.type === 'compilation_unit') break
-      parent = parent.parent
-    }
+    // A bare, single-argument hash call is the candidate; a second argument is
+    // typically the salt/encoding that makes it safe.
+    const args = node.childForFieldName('arguments')
+    if (!args || args.namedChildren.length >= 2) return null
 
-    return null
+    if (!isPasswordHashingContext(node)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Missing salt in hash',
+      `${methodName}() called without a salt in a password context. This allows rainbow table attacks.`,
+      sourceCode,
+      'Use a password hashing function like bcrypt, argon2, or PBKDF2 which handle salting automatically.',
+    )
   },
 }
 
