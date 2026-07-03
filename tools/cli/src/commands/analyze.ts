@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import fs from "node:fs";
 import path from "node:path";
 import { agentTransport } from "@truecourse/shared/llm";
 import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
@@ -18,6 +19,39 @@ async function resolveOrInitProject(): Promise<RegistryEntry> {
   const repoDir = resolveRepoDir(process.cwd()) ?? process.cwd();
   ensureRepoTruecourseDir(repoDir);
   return registerProject(repoDir);
+}
+
+/**
+ * Cheap check: does the repo contain any C# source? Decides whether the
+ * "C# semantic analysis" step is shown up front. Bounded walk with early-exit —
+ * skips heavy/output dirs, returns on the first `.cs`, and gives up after a
+ * directory budget so a large non-C# repo doesn't pay for a full traversal.
+ * (A false negative is self-healing: the pipeline still inserts the step
+ * dynamically if C# work happens — see StepTracker.ensureStep.)
+ */
+function repoHasCSharp(root: string): boolean {
+  const SKIP = new Set(["node_modules", "bin", "obj", ".git", ".truecourse", "dist", ".vs"]);
+  let budget = 20000;
+  const stack: string[] = [root];
+  while (stack.length > 0) {
+    if (budget-- <= 0) return false;
+    const dir = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (SKIP.has(e.name) || e.name.startsWith(".")) continue;
+        stack.push(path.join(dir, e.name));
+      } else if (e.name.endsWith(".cs")) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +83,11 @@ function renderSteps(steps: AnalysisStep[]): void {
   if (renderedLineCount > 0) {
     process.stderr.write(`\x1b[${renderedLineCount}A`);
   }
+  // Erase from the cursor to the end of the screen before repainting, so a
+  // shorter frame — or a list that changed size mid-run — leaves no ghost
+  // lines behind. The bare cursor-up alone overwrote line-by-line and left
+  // leftovers whenever the new frame had fewer lines than the previous one.
+  process.stderr.write("\x1b[0J");
   for (const step of visible) {
     const detail = step.detail ? ` — ${step.detail}` : "";
     let icon: string;
@@ -261,7 +300,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     p.log.info("Legacy Postgres data wiped. Re-analyze to repopulate.");
   }
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules, repoHasCSharp(project.path));
   const tracker = new StepTracker((payload) => {
     if (payload.steps) renderSteps(payload.steps);
   }, stepDefs);
@@ -368,7 +407,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   // `renderedLineCount` globals.
   renderPhase = enableLlmRules ? "pre-llm" : "all";
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules, repoHasCSharp(project.path));
   const tracker = new StepTracker((payload) => {
     if (payload.steps) renderSteps(payload.steps);
   }, stepDefs);

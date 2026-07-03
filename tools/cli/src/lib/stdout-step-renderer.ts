@@ -32,6 +32,9 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
     if (renderedLineCount > 0) {
       process.stderr.write(`\x1b[${renderedLineCount}A`);
     }
+    // Clear from cursor to end of screen so a shorter/resized frame leaves no
+    // ghost lines behind (see the matching note in analyze.ts renderSteps).
+    process.stderr.write('\x1b[0J');
     for (const step of steps) {
       // Suppress detail on pending steps — they shouldn't display
       // numbers before the step has actually started. The dashboard

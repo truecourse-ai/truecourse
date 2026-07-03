@@ -40,9 +40,11 @@ internal static class Program
 
     private static int Main()
     {
-        // Register an installed .NET SDK with MSBuildLocator before any MSBuild
-        // type is touched (the analyze-project path). Must run first.
-        if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
+        // NOTE: MSBuild is registered lazily, inside AnalyzeProject — NOT here.
+        // MSBuildLocator.RegisterDefaults() honours the spawn cwd's global.json
+        // and throws if that SDK isn't installed. Registering at startup coupled
+        // the SDK-free tiers (ping / loose-text `analyze`) to the target repo's
+        // SDK pin and hard-crashed the whole host. Only analyze-project needs it.
 
         // Line-buffered request/response loop. Blocks until stdin closes.
         for (string? line; (line = Console.In.ReadLine()) is not null;)
@@ -86,13 +88,18 @@ internal static class Program
             "analysis", trees, References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        // Tree-major, not rule-major: build each tree's semantic model ONCE and
+        // reuse it across all rules. GetSemanticModel returns a fresh model per
+        // call (no cross-call cache), so the old rule-major order rebuilt — and
+        // rebound — every tree once per rule (rules × trees models). Binding is
+        // the dominant cost, so this is ~O(rules) faster. Matches AnalyzeProject.
         var violations = new List<Violation>();
-        foreach (var rule in SemanticRules.All)
+        foreach (var tree in trees)
         {
-            if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
-            foreach (var tree in trees)
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var rule in SemanticRules.All)
             {
-                var model = compilation.GetSemanticModel(tree);
+                if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
                 violations.AddRange(rule.Analyze(model, tree));
             }
         }
@@ -111,6 +118,13 @@ internal static class Program
         if (!File.Exists(req.Project))
             return new Response(false, Error: $"project not found: {req.Project}");
 
+        // Register MSBuild here, on first project-tier use — this is the only path
+        // that needs an SDK. If the project's global.json pins an SDK that isn't
+        // installed, RegisterDefaults throws; that surfaces to the caller as a
+        // failed response and the run fails hard (the dev must install that SDK).
+        // Safe inside this NoInlining method: it runs before any MSBuild type below.
+        if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
+
         var enabled = req.Rules is { Count: > 0 } ? new HashSet<string>(req.Rules) : null;
 
         using var workspace = MSBuildWorkspace.Create();
@@ -121,7 +135,11 @@ internal static class Program
         };
 
         var projects = new List<Project>();
-        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
+        // `.slnx` (newer XML solution format) opens as a solution too — and note
+        // ".slnx".EndsWith(".sln") is false, so it needs its own check or it would
+        // wrongly fall through to OpenProjectAsync.
+        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || req.Project.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
         {
             var solution = await workspace.OpenSolutionAsync(req.Project);
             projects.AddRange(solution.Projects);

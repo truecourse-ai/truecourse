@@ -40,7 +40,10 @@ function findCSharpProjectFiles(repoPath: string): string[] {
         if (SKIP.has(e.name) || e.name.startsWith('.')) continue;
         walk(path.join(dir, e.name), depth + 1);
       } else if (e.isFile()) {
-        if (e.name.endsWith('.sln')) solutions.push(path.join(dir, e.name));
+        // `.slnx` is the newer XML solution format (e.g. ABP) — MSBuildWorkspace
+        // opens it like `.sln`. Without this we found no solution and fell back
+        // to opening all N `.csproj` files independently.
+        if (e.name.endsWith('.sln') || e.name.endsWith('.slnx')) solutions.push(path.join(dir, e.name));
         else if (e.name.endsWith('.csproj')) projects.push(path.join(dir, e.name));
       }
     }
@@ -463,10 +466,44 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  // The deterministic domain checks (tree-sitter per-file + architecture) are
+  // complete once the scan above finishes. Mark them done HERE — before the C#
+  // semantic tiers — so they render as ● while C# runs on its own line, and a C#
+  // failure can't leave them spinning. Counts are deterministic-only; C# findings
+  // are surfaced under the dedicated 'csharp' step, not folded back into domains.
+  {
+    const detByDomain = new Map<string, number>();
+    for (const v of allCodeViolations) {
+      const d = v.ruleKey.split('/')[0];
+      detByDomain.set(d, (detByDomain.get(d) ?? 0) + 1);
+    }
+    const archDet = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+    if (archDet > 0) detByDomain.set('architecture', (detByDomain.get('architecture') ?? 0) + archDet);
+    for (const domain of DOMAIN_ORDER) {
+      const count = detByDomain.get(domain) ?? 0;
+      tracker?.done(domain, count > 0 ? `${count} violations` : 'Clean');
+    }
+  }
+  const detViolationCount = allCodeViolations.length;
+
   // C# semantic rules run in the out-of-process Roslyn host (build-required).
   // Batch: one host invocation over all C# files. Fail-hard — if there are C#
   // files and host rules but the host is unavailable, runRoslynHost throws and
   // the analysis errors out (no tree-sitter fallback, by design).
+  // The C# semantic tiers (loose-text host + project workspace) run out-of-process
+  // AFTER the per-file scan, so — unlike the TS type-checker (inline in the domain
+  // checks) or Pyright (inline in parse) — they have no host step to report under.
+  // Add one dynamically the first time real C# work happens, so the UI shows this
+  // phase instead of freezing on "Saving results" while the host churns.
+  let csharpStepActive = false;
+  const startCsharpStep = (detail: string) => {
+    if (!csharpStepActive) {
+      tracker?.ensureStep('csharp', 'C# semantic analysis');
+      csharpStepActive = true;
+    }
+    tracker?.start('csharp', detail);
+  };
+
   const enabledHostRules = enabledCodeRules.filter((r) => r.engine === 'roslyn-host');
   if (enabledHostRules.length > 0) {
     const csharpFiles: { path: string; text: string }[] = [];
@@ -478,6 +515,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       if (fc) csharpFiles.push({ path: key, text: fc.content });
     }
     if (csharpFiles.length > 0) {
+      startCsharpStep(`Analyzing ${csharpFiles.length} C# files…`);
       const ruleByKey = new Map(enabledHostRules.map((r) => [r.key, r]));
       const hostViolations = await runRoslynHost(csharpFiles, enabledHostRules.map((r) => r.key));
       for (const v of hostViolations) {
@@ -512,18 +550,30 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (enabledWorkspaceRules.length > 0 && filesToScan.some((f) => detectLanguage(f.filePath) === 'csharp')) {
     const projectFiles = findCSharpProjectFiles(repoPath);
     if (projectFiles.length === 0) {
-      log.info('[Pipeline] C# present but no .csproj/.sln found — project-aware C# rules skipped');
+      log.info('[Pipeline] C# present but no .csproj/.sln/.slnx found — project-aware C# rules skipped');
     } else {
       const ruleByKey = new Map(enabledWorkspaceRules.map((r) => [r.key, r]));
       const ruleKeys = enabledWorkspaceRules.map((r) => r.key);
-      for (const projectFile of projectFiles) {
+      for (const [pi, projectFile] of projectFiles.entries()) {
+        startCsharpStep(
+          projectFiles.length > 1
+            ? `Loading project ${pi + 1}/${projectFiles.length}: ${path.basename(projectFile)}…`
+            : `Loading project ${path.basename(projectFile)}…`,
+        );
         let wsViolations;
         try {
           wsViolations = await runRoslynWorkspace(projectFile, ruleKeys);
         } catch (err) {
+          tracker?.error('csharp', `Project load failed: ${path.basename(projectFile)}`);
           if (err instanceof RoslynHostUnavailableError) throw err;
-          log.warn(`[Pipeline] Project-aware C# rules skipped for ${path.basename(projectFile)}: ${(err as Error).message}. Restore the project (\`dotnet restore\`) for full C# coverage.`);
-          continue;
+          // Fail-hard: an unloadable project (not restored, or its global.json
+          // pins an SDK that isn't installed) means C# project-aware coverage is
+          // incomplete. We surface that as an error rather than silently degrade
+          // — the dev owns the project and must restore it / install its SDK.
+          throw new Error(
+            `Project-aware C# analysis failed for ${path.basename(projectFile)}: ${(err as Error).message}. ` +
+              `Restore the project (\`dotnet restore\`) and ensure its pinned .NET SDK is installed.`,
+          );
         }
         for (const v of wsViolations) {
           const rule = ruleByKey.get(v.ruleKey);
@@ -549,6 +599,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         }
       }
     }
+  }
+
+  if (csharpStepActive) {
+    const csharpFindings = allCodeViolations.length - detViolationCount;
+    tracker?.done('csharp', csharpFindings > 0 ? `${csharpFindings} violations` : 'Clean');
   }
 
   log.info(`[Pipeline] Code scan: ${allCodeViolations.length} violations from ${filesToScan.length} files (${enabledCodeRules.length} det rules, ${enabledLlmCodeRules.length} LLM rules)`);
@@ -617,10 +672,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       .join(', ')} (${totalDet})`,
   );
 
-  for (const domain of DOMAIN_ORDER) {
-    const count = violationsByDomain.get(domain) ?? 0;
-    tracker?.done(domain, count > 0 ? `${count} violations` : 'Clean');
-  }
+  // Deterministic domains were already marked done right after the scan (before
+  // the C# tiers) so a C# failure can't leave them spinning — nothing to do here.
+  // `violationsByDomain` above stays for logging + the LLM detCount below.
 
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 

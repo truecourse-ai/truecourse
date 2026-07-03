@@ -8,14 +8,19 @@
     <AssemblyName>csharp-roslyn-host</AssemblyName>
     <RootNamespace>TrueCourse.RoslynHost</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The published host ships as a portable net8.0 DLL run via the user's
+         `dotnet`. LatestMajor lets it start on any installed .NET >= 8 runtime
+         (a C# dev may have only 9/10/11), not just an exact net8.0 runtime. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <!-- MSBuildWorkspace project loading (the `analyze-project` op): opens a real
          .csproj/.sln with its actual references for full-fidelity semantics.
-         Microsoft.Build.Locator must register an installed SDK before any MSBuild
-         type is touched — see Program.Main. -->
+         Microsoft.Build.Locator registers an installed SDK lazily, on first
+         project-tier use — see AnalyzeProject (NOT Main, so the SDK-free tiers
+         never touch MSBuild). -->
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.8.0" />
     <!-- The C# language-specific workspace service; without it MSBuildWorkspace
          reports "language 'C#' is not supported". -->
