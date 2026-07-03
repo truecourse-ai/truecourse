@@ -31,6 +31,10 @@ function parameterTypeIdentifiers(method: SyntaxNode): Set<string> {
     if (param?.type !== 'parameter') continue
     for (const id of identifiersIn(param.childForFieldName('type'))) used.add(id)
   }
+  // A trailing `params T[]` parameter is not wrapped in a `parameter` node by
+  // tree-sitter-c-sharp; its type is attached directly as the `type` field of
+  // the parameter list. Fold those identifiers in so `T` still counts as used.
+  for (const id of identifiersIn(params.childForFieldName('type'))) used.add(id)
   return used
 }
 

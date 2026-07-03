@@ -1957,7 +1957,19 @@
       "layer": "service"
     },
     {
+      "name": "GenericReturnOnlyFactory",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "GlobalAuditMarker",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GreeterBase",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2329,6 +2341,18 @@
       "layer": "service"
     },
     {
+      "name": "RawConfig",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RawConfigLoader",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ReconciliationTracer",
       "service": "UserService",
       "kind": "class",
@@ -2336,6 +2360,12 @@
     },
     {
       "name": "Record",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RedundantBaseGreeter",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2486,6 +2516,12 @@
     },
     {
       "name": "StringFormattingHelpers",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SwallowedFlushErrors",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
