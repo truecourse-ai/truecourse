@@ -286,13 +286,17 @@ export async function generateContractsFromCorpus(
   // Phase 2 — reconcile the GLOBAL target list: de-dup across areas + collapse
   // semantic duplicates (different identities, same artifact) so each artifact is
   // generated exactly once, with a stable identity (kills cross-area over-generation).
-  const planned = await reconcileTargets(opts.repoRoot, enumerated, {
+  const reconciled = await reconcileTargets(opts.repoRoot, enumerated, {
     runner: opts.reconcileRunner,
     enabled: opts.disableTargetReconciliation !== true,
     transport: opts.transport,
     model: models.reconcile,
     fallbackModel: models.fallback,
+    // Anchor duplicate-merging to the prior artifacts: a reviewed identity is
+    // forced canonical instead of being re-judged (and possibly flipped) by the LLM.
+    priorTargets: opts.prior?.targets,
   });
+  const planned = reconciled.byArea;
 
   // The global reconciled identity list — what a cross-ref may point at. Every
   // area's extractor gets it, so refs to shared artifacts use REAL identities
@@ -329,6 +333,10 @@ export async function generateContractsFromCorpus(
     models: { extract: models.extract, repair: models.repair, repairParse: models.repairParse, fallback: models.fallback },
     disableRepair: opts.dryRun || opts.disableRepair,
     onRepairProgress: opts.onRepairProgress,
+    // Rewrite any cross-reference pointing at a merged (non-canonical) identity
+    // onto its canonical spelling, so references stay stable when reconcile picks
+    // a canonical — cached/anchored fragments included.
+    referenceMerges: reconciled.merges,
   });
 
   if (assembled.resolverHard) {

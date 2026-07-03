@@ -74,10 +74,17 @@ export { canonicalIdentity, slugIdentity } from './identity.js';
 export {
   reconcileTargets,
   planReconcileCalls,
+  rewriteReferencesToCanonical,
   RECONCILE_SYSTEM_PROMPT,
   buildReconcileUserPrompt,
 } from './target-reconciler.js';
-export type { ReconcileRunner, ReconcileRunnerInput, AreaTargets, TargetReconcilerOptions } from './target-reconciler.js';
+export type {
+  ReconcileRunner,
+  ReconcileRunnerInput,
+  ReconcileResult,
+  AreaTargets,
+  TargetReconcilerOptions,
+} from './target-reconciler.js';
 export {
   judgeGaps,
   GAP_JUDGE_SYSTEM_PROMPT,

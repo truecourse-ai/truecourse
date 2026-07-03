@@ -48,20 +48,36 @@ export interface TargetReconcilerOptions {
   transport?: LlmTransport;
   /** When false, only the deterministic cross-area de-dup runs (no LLM). */
   enabled?: boolean;
+  /**
+   * Existing artifact identities (kind + identity) from the prior generation.
+   * When a candidate cluster contains exactly one of these incumbents, that
+   * spelling is forced canonical deterministically (incumbent-wins) — so a
+   * reviewed identity never flips run-to-run just because the LLM re-judged it.
+   */
+  priorTargets?: readonly { kind: string; identity: string }[];
   model?: string;
   fallbackModel?: string;
+}
+
+/** Output of {@link reconcileTargets}: the reassigned per-area target lists plus
+ *  the merge map (non-canonical coverage key → canonical kind+identity, chain-
+ *  resolved) so the generate tail can rewrite cross-references onto canonicals. */
+export interface ReconcileResult {
+  byArea: AreaTargets[];
+  merges: Record<string, { kind: string; identity: string }>;
 }
 
 /**
  * Reconcile the enumerated targets globally. Returns per-area target lists where
  * each unique artifact appears exactly once (assigned to the lexicographically
- * smallest area that enumerated it — a deterministic origin), with canonical identities.
+ * smallest area that enumerated it — a deterministic origin), with canonical
+ * identities, plus the merge map that produced them.
  */
 export async function reconcileTargets(
   scope: string,
   byArea: AreaTargets[],
   opts: TargetReconcilerOptions = {},
-): Promise<AreaTargets[]> {
+): Promise<ReconcileResult> {
   // Flatten. For each coverage key remember the LEXICOGRAPHICALLY SMALLEST area id
   // that enumerated it — a deterministic origin, so a shared target's home area
   // (and therefore its generated `origin` line) can't flip when the corpus
@@ -78,6 +94,14 @@ export async function reconcileTargets(
   }
 
   // (b) Semantic reconciliation — map duplicate identities onto a canonical one.
+  // Two layers, DETERMINISTIC first:
+  //   1–3. Per-cluster deterministic rules (incumbent-wins, token-set equal,
+  //        singleton-kind subset) collapse near-duplicates with NO LLM and NO
+  //        cache — a pure function of the cluster's identities plus the prior
+  //        artifacts, so a reviewed identity can't flip run-to-run just because
+  //        the model re-judged it.
+  //   4.   Whatever a cluster can't resolve deterministically (≥2 members left)
+  //        goes to the LLM, cached on EXACTLY the members it saw.
   // SCOPED + CACHED PER CLUSTER: only same-kind targets that share a token are
   // candidates to merge, so we form small deterministic clusters and reconcile
   // each on its own, cached by that cluster's own members. Editing one doc only
@@ -87,11 +111,15 @@ export async function reconcileTargets(
   // corpus on any edit, which is what churned unrelated areas.)
   const merges: Record<string, { kind: string; identity: string }> = {};
   if (opts.enabled !== false && distinct.size >= 2) {
+    const prior = buildPriorSet(opts.priorTargets);
     const runner =
       opts.runner ?? spawnReconcileRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
     for (const cluster of clusterCandidates(distinct)) {
+      const { merges: deterministic, remaining } = resolveClusterDeterministically(cluster, prior);
+      Object.assign(merges, deterministic);
+      if (remaining.length < 2) continue; // fully resolved deterministically — no LLM, no cache
       const input: ReconcileRunnerInput = {
-        targets: cluster.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
+        targets: remaining.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
       };
       const key = computeCacheKey(input);
       const cached = await readCache(scope, key);
@@ -109,12 +137,17 @@ export async function reconcileTargets(
     }
   }
 
+  // Chain-resolve (A→B, B→C ⇒ A→C) so every non-canonical maps in one hop to its
+  // final canonical — the reassignment below and the reference rewrite both want
+  // a one-hop map.
+  const resolved = chainResolveMerges(merges);
+
   // Apply merges: rewrite each distinct target to its canonical identity, then
   // collapse again by the NEW coverage key (so `outbox-pattern` and
   // `transactional-outbox` both land on one canonical target in one area).
   const canonByArea = new Map<string, Map<string, TargetSpec>>(); // areaId → (coverageKey → target)
   for (const [k, t] of distinct) {
-    const canon = merges[k];
+    const canon = resolved[k];
     const target: TargetSpec = canon ? { kind: canon.kind, identity: canon.identity, hint: t.hint } : t;
     const ck = coverageKey(target.kind, target.identity);
     const areaId = originArea.get(canon ? coverageKey(canon.kind, canon.identity) : k) ?? originArea.get(k)!;
@@ -124,18 +157,22 @@ export async function reconcileTargets(
   }
 
   // Rebuild per-area lists in the original area order.
-  return byArea.map(({ area }) => ({ area, targets: [...(canonByArea.get(area.areaId)?.values() ?? [])] }));
+  const rebuilt = byArea.map(({ area }) => ({ area, targets: [...(canonByArea.get(area.areaId)?.values() ?? [])] }));
+  return { byArea: rebuilt, merges: resolved };
 }
 
 /**
  * Estimate support: how many LLM calls {@link reconcileTargets} would make for
- * these targets — the same flatten → cluster pipeline, checking each cluster
- * against the same per-cluster cache. `misses` is the exact call count for a
- * warm run. No LLM, no cache writes.
+ * these targets — the same flatten → cluster → deterministic-resolve pipeline,
+ * checking each cluster's LLM-bound remainder against the same per-cluster cache.
+ * `clusters` counts only the clusters that actually reach the LLM (≥2 members
+ * survive the deterministic rules); `misses` is the exact cold-run call count.
+ * No LLM, no cache writes.
  */
 export async function planReconcileCalls(
   scope: string,
   byArea: AreaTargets[],
+  priorTargets?: readonly { kind: string; identity: string }[],
 ): Promise<{ clusters: number; misses: number }> {
   const distinct = new Map<string, TargetSpec>();
   for (const { targets } of byArea) {
@@ -145,12 +182,15 @@ export async function planReconcileCalls(
     }
   }
   if (distinct.size < 2) return { clusters: 0, misses: 0 };
+  const prior = buildPriorSet(priorTargets);
   let clusters = 0;
   let misses = 0;
   for (const cluster of clusterCandidates(distinct)) {
+    const { remaining } = resolveClusterDeterministically(cluster, prior);
+    if (remaining.length < 2) continue; // resolved deterministically — no LLM call
     clusters++;
     const input: ReconcileRunnerInput = {
-      targets: cluster.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
+      targets: remaining.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
     };
     if ((await readCache(scope, computeCacheKey(input))) === null) misses++;
   }
@@ -232,9 +272,279 @@ function sanitize(
     if (colon === -1) continue;
     const fromKey = coverageKey(fromRaw.slice(0, colon), fromRaw.slice(colon + 1));
     const toKey = coverageKey(to.kind, to.identity);
-    if (!distinct.has(fromKey) || !distinct.has(toKey)) continue; // both sides must be real targets
+    const canon = distinct.get(toKey);
+    if (!distinct.has(fromKey) || !canon) continue; // both sides must be real targets
     if (fromKey === toKey) continue; // identity merge
-    out[fromKey] = { kind: to.kind, identity: to.identity };
+    // Store the real canonical target's spelling (not the LLM's echo) so downstream
+    // reassignment + reference rewriting use the exact enumerated identity.
+    out[fromKey] = { kind: canon.kind, identity: canon.identity };
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic per-cluster reconciliation (rules 1–3, run before the LLM)
+// ---------------------------------------------------------------------------
+
+/**
+ * The conceptually-singleton cross-cutting concerns: a repo has essentially ONE
+ * of each, so collapsing near-duplicate spellings (a subset/superset relation,
+ * or absorbing a lone-incumbent cluster) is safe. Distinct Entities / Operations
+ * / decisions that merely share a token are NOT duplicates (§4.6), so the subset
+ * and lone-incumbent rules deliberately do NOT apply to them — only the exact
+ * token-multiset rule does, which can't conflate `POST` and `GET` of one path.
+ */
+const SINGLETON_KINDS: ReadonlySet<string> = new Set([
+  'authrequirement',
+  'errorenvelope',
+  'paginationcontract',
+  'idempotencycontract',
+]);
+
+function isSingletonKind(kind: string): boolean {
+  return SINGLETON_KINDS.has(kind.trim().toLowerCase());
+}
+
+/** Prior artifact identities → a coverage-key set for fast incumbency checks. */
+function buildPriorSet(priorTargets?: readonly { kind: string; identity: string }[]): ReadonlySet<string> {
+  const set = new Set<string>();
+  for (const t of priorTargets ?? []) set.add(coverageKey(t.kind, t.identity));
+  return set;
+}
+
+/** Significant identity tokens (full set — no length filter, unlike clustering:
+ *  a 2-char token like `v2` distinguishes `api.v2` from `api.v3`, so it must count). */
+function identityTokens(identity: string): string[] {
+  return slugIdentity(identity).split(/[.-]+/).filter(Boolean);
+}
+
+/** Order-insensitive token multiset key (rule 2). */
+function tokenMultisetKey(identity: string): string {
+  return identityTokens(identity).slice().sort().join(' ');
+}
+
+/** Strict subset test over token SETS (rule 3). */
+function isStrictTokenSubset(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size >= b.size) return false;
+  for (const tok of a) if (!b.has(tok)) return false;
+  return true;
+}
+
+/**
+ * Deterministic reconciliation of one candidate cluster (all same kind), run
+ * BEFORE any LLM call. Returns the merges it can prove plus the members it can't
+ * resolve (which the caller sends to the LLM). Rules, in order:
+ *
+ *   1. Incumbent-wins — for a SINGLETON kind, a cluster with exactly one prior
+ *      artifact (incumbent) collapses entirely onto that incumbent: the reviewed
+ *      spelling is locked. (Not applied to Entity/Operation/… — a lone incumbent
+ *      there would swallow genuinely-distinct siblings sharing a path token.)
+ *   2. Token-set dedupe (all kinds) — identical token multiset ⇒ the same
+ *      artifact reordered/re-punctuated (`error.envelope.standard` ↔
+ *      `standard-error-envelope`).
+ *   3. Singleton-kind subset — one token set ⊂ the other ⇒ the more specific
+ *      superset is the same concern (`bearer-api` ⊂ `auth.bearer.api`).
+ *
+ * Canonical per merge group: prefer an incumbent; then the most specific (most
+ * tokens — the superset of rule 3); tie-break lexicographically (rule 2). When
+ * both spellings are incumbents (the observed flip case) this is still fully
+ * deterministic, which is the whole point.
+ */
+function resolveClusterDeterministically(
+  cluster: TargetSpec[],
+  prior: ReadonlySet<string>,
+): { merges: Record<string, { kind: string; identity: string }>; remaining: TargetSpec[] } {
+  const singleton = isSingletonKind(cluster[0].kind);
+  const keys = cluster.map((t) => coverageKey(t.kind, t.identity));
+  const incumbent = keys.map((k) => prior.has(k));
+  const sets = cluster.map((t) => new Set(identityTokens(t.identity)));
+  const multis = cluster.map((t) => tokenMultisetKey(t.identity));
+
+  const parent = cluster.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  for (let i = 0; i < cluster.length; i++) {
+    for (let j = i + 1; j < cluster.length; j++) {
+      if (multis[i] === multis[j]) union(i, j); // rule 2 (all kinds)
+      else if (singleton && (isStrictTokenSubset(sets[i], sets[j]) || isStrictTokenSubset(sets[j], sets[i]))) union(i, j); // rule 3
+    }
+  }
+  // Rule 1: a singleton-kind cluster with a single incumbent collapses onto it.
+  if (singleton && incumbent.filter(Boolean).length === 1) {
+    const inc = incumbent.indexOf(true);
+    for (let i = 0; i < cluster.length; i++) if (i !== inc) union(i, inc);
+  }
+
+  const components = new Map<number, number[]>();
+  for (let i = 0; i < cluster.length; i++) {
+    const root = find(i);
+    const members = components.get(root);
+    if (members) members.push(i);
+    else components.set(root, [i]);
+  }
+
+  const merges: Record<string, { kind: string; identity: string }> = {};
+  const remaining: TargetSpec[] = [];
+  for (const members of components.values()) {
+    if (members.length < 2) {
+      remaining.push(cluster[members[0]]);
+      continue;
+    }
+    const incumbents = members.filter((i) => incumbent[i]);
+    const candidates = incumbents.length > 0 ? incumbents : members;
+    const canonical = candidates.slice().sort((a, b) => {
+      if (sets[a].size !== sets[b].size) return sets[b].size - sets[a].size; // most specific first
+      return cluster[a].identity.localeCompare(cluster[b].identity); // then lexicographically smallest
+    })[0];
+    for (const i of members) {
+      if (i === canonical) continue;
+      merges[keys[i]] = { kind: cluster[canonical].kind, identity: cluster[canonical].identity };
+    }
+  }
+  return { merges, remaining };
+}
+
+/** Follow value→key edges to a fixpoint so a merged non-canonical maps straight
+ *  to its final canonical (cycle-guarded — a cycle stops at the first repeat). */
+function chainResolveMerges(
+  merges: Record<string, { kind: string; identity: string }>,
+): Record<string, { kind: string; identity: string }> {
+  const out: Record<string, { kind: string; identity: string }> = {};
+  for (const [from, to0] of Object.entries(merges)) {
+    let to = to0;
+    const seen = new Set<string>([from]);
+    let key = coverageKey(to.kind, to.identity);
+    while (merges[key] && !seen.has(key)) {
+      seen.add(key);
+      to = merges[key];
+      key = coverageKey(to.kind, to.identity);
+    }
+    out[from] = to;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-reference rewrite (typed `.tc` reference tokens → canonical identity)
+// ---------------------------------------------------------------------------
+
+/** identCont chars per the `.tc` grammar: letter | digit | `_` | `$` | `-` | `.`. */
+const IDENT_CONT = /[A-Za-z0-9_$.\-]/;
+/** A bare identity that needs no quoting as a reference tail. */
+const BARE_IDENTITY = /^[A-Za-z_$][A-Za-z0-9_$.\-]*$/;
+
+interface RefMatch {
+  kind: string;
+  identity: string;
+  quoted: boolean;
+  end: number;
+}
+
+/** Match a single `.tc` reference token — `Kind:ident` or `Kind:"identity"` — at
+ *  `start`, per the grammar `reference = upper identCont* ":" (refQuoted | ident)`. */
+function matchReferenceAt(src: string, start: number): RefMatch | null {
+  if (!/[A-Z]/.test(src[start])) return null;
+  let i = start + 1;
+  while (i < src.length && IDENT_CONT.test(src[i])) i++;
+  const kind = src.slice(start, i);
+  if (src[i] !== ':') return null;
+  i++;
+  if (src[i] === '"') {
+    const close = src.indexOf('"', i + 1);
+    if (close === -1) return null;
+    return { kind, identity: src.slice(i + 1, close), quoted: true, end: close + 1 };
+  }
+  if (i >= src.length || !/[A-Za-z_$]/.test(src[i])) return null;
+  const idStart = i;
+  i++;
+  while (i < src.length && IDENT_CONT.test(src[i])) i++;
+  return { kind, identity: src.slice(idStart, i), quoted: false, end: i };
+}
+
+function formatReference(kind: string, identity: string, wasQuoted: boolean): string {
+  const quote = wasQuoted || !BARE_IDENTITY.test(identity);
+  return quote ? `${kind}:"${identity}"` : `${kind}:${identity}`;
+}
+
+/**
+ * Rewrite every typed cross-reference in a `.tc` body whose (kind, identity)
+ * matches a merged non-canonical → its canonical spelling. `merges` is the
+ * chain-resolved map from {@link reconcileTargets} (coverage key → canonical).
+ *
+ * Only whole reference TOKENS are touched — matched at a token boundary and
+ * compared by coverage key, so a partial identity (`Entity:Order` inside
+ * `Entity:Order.total`) and any occurrence inside a string literal or comment
+ * are left verbatim. Quoting is preserved (operations keep their quotes) and
+ * forced only when a canonical identity isn't a bare ident.
+ */
+export function rewriteReferencesToCanonical(
+  tcSource: string,
+  merges: Record<string, { kind: string; identity: string }>,
+): string {
+  if (Object.keys(merges).length === 0) return tcSource;
+  const n = tcSource.length;
+  let out = '';
+  let i = 0;
+  while (i < n) {
+    const c = tcSource[i];
+    // Comments are free text — copy through untouched.
+    if (c === '/' && tcSource[i + 1] === '/') {
+      const nl = tcSource.indexOf('\n', i);
+      const end = nl === -1 ? n : nl;
+      out += tcSource.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === '/' && tcSource[i + 1] === '*') {
+      const close = tcSource.indexOf('*/', i + 2);
+      const end = close === -1 ? n : close + 2;
+      out += tcSource.slice(i, end);
+      i = end;
+      continue;
+    }
+    // A reference starts on an uppercase letter at a token boundary. Consume the
+    // whole token (including a quoted identity) so a quoted ref's `"` is never
+    // seen as a standalone string below.
+    if (/[A-Z]/.test(c) && (i === 0 || !IDENT_CONT.test(tcSource[i - 1]))) {
+      const m = matchReferenceAt(tcSource, i);
+      if (m) {
+        const canon = merges[coverageKey(m.kind, m.identity)];
+        out += canon ? formatReference(canon.kind, canon.identity, m.quoted) : tcSource.slice(i, m.end);
+        i = m.end;
+        continue;
+      }
+    }
+    // A standalone string literal is free text — skip its contents verbatim.
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (tcSource[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (tcSource[j] === '"') {
+          j++;
+          break;
+        }
+        j++;
+      }
+      out += tcSource.slice(i, j);
+      i = j;
+      continue;
+    }
+    out += c;
+    i++;
   }
   return out;
 }

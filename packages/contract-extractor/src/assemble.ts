@@ -13,6 +13,7 @@ import { propagateCrossCuttingTags } from './tag-propagator.js';
 import { normalizeMergedArtifacts } from './normalizer.js';
 import { repair, type RepairProgress } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
+import { rewriteReferencesToCanonical } from './target-reconciler.js';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { SpecSlice } from './types.js';
 // Type-only (erased at runtime → no cycle with index.ts which imports this module).
@@ -23,6 +24,13 @@ export interface AssembleOptions {
   models?: ExtractModels;
   disableRepair?: boolean;
   onRepairProgress?: (e: RepairProgress) => void;
+  /**
+   * Reconcile's merge map (coverage key → canonical kind+identity, chain-resolved).
+   * Every artifact's cross-references are rewritten onto these canonicals before
+   * validate, so a reference to a merged non-canonical identity stays resolvable
+   * and byte-stable across runs. Absent (or empty) ⇒ no rewrite.
+   */
+  referenceMerges?: Record<string, { kind: string; identity: string }>;
 }
 
 export interface AssembleResult {
@@ -82,6 +90,18 @@ export async function assembleArtifacts(
       })),
     );
   }
+
+  // Canonicalize cross-references against reconcile's merges (deterministic, before
+  // validate): a reference to a merged non-canonical identity is rewritten to the
+  // canonical so it resolves and stays byte-stable. Applied to the winning body,
+  // which is what the writer emits.
+  if (opts.referenceMerges && Object.keys(opts.referenceMerges).length > 0) {
+    for (const a of merged.artifacts) {
+      const rewritten = rewriteReferencesToCanonical(a.winning.tcSource, opts.referenceMerges);
+      if (rewritten !== a.winning.tcSource) a.winning = { ...a.winning, tcSource: rewritten };
+    }
+  }
+
   const validation = validateMerged(merged.artifacts);
 
   // Drop artifacts with HARD validation issues and keep the rest. A single bad

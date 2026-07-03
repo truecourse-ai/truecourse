@@ -52,6 +52,28 @@ function entity(src: string, identity: string): Fragment {
   };
 }
 
+function authRequirement(src: string, identity: string): Fragment {
+  return {
+    kind: 'AuthRequirement',
+    identity,
+    tcSource: `auth-requirement ${identity} {\n  origin "${src}" "Auth" 1..2\n  scheme Bearer\n}`,
+    origin: { source: src, section: 'Auth', lines: [1, 2] },
+    obligationKeys: [],
+  };
+}
+
+/** An operation that cross-references the auth requirement by a NON-canonical
+ *  spelling (`bearer-api`) — so the reference rewrite is what makes it canonical. */
+function ordersOperation(src: string): Fragment {
+  return {
+    kind: 'Operation',
+    identity: 'POST /api/orders',
+    tcSource: `operation POST "/api/orders" {\n  origin "${src}" "orders" 1..2\n  response 401 inherits AuthRequirement:bearer-api\n}`,
+    origin: { source: src, section: 'orders', lines: [1, 2] },
+    obligationKeys: [],
+  };
+}
+
 describe('determinism guardrail', () => {
   it('edit one doc → only that area regenerates; every other .tc is byte-identical', async () => {
     // Three independent areas, each owning one entity. The generate stub is
@@ -99,5 +121,65 @@ describe('determinism guardrail', () => {
       if (p.startsWith('order/')) continue; // the edited area's domain
       expect(after[p]).toBe(bytes);
     }
+  });
+
+  it('two anchored generates yield byte-identical cross-cutting identities (deterministic reconcile + reference rewrite)', async () => {
+    // The auth requirement is enumerated in two areas under two spellings —
+    // `auth.bearer.api` and its subset `bearer-api` — the exact shape that used
+    // to flip run-to-run. The deterministic subset rule pins the canonical to the
+    // superset, and the operation's `bearer-api` reference is rewritten to match.
+    const corpus: AreaGenInput[] = [
+      { areaId: 'core/auth', product: 'core', concern: 'auth', docs: [{ ref: 'auth.md', content: '# Auth\nbody', lastTouched: '2026-01-01T00:00:00Z', status: 'shipped', kind: 'prd' }] },
+      { areaId: 'core/orders', product: 'core', concern: 'orders', docs: [{ ref: 'orders.md', content: '# Orders\nbody', lastTouched: '2026-02-01T00:00:00Z', status: 'shipped', kind: 'prd' }] },
+    ];
+    const enumerateRunner: EnumerateRunner = async ({ area }) =>
+      area.areaId === 'core/auth'
+        ? [{ kind: 'AuthRequirement', identity: 'auth.bearer.api' }]
+        : [{ kind: 'AuthRequirement', identity: 'bearer-api' }, { kind: 'Operation', identity: 'POST /api/orders' }];
+    const generateRunner: GenerateBatchRunner = async ({ area, targets }) => ({
+      fragments: targets.map((tg) =>
+        tg.kind === 'Operation' ? ordersOperation(area.docs[0].ref) : authRequirement(area.docs[0].ref, tg.identity),
+      ),
+    });
+    // Subset merge is deterministic (no LLM); the stub asserts the runner is never called.
+    let reconcileCalls = 0;
+    const reconcileRunner = async () => {
+      reconcileCalls++;
+      return { merges: {} };
+    };
+    const opts = (prior?: { targets: { kind: string; identity: string }[]; bodyByKey: Map<string, string> }) => ({
+      repoRoot: repo,
+      corpusInput: corpus,
+      enumerateRunner,
+      reconcileRunner,
+      generateRunner,
+      prior,
+      disableRepair: true,
+      disableGapJudge: true,
+      disableManifest: true, // force a real second run rather than the no-op short-circuit
+    });
+
+    const first = await generateContractsFromCorpus(opts());
+    const before = snapshotTc(path.join(repo, '.truecourse', 'contracts'));
+    expect(reconcileCalls).toBe(0);
+
+    // Exactly one auth requirement, under the superset canonical.
+    const authFiles = Object.entries(before).filter(([, b]) => b.startsWith('auth-requirement '));
+    expect(authFiles).toHaveLength(1);
+    expect(authFiles[0][1]).toContain('auth-requirement auth.bearer.api');
+
+    // The operation's reference was rewritten onto the canonical identity.
+    const opFile = Object.entries(before).find(([p]) => p.includes('operations'))![1];
+    expect(opFile).toContain('AuthRequirement:auth.bearer.api');
+    expect(opFile).not.toContain('bearer-api');
+
+    // Anchor a second run to the first's contracts — output is byte-identical.
+    const prior = {
+      targets: first.artifactsToWrite.map((a) => ({ kind: a.kind, identity: a.identity })),
+      bodyByKey: new Map<string, string>(),
+    };
+    await generateContractsFromCorpus(opts(prior));
+    const after = snapshotTc(path.join(repo, '.truecourse', 'contracts'));
+    expect(after).toEqual(before);
   });
 });
