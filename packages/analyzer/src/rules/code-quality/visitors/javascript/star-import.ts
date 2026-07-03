@@ -39,6 +39,16 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
         || sourceText.startsWith('fumadocs-core/')) {
         return null
       }
+      // Libraries conventionally consumed under a namespace alias:
+      //   - `semver` exposes many top-level version helpers and is idiomatically
+      //     imported as `import * as semver from 'semver'` → `semver.satisfies(...)`.
+      //   - the Sentry SDK (`@sentry/*`) documents `import * as Sentry` →
+      //     `Sentry.captureException(...)` as its standard usage.
+      // These read more cleanly as a namespace even when referenced only once
+      // or twice, so they don't benefit from the ≥5-reference heuristic below.
+      if (sourceText === 'semver' || sourceText.startsWith('@sentry/')) {
+        return null
+      }
       // Relative imports (./foo, ../bar) — namespace imports for local modules are a valid pattern
       if (sourceText.startsWith('./') || sourceText.startsWith('../')) return null
 
