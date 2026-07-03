@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeArea,
+  canonicalizeConcern,
   splitArea,
   slugifyAxis,
   isProcessArea,
@@ -78,6 +79,31 @@ describe('normalizeArea', () => {
     expect(normalizeArea({ product: 'core', concern: 'Goals' })).toBe('process/goals');
     expect(normalizeArea({ product: 'capacity-app', concern: 'open questions' })).toBe('process/open-questions');
     expect(normalizeArea({ product: 'core', concern: 'non-goals' })).toBe('process/non-goals');
+  });
+});
+
+describe('canonicalizeConcern', () => {
+  it('slugs a heading to the same concern the grouper produces', () => {
+    // Must line up with normalizeArea's concern axis so heading-widened overlap
+    // matching hits an area's `concern` exactly.
+    expect(canonicalizeConcern('Pagination')).toBe('pagination');
+    expect(canonicalizeConcern('Users Entity')).toBe('users-entity');
+    expect(canonicalizeConcern('Authentication')).toBe(splitArea(normalizeArea({ product: 'core', concern: 'Authentication' })!).concern);
+  });
+
+  it('folds alias synonyms (Authentication/RBAC → auth)', () => {
+    expect(canonicalizeConcern('Authentication')).toBe('auth');
+    expect(canonicalizeConcern('RBAC')).toBe('auth');
+    expect(canonicalizeConcern('Error Handling')).toBe('errors');
+  });
+
+  it('applies the vocab remap', () => {
+    expect(canonicalizeConcern('paging', { products: {}, concerns: { paging: 'pagination' } })).toBe('pagination');
+  });
+
+  it('returns null for content-free headings', () => {
+    expect(canonicalizeConcern('   ')).toBeNull();
+    expect(canonicalizeConcern('!!!')).toBeNull();
   });
 });
 

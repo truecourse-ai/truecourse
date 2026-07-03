@@ -36,6 +36,7 @@ export {
   AreaSchema,
   CuratedCorpusSchema,
   normalizeArea,
+  canonicalizeConcern,
   splitArea,
   slugifyAxis,
   isProcessArea,

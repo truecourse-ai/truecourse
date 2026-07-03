@@ -217,7 +217,7 @@ ASSIGN AT LEAST ONE AREA TO EVERY DOC. Every file you receive has already been c
   - "we use Kafka for messaging"    → core / messaging    (and/or core / architecture)
 Returning zero areas for a real spec doc is a mistake — it would be excluded from contract generation entirely.
 
-MULTI-AREA: a doc often covers several areas (a broad README or PRD may cover orders + customers + auth + errors). List EVERY area it materially specifies. Ignore incidental one-line mentions. Cap at ~6 areas.
+MULTI-AREA: a doc often covers several areas (a broad README or PRD may cover orders + customers + auth + errors). List EVERY area it materially specifies — a broad doc MUST carry the concern of EVERY section that states real behavior: a substantive "## Pagination", "## Auth", "## Errors", or "## Idempotency" section means that concern (pagination, auth, errors, idempotency) belongs among the tags, even when the doc is otherwise wide. Ignore incidental one-line mentions. An umbrella label does NOT stand in for the section topics beneath it: a broad "conventions" / "standards" / "platform" concern (e.g. api-conventions, platform-standards) may coexist with the specific section concerns but must NEVER REPLACE them — tag both the umbrella and each concrete section topic. Cap at ~8 areas.
 
 PROCESS BUCKET: sections that are pure overview / goals / non-goals / open-questions and spec no behavior map to product "process" with one of these concerns: overview, goals, non-goals, open-questions. A doc that is ONLY process gets only process areas; a substantive doc that merely has a Goals section does NOT need a process area.
 

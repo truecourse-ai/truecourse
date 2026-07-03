@@ -12,16 +12,16 @@ import { resetKvCacheStore } from '@truecourse/llm';
 import { flagOverlaps } from '../../packages/spec-consolidator/src/index.js';
 import type { Area, DocCandidate, OverlapRunner, Relation } from '../../packages/spec-consolidator/src/index.js';
 
-function doc(p: string): DocCandidate {
+function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
     path: p,
     absPath: `/abs/${p}`,
-    content: `body of ${p}`,
+    content,
     kind: 'prd',
-    preview: `body of ${p}`,
+    preview: content.split('\n').slice(0, 5).join('\n'),
     lastTouched: '2026-01-01T00:00:00Z',
     contentHash: `hash-${p}`,
-    size: 100,
+    size: content.length,
   };
 }
 
@@ -184,6 +184,162 @@ describe('flagOverlaps', () => {
 
   it('ignores single-doc areas (no pairs)', async () => {
     const out = await flagOverlaps(repo, [area('core/auth', ['a.md'])], [doc('a.md')], { runner: flagAll });
+    expect(out.size).toBe(0);
+  });
+});
+
+// Realistic fixtures: a broad platform PRD whose sections each state real
+// behavior, and a focused pagination standard note. The tagger (upstream) files
+// them under different concerns, so they never share an area — heading widening
+// is what re-couples the pagination sections so the overlap judge sees the pair.
+const BROAD_PRD = `# Payments Platform PRD
+Status: shipped
+
+## Authentication
+All endpoints require a Bearer JWT in the Authorization header.
+
+## Errors
+Errors use the standard envelope { code, message, details }.
+
+## Pagination
+List endpoints use offset/limit paging with a default page size of 25.
+
+## Idempotency
+Write endpoints accept an Idempotency-Key header, retained for 24h.
+`;
+
+const PAGINATION_NOTE = `# Pagination Standard
+
+## Pagination
+All list endpoints MUST use cursor-based pagination with a default page size of 50.
+`;
+
+describe('flagOverlaps — heading-widened cross-area candidates', () => {
+  it('pairs an outside doc whose heading matches the area concern with the area docs', async () => {
+    const prd = doc('docs/platform-prd.md', BROAD_PRD);
+    const note = doc('docs/pagination.md', PAGINATION_NOTE);
+    const seen: Array<[string, string, string]> = [];
+    const runner: OverlapRunner = async ({ areaId, a, b }) => {
+      seen.push([areaId, a.path, b.path]);
+      return { overlap: true, note: `${a.path} vs ${b.path}` };
+    };
+    // PRD tagged api-conventions (umbrella), note tagged pagination — they never
+    // co-locate. Neither area has two docs, so only widening can produce a pair.
+    const areas = [
+      area('core/api-conventions', ['docs/platform-prd.md']),
+      area('core/pagination', ['docs/pagination.md']),
+    ];
+    const out = await flagOverlaps(repo, areas, [prd, note], { runner });
+
+    // Exactly one widened pair, examined under the pagination area.
+    expect(seen).toEqual([['core/pagination', 'docs/platform-prd.md', 'docs/pagination.md']]);
+    expect(out.get('core/pagination')).toEqual([
+      {
+        docs: ['docs/platform-prd.md', 'docs/pagination.md'],
+        note: 'docs/platform-prd.md vs docs/pagination.md',
+        sections: [],
+      },
+    ]);
+    // The umbrella area itself has no matching outside heading → no pair.
+    expect(out.has('core/api-conventions')).toBe(false);
+  });
+
+  it('folds heading synonyms through the alias map (an "Authentication" heading matches the auth concern)', async () => {
+    const prd = doc('docs/platform-prd.md', BROAD_PRD); // carries a "## Authentication" heading
+    const authAdr = doc('docs/auth-adr.md', '# Bearer JWT ADR\n\n## Auth\nWe use Bearer JWTs.\n');
+    const seen: string[] = [];
+    const runner: OverlapRunner = async ({ a, b }) => {
+      seen.push([a.path, b.path].sort().join(' vs '));
+      return { overlap: false, note: '' };
+    };
+    const areas = [area('core/auth', ['docs/auth-adr.md'])];
+    await flagOverlaps(repo, areas, [prd, authAdr], { runner });
+    // "Authentication" → auth via the alias map, so the PRD widens into core/auth.
+    expect(seen).toEqual(['docs/auth-adr.md vs docs/platform-prd.md']);
+  });
+
+  it('skips a widened pair a relation already resolves', async () => {
+    const prd = doc('docs/platform-prd.md', BROAD_PRD);
+    const note = doc('docs/pagination.md', PAGINATION_NOTE);
+    let calls = 0;
+    const runner: OverlapRunner = async (i) => {
+      calls++;
+      return flagAll(i);
+    };
+    const relations: Relation[] = [
+      { type: 'keep-both', older: 'docs/pagination.md', newer: 'docs/platform-prd.md', detectedFrom: 'manual' },
+    ];
+    const out = await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [prd, note], {
+      runner,
+      relations,
+    });
+    expect(calls).toBe(0);
+    expect(out.size).toBe(0);
+  });
+
+  it('counts widened pairs against the per-area cap', async () => {
+    const note = doc('docs/pagination.md', PAGINATION_NOTE);
+    const prd1 = doc('docs/prd-1.md', BROAD_PRD);
+    const prd2 = doc('docs/prd-2.md', BROAD_PRD);
+    const capped: Array<[string, number, number]> = [];
+    let calls = 0;
+    const runner: OverlapRunner = async (i) => {
+      calls++;
+      return flagAll(i);
+    };
+    await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [note, prd1, prd2], {
+      runner,
+      maxPairsPerArea: 1,
+      onCapped: (areaId, examined, total) => capped.push([areaId, examined, total]),
+    });
+    // Two widened pairs (prd-1,note) + (prd-2,note) — capped to 1.
+    expect(capped).toEqual([['core/pagination', 1, 2]]);
+    expect(calls).toBe(1);
+  });
+
+  it('does not self-pair or double-count repeated matching headings', async () => {
+    // Two "## Pagination" headings in one doc still yield ONE pair, and an in-area
+    // doc is never widened against itself.
+    const note = doc('docs/pagination.md', PAGINATION_NOTE);
+    const prd = doc(
+      'docs/dupe.md',
+      '# Dupe\n\n## Pagination\nCursor paging.\n\n## Pagination\nStill cursor paging.\n',
+    );
+    let calls = 0;
+    const runner: OverlapRunner = async (i) => {
+      calls++;
+      return flagAll(i);
+    };
+    const out = await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [note, prd], { runner });
+    expect(calls).toBe(1);
+    expect(out.get('core/pagination')).toHaveLength(1);
+  });
+
+  it('adds nothing when no outside heading matches the area concern', async () => {
+    const note = doc('docs/pagination.md', PAGINATION_NOTE);
+    const other = doc('docs/billing.md', '# Billing\n\n## Invoices\nMonthly invoices.\n');
+    let calls = 0;
+    const runner: OverlapRunner = async (i) => {
+      calls++;
+      return flagAll(i);
+    };
+    const out = await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [note, other], { runner });
+    expect(calls).toBe(0);
+    expect(out.size).toBe(0);
+  });
+
+  it('excludes process areas from widening (generic section names are not behavior)', async () => {
+    // "## Overview" appears in nearly every doc; a process area must not fan out
+    // to every doc that merely has an Overview section.
+    const vision = doc('docs/vision.md', '# Vision\n\n## Overview\nThe product vision.\n');
+    const prd = doc('docs/prd.md', '# PRD\n\n## Overview\nWhat we build.\n\n## Pagination\nCursor paging.\n');
+    let calls = 0;
+    const runner: OverlapRunner = async (i) => {
+      calls++;
+      return flagAll(i);
+    };
+    const out = await flagOverlaps(repo, [area('process/overview', ['docs/vision.md'])], [vision, prd], { runner });
+    expect(calls).toBe(0);
     expect(out.size).toBe(0);
   });
 });

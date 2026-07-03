@@ -840,9 +840,17 @@ The prompt teaches the model a specific discipline for choosing them:
   the one concern it decides. The prompt anchors this with fixed examples: Bearer
   JWTs → `core/auth`, a standard error envelope → `core/errors`, Postgres →
   `core/persistence`, Kafka → `core/messaging`.
-- **Broad docs get multiple areas** (capped around six). A wide README or PRD
+- **Broad docs get multiple areas** (capped around eight). A wide README or PRD
   might materially specify orders, customers, auth, and errors all at once; the
-  model lists each area it really specifies and ignores one-line mentions.
+  model lists each area it really specifies and ignores one-line mentions. The
+  prompt makes this concrete: a broad doc must carry the concern of *every*
+  section that states real behavior — a substantive `## Pagination` or `## Auth`
+  section forces `pagination` / `auth` into the tags even when the doc is
+  otherwise wide — and an umbrella concern like `api-conventions` may *coexist*
+  with those section topics but must never *replace* them. This is what keeps the
+  same subject from being filed under a different concern in every doc (see the
+  overlap detector's heading-widening in §3.9, which is the deterministic net
+  behind this prompt-level nudge).
 - **Pure process material** — overviews, goals, non-goals, open questions that
   specify no behavior — goes under a fixed `process` product. A doc that is
   *only* process gets only process areas; a substantive doc that merely has a
@@ -1058,12 +1066,30 @@ resolve them — typically by recording a doc→doc relation.
 It only examines pairs worth examining. Any pair already covered by a
 relation of *any* type is skipped, which is the crucial link back to §3.8: the
 moment a user records a replace, precedence, or keep-both on a pair, that pair
-stops being flagged as an overlap. Everything left — every unresolved pair in
-every area that has at least two docs — is checked. To keep a pathological area
-from exploding into a huge number of comparisons, an area past a pair-count
-ceiling (60 by default) has its extra pairs *reported* rather than silently
-dropped. Each pair is checked concurrently, and a failed check flags nothing,
-since a spurious flag is worse than a missed one.
+stops being flagged as an overlap. To keep a pathological area from exploding
+into a huge number of comparisons, an area past a pair-count ceiling (60 by
+default) has its extra pairs *reported* rather than silently dropped. Each pair
+is checked concurrently, and a failed check flags nothing, since a spurious flag
+is worse than a missed one.
+
+**Heading-widened candidates.** The candidate set for an area is not only its own
+doc pairs. Because the tagger labels each doc independently (§3.5), the *same
+subject* can land under different concerns across docs — a broad PRD's
+`## Pagination` section tagged `core/api-conventions`, a focused note tagged
+`core/pagination` — and the two would never share an area to be compared. So
+alongside each area's within-area pairs, the detector adds a deterministic
+safety net: for a **non-process** area, any *outside* doc whose markdown heading
+slug-matches the area's concern is paired with each doc already in the area. The
+match runs a doc's ATX headings (leading/trailing `#`s and inline emphasis/code
+markers stripped) through the *very same* slug + alias + vocab fold the grouper
+applies to an area's concern (§3.7), so a heading "Authentication" matches the
+`auth` concern and "Pagination" matches `pagination`. This is pure string work —
+no new LLM stage — and every widened candidate still goes through the same
+overlap judge, is still skipped when a relation resolves it, is deduped
+order-insensitively, and counts against the same per-area cap. Process areas are
+excluded from widening, since their concerns (overview, goals, …) name generic
+structural sections rather than behavior, and would otherwise fan out to nearly
+every doc.
 
 The prompt draws a sharp line for the model. Two docs **disagree** only when they
 state different things about the *same specific decision* — a value, field, type,
@@ -3975,7 +4001,7 @@ The curate pipeline ([§3](#scan), `spec-consolidator`) has structural duplicati
 | **The relevance filter is missing a concurrency clamp** | the relevance filter | It doesn't apply the `max(1, …)` clamp its sibling stages use, so a zero or negative concurrency setting stalls the hand-rolled limiter (a promise that never resolves) | Add the clamp |
 | **A failed area-tag is a silent coverage hole** | the area-tagger | The "every doc gets at least one area" rule is enforced only by the prompt; if a doc's tagging call fails it ends up with zero areas, ungrouped, and is dropped from contract generation entirely — different from a plain cache miss | Fall back to a `misc` area, or fail loud |
 | **The overlap cap silently under-checks large areas** | the overlap detector | Only the first 60 candidate pairs in an area are LLM-checked; the rest are reported as capped but never checked this run, so a big single area can leave real disagreements unflagged | Rank pairs by likelihood, or raise the cap |
-| **Conflict detection is area-local, so tag-granularity drift hides real contradictions** | the area tagger + overlap detector | Overlaps are only checked between docs sharing an area, and the tagger can file the *same subject* under different concerns per doc (observed live: a broad PRD's `## Pagination` section tagged `api-conventions`, a pagination-focused note tagged `pagination` — the pair never co-located, so a four-way blunt value contradiction was never compared; the losing values then also vanished in the silent same-identity merge, [§12.10](#gaps-generate)). The vocab normalizer only folds synonyms, not granularity (a section-topic vs a conventions-umbrella) | Tag broad docs at section granularity (or fold umbrella concerns like `api-conventions` into their constituent topics when both exist), and/or run overlap candidates on identity/keyword co-occurrence rather than area co-membership alone |
+| **Conflict detection is only as complete as tagging + heading names** | the area tagger + overlap detector | *Largely closed.* Overlaps are now checked both within an area and across areas via a deterministic **heading-widened** net: an outside doc whose markdown heading slug-matches an area's concern is paired with that area's docs (§3.9), so the observed case — a broad PRD's `## Pagination` section vs a `pagination` note the tagger filed apart — now co-locates and is compared. The tagging prompt was also hardened to carry the concern of every behavior-bearing section and to never let an umbrella concern replace its section topics (§3.5). **Residue:** the net keys on *headings*, so a contradiction whose subject is stated inline with no heading that slug-matches an existing area's concern (a value buried in prose, or a heading the alias/vocab fold doesn't map onto an area that actually exists) still won't be paired; and the tagger can still under-tag a doc that names no such area at all. When a losing value does slip through unpaired it can still vanish in the silent same-identity merge, [§12.10](#gaps-generate) | Widen on identity/keyword co-occurrence in *body text* (not headings alone), or fold umbrella concerns into their constituent topics at tag time |
 | **Near-duplicate detection is O(n²)** | the relevance filter | It compares full doc line-sets pairwise — fine for hundreds of docs, a scaling cliff for very large corpora | MinHash/LSH if it ever bites |
 | **The in-memory doc-source seam is unexercised** | the curate options | Injecting docs in memory has no production caller — every real caller writes docs to a disk tree first. It's a public seam kept for EE, but currently untested in anger | Keep it, or exercise it |
 | **Contradictory "replace" picks in one area silently drop a winner** | the per-area generation reader | When an area has two "replace" decisions and one document is the *winner* of one and the *loser* of the other, that document is dropped anyway. The reader gathers every losing document into a single drop set and never checks whether a doc it's dropping was also declared a winner elsewhere in the same area — so "use D over Y" is silently nullified the moment D also loses to X, with no warning. (Cross-area picks are safe — area-scoping keeps them independent — and precedence conflicts are gentler, since nothing is dropped; a cycle just falls back to recency order.) | Warn (or reject) when a document is both a winner and a loser of replace relations in the same area |

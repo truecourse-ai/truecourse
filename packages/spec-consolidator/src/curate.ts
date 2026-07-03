@@ -162,6 +162,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
     relations,
+    vocab,
     transport: opts.transport,
     model: models.overlap,
     fallbackModel,

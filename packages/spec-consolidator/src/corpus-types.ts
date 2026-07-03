@@ -193,6 +193,19 @@ export function normalizeArea(tag: AreaTag, vocab?: VocabMap): string | null {
   return `${product}/${concern}`;
 }
 
+/**
+ * Canonicalize a free-form concern label (e.g. a markdown heading) into the same
+ * concern slug the grouper produces on the concern axis — slug + alias fold +
+ * vocab remap. Returns `null` when the value carries no real content. Mirrors the
+ * concern half of {@link normalizeArea} so heading-based matching lines up with
+ * an area's `concern` exactly.
+ */
+export function canonicalizeConcern(raw: string, vocab?: VocabMap): string | null {
+  const concern = canonAxis(raw, CONCERN_ALIASES);
+  if (!concern) return null;
+  return vocab?.concerns[concern] ?? concern;
+}
+
 /** Split a canonical area id back into its `{product, concern}` axes. */
 export function splitArea(id: string): AreaTag {
   const slash = id.indexOf('/');
