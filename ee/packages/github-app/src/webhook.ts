@@ -54,6 +54,8 @@ export interface PullRequestPayload {
       repo?: { full_name: string; fork: boolean } | null;
     };
     base: { sha: string; ref: string };
+    /** Set on a `closed` event: whether the PR merged (vs. closed unmerged). */
+    merged?: boolean;
   };
   repository: { full_name: string; default_branch: string };
   installation?: { id: number };

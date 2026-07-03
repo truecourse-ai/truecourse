@@ -18,12 +18,13 @@ export async function readRepoDocFromGithub(
   store: GateStore,
   repoFullName: string,
   docPath: string,
+  opts?: { commit?: string },
 ): Promise<string | null> {
   const repo = await store.getRepo(repoFullName);
   if (!repo) return null;
 
   const baseline = await store.getBaseline(repoFullName);
-  const ref = baseline?.commitSha ?? repo.defaultBranch;
+  const ref = opts?.commit ?? baseline?.commitSha ?? repo.defaultBranch;
   const octokit = installationOctokit(cfg, repo.installationId);
   const { owner, repo: name } = splitRepo(repoFullName);
 

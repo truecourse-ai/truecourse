@@ -19,6 +19,11 @@ export const REPO_BASELINE_TASK = 'repo.baseline';
  *  `repo.contracts` job or progress popup; the baseline's own panel shows the work. */
 export const REPO_CONTRACTS_TASK = 'repo.contracts';
 
+/** The PR-scoped analog: a PR-scoped decision cleared that PR's last conflict, so
+ *  re-gate exactly that one PR (no repo-wide contract regeneration). Matches the
+ *  core `PrRegateTask.type` literal. */
+export const PR_REGATE_TASK = 'pr.regate';
+
 /** The workspace analogue: refresh the workspace `.tc` corpus after a workspace
  *  Knowledge decision (same debounced, tracked model). */
 export const WORKSPACE_CONTRACTS_TASK = 'workspace.contracts';

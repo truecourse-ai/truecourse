@@ -197,4 +197,33 @@ describe('driftsForCommit — gate contract sourcing (warm/cold/null/fail)', () 
     );
     expect(result.drifts![0]!.filePath).toBe('src/x.ts'); // repo-relative, no temp-clone leak
   });
+
+  it('COLD scan folds the PR overlay when a PR number is passed (head side)', async () => {
+    const scan = cleanScan();
+    await driftsForCommit(
+      { scan, generate: vi.fn(async () => ({ fileCount: 0 })) } as SpecScanPipeline,
+      verifyOk,
+      REPO,
+      'cold-pr',
+      checkoutDir,
+      undefined,
+      undefined,
+      undefined,
+      7,
+    );
+    // The head-side cold scan is told the PR so curate folds that PR's overlay.
+    expect(scan).toHaveBeenCalledWith(checkoutDir, { repoKey: REPO, commitSha: 'cold-pr' }, undefined, { pr: 7 });
+  });
+
+  it('COLD scan stays repo-scoped (no overlay) when no PR number is passed (base side)', async () => {
+    const scan = cleanScan();
+    await driftsForCommit(
+      { scan, generate: vi.fn(async () => ({ fileCount: 0 })) } as SpecScanPipeline,
+      verifyOk,
+      REPO,
+      'cold-base',
+      checkoutDir,
+    );
+    expect(scan).toHaveBeenCalledWith(checkoutDir, { repoKey: REPO, commitSha: 'cold-base' }, undefined, undefined);
+  });
 });

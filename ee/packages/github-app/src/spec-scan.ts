@@ -27,6 +27,10 @@ import {
   type GithubAuth,
 } from './github.js';
 
+/** The generate manifest (area→specHash) `contracts generate` writes next to the
+ *  `.tc` tree, relative to `.truecourse/contracts/`. Carried in the stored set. */
+const GENERATE_MANIFEST = 'manifest.json';
+
 /** The expensive spec→contract pipeline, abstracted for injection in tests. */
 export interface SpecScanPipeline {
   /**
@@ -40,6 +44,9 @@ export interface SpecScanPipeline {
     repoRoot: string,
     ref: RepoRef,
     tracker?: StepTracker,
+    /** Fold the PR's decisions overlay (EE) — the PR-head scan sees its own
+     *  PR-scoped resolutions, not just the repo row. Omitted for base/baseline. */
+    opts?: { pr?: number },
   ): Promise<{ openConflicts: number }>;
   /** Generate contracts from the corpus and persist them under `ref`
    *  (`saveContracts`). Returns the file count. `tracker` (driven through
@@ -55,7 +62,7 @@ export interface SpecScanPipeline {
 }
 
 export const defaultSpecScanPipeline: SpecScanPipeline = {
-  async scan(repoRoot, ref, tracker) {
+  async scan(repoRoot, ref, tracker, opts) {
     // Fail loudly BEFORE any LLM work when no provider is configured — otherwise
     // the curate fail-open handling swallows it and the gate "completes" with no
     // corpus (and EE must never fall back to the `claude` CLI).
@@ -65,7 +72,8 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     // them and fold them into curate, else the re-scan re-detects already-resolved
     // conflicts and never generates contracts (the dashboard resolve → regenerate
     // loop). Empty on the first (connect) scan, so conflicts surface as expected.
-    const decisions = await getDecisions(ref.repoKey);
+    // With `pr`, the effective decisions include that PR's overlay (overlay wins).
+    const decisions = await getDecisions(ref.repoKey, opts);
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
     // writes corpus.json into the clone; we persist it under `ref` for the store.
     const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker, decisions });
@@ -89,10 +97,11 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
   },
 };
 
-/** Write a stored contract set's `.tc` files into `<repoRoot>/.truecourse/contracts/`
- *  so generation can anchor to them (the clone carries no committed contracts).
- *  Best-effort: a missing/unreadable base never fails generation. */
-async function materializeAnchorContracts(anchorRef: RepoRef, repoRoot: string): Promise<void> {
+/** Write a stored contract set's `.tc` files (plus its generate manifest) into
+ *  `<repoRoot>/.truecourse/contracts/` so generation can anchor to them (the clone
+ *  carries no committed contracts). Best-effort: a missing/unreadable base never
+ *  fails generation. */
+export async function materializeAnchorContracts(anchorRef: RepoRef, repoRoot: string): Promise<void> {
   try {
     const dir = path.join(repoRoot, '.truecourse', 'contracts');
     for (const rel of await listContractFiles(anchorRef.repoKey, 'contracts', anchorRef.commitSha)) {
@@ -101,6 +110,15 @@ async function materializeAnchorContracts(anchorRef: RepoRef, repoRoot: string):
       const abs = path.join(dir, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, content);
+    }
+    // Also restore the anchor's generate manifest (excluded from listContractFiles)
+    // so `classifyAreas` sees the prior specHashes and unchanged areas no-op — the
+    // reviewed contracts reproduce byte-for-byte with zero LLM. Old sets have none
+    // stored → skipped, and generation just falls back to per-area cache hits.
+    const manifest = await readContractFile(anchorRef.repoKey, 'contracts', GENERATE_MANIFEST, anchorRef.commitSha);
+    if (manifest != null) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, GENERATE_MANIFEST), manifest);
     }
   } catch {
     // Anchor is a bias, never a hard dependency — swallow and generate cold.

@@ -21,7 +21,7 @@ import type {
   WorkspaceRef,
 } from '@truecourse/core/lib/contract-store';
 import { ContentStore, contentScope } from './content-store.js';
-import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys, walkTcRelFiles } from './pack.js';
+import { GENERATE_MANIFEST, assertSafeRel, mapLimit, safeJoin, sha256, sortKeys, walkTcRelFiles } from './pack.js';
 
 const OBJECT_CONCURRENCY = 16;
 
@@ -59,6 +59,21 @@ export class PgContractStore implements ContractStore {
       manifest[rel] = sha;
       if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
     });
+
+    // Carry the generate manifest (area→specHash) alongside the `.tc` tree so a
+    // later anchored regenerate can no-op unchanged areas — the reviewed contracts
+    // land under the merge commit unchanged. Kept out of `files` (so `fileCount`
+    // stays `.tc`-only) and out of `listContractFiles`, but readable by path.
+    if (kind === 'contracts') {
+      const bytes = await fsp
+        .readFile(path.join(sourceDir, GENERATE_MANIFEST))
+        .catch(() => null);
+      if (bytes) {
+        const sha = sha256(bytes);
+        manifest[GENERATE_MANIFEST] = sha;
+        if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
+      }
+    }
 
     // Phase 2: put each unique object (objects first, manifest row last — a
     // crash mid-save can orphan objects, which GC reclaims, but never leaves a
@@ -136,7 +151,9 @@ export class PgContractStore implements ContractStore {
     commitSha?: string,
   ): Promise<string[]> {
     const manifest = await this.manifestFor(repoKey, kind, commitSha);
-    return manifest ? Object.keys(manifest.files ?? {}) : [];
+    if (!manifest) return [];
+    // The carried generate manifest is not a contract file — listings are `.tc` only.
+    return Object.keys(manifest.files ?? {}).filter((rel) => rel !== GENERATE_MANIFEST);
   }
 
   async readContractFile(

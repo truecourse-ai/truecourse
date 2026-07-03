@@ -117,6 +117,38 @@ describe('PgContractStore (pglite + Postgres content)', () => {
     expect(fs.existsSync(mat!.dir)).toBe(false);
   });
 
+  it('carries the generate manifest: readable + materialized, excluded from listings', async () => {
+    const contracts = seedCorpus(srcDir);
+    writeFile(
+      contracts,
+      'manifest.json',
+      JSON.stringify({ version: 1, areas: { order: { specHash: 'abc' } } }),
+    );
+    const res = await store.saveContracts(refAt('c1'), 'contracts', contracts);
+
+    // fileCount + listings stay `.tc`-only — the manifest is not a contract file.
+    expect(res.fileCount).toBe(3);
+    expect((await store.listContractFiles(REPO, 'contracts', 'c1')).sort()).toEqual([
+      '_shared/auth.tc',
+      'order/operations/get-order.tc',
+      'order/order-model.tc',
+    ]);
+    // …but it round-trips by path (the anchor reads it to no-op unchanged areas)…
+    expect(await store.readContractFile(REPO, 'contracts', 'manifest.json', 'c1')).toContain('specHash');
+    // …and materializes into the tree (the verifier tolerates a stray manifest.json).
+    const mat = await store.loadContracts(refAt('c1'), 'contracts');
+    expect(listFilesRel(mat!.dir)).toContain('manifest.json');
+    expect(fs.readFileSync(path.join(mat!.dir, 'manifest.json'), 'utf-8')).toContain('specHash');
+    await mat!.cleanup();
+  });
+
+  it('an old set with no manifest reads null for it (no error)', async () => {
+    const contracts = seedCorpus(srcDir); // no manifest.json written
+    await store.saveContracts(refAt('c1'), 'contracts', contracts);
+    expect(await store.readContractFile(REPO, 'contracts', 'manifest.json', 'c1')).toBeNull();
+    expect(await store.listContractFiles(REPO, 'contracts', 'c1')).not.toContain('manifest.json');
+  });
+
   it('stores the inferred subtree as the split kind; load is independent', async () => {
     const contracts = seedCorpus(srcDir);
     await store.saveContracts(refAt('c1'), 'contracts_inferred', path.join(contracts, '_inferred'));

@@ -10,15 +10,19 @@
  * State (fetch + scan) lives in `useSpecCorpus` so the page header owns Scan.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
+import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation } from '@/lib/api';
 
 const base = (ref: string): string => ref.split('/').pop() ?? ref;
+
+/** Shown on decision actions while a PR is being viewed before its gate has run. */
+const PR_GATE_HINT = 'Available after the PR gate runs.';
 
 // Docs are listed once (keyed by their plain ref). An overlap is keyed by its
 // area + doc pair so the resolution detail is addressable + URL-stable.
@@ -94,6 +98,8 @@ export interface SpecCorpusState {
   hydrating: boolean;
   scanning: boolean;
   error: string | null;
+  /** EE PR view: the commit whose corpus was returned (≠ ref → baseline fallback). */
+  corpusCommit: string | null;
   /** Run a fresh corpus scan (curate) — wired to the page header's Scan/Rescan. */
   scan: () => Promise<void>;
   /** Re-read corpus + relations after an inline resolution. */
@@ -104,9 +110,10 @@ export interface SpecCorpusState {
 
 /**
  * Owns the corpus fetch + scan for one repo. `enabled` gates the initial read so
- * the page doesn't fetch a corpus until the Spec tab is actually shown.
+ * the page doesn't fetch a corpus until the Spec tab is actually shown. `ref`
+ * (EE PR view) reads the corpus at a PR head — a change re-fetches.
  */
-export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState {
+export function useSpecCorpus(repoId: string, enabled: boolean, ref?: string): SpecCorpusState {
   const [data, setData] = useState<SpecCorpusResponse | null>(null);
   const [hydrating, setHydrating] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -120,14 +127,14 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
     let cancelled = false;
     setHydrating(true);
     api
-      .getSpecCorpus(repoId)
+      .getSpecCorpus(repoId, ref)
       .then((r) => !cancelled && setData(r))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setHydrating(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled]);
+  }, [repoId, enabled, ref]);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -152,15 +159,15 @@ export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState
 
   const refetch = useCallback(async () => {
     try {
-      setData(await api.getSpecCorpus(repoId));
+      setData(await api.getSpecCorpus(repoId, ref));
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [repoId]);
+  }, [repoId, ref]);
 
   const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
 
-  return { data, hydrating, scanning, error, scan, refetch, apply };
+  return { data, hydrating, scanning, error, corpusCommit: data?.corpusCommit ?? null, scan, refetch, apply };
 }
 
 export function SpecCorpusView({
@@ -168,6 +175,8 @@ export function SpecCorpusView({
   corpus,
   activeKey,
   onOpen,
+  prNumber = null,
+  prRef,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
@@ -175,6 +184,10 @@ export function SpecCorpusView({
   activeKey: string | null;
   /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
+  /** EE PR view: scope decisions to this PR. Repo view when null/undefined. */
+  prNumber?: number | null;
+  /** EE PR view: the PR head SHA. Undefined until the gate runs. */
+  prRef?: string;
 }) {
   const { data, hydrating, scanning } = corpus;
   // Declared before the early returns to satisfy the rules of hooks.
@@ -182,6 +195,15 @@ export function SpecCorpusView({
   // The doc ref currently mutating — while set, every include/exclude action is
   // disabled (one re-curate at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
+
+  // EE PR view: every decision is scoped to the PR + head SHA. With no gate run
+  // yet (no head SHA) reads fall back to baseline but writes can't be scoped, so
+  // the decision actions are disabled. Repo view is unscoped (byte-identical).
+  const prScope = useMemo(
+    () => (prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined),
+    [prNumber, prRef],
+  );
+  const decisionsDisabled = prNumber != null && !prRef;
 
   // Force-include / exclude. Move the row optimistically so it jumps immediately,
   // then let the server-driven re-curate run (its step-progress popup shows via
@@ -205,17 +227,17 @@ export function SpecCorpusView({
   const setInclude = useCallback(
     (ref: string, include: boolean) =>
       runDecision(ref, include ? 'include' : 'uninclude', () =>
-        include ? api.addSpecInclude(repoId, ref) : api.removeSpecInclude(repoId, ref),
+        include ? api.addSpecInclude(repoId, ref, prScope) : api.removeSpecInclude(repoId, ref, prScope),
       ),
-    [repoId, runDecision],
+    [repoId, runDecision, prScope],
   );
 
   const setExclude = useCallback(
     (ref: string, exclude: boolean) =>
       runDecision(ref, exclude ? 'exclude' : 'unexclude', () =>
-        exclude ? api.addSpecExclude(repoId, ref) : api.removeSpecExclude(repoId, ref),
+        exclude ? api.addSpecExclude(repoId, ref, prScope) : api.removeSpecExclude(repoId, ref, prScope),
       ),
-    [repoId, runDecision],
+    [repoId, runDecision, prScope],
   );
 
   if (hydrating || (scanning && !data)) {
@@ -241,6 +263,9 @@ export function SpecCorpusView({
   const skippedDocs = c.skippedDocs ?? [];
   const manualIncludes = data.manualIncludes ?? [];
   const manualExcludes = data.manualExcludes ?? [];
+  // PR view fell back to the base corpus because this PR changed no docs.
+  const baselineFallback = !!prRef && !!data.corpusCommit && data.corpusCommit !== prRef;
+  const decisionsHint = decisionsDisabled ? PR_GATE_HINT : null;
   // Single-product repos tag everything `core/*`; drop the redundant product in
   // area/tag labels so they read as their concern (e.g. "auth", not "core/auth").
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
@@ -284,36 +309,22 @@ export function SpecCorpusView({
           </Alert>
         </div>
       )}
-      {allTags.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1 border-b border-border px-3 py-2">
-          <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">Filter docs:</span>
-          {allTags.map((t) => {
-            const on = selectedTags.has(t);
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => toggleTag(t)}
-                className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
-                  on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {t}
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedTags(new Set())}
-              className="ml-1 text-[10px] text-muted-foreground underline hover:text-foreground"
-            >
-              clear
-            </button>
-          )}
+      {baselineFallback && (
+        <div className="border-b border-border bg-card/40 px-4 py-1.5 text-[11px] text-muted-foreground">
+          Showing the base spec — this PR changed no docs.
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto py-1">
+      {allTags.length > 1 && (
+        <AreaTagFilter
+          tags={allTags}
+          selected={selectedTags}
+          onToggle={toggleTag}
+          onClear={() => setSelectedTags(new Set())}
+        />
+      )}
+      {/* pb-1 only (no top pad): a scroll container's top padding leaves a band
+          above `sticky top-0` section headers where scrolled rows bleed through. */}
+      <div className="min-h-0 flex-1 overflow-auto pb-1">
         {visibleOverlaps.length > 0 && (
           <Section title="Conflicts" count={visibleOverlaps.length} icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}>
             {visibleOverlaps.map(({ area, ov, resolved }, i) => (
@@ -336,6 +347,7 @@ export function SpecCorpusView({
               tags={doc.areaTags.map(fmtArea)}
               active={activeKey === doc.ref}
               busy={busyRef !== null}
+              disabledReason={decisionsHint}
               onOpen={(pinned) => onOpen(doc.ref, pinned)}
               onSkip={() => setExclude(doc.ref, true)}
             />
@@ -355,6 +367,7 @@ export function SpecCorpusView({
                 active={activeKey === doc.ref}
                 actionLabel="include"
                 busy={busyRef !== null}
+                disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(doc.ref, pinned)}
                 onAction={() => setInclude(doc.ref, true)}
               />
@@ -374,6 +387,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="remove"
                 busy={busyRef !== null}
+                disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setInclude(ref, false)}
               />
@@ -394,6 +408,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="restore"
                 busy={busyRef !== null}
+                disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setExclude(ref, false)}
               />
@@ -401,6 +416,153 @@ export function SpecCorpusView({
           </Section>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Above this many area tags the flat chip row is unusable (crowds out the doc
+ * list); switch to a type-to-filter combobox. At or below it, one-click chips
+ * are nicer — you see every option at a glance. */
+const HYBRID_TAG_THRESHOLD = 12;
+
+interface AreaTagFilterProps {
+  tags: string[];
+  selected: Set<string>;
+  onToggle: (t: string) => void;
+  onClear: () => void;
+}
+
+/** Doc-list area-tag filter. Chips for a handful of tags, a typeahead combobox
+ * when there are many. Empty selection = no filter (all docs), either way. */
+function AreaTagFilter(props: AreaTagFilterProps) {
+  return props.tags.length <= HYBRID_TAG_THRESHOLD ? (
+    <AreaTagChips {...props} />
+  ) : (
+    <AreaTagCombobox {...props} />
+  );
+}
+
+/** The small-N filter: every tag as a one-click toggle chip. */
+function AreaTagChips({ tags, selected, onToggle, onClear }: AreaTagFilterProps) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-2">
+      <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">Filter docs:</span>
+      {tags.map((t) => {
+        const on = selected.has(t);
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onToggle(t)}
+            className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
+              on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t}
+          </button>
+        );
+      })}
+      {selected.size > 0 && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-1 text-[10px] text-muted-foreground underline hover:text-foreground"
+        >
+          clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The many-N filter: selected tags as removable pills + a search input that
+ * reveals a scrollable, type-narrowed list of the remaining tags. The list
+ * expands inline (not a floating popover) so it can't be clipped by the panel's
+ * `overflow-hidden`. Picking a tag adds a pill; clearing removes the filter.
+ */
+function AreaTagCombobox({ tags, selected, onToggle, onClear }: AreaTagFilterProps) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Close the suggestion list when focus/clicks leave the widget.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const selectedList = tags.filter((t) => selected.has(t));
+  const suggestions = tags.filter((t) => !selected.has(t) && (q === '' || t.toLowerCase().includes(q)));
+
+  return (
+    <div ref={containerRef} className="shrink-0 border-b border-border">
+      <div className="flex flex-wrap items-center gap-1 px-3 py-2">
+        <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">Filter docs:</span>
+        {selectedList.map((t) => (
+          <span
+            key={t}
+            className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground"
+          >
+            {t}
+            <button type="button" aria-label={`Remove ${t}`} onClick={() => onToggle(t)} className="hover:opacity-80">
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+        <div className="flex min-w-[7rem] flex-1 items-center gap-1">
+          <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={selectedList.length ? 'Add area…' : 'Type to filter by area…'}
+            className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+          />
+        </div>
+        {selected.size > 0 && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="ml-1 shrink-0 text-[10px] text-muted-foreground underline hover:text-foreground"
+          >
+            clear
+          </button>
+        )}
+      </div>
+      {open && suggestions.length > 0 && (
+        <div className="max-h-48 overflow-y-auto border-t border-border/60 py-1">
+          {suggestions.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                onToggle(t);
+                setQuery('');
+                inputRef.current?.focus();
+              }}
+              className="flex w-full items-center px-3 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && suggestions.length === 0 && q !== '' && (
+        <div className="border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground/70">
+          No areas match “{query}”.
+        </div>
+      )}
     </div>
   );
 }
@@ -446,6 +608,7 @@ function DocRow({
   tags,
   active,
   busy,
+  disabledReason,
   onOpen,
   onSkip,
 }: {
@@ -453,6 +616,8 @@ function DocRow({
   tags: string[];
   active: boolean;
   busy: boolean;
+  /** When set, the inline action is disabled and the reason shows on hover. */
+  disabledReason?: string | null;
   onOpen: (pinned: boolean) => void;
   onSkip: () => void;
 }) {
@@ -483,18 +648,20 @@ function DocRow({
           </span>
         )}
       </span>
-      <button
-        type="button"
-        disabled={busy}
-        title="Exclude this doc from the corpus"
-        onClick={(e) => {
-          e.stopPropagation();
-          onSkip();
-        }}
-        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100 disabled:opacity-50 disabled:hover:bg-transparent"
-      >
-        skip
-      </button>
+      <HoverPopover content={disabledReason ?? null} side="top" align="end">
+        <button
+          type="button"
+          disabled={busy || !!disabledReason}
+          title="Exclude this doc from the corpus"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSkip();
+          }}
+          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus:opacity-100 group-hover:opacity-100 disabled:opacity-50 disabled:hover:bg-transparent"
+        >
+          skip
+        </button>
+      </HoverPopover>
     </div>
   );
 }
@@ -513,6 +680,7 @@ function IncludeRow({
   active,
   actionLabel,
   busy,
+  disabledReason,
   onOpen,
   onAction,
 }: {
@@ -521,6 +689,8 @@ function IncludeRow({
   active: boolean;
   actionLabel: string;
   busy: boolean;
+  /** When set, the inline action is disabled and the reason shows on hover. */
+  disabledReason?: string | null;
   onOpen: (pinned: boolean) => void;
   onAction: () => void;
 }) {
@@ -544,17 +714,19 @@ function IncludeRow({
           </span>
         )}
       </span>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={(e) => {
-          e.stopPropagation();
-          onAction();
-        }}
-        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
-      >
-        {actionLabel}
-      </button>
+      <HoverPopover content={disabledReason ?? null} side="top" align="end">
+        <button
+          type="button"
+          disabled={busy || !!disabledReason}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction();
+          }}
+          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
+        >
+          {actionLabel}
+        </button>
+      </HoverPopover>
     </div>
   );
 }

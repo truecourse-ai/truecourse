@@ -12,13 +12,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** Options for a doc read. `commit` pins the revision (EE only; OSS ignores it). */
+export interface RepoDocReadOptions {
+  /** The git commit to read the doc at. EE fetches this ref; OSS ignores it. */
+  commit?: string;
+}
+
 /** Read `docPath` (repo-relative) for `repoKey`; resolves to null when absent. */
-export type RepoDocReader = (repoKey: string, docPath: string) => Promise<string | null>;
+export type RepoDocReader = (
+  repoKey: string,
+  docPath: string,
+  opts?: RepoDocReadOptions,
+) => Promise<string | null>;
 
 /**
  * OSS default: read from the local working tree, where `repoKey` is the checkout
  * root. Confined to the repo tree (no traversal); returns null for a missing path
- * or a non-file.
+ * or a non-file. The `commit` option is meaningless on a live checkout, so it's
+ * ignored.
  */
 const fileRepoDocReader: RepoDocReader = async (repoKey, docPath) => {
   const root = path.resolve(repoKey);
@@ -36,6 +47,10 @@ export function setRepoDocReader(fn: RepoDocReader): void {
 }
 
 /** Read a repo doc through the installed reader (FS in OSS, GitHub in EE). */
-export function readRepoDoc(repoKey: string, docPath: string): Promise<string | null> {
-  return reader(repoKey, docPath);
+export function readRepoDoc(
+  repoKey: string,
+  docPath: string,
+  opts?: RepoDocReadOptions,
+): Promise<string | null> {
+  return reader(repoKey, docPath, opts);
 }

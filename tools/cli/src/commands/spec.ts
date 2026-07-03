@@ -27,6 +27,7 @@ import {
   INFER_STEPS,
   EstimateDeclined,
 } from "@truecourse/core/commands/spec-in-process";
+import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { resolveStashDecision } from "./analyze.js";
@@ -59,6 +60,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec scan");
   await requireGitRepo(root);
+  // Scan is the first command in the spec/contract pipeline — register the repo
+  // so the corpus it produces is visible in the dashboard's project list.
+  await registerProject(root);
   // The relevance + area-tag stages shell out to `claude`; an expired login would
   // fail every doc. Probe once up front (the `agent` transport answers via the
   // filesystem mailbox, so the probe is irrelevant there).

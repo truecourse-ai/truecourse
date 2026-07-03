@@ -9,9 +9,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, renderHook, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SpecCorpusView, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
+import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '../../apps/dashboard/client/src/components/spec/SpecOverlapDetail';
 import type { SpecCorpusResponse } from '../../apps/dashboard/client/src/lib/api';
@@ -54,8 +54,10 @@ const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
   hydrating: false,
   scanning: false,
   error: null,
+  corpusCommit: null,
   scan: vi.fn(),
   refetch: vi.fn(),
+  apply: vi.fn(),
   ...over,
 });
 
@@ -198,5 +200,181 @@ describe('SpecOverlapDetail (right pane)', () => {
     expect(screen.queryByRole('button', { name: 'Prefer newer' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Change' }));
     expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EE PR-scoping: the Spec tab keys to the viewed PR's head SHA. Reads carry the
+// ref; decision mutations carry `?pr=&ref=`; a code-only PR (base fallback) is
+// labelled; before the gate runs (no head SHA) decisions are disabled.
+// ---------------------------------------------------------------------------
+
+describe('useSpecCorpus (PR ref threading)', () => {
+  let calls: string[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push(String(url));
+        return json({ ...RESP, corpusCommit: 'base-sha' });
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('threads ref into the corpus fetch and re-fetches on ref change', async () => {
+    const { result, rerender } = renderHook(({ ref }) => useSpecCorpus('r1', true, ref), {
+      initialProps: { ref: 'head-1' as string | undefined },
+    });
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(calls.some((u) => u.includes('/spec/corpus?ref=head-1'))).toBe(true);
+    expect(result.current.corpusCommit).toBe('base-sha');
+    calls.length = 0;
+    rerender({ ref: 'head-2' });
+    await waitFor(() => expect(calls.some((u) => u.includes('/spec/corpus?ref=head-2'))).toBe(true));
+  });
+
+  it('omits ref in repo view (byte-identical URL)', async () => {
+    const { result } = renderHook(() => useSpecCorpus('r1', true, undefined));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(calls.some((u) => u.endsWith('/spec/corpus'))).toBe(true);
+    expect(calls.every((u) => !u.includes('ref='))).toBe(true);
+  });
+
+  it('refetch re-reads at the current ref', async () => {
+    const { result } = renderHook(() => useSpecCorpus('r1', true, 'head-9'));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    calls.length = 0;
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(calls.some((u) => u.includes('/spec/corpus?ref=head-9'))).toBe(true);
+  });
+});
+
+describe('SpecCorpusView (PR-scoped decisions)', () => {
+  let calls: { url: string; method?: string }[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, opts?: RequestInit) => {
+        calls.push({ url: String(url), method: opts?.method });
+        return json(RESP);
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('scopes a decision mutation to pr+ref in PR view', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} prNumber={7} prRef="head-abc" />);
+    await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/spec/excludes'))).toBe(true));
+    expect(calls.find((c) => c.url.includes('/spec/excludes'))?.url).toContain('?pr=7&ref=head-abc');
+  });
+
+  it('omits pr+ref in repo view', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+    await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/spec/excludes'))).toBe(true));
+    const url = calls.find((c) => c.url.includes('/spec/excludes'))?.url ?? '';
+    expect(url).not.toContain('pr=');
+    expect(url).not.toContain('ref=');
+  });
+
+  it('labels the base-corpus fallback when the PR changed no docs', () => {
+    render(
+      <SpecCorpusView
+        repoId="r1"
+        corpus={state({ data: { ...RESP, corpusCommit: 'base-sha' } })}
+        activeKey={null}
+        onOpen={vi.fn()}
+        prNumber={7}
+        prRef="head-abc"
+      />,
+    );
+    expect(screen.getByText(/Showing the base spec/)).toBeInTheDocument();
+  });
+
+  it('hides the fallback label when the corpus matches the PR head', () => {
+    render(
+      <SpecCorpusView
+        repoId="r1"
+        corpus={state({ data: { ...RESP, corpusCommit: 'head-abc' } })}
+        activeKey={null}
+        onOpen={vi.fn()}
+        prNumber={7}
+        prRef="head-abc"
+      />,
+    );
+    expect(screen.queryByText(/Showing the base spec/)).not.toBeInTheDocument();
+  });
+
+  it('disables decision actions (with a hint) before the PR gate runs', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} prNumber={7} prRef={undefined} />);
+    const skip = screen.getAllByRole('button', { name: 'skip' })[0];
+    expect(skip).toBeDisabled();
+    expect(screen.getAllByText('Available after the PR gate runs.').length).toBeGreaterThan(0);
+    await user.click(skip);
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe('SpecOverlapDetail (PR-scoped resolution)', () => {
+  let calls: { url: string; method?: string }[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, opts?: RequestInit) => {
+        const u = String(url);
+        calls.push({ url: u, method: opts?.method });
+        if (u.includes('/spec/relations') && opts?.method === 'POST') {
+          // PR scope re-curates + returns the full corpus; repo scope returns { relations }.
+          return u.includes('pr=') ? json({ ...RESP, corpusCommit: 'head-1' }) : json({ relations: [] });
+        }
+        return json({ ref: 'docs/x.md', content: 'body' });
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('scopes the resolution to pr+ref and applies the returned corpus', async () => {
+    const onResolved = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Prefer newer' }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    expect(calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url).toContain('?pr=4&ref=head-1');
+    // Full corpus returned → onResolved receives it (apply path, no stale refetch).
+    expect(onResolved.mock.calls[0][0]).toMatchObject({ corpus: expect.anything() });
+  });
+
+  it('repo view: no pr+ref, onResolved called with no corpus (refetch path)', async () => {
+    const onResolved = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} onResolved={onResolved} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Prefer newer' }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    const url = calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url ?? '';
+    expect(url).not.toContain('pr=');
+    expect(onResolved.mock.calls[0][0]).toBeUndefined();
+  });
+
+  it('disables resolution actions (with a hint) before the PR gate runs', () => {
+    render(
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Use newer only' })).toBeDisabled();
+    expect(screen.getAllByText('Available after the PR gate runs.').length).toBeGreaterThan(0);
   });
 });

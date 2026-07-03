@@ -20,7 +20,7 @@ import { JobStore, NotificationStore, ActiveJobExistsError } from '@truecourse/e
 import { log } from '@truecourse/core/lib/logger';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
-import { selectGateStore, getPrReverifier } from '@truecourse/ee-github-app';
+import { selectGateStore, getPrReverifier, getPrRegater } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import { reverifyWorkspaceRepos } from './reverify.js';
@@ -28,6 +28,7 @@ import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
   REPO_CONTRACTS_TASK,
+  PR_REGATE_TASK,
   WORKSPACE_CONTRACTS_TASK,
   type SyncJobPayload,
   type BaselineEnqueueRequest,
@@ -272,6 +273,16 @@ export async function registerJobs(
       // open PRs. There is no separate "refreshing contracts" job/popup — the old
       // wrapper did no work of its own beyond this call, so it was pure redundancy.
       await onContractsRegenerated(task.repoKey, workspaceOrgId);
+    } else if (task.type === PR_REGATE_TASK && task.repoKey) {
+      // A PR-scoped decision cleared that PR's last conflict — force a targeted
+      // re-gate of just that one PR (no repo-wide contract regeneration). Null
+      // regater = the GitHub App isn't configured (SSO-only), so nothing to do.
+      const regate = getPrRegater();
+      if (!regate) {
+        log.warn('[ee-jobs] pr.regate skipped: the GitHub App is not configured');
+        return;
+      }
+      await regate(task.repoKey, task.prNumber);
     }
   });
 

@@ -47,6 +47,9 @@ const RESOLUTION_HELP = (
   </div>
 );
 
+/** Shown on resolution actions while a PR is being viewed before its gate has run. */
+const PR_GATE_HINT = 'Available after the PR gate runs.';
+
 function coveringRelation(rels: SpecRelation[], a: string, b: string, area: string): SpecRelation | undefined {
   return rels.find((r) => {
     const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
@@ -60,6 +63,8 @@ export function SpecOverlapDetail({
   docA,
   docB,
   data,
+  prNumber = null,
+  prRef,
   onResolved,
 }: {
   repoId: string;
@@ -67,7 +72,12 @@ export function SpecOverlapDetail({
   docA: string;
   docB: string;
   data: SpecCorpusResponse;
-  onResolved: () => void;
+  /** EE PR view: scope the resolution to this PR. Repo view when null/undefined. */
+  prNumber?: number | null;
+  /** EE PR view: the PR head SHA — also the commit the docs are read at. */
+  prRef?: string;
+  /** In PR scope the server returns the re-curated corpus; the page applies it. */
+  onResolved: (res?: SpecCorpusResponse) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -116,13 +126,22 @@ export function SpecOverlapDetail({
     { key: 'keep-both', type: 'keep-both', winner: newerDoc, label: 'Keep both', hint: 'Both are current peers — combine them.' },
   ];
 
+  // EE PR view: scope the resolution to the PR + head SHA. With no gate run yet
+  // (no head SHA) the resolution can't be scoped, so the actions are disabled.
+  const prScope = prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined;
+  const decisionsDisabled = prNumber != null && !prRef;
+
   const resolve = async (a: (typeof actions)[number]): Promise<void> => {
     setBusy(a.key);
     try {
       const loser = a.winner === docA ? docB : docA;
-      await api.postSpecRelation(repoId, { type: a.type, older: loser, newer: a.winner, scope: area, detectedFrom: 'manual' });
+      const res = await api.postSpecRelation(
+        repoId,
+        { type: a.type, older: loser, newer: a.winner, scope: area, detectedFrom: 'manual' },
+        prScope,
+      );
       setEditing(false);
-      onResolved();
+      onResolved('corpus' in res ? res : undefined);
     } finally {
       setBusy(null);
     }
@@ -132,9 +151,13 @@ export function SpecOverlapDetail({
     if (!userRel) return;
     setBusy('revoke');
     try {
-      await api.deleteSpecRelation(repoId, { older: userRel.older, newer: userRel.newer, scope: userRel.scope });
+      const res = await api.deleteSpecRelation(
+        repoId,
+        { older: userRel.older, newer: userRel.newer, scope: userRel.scope },
+        prScope,
+      );
       setEditing(false);
-      onResolved();
+      onResolved('corpus' in res ? res : undefined);
     } finally {
       setBusy(null);
     }
@@ -159,18 +182,22 @@ export function SpecOverlapDetail({
               Change
             </button>
             {userRel && (
-              <button type="button" onClick={revoke} disabled={busy !== null} className="text-muted-foreground underline hover:text-foreground">
-                {busy === 'revoke' ? 'Revoking…' : 'Revoke'}
-              </button>
+              <HoverPopover content={decisionsDisabled ? PR_GATE_HINT : null}>
+                <button type="button" onClick={revoke} disabled={busy !== null || decisionsDisabled} className="text-muted-foreground underline hover:text-foreground disabled:opacity-50">
+                  {busy === 'revoke' ? 'Revoking…' : 'Revoke'}
+                </button>
+              </HoverPopover>
             )}
           </div>
         ) : (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {actions.map((a) => (
-              <Button key={a.key} size="sm" variant="outline" disabled={busy !== null} title={a.hint} onClick={() => resolve(a)}>
-                {busy === a.key ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                {a.label}
-              </Button>
+              <HoverPopover key={a.key} content={decisionsDisabled ? PR_GATE_HINT : null} side="top">
+                <Button size="sm" variant="outline" disabled={busy !== null || decisionsDisabled} title={a.hint} onClick={() => resolve(a)}>
+                  {busy === a.key ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  {a.label}
+                </Button>
+              </HoverPopover>
             ))}
             <HoverPopover content={RESOLUTION_HELP} width="wide" align="end">
               <button type="button" aria-label="How conflict resolution works" className="ml-0.5 text-muted-foreground transition-colors hover:text-foreground">
@@ -187,10 +214,10 @@ export function SpecOverlapDetail({
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 divide-x divide-border">
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <SpecDocViewer repoId={repoId} docRef={docA} badge={docA === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollA} highlight={sectionsFor(docA)} />
+          <SpecDocViewer repoId={repoId} docRef={docA} commit={prRef} badge={docA === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollA} highlight={sectionsFor(docA)} />
         </div>
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <SpecDocViewer repoId={repoId} docRef={docB} badge={docB === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollB} highlight={sectionsFor(docB)} />
+          <SpecDocViewer repoId={repoId} docRef={docB} commit={prRef} badge={docB === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollB} highlight={sectionsFor(docB)} />
         </div>
       </div>
     </div>

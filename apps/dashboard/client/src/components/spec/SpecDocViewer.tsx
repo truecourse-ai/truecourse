@@ -14,6 +14,7 @@ import { DocMarkdown } from './DocMarkdown';
 export function SpecDocViewer({
   repoId,
   docRef,
+  commit,
   badge,
   scrollTo,
   highlight,
@@ -22,6 +23,8 @@ export function SpecDocViewer({
 }: {
   repoId: string;
   docRef: string;
+  /** EE PR view: read the doc's markdown at this commit (the PR head). */
+  commit?: string;
   /** Optional role label shown before the doc name (e.g. "Older" / "Newer"). */
   badge?: string;
   /** Scroll the rendered doc to the heading whose text matches this — re-applied
@@ -44,14 +47,14 @@ export function SpecDocViewer({
     setLoading(true);
     setError(null);
     api
-      .getSpecDoc(repoId, docRef)
+      .getSpecDoc(repoId, docRef, commit)
       .then((r) => !cancelled && setContent(r.content))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, docRef]);
+  }, [repoId, docRef, commit]);
 
   // Scroll to a conflicting section: match a rendered heading by text.
   useEffect(() => {

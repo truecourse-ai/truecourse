@@ -1169,7 +1169,7 @@ function RepoPageInner() {
 
   // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
   // the panel) drives it, consistent with the other tabs.
-  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec');
+  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec', refForTabs);
 
   const sectionActionsNode =
     leftTab === 'spec' ? (
@@ -1413,7 +1413,7 @@ function RepoPageInner() {
             // The curated corpus Spec tab: an area-grouped prose nav (areas →
             // docs + overlaps); selecting opens the right pane (?spec=). Scan
             // lives in the header.
-            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} />
+            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} prNumber={prNumber} prRef={refForTabs} />
           )}
           {leftTab === 'contracts' && (
             <ContractsPanel
@@ -1679,7 +1679,12 @@ function RepoPageInner() {
                     docA={k.a}
                     docB={k.b}
                     data={specCorpus.data}
-                    onResolved={specCorpus.refetch}
+                    prNumber={prNumber}
+                    prRef={refForTabs}
+                    onResolved={(res) => {
+                      if (res) specCorpus.apply(res);
+                      else void specCorpus.refetch();
+                    }}
                   />
                 ) : (
                   <SpecPanePlaceholder />
@@ -1696,6 +1701,7 @@ function RepoPageInner() {
                 <SpecDocViewer
                   repoId={repoId}
                   docRef={k.ref}
+                  commit={refForTabs}
                   tags={docTags}
                   notIncludedReason={skipped?.reason}
                 />

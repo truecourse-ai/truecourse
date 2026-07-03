@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
-import { verifyInProcess } from '@truecourse/core/commands/spec-in-process';
+import { verifyInProcess, promoteDecisionsOverlay } from '@truecourse/core/commands/spec-in-process';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { readLatest } from '@truecourse/core/lib/analysis-store';
 import type { StepTracker } from '@truecourse/core/progress';
@@ -33,12 +33,19 @@ import {
   stripEmbeddedAuth,
   type GithubAuth,
 } from './github.js';
+import { splitRepo, listPrsForCommit, type OctokitClient } from './octokit.js';
 import { defaultSpecScanPipeline, type SpecScanPipeline } from './spec-scan.js';
 import { defaultInferPipeline, type InferPipeline } from './infer-scan.js';
 
 export interface BaselineDeps {
   store: GateStore;
   auth: GithubAuth;
+  /**
+   * Installation-scoped GitHub client factory — used to map the merge/squash
+   * commit back to its merged PR (decision promotion + contract anchoring).
+   * Omitted ⇒ PR resolution is skipped and the baseline anchors as before.
+   */
+  octokitFor?: (installationId: number) => OctokitClient;
   /** Scan+generate pipeline for the cold path (injected in tests). */
   scanPipeline?: SpecScanPipeline;
   /** Infer pipeline for the baseline inferred-decisions set (injected in tests). */
@@ -81,6 +88,57 @@ export interface BaselineResult {
   hasContracts: boolean;
 }
 
+/**
+ * The merged PR whose merge/squash produced `commitSha`, or null. Prefers the PR
+ * whose `merge_commit_sha` is exactly this commit (the unambiguous match); falls
+ * back to any merged PR associated with the commit (covers squash/rebase, whose
+ * landed sha differs from the recorded merge commit).
+ */
+export async function resolveMergedPr(
+  octokit: OctokitClient,
+  repoFullName: string,
+  commitSha: string,
+): Promise<{ number: number; headSha: string } | null> {
+  const merged = (await listPrsForCommit(octokit, splitRepo(repoFullName), commitSha)).filter(
+    (p) => p.merged,
+  );
+  if (merged.length === 0) return null;
+  const chosen = merged.find((p) => p.mergeCommitSha === commitSha) ?? merged[0]!;
+  return { number: chosen.number, headSha: chosen.headSha };
+}
+
+/**
+ * On a default-branch push, resolve the merged PR and (a) promote its PR-scoped
+ * decisions onto the repo row BEFORE the merge-commit scan (idempotent — the
+ * pull_request.closed handler may have already promoted; this is the
+ * push-before-closed race-proofing), and (b) return the PR head as the contract
+ * anchor when the head has stored contracts, so unchanged areas reproduce the
+ * exact contracts the PR reviewed. Any failure degrades to no anchor (the caller
+ * falls back to the prior baseline) — resolution never fails the baseline.
+ */
+export async function resolveMergeAnchor(
+  deps: Pick<BaselineDeps, 'octokitFor'>,
+  req: { repoFullName: string; installationId: number; commitSha: string },
+): Promise<RepoRef | undefined> {
+  if (!deps.octokitFor) return undefined;
+  try {
+    const merged = await resolveMergedPr(
+      deps.octokitFor(req.installationId),
+      req.repoFullName,
+      req.commitSha,
+    );
+    if (!merged) return undefined;
+    await promoteDecisionsOverlay(req.repoFullName, merged.number);
+    const headRef: RepoRef = { repoKey: req.repoFullName, commitSha: merged.headSha };
+    return (await hasContracts(headRef, 'contracts')) ? headRef : undefined;
+  } catch (err) {
+    log.warn(
+      `[github-app] merged-PR resolution failed for ${req.repoFullName}@${req.commitSha.slice(0, 7)}: ${(err as Error).message}`,
+    );
+    return undefined;
+  }
+}
+
 export async function runBaseline(
   deps: BaselineDeps,
   req: BaselineRequest,
@@ -113,6 +171,11 @@ export async function runBaseline(
     ]);
     await stripEmbeddedAuth(simpleGit(tmp));
 
+    // Map this push to its merged PR: promote the PR's decisions (before the scan
+    // folds them) and prefer the PR head as the contract anchor so the merge commit
+    // reproduces exactly what was reviewed. Degrades to the prior baseline anchor.
+    const mergeAnchor = await resolveMergeAnchor(deps, req);
+
     // Generate the default head's contracts into the store if not present.
     // A failure here (or in verify) must NOT be saved as a neutral baseline:
     // a `null` baseline reads identically to "no spec" and would make the gate
@@ -131,9 +194,12 @@ export async function runBaseline(
       // resolved in the dashboard, which regenerates contracts (repo.contracts).
       if (openConflicts === 0) {
         await deps.onPhase?.('contracts');
-        // Anchor this (re)baseline to the PRIOR baseline's contracts so unchanged
-        // areas reproduce them instead of drifting run-to-run (Phase 4).
-        const anchorRef = existing ? { repoKey: req.repoFullName, commitSha: existing.commitSha } : undefined;
+        // Anchor this (re)baseline to the merged PR's reviewed contracts when
+        // resolved, else the PRIOR baseline's, so unchanged areas reproduce them
+        // instead of drifting run-to-run.
+        const anchorRef =
+          mergeAnchor ??
+          (existing ? { repoKey: req.repoFullName, commitSha: existing.commitSha } : undefined);
         await scanPipeline.generate(tmp, ref, deps.generateTracker, anchorRef);
       } else {
         log.info(

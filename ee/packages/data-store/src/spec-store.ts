@@ -33,6 +33,17 @@ function requireCommit(ref: RepoRef): string {
   return ref.commitSha;
 }
 
+/**
+ * The decisions-ledger scope for a repo ref. The repo row is keyed by `repoKey`
+ * (the core's `_repo` / empty sentinel commit is discarded); a PR overlay uses
+ * the core's `_pr/<n>` sentinel commit, mapped to a distinct `${repoKey}#pr/<n>`
+ * scope so a PR's resolutions never leak into the base repo view.
+ */
+function decisionsScope(ref: RepoRef): string {
+  const m = /^_pr\/(\d+)$/.exec(ref.commitSha ?? '');
+  return m ? `${ref.repoKey}#pr/${m[1]}` : ref.repoKey;
+}
+
 export class PgSpecStore implements SpecStore {
   readonly materializesInPlace = false;
   private readonly content: ContentStore;
@@ -47,7 +58,7 @@ export class PgSpecStore implements SpecStore {
       return;
     }
     if (artifact === 'decisions') {
-      await this.saveDecisions(ref.repoKey, json);
+      await this.saveDecisions(decisionsScope(ref), json);
       return;
     }
     const commitSha = requireCommit(ref);
@@ -67,7 +78,7 @@ export class PgSpecStore implements SpecStore {
       return readSnapshot<T>(this.db, ref.repoKey, requireCommit(ref));
     }
     if (artifact === 'decisions') {
-      return this.loadDecisions<T>(ref.repoKey);
+      return this.loadDecisions<T>(decisionsScope(ref));
     }
     const rows = await this.db
       .select({ contentSha: specSets.contentSha })
@@ -82,6 +93,15 @@ export class PgSpecStore implements SpecStore {
       .limit(1);
     if (!rows[0]) return null;
     return this.content.getJson<T>(contentScope.spec(ref.repoKey), rows[0].contentSha);
+  }
+
+  // Only `decisions` is deletable — dropping a PR overlay row on merge/close.
+  // Idempotent: a DELETE with no match is a no-op.
+  async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
+    if (artifact !== 'decisions') {
+      throw new Error('[ee-data-store] deleteSpec supports only the decisions artifact');
+    }
+    await this.deleteDecisions(decisionsScope(ref));
   }
 
   async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null> {
@@ -178,5 +198,9 @@ export class PgSpecStore implements SpecStore {
       .where(eq(decisions.scope, scope))
       .limit(1);
     return rows[0] ? (rows[0].payload as T) : null;
+  }
+
+  private async deleteDecisions(scope: string): Promise<void> {
+    await this.db.delete(decisions).where(eq(decisions.scope, scope));
   }
 }

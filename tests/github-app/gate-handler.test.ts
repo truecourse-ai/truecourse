@@ -6,8 +6,11 @@ import {
   FileGateStore,
   handlePullRequestGate,
   reverifyOpenPrs,
+  reverifyOnePr,
   setPrReverifier,
   getPrReverifier,
+  setPrRegater,
+  getPrRegater,
   GATE_MARKER,
   renderGateComment,
   type GateHandlerDeps,
@@ -37,7 +40,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
-  setPrReverifier(null); // isolate the module-global seam between tests
+  setPrReverifier(null); // isolate the module-global seams between tests
+  setPrRegater(null);
 });
 
 function drift(obligationKey: string, over: Record<string, unknown> = {}): any {
@@ -397,5 +401,61 @@ describe('reverifyOpenPrs', () => {
     setPrReverifier(async (repo) => { seen.push(repo); });
     await getPrReverifier()!('acme/api');
     expect(seen).toEqual(['acme/api']);
+  });
+});
+
+describe('reverifyOnePr', () => {
+  function echoDeps(octokit: any): GateHandlerDeps {
+    return {
+      store,
+      octokitFor: () => octokit,
+      runVerify: async (_d: any, req: any) => ({
+        baseSha: `base-${req.prNumber}`,
+        headSha: `h${req.prNumber}`,
+        baseDrifts: [],
+        headDrifts: [],
+      }),
+    } as unknown as GateHandlerDeps;
+  }
+  function openPr(number: number) {
+    return {
+      number,
+      head: { sha: `h${number}`, ref: `f${number}`, repo: { full_name: 'acme/api', fork: false } },
+      base: { sha: `b${number}`, ref: 'main' },
+    };
+  }
+
+  it('force re-gates ONLY the targeted PR, leaving the others untouched', async () => {
+    // PR 7 was already gated; the targeted re-gate must still run (force).
+    await store.recordRun({
+      id: 'r7', repoFullName: 'acme/api', prNumber: 7, headSha: 'h7', baseSha: 'b7',
+      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7), openPr(8)] });
+    await reverifyOnePr(echoDeps(octokit), 'acme/api', 7);
+    // Only PR 7's two Checks (drift + Code Quality) — PR 8 is never touched.
+    expect(calls.check.map((c: any) => c.head_sha)).toEqual(['h7', 'h7']);
+    const prNums = (await store.listRuns('acme/api')).map((r) => r.prNumber).sort();
+    expect(prNums).toEqual([7, 7]); // the original run + the one re-gate
+  });
+
+  it('no-ops when the PR is no longer open (already merged/closed)', async () => {
+    const { octokit, calls } = makeOctokit({ openPrs: [openPr(8)] });
+    await reverifyOnePr(echoDeps(octokit), 'acme/api', 7);
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('no-ops for an unconnected repo', async () => {
+    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7)] });
+    await reverifyOnePr(echoDeps(octokit), 'stranger/repo', 7);
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('the PR-regater seam round-trips and defaults to null', async () => {
+    expect(getPrRegater()).toBeNull();
+    const seen: Array<[string, number]> = [];
+    setPrRegater(async (repo, pr) => { seen.push([repo, pr]); });
+    await getPrRegater()!('acme/api', 7);
+    expect(seen).toEqual([['acme/api', 7]]);
   });
 });

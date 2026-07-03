@@ -31,7 +31,7 @@ The document is organized as a shared **Common** core (stages and cross-cutting 
 - [11. EE (Enterprise) Edition](#ee-edition) — hosted GitHub App PR gate, Postgres/blob storage, background jobs, workspace knowledge.
 
 **Reference**
-- [12. Gaps & Known Limitations](#gaps) — the generate non-determinism bug, stale doc-comments, extractor edge cases.
+- [12. Gaps & Known Limitations](#gaps) — stale doc-comments, extractor edge cases, and the residue of the (fixed) generate-determinism bug.
 
 > Note on section numbering: cross-references throughout use stable `#anchor` slugs (e.g. [`#llm-orchestration`](#llm-orchestration), [`#cli-reference`](#cli-reference)) rather than section numbers, since numbering may shift as the document evolves.
 
@@ -80,7 +80,7 @@ The vertical spine is a straight pipe: **docs → corpus → `.tc` → drift**. 
 
 **Stage 1 — Scan (Curate).** Scan reads all of the repo's Markdown and works out which docs actually describe how the system behaves, then organizes them. It walks the repo for `.md` files in a stable, repeatable order, and an LLM judges each one — keep it if it states real behavior, drop it otherwise. Every kept doc is tagged with one or more **areas** (a two-level `product/concern` slice such as `core/auth`), and a cleanup pass collapses synonym drift so `authn` and `authentication` don't split into two areas. Docs are then grouped by area, doc→doc **relations** are detected — which doc supersedes which, partly from filename version numbers and partly from a single LLM pass — and within each area the tool flags **overlaps**: pairs of docs that might contradict each other, skipping any pair a relation already settles. The result is the curated corpus, written to `specs/corpus.json`, which stores only references and tags, never the prose itself. Every LLM step is cached by content, so an unchanged doc costs nothing on a re-run and the committed `corpus.json` stays stable. Full detail in [§3](#scan).
 
-**Stage 2 — Generate.** Generate turns the corpus into the actual `.tc` contract tree, working one area at a time. First it resolves that area's docs — dropping any superseded by a `replace` relation and ordering the rest by precedence. Then it **enumerates** the area's contract *targets*: a cheap, names-only checklist of the obligations that should exist, with no bodies yet. Because several areas may list the same obligation under different names, a global **reconcile** pass merges those duplicates. Then comes the expensive step — an LLM generates the real `.tc` for each target, guarded by a **completeness gate** that re-prompts for any target still missing a body and retries until it stops making progress. A shared tail merges, normalizes, repairs, and validates the results, writes the surviving `.tc` files under `contracts/`, and records a spec-hash **manifest** so a re-run with unchanged specs regenerates nothing. Finally an LLM judges any targets that still look uncovered, to weed out false misses. One important caveat: generation is *not* a perfectly deterministic function of the corpus — see [§4](#generate) and [§12](#gaps). The `.tc` language itself is [§5](#tc-language).
+**Stage 2 — Generate.** Generate turns the corpus into the actual `.tc` contract tree, working one area at a time. First it resolves that area's docs — dropping any superseded by a `replace` relation and ordering the rest by precedence. Then it **enumerates** the area's contract *targets*: a cheap, names-only checklist of the obligations that should exist, with no bodies yet. Because several areas may list the same obligation under different names, a global **reconcile** pass merges those duplicates. Then comes the expensive step — an LLM generates the real `.tc` for each target, guarded by a **completeness gate** that re-prompts for any target still missing a body and retries until it stops making progress. A shared tail merges, normalizes, repairs, and validates the results, writes the surviving `.tc` files under `contracts/`, and records a spec-hash **manifest** so a re-run with unchanged specs regenerates nothing. Finally an LLM judges any targets that still look uncovered, to weed out false misses. Generation is deterministic where it matters: identities are canonicalized at parse, the duplicate-merge (reconcile) step is scoped per cluster, origins tie-break deterministically, and a regeneration anchors to the previously generated contracts — so unchanged areas reproduce byte-identically, and only a genuinely new or edited area's body can vary until cached (see [§4.12](#gen-nondeterminism)). The `.tc` language itself is [§5](#tc-language).
 
 **Stage 3 — Verify.** Verify checks the code against the authored contracts, and it does so with zero LLM calls. It loads the `.tc` files, parses and resolves them into typed artifacts, then extracts the equivalent facts straight from the code — TS/JS/Python/C# via tree-sitter — but only for the kinds the spec actually references, so it does no wasted work. One **comparator** per artifact kind diffs the spec's claim against what the code really does, and any mismatch becomes a **drift**. A final pass anchors each drift to its enclosing function and to which occurrence within that function it is, so a drift keeps its identity even when unrelated edits shift line numbers. Because it is pure parsing and diffing, Verify is fully deterministic — no models, no tokens, no toggles. Its drifts feed the OSS analyze violation store, or drive the EE PR gate, which compares the base and head of a pull request. Detail in [§6](#verify).
 
@@ -102,7 +102,7 @@ The same engine code runs in both editions. Every difference between them is pus
 | LLM transport | Shells out to the local `claude` binary, which must be on your PATH | An AI-SDK transport wired in at boot; no binary or key of your own, and it refuses to run until a provider is configured |
 | Per-stage models | Honors each stage's model tier — a cheaper model for light work, a stronger one for extraction | Runs one configured model for every stage, and hides the per-stage tiers so hosted progress isn't misleading |
 | KV cache | Cached to files under `.truecourse/.cache/` | Cached in Postgres, content-addressed so it survives the throwaway clones |
-| Decisions | Read from `decisions.json` in the repo | Passed in explicitly from Postgres, since a fresh clone has no `decisions.json` |
+| Decisions | Read from `decisions.json` in the repo | A repo-global Postgres ledger plus a per-PR overlay; PR-head scans fold repo ∪ overlay, and the overlay promotes into the ledger on merge |
 | Verify baseline | `verifier/LATEST.json` committed in the repo | Per-commit snapshots; the PR-head verify is transient and never moves the baseline, and the gate diffs base against head |
 
 The critical practical difference: **OSS is user-driven and committable** — the `.tc` tree and `corpus.json` are git-tracked, so a PR reviews spec changes the same way it reviews code. **EE is webhook-driven and server-stored** — nothing is committed to the customer's repo, and the PR gate compares the base-vs-head drift sets to flag *newly* violating code.
@@ -381,6 +381,8 @@ Example `specs/decisions.json`:
 
 One thing to know about reads: two different packages each have their own reader for this same file, on purpose, so neither has to depend on the other. Both are fail-soft — a missing or corrupt file reads back as an empty decisions object rather than an error. One reader serves the CLI's relation flow and the dashboard write-back; the other serves the scan's curation step and the generate reader.
 
+In EE the same shape lives in Postgres, keyed by a scope string: one repo-global row plus, while a pull request is open, a **per-PR overlay** row (`repoKey#pr/N`, addressed through the seam by the sentinel commit `_pr/N` alongside the repo row's `_repo`). Reads for a PR-head scan merge repo ∪ overlay — the overlay wins per doc pair, path, and doc — so a resolution made while reviewing one PR never touches main or another PR. When the PR merges, the overlay is **promoted** into the repo row (an idempotent merge, so the closed webhook and the merge baseline can both attempt it) and deleted; a PR closed without merging just discards it. The OSS file store has no PR dimension and rejects PR-scoped decisions outright.
+
 #### 2.3.3 `specs/inferredDecisions.json` — the reverse-engineering summary
 
 This file is what the infer path produces: a summary of decisions reverse-engineered from the code rather than written down in a doc. It's what the dashboard's Inferred tab reads. Each entry names an artifact (its kind and identity), where in the code it was found, why the deterministic inferer thinks it's real, a confidence level, and the rendered `.tc` body — plus a pointer to the contract file, so a user can promote an inferred decision into the authored set.
@@ -490,7 +492,7 @@ There are two families of caches, one per LLM-using stage:
 | reconcile | how duplicate targets across all areas should be merged |
 | gap judge | whether an un-contracted target is a genuine coverage gap |
 
-The **extract** cache is the expensive one — it's where the heavyweight extraction model runs — and it's the seam that makes generate incremental: its key ties an area's fragments to that area's document content, so only areas whose specs actually changed get re-extracted. There's a known limitation, though ([§12](#gaps)): the **reconcile** step keys on the *global* list of targets across all areas, so a single edit anywhere busts reconcile, and because reconcile's output feeds the extract key, that can knock out otherwise-unchanged areas too. Full per-area incrementality is only guaranteed when literally nothing changed.
+The **extract** cache is the expensive one — it's where the heavyweight extraction model runs — and it's the seam that makes generate incremental: its key ties an area's fragments to that area's document content, so only areas whose specs actually changed get re-extracted. Reconcile is scoped to protect exactly that incrementality: rather than one global call keyed on every target across all areas, targets are grouped into small deterministic clusters and each cluster is reconciled and cached on its own members — a doc edit busts only the clusters its targets join, so unchanged areas keep their identities and their extract-cache hits ([§4.6](#gen-reconcile)).
 
 One helper keeps these keys from being brittle: contract identities are normalized before hashing — lowercasing kinds, collapsing whitespace, and for HTTP operations normalizing the method and path (folding `:id` and `{id}` together) — so cosmetic differences don't cause spurious cache misses while genuinely distinct names stay distinct.
 
@@ -510,7 +512,7 @@ The one capability callers actually branch on is **`materializesInPlace`**. For 
 
 #### 2.7.1 The spec store
 
-The spec store loads and saves the whole-document spec artifacts ([§2.3](#data-model-storage)). The file version simply reads and writes JSON under `specs/` and has no notion of a commit. Workspace-scoped specs — specs shared across a whole organization rather than one repo — are an EE-only feature, so the file version refuses to save them and returns nothing when asked to load one.
+The spec store loads and saves the whole-document spec artifacts ([§2.3](#data-model-storage)). The file version simply reads and writes JSON under `specs/` and has no notion of a commit. Workspace-scoped specs — specs shared across a whole organization rather than one repo — are an EE-only feature, so the file version refuses to save them and returns nothing when asked to load one. The same goes for the decisions artifact's per-PR scope (the `_pr/N` sentinel commit, [§2.3.2](#data-model-storage)): the file store throws rather than silently writing an overlay OSS can't represent.
 
 #### 2.7.2 The contract store
 
@@ -535,7 +537,7 @@ A `DocRef` is the small abstraction that keeps the corpus prose-free and edition
 | verify state | never written | one snapshot per commit |
 | verify diffs | a single `diff.json` | no diff files — computed on read from two snapshots |
 | workspace (org-wide) scope | unsupported — write throws, read is empty | org-wide contract sets and decisions |
-| decisions on re-scan | read from `decisions.json` | must be supplied — a fresh clone has no file, so they're loaded from the ledger |
+| decisions on re-scan | read from `decisions.json` | loaded from the ledger — the repo row, merged with the PR's overlay for a PR-head scan |
 
 Because both editions key their caches on content with the identical scheme ([§2.6](#data-model-storage)), an unchanged document or area hits the cache across runs, across commits, and — in EE — across repos.
 
@@ -1169,8 +1171,16 @@ re-baseline (clone → curate → generate → verify), surfaced by the baseline
 progress panel — there is **no** separate contract-refresh job or popup. (Because EE
 gates regeneration on the conflict count, its relation edits re-curate too, to
 recompute it; OSS, which regenerates manually, leaves a relation as a client-side
-"resolved" overlay on the existing corpus.) (The small module that persists these
-edits is still named `orchestrator.ts` for historical reasons, though it no longer
+"resolved" overlay on the existing corpus.) All of the above is the **repo
+scope** — the EE re-curate reads doc bodies at, and saves the corpus back to,
+the *baseline* commit. When the dashboard is viewing a **pull request**, the
+same edits become PR-scoped instead: they write the PR's decisions overlay
+([§2.3.2](#data-model-storage)), re-curate the **PR head** corpus (docs read at
+the head commit), save it at the head, and — when that clears the PR's last
+conflict — force a re-gate of *that one PR* rather than a main re-baseline. The
+repo baseline and every other PR are untouched; the overlay reaches main only
+through merge-time promotion. (The small module that persists these edits is
+still named `orchestrator.ts` for historical reasons, though it no longer
 orchestrates anything — it's just decisions I/O now.)
 
 ---
@@ -1275,11 +1285,11 @@ Stage 2 turns the **curated doc corpus** from [Stage 1: Spec Scan (§3)](#scan) 
 
 It is one engine, shared by both editions. The OSS CLI (`truecourse contracts generate`, see [§9](#cli-reference)) and the EE GitHub App gate ([§11](#ee-edition)) run the exact same code; they differ only in a few pluggable seams — how the LLM is called, where the cache lives, how doc content is fetched, and where output is written — covered in [§8 (LLM Orchestration)](#llm-orchestration) and [§2 (Data Model & Storage)](#data-model-storage). This section explains the shared algorithm; the `.tc` grammar and the deep internals of the merge/repair tail live in their own sections and are cross-linked rather than repeated here.
 
-> **Determinism warning.** Contract generate is *not* a deterministic function of the corpus. The same `corpus.json` can produce a different, churning `.tc` tree from one run to the next. The mechanism is summarized in [§4.12](#gen-nondeterminism); the full analysis and intended fix live in [§12 (Gaps)](#gaps).
+> **Determinism.** For unchanged inputs, contract generate reproduces its output byte-for-byte: identities are canonicalized once at parse, the duplicate-merge (reconcile) step runs per cluster, origin assignment tie-breaks deterministically, and a regeneration anchors to the prior contracts. A guardrail test pins the property: edit one doc, and only that doc's area regenerates — every other `.tc` stays byte-identical. What the LLM writes for a genuinely new or edited area can still vary until cached. Mechanism and history in [§4.12](#gen-nondeterminism).
 
 ### 4.1 The pipeline at a glance
 
-The stage runs as a fixed sequence of steps. Three of them are deterministic bookkeeping (build inputs, write files, write the manifest); the interesting work is three LLM phases — enumerate, then generate — bracketed by a global reconcile in the middle and a repair/validate tail at the end.
+The stage runs as a fixed sequence of steps. Three of them are deterministic bookkeeping (build inputs, write files, write the manifest); the interesting work is three LLM phases — enumerate, then generate — bracketed by a cross-area reconcile in the middle and a repair/validate tail at the end.
 
 | # | Step | LLM? | What it does |
 |---|------|------|------|
@@ -1301,7 +1311,7 @@ The five LLM phases fire in this order: enumerate → reconcile → generate (ex
 
 ### 4.2 Options, result, and knobs
 
-Both editions call the engine with the same bundle of options. The only required one is the repo root; everything else is a tuning knob or an injection seam. The seams are what let EE and the test suite swap in their own behavior: a custom way to reach the LLM, stub runners for each phase in place of real LLM calls, a way to feed the corpus in directly instead of reading `corpus.json` off disk, and progress callbacks that stream live counts to the dashboard. A handful of `disable*` switches turn off reconciliation, repair, the gap judge, the extract cache, or the manifest short-circuit — mostly so tests can assert exact call counts or force a full run. A dry run produces a proposal without writing anything.
+Both editions call the engine with the same bundle of options. The only required one is the repo root; everything else is a tuning knob or an injection seam. The seams are what let EE and the test suite swap in their own behavior: a custom way to reach the LLM, stub runners for each phase in place of real LLM calls, a way to feed the corpus in directly instead of reading `corpus.json` off disk, and progress callbacks that stream live counts to the dashboard. A handful of `disable*` switches turn off reconciliation, repair, the gap judge, the extract cache, the manifest short-circuit, or the prior-contracts anchor (`disableAnchor`) — mostly so tests can assert exact call counts or force a full run. A dry run produces a proposal without writing anything.
 
 The result reports whether anything was generated, what was written (or proposed, on a dry run), the surviving contracts, per-area coverage and residual gaps, and any validation issues. Two flags are worth calling out: `resolverHard` means the corpus had irreconcilable identities and nothing was written, and `noChanges` means the manifest short-circuit fired and no LLM was called at all.
 
@@ -1361,6 +1371,8 @@ A couple of the enumeration rules are subtle enough that the prompt spells them 
 - **ValidationRule means conditional requiredness only** — "X is required when Y = Z" — not the field attributes above.
 - **One EffectGroup per event source.** Individual effects are members of a group, never standalone targets.
 
+Two hardening steps run right after each enumerate call. Every returned identity is **canonicalized** (`canonicalIdentity`) immediately — whitespace collapsed; for operations the method upper-cased, the trailing slash dropped, and `:id` folded to `{id}` — so no raw LLM spelling ever reaches a downstream key. And when the repo already has generated contracts, enumerate is **anchored to them**: the existing artifact identities are passed into the prompt with the instruction to reuse their exact kind + identity spelling for anything the docs still specify, so a regeneration doesn't re-spell (and thereby rename) artifacts that didn't change ([§4.12](#gen-nondeterminism)).
+
 #### The tolerant identity key
 
 The completeness gate, the reconciler, and the gap judge all compare targets through one shared "coverage key" that normalizes *benign* spelling drift without collapsing genuinely-distinct names. It lowercases the kind, squeezes runs of whitespace, and — for operations — uppercases the HTTP method, strips trailing slashes, and folds Express-style `:id` path params into OpenAPI-style `{id}`. So `get /orders/:id/` and `GET /orders/{id}` land on the same key, while `Entity:Order` and `Entity:OrderLine` stay firmly apart.
@@ -1380,18 +1392,18 @@ This phase uses the `sonnet` tier with a 300-second per-call timeout — a slow 
 
 Because every area enumerates on its own, a cross-cutting decision — the outbox pattern, the bearer-auth requirement, a shared constant — tends to get listed by several areas at once, and often under a *different name each time* (`outbox-pattern` in one area, `transactional-outbox` in another). Left alone, generation would produce that same artifact several times over, and since the identities differ the merge tail couldn't collapse the duplicates. Reconcile sits between enumerate and generate to give each real artifact a single canonical identity.
 
-It works in two layers. First, a deterministic de-dup collapses targets that already share a coverage key, remembering which area saw each one first. Then, only if there are at least two distinct targets and reconciliation is enabled, a single LLM call looks across *all* the targets and proposes semantic merges — clustering things that are the same concept under different spellings and picking one canonical `(kind, identity)` per cluster. The prompt gives worked examples (merging `outbox-pattern` with `transactional-outbox`, `bearer-jwt` with `customer-bearer-jwt`), spells out what is *not* a duplicate (different kinds, operations that differ by method or path, entities that differ by name), and — because the cross-cutting kinds duplicate the most and mis-merging is worse than missing a merge — lands on the rule **"when unsure, do not merge."**
+It works in two layers. First, a deterministic de-dup collapses targets that already share a coverage key, remembering for each one the **lexicographically smallest** area id that enumerated it — a deterministic home, so a shared target's owner can't flip when area order changes. Then, only when reconciliation is enabled and at least two distinct targets remain, the semantic layer runs — but **not** as one global call. Targets are grouped into small deterministic candidate clusters (same kind, sharing a meaningful slug token); a cluster needs at least two members to reach the LLM at all, and each cluster is reconciled by its own call and cached on its own members. Within a cluster the model proposes semantic merges — things that are the same concept under different spellings — and picks one canonical `(kind, identity)` per merge group. The prompt gives worked examples (merging `outbox-pattern` with `transactional-outbox`, `bearer-jwt` with `customer-bearer-jwt`), spells out what is *not* a duplicate (different kinds, operations that differ by method or path, entities that differ by name), and — because the cross-cutting kinds duplicate the most and mis-merging is worse than missing a merge — lands on the rule **"when unsure, do not merge."**
 
 Two safety properties matter here:
 
 - **The LLM can't invent identities.** Its proposed merges are sanitized so that both sides of every merge must be targets some area actually enumerated; self-merges are dropped. A canonical identity that no area ever listed is rejected.
-- **Reconcile is best-effort.** If the call throws, the merges are simply treated as empty and the run falls back to the deterministic de-dup alone. Enumeration is never lost to a reconcile failure.
+- **Reconcile is best-effort, per cluster.** If a cluster's call throws, that cluster's merges are simply treated as empty and its targets fall back to the deterministic de-dup — the other clusters, and enumeration itself, are never lost to one failure.
 
-Once merges are chosen, each target adopts its canonical identity and is reassigned to the first area that enumerated that canonical form. An area that donated all its targets to another area ends up with an empty list, which is fine — the artifact is generated once, in whichever area owns it.
+Once merges are chosen, each target adopts its canonical identity and is reassigned to the smallest area id that enumerated that canonical form. An area that donated all its targets to another area ends up with an empty list, which is fine — the artifact is generated once, in whichever area owns it.
 
-This phase runs silently (no per-area progress hook — the tracker just advances to the "reconcile" step once every area is enumerated), uses the `sonnet` tier, and gets a generous 600-second timeout because the output grows with the target count. Setting `disableTargetReconciliation` keeps the deterministic de-dup but skips the LLM cluster call.
+This phase runs silently (no per-area progress hook — the tracker just advances to the "reconcile" step once every area is enumerated), uses the `sonnet` tier, and gets a generous 600-second per-call timeout because the output grows with the cluster size. Setting `disableTargetReconciliation` keeps the deterministic de-dup but skips the LLM cluster calls.
 
-One thing to flag for later: the reconcile cache is keyed on the *sorted list of every target across every area*. That global key means a single doc edit anywhere changes the list, misses the cache, and re-runs the clustering over the whole corpus — which is a root cause of the non-determinism bug in [§4.12](#gen-nondeterminism).
+This per-cluster scoping is what protects generate's incrementality: a doc edit busts only the clusters its targets join, so unchanged targets keep their canonical identity and unchanged areas keep hitting the extract cache. (The original design — a single global call cached on the sorted list of every target across every area — re-clustered the whole corpus on any edit, and was a root cause of the since-fixed churn bug, [§4.12](#gen-nondeterminism).)
 
 ### 4.7 Step 6 (Phase 3) — Batch generate + completeness gate
 
@@ -1402,7 +1414,7 @@ This is where the real work happens: for each area, generate the actual `.tc` co
 
 Before generating anything, an area checks the extract cache. If its docs, its reconciled targets, the prompt, and the retry budget are all unchanged from a prior run, the previous contracts are reused directly and no LLM is called for that area. This is the seam that makes editing one doc cheap: only the areas that actually changed pay for regeneration.
 
-The cache key folds together the generate prompt's fingerprint, the retry budget, the area id, a hash of each doc's reference and content, and the sorted list of the area's *reconciled* target identities. Sorting means batch ordering can't perturb the key. But note the word *reconciled*: because these identities come out of the global reconcile step, a reconcile that re-clusters the corpus changes them — which is exactly how a single doc edit can bust the extract cache of areas that didn't change at all ([§4.12](#gen-nondeterminism)).
+The cache key folds together the generate prompt's fingerprint, the retry budget, the area id, a hash of each doc's reference and content, and the sorted list of the area's *reconciled* target identities. Sorting means batch ordering can't perturb the key. The word *reconciled* used to be the weak spot: when reconcile was one global call, a doc edit anywhere could re-cluster the corpus, rename identities, and bust the extract cache of areas that hadn't changed. With per-cluster reconcile ([§4.6](#gen-reconcile)) an unchanged target's identity is stable, so an unchanged area's key — and its cache hit — survives edits elsewhere ([§4.12](#gen-nondeterminism)).
 
 #### The generation loop and completeness gate
 
@@ -1422,9 +1434,13 @@ The prompt hands the model one area, the exact target list, and the area's docs 
 
 Generation runs on the `opus` tier with a 600-second timeout. It shares one big **system prompt** with the repair pass ([§4.9](#gen-tail)) — a single roughly 1,400-line document that carries the prime directive, the output shape, the artifact catalog, the full `.tc` grammar taught by example, few-shot samples, and a **generated closed-keyword-set reference**. That last section is not hand-written: it is derived mechanically from the ohm grammar source at module load (`keyword-sets.ts` in the verifier — see [§5.2](#tc-language)), listing for every closed keyword rule the complete set of legal keywords and argument shapes, framed with the rule that the sets are CLOSED — never invent a keyword, and if the spec's statement has no legal encoding in the target kind, emit an `unenforceable-obligation` instead. Because it's generated, the prompt's picture of the grammar cannot drift from what the parser accepts (a hand-written prose copy once left the `field-exposure` `via` channel set unstated, and a model promptly invented `via service-metadata`). The prime directive is **faithfulness**: encode only what the spec actually states, and when the spec is vague, reach for a wider grammar form rather than guessing a precise one — a `2xx`/`4xx` status *class* instead of an exact code, or an `UnenforceableObligation` (carrying a `reason`) for prose that can't be encoded at all. This prompt's hash is what fingerprints the extract cache above; the grammar it teaches is specified in full in [§5](#tc-language).
 
-#### The identity-float caveat
+#### Anchoring to the prior generation
 
-Each generated fragment carries its kind, its identity, the raw `.tc` source, and an origin pointing back at the doc it came from. One detail here is load-bearing: the **identity string is trusted verbatim from the LLM** — it isn't normalized at generation time, only slugified much later when a filename is chosen. That trust is the root of the "identity float" bug ([§4.12](#gen-nondeterminism)), where the same concept drifts between spellings run to run.
+When contracts already exist from a previous run, generation **anchors to them**. Each batch target whose coverage key matches an existing artifact gets that artifact's previous `.tc` body attached to the prompt — origin lines stripped, since their line ranges are volatile — with the instruction to reproduce it exactly unless the docs changed what it must say. Enumerate is anchored the same way, with the existing identities ([§4.5](#generate)). In OSS the prior tree is read from `.truecourse/contracts/`; in the EE gate the base baseline's stored `.tc` is materialized into the clone before generating. The anchor is on by default and disabled with `disableAnchor` — it's the piece that makes a *regeneration* converge on its prior output instead of re-wording contracts whose specs didn't change ([§4.12](#gen-nondeterminism)).
+
+#### Canonical identity at parse
+
+Each generated fragment carries its kind, its identity, the raw `.tc` source, and an origin pointing back at the doc it came from. One detail here is load-bearing: the identity is **canonicalized the moment the fragment is parsed** (`canonicalIdentity` in `identity.ts` — whitespace collapsed; for operations the method upper-cased, the trailing slash dropped, and `:id` folded to `{id}`; type-name casing deliberately preserved, since it's load-bearing in cross-references). That one canonical string is then used everywhere: as the merge key, as the `.tc` header identity, and — through the single filename slug ([§4.9](#gen-slugs)) — as the file name. Identities used to be trusted verbatim from the LLM and slugified only at filename time by two divergent functions; that "identity float" was a root cause of the since-fixed churn bug ([§4.12](#gen-nondeterminism)).
 
 #### Spec context for the tail
 
@@ -1470,9 +1486,9 @@ Where each contract lands depends on its kind:
 The writer only ever creates those four kinds of directory. It never touches `_inferred/` (that belongs to the [Infer path (§7)](#infer)) and never writes `result.json` (that's the driver's job — [§4.11](#gen-markers)).
 
 <a id="gen-slugs"></a>
-#### Why there are two slug functions
+#### The single slug rule
 
-Two different slug functions are in play, and they must stay different. One builds artifact *identities* and collapses every non-alphanumeric character — including dots — to a single dash. The other builds *file names* and deliberately **preserves dots**. The divergence is required, not accidental: file placement infers a contract's domain directory by splitting the identity on its first dot (`Order.status` → domain `order`), so if the file-naming slug collapsed dots the way the identity slug does, domain inference would break. The dots you see in a final identity are joiners inserted *between* already-slugged pieces, not characters the identity slug ever emits. (That this normalization happens so late, on a raw LLM-chosen string, is part of the identity-float story in [§4.12](#gen-nondeterminism).)
+One slug function (`slugIdentity` in `identity.ts`) derives every file name from the already-canonical identity: lowercase, **dots kept** as segment separators, every other run of non-alphanumerics collapsed to one dash, stray separators trimmed. Keeping dots matters because file placement infers a contract's domain directory by splitting the identity on its first dot (`Order.status` → domain `order`). There used to be two divergent sluggers here — one collapsing dots for identity tokens, one preserving them for file names, both applied late to a raw LLM-chosen string — and that split was a root cause of the churn bug; today the file name is derived from the same canonical identity everything else uses ([§4.12](#gen-nondeterminism)). (The infer-path serializer still keeps its own near-duplicate slug to avoid a package cycle — [§5.8](#tc-language).)
 
 When a contract had overridden fragments, their origin lines are stacked beneath the winner's for lineage. There's also an in-memory variant that returns the whole tree as path→source pairs for an EE "no local files" persist path; it exists but isn't wired into the current main-branch entry point.
 
@@ -1521,17 +1537,21 @@ There's an edition difference worth noting: in OSS each stage's `claude -p` call
 Every one of these calls is content-addressed cached through a pluggable key-value seam — on disk under the gitignored `.truecourse/.cache/` in OSS, in Postgres in EE. The per-stage cache keys were described alongside each phase above; the seam itself is [§8](#llm-orchestration).
 
 <a id="gen-nondeterminism"></a>
-### 4.12 The non-determinism bug (mechanism)
+### 4.12 Determinism — the churn bug and its fix
 
-Contract generate is not a deterministic function of the corpus: the same `corpus.json` can produce a different `.tc` tree from one run to the next. In OSS that means a plain regenerate can churn the whole `.tc` tree in `git diff`; in EE the PR contracts view churns wholesale (one small doc change flagged roughly 57 of 60 contracts as changed). The bug lives in the shared engine, so both editions are affected equally. There are three confirmed mechanisms (the full analysis and intended fix are in [§12 (Gaps)](#gaps)):
+Contract generate used to be non-deterministic: the same `corpus.json` could produce a different `.tc` tree from one run to the next. In OSS a plain regenerate churned the whole tree in `git diff`; in EE the PR contracts view churned wholesale (one small doc change once flagged roughly 57 of 60 contracts as changed). Three mechanisms drove it, and each now has a landed fix in the shared engine (commits `a67b63c1` and `54c1c252`) — so both editions got the fix together:
 
-1. **Identity float.** The artifact identity is trusted raw from the LLM, grouped by that raw string during merge, and only slugified at filename time — by two functions that deliberately diverge on how they treat dots ([§4.9](#gen-slugs)). So the same concept can flip between spellings like `max-retry` and `maxretry`, which a structural corpus-diff reads as a delete plus a create.
+1. **Identity float → canonical identity at parse.** The artifact identity was trusted raw from the LLM, grouped by that raw string during merge, and slugified only at filename time by two divergent functions — so the same concept could flip between spellings like `max-retry` and `maxretry`, which a structural corpus-diff read as a delete plus a create. Now every LLM-proposed identity is canonicalized once, right after parsing (`canonicalIdentity`), and the merge key, the `.tc` header identity, and the filename slug (`slugIdentity`) all derive from that one string ([§4.7](#generate), [§4.9](#gen-slugs)).
 
-2. **Global reconcile.** Reconcile is one global LLM call keyed on the sorted list of *every* target across *all* areas ([§4.6](#gen-reconcile)). A single doc edit anywhere changes that list, misses the cache, and re-clusters and renames the whole corpus non-deterministically. Those reconciled identities then feed each area's extract cache key ([§4.7](#gen-extract-cache)), so even areas that didn't change miss their cache and regenerate with drifted content. This is what defeats the per-area incremental cache and the manifest, which only short-circuits when literally nothing changed.
+2. **Global reconcile → per-cluster reconcile.** Reconcile was one global LLM call keyed on the sorted list of *every* target across *all* areas: any doc edit missed the cache, re-clustered and renamed the whole corpus, and — because reconciled identities feed each area's extract-cache key ([§4.7](#gen-extract-cache)) — busted the caches of areas that hadn't changed, defeating the per-area incrementality from above. Now targets are grouped into small deterministic candidate clusters, each reconciled and cached on its own members, so an edit touches only the clusters its targets join and unchanged areas keep their extract-cache hits ([§4.6](#gen-reconcile)).
 
-3. **Origin flips.** A cross-cutting artifact is owned by whichever area enumerated it first, and repair keeps the first slice on ties. When reconcile reorders or renames, the artifact ends up generated over a *different* area's docs, so its recorded origin flips (say, from the API-conventions area to the auth area) even when the contract body is byte-for-byte identical.
+3. **Origin flips → deterministic origin.** A cross-cutting artifact was owned by whichever area happened to enumerate it first, and repair kept the first slice on ties — so re-grouping could flip an artifact's recorded origin (say, from the API-conventions area to the auth area) even when the body was byte-for-byte identical. Now a shared target's home is the lexicographically smallest area id that enumerated it, and repair's slice tie-breaks are stable.
 
-The through-line is that the one *global*, non-deterministic step upstream undermines all the careful incrementality machinery downstream of it. The intended fix — a single canonical slugifier applied right after parse, deterministic per-cluster reconcile keys, and a deterministic origin tie-break — is tracked in [§12](#gaps).
+On top of those, a regeneration **anchors to the prior contracts**: enumerate is told the existing identities (reuse the exact spelling) and extract is shown each target's previous body (reproduce it unless the spec changed) — so even areas that must re-run converge on their prior output ([§4.7](#generate)).
+
+The property is pinned by a guardrail test (`tests/contract-extractor/corpus-determinism.test.ts`): generate, edit one doc in one area, generate again — only that area's contracts change, and every other `.tc` is byte-identical.
+
+**Honest limit.** What the LLM writes for a genuinely new or edited area still varies until cached (the anchor dampens this; it can't eliminate it), and two residues remain open in [§12.10](#gaps-generate): repaired bodies aren't persisted back into the extract cache, and cross-*references* are still written verbatim rather than canonicalized.
 
 <a id="tc-language"></a>
 ## 5. Common — The .tc Contract Language & Kinds
@@ -1932,7 +1952,7 @@ Neither of these is declarable. `Effect` is synthesized from an effect group's i
 
 An artifact's identity — the index key — is always `type:identity`. For an operation that identity is the method plus the canonicalized path (`:name` rewritten to `{name}`), applied to both declarations and cross-references so spec and code identities line up; for every other kind it's the single token after the keyword (`Order.status`, `TIER_WEIGHTS`, …). Inner effects are keyed `Effect:<name>`, and a field-path reference like `Entity:Order.total` resolves by falling back to its parent entity.
 
-The on-disk file path is derived from that identity by a slug, and the slug logic is **deliberately duplicated** in two places — the generate-path writer and the infer-path serializer — to avoid a circular dependency between the packages. Both compute the identical slug:
+The on-disk file path is derived from that identity by a slug. The generate-path writer derives it from the canonical identity via `slugIdentity` (`contract-extractor`'s `identity.ts`): lowercase, dots kept, every other run of non-alphanumerics collapsed to one dash, stray separators trimmed ([§4.9](#gen-slugs)). The infer-path serializer keeps its own near-duplicate — deliberately, to avoid a circular dependency between the packages:
 
 ```
 slugifyIdentity(id) = id.toLowerCase()
@@ -1940,6 +1960,8 @@ slugifyIdentity(id) = id.toLowerCase()
   .replace(/[^a-z0-9.-]+/g, '')  // drop anything not alnum / dot / dash
   .replace(/^-+|-+$/g, '')       // trim leading/trailing dashes
 ```
+
+The two agree on ordinary identities but differ on exotic punctuation (the infer rule *drops* what the generate rule turns into a dash), so a hand-crafted identity could file differently depending on which path wrote it.
 
 Operations file under `<domain>/operations/<slug>.tc` (the domain being the first meaningful path segment); a set of cross-cutting "shared" kinds file under `_shared/`; unenforceable obligations (writer only) file under `unenforceable/`; and everything else files under `<domain>/<slug>.tc`, where the domain is the first dot-segment of the identity (`Order.status` → `order`).
 
@@ -2619,7 +2641,7 @@ Each forward stage of the pipeline has its own named cache, and what goes into t
 | `spec.overlap` | whether two docs in an area overlap | the two docs' content hashes, sorted so order doesn't matter |
 | `contract.enumerate` | the target checklist for an area | the area's docs and their content |
 | `contract.extract` | the generated `.tc` fragments for an area | the docs, the reconciled targets, and the retry budget |
-| `contract.reconcile` | which duplicate targets to merge | the full set of target identities |
+| `contract.reconcile` | which duplicate targets to merge | each candidate cluster's own members — one entry per cluster |
 | `contract.gapJudge` | gap verdicts for an area | the area's gaps, doc content, and corpus keys |
 
 Two things are worth noting. First, `spec.relation` has no cache of its own — it reuses the chain-detection prompt and rides along in the same cache as `spec.chainDetect`, which is why they share one row. Second, the only model stages with no cache at all are the repair steps, because each one fixes a specific malformed output on the fly and there is nothing content-stable to key it on.
@@ -2710,7 +2732,7 @@ The logs land under the repo's `.truecourse/logs/` directory. Because the dashbo
 
 #### 8.9.3 The progress usage tag
 
-The small suffix each progress step shows — something like " · sonnet · 12.4K tok · $0.04" — is built from this usage data. Each visible step in the UI maps to one or two underlying stages:
+The small suffix each progress step shows — something like " · sonnet · 12.3K tok · $0.04" — is built from this usage data. Each visible step in the UI maps to one or two underlying stages:
 
 | progress step | stage(s) it covers |
 |---|---|
@@ -3480,9 +3502,9 @@ Around the shared body pool sit a handful of pointer and ledger tables. Each one
 |---|---|
 | `content` | the shared body pool from [§11.3.3](#ee-edition) |
 | `spec_sets` | which body holds a repo's corpus (and inferred decisions) at a commit |
-| `contract_sets` | the manifest mapping each `.tc` file path to its body hash, for a repo's contracts and its inferred contracts |
+| `contract_sets` | the manifest mapping each `.tc` file path to its body hash, for a repo's contracts and its inferred contracts — the generate `manifest.json` rides along in the set (excluded from `.tc` listings) so anchoring can materialize it |
 | `verify_snapshots` | the one and only home for drift state — the full verify result at a commit, plus a drift count and per-severity totals for the trend chart, and a flag marking whether the row is a baseline |
-| `decisions` | the mutable, always-latest ledger of a user's conflict resolutions, per repo or per workspace |
+| `decisions` | the mutable, always-latest ledger of a user's conflict resolutions — one row per scope: a repo, a PR overlay (`repo#pr/N`, promoted into the repo row on merge), or a workspace |
 | `extraction_cache` | the content-addressed LLM-stage cache, shared globally across the whole enterprise |
 | `workspace_spec_sets` / `workspace_contract_sets` | the workspace equivalents of the spec and contract pointers — always-latest, no commit |
 | `knowledge_documents` | provenance only for external docs (path, title, link, version, content hash) — never the doc body |
@@ -3538,7 +3560,7 @@ Authentication is standard GitHub App auth. Two details are worth noting for sec
 
 Registration wires the App together and reports whether it turned on. If the config is missing it logs and reports off. Otherwise it selects the storage backend, sets up GitHub authentication, and enables the email notifier only if an email key was provided. It keeps a few in-flight guards to dedupe concurrent work — one keyed by comment, one by pull request and offer type, one by repo and commit — so redelivered webhooks don't double-process. It also installs a "re-verify open PRs" hook that the jobs layer calls after a repo's contracts are regenerated. Finally it mounts two routers under the same base: a public one that receives webhooks and a protected one that powers the dashboard's connect page. Then it reports on.
 
-Three events drive the gate. When the default branch moves, the App recomputes the baseline — preferably as a durable background job (with progress and a notification), or inline as a fallback. When a pull request changes, it runs **the gate first, then infer, and never at the same time**: the gate cold-generates the head's contracts and infer subtracts them, so running them concurrently would re-offer decisions the PR just documented. If the gate fails, infer still runs, falling back to the baseline's contracts. And when a comment is edited, it re-checks the infer offer.
+Four events drive the gate. When the default branch moves, the App recomputes the baseline — preferably as a durable background job (with progress and a notification), or inline as a fallback. When a pull request changes, it runs **the gate first, then infer, and never at the same time**: the gate cold-generates the head's contracts and infer subtracts them, so running them concurrently would re-offer decisions the PR just documented. If the gate fails, infer still runs, falling back to the baseline's contracts. When a pull request **closes**, the App settles its decisions overlay — merged: promoted into the repo ledger; unmerged: discarded — and cleans up the PR-scoped Code Quality diff. And when a comment is edited, it re-checks the infer offer.
 
 #### 11.5.3 Webhook receiver
 
@@ -3573,7 +3595,7 @@ A baseline is the full first pass over the default branch: clone the repo, curat
 
 The run is idempotent. If a baseline already exists at this exact commit and the caller didn't force a rebuild, it skips re-cloning entirely. Forcing is what a post-conflict-resolution re-baseline uses to upgrade a neutral baseline into a real verify at the same commit.
 
-Otherwise it clones the default branch shallowly and works through the phases. If the repo has no contracts yet, it scans the specs; if that scan finds no unresolved conflicts, it generates contracts, and if it does find conflicts, it deliberately *skips* generation and leaves a neutral baseline in place until someone resolves them in the dashboard (which triggers a contract regeneration). Then it computes drift — but only if there are contracts to check against, whether the repo's own or the workspace's shared ones. Crucially, the baseline verifies against the **same merged (workspace plus repo) contract set** the PR-head verify will use, so the two are comparing like with like. If there are genuinely no contracts at all, the baseline is neutral.
+Otherwise it clones the default branch shallowly and works through the phases. First it asks GitHub which **merged pull request** produced this commit (the commit→PR association API — race-proof against webhook ordering, since the `closed` event can arrive after the push). If one is found, the PR's decisions overlay is promoted into the repo ledger *before* the spec scan (idempotent — the closed handler may have done it already), and contract generation **anchors to that PR's head contracts** instead of the previous baseline's: with the generate manifest carried in the stored set, areas whose docs didn't drift regenerate as a true no-op, so the merge commit's saved contracts come out byte-identical to the reviewed set. Any failure in this resolution degrades to the previous-baseline anchor and never fails the run. If the repo has no contracts yet, it scans the specs; if that scan finds no unresolved conflicts, it generates contracts, and if it does find conflicts, it deliberately *skips* generation and leaves a neutral baseline in place until someone resolves them in the dashboard (which triggers a contract regeneration). Then it computes drift — but only if there are contracts to check against, whether the repo's own or the workspace's shared ones. Crucially, the baseline verifies against the **same merged (workspace plus repo) contract set** the PR-head verify will use, so the two are comparing like with like. If there are genuinely no contracts at all, the baseline is neutral.
 
 Code Quality analysis and infer both run as best-effort extras. Code Quality is skipped when the code hasn't changed at this commit (so a contract-only re-baseline doesn't needlessly re-analyze), and a failure there — for instance, no LLM provider configured — must not block the drift baseline. Infer reverse-engineers the default branch's undocumented decisions (see [§7](#infer)), stores them, and re-applies the user's promotions. Finally the baseline is saved and the temp clone is deleted.
 
@@ -3597,7 +3619,7 @@ For the base, if the PR targets the default branch it reuses the saved baseline 
 
 Code Quality runs best-effort and, importantly, statelessly: it analyzes the head without persisting anything to the repo's baseline, so gating a PR never moves the mainline Code Quality baseline. If a baseline exists, the added violations are reported and a PR-scoped diff is written under a PR-specific key; a failure just leaves the Code Quality result empty.
 
-Underneath, the routine that computes drift at a commit either reuses contracts already in the store or cold-generates them on the current checkout without a second clone. When the PR changed no specs, it reuses the base's already-resolved contracts and re-resolves nothing. Otherwise, if the repo has no contracts yet it scans and generates; if it does, it still recovers the conflict count from the stored corpus, so a warm cache can never silently downgrade a spec that actually disagrees into a "trusted" one. Then, only if there are contracts to check against (the repo's or the workspace's), it verifies and rewrites the paths.
+Underneath, the routine that computes drift at a commit either reuses contracts already in the store or cold-generates them on the current checkout without a second clone. When the PR changed no specs, it reuses the base's already-resolved contracts and re-resolves nothing. Otherwise, if the repo has no contracts yet it scans and generates; if it does, it still recovers the conflict count from the stored corpus, so a warm cache can never silently downgrade a spec that actually disagrees into a "trusted" one. When specs did change and contracts must regenerate, the base baseline's stored `.tc` — and the generate manifest that rides with it — is first materialized into the clone so generation anchors to it ([§4.12](#gen-nondeterminism)): the head's regenerated contracts reproduce the base's for unchanged areas instead of drifting. The head-side scan also folds the PR's decisions overlay into the stored repo decisions ([§2.3.2](#data-model-storage)); the base and baseline verifies stay repo-scoped. Then, only if there are contracts to check against (the repo's or the workspace's), it verifies and rewrites the paths.
 
 Two disciplines protect correctness here. First, **neutral versus error**: the verify treats "no contracts directory" as a genuine neutral result, but *every other* failure — a missing or garbage-collected body, a verifier crash, a read error — is re-thrown so it surfaces as the gate's error Check. It must never silently collapse into "neutral" and stop blocking real drift. Second, because the analysis happened in a throwaway clone, the drift paths are rewritten from absolute temp-directory paths to repo-relative ones before they're stored, so the dashboard's file links point at the real repo.
 
@@ -3662,7 +3684,7 @@ There are three kinds of jobs:
 | **Knowledge sync** | a workspace's external docs (e.g. Confluence) change | re-fetches the docs, rebuilds the shared workspace contracts, and re-verifies the repos that use them |
 | **Workspace contracts** | shared workspace contracts changed | a thin follow-up that only re-verifies the connected repos |
 
-There is no separate "refresh contracts" job. When a dashboard decision resolves the last spec conflict, contract regeneration is a **forced re-baseline** of the current head (which regenerates contracts, recomputes the drift baseline, and re-verifies open PRs) — the re-curate itself already ran in the decision request. That way the user sees one progress panel (the baseline's), not a redundant wrapper.
+There is no separate "refresh contracts" job. When a dashboard decision resolves the last spec conflict, contract regeneration is a **forced re-baseline** of the current head (which regenerates contracts, recomputes the drift baseline, and re-verifies open PRs) — the re-curate itself already ran in the decision request. That way the user sees one progress panel (the baseline's), not a redundant wrapper. That flow is the repo scope; a PR-scoped decision edit that clears that PR's last conflict instead enqueues the lighter `pr.regate` task — a forced re-gate of that single pull request, reusing the same synthesized-event mechanism the open-PR re-verify uses.
 
 How the jobs behave:
 
@@ -3688,7 +3710,7 @@ The most important design choice is that **workspace contracts are merged in at 
 The per-repo BL-Drift panels — Spec, Contracts, Verify, Inferred — are shared code that renders in both editions (see [§10](#oss-edition)). The enterprise client package adds the cross-repo surfaces on top, and the client simply asks which edition it's running in to decide how those shared panels behave. The differences all follow from EE having no local working tree and being organized around pull requests:
 
 - **No run buttons.** The open-source panels have Scan, Generate, Verify, and Infer buttons anchored to your working tree. In EE the gate produces those results per commit, so with no working tree to act on, the buttons hide themselves.
-- **PR-aware instead of working-tree.** Where open source has a "Git Diff" mode over your uncommitted changes, EE keys its views to a pull request: selecting a PR pins the contracts and verify tabs to that PR's head commit and shows the diff against its baseline.
+- **PR-aware instead of working-tree.** Where open source has a "Git Diff" mode over your uncommitted changes, EE keys its views to a pull request: selecting a PR pins the spec, contracts, and verify tabs to that PR's head commit and shows the diff against its baseline. The Spec tab reads the corpus at the head — falling back to the baseline corpus, with a note, when the PR changed no docs — its decision actions write the PR's overlay ([§2.3.2](#data-model-storage)), and they stay disabled until the gate has produced a head commit to scope to.
 - **Different chrome and tabs.** EE swaps the open-source header for a workspace-styled bar (repo title, tabs, and a PR pill). Some tabs are enterprise-only and appear based on which capabilities are enabled — pull requests, drift analytics, and settings need the GitHub gate; workspace analytics and violations need workspaces — while the local-filesystem tabs (flows, files, databases) are open-source-only.
 - **Workspace provenance.** The contract list unions in the shared workspace Knowledge contracts, badged as coming from the workspace, with the repo's own winning on any path collision. In open source that workspace list is always empty.
 - **No staleness.** In EE the spec, contract, and verify sets are always produced together for a commit, so they can never be out of sync; the open-source staleness probes don't apply.
@@ -3733,47 +3755,14 @@ Note that the **LLM provider itself is not an environment variable** in EE. It's
 
 This is the honest state of the spec/contract/verify module: the bugs, the half-built features, the stale documentation, the coverage holes, and the dead code. Everything below was verified against source at the commit under review — where a design document and the code disagreed, the code won, and the discrepancy is itself recorded as a gap.
 
-Read this section as a roadmap, not an apology. Each entry says **what** the gap is, **why** it matters, **where** in the code it lives, the **intended fix**, and, where it varies, its **edition scope** (OSS / EE / both). The four headline gaps are written out in prose because they are load-bearing and need root-cause depth; the long tail is grouped into thematic tables.
+Read this section as a roadmap, not an apology. Each entry says **what** the gap is, **why** it matters, **where** in the code it lives, the **intended fix**, and, where it varies, its **edition scope** (OSS / EE / both). The three headline gaps are written out in prose because they are load-bearing and need root-cause depth; the long tail is grouped into thematic tables.
 
-One meta-warning before the specifics: **the module's own planning document, `docs/SPEC_SCAN_REDESIGN_PLAN.md`, is materially stale.** Its `STATUS:` lines and Phase 3/5/6 sections describe a transitional world in which two spec engines ("claims" and "curated corpus") coexist. That world has already ended in code — see [§12.5](#gaps-stale-plan). Trust the code, and trust the other sections of this document ([§3](#scan)–[§11](#ee-edition)), over that plan.
-
----
-
-<a id="gaps-nondeterminism-generate"></a>
-### 12.1 Headline gap A — Contract generation is non-deterministic (CORE BUG)
-
-**Scope: both OSS and EE.** Generation runs in one shared engine (see [§4](#generate)), driven identically by the OSS CLI and the EE GitHub App, so the bug affects both editions.
-
-**What it is.** Running `contracts generate` on the same curated corpus twice can produce *different* `.tc` output — different artifact identities, file names, origin tags, and (on a cold cache) different bodies. That breaks the core promise that `.tc` is a stable, committable, diffable materialization of the spec.
-
-**How it surfaces.** It's one bug with two faces:
-
-- **OSS:** every regenerate churns the *entire* contract tree in `git diff`, not just the area whose doc you edited, so a reviewer can't tell a real spec change from identity noise.
-- **EE:** each spec-touching PR regenerates the head corpus and diffs it against a separately-generated base, so the PR "Contracts" view churns wholesale — in one real case, about 57 of 60 contracts were marked changed when only one area's doc had actually moved.
-
-**Why it happens.** Three root causes, all confirmed:
-
-1. **Artifact identity floats.** The identity string comes straight from the model and is only cleaned up at write time — by *two different* cleanup functions that disagree. One preserves dots (used for file names), the other collapses dots to dashes (used for the identity token). So `max.retry` survives as a filename but becomes `max-retry` as an identity, and the diff reads that mismatch as a delete-plus-create rather than one stable artifact. (See [§5](#tc-language) for why two slugifiers exist and [§2](#data-model-storage) for how the diff treats a rename.)
-
-2. **A global reconcile step busts caches it shouldn't.** Duplicate targets across areas are merged by a single LLM call whose cache key folds in *every* target across *all* areas. Editing one doc changes that global list, misses the cache, and re-clusters everything — and because those reconciled identities feed each area's own extraction cache key, even *unchanged* areas miss their cache and regenerate with drifted content. The per-area cache that is supposed to make regeneration incremental is defeated from above.
-
-3. **Origin tags flip.** A cross-cutting artifact is tagged with whichever area happened to enumerate it first. When reconcile reorders things, that origin flips between areas even though the body is byte-identical — pure churn.
-
-**Why the incremental machinery doesn't save you.** The engine does compute per-area changed/unchanged/deleted lists, but it only acts on the whole-corpus "nothing changed at all" shortcut. All finer-grained skipping is delegated to the per-area extraction cache — which root cause #2 defeats.
-
-**The intended fix.** The goal is "deterministic *enough*": unchanged inputs reproduce byte-for-byte, while the LLM stays free to vary on genuinely new work. Four moves:
-
-1. **Canonical identity at parse.** Canonicalize the identity right after the model returns it, and use that one form as the merge key, the file name, and the `.tc` identity — collapsing the two divergent slugifiers into one.
-2. **Deterministic, scoped reconcile.** Dedupe by canonical id with no LLM, and key the residual semantic dedup per-target rather than over the global list, so unchanged targets keep their identity and their cache hit.
-3. **Deterministic origin tie-break.** Break origin ties by sorted area id, everywhere origin is assigned.
-4. **A guardrail test.** Generate, edit one doc in one area, generate again, and assert that *only that area's* contracts changed and everything else is byte-identical. That is the concrete definition of "fixed."
-
-**Honest limit.** A cold regenerate of a *brand-new* area's body still varies until it's cached. Canonical identity pins that area's file name and identity; the diff only needs the *unchanged* areas to stay stable, which the fixes above deliver.
+One meta-warning before the specifics: **the module's own planning document, `docs/SPEC_SCAN_REDESIGN_PLAN.md`, is materially stale.** Its `STATUS:` lines and Phase 3/5/6 sections describe a transitional world in which two spec engines ("claims" and "curated corpus") coexist. That world has already ended in code — see [§12.4](#gaps-stale-plan). Trust the code, and trust the other sections of this document ([§3](#scan)–[§11](#ee-edition)), over that plan.
 
 ---
 
 <a id="gaps-ee-models"></a>
-### 12.2 Headline gap B — EE ignores per-stage model tiers (one model runs every stage)
+### 12.1 Headline gap A — EE ignores per-stage model tiers (one model runs every stage)
 
 **Scope: EE only** (OSS is correct). See [§8](#llm-orchestration) for the model-tier registry.
 
@@ -3783,21 +3772,21 @@ One meta-warning before the specifics: **the module's own planning document, `do
 
 **Two side effects, papered over rather than fixed:**
 
-- **Progress labels.** Progress used to derive a per-stage model name from the *OSS* tiers, which was misleading in EE since EE really runs one model. EE now suppresses that label at boot so no model name is shown, and a recent commit dropped the misleading per-stage labels outright. (The dashboard's estimate modal still renders a per-stage "Model" column, which now depends on whether the server fills it in — see [§12.17](#gaps-ui).)
-- **Cost estimate.** The pre-flight estimate still prices each stage at its OSS tier even in EE, so an EE user can see a blended Opus/Sonnet/Haiku estimate that won't match the real single-model bill. Cosmetic, uncorrected — see [§12.14](#gaps-llm).
+- **Progress labels.** Progress used to derive a per-stage model name from the *OSS* tiers, which was misleading in EE since EE really runs one model. EE now suppresses that label at boot so no model name is shown, and a recent commit dropped the misleading per-stage labels outright. (The dashboard's estimate modal still renders a per-stage "Model" column, which now depends on whether the server fills it in — see [§12.16](#gaps-ui).)
+- **Cost estimate.** The pre-flight estimate still prices each stage at its OSS tier even in EE, so an EE user can see a blended Opus/Sonnet/Haiku estimate that won't match the real single-model bill. Cosmetic, uncorrected — see [§12.13](#gaps-llm).
 
 **Intended fix (a product decision, not yet done):** in the EE transport, map each OSS tier to a provider-specific model *per stage*, instead of running one configured model everywhere, so hosted gets the same cost/quality profile as OSS.
 
 ---
 
 <a id="gaps-workspace"></a>
-### 12.3 Headline gap C — Workspace Knowledge conflict resolution is NOT BUILT
+### 12.2 Headline gap B — Workspace Knowledge conflict resolution is NOT BUILT
 
 **Scope: EE only** (Knowledge is an EE feature; see [§11](#ee-edition)).
 
 **What it is.** On the repo side, conflict resolution is complete: overlapping docs surface, you record how they relate (one replaces another, one takes precedence, or keep both), those decisions save to `decisions.json`, and contracts regenerate. Workspace Knowledge — the Confluence-sync side — has none of that. Its page offers only *Sources* and *Contracts* tabs, with no corpus/overlap view and no way to edit relations. Overlaps *are* computed during the sync and stored in the workspace `corpus.json`, but they're never shown, so a workspace conflict is only ever resolved by the engine's silent default of keeping both docs.
 
-**Why it's more than a missing screen.** The sync curates the synced docs but never loads or applies any user decisions, and it saves only the corpus and the contracts — there's no decisions artifact at all. Worse, workspace doc *bodies* aren't stored (only a provenance ledger of where each doc came from), so a resolution could only take effect by re-curating on a fresh Confluence re-sync. There's also a related silent bug: when a workspace and a repo contract collide on the same key, the repo one wins and the workspace one is dropped with no indicator (see [§12.17](#gaps-ui)).
+**Why it's more than a missing screen.** The sync curates the synced docs but never loads or applies any user decisions, and it saves only the corpus and the contracts — there's no decisions artifact at all. Worse, workspace doc *bodies* aren't stored (only a provenance ledger of where each doc came from), so a resolution could only take effect by re-curating on a fresh Confluence re-sync. There's also a related silent bug: when a workspace and a repo contract collide on the same key, the repo one wins and the workspace one is dropped with no indicator (see [§12.16](#gaps-ui)).
 
 **Intended fix (six parts, per the plan):**
 1. **Engine** — load the stored workspace decisions, write them into the scratch tree as `decisions.json` before curating, and persist the decisions artifact.
@@ -3812,32 +3801,18 @@ The repo half already shipped: resolving a repo conflict enqueues a contract reg
 ---
 
 <a id="gaps-spec-diff"></a>
-### 12.4 Headline gap D — Spec diff & EE PR-scoping are NOT BUILT
+### 12.3 Headline gap C — No semantic spec diff (deliberately low priority)
 
-**Scope: both OSS and EE** (with an extra EE sub-gap). See [§10](#oss-edition) / [§11](#ee-edition) for the diff UIs that already exist.
+**Scope: both editions.** This entry used to cover two things; the load-bearing half — **EE PR-scoping — is now built**: the Spec tab reads the corpus at the viewed commit (PR head, falling back to the baseline for a code-only PR), docs are fetched at the viewed commit, decisions are per-PR overlays that promote into the repo ledger on merge, and the merge-commit baseline anchors to the merged PR's reviewed contracts so "what you reviewed is what lands" when docs match (see [§2.3.2](#data-model-storage), [§3.10.2](#scan), [§11.3](#ee-edition), [§11.5](#ee-edition)). What remains is only the diff *view*:
 
-**What it is.** Spec is the *only* one of the BL-Drift artifacts with no diff view. Verify, Contracts, and Inferred each have one; Spec — the source of truth for the whole pipeline — does not. There's no spec-diff endpoint and no diff toggle on the Spec tab, and the tab's data hook can't be pointed at a past revision. The Spec tab shows only the *current* `corpus.json`.
+**What it is.** Spec is the only BL-Drift artifact with no diff view. Verify, Contracts, and Inferred each have one; Spec does not — there's no spec-diff endpoint and no toggle on the Spec tab. A reviewer can see raw `.md` changes (plain git) and contract changes (the Contracts diff), but not the corpus layer in between — the semantic delta that explains *why* the contracts changed: docs added to or dropped from the corpus, docs re-tagged into different areas, overlaps newly flagged or resolved, and relations added or removed. In OSS that diff would be working-tree `corpus.json` vs HEAD (through the existing toggle pattern); in EE, the PR-head corpus vs the baseline corpus — the per-commit corpus loads and shared diff primitives it needs all exist now.
 
-**Why it matters.** The pipeline runs doc → corpus → contract. A reviewer can already see raw `.md` changes (plain git) and contract changes (the Contracts diff), but not the *corpus layer in between* — and that's exactly where the consolidation happens, and what explains *why* the contracts changed. A spec diff should show the curated, semantic delta rather than raw doc text: docs added to or dropped from the corpus, docs re-tagged into different areas, overlaps newly flagged or resolved, and relations added or removed.
-
-**The EE case is bigger than a missing diff — the Spec tab, and the whole corpus/contract model under it, isn't PR-scoped at all.** Three distinct problems:
-
-1. **No spec diff** (same as OSS).
-2. **A PR's spec leaks into every view.** The Spec tab always loads the repo's *latest-scanned* corpus (`loadLatestSpec`, newest by timestamp) — never the corpus at the commit you're actually viewing. So the instant *any* PR's gate scans, that PR's corpus becomes what **every** Spec-tab view renders: the repo/main view and every *other* open PR included. **Proven empirically:** a PR adding a `refunds_PRD.md` made a brand-new `core/refunds-entity` area appear in the main view *and* in an unrelated PR that never touched refunds. It's also racy — the next scan (another PR, or a main re-baseline) flips the "latest" and the spec vanishes again. **You cannot review two PRs' specs independently**, and the repo view can show a spec that isn't on any branch you'd expect.
-3. **The reads and mutations under it are repo-scoped too.** The doc reader (`readRepoDoc`) fetches at the *baseline* (main) commit, not the PR head — so opening/re-curating a doc in a PR reads main's version. Decisions are repo-global (`_repo`), so resolving a conflict in one PR's view writes a decision that hits main and every other PR at once. And on merge the gate **re-derives** main's contracts rather than promoting the PR's *reviewed* set — the content-addressed KV cache usually reproduces the same bodies, but the global reconcile ([§12.1](#gaps-nondeterminism-generate)) or any doc drift (rebase, another PR merged in between) can diverge, so **"what you reviewed is what lands" is not guaranteed**.
-
-**Intended fix — PR-scope the whole spec/contract path, both editions.** This is materially more than a diff toggle:
-- **Load by the viewed commit, not the global latest** — EE reads the corpus at the PR head SHA (OSS: the working tree) — plus the semantic diff (docs added/dropped, re-tagged areas, overlaps flagged/resolved, relations added/removed) that's missing today. Mirror the contract diff, reusing the shared diff primitives. (OSS: working-tree `corpus.json` vs committed `HEAD`, through the existing toggle.)
-- **Read docs at the viewed commit**, so display and re-curate agree.
-- **Scope decisions per-PR** (an overlay that promotes into the repo decisions on merge) instead of writing repo-global immediately.
-- **Promote the PR's contracts to main on merge** — a content-addressed copy of the reviewed set — instead of re-deriving them.
-
-**Dependency.** The spec-diff half is only as clean as the corpus is stable across runs — the corpus is *more* stable than contracts (per-doc/per-pair caches, no global reconcile), but a cold re-scan can still re-tag non-deterministically, so it rides on the same determinism work as [§12.1](#gaps-nondeterminism-generate) / [§12.6](#gaps-nondeterminism). The diff primitives and the OSS toggle already exist; the PR-scoping (load-by-commit, per-PR decisions, merge-promotion) does not, and it's the load-bearing part.
+**Priority.** Deliberately low — it's a review-convenience view, not a correctness fix. One rider if built: a cold re-scan can still re-tag non-deterministically ([§12.5](#gaps-nondeterminism)), which would show up as noise in the diff.
 
 ---
 
 <a id="gaps-stale-plan"></a>
-### 12.5 The stale plan and the already-deleted "claims" engine
+### 12.4 The stale plan and the already-deleted "claims" engine
 
 **Scope: documentation, both editions.** This is the single most confusing gap for a reimplementer, because the module's own planning doc actively misdescribes the current architecture.
 
@@ -3891,15 +3866,15 @@ The working copy of the plan has roughly 95 uncommitted added lines, but **none 
 ---
 
 <a id="gaps-nondeterminism"></a>
-### 12.6 Non-determinism across the pipeline (summary)
+### 12.5 Non-determinism across the pipeline (summary)
 
-The pipeline mixes non-deterministic LLM stages with deterministic assembly. The committable artifacts (`corpus.json`, `.tc`) are stable **only when every LLM stage is a cache hit**; that is exactly why CLAUDE.md says to commit them **only after merging to main** (see [§2](#data-model-storage)). This table consolidates every determinism hazard; the generate CORE BUG is [§12.1](#gaps-nondeterminism-generate).
+The pipeline mixes non-deterministic LLM stages with deterministic assembly. The committable artifacts (`corpus.json`, `.tc`) are stable **only when every LLM stage is a cache hit**; that is exactly why CLAUDE.md says to commit them **only after merging to main** (see [§2](#data-model-storage)). This table consolidates every determinism hazard; the generate churn bug — now fixed — is chronicled in [§4.12](#gen-nondeterminism).
 
 | Source of non-determinism | Effect | Edition |
 |---|---|---|
 | Every scan stamps a fresh "generated at" time into `corpus.json` | The file is byte-unstable even on a no-op scan unless every stage is a cache hit | both |
 | The LLM curate stages (relevance, area-tagging, vocab, relations, overlap) on a cold cache | Docs can be re-tagged or re-flagged differently run to run — the corpus is "not purely deterministic," which is why it's inherited from git rather than regenerated | both |
-| Contract generation's identity float, global reconcile, and origin flips (see [§12.1](#gaps-nondeterminism-generate)) | The whole `.tc` tree churns | both |
+| Contract generation's identity float, global reconcile, and origin flips — **fixed** ([§4.12](#gen-nondeterminism)) | Residual only: a new/edited area's body varies until cached, and unpersisted repairs can drift ([§12.10](#gaps-generate)) | both |
 | Extraction fragments are ordered by whichever batch finishes first | That order feeds a tiebreak during merge; each identity still appears only once per area | both |
 | Same-rank merge conflicts (every corpus fragment ranks equally) | A missed cross-area duplicate is resolved by a specificity score then insertion order — one body is picked and only a soft diagnostic is emitted, never a hard failure | both |
 | Code extractors dedupe over an unsorted directory walk ("first occurrence wins") | The *location* a fact is attributed to can vary across machines (only field-exposure sorts its walk to avoid this) | both |
@@ -3911,7 +3886,7 @@ The deterministic assembly tail (normalize → merge → write) reproduces exact
 ---
 
 <a id="gaps-language"></a>
-### 12.7 Language & framework coverage gaps (verify / extract)
+### 12.6 Language & framework coverage gaps (verify / extract)
 
 The code-side extractor ([§6](#verify), `extractor`) supports **TS/JS, Python, and C#**, but coverage is **asymmetric across kinds** and heavily biased toward JS/TS + specific ORMs/frameworks. A non-Prisma, non-Express, alias-heavy, or C#-only repo silently under-extracts, which surfaces as *false "missing" drifts* (spec obligation present, code fact not found) or *inferred blind spots* (undocumented decision never surfaced). None of these throw — they degrade to under-recall.
 
@@ -3945,7 +3920,7 @@ The code-side extractor ([§6](#verify), `extractor`) supports **TS/JS, Python, 
 ---
 
 <a id="gaps-tc-lifters"></a>
-### 12.8 Correctness bugs & lossy parses in the .tc lifters
+### 12.7 Correctness bugs & lossy parses in the .tc lifters
 
 The `.tc` resolver/lifter layer ([§5](#tc-language)) is pure and deterministic, but several lifters silently **lose or corrupt** information the grammar actually captured. These are the most dangerous gaps in the module because they are silent: the `.tc` parses, resolves, and compares — it is just *wrong* or *incomplete*, so verify can miss a real drift. All live under the `.tc` resolver/lifter layer.
 
@@ -3960,14 +3935,14 @@ The `.tc` resolver/lifter layer ([§5](#tc-language)) is pure and deterministic,
 | **An `origin` needs both a source and a section** | the origin extractor | An `origin` line missing its section string is silently skipped and left null rather than reported — even though validation was meant to flag it | Emit a validation warning |
 | **The shared-kinds list drifted into two copies** | the contract writer vs the infer serializer | The writer's "shared" set includes `AuthorizationRule`; the serializer's includes `ArchitectureDecision`; neither includes both. So the same kind files into a *different* directory depending on whether it was generated or inferred | One shared `SHARED_KINDS` constant |
 
-One more thing to note: the two-slugifier split — one preserves dots for file names, the other collapses them for identities — is the root of headline gap A ([§12.1](#gaps-nondeterminism-generate)), not just a lifter quirk.
+One more thing to note: the two-slugifier split inside generate — one preserving dots for file names, the other collapsing them for identities — was the root of the since-fixed churn bug and has been collapsed into the single canonical slug ([§4.12](#gen-nondeterminism)); what still exists is the infer serializer's separate near-duplicate slug ([§5.8](#tc-language)).
 
 **Stale build artifact:** the old hand-written parser was fully removed from source when ohm replaced it, but a compiled artifact still lingers under `dist/` with no source counterpart — a build-cache leftover to clean.
 
 ---
 
 <a id="gaps-comparator"></a>
-### 12.9 Comparator-layer gaps (verify)
+### 12.8 Comparator-layer gaps (verify)
 
 The comparators ([§6](#verify)) are pure diffs, but they carry inconsistencies and heuristic magic numbers that cause silent under-reporting or non-navigable drifts. All of these affect both editions.
 
@@ -3979,7 +3954,7 @@ The comparators ([§6](#verify)) are pure diffs, but they carry inconsistencies 
 | **Enum name-matching leans on magic numbers** | the enum comparator | Prefix length, value-overlap ratios, size tolerance, and exact-Jaccard thresholds are all brittle to tuning — a documented source of both false positives and false negatives |
 | **Query matching is over-broad** | the verify orchestrator | Every extracted query is fed to every rule with no entity pre-filter, so a rule about a generic column like `id` fires against any query touching that column. Only distinctive column names keep this in check |
 | **Forbidden-alternative dedupe collapses distinct values** | the architecture-decision comparator | The dedupe key has no per-value suffix, so when several distinct forbidden alternatives are found, only the first is reported and the rest are silently dropped |
-| **Unparseable-query attribution varies** | the query-rule comparator and orchestrator dedupe | When the source table is unknown the drift is emitted against every rule, then deduped "first in index order," so which rule owns it can vary across a multi-file corpus (a determinism source — see [§12.6](#gaps-nondeterminism)) |
+| **Unparseable-query attribution varies** | the query-rule comparator and orchestrator dedupe | When the source table is unknown the drift is emitted against every rule, then deduped "first in index order," so which rule owns it can vary across a multi-file corpus (a determinism source — see [§12.5](#gaps-nondeterminism)) |
 | **The `persistence-strategy` architecture category has no verify detector** | the architecture extractors | This is one of the architecture categories, but nothing in the architecture scan detects it — so verify can neither confirm nor drift such a decision. It's effectively inference-only: emitted by [Infer §7](#infer), never checked |
 
 **Intended fix:** thread the spec origin through the three offending comparators, standardize on UUID ids, add a per-value suffix to the architecture-decision dedupe key, and (the larger one) add entity pre-filtering to the query orchestrator. All are localized.
@@ -3987,7 +3962,7 @@ The comparators ([§6](#verify)) are pure diffs, but they carry inconsistencies 
 ---
 
 <a id="gaps-scan"></a>
-### 12.10 Scan / curate pipeline gaps
+### 12.9 Scan / curate pipeline gaps
 
 The curate pipeline ([§3](#scan), `spec-consolidator`) has structural duplication, stale comments, and a few silent coverage holes.
 
@@ -4007,19 +3982,19 @@ The curate pipeline ([§3](#scan), `spec-consolidator`) has structural duplicati
 ---
 
 <a id="gaps-generate"></a>
-### 12.11 Contract-generate & assembly-tail gaps
+### 12.10 Contract-generate & assembly-tail gaps
 
-Beyond the CORE BUG ([§12.1](#gaps-nondeterminism-generate)), the generate path ([§4](#generate), `contract-extractor`) has silent-degradation and attribution issues.
+Beyond the fixed churn bug ([§4.12](#gen-nondeterminism)), the generate path ([§4](#generate), `contract-extractor`) has silent-degradation and attribution issues.
 
 | Gap | Where | Effect | Fix |
 |---|---|---|---|
 | **A failed enumerate view's underlying error text is swallowed** (the *silent-drop* part of this gap is closed: a failed view is retried once, and a still-failed view marks the area failed — uncached, left out of the manifest, surfaced in `enumerateFailures` with a loud re-run warning; returned kinds are also validated against the catalog with one corrective re-ask) | the enumerate step | The catch discards the error object itself, so diagnosing *why* a view failed (timeout vs bad JSON vs schema mismatch) still requires the LLM call log | Attach the last error string per failed area to the result |
-| **The per-area change lists are mostly unused** | the generate driver | Only the whole-corpus "nothing changed" flag is read; the per-area changed/unchanged/deleted lists are computed but ignored, with all incremental skipping delegated to the extract cache (which global reconcile defeats) and deleted areas handled implicitly by the writer's prune | Use the per-area lists to scope regeneration |
+| **The per-area change lists are mostly unused** | the generate driver | Only the whole-corpus "nothing changed" flag is read; the per-area changed/unchanged/deleted lists are computed but ignored, with all incremental skipping delegated to the extract cache (which holds now that reconcile is cluster-scoped — [§4.12](#gen-nondeterminism)) and deleted areas handled implicitly by the writer's prune | Use the per-area lists to scope regeneration |
 | **Same-rank cross-area conflicts are resolved silently** | the generate driver and merge step | Every corpus fragment ranks equally, so any cross-area duplicate the reconcile missed is settled by a specificity score then insertion order — one body wins and only a soft diagnostic is emitted, never a hard failure | Emit a visible conflict |
 | **Repair escalation mis-attributes its cost** | the repair loop | The final, escalated repair attempt runs on the expensive Opus model but is still tagged with the cheaper Sonnet stage, so per-stage cost accounting charges an Opus call to the wrong stage | Tag it with the model it actually used |
 | **The extract cache key ignores batch size** | the extract cache | It folds in the retry-round count but not the batch size, so changing the generate batch size doesn't bust the cache — a re-run reuses old fragments (fine for determinism, surprising when tuning) | Document it, or fold batch size into the key |
 | **Repairs aren't persisted back into the extract cache** | the extract cache and the repair tail | The per-area cache stores *pre-repair* fragments. The extract-stage parse gate now keeps most broken fragments out of the cache, but the residue — yield-floor flushes that never parsed, plus missing/incomplete repairs — is re-repaired by a fresh (nondeterministic) LLM call on every run in which the pipeline executes, so those bodies can drift even for unchanged areas | Cache post-repair, or write repaired bodies back through the cache |
-| **Cross-references aren't validated against declared identities at generate time** | the generate + repair path (only the `contract-verifier` resolver flags it, later, at verify) | The LLM writes a reference verbatim, so a regenerated area can point at a *non-canonical* spelling of an identity. Observed on a real PR: a regenerated `Order` entity emitted `field customerId … references Entity:core.customers` (the **area-id** form, `core/customers-entity`) while the customer entity is declared `entity Customer` — identity `Customer`. The reference dangles: the resolver reports it as an **unresolved reference** at verify time (a diagnostic, non-blocking), and that field is never checked against code. This is the same identity-float that hits declarations ([§12.1](#gaps-nondeterminism-generate)) hitting *references* too — and neither generate nor the repair pass catches a dangling ref, so a base can have zero and a regenerated head can introduce one | Canonicalize references the same way identities are canonicalized, and validate every reference against the set's declared identities at generate/repair time — a dangling ref should trigger a repair that rewrites `core.customers` → `Customer` (or drops the field) rather than shipping an unresolvable reference |
+| **Cross-references aren't validated against declared identities at generate time** | the generate + repair path (only the `contract-verifier` resolver flags it, later, at verify) | The LLM writes a reference verbatim, so a regenerated area can point at a *non-canonical* spelling of an identity. Observed on a real PR: a regenerated `Order` entity emitted `field customerId … references Entity:core.customers` (the **area-id** form, `core/customers-entity`) while the customer entity is declared `entity Customer` — identity `Customer`. The reference dangles: the resolver reports it as an **unresolved reference** at verify time (a diagnostic, non-blocking), and that field is never checked against code. This is the identity float one layer down: declarations were fixed by canonical-identity-at-parse ([§4.12](#gen-nondeterminism)), but *references* are still written verbatim — and neither generate nor the repair pass catches a dangling ref, so a base can have zero and a regenerated head can introduce one | Canonicalize references the same way identities are canonicalized, and validate every reference against the set's declared identities at generate/repair time — a dangling ref should trigger a repair that rewrites `core.customers` → `Customer` (or drops the field) rather than shipping an unresolvable reference |
 | **A no-op regenerate leaves a stale "staleness" dot** | the core spec driver | When nothing changed, the run skips re-stamping the generate marker, so a page reload still shows the prior run's summary and the dot can look stale after an unchanged regenerate | Re-stamp the marker even on a no-op |
 | **Reconcile and gap-judge fail soft into degraded output** | the target reconciler and gap-judge | If either LLM call throws, reconcile falls back to no merges (semantic dedup off) and gap-judge keeps every gap — so a transport failure (e.g. an EE workspace with no provider) looks like a successful run with quietly degraded output | Surface a warning when the fallback fires |
 | **The cross-cutting `paginated` heuristic is too broad** | the tag propagator | It tags an operation as paginated whenever "cursor" and "limit" appear within about 200 characters of each other, so incidental co-occurrence in prose can wrongly flag it | Tighten the pattern |
@@ -4030,7 +4005,7 @@ Beyond the CORE BUG ([§12.1](#gaps-nondeterminism-generate)), the generate path
 ---
 
 <a id="gaps-orch"></a>
-### 12.12 Core orchestration & concurrency gaps
+### 12.11 Core orchestration & concurrency gaps
 
 The shared driver (the pipeline spine; its LLM plumbing is [§8](#llm-orchestration)) has a **process-global concurrency hazard** and several cosmetic or robustness issues. All affect both editions — the concurrency hazard only bites a multi-pipeline EE server.
 
@@ -4048,7 +4023,7 @@ The shared driver (the pipeline spine; its LLM plumbing is [§8](#llm-orchestrat
 ---
 
 <a id="gaps-storage"></a>
-### 12.13 Persistence & storage-layout gaps
+### 12.12 Persistence & storage-layout gaps
 
 The store seams ([§2](#data-model-storage)) have several silent-hazard and doc-drift issues. The most user-facing is a **`.gitignore` hole**.
 
@@ -4056,7 +4031,7 @@ The store seams ([§2](#data-model-storage)) have several silent-hazard and doc-
 |---|---|---|---|
 | **`verifier/runs/` isn't gitignored** | the `.gitignore` template | The template covers the other generated store files but has no `verifier/runs/` entry, so the per-run drift snapshots there aren't ignored — a user can accidentally commit them even though CLAUDE.md documents them as gitignored | Add `verifier/runs/` |
 | **`contracts generate` prune can wipe the `_inferred/` tree** | the prune step | Prune walks the whole `contracts/` root and deletes any `.tc` that isn't in the authored, generated set. Inferred contracts live under `contracts/_inferred/` and are never in that set, so running generate after infer deletes the entire inferred tree — unlike verify, prune has no `_inferred` guard | Skip `_inferred/` and `_shared/` in prune |
-| **Two decisions readers duplicate their logic and constants** | the decisions readers | The same reader logic and the same "empty decisions" constant exist in two places — a schema-change drift risk (also noted in [§12.10](#gaps-scan)) | Collapse them into one |
+| **Two decisions readers duplicate their logic and constants** | the decisions readers | The same reader logic and the same "empty decisions" constant exist in two places — a schema-change drift risk (also noted in [§12.9](#gaps-scan)) | Collapse them into one |
 | **Vestigial `.cache/{drift,verifier}` paths** | the core spec driver and drift-enrichment | One legacy verify-state cache path is only ever deleted, never written or read; the drift cache runs only in EE (where the cache is Postgres), so its file path never materializes locally; and a gap-judge cache exists but isn't listed in CLAUDE.md | Prune the docs and the dead paths |
 | **Inconsistent trailing-newline convention** | the atomic writer vs the plain writes | The atomic writer emits no trailing newline, while `corpus.json`, `decisions.json`, `manifest.json`, and `result.json` are written *with* one — so diffs are formatted inconsistently across the committable set | Standardize on one convention |
 | **Loud writes, quiet reads can hide a mis-wired write** | the workspace spec/contract stores | Saving a workspace spec or contract throws loudly by design, but the matching loads return null or empty silently — so a read-only test wouldn't catch a write path that was wired up wrong | Make the reads loud in tests too |
@@ -4066,9 +4041,9 @@ The store seams ([§2](#data-model-storage)) have several silent-hazard and doc-
 ---
 
 <a id="gaps-llm"></a>
-### 12.14 LLM orchestration, estimation & cost gaps
+### 12.13 LLM orchestration, estimation & cost gaps
 
-Beyond headline gap B ([§12.2](#gaps-ee-models), EE ignoring per-stage tiers), the LLM plumbing ([§8](#llm-orchestration)) has estimation skew and single-slot hazards.
+Beyond headline gap A ([§12.1](#gaps-ee-models), EE ignoring per-stage tiers), the LLM plumbing ([§8](#llm-orchestration)) has estimation skew and single-slot hazards.
 
 | Gap | Where | Effect | Edition |
 |---|---|---|---|
@@ -4076,7 +4051,7 @@ Beyond headline gap B ([§12.2](#gaps-ee-models), EE ignoring per-stage tiers), 
 | **The EE estimate blends per-stage prices EE never pays** | the spec estimator | It prices each stage at its OSS tier even in EE, where one model runs every stage — so the estimate mixes Opus/Sonnet/Haiku prices that won't match the real single-model bill (cosmetic, uncorrected) | EE |
 | **The retry-round count is hardcoded in two places** | the spec estimator vs the generate path | Both bake in "two retry rounds" as independent constants that can silently drift apart | both |
 | **The scan estimate over-counts relevance calls when there are manual includes** | the spec estimator | The pre-flight prefilter is run without the user's force-includes (an upper bound on skips), so the estimated relevance call count can slightly over-count when a force-included doc also matches a deterministic skip | both |
-| **The process-global LLM sink** | the transport | Same single-slot hazard as [§12.12](#gaps-orch): two pipelines interleave and the first clears the sink for the other. An async-local-storage context would fix it — done for EE's trace context, not for this sink | both |
+| **The process-global LLM sink** | the transport | Same single-slot hazard as [§12.11](#gaps-orch): two pipelines interleave and the first clears the sink for the other. An async-local-storage context would fix it — done for EE's trace context, not for this sink | both |
 | **The OSS CLI transport treats any error envelope as fatal** | the OSS CLI transport | An error flag on a zero-exit response aborts the whole batch — correct for rate limits and server errors, but a merely non-fatal warning delivered the same way also kills the batch, and the truncated error slice can cut off the real detail | OSS |
 | **Config is re-read from disk on every call** | the model resolver | It reads and parses `config.json` synchronously per call with no caching, so describing stage resolutions and running each per-stage estimate re-read the file repeatedly (minor I/O) | both |
 | **`TraceContext.parentId` is dead** | EE trace context | Currently unused — reserved for linking a repair back to its source | EE |
@@ -4084,7 +4059,7 @@ Beyond headline gap B ([§12.2](#gaps-ee-models), EE ignoring per-stage tiers), 
 ---
 
 <a id="gaps-cli"></a>
-### 12.15 CLI surface gaps
+### 12.14 CLI surface gaps
 
 The `truecourse` command surface ([§9](#cli-reference), `tools/cli`) is a thin adapter, so most gaps are UX/exit-code inconsistencies — but two are behavioral (**uncosted LLM calls**, **exit-0-on-failure**).
 
@@ -4098,11 +4073,12 @@ The `truecourse` command surface ([§9](#cli-reference), `tools/cli`) is a thin 
 | **The verifier is imported lazily at command time** | the contracts command | `contracts list` and `validate` import the verifier package on demand, so a broken verifier fails only when you run those commands, not at CLI startup | Acceptable — just noted |
 | **The `--version` string is hand-maintained** | the CLI entry point | The version the CLI prints is a hardcoded literal that must be kept in sync with three `package.json` versions by hand — a known drift risk | Read it from `package.json` |
 | **`spec conflicts list` always suggests `--precedence`** | the conflicts command | The suggested resolve command hardcodes `--precedence` regardless of which relation actually fits, so users have to know to substitute `--replace` or `--keep-both` | Suggest the right flag per case |
+| **`contracts generate --diff` isn't a diff** | the contracts command | The flag runs generation and writes nothing (a preview: "would write N files") — a third meaning of "diff" alongside `verify --diff` (working tree vs baseline) and the Contracts tab's git-compare. It breaks the analyze-consistent rule that diff always means "working tree vs committed" | Retire the preview flag — the pre-flight estimate already shows scope ("N of M areas changed") — so `--diff` means one thing everywhere |
 
 ---
 
 <a id="gaps-ee"></a>
-### 12.16 EE-specific gaps (GitHub App, jobs, Postgres/blob storage)
+### 12.15 EE-specific gaps (GitHub App, jobs, Postgres/blob storage)
 
 The hosted edition ([§11](#ee-edition)) adds the PR gate, the graphile-worker job queue, and Postgres persistence. Its gaps are latent traps (a retired-but-reachable blob store), atomicity gaps, and doc-drift comments.
 
@@ -4111,7 +4087,7 @@ The hosted edition ([§11](#ee-edition)) adds the PR gate, the graphile-worker j
 | Gap | Where | Effect |
 |---|---|---|
 | **The spec-scan entry point has no live caller** | the GitHub App | It's fully implemented and exported, but the gate and baseline drive scan-and-generate directly, so nothing in-tree calls it except the tests |
-| **Cold-scan overlap flags can vary run to run** | the LLM-backed curate | Overlap flagging decides whether contracts generate at all, so a cold re-scan could differ from a warm one — the drift path re-reads the persisted overlaps to stay consistent (see [§12.6](#gaps-nondeterminism)) |
+| **Cold-scan overlap flags can vary run to run** | the LLM-backed curate | Overlap flagging decides whether contracts generate at all, so a cold re-scan could differ from a warm one — the drift path re-reads the persisted overlaps to stay consistent (see [§12.5](#gaps-nondeterminism)) |
 | **The Postgres baseline save assumes the snapshot already exists** | the file vs Postgres baseline stores | The file store writes the drifts inline; Postgres instead points at a pre-existing snapshot row. If a caller saved a baseline pointer without first writing that snapshot, reads would come back with null drifts (misread as "no drift"). The real caller writes the snapshot first, so the ordering holds — but only implicitly |
 | **Actor-permission checks fail closed but silently** | the octokit wrapper | Any GitHub API error returns "no permission," so a transient failure during the infer-checkbox authorization can silently deny a legitimate writer |
 | **Inline review comments are capped at 25** | the gate handler | Drifts past the first 25 appear only in the summary comment, never inline — silent truncation, by design |
@@ -4137,24 +4113,23 @@ The hosted edition ([§11](#ee-edition)) adds the PR gate, the graphile-worker j
 ---
 
 <a id="gaps-ui"></a>
-### 12.17 Dashboard UI gaps
+### 12.16 Dashboard UI gaps
 
-The dashboard ([§10](#oss-edition) / [§11](#ee-edition), `apps/dashboard/client` + server routes) shares components across editions. Its two biggest gaps are already covered as headlines (spec diff [§12.4](#gaps-spec-diff), workspace conflict [§12.3](#gaps-workspace)); the rest are wiring/robustness issues.
+The dashboard ([§10](#oss-edition) / [§11](#ee-edition), `apps/dashboard/client` + server routes) shares components across editions. Its two biggest gaps are already covered as headlines (spec diff [§12.3](#gaps-spec-diff), workspace conflict [§12.2](#gaps-workspace)); the rest are wiring/robustness issues.
 
 | Gap | Where | Effect |
 |---|---|---|
-| **Workspace-vs-repo contract collisions are resolved silently** | the effective-contracts merge | When a workspace and a repo contract share the same key, the repo one wins and the workspace one is dropped from the list — with no conflict indicator and no resolution UI on the Knowledge page. See [§12.3](#gaps-workspace) |
+| **Workspace-vs-repo contract collisions are resolved silently** | the effective-contracts merge | When a workspace and a repo contract share the same key, the repo one wins and the workspace one is dropped from the list — with no conflict indicator and no resolution UI on the Knowledge page. See [§12.2](#gaps-workspace) |
 | **Two parallel "which revision" mechanisms can mismatch** | the repo page's tab ref vs the drift-view ref | The file tree is keyed to the PR head, but opening a file reads from a *separate* ref that a PR view doesn't set — so in a code-only PR the tree is at the PR head while the file viewer reads the latest, and the two can disagree |
 | **The verify staleness dot is an mtime probe** | the spec route | Unlike the content-based contracts check, verify staleness is a pure modification-time comparison — so an external `touch` of the marker against an older baseline can light a false amber dot (mtimes lie) |
 | **The drift-enrichment fetch over-refetches** | the verify drift detail | Its effect keys on the *object identity* of the artifact reference, so moving between drifts with identical content but fresh object references refetches — it relies on the server's content-addressed cache to make that cheap |
 | **`InferredPanel` is misfiled under `ee/`** | the dashboard client's `ee/` directory | Its own header says OSS and EE behave identically, yet the edition-agnostic component lives in an EE directory — misleading placement |
-| **The estimate modal still renders a per-stage Model column** | the repo page | It renders each stage's model, but a recent commit dropped the misleading per-stage labels in EE, so what shows now depends on whether the server fills that field in (see [§12.2](#gaps-ee-models)) |
-| **The Spec tab has no diff mode and isn't PR-aware** | the repo page and the spec-corpus hook | Covered in [§12.4](#gaps-spec-diff) — the tab loads the repo's *latest-scanned* corpus, not the viewed commit's, so a PR's new spec **leaks into the repo view and every other open PR** (proven empirically), and it's racy across scans |
-
+| **The estimate modal still renders a per-stage Model column** | the repo page | It renders each stage's model, but a recent commit dropped the misleading per-stage labels in EE, so what shows now depends on whether the server fills that field in (see [§12.1](#gaps-ee-models)) |
+| **The Spec tab has no diff mode** | the repo page and the spec-corpus hook | The semantic corpus diff is the one BL-Drift diff still missing — [§12.3](#gaps-spec-diff) (deliberately low priority; the tab itself is PR-scoped now) |
 ---
 
 <a id="gaps-shared"></a>
-### 12.18 Shared-schema drift, hand-written mirrors & version pins
+### 12.17 Shared-schema drift, hand-written mirrors & version pins
 
 The shared data-model layer ([§2](#data-model-storage) covers the store seams; the typed-contract vocabulary is [§5](#tc-language)) uses **hand-written frontend mirrors** and **generic diff primitives** that can silently drift from their backend sources.
 
@@ -4169,14 +4144,14 @@ The shared data-model layer ([§2](#data-model-storage) covers the store seams; 
 
 ---
 
-### 12.19 Closing note — what "done" looks like
+### 12.18 Closing note — what "done" looks like
 
 If you are reimplementing this module, the gaps above cluster into four workstreams, in rough priority order:
 
-1. **Determinism** ([§12.1](#gaps-nondeterminism-generate), [§12.6](#gaps-nondeterminism)) — canonical identity + scoped reconcile + deterministic origin. This unblocks the **spec diff** ([§12.4](#gaps-spec-diff)) and stops the OSS/EE contract-diff churn. Highest leverage.
-2. **Coverage** ([§12.7](#gaps-language), [§12.8](#gaps-tc-lifters)) — non-Prisma entities, C# parity for computed/state fields, alias-aware imports, and the silent lifter bugs (entity union, StateMachine round-trip, dropped operation blocks). These directly govern verify recall.
-3. **EE parity** ([§12.2](#gaps-ee-models), [§12.3](#gaps-workspace), [§12.16](#gaps-ee)) — per-stage tiers, workspace conflict resolution, and the retired-blob-store trap.
-4. **Hygiene** ([§12.5](#gaps-stale-plan)) — rewrite the stale plan, delete the dead claims-era code, and reconcile the hand-written mirrors ([§12.18](#gaps-shared)). Low risk, high clarity payoff.
+1. **Determinism residue** — the generate-side fix has landed ([§4.12](#gen-nondeterminism)); what remains is the corpus side (cold re-scan variance, [§12.5](#gaps-nondeterminism)) and the generate residue (unpersisted repairs, verbatim cross-references — [§12.10](#gaps-generate)), which is what the **spec diff** ([§12.3](#gaps-spec-diff)) still rides on.
+2. **Coverage** ([§12.6](#gaps-language), [§12.7](#gaps-tc-lifters)) — non-Prisma entities, C# parity for computed/state fields, alias-aware imports, and the silent lifter bugs (entity union, StateMachine round-trip, dropped operation blocks). These directly govern verify recall.
+3. **EE parity** ([§12.1](#gaps-ee-models), [§12.2](#gaps-workspace), [§12.15](#gaps-ee)) — per-stage tiers, workspace conflict resolution, and the retired-blob-store trap.
+4. **Hygiene** ([§12.4](#gaps-stale-plan)) — rewrite the stale plan, delete the dead claims-era code, and reconcile the hand-written mirrors ([§12.17](#gaps-shared)). Low risk, high clarity payoff.
 
 None of these is a rewrite; every one is a scoped, additive change to an engine that already works end-to-end. The single most important sentence in this section: **there is exactly one spec engine (curated corpus), not two — trust the code, not the plan.**
 

@@ -251,6 +251,31 @@ export async function listOpenPrs(
   }));
 }
 
+/**
+ * Pull requests associated with a commit (GitHub's "list pull requests
+ * associated with a commit"), reduced to what identifies a merged PR: its number,
+ * whether it merged, the merge commit it produced, and its head sha. Used on a
+ * default-branch push to map the merge/squash commit back to the PR it landed.
+ */
+export async function listPrsForCommit(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  commitSha: string,
+): Promise<
+  Array<{ number: number; merged: boolean; mergeCommitSha: string | null; headSha: string }>
+> {
+  const prs = await octokit.paginate(
+    octokit.repos.listPullRequestsAssociatedWithCommit,
+    { owner, repo, commit_sha: commitSha, per_page: 100 },
+  );
+  return prs.map((p) => ({
+    number: p.number,
+    merged: p.merged_at != null,
+    mergeCommitSha: p.merge_commit_sha ?? null,
+    headSha: p.head.sha,
+  }));
+}
+
 export async function getPullRequest(
   octokit: Octokit,
   { owner, repo }: RepoCoords,

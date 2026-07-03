@@ -167,6 +167,8 @@ export async function driftsForCommit(
   workspaceOrgId?: string | null,
   contractsRef?: RepoRef,
   anchorRef?: RepoRef,
+  /** PR number to fold the decisions overlay into a HEAD-side cold scan (EE). */
+  prNumber?: number,
 ): Promise<CommitDrifts> {
   const ref: RepoRef = { repoKey: repoFullName, commitSha: sha };
   // Base-reuse: the PR changed no specs, so the head's spec == the base's. Verify
@@ -184,7 +186,12 @@ export async function driftsForCommit(
   }
   let openConflicts: number;
   if (!(await hasContracts(ref, 'contracts'))) {
-    ({ openConflicts } = await scanPipeline.scan(checkoutDir, ref));
+    ({ openConflicts } = await scanPipeline.scan(
+      checkoutDir,
+      ref,
+      undefined,
+      prNumber !== undefined ? { pr: prNumber } : undefined,
+    ));
     await scanPipeline.generate(checkoutDir, ref, undefined, anchorRef);
   } else {
     // Already generated (e.g. an earlier gate run or the scan checkbox). The
@@ -214,8 +221,13 @@ export async function runGateVerify(
   const scanPipeline = deps.scanPipeline ?? defaultSpecScanPipeline;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-verify-'));
 
-  const driftsAt = (sha: string, contractsRef?: RepoRef, anchorRef?: RepoRef): Promise<CommitDrifts> =>
-    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId, contractsRef, anchorRef);
+  const driftsAt = (
+    sha: string,
+    contractsRef?: RepoRef,
+    anchorRef?: RepoRef,
+    prNumber?: number,
+  ): Promise<CommitDrifts> =>
+    driftsForCommit(scanPipeline, verify, req.repoFullName, sha, tmp, req.workspaceOrgId, contractsRef, anchorRef, prNumber);
 
   try {
     const token = await getInstallationToken(deps.auth, req.installationId);
@@ -270,7 +282,9 @@ export async function runGateVerify(
       !headContractsRef && baselineCommit
         ? { repoKey: req.repoFullName, commitSha: baselineCommit }
         : undefined;
-    const head = await driftsAt(headSha, headContractsRef, headAnchorRef);
+    // Only the HEAD folds the PR overlay — and only when it actually re-scans
+    // (spec changed ⇒ no `headContractsRef`); base/baseline stay repo-scoped.
+    const head = await driftsAt(headSha, headContractsRef, headAnchorRef, req.prNumber);
 
     // Code Quality signal — run the OSS analyze pass on the SAME PR-head checkout,
     // diffed against the baseline analysis. analyzeCore is STATELESS (no persist,

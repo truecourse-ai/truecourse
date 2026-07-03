@@ -24,6 +24,7 @@ import {
   runBaseline,
   loadGithubAppConfig,
   createGithubAuth,
+  installationOctokit,
   selectGateStore,
   type BaselineResult,
 } from '@truecourse/ee-github-app';
@@ -309,6 +310,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
         {
           store,
           auth,
+          octokitFor: (id) => installationOctokit(cfg, id),
           onPhase: (phase) => tracker.advance(phase),
           specTracker: specScanBridge(tracker, 'spec'),
           generateTracker: specScanBridge(tracker, 'contracts', CORPUS_GENERATE_STEPS),

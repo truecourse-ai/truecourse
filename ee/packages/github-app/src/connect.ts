@@ -8,8 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
-import { getCorpus } from '@truecourse/core/commands/spec-in-process';
-import { latestSpecCommit } from '@truecourse/core/lib/spec-store';
+import { loadSpec } from '@truecourse/core/lib/spec-store';
 import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import type {
   AuthUser,
@@ -130,14 +129,23 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // doc disagreements awaiting a relation) so the list can flag repos that need review.
     const repoSummaries = await Promise.all(
       repos.map(async (r) => {
-        const [project, corpus, commit] = await Promise.all([
+        // Read the corpus at the BASELINE commit — the repo's default-branch view —
+        // never the newest scan, which may be an in-flight PR head (that spec is
+        // PR-scoped and must not leak into the repo overview).
+        const [project, baseline] = await Promise.all([
           getProjectByPath(r.repoFullName),
-          getCorpus(r.repoFullName).catch(() => null),
-          latestSpecCommit(r.repoFullName).catch(() => null),
+          deps.store.getBaseline(r.repoFullName).catch(() => null),
         ]);
+        const commit = baseline?.commitSha ?? null;
+        const corpus = commit
+          ? await loadSpec<{ areas?: Array<{ overlaps?: unknown[] }> }>(
+              { repoKey: r.repoFullName, commitSha: commit },
+              'corpus',
+            ).catch(() => null)
+          : null;
         const overlapCount =
-          corpus?.areas.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
-        // hasContracts: any generated contract files at the latest scanned commit.
+          corpus?.areas?.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
+        // hasContracts: any generated contract files at the baseline commit.
         const files = commit
           ? await listContractFiles(r.repoFullName, 'contracts', commit).catch(() => [])
           : [];

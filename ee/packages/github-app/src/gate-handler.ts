@@ -358,22 +358,7 @@ export async function reverifyOpenPrs(
   const octokit = deps.octokitFor(link.installationId);
   const prs = await listOpenPrs(octokit, coords);
   for (const pr of prs) {
-    const payload: PullRequestPayload = {
-      action: 'synchronize',
-      number: pr.number,
-      pull_request: {
-        head: {
-          sha: pr.headSha,
-          ref: pr.headRef,
-          repo: pr.headRepoFullName
-            ? { full_name: pr.headRepoFullName, fork: pr.headRepoIsFork }
-            : null,
-        },
-        base: { sha: pr.baseSha, ref: pr.baseRef },
-      },
-      repository: { full_name: repoFullName, default_branch: link.defaultBranch },
-      installation: { id: link.installationId },
-    };
+    const payload = synthesizePrEvent(repoFullName, link.defaultBranch, link.installationId, pr);
     await handlePullRequestGate(deps, payload, { force: true }).catch((err) =>
       log.error(
         `[github-app] re-verify failed for ${repoFullName} PR#${pr.number}: ${(err as Error).message}`,
@@ -381,6 +366,61 @@ export async function reverifyOpenPrs(
       ),
     );
   }
+}
+
+/**
+ * Force re-gate exactly ONE open PR — the targeted analog of {@link reverifyOpenPrs}.
+ * Called after a PR-scoped decision cleared that PR's last conflict (the
+ * `pr.regate` background task): the PR's effective spec is now resolved, so it
+ * gets a real verdict without waiting for a push. A PR that already closed/merged
+ * is a no-op (nothing to re-gate).
+ */
+export async function reverifyOnePr(
+  deps: GateHandlerDeps,
+  repoFullName: string,
+  prNumber: number,
+): Promise<void> {
+  const link = await deps.store.getRepo(repoFullName);
+  if (!link || !link.enabled) return;
+  const coords = splitRepo(repoFullName);
+  const octokit = deps.octokitFor(link.installationId);
+  const pr = (await listOpenPrs(octokit, coords)).find((p) => p.number === prNumber);
+  if (!pr) return;
+  const payload = synthesizePrEvent(repoFullName, link.defaultBranch, link.installationId, pr);
+  await handlePullRequestGate(deps, payload, { force: true });
+}
+
+/** Build a synthetic `synchronize` PR event from a listed open PR, for a forced re-gate. */
+function synthesizePrEvent(
+  repoFullName: string,
+  defaultBranch: string,
+  installationId: number,
+  pr: {
+    number: number;
+    headSha: string;
+    headRef: string;
+    headRepoFullName: string | null;
+    headRepoIsFork: boolean;
+    baseSha: string;
+    baseRef: string;
+  },
+): PullRequestPayload {
+  return {
+    action: 'synchronize',
+    number: pr.number,
+    pull_request: {
+      head: {
+        sha: pr.headSha,
+        ref: pr.headRef,
+        repo: pr.headRepoFullName
+          ? { full_name: pr.headRepoFullName, fork: pr.headRepoIsFork }
+          : null,
+      },
+      base: { sha: pr.baseSha, ref: pr.baseRef },
+    },
+    repository: { full_name: repoFullName, default_branch: defaultBranch },
+    installation: { id: installationId },
+  };
 }
 
 // Settable seam so the EE jobs layer can trigger a PR re-verify after the
@@ -395,4 +435,17 @@ export function setPrReverifier(
 }
 export function getPrReverifier(): ((repoFullName: string) => Promise<void>) | null {
   return prReverifier;
+}
+
+// Targeted analog of the reverifier seam: the EE jobs layer's `pr.regate` task
+// re-gates ONE PR through this, without ee-server reaching into the gate's deps.
+// `registerGithubApp` sets it (closing over the gate deps); null → a no-op.
+let prRegater: ((repoFullName: string, prNumber: number) => Promise<void>) | null = null;
+export function setPrRegater(
+  fn: ((repoFullName: string, prNumber: number) => Promise<void>) | null,
+): void {
+  prRegater = fn;
+}
+export function getPrRegater(): ((repoFullName: string, prNumber: number) => Promise<void>) | null {
+  return prRegater;
 }

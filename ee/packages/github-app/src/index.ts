@@ -23,8 +23,11 @@ import {
 import {
   handlePullRequestGate,
   reverifyOpenPrs,
+  reverifyOnePr,
   setPrReverifier,
+  setPrRegater,
 } from './gate-handler.js';
+import { handlePullRequestClosed } from './pr-closed.js';
 import { createEmailNotifier } from './email.js';
 import { reportGithubError } from './observability.js';
 
@@ -98,6 +101,9 @@ export async function registerGithubApp(
   // regenerates contracts (post-conflict-resolution), without reaching into the
   // gate's deps. The seam is null until set here, so SSO-only deploys no-op.
   setPrReverifier((repoFullName) => reverifyOpenPrs(offerDeps, repoFullName));
+  // Targeted variant: re-gate exactly one PR after a PR-scoped decision cleared its
+  // last conflict (the `pr.regate` background task). Null until set → SSO-only no-op.
+  setPrRegater((repoFullName, prNumber) => reverifyOnePr(offerDeps, repoFullName, prNumber));
 
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
@@ -117,14 +123,24 @@ export async function registerGithubApp(
           );
           return;
         }
-        void runBaseline({ store, auth }, trigger).catch((err) =>
-          reportGithubError(store, 'baseline failed', { repo }, err),
-        );
+        void runBaseline(
+          { store, auth, octokitFor: (id) => installationOctokit(cfg, id) },
+          trigger,
+        ).catch((err) => reportGithubError(store, 'baseline failed', { repo }, err));
       },
       // On PR open/sync: run the drift gate (Phase 4) — it scans the head's specs
       // automatically when the PR changes them — and offer an infer run (Phase 3).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
+        // Merge/close: promote (merged) or discard (unmerged) the PR's decisions
+        // overlay + clean up its PR-scoped Code Quality diff. Neither gate nor infer
+        // reacts to `closed`, so handle it here and stop.
+        if (payload.action === 'closed') {
+          void handlePullRequestClosed(payload).catch((err) =>
+            reportGithubError(store, 'pr closed handling failed', ctx, err),
+          );
+          return;
+        }
         // Run the gate FIRST, then infer — never concurrently. The gate generates
         // the head's contracts (the cold path, when the PR changed a spec); infer
         // subtracts those contracts to decide what's still undocumented. Racing them
@@ -175,7 +191,8 @@ export type {
   IssueCommentPayload,
 } from './webhook.js';
 export { createConnectRouter } from './connect.js';
-export { runBaseline, type BaselineResult } from './baseline.js';
+export { runBaseline, resolveMergedPr, resolveMergeAnchor, type BaselineResult } from './baseline.js';
+export { handlePullRequestClosed } from './pr-closed.js';
 export { loadGithubAppConfig } from './config.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
@@ -192,6 +209,7 @@ export {
   installationOctokit,
   splitRepo,
   findComment,
+  listPrsForCommit,
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';
@@ -247,8 +265,11 @@ export {
 export {
   handlePullRequestGate,
   reverifyOpenPrs,
+  reverifyOnePr,
   setPrReverifier,
   getPrReverifier,
+  setPrRegater,
+  getPrRegater,
   type GateHandlerDeps,
 } from './gate-handler.js';
 

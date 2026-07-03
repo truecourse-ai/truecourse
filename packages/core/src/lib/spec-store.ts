@@ -40,6 +40,12 @@ export interface SpecStore {
   saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void>;
   /** Read one spec JSON artifact at a specific `ref`, or `null` when absent. */
   loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null>;
+  /**
+   * Delete one spec JSON artifact for `(ref)`. Idempotent — a no-op when absent.
+   * Used to drop a PR-scoped `decisions` overlay row on merge/close; the file
+   * default throws for a PR-scoped decisions ref (OSS has no overlays).
+   */
+  deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void>;
   /** Read the repo's CURRENT artifact (the latest stored, for the dashboard), or `null`. */
   loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null>;
   /**
@@ -72,6 +78,17 @@ function specPath(repoKey: string, artifact: SpecArtifact): string {
   return path.join(repoKey, '.truecourse', 'specs', `${artifact}.json`);
 }
 
+/**
+ * The core's PR-overlay sentinel commit for the `decisions` artifact
+ * (`_pr/<number>`, alongside the repo `_repo`). PR-scoped decisions live only in
+ * the enterprise store, so the file default fails loud if one reaches it.
+ */
+function isPrDecisionsRef(commitSha: string | undefined): boolean {
+  return /^_pr\/\d+$/.test(commitSha ?? '');
+}
+const PR_DECISIONS_FILE_ERROR =
+  '[spec-store] PR-scoped decisions require the enterprise store';
+
 // ---------------------------------------------------------------------------
 // File-backed default (OSS) — raw JSON at the same paths the IL writers use,
 // so save/load round-trip the exact on-disk document.
@@ -81,12 +98,18 @@ class FileSpecStore implements SpecStore {
   readonly materializesInPlace = true;
 
   async saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
     const file = specPath(ref.repoKey, artifact);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n', 'utf-8');
   }
 
   async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
     const file = specPath(ref.repoKey, artifact);
     if (!fs.existsSync(file)) return null;
     try {
@@ -94,6 +117,14 @@ class FileSpecStore implements SpecStore {
     } catch {
       return null;
     }
+  }
+
+  async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
+    const file = specPath(ref.repoKey, artifact);
+    if (fs.existsSync(file)) fs.rmSync(file);
   }
 
   // The file impl is single-document-per-repo, so "latest" === read the file.
@@ -141,6 +172,8 @@ export const saveSpec = (ref: RepoRef, artifact: SpecArtifact, json: unknown): P
   active.saveSpec(ref, artifact, json);
 export const loadSpec = <T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> =>
   active.loadSpec<T>(ref, artifact);
+export const deleteSpec = (ref: RepoRef, artifact: SpecArtifact): Promise<void> =>
+  active.deleteSpec(ref, artifact);
 export const loadLatestSpec = <T = unknown>(
   repoKey: string,
   artifact: SpecArtifact,

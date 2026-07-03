@@ -1031,6 +1031,12 @@ export interface SpecCorpusResponse {
   manualExcludes?: string[];
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
+  /**
+   * EE PR view: the commit whose corpus was actually returned. When it differs
+   * from the requested `ref`, the server fell back to the baseline corpus (e.g.
+   * a code-only PR whose head was never spec-scanned).
+   */
+  corpusCommit?: string;
 }
 
 /** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
@@ -1038,10 +1044,19 @@ export interface SpecScanCancelled {
   cancelled: true;
 }
 
+/**
+ * EE PR scope for the spec decision routes: `?pr=<n>&ref=<headSha>` (both
+ * required together). Empty outside a PR view, so OSS URLs are unchanged.
+ */
+function prScopeQuery(opts?: { pr?: number; ref?: string }): string {
+  return opts?.pr != null && opts.ref ? `?pr=${opts.pr}&ref=${encodeURIComponent(opts.ref)}` : '';
+}
+
 /** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
-export async function getSpecCorpus(repoId: string): Promise<SpecCorpusResponse | null> {
+export async function getSpecCorpus(repoId: string, ref?: string): Promise<SpecCorpusResponse | null> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
   try {
-    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus`);
+    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus${q}`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
@@ -1058,10 +1073,11 @@ export function getSpecCorpusScan(
   return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
 }
 
-/** A source doc's markdown (for the prose Spec tab). */
-export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
+/** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
+export function getSpecDoc(repoId: string, ref: string, commit?: string): Promise<{ ref: string; content: string }> {
+  const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
   return fetchApi<{ ref: string; content: string }>(
-    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}`,
+    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
   );
 }
 
@@ -1075,54 +1091,67 @@ export function runInferContracts(repoId: string): Promise<{ decisions: number; 
 // Include/exclude mutations re-curate server-side and return the fresh corpus
 // (with recomputed overlaps) — no separate scan call.
 
+// The optional `scope` on every mutation is the EE PR view (`?pr=&ref=`); in PR
+// scope the server re-curates the PR head and returns the fresh corpus (relations
+// routes included). Repo scope is unchanged — no query, relations return `{relations}`.
+type SpecMutationScope = { pr?: number; ref?: string };
+
 /** Force-include a relevance-dropped doc. Returns the re-curated corpus. */
-export function addSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
+export function addSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
     method: 'POST',
     body: JSON.stringify({ ref }),
   });
 }
 
 /** Remove a force-include override. Returns the re-curated corpus. */
-export function removeSpecInclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes`, {
+export function removeSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
     method: 'DELETE',
     body: JSON.stringify({ ref }),
   });
 }
 
 /** Force-exclude an otherwise-kept doc (drops it + its conflicts). Returns the re-curated corpus. */
-export function addSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
+export function addSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
     method: 'POST',
     body: JSON.stringify({ ref }),
   });
 }
 
 /** Remove a force-exclude override (restore the doc). Returns the re-curated corpus. */
-export function removeSpecExclude(repoId: string, ref: string): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes`, {
+export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
+  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
     method: 'DELETE',
     body: JSON.stringify({ ref }),
   });
 }
 
-/** Record a user doc→doc relation (resolves an overlap). */
-export function postSpecRelation(repoId: string, payload: SpecRelation): Promise<{ relations: SpecRelation[] }> {
-  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+/**
+ * Record a user doc→doc relation (resolves an overlap). Repo scope returns
+ * `{relations}`; PR scope returns the full re-curated corpus.
+ */
+export function postSpecRelation(
+  repoId: string,
+  payload: SpecRelation,
+  scope?: SpecMutationScope,
+): Promise<{ relations: SpecRelation[] } | SpecCorpusResponse> {
+  return fetchApi<{ relations: SpecRelation[] } | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/relations${prScopeQuery(scope)}`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
 }
 
-/** Remove a user relation. */
+/** Remove a user relation. Repo scope returns `{relations}`; PR scope the full corpus. */
 export function deleteSpecRelation(
   repoId: string,
   payload: { older: string; newer: string; scope?: string },
-): Promise<{ relations: SpecRelation[] }> {
-  return fetchApi<{ relations: SpecRelation[] }>(`/api/repos/${repoId}/spec/relations`, {
-    method: 'DELETE',
-    body: JSON.stringify(payload),
-  });
+  scope?: SpecMutationScope,
+): Promise<{ relations: SpecRelation[] } | SpecCorpusResponse> {
+  return fetchApi<{ relations: SpecRelation[] } | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/relations${prScopeQuery(scope)}`,
+    { method: 'DELETE', body: JSON.stringify(payload) },
+  );
 }
 

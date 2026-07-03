@@ -12,6 +12,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ContractKind } from '@truecourse/core/lib/contract-store';
 
+/**
+ * The generate manifest (area→specHash) `contracts generate` writes next to the
+ * `.tc` tree. Carried in the stored set so an anchored regenerate can no-op
+ * unchanged areas, but excluded from `listContractFiles` (contract listings are
+ * `.tc` only, mirroring the file store).
+ */
+export const GENERATE_MANIFEST = 'manifest.json';
+
 /** `sha256-<hex>` over the bytes. */
 export function sha256(bytes: Buffer): string {
   return 'sha256-' + createHash('sha256').update(bytes).digest('hex');

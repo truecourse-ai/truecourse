@@ -22,6 +22,7 @@ import {
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   loadLatestSpec,
+  loadSpec,
   specsMaterializeInPlace,
 } from '@truecourse/core/lib/spec-store';
 import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
@@ -40,12 +41,14 @@ import {
   isCorpusStale,
   getCorpus,
   getDecisions,
+  recuratePrCorpus,
   recurateStoredCorpus,
   removeManualExclude,
   removeManualInclude,
   removeRelation,
   verifyLatestPath,
 } from '@truecourse/core/commands/spec-in-process';
+import { baselineCommit } from './diff-base.js';
 import {
   createSocketSpecTracker,
   createSocketSpecEstimateHandler,
@@ -61,22 +64,67 @@ const router: Router = Router();
 
 const RELATION_TYPES: RelationType[] = ['replace', 'precedence', 'keep-both'];
 
-async function corpusPayload(
-  repoPath: string,
-): Promise<{
+interface SpecCorpusPayload {
   corpus: CuratedCorpus | null;
   userRelations: Relation[];
   manualIncludes: string[];
   manualExcludes: string[];
-}> {
-  const corpus = await getCorpus(repoPath);
+  /** The commit whose corpus was returned (EE), when different from what was asked. */
+  corpusCommit?: string;
+}
+
+/**
+ * Resolve the corpus for a (possibly PR-scoped) view. OSS has no commit
+ * dimension, so it always reads the live `corpus.json`. EE reads at the requested
+ * `ref`, else the baseline commit (the same `isBaseline` anchor the BL-Drift PR
+ * diffs use — never `loadLatest`, which a PR-head scan pollutes). A `ref` with no
+ * stored corpus (a code-only PR that never scanned specs) falls back to the
+ * baseline corpus, labelled by `corpusCommit` so the client can note it.
+ */
+async function loadCorpusForRef(
+  repoPath: string,
+  ref?: string,
+): Promise<{ corpus: CuratedCorpus | null; corpusCommit?: string }> {
+  if (specsMaterializeInPlace()) return { corpus: await getCorpus(repoPath) };
+  if (ref) {
+    const corpus = await loadSpec<CuratedCorpus>({ repoKey: repoPath, commitSha: ref }, 'corpus');
+    if (corpus) return { corpus, corpusCommit: ref };
+  }
+  const baseSha = await baselineCommit(repoPath);
+  if (baseSha) {
+    const corpus = await loadSpec<CuratedCorpus>({ repoKey: repoPath, commitSha: baseSha }, 'corpus');
+    if (corpus) return { corpus, corpusCommit: baseSha };
+  }
+  return { corpus: null };
+}
+
+async function corpusPayload(repoPath: string, ref?: string): Promise<SpecCorpusPayload> {
+  const { corpus, corpusCommit } = await loadCorpusForRef(repoPath, ref);
   const decisions = await getDecisions(repoPath);
   return {
     corpus,
     userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
+    corpusCommit,
   };
+}
+
+// The PR-scoped payload for a mutation response: the freshly re-curated corpus
+// (saved at the PR head) + the effective decisions folding the PR overlay.
+function prCorpusPayload(
+  repoPath: string,
+  pr: number,
+  ref: string,
+  corpus: CuratedCorpus | null,
+): Promise<SpecCorpusPayload> {
+  return getDecisions(repoPath, { pr }).then((decisions) => ({
+    corpus,
+    userRelations: decisions.relations ?? [],
+    manualIncludes: decisions.manualIncludes ?? [],
+    manualExcludes: decisions.manualExcludes ?? [],
+    corpusCommit: corpus ? ref : undefined,
+  }));
 }
 
 router.get(
@@ -84,7 +132,8 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      const payload = await corpusPayload(repo.path);
+      const ref = req.query.ref ? String(req.query.ref) : undefined;
+      const payload = await corpusPayload(repo.path, ref);
       if (!payload.corpus) {
         res.status(404).json({ error: 'No corpus has been scanned yet.' });
         return;
@@ -149,7 +198,9 @@ router.get(
         return;
       }
       // Read through the seam: local working tree in OSS, GitHub (App) in EE.
-      const content = await readRepoDoc(repo.path, ref);
+      // `commit` pins the revision (EE, PR views); OSS ignores it (live tree).
+      const commit = req.query.commit ? String(req.query.commit) : undefined;
+      const content = await readRepoDoc(repo.path, ref, commit ? { commit } : undefined);
       if (content == null) {
         res.status(404).json({ error: `Doc not found: ${ref}` });
         return;
@@ -191,6 +242,53 @@ async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
   }
 }
 
+// A PR-scoped decision edit (EE): the client sends `?pr=<number>` plus
+// `?ref=<PR head SHA>` (the same head it reads the tabs at). The overlay + the
+// re-curate both need the head, so require them together.
+interface PrScope {
+  pr: number;
+  ref: string;
+}
+
+function parsePrScope(req: Request): { scope: PrScope | null } | { error: string } {
+  if (req.query.pr === undefined) return { scope: null };
+  const pr = Number(req.query.pr);
+  if (!Number.isInteger(pr) || pr <= 0) return { error: 'pr must be a positive integer.' };
+  const ref = req.query.ref ? String(req.query.ref) : '';
+  if (!ref) return { error: 'pr requires ref (the PR head commit SHA).' };
+  return { scope: { pr, ref } };
+}
+
+// A PR-scoped edit that clears the PR's last conflict: force a targeted re-gate of
+// just that PR (repo-scope contract regeneration stays enqueueContractsRefresh).
+async function enqueuePrRegate(repoKey: string, prNumber: number): Promise<void> {
+  const runner = getBackgroundTaskRunner();
+  if (!runner) return;
+  try {
+    await runner({ type: 'pr.regate', repoKey, prNumber });
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
+}
+
+// EE PR scope: write the overlay (the mutate closure passes `{ pr }` through), then
+// re-curate the PR head corpus in-process (saved at the PR head — never the base
+// view or another PR), and — only if that PR is now conflict-free — enqueue a
+// targeted re-gate of it. Returns the fresh PR-scoped corpus + effective decisions.
+async function mutateSpecDecisionPr(
+  repoPath: string,
+  scope: PrScope,
+  res: Response,
+  mutate: (opts?: { pr?: number }) => Promise<unknown>,
+): Promise<void> {
+  await mutate({ pr: scope.pr });
+  const result = await recuratePrCorpus(repoPath, scope.ref, scope.pr);
+  if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
+    await enqueuePrRegate(repoPath, scope.pr);
+  }
+  res.json(await prCorpusPayload(repoPath, scope.pr, scope.ref, result?.corpus ?? null));
+}
+
 router.post(
   '/:id/spec/relations',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -209,14 +307,26 @@ router.post(
         res.status(400).json({ error: 'older and newer must differ.' });
         return;
       }
-      const decisions = await addRelation(repo.path, {
+      const relation = {
         type: body.type,
         older: body.older,
         newer: body.newer,
         scope: body.scope,
-        detectedFrom: 'manual',
+        detectedFrom: 'manual' as const,
         note: body.note,
-      });
+      };
+      const parsed = parsePrScope(req);
+      if ('error' in parsed) {
+        res.status(400).json({ error: parsed.error });
+        return;
+      }
+      if (parsed.scope) {
+        await mutateSpecDecisionPr(repo.path, parsed.scope, res, (opts) =>
+          addRelation(repo.path, relation, opts),
+        );
+        return;
+      }
+      const decisions = await addRelation(repo.path, relation);
       await recurateAndRegenIfResolved(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
@@ -235,7 +345,19 @@ router.delete(
         res.status(400).json({ error: 'Missing older or newer.' });
         return;
       }
-      const decisions = await removeRelation(repo.path, { older: body.older, newer: body.newer, scope: body.scope });
+      const input = { older: body.older, newer: body.newer, scope: body.scope };
+      const parsed = parsePrScope(req);
+      if ('error' in parsed) {
+        res.status(400).json({ error: parsed.error });
+        return;
+      }
+      if (parsed.scope) {
+        await mutateSpecDecisionPr(repo.path, parsed.scope, res, (opts) =>
+          removeRelation(repo.path, input, opts),
+        );
+        return;
+      }
+      const decisions = await removeRelation(repo.path, input);
       await recurateAndRegenIfResolved(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
@@ -299,6 +421,27 @@ async function mutateSpecDecision(
   res.json(await mutateAndRecurate(repoPath, repoId, mutate));
 }
 
+// Dispatch an include/exclude mutation: a PR-scoped edit (EE, `?pr` + `?ref`)
+// writes the PR overlay and re-curates the PR head; otherwise the repo-scope path.
+async function applySpecMutation(
+  req: Request,
+  res: Response,
+  repoPath: string,
+  repoId: string,
+  mutate: (opts?: { pr?: number }) => Promise<unknown>,
+): Promise<void> {
+  const parsed = parsePrScope(req);
+  if ('error' in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  if (parsed.scope) {
+    await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
+    return;
+  }
+  await mutateSpecDecision(repoPath, repoId, res, () => mutate());
+}
+
 // Force-include / un-include a relevance-dropped doc, then re-curate so the
 // corpus + overlaps reflect it immediately.
 router.post(
@@ -312,7 +455,9 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await mutateSpecDecision(repo.path, req.params.id as string, res, () => addManualInclude(repo.path, ref));
+      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+        addManualInclude(repo.path, ref, opts),
+      );
     } catch (e) {
       next(e);
     }
@@ -330,7 +475,9 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await mutateSpecDecision(repo.path, req.params.id as string, res, () => removeManualInclude(repo.path, ref));
+      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+        removeManualInclude(repo.path, ref, opts),
+      );
     } catch (e) {
       next(e);
     }
@@ -350,7 +497,9 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await mutateSpecDecision(repo.path, req.params.id as string, res, () => addManualExclude(repo.path, ref));
+      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+        addManualExclude(repo.path, ref, opts),
+      );
     } catch (e) {
       next(e);
     }
@@ -368,7 +517,9 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await mutateSpecDecision(repo.path, req.params.id as string, res, () => removeManualExclude(repo.path, ref));
+      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+        removeManualExclude(repo.path, ref, opts),
+      );
     } catch (e) {
       next(e);
     }

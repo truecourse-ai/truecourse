@@ -139,8 +139,8 @@ const plugin: EePlugin = {
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App
     // installation (at the repo's baseline commit). Reuses the gate store above.
-    setRepoDocReader((repoKey, docPath) =>
-      readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath),
+    setRepoDocReader((repoKey, docPath, opts) =>
+      readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath, opts),
     );
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on

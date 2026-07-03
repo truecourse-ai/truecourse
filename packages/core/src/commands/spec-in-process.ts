@@ -126,8 +126,8 @@ import {
 import {
   saveSpec,
   loadSpec,
+  deleteSpec,
   loadLatestSpec,
-  latestSpecCommit,
   saveWorkspaceSpec,
   loadWorkspaceSpec,
   specsMaterializeInPlace,
@@ -1767,26 +1767,122 @@ const EMPTY_DECISIONS: DecisionsFile = {
 };
 /** Sentinel commit for the per-repo "current" decisions document in EE. */
 const DECISIONS_REF = '_repo';
+/** Sentinel commit for a PR-scoped decisions overlay in EE (`_pr/<number>`). */
+const prDecisionsRef = (pr: number): string => `_pr/${pr}`;
+/** The sentinel commit addressing the repo row or a PR overlay. */
+const decisionsRef = (pr?: number): string =>
+  pr === undefined ? DECISIONS_REF : prDecisionsRef(pr);
 
-async function loadDecisions(repoKey: string): Promise<DecisionsFile> {
+/** PR-scoped decisions live only in EE — a live-tree (OSS) store can't hold them. */
+function assertNoPrInPlace(pr?: number): void {
+  if (pr !== undefined && specsMaterializeInPlace()) {
+    throw new Error('[spec] PR-scoped decisions require the enterprise store');
+  }
+}
+
+async function loadDecisions(repoKey: string, opts?: { pr?: number }): Promise<DecisionsFile> {
+  assertNoPrInPlace(opts?.pr);
   if (specsMaterializeInPlace()) return readDecisions(repoKey);
   return (
-    (await loadSpec<DecisionsFile>({ repoKey, commitSha: DECISIONS_REF }, 'decisions')) ??
-    EMPTY_DECISIONS
+    (await loadSpec<DecisionsFile>(
+      { repoKey, commitSha: decisionsRef(opts?.pr) },
+      'decisions',
+    )) ?? EMPTY_DECISIONS
   );
 }
 
-async function storeDecisions(repoKey: string, next: DecisionsFile): Promise<void> {
+async function storeDecisions(
+  repoKey: string,
+  next: DecisionsFile,
+  opts?: { pr?: number },
+): Promise<void> {
+  assertNoPrInPlace(opts?.pr);
   if (specsMaterializeInPlace()) {
     writeDecisions(repoKey, next);
     return;
   }
-  await saveSpec({ repoKey, commitSha: DECISIONS_REF }, 'decisions', next);
+  await saveSpec({ repoKey, commitSha: decisionsRef(opts?.pr) }, 'decisions', next);
 }
 
-/** The repo's current decisions (dashboard read) — file in OSS, Postgres in EE. */
-export function getDecisions(repoKey: string): Promise<DecisionsFile> {
-  return loadDecisions(repoKey);
+/**
+ * The repo's current decisions (dashboard read) — file in OSS, Postgres in EE.
+ * With `pr`, returns the effective decisions for that PR: the repo row merged
+ * with the PR's overlay (the overlay wins — see {@link mergeDecisions}).
+ */
+export async function getDecisions(
+  repoKey: string,
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  if (opts?.pr === undefined) return loadDecisions(repoKey);
+  const [base, overlay] = await Promise.all([
+    loadDecisions(repoKey),
+    loadDecisions(repoKey, { pr: opts.pr }),
+  ]);
+  return mergeDecisions(base, overlay);
+}
+
+/**
+ * Merge a PR's decisions overlay over the repo row. Pure. The overlay wins on
+ * every dimension:
+ *   - relations: an overlay relation on the same doc pair (order-insensitive,
+ *     same scope) replaces the base one; other base relations survive.
+ *   - manualIncludes / manualExcludes: union by path, but the overlay's verb wins
+ *     per path — a path the overlay excludes is dropped from includes and vice
+ *     versa (never a contradictory pair).
+ *   - manualAreas: the overlay's override replaces the base's for that doc.
+ */
+export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): DecisionsFile {
+  const overlayRelKeys = new Set((overlay.relations ?? []).map(relationKey));
+  const relations = [
+    ...(base.relations ?? []).filter((r) => !overlayRelKeys.has(relationKey(r))),
+    ...(overlay.relations ?? []),
+  ];
+
+  const overlayIncludes = new Set(overlay.manualIncludes ?? []);
+  const overlayExcludes = new Set(overlay.manualExcludes ?? []);
+  const manualIncludes = uniqueStrings([
+    ...(base.manualIncludes ?? []),
+    ...(overlay.manualIncludes ?? []),
+  ]).filter((p) => !overlayExcludes.has(p));
+  const manualExcludes = uniqueStrings([
+    ...(base.manualExcludes ?? []),
+    ...(overlay.manualExcludes ?? []),
+  ]).filter((p) => !overlayIncludes.has(p));
+
+  const overlayAreaDocs = new Set((overlay.manualAreas ?? []).map((a) => a.doc));
+  const manualAreas = [
+    ...(base.manualAreas ?? []).filter((a) => !overlayAreaDocs.has(a.doc)),
+    ...(overlay.manualAreas ?? []),
+  ];
+
+  return { version: 1, manualIncludes, manualExcludes, relations, manualAreas };
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return [...new Set(items)];
+}
+
+/**
+ * Promote a PR's decisions overlay onto the repo row on merge. Idempotent: when
+ * no overlay exists returns false and does nothing (the merge flow may call this
+ * twice — closed handler + baseline). Otherwise merges the overlay onto the repo
+ * row, persists it, drops the overlay row, and returns true.
+ */
+export async function promoteDecisionsOverlay(repoKey: string, pr: number): Promise<boolean> {
+  const overlay = await loadSpec<DecisionsFile>(
+    { repoKey, commitSha: prDecisionsRef(pr) },
+    'decisions',
+  );
+  if (!overlay) return false;
+  const merged = mergeDecisions(await loadDecisions(repoKey), overlay);
+  await storeDecisions(repoKey, merged);
+  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
+  return true;
+}
+
+/** Discard a PR's decisions overlay (unmerged close). Idempotent. */
+export async function discardDecisionsOverlay(repoKey: string, pr: number): Promise<void> {
+  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
 }
 
 /**
@@ -1813,6 +1909,7 @@ export function buildStoredDocSource(
   repoKey: string,
   corpus: CuratedCorpus,
   decisions: DecisionsFile,
+  commit?: string,
 ): () => Promise<DocCandidate[]> {
   const lastTouchedByRef = new Map(corpus.docs.map((d) => [d.ref, d.lastTouched]));
   const refs = new Set<string>();
@@ -1820,10 +1917,11 @@ export function buildStoredDocSource(
   for (const s of corpus.skippedDocs ?? []) refs.add(s.ref);
   for (const p of decisions.manualExcludes ?? []) refs.add(p);
   for (const p of decisions.manualIncludes ?? []) refs.add(p);
+  const readOpts = commit ? { commit } : undefined;
   return async () => {
     const docs: DocCandidate[] = [];
     for (const ref of refs) {
-      const content = await readRepoDoc(repoKey, ref);
+      const content = await readRepoDoc(repoKey, ref, readOpts);
       if (content == null) continue; // deleted upstream — drop it from the set
       docs.push({
         path: ref,
@@ -1864,8 +1962,56 @@ export async function recurateStoredCorpus(
     skipGit: true,
     skipCorpusWrite: true,
   });
-  const commitSha = await latestSpecCommit(repoKey);
+  // Save at the baseline commit — the repo-scope corpus the base view reads —
+  // never `latestSpecCommit`, which a PR-head scan can leave pointing at a PR.
+  const commitSha = await baselineSpecCommit(repoKey);
   if (commitSha) await saveSpec({ repoKey, commitSha }, 'corpus', result.corpus);
+  return { corpus: result.corpus, openConflicts: result.stats.overlapFlags };
+}
+
+/**
+ * The default-branch baseline commit — the same anchor the BL-Drift PR diffs use
+ * (the verify store's `isBaseline` snapshot). The base repo view + repo-scope
+ * corpus live here; a PR-head scan never moves it. `null` before any baseline.
+ */
+async function baselineSpecCommit(repoKey: string): Promise<string | null> {
+  return (await readVerifyState(repoKey))?.commitHash ?? null;
+}
+
+/** The corpus stored at the baseline commit, or null when none is stored yet. */
+async function loadBaselineCorpus(repoKey: string): Promise<CuratedCorpus | null> {
+  const commitSha = await baselineSpecCommit(repoKey);
+  if (!commitSha) return null;
+  return loadSpec<CuratedCorpus>({ repoKey, commitSha }, 'corpus');
+}
+
+/**
+ * Re-curate a PR's corpus after a PR-scoped decision edit (EE only). Mirrors
+ * {@link recurateStoredCorpus}, but scoped to one PR: the doc universe is the
+ * corpus scanned at the PR head (falling back to the baseline corpus for a
+ * code-only PR that never scanned specs), doc bodies are read at the PR head, the
+ * effective decisions fold the PR overlay ({@link getDecisions} with `pr`), and
+ * the result is saved at the PR head — so it never touches the base repo view or
+ * another PR. Returns the fresh corpus + open-conflict count, or null when the
+ * repo has no corpus at all yet.
+ */
+export async function recuratePrCorpus(
+  repoKey: string,
+  prHeadSha: string,
+  prNumber: number,
+): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
+  const corpus =
+    (await loadSpec<CuratedCorpus>({ repoKey, commitSha: prHeadSha }, 'corpus')) ??
+    (await loadBaselineCorpus(repoKey));
+  if (!corpus) return null;
+  const decisions = await getDecisions(repoKey, { pr: prNumber });
+  const { curate: result } = await curateInProcess(repoKey, {
+    docSource: buildStoredDocSource(repoKey, corpus, decisions, prHeadSha),
+    decisions,
+    skipGit: true,
+    skipCorpusWrite: true,
+  });
+  await saveSpec({ repoKey, commitSha: prHeadSha }, 'corpus', result.corpus);
   return { corpus: result.corpus, openConflicts: result.stats.overlapFlags };
 }
 
@@ -1978,9 +2124,13 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
  * for the same (older, newer, scope) already exists it's replaced. Self-pairs are
  * rejected. Re-run `spec scan` (curate) to apply.
  */
-export async function addRelation(repoRoot: string, input: Relation): Promise<DecisionsFile> {
-  const next = applyAddRelation(await loadDecisions(repoRoot), input);
-  await storeDecisions(repoRoot, next);
+export async function addRelation(
+  repoRoot: string,
+  input: Relation,
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  const next = applyAddRelation(await loadDecisions(repoRoot, opts), input);
+  await storeDecisions(repoRoot, next, opts);
   return next;
 }
 
@@ -1991,19 +2141,24 @@ export async function addRelation(repoRoot: string, input: Relation): Promise<De
 export async function removeRelation(
   repoRoot: string,
   input: { older: string; newer: string; scope?: string },
+  opts?: { pr?: number },
 ): Promise<DecisionsFile> {
-  const next = applyRemoveRelation(await loadDecisions(repoRoot), input);
-  await storeDecisions(repoRoot, next);
+  const next = applyRemoveRelation(await loadDecisions(repoRoot, opts), input);
+  await storeDecisions(repoRoot, next, opts);
   return next;
 }
 
 /**
  * Force-include a doc the relevance filter skipped. Idempotent.
  */
-export async function addManualInclude(repoRoot: string, docPath: string): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot);
+export async function addManualInclude(
+  repoRoot: string,
+  docPath: string,
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot, opts);
   const next = applyAddManualInclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next);
+  if (next !== existing) await storeDecisions(repoRoot, next, opts);
   return next;
 }
 
@@ -2013,9 +2168,10 @@ export async function addManualInclude(repoRoot: string, docPath: string): Promi
 export async function removeManualInclude(
   repoRoot: string,
   docPath: string,
+  opts?: { pr?: number },
 ): Promise<DecisionsFile> {
-  const next = applyRemoveManualInclude(await loadDecisions(repoRoot), docPath);
-  await storeDecisions(repoRoot, next);
+  const next = applyRemoveManualInclude(await loadDecisions(repoRoot, opts), docPath);
+  await storeDecisions(repoRoot, next, opts);
   return next;
 }
 
@@ -2023,10 +2179,14 @@ export async function removeManualInclude(
  * Force-exclude a doc the relevance filter would keep — drops it from the corpus
  * on the next curate. Clears any force-include for the same path. Idempotent.
  */
-export async function addManualExclude(repoRoot: string, docPath: string): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot);
+export async function addManualExclude(
+  repoRoot: string,
+  docPath: string,
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  const existing = await loadDecisions(repoRoot, opts);
   const next = applyAddManualExclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next);
+  if (next !== existing) await storeDecisions(repoRoot, next, opts);
   return next;
 }
 
@@ -2036,8 +2196,9 @@ export async function addManualExclude(repoRoot: string, docPath: string): Promi
 export async function removeManualExclude(
   repoRoot: string,
   docPath: string,
+  opts?: { pr?: number },
 ): Promise<DecisionsFile> {
-  const next = applyRemoveManualExclude(await loadDecisions(repoRoot), docPath);
-  await storeDecisions(repoRoot, next);
+  const next = applyRemoveManualExclude(await loadDecisions(repoRoot, opts), docPath);
+  await storeDecisions(repoRoot, next, opts);
   return next;
 }

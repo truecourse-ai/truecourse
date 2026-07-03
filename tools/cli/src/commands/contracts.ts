@@ -7,6 +7,7 @@ import {
   EstimateDeclined,
 } from "@truecourse/core/commands/spec-in-process";
 import { StepTracker } from "@truecourse/core/progress";
+import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { syncShippedTcSyntax } from "./helpers.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -33,6 +34,10 @@ export async function runContractsGenerate(
 
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
   await requireGitRepo(repoRoot);
+  // Part of the spec/contract pipeline — register the repo (idempotent) so a
+  // contracts-first run (specs already committed) still lands in the dashboard.
+  // A dry run previews only, so it must not touch the registry.
+  if (!options.diff) await registerProject(repoRoot);
 
   if (options.llm === "agent" && !options.io) {
     p.log.error("--llm agent requires --io <dir> (the request/response mailbox directory).");
