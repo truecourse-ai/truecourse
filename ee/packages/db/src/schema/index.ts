@@ -29,7 +29,7 @@ import { contractSets, specSets } from './contracts.js';
 import { extractionCache } from './cache.js';
 import { workspaceSpecSets, workspaceContractSets, knowledgeDocuments } from './knowledge.js';
 import { integrationConnections } from './integrations.js';
-import { jobs, notifications } from './jobs.js';
+import { jobs, notifications, pendingBaselines } from './jobs.js';
 import { llmTraces } from './traces.js';
 import { workspaceSettings } from './settings.js';
 
@@ -59,6 +59,7 @@ export const schema = {
   integrationConnections,
   jobs,
   notifications,
+  pendingBaselines,
   llmTraces,
   workspaceSettings,
 };

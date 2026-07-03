@@ -16,7 +16,12 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
-import { JobStore, NotificationStore, ActiveJobExistsError } from '@truecourse/ee-data-store';
+import {
+  JobStore,
+  NotificationStore,
+  ActiveJobExistsError,
+  PendingBaselineStore,
+} from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
@@ -25,16 +30,21 @@ import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import { reverifyWorkspaceRepos } from './reverify.js';
 import {
+  enqueueOrPendBaseline,
+  replayPendingBaseline,
+  drainPendingBaselines,
+} from './pending-baseline.js';
+import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
   REPO_CONTRACTS_TASK,
   PR_REGATE_TASK,
   WORKSPACE_CONTRACTS_TASK,
   prRegateJobKey,
-  baselineJobKey,
   workspaceContractsJobKey,
   type SyncJobPayload,
   type BaselineEnqueueRequest,
+  type BaselineJobPayload,
 } from './constants.js';
 
 function orgIdOf(req: Request): string | null {
@@ -154,6 +164,7 @@ export async function registerJobs(
 ): Promise<JobsApi> {
   const jobStore = new JobStore(opts.db);
   const notifications = new NotificationStore(opts.db);
+  const pendingBaselines = new PendingBaselineStore(opts.db);
   const hub = new EventHub(opts.connectionString);
 
   // Create (or reuse) the single-flight job row for a debounced contract refresh.
@@ -185,20 +196,31 @@ export async function registerJobs(
 
   // Single-flight repo-baseline enqueue — shared by connect/push (returned below)
   // and the post-contracts chain. Closes over the `runner` assigned just below.
-  const enqueueBaseline = async (req: BaselineEnqueueRequest): Promise<string | null> => {
+  // Coalesces (rather than drops) a push that loses the single-flight race: the
+  // dropped request is recorded as the repo's pending follow-up and replayed when
+  // the running scan settles (see pending-baseline.ts). Idempotent for a
+  // redelivered connect/push of the SAME commit — the replay skips a redundant
+  // same-commit pending unless a re-baseline (force) was requested.
+  const enqueueBaseline = (req: BaselineEnqueueRequest): Promise<string | null> => {
     if (!runner) throw new Error('the background job worker is not running');
-    const key = baselineJobKey(req.repoFullName);
-    let job;
-    try {
-      job = await jobStore.create({ org: req.workspaceOrgId, type: REPO_BASELINE_TASK, key });
-    } catch (err) {
-      // A scan is already running for this repo — skip (idempotent connect/push/chain).
-      if (err instanceof ActiveJobExistsError) return null;
-      throw err;
-    }
-    await runner.addJob(REPO_BASELINE_TASK, { jobId: job.id, ...req }, { jobKey: key, maxAttempts: 1 });
-    return job.id;
+    const r = runner;
+    return enqueueOrPendBaseline(
+      {
+        jobStore,
+        pendingBaselines,
+        addJob: async (jobId, jreq, jobKey) => {
+          await r.addJob(REPO_BASELINE_TASK, { jobId, ...jreq }, { jobKey, maxAttempts: 1 });
+        },
+      },
+      req,
+    );
   };
+
+  // After a baseline job settles, replay the repo's coalesced follow-up push (if
+  // any). Wired onto the baseline definition's `onSettled` hook, so it runs in
+  // BOTH the success and failure paths once the single-flight key is free.
+  const onBaselineSettled = (payload: BaselineJobPayload): Promise<void> =>
+    replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
 
   // Single-flight PR re-gate enqueue — a PR-scoped decision cleared that PR's last
   // conflict, so re-gate just that one PR (durable, tracked + notified like a
@@ -279,7 +301,13 @@ export async function registerJobs(
       masterSecret: opts.masterSecret,
       jobStore,
       onWorkspaceContractsChanged,
+      onBaselineSettled,
     });
+    // A crash could have left pending follow-up baselines with no running job to
+    // replay them. Now that the reaped keys are free and the worker is up, drain
+    // them (per-row best-effort — one bad row must not stop the rest).
+    const drained = await drainPendingBaselines(pendingBaselines, enqueueBaseline);
+    if (drained > 0) log.info(`[ee-jobs] drained ${drained} pending baseline(s) from a prior run`);
   } catch (err) {
     log.error(`[ee-jobs] background services failed to start (jobs will not process): ${(err as Error).message}`);
   }

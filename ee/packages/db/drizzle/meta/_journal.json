@@ -15,6 +15,13 @@
       "when": 1783101625293,
       "tag": "0001_moaning_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783108415693,
+      "tag": "0002_famous_pixie",
+      "breakpoints": true
     }
   ]
 }

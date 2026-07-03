@@ -17,7 +17,14 @@ export { PgContractStore } from './contract-store.js';
 export { PgSpecStore } from './spec-store.js';
 export { PgInferredActionStore } from './inferred-action-store.js';
 export { PgKnowledgeStore, type KnowledgeDocRow } from './knowledge-store.js';
-export { JobStore, NotificationStore, ActiveJobExistsError } from './jobs-store.js';
+export {
+  JobStore,
+  NotificationStore,
+  ActiveJobExistsError,
+  PendingBaselineStore,
+  type PendingBaselineInput,
+  type PendingBaselineView,
+} from './jobs-store.js';
 export { PgKvCacheStore } from './cache-store.js';
 export { PgTraceStore } from './trace-store.js';
 export { PgAnalyzeLock } from './analyze-lock.js';

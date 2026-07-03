@@ -177,3 +177,77 @@ describe('executeJob — shared lifecycle envelope', () => {
     expect(progressEvents().some((j) => j.status === 'failed')).toBe(true);
   });
 });
+
+describe('executeJob — onSettled hook', () => {
+  const settledDef = (
+    onSettled: JobDefinition<Payload>['onSettled'],
+    run: JobDefinition<Payload>['run'],
+  ): JobDefinition<Payload> => ({
+    type: 'test.job',
+    title: 'Testing',
+    steps: [{ key: 'a', label: 'Step A' }],
+    org: (p) => p.org,
+    sentry: () => ({ component: 'server', route: 'test' }),
+    onSettled,
+    run,
+    onError: (err) => ({ level: 'error', title: 'Failed', body: err.message }),
+  });
+
+  it('fires AFTER the row is terminal on success', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:s' });
+
+    let statusAtSettle: string | undefined;
+    const settled = vi.fn(async () => {
+      statusAtSettle = (await jobStore.get(job.id))?.status;
+    });
+
+    await executeJob(
+      { db, jobStore, notifications },
+      settledDef(settled, async () => ({ result: {}, notification: null })),
+      { jobId: job.id, org: ORG },
+    );
+
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(statusAtSettle).toBe('succeeded'); // terminal bookkeeping already done
+  });
+
+  it('fires on failure, and the original error still rethrows', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:f' });
+
+    let statusAtSettle: string | undefined;
+    const settled = vi.fn(async () => {
+      statusAtSettle = (await jobStore.get(job.id))?.status;
+    });
+
+    await expect(
+      executeJob(
+        { db, jobStore, notifications },
+        settledDef(settled, async () => {
+          throw new Error('boom');
+        }),
+        { jobId: job.id, org: ORG },
+      ),
+    ).rejects.toThrow('boom');
+
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(statusAtSettle).toBe('failed');
+  });
+
+  it('is optional — a definition without onSettled still completes', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:opt' });
+
+    await executeJob(
+      { db, jobStore, notifications },
+      settledDef(undefined, async () => ({ result: { ok: true }, notification: null })),
+      { jobId: job.id, org: ORG },
+    );
+
+    expect((await jobStore.get(job.id))?.status).toBe('succeeded');
+  });
+});

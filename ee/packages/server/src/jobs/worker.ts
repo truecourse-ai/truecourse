@@ -89,6 +89,12 @@ export interface StartWorkerDeps {
    * contracts. Returns the number of repos re-verified (for the sync notice).
    */
   onWorkspaceContractsChanged?: (workspaceOrgId: string) => Promise<number>;
+  /**
+   * Called after a `repo.baseline` job goes terminal (success OR failure), once
+   * its single-flight key is free — replays any coalesced follow-up push for the
+   * repo (see pending-baseline.ts). Wired only onto the baseline definition.
+   */
+  onBaselineSettled?: (payload: BaselineJobPayload) => Promise<void>;
 }
 
 function jobTrace(
@@ -221,13 +227,17 @@ function knowledgeSyncJob(d: JobBodyDeps): JobDefinition<SyncJobPayload> {
 
 /** Initial / refresh scan of a connected repo: spec + contracts, the gate drift
  *  baseline, AND the Code Quality analyze pass — all via runBaseline. */
-function repoBaselineJob(db: EeDb): JobDefinition<BaselineJobPayload> {
+function repoBaselineJob(
+  db: EeDb,
+  onSettled?: (payload: BaselineJobPayload) => Promise<void>,
+): JobDefinition<BaselineJobPayload> {
   return {
     type: REPO_BASELINE_TASK,
     title: REPO_BASELINE_TITLE,
     steps: REPO_BASELINE_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    onSettled: onSettled ? (ctx) => onSettled(ctx.payload) : undefined,
     sentry: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
@@ -454,7 +464,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     noHandleSignals: true,
     taskList: {
       [KNOWLEDGE_SYNC_TASK]: registerJob(rt, knowledgeSyncJob(bodyDeps)),
-      [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db)),
+      [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
       [WORKSPACE_CONTRACTS_TASK]: registerJob(rt, workspaceContractsJob(reverifyReposIfWorkspaceChanged)),
       // Factory form: read the current re-gate seam per invocation (github-app may
       // set it after the worker starts).

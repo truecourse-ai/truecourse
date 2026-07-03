@@ -74,6 +74,14 @@ export interface JobDefinition<P extends { jobId: string }> {
   run(ctx: JobContext<P>): Promise<JobOutcome>;
   /** Failure notification wording (delivery + shape are identical for all jobs). */
   onError(err: Error, payload: P): JobNotification;
+  /**
+   * Optional side-effect run AFTER the row reaches its terminal state (succeeded
+   * OR failed) and the notification is posted — so the single-flight key is now
+   * free. The repo-baseline uses it to replay a coalesced follow-up push. It must
+   * be best-effort and not throw (a throw would mask the job's own outcome); a
+   * failure still rethrows after it runs.
+   */
+  onSettled?(ctx: JobContext<P>): Promise<void>;
 }
 
 /** The stores the envelope needs — the same for every job. */
@@ -128,6 +136,7 @@ export async function executeJob<P extends { jobId: string }>(
     detail: (key, detail) => tracker.detail(key, detail),
   };
 
+  let failure: unknown = null;
   try {
     const outcome = await def.run(ctx);
     // Terminal job state first (clears the client's activeJobs), then the toast.
@@ -140,8 +149,15 @@ export async function executeJob<P extends { jobId: string }>(
     if (failed) await publishProgress(failed);
     await postNotification(rt, org, def.type, jobId, def.onError(err as Error, payload));
     captureEeException(err, def.sentry(err as Error, payload));
-    throw err; // maxAttempts:1 ⇒ permanent fail, and graphile records it.
+    failure = err;
   }
+
+  // After terminal bookkeeping (row + notification) in BOTH paths, run the
+  // optional settled hook — the single-flight key is now free, so e.g. the
+  // baseline replays a coalesced follow-up push. A failure still rethrows after
+  // (maxAttempts:1 ⇒ permanent fail, and graphile records it).
+  await def.onSettled?.(ctx);
+  if (failure) throw failure;
 }
 
 async function postNotification(
