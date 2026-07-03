@@ -31,6 +31,8 @@ import {
   PR_REGATE_TASK,
   WORKSPACE_CONTRACTS_TASK,
   prRegateJobKey,
+  baselineJobKey,
+  workspaceContractsJobKey,
   type SyncJobPayload,
   type BaselineEnqueueRequest,
 } from './constants.js';
@@ -185,7 +187,7 @@ export async function registerJobs(
   // and the post-contracts chain. Closes over the `runner` assigned just below.
   const enqueueBaseline = async (req: BaselineEnqueueRequest): Promise<string | null> => {
     if (!runner) throw new Error('the background job worker is not running');
-    const key = `${REPO_BASELINE_TASK}:${req.repoFullName}`;
+    const key = baselineJobKey(req.repoFullName);
     let job;
     try {
       job = await jobStore.create({ org: req.workspaceOrgId, type: REPO_BASELINE_TASK, key });
@@ -333,7 +335,7 @@ export async function registerJobs(
     enqueueBaseline,
     enqueueWorkspaceContracts: async (workspaceOrgId) => {
       if (!runner) throw new Error('the background job worker is not running');
-      const key = `${WORKSPACE_CONTRACTS_TASK}:${workspaceOrgId}`;
+      const key = workspaceContractsJobKey(workspaceOrgId);
       const jobId = await ensureContractsJob(WORKSPACE_CONTRACTS_TASK, key, workspaceOrgId);
       await runner.addJob(
         WORKSPACE_CONTRACTS_TASK,

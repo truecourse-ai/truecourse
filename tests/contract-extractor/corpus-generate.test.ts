@@ -671,6 +671,94 @@ describe('generateContractsFromCorpus', () => {
     expect(result.write.proposed.length).toBeGreaterThan(0);
     expect(fs.existsSync(path.join(repo, '.truecourse', 'contracts'))).toBe(false);
   });
+
+  it('passes the GLOBAL reconciled identity list to every generate call (cross-ref context)', async () => {
+    const seen: Array<{ areaId: string; refs: string[] }> = [];
+    const generate: GenerateBatchRunner = async ({ area, targets, referenceable }) => {
+      seen.push({ areaId: area.areaId, refs: (referenceable ?? []).map((r) => `${r.kind}:${r.identity}`) });
+      return { fragments: targets.map((t) => entityFragment(area.docs[0]?.ref ?? area.areaId, t.identity)) };
+    };
+    await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [areaInput('core/users', ['users.md']), areaInput('core/orders', ['orders.md'])],
+      enumerateRunner: enumerateStub({ 'core/users': ['User'], 'core/orders': ['Order'] }),
+      generateRunner: generate,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+    });
+    // Each area's extractor sees BOTH areas' identities — the whole corpus is referenceable.
+    expect(seen).toHaveLength(2);
+    for (const call of seen) {
+      expect(call.refs).toEqual(['Entity:Order', 'Entity:User']);
+    }
+  });
+
+  it('extract cache busts when the global identity list changes (refs may need updating)', async () => {
+    const extracted: string[] = [];
+    const generate: GenerateBatchRunner = async ({ area, targets }) => {
+      extracted.push(area.areaId);
+      return { fragments: targets.map((t) => entityFragment(area.docs[0]?.ref ?? area.areaId, t.identity)) };
+    };
+    const users = areaInput('core/users', ['users.md']);
+    const opts = { repoRoot: repo, generateRunner: generate, disableRepair: true, disableTargetReconciliation: true, disableManifest: true } as const;
+
+    await generateContractsFromCorpus({
+      ...opts,
+      corpusInput: [users, areaInput('core/orders', ['orders.md'])],
+      enumerateRunner: enumerateStub({ 'core/users': ['User'], 'core/orders': ['Order'] }),
+    });
+    expect(extracted.sort()).toEqual(['core/orders', 'core/users']);
+
+    // Only the ORDERS doc changes, and it now enumerates an extra target. The
+    // users area's docs + targets are untouched — but the GLOBAL identity list
+    // grew, so users must re-extract too (its cross-refs may now resolve).
+    extracted.length = 0;
+    const ordersChanged = { ...areaInput('core/orders', ['orders.md']), docs: [{ ...areaInput('core/orders', ['orders.md']).docs[0], content: '# orders.md\nbody v2' }] };
+    await generateContractsFromCorpus({
+      ...opts,
+      corpusInput: [users, ordersChanged],
+      enumerateRunner: enumerateStub({ 'core/users': ['User'], 'core/orders': ['Order', 'Invoice'] }),
+    });
+    expect(extracted.sort()).toEqual(['core/orders', 'core/users']);
+  });
+});
+
+describe('buildCorpusGenerateUserPrompt (referenceable)', () => {
+  it('renders the global identity list with the no-invented-identities rule', async () => {
+    const { buildCorpusGenerateUserPrompt } = await import('../../packages/contract-extractor/src/index.js');
+    const area = areaInput('core/users', ['users.md']);
+    const prompt = buildCorpusGenerateUserPrompt(area, [{ kind: 'Entity', identity: 'User' }], undefined, undefined, [
+      { kind: 'ErrorEnvelope', identity: 'api-error-code-envelope' },
+      { kind: 'Entity', identity: 'User' },
+    ]);
+    expect(prompt).toContain('CROSS-REFERENCEABLE ARTIFACTS');
+    expect(prompt).toContain('ErrorEnvelope: api-error-code-envelope');
+    expect(prompt).toContain('NEVER invent an identity');
+    // Without the list the section is absent (back-compat).
+    expect(buildCorpusGenerateUserPrompt(area, [{ kind: 'Entity', identity: 'User' }])).not.toContain('CROSS-REFERENCEABLE');
+  });
+});
+
+describe('readCachedEnumerateTargets', () => {
+  it('returns null when cold, the canonicalized cached targets after a run', async () => {
+    const { readCachedEnumerateTargets } = await import('../../packages/contract-extractor/src/index.js');
+    const area = areaInput('core/users', ['users.md']);
+    expect(await readCachedEnumerateTargets(repo, area)).toBeNull();
+
+    await generateContractsFromCorpus({
+      repoRoot: repo,
+      corpusInput: [area],
+      enumerateRunner: enumerateStub({ 'core/users': ['User', 'Account'] }),
+      generateRunner: generateAll,
+      disableRepair: true,
+      disableTargetReconciliation: true,
+    });
+    const targets = await readCachedEnumerateTargets(repo, area);
+    expect(targets?.map((t) => coverageKey(t.kind, t.identity)).sort()).toEqual([
+      coverageKey('Entity', 'Account'),
+      coverageKey('Entity', 'User'),
+    ]);
+  });
 });
 
 describe('chunkByHeading', () => {

@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { reconcileTargets } from '../../packages/contract-extractor/src/index.js';
+import { reconcileTargets, planReconcileCalls } from '../../packages/contract-extractor/src/index.js';
 import type { AreaGenInput, ReconcileRunner, TargetSpec } from '../../packages/contract-extractor/src/index.js';
 
 let scope: string;
@@ -130,5 +130,32 @@ describe('reconcileTargets', () => {
     // The arch cluster is a cache hit → only the changed auth cluster re-runs.
     expect(calls).toHaveLength(1);
     expect(calls[0].every((k) => k.startsWith('AuthRequirement'))).toBe(true);
+  });
+});
+
+describe('planReconcileCalls', () => {
+  it('predicts the exact call count of a cold run, and zero after it', async () => {
+    const byArea = [
+      { area: area('core/auth'), targets: [t('AuthRequirement', 'bearer-jwt'), t('AuthRequirement', 'customer-bearer-jwt')] },
+      { area: area('core/architecture'), targets: [t('ArchitectureDecision', 'outbox-pattern'), t('ArchitectureDecision', 'transactional-outbox')] },
+    ];
+    // Cold: two clusters, both cache misses — the run would make 2 calls.
+    expect(await planReconcileCalls(scope, byArea)).toEqual({ clusters: 2, misses: 2 });
+
+    let calls = 0;
+    const runner: ReconcileRunner = async () => {
+      calls++;
+      return { merges: {} };
+    };
+    await reconcileTargets(scope, byArea, { runner });
+    expect(calls).toBe(2); // the plan matched reality
+
+    // Warm: same clusters now cached — a re-run makes 0 calls.
+    expect(await planReconcileCalls(scope, byArea)).toEqual({ clusters: 2, misses: 0 });
+  });
+
+  it('counts no clusters for unmergeable targets', async () => {
+    const byArea = [{ area: area('core/model'), targets: [t('Entity', 'Order'), t('Entity', 'Customer')] }];
+    expect(await planReconcileCalls(scope, byArea)).toEqual({ clusters: 0, misses: 0 });
   });
 });

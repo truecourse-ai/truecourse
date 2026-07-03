@@ -3,6 +3,12 @@
  * reference them without pulling in graphile-worker (only the worker does).
  */
 
+/** A single phase in a job's stepped-progress checklist (popup). */
+export interface JobStepDef {
+  key: string;
+  label: string;
+}
+
 export const KNOWLEDGE_SYNC_TASK = 'knowledge.sync';
 
 export interface SyncJobPayload {
@@ -12,6 +18,28 @@ export interface SyncJobPayload {
 }
 
 export const REPO_BASELINE_TASK = 'repo.baseline';
+
+/** Display title + stepped checklist for the repo-scan job popup. */
+export const REPO_BASELINE_TITLE = 'Scanning repository';
+export const REPO_BASELINE_STEPS: readonly JobStepDef[] = [
+  { key: 'clone', label: 'Cloning repository' },
+  { key: 'spec', label: 'Extracting spec' },
+  { key: 'contracts', label: 'Generating contracts' },
+  { key: 'drift', label: 'Computing drift baseline' },
+  { key: 'analyze', label: 'Analyzing code' },
+];
+
+/** Single-flight key for a repo-baseline job — one scan per repo at a time. */
+export function baselineJobKey(repoFullName: string): string {
+  return `${REPO_BASELINE_TASK}:${repoFullName}`;
+}
+
+/** Display title + stepped checklist for the knowledge-sync job popup. */
+export const KNOWLEDGE_SYNC_TITLE = 'Syncing knowledge';
+export const KNOWLEDGE_SYNC_STEPS: readonly JobStepDef[] = [
+  { key: 'fetch', label: 'Fetching documents' },
+  { key: 'consolidate', label: 'Consolidating spec & contracts' },
+];
 
 /** The intent a dashboard decision hands to the background-task seam when the
  *  spec becomes conflict-free: regenerate the repo's contracts. The runner acts on
@@ -23,6 +51,16 @@ export const REPO_CONTRACTS_TASK = 'repo.contracts';
  *  re-gate exactly that one PR (no repo-wide contract regeneration). Matches the
  *  core `PrRegateTask.type` literal, and is also the graphile task identifier. */
 export const PR_REGATE_TASK = 'pr.regate';
+
+/** Display title + stepped checklist for the PR re-gate job popup. Step keys are
+ *  the gate flow's `GatePhase` literals (github-app), advanced over onPhase. */
+export const PR_REGATE_TITLE = 'Re-gating pull request';
+export const PR_REGATE_STEPS: readonly JobStepDef[] = [
+  { key: 'spec', label: 'Re-checking spec' },
+  { key: 'contracts', label: 'Generating contracts' },
+  { key: 'verify', label: 'Verifying against baseline' },
+  { key: 'verdict', label: 'Posting verdict' },
+];
 
 /** The worker's `pr.regate` task payload (the resolved re-gate target + job id). */
 export interface PrRegateJobPayload {
@@ -47,6 +85,17 @@ export const WORKSPACE_CONTRACTS_TASK = 'workspace.contracts';
 export interface WorkspaceContractsJobPayload {
   jobId: string;
   workspaceOrgId: string;
+}
+
+/** Display title + stepped checklist for the workspace-contracts job popup. */
+export const WORKSPACE_CONTRACTS_TITLE = 'Updating contracts';
+export const WORKSPACE_CONTRACTS_STEPS: readonly JobStepDef[] = [
+  { key: 'contracts', label: 'Refreshing contracts' },
+];
+
+/** Single-flight key for a workspace-contracts refresh — one per workspace. */
+export function workspaceContractsJobKey(workspaceOrgId: string): string {
+  return `${WORKSPACE_CONTRACTS_TASK}:${workspaceOrgId}`;
 }
 
 /** What a caller (connect / push webhook) hands to `enqueueBaseline`. */

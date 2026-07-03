@@ -329,7 +329,7 @@ function sliceDeclaresSubject(slice: SpecSlice, identity: string): boolean {
 // Re-prompt
 // ---------------------------------------------------------------------------
 
-const FIX_SYSTEM_PROMPT = `You are the contract-extraction reviewer. Your job is to fix one previously-extracted contract artifact (or produce one that was missed entirely), given:
+export const FIX_SYSTEM_PROMPT = `You are the contract-extraction reviewer. Your job is to fix one previously-extracted contract artifact (or produce one that was missed entirely), given:
 
   - the source SPEC SLICE the artifact was extracted from,
   - the previous TC SOURCE the extractor produced (may be empty if the artifact was missing entirely),

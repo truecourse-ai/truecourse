@@ -67,6 +67,10 @@ export type GenerateBatchRunner = (input: {
   /** Per-target parser error from a prior round's unparseable fragment (parallel
    *  to `targets`) — attached to that target's line so the model fixes the syntax. */
   errorHints?: (string | undefined)[];
+  /** The global reconciled (kind, identity) list — the identities a cross-ref
+   *  may legally point at. Without it the model invents identities for shared
+   *  artifacts defined in other areas, producing unresolvable references. */
+  referenceable?: { kind: string; identity: string }[];
 }) => Promise<ExtractionResult>;
 
 /** A previously-generated artifact's identity — anchors the enumerate step so it
@@ -290,6 +294,13 @@ export async function generateContractsFromCorpus(
     fallbackModel: models.fallback,
   });
 
+  // The global reconciled identity list — what a cross-ref may point at. Every
+  // area's extractor gets it, so refs to shared artifacts use REAL identities
+  // instead of invented ones. Sorted for a deterministic prompt + cache key.
+  const referenceable = [...new Map(
+    planned.flatMap((p) => p.targets.map((t) => [coverageKey(t.kind, t.identity), { kind: t.kind, identity: t.identity }] as const)),
+  ).values()].sort((a, b) => coverageKey(a.kind, a.identity).localeCompare(coverageKey(b.kind, b.identity)));
+
   // Phase 3 — generate each area's reconciled targets (batch + completeness gate).
   const perArea = await Promise.all(
     planned.map((p) =>
@@ -303,6 +314,7 @@ export async function generateContractsFromCorpus(
         scope: opts.repoRoot,
         cacheEnabled: opts.disableExtractCache !== true,
         prior: opts.prior,
+        referenceable,
       }),
     ),
   );
@@ -434,6 +446,10 @@ interface AreaRunContext {
   cacheEnabled: boolean;
   /** Existing contracts to anchor extraction (Phase 4); undefined = no anchor. */
   prior?: PriorContracts;
+  /** Global reconciled identities cross-refs may point at (sorted). Part of the
+   *  extract cache key: an area's correct refs depend on which shared identities
+   *  exist, so a change here must re-extract. */
+  referenceable: { kind: string; identity: string }[];
 }
 
 interface AreaRunResult {
@@ -455,7 +471,7 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
   // Incremental extract cache: an area whose docs + reconciled targets + prompt
   // are unchanged returns its prior fragments without any LLM call. Progress
   // still advances so the UI reflects the cached contracts immediately.
-  const cacheKey = ctx.cacheEnabled ? extractCacheKey(area, targets, ctx.maxRounds) : null;
+  const cacheKey = ctx.cacheEnabled ? extractCacheKey(area, targets, ctx.maxRounds, ctx.referenceable) : null;
   if (cacheKey) {
     const cached = await getCacheEntry(ctx.scope, EXTRACT_CACHE_NAME, cacheKey);
     if (cached) {
@@ -533,6 +549,7 @@ async function generateAreaTargets(area: AreaGenInput, targets: TargetSpec[], ct
                 ? batch.map((t) => ctx.prior!.bodyByKey.get(coverageKey(t.kind, t.identity)))
                 : undefined,
               errorHints: batch.map((t) => parseErrors.get(coverageKey(t.kind, t.identity))),
+              referenceable: ctx.referenceable,
             }),
           )
           .then((res) => {
@@ -658,15 +675,23 @@ function isValidEnumerateKind(kind: string): boolean {
   return VALID_ENUMERATE_KINDS.has(kind.trim().toLowerCase());
 }
 
-function extractCacheKey(area: AreaGenInput, targets: TargetSpec[], maxRounds: number): string {
+function extractCacheKey(
+  area: AreaGenInput,
+  targets: TargetSpec[],
+  maxRounds: number,
+  referenceable: { kind: string; identity: string }[],
+): string {
   const docMaterial = area.docs
     .map((d) => `${d.ref}:${createHash('sha256').update(d.content).digest('hex')}`)
     .join('|');
   // Reconciled identities decide what we generate; sorted so batch ordering
   // doesn't perturb the key. maxRounds affects how completely gaps get retried.
   const targetMaterial = targets.map((t) => coverageKey(t.kind, t.identity)).sort().join('|');
+  // Cross-refs point at the GLOBAL identity list, so an area's correct output
+  // depends on it: when a shared identity appears/disappears, re-extract.
+  const refMaterial = referenceable.map((r) => coverageKey(r.kind, r.identity)).join('|');
   return createHash('sha256')
-    .update(`${EXTRACT_PROMPT_FINGERPRINT}::r${maxRounds}::${area.areaId}::${docMaterial}::${targetMaterial}`)
+    .update(`${EXTRACT_PROMPT_FINGERPRINT}::r${maxRounds}::${area.areaId}::${docMaterial}::${targetMaterial}::${refMaterial}`)
     .digest('hex');
 }
 
@@ -703,6 +728,23 @@ function enumerateViews(area: AreaGenInput): AreaGenInput[] {
   }
   flush();
   return views.length > 0 ? views : [area];
+}
+
+/**
+ * Estimate support: the CACHED enumerate result for an area, or null when cold.
+ * Same cache read as {@link enumerateCached} and the same canonicalIdentity
+ * mapping the run applies — so a pre-flight estimate can ground itself in the
+ * exact target list a warm run will use. No LLM, no cache writes.
+ */
+export async function readCachedEnumerateTargets(
+  repoRoot: string,
+  area: AreaGenInput,
+): Promise<TargetSpec[] | null> {
+  const cached = await getCacheEntry(repoRoot, ENUMERATE_CACHE_NAME, enumerateCacheKey(area));
+  if (!cached) return null;
+  const parsed = EnumerateResultSchema.safeParse(cached);
+  if (!parsed.success) return null;
+  return parsed.data.targets.map((t) => ({ ...t, identity: canonicalIdentity(t.kind, t.identity) }));
 }
 
 async function enumerateCached(
@@ -831,14 +873,14 @@ function spawnGenerateRunner(
 ): GenerateBatchRunner {
   const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 600_000;
-  return async ({ area, targets, priorBodies, errorHints }) => {
+  return async ({ area, targets, priorBodies, errorHints, referenceable }) => {
     const raw = await transport({
       id: `contract.extract:corpus:${area.areaId}:${targets.map((t) => t.identity).join(',').slice(0, 80)}`,
       stage: 'contract.extract',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: SYSTEM_PROMPT,
-      user: buildCorpusGenerateUserPrompt(area, targets, priorBodies, errorHints),
+      user: buildCorpusGenerateUserPrompt(area, targets, priorBodies, errorHints, referenceable),
       responseFormat: 'json',
       timeoutMs,
     });

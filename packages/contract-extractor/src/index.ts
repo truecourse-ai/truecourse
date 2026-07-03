@@ -73,6 +73,7 @@ export type { TargetSpec, EnumerateResult } from './corpus-prompt.js';
 export { canonicalIdentity, slugIdentity } from './identity.js';
 export {
   reconcileTargets,
+  planReconcileCalls,
   RECONCILE_SYSTEM_PROMPT,
   buildReconcileUserPrompt,
 } from './target-reconciler.js';
@@ -86,7 +87,11 @@ export type { GapJudgeRunner, GapJudgeInput, GapJudgeResult, GapVerdict, GapJudg
 export {
   generateContractsFromCorpus,
   defaultGenerateBatch,
+  readCachedEnumerateTargets,
 } from './corpus-generate.js';
+// Real system-prompt sizes for the pre-flight token estimate (spec-estimate.ts).
+export { SYSTEM_PROMPT as EXTRACT_SYSTEM_PROMPT } from './prompt.js';
+export { FIX_SYSTEM_PROMPT as REPAIR_FIX_SYSTEM_PROMPT } from './repair.js';
 export type {
   EnumerateRunner,
   EnumerateCorrection,

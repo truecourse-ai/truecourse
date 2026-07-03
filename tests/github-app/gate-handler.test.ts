@@ -181,6 +181,21 @@ describe('handlePullRequestGate', () => {
     expect(calls.check.every((c: any) => c.status === 'completed')).toBe(true);
   });
 
+  it('reports the gate phases in order through onPhase when one is provided', async () => {
+    const { octokit } = makeOctokit();
+    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
+    const phases: string[] = [];
+    await handlePullRequestGate(deps, prPayload(), { onPhase: (p) => { phases.push(p); } });
+    expect(phases).toEqual(['spec', 'contracts', 'verify', 'verdict']);
+  });
+
+  it('never requires onPhase — the webhook path passes none and completes normally', async () => {
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
+    await handlePullRequestGate(deps, prPayload()); // no opts at all
+    expect(calls.check).toHaveLength(2); // both Checks completed
+  });
+
   it('passes and posts no inline comments when there is no new drift', async () => {
     const { octokit, calls } = makeOctokit();
     const deps = depsWith(octokit, { baseDrifts: [drift('a')], headDrifts: [drift('a')] });

@@ -167,6 +167,7 @@ export function buildCorpusGenerateUserPrompt(
   targets: TargetSpec[],
   priorBodies?: (string | undefined)[],
   errorHints?: (string | undefined)[],
+  referenceable?: { kind: string; identity: string }[],
 ): string {
   const targetList = targets
     .map((t, i) => {
@@ -190,6 +191,14 @@ export function buildCorpusGenerateUserPrompt(
     `Set each fragment's origin.source to the doc ref you drew it from. Ignore non-spec prose.`,
     `Do NOT emit contracts for anything outside the target list above.`,
   ];
+  if (referenceable && referenceable.length > 0) {
+    parts.push(
+      '',
+      `CROSS-REFERENCEABLE ARTIFACTS — every contract being generated across ALL areas of this repository (kind: identity):`,
+      ...referenceable.map((r) => `  - ${r.kind}: ${r.identity}`),
+      `When you cross-reference an artifact (\`Kind:identity\`), its identity MUST be one from this list (or from your own target list above). NEVER invent an identity — a reference to an unlisted identity will not resolve. The identities used in the system-prompt examples (e.g. error.envelope.standard) are placeholders, NOT real artifacts.`,
+    );
+  }
   const anchors = targets
     .map((t, i) => ({ t, body: priorBodies?.[i] }))
     .filter((a): a is { t: TargetSpec; body: string } => typeof a.body === 'string' && a.body.length > 0);

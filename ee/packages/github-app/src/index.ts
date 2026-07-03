@@ -103,7 +103,9 @@ export async function registerGithubApp(
   setPrReverifier((repoFullName) => reverifyOpenPrs(offerDeps, repoFullName));
   // Targeted variant: re-gate exactly one PR after a PR-scoped decision cleared its
   // last conflict (the `pr.regate` background task). Null until set → SSO-only no-op.
-  setPrRegater((repoFullName, prNumber) => reverifyOnePr(offerDeps, repoFullName, prNumber));
+  setPrRegater((repoFullName, prNumber, onPhase) =>
+    reverifyOnePr(offerDeps, repoFullName, prNumber, onPhase),
+  );
 
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
@@ -271,6 +273,8 @@ export {
   setPrRegater,
   getPrRegater,
   type GateHandlerDeps,
+  type GatePhase,
+  type PrRegater,
 } from './gate-handler.js';
 
 // Phase 5: email notifications

@@ -1,17 +1,18 @@
 /**
- * The in-process graphile-worker runner + the `knowledge.sync` task.
+ * The in-process graphile-worker runner + the four background job definitions.
  *
  * `run()` installs graphile-worker's own schema and starts polling/LISTENing for
- * jobs. The `knowledge.sync` task IS the old inline `/sync` body, now off the
- * request path: it marks the `jobs` row running, drives the connector sync with
- * an `onProgress` callback (→ `jobs.progress` + a live SSE event), and on terminal
- * records a durable `notifications` row + SSE. Single-flight is already guaranteed
- * by the create-time partial-unique index, so the task needs no extra lock.
+ * jobs. Each job type is a {@link JobDefinition} (type + title + steps + run body
+ * + notification wording); the shared {@link executeJob} harness owns the whole
+ * lifecycle envelope identically for all of them — marking the `jobs` row
+ * running → succeeded/failed with live SSE progress, seeding + advancing the
+ * stepped checklist, posting the standardized success/failure notification, and
+ * capturing failures to Sentry. A job body only does the work and returns its
+ * result + success notification.
  *
- * Jobs are enqueued with `maxAttempts: 1` (see the /sync route): a sync failure
- * is terminal and surfaced to the user, who can re-run (idempotent; unchanged
- * pages cost 0 LLM). So a thrown task = a permanent fail, never a silent retry
- * that would double-run and fight the single-flight key.
+ * Jobs are enqueued with `maxAttempts: 1` (see index.ts): a failure is terminal
+ * and surfaced to the user, who can re-run. So a thrown body = a permanent fail,
+ * never a silent retry that would double-run and fight the single-flight key.
  */
 
 import { run, type Runner, type Task } from 'graphile-worker';
@@ -28,17 +29,36 @@ import {
   selectGateStore,
   getPrRegater,
   type BaselineResult,
+  type PrRegater,
 } from '@truecourse/ee-github-app';
 import type { NotificationLevel } from '@truecourse/shared';
-import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
+import { upstreamStatusOf } from '../observability/sentry.js';
 import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from '../knowledge/connectors/registry.js';
 import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
 import { syncWorkspaceKnowledge, SYNC_MSG_CONSOLIDATE } from '../knowledge/sync.js';
 import { CURATE_STEPS, CORPUS_GENERATE_STEPS, VERIFY_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
-import { publishEvent } from './events.js';
-import { JobStepTracker, type StepEmit } from './steps.js';
+import { JobStepTracker } from './steps.js';
+import { executeJob, type JobDefinition, type JobRuntime } from './harness.js';
+import {
+  KNOWLEDGE_SYNC_TASK,
+  KNOWLEDGE_SYNC_TITLE,
+  KNOWLEDGE_SYNC_STEPS,
+  REPO_BASELINE_TASK,
+  REPO_BASELINE_TITLE,
+  REPO_BASELINE_STEPS,
+  WORKSPACE_CONTRACTS_TASK,
+  WORKSPACE_CONTRACTS_TITLE,
+  WORKSPACE_CONTRACTS_STEPS,
+  PR_REGATE_TASK,
+  PR_REGATE_TITLE,
+  PR_REGATE_STEPS,
+  type SyncJobPayload,
+  type BaselineJobPayload,
+  type WorkspaceContractsJobPayload,
+  type PrRegateJobPayload,
+} from './constants.js';
 
 /**
  * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
@@ -57,16 +77,6 @@ function specScanBridge(
     void eeTracker.detail(stepKey, text);
   }, [...stepDefs]);
 }
-import {
-  KNOWLEDGE_SYNC_TASK,
-  REPO_BASELINE_TASK,
-  WORKSPACE_CONTRACTS_TASK,
-  PR_REGATE_TASK,
-  type SyncJobPayload,
-  type BaselineJobPayload,
-  type WorkspaceContractsJobPayload,
-  type PrRegateJobPayload,
-} from './constants.js';
 
 export interface StartWorkerDeps {
   db: EeDb;
@@ -79,18 +89,6 @@ export interface StartWorkerDeps {
    * contracts. Returns the number of repos re-verified (for the sync notice).
    */
   onWorkspaceContractsChanged?: (workspaceOrgId: string) => Promise<number>;
-}
-
-/**
- * Wrap a worker task so every LLM call it makes runs inside an ambient trace
- * context (org / job / repo) the EE transport's recorder tags traces with. The
- * task bodies are unchanged — only the payload→context mapping lives here.
- */
-function withTrace<P>(ctxOf: (payload: P) => TraceContext, task: Task): Task {
-  return (payload, helpers) =>
-    runWithTrace(ctxOf(payload as P), async () => {
-      await task(payload, helpers);
-    });
 }
 
 function jobTrace(
@@ -151,67 +149,258 @@ function contractFailureBody(message: string): string {
     : 'The contracts couldn’t be generated. Open Details for the technical reason.';
 }
 
-/** Deps the `pr.regate` task body needs — the stores + the github-app re-gate
- *  seam (null when the App isn't configured). Injected so the body is unit-testable
- *  without standing up graphile-worker. */
+/** Shared deps the workspace-touching job bodies close over (built in startWorker). */
+interface JobBodyDeps {
+  db: EeDb;
+  integrations: IntegrationStore;
+  knowledge: PgKnowledgeStore;
+  wsContractsHash: (org: string) => Promise<string | null>;
+  reverifyReposIfWorkspaceChanged: (org: string, beforeHash: string | null) => Promise<number>;
+}
+
+// --- Job definitions -------------------------------------------------
+
+/** Connector sync: fetch docs → consolidate spec & contracts, then re-verify repos
+ *  if the workspace contracts changed. */
+function knowledgeSyncJob(d: JobBodyDeps): JobDefinition<SyncJobPayload> {
+  return {
+    type: KNOWLEDGE_SYNC_TASK,
+    title: KNOWLEDGE_SYNC_TITLE,
+    steps: KNOWLEDGE_SYNC_STEPS,
+    org: (p) => p.org,
+    sentry: (err, p) => ({
+      component: 'knowledge',
+      orgId: p.org,
+      connector: p.kind,
+      upstreamStatus: upstreamStatusOf(err),
+      route: 'worker knowledge.sync',
+    }),
+    async run(ctx) {
+      const { org, kind } = ctx.payload;
+      const connector = CONNECTORS[kind as ConnectorKind];
+      if (!connector) throw new Error(`Unknown connector: ${kind}`);
+      const conn = await d.integrations.getConnection(org, kind);
+      if (!conn?.token) throw new Error(`No ${kind} connection.`);
+      const cfg = connectorConfig(connector, conn.config, conn.token);
+
+      const beforeHash = await d.wsContractsHash(org);
+      const result = await syncWorkspaceKnowledge(org, d.knowledge, connector, cfg, {
+        onProgress: async (current, total, message) => {
+          if (message === SYNC_MSG_CONSOLIDATE) await ctx.phase('consolidate');
+          else await ctx.phase('fetch', total > 0 ? `${current}/${total} docs` : undefined);
+        },
+        // Curate sub-phases + contract generation both surface on the "consolidate"
+        // step (the bridge mirrors both step sets, so it shows N/M docs then the
+        // per-area contract counts).
+        tracker: specScanBridge(ctx.tracker, 'consolidate', [...CURATE_STEPS, ...CORPUS_GENERATE_STEPS]),
+      });
+
+      const reverified = await d.reverifyReposIfWorkspaceChanged(org, beforeHash);
+      return {
+        result: { synced: result.synced },
+        notification: {
+          level: 'success',
+          title: 'Knowledge sync complete',
+          body: `Synced ${result.synced} document${result.synced === 1 ? '' : 's'}.${
+            reverified > 0
+              ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'} against the updated contracts.`
+              : ''
+          }`,
+          data: { synced: result.synced, reverified },
+        },
+      };
+    },
+    onError: (err) => ({
+      level: 'error',
+      title: 'Knowledge sync failed',
+      body: 'The sync didn’t finish. Open Details for the technical reason.',
+      data: { detail: err.message },
+    }),
+  };
+}
+
+/** Initial / refresh scan of a connected repo: spec + contracts, the gate drift
+ *  baseline, AND the Code Quality analyze pass — all via runBaseline. */
+function repoBaselineJob(db: EeDb): JobDefinition<BaselineJobPayload> {
+  return {
+    type: REPO_BASELINE_TASK,
+    title: REPO_BASELINE_TITLE,
+    steps: REPO_BASELINE_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      route: 'worker repo.baseline',
+    }),
+    async run(ctx) {
+      const { repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
+        ctx.payload;
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      const auth = createGithubAuth(cfg);
+      const store = selectGateStore(db);
+      // Per-workspace toggle: LLM code-analysis rules run only when opted in.
+      const enableLlmAnalysis = await new WorkspaceSettingsStore(db).codeAnalysisLlm(workspaceOrgId);
+      const req = { repoFullName, installationId, defaultBranch, commitSha, force, enableLlmAnalysis };
+
+      const result = await runBaseline(
+        {
+          store,
+          auth,
+          octokitFor: (id) => installationOctokit(cfg, id),
+          onPhase: (phase) => ctx.phase(phase),
+          specTracker: specScanBridge(ctx.tracker, 'spec'),
+          generateTracker: specScanBridge(ctx.tracker, 'contracts', CORPUS_GENERATE_STEPS),
+          driftTracker: specScanBridge(ctx.tracker, 'drift', VERIFY_STEPS),
+        },
+        req,
+      );
+
+      // Quiet runs (the workspace→repos ripple) suppress the SUCCESS toast — one KB
+      // sync re-verifying N repos shouldn't fan out N notifications. The job still
+      // tracks (popup) and FAILURES still notify (onError, unconditionally).
+      if (quiet) return { result: { repoFullName }, notification: null };
+      const notice = baselineNotice(repoFullName, result);
+      return {
+        result: { repoFullName },
+        notification: {
+          level: notice.level,
+          title: notice.title,
+          body: notice.body,
+          data: { repoFullName },
+        },
+      };
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Repository scan failed — ${p.repoFullName}`,
+      body: 'The scan didn’t finish. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, detail: err.message },
+    }),
+  };
+}
+
+/** Refresh the workspace `.tc` corpus after a Knowledge decision, then re-verify
+ *  repos if the workspace contracts changed. */
+function workspaceContractsJob(
+  reverifyReposIfWorkspaceChanged: (org: string, beforeHash: string | null) => Promise<number>,
+): JobDefinition<WorkspaceContractsJobPayload> {
+  return {
+    type: WORKSPACE_CONTRACTS_TASK,
+    title: WORKSPACE_CONTRACTS_TITLE,
+    steps: WORKSPACE_CONTRACTS_STEPS,
+    org: (p) => p.workspaceOrgId,
+    sentry: (_err, p) => ({
+      component: 'knowledge',
+      orgId: p.workspaceOrgId,
+      route: 'worker workspace.contracts',
+    }),
+    async run(ctx) {
+      await ctx.phase('contracts');
+      const reverified = await reverifyReposIfWorkspaceChanged(ctx.payload.workspaceOrgId, null);
+      return {
+        result: {},
+        notification: {
+          level: 'success',
+          title: 'Workspace contracts refreshed',
+          body: `Knowledge contracts are regenerated on sync.${
+            reverified > 0 ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'}.` : ''
+          }`,
+          data: { reverified },
+        },
+      };
+    },
+    onError: (err) => ({
+      level: 'error',
+      title: 'Contract generation failed — Workspace Knowledge',
+      body: contractFailureBody(err.message),
+      data: { detail: err.message },
+    }),
+  };
+}
+
+/**
+ * Re-gate one PR after a PR-scoped decision cleared its last conflict. The
+ * `regate` seam streams the gate's coarse phases (spec → contracts → verify →
+ * verdict) onto the popup. A null regater means the GitHub App isn't configured;
+ * that's a terminal failure (same shape as baseline's missing-config throw).
+ */
+export function prRegateJob(regate: PrRegater | null): JobDefinition<PrRegateJobPayload> {
+  return {
+    type: PR_REGATE_TASK,
+    title: PR_REGATE_TITLE,
+    steps: PR_REGATE_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName }),
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      pr: p.prNumber,
+      route: 'worker pr.regate',
+    }),
+    async run(ctx) {
+      const { repoFullName, prNumber } = ctx.payload;
+      if (!regate) throw new Error('the GitHub App is not configured');
+      await regate(repoFullName, prNumber, (phase) => ctx.phase(phase));
+      return {
+        result: { repoFullName, prNumber },
+        notification: {
+          level: 'success',
+          title: 'PR re-gated',
+          body: `${repoFullName} — PR #${prNumber} re-gated after conflict resolution.`,
+          data: { repoFullName, prNumber },
+        },
+      };
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `PR re-gate failed — ${p.repoFullName}`,
+      body: 'The re-gate didn’t finish. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, prNumber: p.prNumber, detail: err.message },
+    }),
+  };
+}
+
+/**
+ * Wrap a job definition as a graphile task: resolve the payload → ambient trace
+ * context (org / job / repo) the EE transport tags LLM traces with, then run the
+ * shared lifecycle. A definition factory (vs a plain definition) is resolved
+ * per-invocation, so pr.regate reads the current `getPrRegater()` seam each run.
+ */
+function registerJob<P extends { jobId: string }>(
+  rt: JobRuntime,
+  defOrFactory: JobDefinition<P> | ((payload: P) => JobDefinition<P>),
+): Task {
+  return (rawPayload) => {
+    const payload = rawPayload as P;
+    const def = typeof defOrFactory === 'function' ? defOrFactory(payload) : defOrFactory;
+    const trace = jobTrace(def.org(payload), payload.jobId, def.traceMeta?.(payload));
+    return runWithTrace(trace, () => executeJob(rt, def, payload));
+  };
+}
+
+/** Deps the exported `runPrRegate` test seam needs — the stores + the github-app
+ *  re-gate seam (null when the App isn't configured). */
 export interface RunPrRegateDeps {
   db: EeDb;
   jobStore: JobStore;
   notifications: NotificationStore;
-  regate: ((repoFullName: string, prNumber: number) => Promise<void>) | null;
+  regate: PrRegater | null;
 }
 
 /**
- * The `pr.regate` task body: re-gate exactly one PR after a PR-scoped decision
- * cleared its last conflict. Mirrors `repo.baseline` — mark running, do the work,
- * mark succeeded/failed, and post a durable notification (+ live SSE) either way.
- * A null regater means the GitHub App isn't configured; that's a terminal failure
- * (same shape as baseline's missing-config throw), never a silent success.
+ * Run the `pr.regate` body directly (unit-testable without graphile-worker). A
+ * thin wrapper over the harness so tests keep a stable entry point.
  */
 export async function runPrRegate(deps: RunPrRegateDeps, payload: PrRegateJobPayload): Promise<void> {
-  const { db, jobStore, notifications } = deps;
-  const { jobId, workspaceOrgId, repoFullName, prNumber } = payload;
-
-  const running = await jobStore.markRunning(jobId);
-  if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-  try {
-    if (!deps.regate) throw new Error('the GitHub App is not configured');
-    await deps.regate(repoFullName, prNumber);
-
-    const done = await jobStore.markSucceeded(jobId, { repoFullName, prNumber });
-    if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-    const note = await notifications.add({
-      org: workspaceOrgId,
-      kind: PR_REGATE_TASK,
-      level: 'success',
-      title: 'PR re-gated',
-      body: `${repoFullName} — PR #${prNumber} re-gated after conflict resolution.`,
-      data: { jobId, repoFullName, prNumber },
-    });
-    await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-  } catch (err) {
-    const message = (err as Error).message;
-    const failed = await jobStore.markFailed(jobId, message);
-    const note = await notifications.add({
-      org: workspaceOrgId,
-      kind: PR_REGATE_TASK,
-      level: 'error',
-      title: `PR re-gate failed — ${repoFullName}`,
-      body: 'The re-gate didn’t finish. Open Details for the technical reason.',
-      data: { jobId, repoFullName, prNumber, detail: message },
-    });
-    if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-    await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-    captureEeException(err, {
-      component: 'github-gate',
-      orgId: workspaceOrgId,
-      repo: repoFullName,
-      pr: prNumber,
-      route: 'worker pr.regate',
-    });
-    throw err; // maxAttempts:1 ⇒ permanent fail.
-  }
+  await executeJob(
+    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    prRegateJob(deps.regate),
+    payload,
+  );
 }
 
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
@@ -219,23 +408,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   const notifications = new NotificationStore(db);
   const knowledge = new PgKnowledgeStore(db);
   const integrations = new IntegrationStore(db, deps.masterSecret);
-
-  // A StepTracker emit that persists coarse progress (current/total/message) on
-  // the jobs row and forwards the full stepped checklist on the LIVE SSE event —
-  // steps ride the event only, never the row (see JobProgress.steps).
-  const stepEmit = (jobId: string, org: string): StepEmit => async (snap) => {
-    const job = await jobStore.setProgress(jobId, {
-      current: snap.current,
-      total: snap.total,
-      message: snap.message,
-    });
-    if (job) {
-      await publishEvent(db, org, {
-        type: 'job.progress',
-        job: { ...job, progress: { ...job.progress, steps: snap.steps } },
-      });
-    }
-  };
+  const rt: JobRuntime = { db, jobStore, notifications };
 
   // Fingerprint of a workspace's contract corpus — lets us detect whether a KB
   // sync / workspace decision actually CHANGED the contracts (so we only re-verify
@@ -266,223 +439,13 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
-  const knowledgeSync: Task = async (rawPayload) => {
-    const { jobId, org, kind } = rawPayload as SyncJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, org, { type: 'job.progress', job: running });
-
-    try {
-      const connector = CONNECTORS[kind as ConnectorKind];
-      if (!connector) throw new Error(`Unknown connector: ${kind}`);
-      const conn = await integrations.getConnection(org, kind);
-      if (!conn?.token) throw new Error(`No ${kind} connection.`);
-      const cfg = connectorConfig(connector, conn.config, conn.token);
-
-      const tracker = new JobStepTracker(
-        [
-          { key: 'fetch', label: 'Fetching documents' },
-          { key: 'consolidate', label: 'Consolidating spec & contracts' },
-        ],
-        stepEmit(jobId, org),
-      );
-      const beforeHash = await wsContractsHash(org);
-      const result = await syncWorkspaceKnowledge(org, knowledge, connector, cfg, {
-        onProgress: async (current, total, message) => {
-          if (message === SYNC_MSG_CONSOLIDATE) await tracker.advance('consolidate');
-          else await tracker.advance('fetch', total > 0 ? `${current}/${total} docs` : undefined);
-        },
-        // Curate sub-phases + contract generation both surface on the "consolidate"
-        // step (the bridge mirrors both step sets, so it shows N/M docs then the
-        // per-area contract counts). The old onSlice/onRepair callbacks were dead —
-        // corpus generate reports via the tracker, not per-slice — so they're gone.
-        tracker: specScanBridge(tracker, 'consolidate', [...CURATE_STEPS, ...CORPUS_GENERATE_STEPS]),
-      });
-
-      const reverified = await reverifyReposIfWorkspaceChanged(org, beforeHash);
-      const done = await jobStore.markSucceeded(jobId, { synced: result.synced });
-      const note = await notifications.add({
-        org,
-        kind: KNOWLEDGE_SYNC_TASK,
-        level: 'success',
-        title: 'Knowledge sync complete',
-        body: `Synced ${result.synced} document${result.synced === 1 ? '' : 's'}.${
-          reverified > 0
-            ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'} against the updated contracts.`
-            : ''
-        }`,
-        data: { jobId, synced: result.synced, reverified },
-      });
-      // Terminal job state first (clears the client's activeJobs), then the toast.
-      if (done) await publishEvent(db, org, { type: 'job.progress', job: done });
-      await publishEvent(db, org, { type: 'notification', notification: note, jobId });
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org,
-        kind: KNOWLEDGE_SYNC_TASK,
-        level: 'error',
-        title: 'Knowledge sync failed',
-        body: 'The sync didn’t finish. Open Details for the technical reason.',
-        data: { jobId, detail: message },
-      });
-      if (failed) await publishEvent(db, org, { type: 'job.progress', job: failed });
-      await publishEvent(db, org, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'knowledge',
-        orgId: org,
-        connector: kind,
-        upstreamStatus: upstreamStatusOf(err),
-        route: 'worker knowledge.sync',
-      });
-      throw err; // maxAttempts:1 ⇒ permanent fail (no retry), and graphile records it as failed.
-    }
+  const bodyDeps: JobBodyDeps = {
+    db,
+    integrations,
+    knowledge,
+    wsContractsHash,
+    reverifyReposIfWorkspaceChanged,
   };
-
-  // Initial / refresh scan of a connected repo: generate its spec + contracts, the
-  // gate drift baseline, AND the Code Quality analyze pass (architecture graph +
-  // violations) — all via runBaseline. Triggered on connect AND on default-branch
-  // push, off the request path. The gate store + GitHub auth are rebuilt from db +
-  // env config (cheap).
-  const repoBaseline: Task = async (rawPayload) => {
-    const { jobId, repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
-      rawPayload as BaselineJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [
-        { key: 'clone', label: 'Cloning repository' },
-        { key: 'spec', label: 'Extracting spec' },
-        { key: 'contracts', label: 'Generating contracts' },
-        { key: 'drift', label: 'Computing drift baseline' },
-        { key: 'analyze', label: 'Analyzing code' },
-      ],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
-      const cfg = loadGithubAppConfig();
-      if (!cfg) throw new Error('the GitHub App is not configured');
-      const auth = createGithubAuth(cfg);
-      const store = selectGateStore(db);
-      // Per-workspace toggle: LLM code-analysis rules run only when opted in.
-      const enableLlmAnalysis = await new WorkspaceSettingsStore(db).codeAnalysisLlm(workspaceOrgId);
-      const req = { repoFullName, installationId, defaultBranch, commitSha, force, enableLlmAnalysis };
-
-      const result = await runBaseline(
-        {
-          store,
-          auth,
-          octokitFor: (id) => installationOctokit(cfg, id),
-          onPhase: (phase) => tracker.advance(phase),
-          specTracker: specScanBridge(tracker, 'spec'),
-          generateTracker: specScanBridge(tracker, 'contracts', CORPUS_GENERATE_STEPS),
-          driftTracker: specScanBridge(tracker, 'drift', VERIFY_STEPS),
-        },
-        req,
-      );
-
-      const done = await jobStore.markSucceeded(jobId, { repoFullName });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      // Quiet runs (the workspace→repos ripple) suppress the SUCCESS toast — one KB
-      // sync re-verifying N repos shouldn't fan out N notifications. The job still
-      // tracks (popup) and FAILURES still notify (the catch below, unconditionally).
-      if (!quiet) {
-        const notice = baselineNotice(repoFullName, result);
-        const note = await notifications.add({
-          org: workspaceOrgId,
-          kind: REPO_BASELINE_TASK,
-          level: notice.level,
-          title: notice.title,
-          body: notice.body,
-          data: { jobId, repoFullName },
-        });
-        await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      }
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_BASELINE_TASK,
-        level: 'error',
-        title: `Repository scan failed — ${repoFullName}`,
-        body: 'The scan didn’t finish. Open Details for the technical reason.',
-        data: { jobId, repoFullName, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'github-gate',
-        orgId: workspaceOrgId,
-        repo: repoFullName,
-        route: 'worker repo.baseline',
-      });
-      throw err; // maxAttempts:1 ⇒ permanent fail.
-    }
-  };
-
-  // Workspace contracts are (re)generated as part of a connector SYNC on the corpus
-  // path (the sync curates the synced docs + generates the `.tc` corpus together),
-  // so there is no standalone generate-from-stored-state step. This job now only
-  // re-verifies connected repos if the workspace contracts changed since enqueue.
-  const workspaceContracts: Task = async (rawPayload) => {
-    const { jobId, workspaceOrgId } = rawPayload as WorkspaceContractsJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [{ key: 'contracts', label: 'Refreshing contracts' }],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
-      await tracker.advance('contracts');
-      const reverified = await reverifyReposIfWorkspaceChanged(workspaceOrgId, null);
-      const done = await jobStore.markSucceeded(jobId, {});
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: WORKSPACE_CONTRACTS_TASK,
-        level: 'success',
-        title: 'Workspace contracts refreshed',
-        body: `Knowledge contracts are regenerated on sync.${
-          reverified > 0 ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'}.` : ''
-        }`,
-        data: { jobId, reverified },
-      });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: WORKSPACE_CONTRACTS_TASK,
-        level: 'error',
-        title: 'Contract generation failed — Workspace Knowledge',
-        body: contractFailureBody(message),
-        data: { jobId, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'knowledge',
-        orgId: workspaceOrgId,
-        route: 'worker workspace.contracts',
-      });
-      throw err;
-    }
-  };
-
-  // Re-gate one PR after a PR-scoped decision cleared its last conflict. Reads the
-  // github-app seam here (in the worker), not at enqueue time, so the enqueue stays
-  // dependency-free; the body itself lives in `runPrRegate` for unit-testability.
-  const prRegate: Task = (rawPayload) =>
-    runPrRegate({ db, jobStore, notifications, regate: getPrRegater() }, rawPayload as PrRegateJobPayload);
 
   const runner = await run({
     connectionString: deps.connectionString,
@@ -490,22 +453,12 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     // ee-server owns SIGTERM/SIGINT (sentry flush + runner.stop in registerJobs).
     noHandleSignals: true,
     taskList: {
-      [KNOWLEDGE_SYNC_TASK]: withTrace<SyncJobPayload>(
-        (p) => jobTrace(p.org, p.jobId),
-        knowledgeSync,
-      ),
-      [REPO_BASELINE_TASK]: withTrace<BaselineJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoFullName, commitSha: p.commitSha }),
-        repoBaseline,
-      ),
-      [WORKSPACE_CONTRACTS_TASK]: withTrace<WorkspaceContractsJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId),
-        workspaceContracts,
-      ),
-      [PR_REGATE_TASK]: withTrace<PrRegateJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoFullName }),
-        prRegate,
-      ),
+      [KNOWLEDGE_SYNC_TASK]: registerJob(rt, knowledgeSyncJob(bodyDeps)),
+      [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db)),
+      [WORKSPACE_CONTRACTS_TASK]: registerJob(rt, workspaceContractsJob(reverifyReposIfWorkspaceChanged)),
+      // Factory form: read the current re-gate seam per invocation (github-app may
+      // set it after the worker starts).
+      [PR_REGATE_TASK]: registerJob(rt, () => prRegateJob(getPrRegater())),
     },
   });
   log.info('[ee-jobs] worker runner started');

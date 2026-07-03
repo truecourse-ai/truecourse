@@ -72,7 +72,7 @@ describe('pr.regate — enqueue single-flight (per repo AND PR)', () => {
 });
 
 describe('runPrRegate — worker body', () => {
-  it('calls the regater, completes the job, and emits a success notification', async () => {
+  it('drives the stepped progress, completes the job, and emits a success notification', async () => {
     const jobStore = new JobStore(db);
     const notifications = new NotificationStore(db);
     const job = await jobStore.create({
@@ -81,18 +81,43 @@ describe('runPrRegate — worker body', () => {
       key: prRegateJobKey('acme/api', 7),
     });
 
-    const regate = vi.fn().mockResolvedValue(undefined);
+    // The re-gate seam drives the gate's coarse phases; capture the job row's
+    // progress after each so we can assert the checklist advances over the same
+    // store the popup reads.
+    const progressAfter: Array<{ current: number; total: number; message: string | null }> = [];
+    const regate = vi.fn(
+      async (_repo: string, _pr: number, onPhase?: (p: string) => void | Promise<void>) => {
+        for (const phase of ['spec', 'contracts', 'verify', 'verdict']) {
+          await onPhase?.(phase);
+          const j = await jobStore.get(job.id);
+          if (j) progressAfter.push({ ...j.progress });
+        }
+      },
+    );
+
     await runPrRegate(
       { db, jobStore, notifications, regate },
       { jobId: job.id, workspaceOrgId: ORG, repoFullName: 'acme/api', prNumber: 7 },
     );
 
-    expect(regate).toHaveBeenCalledWith('acme/api', 7);
+    // The re-gate is invoked with an onPhase callback (steps flow through it).
+    expect(regate).toHaveBeenCalledWith('acme/api', 7, expect.any(Function));
+
+    // Four phases advanced the checklist, in order, over the full step count.
+    expect(progressAfter.map((p) => p.message)).toEqual([
+      'Re-checking spec',
+      'Generating contracts',
+      'Verifying against baseline',
+      'Posting verdict',
+    ]);
+    expect(progressAfter.every((p) => p.total === 4)).toBe(true);
+    expect(progressAfter.map((p) => p.current)).toEqual([0, 1, 2, 3]);
 
     const done = await jobStore.get(job.id);
     expect(done?.status).toBe('succeeded');
     expect(done?.result).toEqual({ repoFullName: 'acme/api', prNumber: 7 });
 
+    // Baseline parity: success posts a durable notification (the client toasts it).
     const notes = await notifications.listForOrg(ORG);
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({

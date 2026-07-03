@@ -8,43 +8,48 @@
  * Deterministic, no LLM, no transport:
  *  - SCAN is accurate in CALL COUNT (discovery + the same deterministic prefilter
  *    the real run uses); token sizes are heuristic.
- *  - GENERATE is heuristic: extract (the dominant Opus stage) scales with the
- *    enumerated TARGET count, which isn't known until enumerate runs — so we
- *    approximate it from area/doc sizes and widen the range. A precise,
- *    enumerate-grounded estimate is a follow-up.
+ *  - GENERATE grounds itself in the caches where they're warm: a warm enumerate
+ *    cache gives the EXACT target list a run will use (same key, same
+ *    canonicalization) → exact extract batches, zero enumerate calls for that
+ *    area; when every area is warm the reconcile stage is exact too (the same
+ *    cluster + per-cluster cache check the run makes). Cold areas fall back to
+ *    the size heuristics, surfaced as ranges.
  *
- * Per-stage system-prompt sizes are coarse constants (documented below); the
- * body sizes (doc/area chars) are real and dominate, which is what matters for a
- * "is this a big run?" confirm gate.
+ * Per-stage system-prompt sizes are the REAL prompt constants (imported from the
+ * packages that send them), so they can't drift from what a run actually pays.
+ * The body sizes (doc/area chars) are real and dominate.
  */
 
-import { discoverDocs, prefilterDocs, readRelevanceCache, isAreaTagCached } from '@truecourse/spec-consolidator';
+import {
+  discoverDocs,
+  prefilterDocs,
+  readRelevanceCache,
+  isAreaTagCached,
+  RELEVANCE_SYSTEM_PROMPT,
+  AREA_TAGGER_SYSTEM_PROMPT,
+  VOCAB_NORMALIZER_SYSTEM_PROMPT,
+  CHAIN_DETECTION_SYSTEM_PROMPT,
+  OVERLAP_DETECTOR_SYSTEM_PROMPT,
+} from '@truecourse/spec-consolidator';
 import {
   readCorpusForGenerate,
   defaultGenerateBatch,
   classifyAreas,
   readManifest,
+  readCachedEnumerateTargets,
+  planReconcileCalls,
+  ENUMERATE_SYSTEM_PROMPT,
+  RECONCILE_SYSTEM_PROMPT,
+  EXTRACT_SYSTEM_PROMPT,
+  REPAIR_FIX_SYSTEM_PROMPT,
+  GAP_JUDGE_SYSTEM_PROMPT,
   type AreaGenInput,
+  type TargetSpec,
 } from '@truecourse/contract-extractor';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
 import type { PriceTable } from './model-prices.js';
-
-// Coarse per-stage system-prompt token sizes (the body dominates; these only
-// need to be the right order of magnitude for a confirm gate).
-const SYS = {
-  relevance: 350,
-  areaTag: 550,
-  vocab: 300,
-  relation: 800,
-  overlap: 500,
-  enumerate: 600,
-  reconcile: 500,
-  extract: 4000, // the generate system prompt is large
-  repair: 4000,
-  gapJudge: 700,
-} as const;
 
 // Heuristic assumptions, surfaced as ranges where they bite.
 const KEEP_RATE = 0.9; // fraction of prefiltered docs the relevance LLM keeps
@@ -130,7 +135,7 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       stage: 'relevance',
       model: resolveModel('spec.relevance', undefined, repoRoot),
       calls: nRelevanceCalls,
-      avgInputTokens: tokensFromChars(SYS.relevance * 4, previewChars()),
+      avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, previewChars()),
       avgOutputTokens: 40,
     },
     {
@@ -141,21 +146,21 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       calls: nAreaTagCalls,
       minCalls: cachedKeptTagMisses,
       maxCalls: cachedKeptTagMisses + nRelevanceCalls,
-      avgInputTokens: tokensFromChars(SYS.areaTag * 4, avgDocChars),
+      avgInputTokens: tokensFromChars(AREA_TAGGER_SYSTEM_PROMPT.length, avgDocChars),
       avgOutputTokens: 80,
     },
     {
       stage: 'vocab',
       model: resolveModel('spec.vocab', undefined, repoRoot),
       calls: hasWork && nKept > 0 ? 1 : 0,
-      avgInputTokens: tokensFromChars(SYS.vocab * 4, 2000),
+      avgInputTokens: tokensFromChars(VOCAB_NORMALIZER_SYSTEM_PROMPT.length, 2000),
       avgOutputTokens: 200,
     },
     {
       stage: 'relation',
       model: resolveModel('spec.relation', undefined, repoRoot),
       calls: hasWork && nKept >= 2 ? 1 : 0,
-      avgInputTokens: tokensFromChars(SYS.relation * 4, nKept * 200),
+      avgInputTokens: tokensFromChars(CHAIN_DETECTION_SYSTEM_PROMPT.length, nKept * 200),
       avgOutputTokens: 200,
     },
     {
@@ -164,7 +169,7 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       calls: overlapCalls,
       minCalls: 0,
       maxCalls: overlapCalls * 2,
-      avgInputTokens: tokensFromChars(SYS.overlap * 4, avgDocChars * 2),
+      avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, avgDocChars * 2),
       avgOutputTokens: 120,
     },
   ];
@@ -191,15 +196,29 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
   const areas = allAreas.filter((a) => changed.has(a.areaId));
   const batchSize = defaultGenerateBatch();
 
+  // Ground in the enumerate cache where warm: the cached list is EXACTLY what a
+  // run will use (same key, same canonicalization), so that area's enumerate
+  // calls drop to 0 and its extract batches stop being guesses.
+  const cachedTargets = new Map<string, TargetSpec[]>();
+  await Promise.all(
+    allAreas.map(async (a) => {
+      const t = await readCachedEnumerateTargets(repoRoot, a);
+      if (t) cachedTargets.set(a.areaId, t);
+    }),
+  );
+
   let enumerateCalls = 0;
   let extractCalls = 0;
   let extractInputCharsTotal = 0;
+  let changedTargetsTotal = 0;
   for (const area of areas) {
     const chars = areaChars(area);
-    const views = Math.max(1, Math.ceil(chars / 48_000)); // mirrors ENUMERATE_AREA_BUDGET
-    enumerateCalls += views;
-    // Heuristic target count for the area → extract batches × retry amplification.
-    const targets = Math.max(1, Math.round((chars / 1024) * TARGET_DENSITY_PER_KB));
+    const known = cachedTargets.get(area.areaId);
+    // Warm enumerate cache → the run reads it back, zero enumerate calls.
+    if (!known) enumerateCalls += Math.max(1, Math.ceil(chars / 48_000)); // mirrors ENUMERATE_AREA_BUDGET
+    // Exact target count when warm; density heuristic when cold.
+    const targets = known ? known.length : Math.max(1, Math.round((chars / 1024) * TARGET_DENSITY_PER_KB));
+    changedTargetsTotal += targets;
     const batches = Math.ceil(targets / batchSize);
     extractCalls += batches;
     extractInputCharsTotal += batches * Math.min(chars, 60_000); // area docs re-sent per batch
@@ -207,19 +226,38 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
   const extractCallsPoint = Math.round(extractCalls * RETRY_AMP);
   const avgExtractBodyChars = extractCalls > 0 ? extractInputCharsTotal / extractCalls : 0;
 
+  // Reconcile runs over the GLOBAL target list (all areas), one call per
+  // cluster whose per-cluster cache misses. With every area's enumerate cache
+  // warm we can replay that exactly. Otherwise: bounds from the cluster
+  // structure — each LLM'd cluster has >=2 members, so calls <= distinct/2.
+  let reconcile: Pick<StageCallEstimate, 'calls' | 'minCalls' | 'maxCalls'>;
+  if (areas.length === 0) {
+    reconcile = { calls: 0 };
+  } else if (allAreas.every((a) => cachedTargets.has(a.areaId))) {
+    const plan = await planReconcileCalls(
+      repoRoot,
+      allAreas.map((a) => ({ area: a, targets: cachedTargets.get(a.areaId)! })),
+    );
+    reconcile = { calls: plan.misses };
+  } else {
+    const knownTotal = [...cachedTargets.values()].reduce((n, t) => n + t.length, 0);
+    const distinctCap = Math.ceil((knownTotal + changedTargetsTotal) / 2);
+    reconcile = { calls: Math.min(areas.length, distinctCap), minCalls: 0, maxCalls: distinctCap };
+  }
+
   const stages: StageCallEstimate[] = [
     {
       stage: 'enumerate',
       model: resolveModel('contract.enumerate', undefined, repoRoot),
       calls: enumerateCalls,
-      avgInputTokens: tokensFromChars(SYS.enumerate * 4, 48_000),
+      avgInputTokens: tokensFromChars(ENUMERATE_SYSTEM_PROMPT.length, 48_000),
       avgOutputTokens: 400,
     },
     {
       stage: 'reconcile',
       model: resolveModel('contract.reconcile', undefined, repoRoot),
-      calls: areas.length > 0 ? 1 : 0,
-      avgInputTokens: tokensFromChars(SYS.reconcile * 4, areas.length * 300),
+      ...reconcile,
+      avgInputTokens: tokensFromChars(RECONCILE_SYSTEM_PROMPT.length, areas.length * 300),
       avgOutputTokens: 300,
     },
     {
@@ -228,7 +266,7 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
       calls: extractCallsPoint,
       minCalls: extractCalls,
       maxCalls: Math.round(extractCalls * (1 + 2)), // up to maxRetryRounds=2 extra rounds
-      avgInputTokens: tokensFromChars(SYS.extract * 4, avgExtractBodyChars),
+      avgInputTokens: tokensFromChars(EXTRACT_SYSTEM_PROMPT.length, avgExtractBodyChars),
       avgOutputTokens: batchSize * 250,
     },
     {
@@ -238,17 +276,18 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
       calls: Math.ceil(areas.length * GAP_AREA_FRACTION),
       minCalls: 0,
       maxCalls: areas.length,
-      avgInputTokens: tokensFromChars(SYS.gapJudge * 4, avgExtractBodyChars / 2),
+      avgInputTokens: tokensFromChars(GAP_JUDGE_SYSTEM_PROMPT.length, avgExtractBodyChars / 2),
       avgOutputTokens: 200,
     },
     {
       // Parse-repair: only the rare malformed artifact, retried (mostly sonnet).
+      // Repair sends the FULL extract system prompt plus its fix preamble.
       stage: 'repairParse',
       model: resolveModel('contract.repairParse', undefined, repoRoot),
       calls: Math.ceil(extractCallsPoint * MALFORMED_RATE),
       minCalls: 0,
       maxCalls: Math.ceil(extractCallsPoint * MALFORMED_RATE) * PARSE_REPAIR_ATTEMPTS,
-      avgInputTokens: tokensFromChars(SYS.repair * 4, avgExtractBodyChars),
+      avgInputTokens: tokensFromChars(EXTRACT_SYSTEM_PROMPT.length + REPAIR_FIX_SYSTEM_PROMPT.length, avgExtractBodyChars),
       avgOutputTokens: 400,
     },
   ];

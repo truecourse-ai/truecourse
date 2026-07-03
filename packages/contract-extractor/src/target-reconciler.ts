@@ -128,6 +128,36 @@ export async function reconcileTargets(
 }
 
 /**
+ * Estimate support: how many LLM calls {@link reconcileTargets} would make for
+ * these targets — the same flatten → cluster pipeline, checking each cluster
+ * against the same per-cluster cache. `misses` is the exact call count for a
+ * warm run. No LLM, no cache writes.
+ */
+export async function planReconcileCalls(
+  scope: string,
+  byArea: AreaTargets[],
+): Promise<{ clusters: number; misses: number }> {
+  const distinct = new Map<string, TargetSpec>();
+  for (const { targets } of byArea) {
+    for (const t of targets) {
+      const k = coverageKey(t.kind, t.identity);
+      if (!distinct.has(k)) distinct.set(k, t);
+    }
+  }
+  if (distinct.size < 2) return { clusters: 0, misses: 0 };
+  let clusters = 0;
+  let misses = 0;
+  for (const cluster of clusterCandidates(distinct)) {
+    clusters++;
+    const input: ReconcileRunnerInput = {
+      targets: cluster.map((t) => ({ kind: t.kind, identity: t.identity, hint: t.hint })),
+    };
+    if ((await readCache(scope, computeCacheKey(input))) === null) misses++;
+  }
+  return { clusters, misses };
+}
+
+/**
  * Group distinct targets into deterministic candidate clusters for the semantic
  * merge: same KIND, connected (transitively) by a shared significant token
  * (>=3 chars). Only clusters with >=2 members are returned — a lone target has

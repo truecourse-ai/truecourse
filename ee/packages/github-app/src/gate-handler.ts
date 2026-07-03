@@ -77,10 +77,17 @@ export interface GateHandlerDeps {
   codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
 
+/**
+ * The coarse phases a re-gate reports to the EE job popup. Emitted only when a
+ * caller threads `onPhase` (the `pr.regate` background job); the webhook-driven
+ * gate passes nothing, so every emit is a no-op and behavior is unchanged.
+ */
+export type GatePhase = 'spec' | 'contracts' | 'verify' | 'verdict';
+
 export async function handlePullRequestGate(
   deps: GateHandlerDeps,
   payload: PullRequestPayload,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; onPhase?: (phase: GatePhase) => void | Promise<void> } = {},
 ): Promise<void> {
   if (!GATE_ACTIONS.includes(payload.action)) return;
   if (!payload.installation) return;
@@ -119,6 +126,7 @@ export async function handlePullRequestGate(
     // Did the PR touch any spec docs? If not, the gate verifies the head's code
     // against the base's resolved contracts (no re-scan). If so, it scans the
     // head for its own contracts (the cold path).
+    await opts.onPhase?.('spec');
     const specChanged =
       detectSpecDocChanges(await listPrFiles(octokit, coords, prNumber)).length > 0;
 
@@ -129,6 +137,7 @@ export async function handlePullRequestGate(
     const runVerify = deps.runVerify ?? runGateVerify;
     let output: GateVerifyOutput;
     try {
+      await opts.onPhase?.('contracts');
       output = await runVerify(
         { store: deps.store, auth: deps.auth, verify: deps.verify, scanPipeline: deps.scanPipeline },
         {
@@ -156,6 +165,7 @@ export async function handlePullRequestGate(
       return;
     }
 
+    await opts.onPhase?.('verify');
     const headSha = output.headSha ?? eventHeadSha;
     const decision = decideGate(output.baseDrifts, output.headDrifts, {
       blocking: link.blocking,
@@ -170,6 +180,7 @@ export async function handlePullRequestGate(
 
     // Authoritative: post the completed Check (anchored to the sha we verified)
     // before any cosmetic surface.
+    await opts.onPhase?.('verdict');
     await postCheck(
       octokit,
       coords,
@@ -379,6 +390,7 @@ export async function reverifyOnePr(
   deps: GateHandlerDeps,
   repoFullName: string,
   prNumber: number,
+  onPhase?: (phase: GatePhase) => void | Promise<void>,
 ): Promise<void> {
   const link = await deps.store.getRepo(repoFullName);
   if (!link || !link.enabled) return;
@@ -387,7 +399,7 @@ export async function reverifyOnePr(
   const pr = (await listOpenPrs(octokit, coords)).find((p) => p.number === prNumber);
   if (!pr) return;
   const payload = synthesizePrEvent(repoFullName, link.defaultBranch, link.installationId, pr);
-  await handlePullRequestGate(deps, payload, { force: true });
+  await handlePullRequestGate(deps, payload, { force: true, onPhase });
 }
 
 /** Build a synthetic `synchronize` PR event from a listed open PR, for a forced re-gate. */
@@ -439,13 +451,17 @@ export function getPrReverifier(): ((repoFullName: string) => Promise<void>) | n
 
 // Targeted analog of the reverifier seam: the EE jobs layer's `pr.regate` task
 // re-gates ONE PR through this, without ee-server reaching into the gate's deps.
-// `registerGithubApp` sets it (closing over the gate deps); null → a no-op.
-let prRegater: ((repoFullName: string, prNumber: number) => Promise<void>) | null = null;
-export function setPrRegater(
-  fn: ((repoFullName: string, prNumber: number) => Promise<void>) | null,
-): void {
+// `registerGithubApp` sets it (closing over the gate deps); null → a no-op. The
+// optional `onPhase` streams the re-gate's coarse phases to the job popup.
+export type PrRegater = (
+  repoFullName: string,
+  prNumber: number,
+  onPhase?: (phase: GatePhase) => void | Promise<void>,
+) => Promise<void>;
+let prRegater: PrRegater | null = null;
+export function setPrRegater(fn: PrRegater | null): void {
   prRegater = fn;
 }
-export function getPrRegater(): ((repoFullName: string, prNumber: number) => Promise<void>) | null {
+export function getPrRegater(): PrRegater | null {
   return prRegater;
 }
