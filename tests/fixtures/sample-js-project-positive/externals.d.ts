@@ -119,6 +119,17 @@ declare module 'sample-crypto-shim' {
   export function hashLegacy(input: string, rounds: number): string;
 }
 
+declare module 'semver' {
+  export function satisfies(version: string, range: string): boolean;
+  export function gt(a: string, b: string): boolean;
+  export function valid(version: string): string | null;
+}
+
+declare module '@sentry/node' {
+  export function captureException(error: unknown): string;
+  export function init(options: Record<string, unknown>): void;
+}
+
 declare module 'zod' {
   type ZodTypeAny = unknown;
   interface ZodString { uuid(): ZodString; min(n: number): ZodString }
