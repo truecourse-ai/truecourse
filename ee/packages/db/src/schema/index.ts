@@ -18,7 +18,7 @@ export * from './jobs.js';
 export * from './traces.js';
 export * from './settings.js';
 
-import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions } from './github.js';
+import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions, ghPrs } from './github.js';
 import { llmProviderConfig } from './llm.js';
 import { content } from './content.js';
 import { verifySnapshots } from './verify.js';
@@ -39,6 +39,7 @@ export const schema = {
   ghBaselines,
   ghRuns,
   ghInferredActions,
+  ghPrs,
   llmProviderConfig,
   content,
   verifySnapshots,

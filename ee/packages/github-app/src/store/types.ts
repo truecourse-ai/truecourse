@@ -58,6 +58,20 @@ export interface BaselineRecord {
   capturedAt: string;
 }
 
+/** Open/closed/merged lifecycle of a PR (`merged` = closed after merging). */
+export type PrState = 'open' | 'closed' | 'merged';
+
+/** A PR's tracked state, upserted from every pull_request webhook. */
+export interface PrRecord {
+  repoFullName: string;
+  prNumber: number;
+  /** PR title at the last webhook; null when the payload carried none. */
+  title: string | null;
+  state: PrState;
+  headSha: string;
+  updatedAt: string;
+}
+
 /** A recorded gate run on a PR (Phase 4 fills in inline-comment details). */
 export interface GateRunRecord {
   id: string;
@@ -99,4 +113,10 @@ export interface GateStore {
   recordRun(rec: GateRunRecord): Promise<void>;
   /** Most-recent-first, capped at `limit` (default 50). */
   listRuns(repoFullName: string, limit?: number): Promise<GateRunRecord[]>;
+
+  // --- PR state ---
+  /** Insert or update a PR's tracked state (keyed by repo + number). */
+  upsertPr(rec: PrRecord): Promise<void>;
+  /** Every tracked PR for a repo (used to annotate the runs feed with state). */
+  listPrs(repoFullName: string): Promise<PrRecord[]>;
 }

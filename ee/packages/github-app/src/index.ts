@@ -28,6 +28,7 @@ import {
   setPrRegater,
 } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
+import { upsertPrState } from './pr-state.js';
 import { createEmailNotifier } from './email.js';
 import { reportGithubError } from './observability.js';
 
@@ -134,6 +135,11 @@ export async function registerGithubApp(
       // automatically when the PR changes them — and offer an infer run (Phase 3).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
+        // Track the PR's open/closed/merged state for the dashboard feed first —
+        // independent of the gate/infer outcomes below, and non-fatal on failure.
+        void upsertPrState(store, payload).catch((err) =>
+          reportGithubError(store, 'pr state upsert failed', ctx, err),
+        );
         // Merge/close: promote (merged) or discard (unmerged) the PR's decisions
         // overlay + clean up its PR-scoped Code Quality diff. Neither gate nor infer
         // reacts to `closed`, so handle it here and stop.
@@ -195,6 +201,7 @@ export type {
 export { createConnectRouter } from './connect.js';
 export { runBaseline, resolveMergedPr, resolveMergeAnchor, type BaselineResult } from './baseline.js';
 export { handlePullRequestClosed } from './pr-closed.js';
+export { upsertPrState, prStateFromPayload } from './pr-state.js';
 export { loadGithubAppConfig } from './config.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';

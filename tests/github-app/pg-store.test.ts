@@ -130,7 +130,36 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
     expect(await store.listRuns('acme/api', 1)).toHaveLength(1);
   });
 
-  it('cascades removeInstallation to repos, baselines, and runs', async () => {
+  it('upserts PR state with the composite-key conflict update, scoped per repo', async () => {
+    await store.upsertPr({
+      repoFullName: 'acme/api', prNumber: 7, title: 'Add widget', state: 'open',
+      headSha: 'aaa', updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.upsertPr({
+      repoFullName: 'acme/api', prNumber: 8, title: 'Fix bug', state: 'open',
+      headSha: 'bbb', updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.upsertPr({
+      repoFullName: 'other/web', prNumber: 7, title: 'Unrelated', state: 'closed',
+      headSha: 'ccc', updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    expect((await store.listPrs('acme/api')).map((p) => p.prNumber).sort()).toEqual([7, 8]);
+    expect(await store.listPrs('nope/none')).toEqual([]);
+
+    // Re-upsert #7 merged → updates in place, no duplicate row.
+    await store.upsertPr({
+      repoFullName: 'acme/api', prNumber: 7, title: 'Add widget', state: 'merged',
+      headSha: 'ddd', updatedAt: '2026-01-03T00:00:00.000Z',
+    });
+    const prs = await store.listPrs('acme/api');
+    expect(prs).toHaveLength(2);
+    expect(prs.find((p) => p.prNumber === 7)?.state).toBe('merged');
+    expect(prs.find((p) => p.prNumber === 7)?.headSha).toBe('ddd');
+    expect((await store.listPrs('other/web'))[0].state).toBe('closed');
+  });
+
+  it('cascades removeInstallation to repos, baselines, runs, and PR state', async () => {
     await store.saveInstallation(installation(1, 'org_A'));
     await store.linkRepo(repo('acme/api', { installationId: 1 }));
     await store.saveBaseline({ repoFullName: 'acme/api', commitSha: 'abc', drifts: [], capturedAt: '2026-01-02T00:00:00.000Z' });
@@ -138,11 +167,16 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
       id: 'r1', repoFullName: 'acme/api', prNumber: 1, headSha: 's', baseSha: 'b',
       conclusion: 'success', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
     });
+    await store.upsertPr({
+      repoFullName: 'acme/api', prNumber: 1, title: 'PR 1', state: 'open',
+      headSha: 's', updatedAt: '2026-01-02T00:00:00.000Z',
+    });
 
     await store.removeInstallation(1);
     expect(await store.getInstallation(1)).toBeNull();
     expect(await store.getRepo('acme/api')).toBeNull();
     expect(await store.getBaseline('acme/api')).toBeNull();
     expect(await store.listRuns('acme/api')).toEqual([]);
+    expect(await store.listPrs('acme/api')).toEqual([]);
   });
 });

@@ -27,6 +27,8 @@ import type {
   InstallationRecord,
   RepoLinkRecord,
   GateRunRecord,
+  PrRecord,
+  PrState,
 } from './store/types.js';
 
 /** Conservative email shape: one `@`, non-empty local/domain, dotted domain. */
@@ -70,6 +72,16 @@ function toRepoSummary(
   };
 }
 
+/**
+ * PR-state fields grafted onto every feed row. `prState` is null for PRs with no
+ * gh_prs row (history predating close-tracking); the client treats null as open.
+ * Defined locally rather than on the shared feed types (which the OSS dashboard
+ * also consumes) — the fields are additive, so those consumers simply ignore them.
+ */
+type PrFeedFields = { prState: PrState | null; title: string | null };
+type RunSummaryWithState = GithubRunSummary & PrFeedFields;
+type WorkspaceRunItemWithState = WorkspaceRunItem & PrFeedFields;
+
 function toRunSummary(r: GateRunRecord): GithubRunSummary {
   return {
     id: r.id,
@@ -80,6 +92,14 @@ function toRunSummary(r: GateRunRecord): GithubRunSummary {
     resolvedCount: r.resolvedCount,
     createdAt: r.createdAt,
   };
+}
+
+function prMapFor(prs: PrRecord[]): Map<number, PrRecord> {
+  return new Map(prs.map((p) => [p.prNumber, p]));
+}
+
+function prFieldsFor(pr: PrRecord | undefined): PrFeedFields {
+  return { prState: pr?.state ?? null, title: pr?.title ?? null };
 }
 
 export interface ConnectDeps {
@@ -437,8 +457,16 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.json({ runs: [] });
       return;
     }
-    const runs = await deps.store.listRuns(repoFullName);
-    res.json({ runs: runs.map(toRunSummary) });
+    const [runs, prs] = await Promise.all([
+      deps.store.listRuns(repoFullName),
+      deps.store.listPrs(repoFullName),
+    ]);
+    const byPr = prMapFor(prs);
+    const withState: RunSummaryWithState[] = runs.map((r) => ({
+      ...toRunSummary(r),
+      ...prFieldsFor(byPr.get(r.prNumber)),
+    }));
+    res.json({ runs: withState });
   });
 
   // Cross-repo gate activity for the workspace home — recent runs across every
@@ -452,14 +480,23 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
     const repos = await deps.store.listReposForWorkspace(orgId);
-    const all: WorkspaceRunItem[] = [];
+    const all: WorkspaceRunItemWithState[] = [];
     for (const repo of repos) {
       // The registered slug (lossy slugify with collision suffixes), so the feed
       // can deep-link each run to /repos/:slug?pr=N. Resolved once per repo.
       const slug = (await getProjectByPath(repo.repoFullName))?.slug ?? null;
-      const runs = await deps.store.listRuns(repo.repoFullName, limit);
+      const [runs, prs] = await Promise.all([
+        deps.store.listRuns(repo.repoFullName, limit),
+        deps.store.listPrs(repo.repoFullName),
+      ]);
+      const prByNumber = prMapFor(prs);
       for (const r of runs) {
-        all.push({ ...toRunSummary(r), repoFullName: repo.repoFullName, slug });
+        all.push({
+          ...toRunSummary(r),
+          repoFullName: repo.repoFullName,
+          slug,
+          ...prFieldsFor(prByNumber.get(r.prNumber)),
+        });
       }
     }
     all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -467,7 +504,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // gate runs (one per pushed commit) collapses to a single row. `all` is already
     // newest-first, so the first run seen per key is the latest — and the limit now
     // counts PRs, not commits.
-    const byPr = new Map<string, WorkspaceRunItem>();
+    const byPr = new Map<string, WorkspaceRunItemWithState>();
     for (const r of all) {
       const k = `${r.repoFullName}#${r.prNumber}`;
       if (!byPr.has(k)) byPr.set(k, r);

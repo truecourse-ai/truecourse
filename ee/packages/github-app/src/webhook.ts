@@ -47,6 +47,8 @@ export interface PullRequestPayload {
   action: string;
   number: number;
   pull_request: {
+    /** PR title (present on every pull_request payload). */
+    title?: string;
     head: {
       sha: string;
       ref: string;
