@@ -3812,7 +3812,7 @@ The repo half already shipped: resolving a repo conflict enqueues a contract reg
 ---
 
 <a id="gaps-spec-diff"></a>
-### 12.4 Headline gap D — Spec diff is NOT BUILT
+### 12.4 Headline gap D — Spec diff & EE PR-scoping are NOT BUILT
 
 **Scope: both OSS and EE** (with an extra EE sub-gap). See [§10](#oss-edition) / [§11](#ee-edition) for the diff UIs that already exist.
 
@@ -3820,15 +3820,19 @@ The repo half already shipped: resolving a repo conflict enqueues a contract reg
 
 **Why it matters.** The pipeline runs doc → corpus → contract. A reviewer can already see raw `.md` changes (plain git) and contract changes (the Contracts diff), but not the *corpus layer in between* — and that's exactly where the consolidation happens, and what explains *why* the contracts changed. A spec diff should show the curated, semantic delta rather than raw doc text: docs added to or dropped from the corpus, docs re-tagged into different areas, overlaps newly flagged or resolved, and relations added or removed.
 
-**The EE case is two gaps in one:**
-1. No spec diff (same as OSS).
-2. The Spec tab isn't even PR-aware — it always returns the *latest* stored corpus regardless of which PR you're viewing, so in a PR it shows the current corpus, unlabeled and undiffed.
+**The EE case is bigger than a missing diff — the Spec tab, and the whole corpus/contract model under it, isn't PR-scoped at all.** Three distinct problems:
 
-**Intended fix — one pattern, both editions.** Mirror the contract diff exactly, reusing the shared diff primitives to compare docs by reference, area membership, overlap pairs, and relations:
-- **OSS:** diff the working-tree `corpus.json` against the committed one at `HEAD`, wired through the existing diff toggle.
-- **EE:** a PR-aware diff comparing the head commit's stored corpus against the base commit's.
+1. **No spec diff** (same as OSS).
+2. **A PR's spec leaks into every view.** The Spec tab always loads the repo's *latest-scanned* corpus (`loadLatestSpec`, newest by timestamp) — never the corpus at the commit you're actually viewing. So the instant *any* PR's gate scans, that PR's corpus becomes what **every** Spec-tab view renders: the repo/main view and every *other* open PR included. **Proven empirically:** a PR adding a `refunds_PRD.md` made a brand-new `core/refunds-entity` area appear in the main view *and* in an unrelated PR that never touched refunds. It's also racy — the next scan (another PR, or a main re-baseline) flips the "latest" and the spec vanishes again. **You cannot review two PRs' specs independently**, and the repo view can show a spec that isn't on any branch you'd expect.
+3. **The reads and mutations under it are repo-scoped too.** The doc reader (`readRepoDoc`) fetches at the *baseline* (main) commit, not the PR head — so opening/re-curating a doc in a PR reads main's version. Decisions are repo-global (`_repo`), so resolving a conflict in one PR's view writes a decision that hits main and every other PR at once. And on merge the gate **re-derives** main's contracts rather than promoting the PR's *reviewed* set — the content-addressed KV cache usually reproduces the same bodies, but the global reconcile ([§12.1](#gaps-nondeterminism-generate)) or any doc drift (rebase, another PR merged in between) can diverge, so **"what you reviewed is what lands" is not guaranteed**.
 
-**Dependency.** A spec diff is only as clean as the corpus is stable across runs. The corpus is *more* stable than contracts (it caches per-doc and per-pair and has no global reconcile step), but a cold re-scan can still re-tag docs non-deterministically — so this rides on the same determinism work as [§12.1](#gaps-nondeterminism-generate) / [§12.6](#gaps-nondeterminism), or it'll be noisy. **The cost is low:** the baseline corpus is already committed, and the diff primitives and the diff toggle already exist.
+**Intended fix — PR-scope the whole spec/contract path, both editions.** This is materially more than a diff toggle:
+- **Load by the viewed commit, not the global latest** — EE reads the corpus at the PR head SHA (OSS: the working tree) — plus the semantic diff (docs added/dropped, re-tagged areas, overlaps flagged/resolved, relations added/removed) that's missing today. Mirror the contract diff, reusing the shared diff primitives. (OSS: working-tree `corpus.json` vs committed `HEAD`, through the existing toggle.)
+- **Read docs at the viewed commit**, so display and re-curate agree.
+- **Scope decisions per-PR** (an overlay that promotes into the repo decisions on merge) instead of writing repo-global immediately.
+- **Promote the PR's contracts to main on merge** — a content-addressed copy of the reviewed set — instead of re-deriving them.
+
+**Dependency.** The spec-diff half is only as clean as the corpus is stable across runs — the corpus is *more* stable than contracts (per-doc/per-pair caches, no global reconcile), but a cold re-scan can still re-tag non-deterministically, so it rides on the same determinism work as [§12.1](#gaps-nondeterminism-generate) / [§12.6](#gaps-nondeterminism). The diff primitives and the OSS toggle already exist; the PR-scoping (load-by-commit, per-PR decisions, merge-promotion) does not, and it's the load-bearing part.
 
 ---
 
@@ -4145,7 +4149,7 @@ The dashboard ([§10](#oss-edition) / [§11](#ee-edition), `apps/dashboard/clien
 | **The drift-enrichment fetch over-refetches** | the verify drift detail | Its effect keys on the *object identity* of the artifact reference, so moving between drifts with identical content but fresh object references refetches — it relies on the server's content-addressed cache to make that cheap |
 | **`InferredPanel` is misfiled under `ee/`** | the dashboard client's `ee/` directory | Its own header says OSS and EE behave identically, yet the edition-agnostic component lives in an EE directory — misleading placement |
 | **The estimate modal still renders a per-stage Model column** | the repo page | It renders each stage's model, but a recent commit dropped the misleading per-stage labels in EE, so what shows now depends on whether the server fills that field in (see [§12.2](#gaps-ee-models)) |
-| **The Spec tab has no diff mode and isn't PR-aware** | the repo page and the spec-corpus hook | Covered in [§12.4](#gaps-spec-diff) — a PR view still shows the default-branch corpus, with no way to diff it |
+| **The Spec tab has no diff mode and isn't PR-aware** | the repo page and the spec-corpus hook | Covered in [§12.4](#gaps-spec-diff) — the tab loads the repo's *latest-scanned* corpus, not the viewed commit's, so a PR's new spec **leaks into the repo view and every other open PR** (proven empirically), and it's racy across scans |
 
 ---
 
