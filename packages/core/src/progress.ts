@@ -20,6 +20,7 @@ export const DOMAIN_LABELS: Record<string, string> = {
 export function buildAnalysisSteps(
   enabledCategories?: string[],
   enableLlmRules?: boolean,
+  hasCSharp?: boolean,
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
@@ -34,6 +35,14 @@ export function buildAnalysisSteps(
 
   for (const domain of activeDomains) {
     steps.push({ key: domain, label: `${DOMAIN_LABELS[domain]} checks` });
+  }
+
+  // C# semantic analysis (Roslyn host) runs as its own out-of-process phase after
+  // the domain checks. Declare it up front for C# repos so the checklist is stable
+  // (no mid-run insertion). Unlike TS (inline in the checks) and Python/Pyright
+  // (inline in parse), this tier has no other step to report under.
+  if (hasCSharp) {
+    steps.push({ key: 'csharp', label: 'C# semantic analysis' });
   }
 
   steps.push({ key: 'persist', label: 'Saving results' });
@@ -91,6 +100,21 @@ export class StepTracker {
       step.detail = detail;
       this.emit();
     }
+  }
+
+  /**
+   * Insert a step at runtime, just before `persist`, if it isn't already there.
+   * Used for phases we can't declare up front — e.g. the C# semantic tier only
+   * exists when the repo actually has C#, which isn't known until files are read.
+   * No-op if the key already exists.
+   */
+  ensureStep(key: string, label: string): void {
+    if (this.steps.some((s) => s.key === key)) return;
+    const persistIdx = this.steps.findIndex((s) => s.key === 'persist');
+    const step: AnalysisStep = { key, label, status: 'pending' };
+    if (persistIdx === -1) this.steps.push(step);
+    else this.steps.splice(persistIdx, 0, step);
+    this.emit();
   }
 
   private setStatus(key: string, status: StepStatus, detail?: string): void {

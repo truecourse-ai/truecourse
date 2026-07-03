@@ -285,6 +285,17 @@ using the `cs-` prefix (e.g. `claude/cs-fp-fix/`), and paste the bootstrap point
 keeps its behavior byte-identical. (Note: the analysis/`fp` loop requires analyzer C# rule
 support to produce findings; the `drift-fp` loop verifies C# via the contract-verifier.)
 
+**C# account .NET prerequisites** (default account needs none):
+- The session must have the **.NET SDK — 10.x** recommended (or ≥ 9.0.2xx). It
+  builds the Roslyn host during `build:dist` and, at analyze time, opens `.slnx`
+  solutions (common in modern C# repos) and modern targets. The host itself is
+  `net8.0` with roll-forward, so it *runs* on any ≥ 8 runtime.
+- Each C# target must be **`dotnet restore`d before analyze** (see the discover /
+  next-fix prompts). The project-aware Roslyn tier **fails-hard** on an
+  unrestored project or a missing/unsatisfiable SDK — it aborts the run rather
+  than skipping, so a target that pins an SDK via `global.json` needs that SDK
+  present too.
+
 The three actual bootstrap prompts (paste verbatim into each routine):
 
 - `fp-discover`:
@@ -501,7 +512,7 @@ One-time, before the first run:
    (they fire in parallel on each campaign-close PR merge).
 
    Use the **Default** environment for all three — no custom env is
-   needed because:
+   needed (except the .NET SDK on the **C# account**, below) because:
    - Default already uses **Trusted** network access (allowlist covers
      npm, GitHub, and the OSS repos we clone over HTTPS).
    - pnpm is pre-installed; project deps (`pnpm install && pnpm build:dist`)
@@ -509,6 +520,12 @@ One-time, before the first run:
      setup script. (Setup scripts run **before** the per-session repo
      clone, so they can't `pnpm install` anything from the repo.)
    - No env vars are required.
+   - **C# account only:** the session needs the **.NET SDK — 10.x**
+     recommended (or ≥ 9.0.2xx). `build:dist` builds the Roslyn host with
+     it, and it opens `.slnx` solutions + modern targets at analyze time.
+     The default (TS/JS/Python) account needs **no** .NET: the host build
+     is tolerant — `build:dist` warns and skips it when `dotnet` is absent,
+     and C# analysis simply stays unavailable.
 4. **Bootstrap the first campaign** by clicking **Run now** on
    `fp-discover` (no campaign-close PR has merged yet, so the GitHub
    trigger has nothing to fire on). It reads `campaigns.yaml`, finds

@@ -113,13 +113,18 @@ internal static class Program
             "analysis", trees, References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        // Tree-major, not rule-major: build each tree's semantic model ONCE and
+        // reuse it across all rules. GetSemanticModel returns a fresh model per
+        // call (no cross-call cache), so the old rule-major order rebuilt — and
+        // rebound — every tree once per rule (rules × trees models). Binding is
+        // the dominant cost, so this is ~O(rules) faster. Matches AnalyzeProject.
         var violations = new List<Violation>();
-        foreach (var rule in SemanticRules.All)
+        foreach (var tree in trees)
         {
-            if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
-            foreach (var tree in trees)
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var rule in SemanticRules.All)
             {
-                var model = compilation.GetSemanticModel(tree);
+                if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
                 violations.AddRange(rule.Analyze(model, tree));
             }
         }
@@ -139,6 +144,7 @@ internal static class Program
         if (!File.Exists(req.Project))
             return new Response(false, Error: $"project not found: {req.Project}");
 
+        // MSBuild is already registered by AnalyzeProjectGuarded before this runs.
         var enabled = req.Rules is { Count: > 0 } ? new HashSet<string>(req.Rules) : null;
 
         using var workspace = MSBuildWorkspace.Create();
@@ -149,7 +155,11 @@ internal static class Program
         };
 
         var projects = new List<Project>();
-        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
+        // `.slnx` (newer XML solution format) opens as a solution too — and note
+        // ".slnx".EndsWith(".sln") is false, so it needs its own check or it would
+        // wrongly fall through to OpenProjectAsync.
+        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || req.Project.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
         {
             var solution = await workspace.OpenSolutionAsync(req.Project);
             projects.AddRange(solution.Projects);

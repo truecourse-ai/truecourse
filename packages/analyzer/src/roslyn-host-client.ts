@@ -42,19 +42,37 @@ export class RoslynHostUnavailableError extends Error {
 }
 
 /**
- * Resolve the built host binary. Honours $TRUECOURSE_ROSLYN_HOST, otherwise looks
- * in the in-repo build output relative to this module. Returns null if not found.
+ * Resolve the host to launch. Honours $TRUECOURSE_ROSLYN_HOST, otherwise finds
+ * either the published host DLL or the in-repo native build. Returns null if
+ * neither is present. A `.dll` result is launched via `dotnet` (see invokeHost).
  */
 export function resolveRoslynHostBinary(): string | null {
   const override = process.env[HOST_BINARY_ENV]
   if (override) return existsSync(override) ? override : null
 
-  const here = dirname(fileURLToPath(import.meta.url))
-  const rel = 'tools/csharp-roslyn-host/bin/Release/net8.0/csharp-roslyn-host'
-  // works from packages/analyzer/src and from a bundled dist a level or two deeper
-  for (const up of ['../../..', '../../../..', '../../../../..']) {
-    const candidate = resolve(here, up, rel)
-    if (existsSync(candidate)) return candidate
+  // Two shipping layouts, checked in preference order at each ancestor level:
+  //   1. `roslyn-host/csharp-roslyn-host.dll` — the framework-dependent host
+  //      bundled next to the published `cli.mjs` (npm installs). One portable
+  //      build runs on every OS, launched through the user's `dotnet` runtime.
+  //   2. `tools/csharp-roslyn-host/bin/Release/net8.0/csharp-roslyn-host` — the
+  //      in-repo native apphost (running from source / a dev checkout).
+  // Walk up from this module toward the filesystem root: the flattened top-level
+  // `dist/cli.mjs` bundle sits 1 level above the shipped host, while source runs
+  // (packages/analyzer/{src,dist}) are ~3 levels above the in-repo build. The old
+  // fixed `../../..` offsets missed the dist layout, so C# analysis failed there.
+  const rels = [
+    'roslyn-host/csharp-roslyn-host.dll',
+    'tools/csharp-roslyn-host/bin/Release/net8.0/csharp-roslyn-host',
+  ]
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (let i = 0; i < 12; i++) {
+    for (const rel of rels) {
+      const candidate = resolve(dir, rel)
+      if (existsSync(candidate)) return candidate
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break // reached the filesystem root
+    dir = parent
   }
   return null
 }
@@ -68,14 +86,20 @@ interface HostResponse {
 /** Spawn the host with one request line and resolve its single JSON response. */
 function invokeHost(bin: string, request: object): Promise<RoslynHostViolation[]> {
   return new Promise<RoslynHostViolation[]>((resolvePromise, reject) => {
-    // Run the host in a neutral working directory with no project build config on
+    // A `.dll` is the portable framework-dependent host — launch it through the
+    // shared `dotnet` runtime, so one build runs on every OS. A non-.dll path is
+    // a native apphost (in-repo dev build) that bootstraps its own runtime.
+    const viaDotnet = bin.endsWith('.dll')
+    const cmd = viaDotnet ? 'dotnet' : bin
+    const args = viaDotnet ? [bin] : []
+    // Run in a neutral working directory (tmpdir) with no project build config on
     // its path. The host is a read-only semantic analyzer — it compiles file texts
     // (or opens an already-restored project by absolute path) and never builds the
     // target — so it must not honor the target repo's `global.json` SDK pin.
-    // Inheriting the analyze cwd (the target repo) let the .NET SDK resolver walk
-    // up to that `global.json` and abort at startup when the pinned SDK wasn't
-    // installed; tmpdir() is guaranteed free of one. See issue #658.
-    const child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'pipe'], cwd: tmpdir() })
+    // Inheriting the analyze cwd let the .NET SDK resolver walk up to that
+    // `global.json` and abort at startup when the pinned SDK wasn't installed;
+    // tmpdir() is guaranteed free of one. See issue #658.
+    const child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], cwd: tmpdir() })
     let stdout = ''
     let stderr = ''
     let settled = false
@@ -98,7 +122,7 @@ function invokeHost(bin: string, request: object): Promise<RoslynHostViolation[]
     child.on('error', (e) =>
       fail(
         new RoslynHostUnavailableError(
-          `Failed to start the Roslyn host (${bin}): ${e.message}. Is the .NET runtime installed?`,
+          `Failed to start the Roslyn host (${viaDotnet ? `dotnet ${bin}` : bin}): ${e.message}. Is the .NET runtime installed?`,
         ),
       ),
     )

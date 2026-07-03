@@ -8,6 +8,16 @@
     <AssemblyName>csharp-roslyn-host</AssemblyName>
     <RootNamespace>TrueCourse.RoslynHost</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The published host ships as a portable net8.0 DLL run via the user's
+         `dotnet`. RollForward=Major PREFERS an installed net8 runtime (so the
+         loose-text reference set — which is the *runtime's* BCL — stays net8 and
+         analysis is deterministic), yet still starts on a newer major (9/10/11)
+         when net8 is absent, e.g. a dev box that only has .NET 10. NOT
+         LatestMajor: that always jumps to the newest runtime present, so on a CI
+         runner image carrying both net8 and net9 the BCL shifted under analysis
+         and version-sensitive semantic rules (e.g. the CallerArgumentExpression
+         overload of Debug.Assert) misfired. -->
+    <RollForward>Major</RollForward>
   </PropertyGroup>
 
   <ItemGroup>
