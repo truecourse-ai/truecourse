@@ -25,14 +25,20 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     // we exclude member-expression calls like `trpc.x.useQuery(...)`,
     // which delegate to TanStack Query under abstractions that surface
     // errors via the returned `error`/`isError` state (no boundary
-    // required). Suspense and the suspense-* query variants always throw
-    // during render and need a boundary upstream.
+    // required). The suspense-* query variants always throw during render
+    // and need a boundary upstream.
+    //
+    // The bare `<Suspense>` component is NOT a signal on its own: it is a
+    // *loading* boundary for pending state, not evidence of an unhandled
+    // throwing fetch in this file. Leaf components frequently render a
+    // <Suspense> fallback while error handling is defined on the route
+    // (Remix / React Router), so keying off `Suspense` presence produced
+    // false positives across ordinary presentational components.
     const hasAsyncData =
       /(?<![.\w])useQuery\b/.test(sourceCode) ||
       /(?<![.\w])useSWR\b/.test(sourceCode) ||
       /\buseSuspenseQuery\b/.test(sourceCode) ||
-      /\buseSuspenseInfiniteQuery\b/.test(sourceCode) ||
-      /\bSuspense\b/.test(sourceCode)
+      /\buseSuspenseInfiniteQuery\b/.test(sourceCode)
 
     if (!hasAsyncData) return null
 
