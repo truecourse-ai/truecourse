@@ -40,6 +40,7 @@ import {
   isCorpusStale,
   getCorpus,
   getDecisions,
+  recurateStoredCorpus,
   removeManualExclude,
   removeManualInclude,
   removeRelation,
@@ -160,18 +161,33 @@ router.get(
   },
 );
 
-// Resolving a conflict changes the curated spec, so the contracts must be
-// regenerated. EE defers this to the background job queue (repo.contracts →
-// re-baseline: clone → curate → generate → verify); OSS has no runner installed,
-// so this is a no-op and the user regenerates via the Contracts "Generate"
-// button. Best-effort: a failed enqueue never fails the resolution save.
+// A decision changed the curated spec, so the contracts may need regenerating.
+// EE hands that to the background queue (a forced re-baseline: clone → curate →
+// generate → verify — shown by the baseline's own progress panel); OSS has no
+// runner installed, so this is a no-op and the user regenerates via the Contracts
+// "Generate" button. Best-effort: a failed enqueue never fails the decision save.
 async function enqueueContractsRefresh(repoKey: string): Promise<void> {
   const runner = getBackgroundTaskRunner();
   if (!runner) return;
   try {
     await runner({ type: 'repo.contracts', repoKey });
   } catch {
-    /* best-effort — the resolution is already saved */
+    /* best-effort — the decision is already saved */
+  }
+}
+
+// EE only. After a decision edit, re-curate the stored corpus and — only if it is
+// now conflict-free — enqueue a contract regeneration. This is the EE analog of the
+// OSS "resolve conflicts, then click Generate" flow: contracts regenerate the moment
+// the spec becomes unambiguous, and never while conflicts remain (then it's just the
+// cheap re-curate). Regeneration triggers off ANY decision that clears the last
+// conflict — a relation OR an exclude — since either can be the one that resolves it.
+// OSS regenerates via the manual Generate step, so this is a no-op there.
+async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
+  if (contractsMaterializeInPlace()) return;
+  const result = await recurateStoredCorpus(repoKey);
+  if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
+    await enqueueContractsRefresh(repoKey);
   }
 }
 
@@ -201,7 +217,7 @@ router.post(
         detectedFrom: 'manual',
         note: body.note,
       });
-      await enqueueContractsRefresh(repo.path);
+      await recurateAndRegenIfResolved(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
       next(e);
@@ -220,7 +236,7 @@ router.delete(
         return;
       }
       const decisions = await removeRelation(repo.path, { older: body.older, newer: body.newer, scope: body.scope });
-      await enqueueContractsRefresh(repo.path);
+      await recurateAndRegenIfResolved(repo.path);
       res.json({ relations: decisions.relations ?? [] });
     } catch (e) {
       next(e);
@@ -228,12 +244,13 @@ router.delete(
   },
 );
 
-// A force-include/exclude changes the curated corpus, so the recheck runs
-// server-side and atomically — the client no longer drives a separate scan. It
-// re-curates with the socket tracker so the dashboard shows the same step-progress
-// popup as a scan (removing/adding a doc changes the doc set, so the relation +
-// vocab stages re-run and this can take tens of seconds). No cost-estimate gate:
-// there's no confirm on include/exclude. Returns the freshly-curated corpus.
+// OSS force-include/exclude: the corpus lives in the live working tree, so the
+// recheck runs server-side and atomically — the client no longer drives a separate
+// scan. It re-curates with the socket tracker so the dashboard shows the same
+// step-progress popup as a scan (removing/adding a doc changes the doc set, so the
+// relation + vocab stages re-run and this can take tens of seconds). No cost gate:
+// there's no confirm on include/exclude. Contracts are NOT regenerated — that's the
+// manual "Generate" step. Returns the freshly-curated corpus.
 async function mutateAndRecurate(
   repoPath: string,
   repoId: string,
@@ -248,17 +265,15 @@ async function mutateAndRecurate(
     emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
     throw e;
   }
-  await enqueueContractsRefresh(repoPath);
   return corpusPayload(repoPath);
 }
 
 // A doc include/exclude mutation, edition-aware. OSS re-curates the live working
-// tree in-process and returns the fresh corpus (needs git). EE has no local tree:
-// the decision persists to the store (by repoKey), and the re-curate + regenerate
-// runs in the background job (repo.contracts: clone → curate w/ decisions →
-// generate → verify), exactly like the relations routes. The current corpus is
-// returned immediately (it already reflects the persisted decision); the job
-// refreshes the kept-doc set and the UI updates when it completes.
+// tree in-process and returns the fresh corpus (needs git). EE has no local tree,
+// so it re-curates the stored corpus over the repo-doc seam in the same request
+// (see recurateAndRegenIfResolved) and returns it — no clone, no separate job. In
+// both editions contracts regenerate only when the spec is conflict-free: OSS via
+// the manual Generate step, EE automatically via the conflict-free check.
 async function mutateSpecDecision(
   repoPath: string,
   repoId: string,
@@ -266,8 +281,14 @@ async function mutateSpecDecision(
   mutate: () => Promise<unknown>,
 ): Promise<void> {
   if (!contractsMaterializeInPlace()) {
+    // EE: no live tree. Persist the decision, then re-curate the corpus over the
+    // repo-doc seam — the SAME curate OSS runs, docs sourced from the store/GitHub
+    // instead of disk (unchanged docs hit the Postgres cache, so a restore is a
+    // cache hit). Contract regeneration is enqueued only if this leaves the spec
+    // conflict-free; while conflicts remain it's just the cheap re-curate. Returns
+    // the freshly re-curated corpus so the client's optimistic move is confirmed.
     await mutate();
-    await enqueueContractsRefresh(repoPath);
+    await recurateAndRegenIfResolved(repoPath);
     res.json(await corpusPayload(repoPath));
     return;
   }

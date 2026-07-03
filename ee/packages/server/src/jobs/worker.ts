@@ -58,11 +58,9 @@ function specScanBridge(
 import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
-  REPO_CONTRACTS_TASK,
   WORKSPACE_CONTRACTS_TASK,
   type SyncJobPayload,
   type BaselineJobPayload,
-  type ContractsJobPayload,
   type WorkspaceContractsJobPayload,
 } from './constants.js';
 
@@ -71,13 +69,6 @@ export interface StartWorkerDeps {
   connectionString: string;
   masterSecret: string;
   jobStore: JobStore;
-  /**
-   * Called after `repo.contracts` regenerates a repo's contracts, to chain a
-   * baseline refresh (the only path with a clone) so verify runs against the new
-   * contracts and the drift baseline is recomputed. Best-effort; a failure here
-   * never flips the (already-succeeded) contracts job.
-   */
-  onContractsRegenerated?: (repoKey: string, workspaceOrgId: string) => Promise<void>;
   /**
    * Called when a workspace's contracts actually CHANGED (KB sync / workspace
    * decision), to re-verify every connected repo against the new effective
@@ -366,61 +357,6 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
-  // Refresh a repo's contracts after a relation/decision change, off the request
-  // path. On the corpus path the spec is re-derived from the source docs (relations
-  // are folded in at curate time), so a contract refresh means re-running the scan
-  // over a fresh clone — i.e. a forced re-baseline (clone → curate → generate →
-  // verify), which `onContractsRegenerated` queues. Notifies on BOTH outcomes.
-  const repoContracts: Task = async (rawPayload) => {
-    const { jobId, repoKey, workspaceOrgId } = rawPayload as ContractsJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [{ key: 'contracts', label: 'Refreshing contracts' }],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
-      await tracker.advance('contracts');
-      // Re-baseline the repo so its corpus + contracts are regenerated from the
-      // current docs and verify re-runs against them.
-      await deps.onContractsRegenerated?.(repoKey, workspaceOrgId);
-      const done = await jobStore.markSucceeded(jobId, { repoKey });
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_CONTRACTS_TASK,
-        level: 'success',
-        title: 'Contracts refresh queued',
-        body: `${repoKey} — re-scanning the repo to regenerate contracts from the current spec.`,
-        data: { jobId, repoKey },
-      });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_CONTRACTS_TASK,
-        level: 'error',
-        title: `Contract generation failed — ${repoKey}`,
-        body: contractFailureBody(message),
-        data: { jobId, repoKey, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'github-gate',
-        orgId: workspaceOrgId,
-        repo: repoKey,
-        route: 'worker repo.contracts',
-      });
-      throw err;
-    }
-  };
-
   // Workspace contracts are (re)generated as part of a connector SYNC on the corpus
   // path (the sync curates the synced docs + generates the `.tc` corpus together),
   // so there is no standalone generate-from-stored-state step. This job now only
@@ -487,10 +423,6 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       [REPO_BASELINE_TASK]: withTrace<BaselineJobPayload>(
         (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoFullName, commitSha: p.commitSha }),
         repoBaseline,
-      ),
-      [REPO_CONTRACTS_TASK]: withTrace<ContractsJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoKey }),
-        repoContracts,
       ),
       [WORKSPACE_CONTRACTS_TASK]: withTrace<WorkspaceContractsJobPayload>(
         (p) => jobTrace(p.workspaceOrgId, p.jobId),

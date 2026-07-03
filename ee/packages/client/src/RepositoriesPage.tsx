@@ -22,25 +22,19 @@ import { useJobs } from './jobs/JobsContext';
 
 /** Job kinds — the wire values the gate worker emits. */
 const REPO_BASELINE_KIND = 'repo.baseline';
-const REPO_CONTRACTS_KIND = 'repo.contracts';
 
-type RepoStatus = 'scanning' | 'updating' | 'needs-review' | 'ready' | 'failed' | 'not-scanned';
+type RepoStatus = 'scanning' | 'needs-review' | 'ready' | 'failed' | 'not-scanned';
 
 /**
  * Derive a repo's scan status from live + durable state (no extra server call):
- * an active baseline job means Scanning; an active contract-refresh job means
- * Updating (conflicts resolved, contracts regenerating); unresolved spec
+ * an active baseline job means Scanning (a contract regeneration after a resolved
+ * conflict runs as a forced baseline, so it reads Scanning too); unresolved spec
  * conflicts mean Needs review (no contracts until resolved); a registered `slug`
  * with no conflicts is Ready; otherwise a recent failed-scan notification means
  * Failed, and a never-scanned repo is Not scanned.
  */
-function deriveRepoStatus(
-  repo: GithubRepoSummary,
-  scanning: boolean,
-  updating: boolean,
-): RepoStatus {
+function deriveRepoStatus(repo: GithubRepoSummary, scanning: boolean): RepoStatus {
   if (scanning) return 'scanning';
-  if (updating) return 'updating';
   if (repo.openConflicts > 0) return 'needs-review';
   if (!repo.slug) return 'not-scanned';
   // Scanned + conflicts resolved: contracts present ⇒ Ready; absent ⇒ generation
@@ -54,14 +48,6 @@ function RepoStatusBadge({ status }: { status: RepoStatus }) {
       <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/10 px-2 py-0.5 text-xs text-sky-400 ring-1 ring-sky-500/30">
         <Loader2 className="h-3 w-3 animate-spin" />
         Scanning…
-      </span>
-    );
-  }
-  if (status === 'updating') {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/10 px-2 py-0.5 text-xs text-sky-400 ring-1 ring-sky-500/30">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        Updating…
       </span>
     );
   }
@@ -129,9 +115,7 @@ export default function RepositoriesPage() {
   // summary, which renders as "Failed" (a scan that ended in conflicts is really
   // "Needs review"). Re-fetch the instant the active repo-job count drops so the
   // badge self-corrects without a manual refresh.
-  const activeRepoJobs = activeJobs.filter(
-    (j) => j.type === REPO_BASELINE_KIND || j.type === REPO_CONTRACTS_KIND,
-  ).length;
+  const activeRepoJobs = activeJobs.filter((j) => j.type === REPO_BASELINE_KIND).length;
   const prevActiveRepoJobs = useRef(activeRepoJobs);
   useEffect(() => {
     if (activeRepoJobs < prevActiveRepoJobs.current) load();
@@ -203,7 +187,6 @@ export default function RepositoriesPage() {
                       status={deriveRepoStatus(
                         r,
                         Boolean(activeJobFor(REPO_BASELINE_KIND, `${REPO_BASELINE_KIND}:${r.repoFullName}`)),
-                        Boolean(activeJobFor(REPO_CONTRACTS_KIND, `${REPO_CONTRACTS_KIND}:${r.repoFullName}`)),
                       )}
                     />
                   </td>

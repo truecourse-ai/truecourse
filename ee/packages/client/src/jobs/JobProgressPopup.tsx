@@ -18,7 +18,6 @@ function jobTitle(job: JobView): string {
       return 'Syncing knowledge';
     case 'repo.baseline':
       return 'Scanning repository';
-    case 'repo.contracts':
     case 'workspace.contracts':
       return 'Updating contracts';
     default:

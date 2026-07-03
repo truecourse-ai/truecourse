@@ -38,11 +38,18 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 // server-driven, not client-driven).
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
-  return { ...actual, curateInProcess: vi.fn(async () => ({ noChanges: false })) };
+  return {
+    ...actual,
+    curateInProcess: vi.fn(async () => ({ noChanges: false })),
+    // EE include/exclude re-curates the stored corpus in-process (its own suite in
+    // tests/core covers the docSource wiring). Stub it here so the route test asserts
+    // the route INVOKES it — never the heavy repo.contracts job.
+    recurateStoredCorpus: vi.fn(async () => null),
+  };
 });
 
 import { createApp } from '../../apps/dashboard/server/src/app';
-import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
+import { curateInProcess, recurateStoredCorpus } from '@truecourse/core/commands/spec-in-process';
 import {
   setBackgroundTaskRunner,
   type BackgroundTask,
@@ -52,6 +59,7 @@ import {
   resetContractStore,
   type ContractStore,
 } from '@truecourse/core/lib/contract-store';
+import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -228,8 +236,11 @@ describe('corpus routes (spec-scan redesign)', () => {
   });
 
   // Resolving a conflict must regenerate contracts. The shared route defers to the
-  // background-task seam (EE runner installed → enqueues repo.contracts; OSS → none).
-  it('POST /spec/relations enqueues repo.contracts when a runner is installed', async () => {
+  // OSS never auto-regenerates: contracts regenerate via the manual "Generate" step,
+  // so a relation edit records the decision and does NOT enqueue anything, even with
+  // a runner installed. (The EE auto-regenerate-when-conflict-free path is covered in
+  // the EE describe below.)
+  it('POST/DELETE /spec/relations record the decision without triggering regeneration (OSS)', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
@@ -239,37 +250,20 @@ describe('corpus routes (spec-scan redesign)', () => {
       .post(`/api/repos/${fixture.project.slug}/spec/relations`)
       .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
       .expect(200);
-    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
-  });
-
-  it('DELETE /spec/relations also enqueues repo.contracts', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
     await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/relations`)
       .send({ older: 'docs/v1.md', newer: 'docs/v2.md' })
       .expect(200);
-    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
-  });
-
-  it('POST /spec/relations is a no-op (no throw) when no runner is installed (OSS)', async () => {
-    setBackgroundTaskRunner(null);
-    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
-      .expect(200);
+    expect(tasks).toEqual([]);
   });
 });
 
 // EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there
-// is no local git tree. The include/exclude routes must NOT gate on git or
-// re-curate in-process — they persist the decision and defer the re-curate to the
-// background job (repo.contracts), exactly like the relations routes. A
-// non-materializing contract store is what flips the route onto that path.
+// is no local git tree. The decision routes must NOT gate on git and must NOT
+// enqueue the old repo.contracts job. They re-curate the stored corpus in-process
+// (the SAME curate OSS runs, docs sourced through the repo-doc seam), and — only if
+// that leaves the spec conflict-free — enqueue a contract regeneration. A
+// non-materializing contract store flips the route onto that path.
 describe('corpus routes — EE (stored corpus, no live tree)', () => {
   let app: Express;
   let fixture: TestFixture;
@@ -290,12 +284,21 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     );
   };
 
+  // Stub the in-process re-curate's outcome (its own docSource wiring is covered in
+  // tests/core). `openConflicts` drives the regenerate-or-not decision.
+  const stubRecurate = (openConflicts: number): void => {
+    vi.mocked(recurateStoredCorpus).mockResolvedValueOnce({
+      corpus: { docs: [{ ref: 'docs/keep.md' }] } as unknown as CuratedCorpus,
+      openConflicts,
+    });
+  };
+
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
     // A store that reports it does NOT materialize in place = hosted EE. Only the
     // capability flag is read by these routes, so a bare stub is sufficient.
     setContractStore({ materializesInPlace: false } as unknown as ContractStore);
-    vi.mocked(curateInProcess).mockClear();
+    vi.mocked(recurateStoredCorpus).mockReset();
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
@@ -304,34 +307,70 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     await teardownTestFixture(fixture.project.slug);
   });
 
-  it('POST /spec/excludes on a non-git repo persists the decision + enqueues, does NOT re-curate in-process', async () => {
+  it('POST /spec/excludes re-curates and — when it leaves the spec conflict-free — enqueues regeneration', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
     });
     seedCorpus();
+    stubRecurate(0);
     const res = await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200); // was 400 "not a git repository" before the fix
     expect(res.body.manualExcludes).toContain('docs/v2.md');
+    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
+    // conflict-free → a plain regeneration intent (no "Refreshing contracts" popup).
     expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
-    // The re-curate is deferred to the background job, not run in the request.
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
   });
 
-  it('DELETE /spec/excludes on a non-git repo restores the doc', async () => {
-    setBackgroundTaskRunner(async () => {});
+  it('POST /spec/excludes re-curates but does NOT regenerate while conflicts remain', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
     seedCorpus();
+    stubRecurate(2);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
+    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
+    expect(tasks).toEqual([]); // conflicts remain → cheap re-curate only
+  });
+
+  it('DELETE /spec/excludes restores the doc (re-curate; regen still gated on conflict-free)', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus();
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    stubRecurate(0);
     const del = await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
     expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
+  });
+
+  it('POST /spec/relations that resolves the last conflict enqueues regeneration', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus();
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
+      .expect(200);
+    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
   });
 });
 

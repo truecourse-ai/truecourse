@@ -196,10 +196,12 @@ export async function registerJobs(
     return job.id;
   };
 
-  // After repo.contracts regenerates contracts (post-resolve), re-baseline the SAME
-  // head with `force` so verify runs against the new contracts and the neutral
-  // baseline becomes a real drift baseline. The commit comes from the existing
-  // (neutral) baseline saved at connect; getRepo gives the installation/branch.
+  // Regenerate a repo's contracts after a decision leaves the spec conflict-free:
+  // re-baseline the SAME head with `force` (clone → curate → generate → verify —
+  // the baseline's own progress panel shows it) so the neutral baseline becomes a
+  // real drift baseline, then re-verify open PRs. Called directly by the decision
+  // task runner below (there is no separate `repo.contracts` job). The commit comes
+  // from the existing baseline saved at connect; getRepo gives installation/branch.
   const onContractsRegenerated = async (repoKey: string, workspaceOrgId: string): Promise<void> => {
     const repo = await gateStore.getRepo(repoKey);
     if (!repo) return; // need the link
@@ -245,7 +247,6 @@ export async function registerJobs(
       connectionString: opts.connectionString,
       masterSecret: opts.masterSecret,
       jobStore,
-      onContractsRegenerated,
       onWorkspaceContractsChanged,
     });
   } catch (err) {
@@ -259,20 +260,18 @@ export async function registerJobs(
     if (!runner) throw new Error('the background job worker is not running');
     if (task.type === REPO_CONTRACTS_TASK && task.repoKey) {
       // OSS adapters (the shared spec routes) pass only repoKey — resolve the
-      // owning workspace from the gate link so the job is scoped + notified.
+      // owning workspace from the gate link so the work is scoped + notified.
       const workspaceOrgId =
         task.workspaceOrgId ?? (await gateStore.getRepo(task.repoKey))?.workspaceOrgId;
       if (!workspaceOrgId) {
-        log.warn(`[ee-jobs] repo.contracts skipped: ${task.repoKey} is not a connected repo`);
+        log.warn(`[ee-jobs] contract regeneration skipped: ${task.repoKey} is not a connected repo`);
         return;
       }
-      const key = `${REPO_CONTRACTS_TASK}:${task.repoKey}`;
-      const jobId = await ensureContractsJob(REPO_CONTRACTS_TASK, key, workspaceOrgId);
-      await runner.addJob(
-        REPO_CONTRACTS_TASK,
-        { jobId, repoKey: task.repoKey, workspaceOrgId },
-        { jobKey: key, maxAttempts: 1 },
-      );
+      // Regenerate contracts by re-baselining directly (clone → curate → generate →
+      // verify → analyze, shown by the baseline's own progress panel) and re-verify
+      // open PRs. There is no separate "refreshing contracts" job/popup — the old
+      // wrapper did no work of its own beyond this call, so it was pure redundancy.
+      await onContractsRegenerated(task.repoKey, workspaceOrgId);
     }
   });
 

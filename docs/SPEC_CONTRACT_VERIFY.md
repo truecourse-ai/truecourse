@@ -1149,10 +1149,29 @@ helpers never re-curate the corpus by themselves** — they just rewrite
 scan as a follow-up step (see [§9](#cli-reference)), and the dashboard's
 include/exclude routes re-curate server-side within the same request (they change
 which docs and overlaps exist, so the recheck must run atomically — no separate
-client scan). Relation and area edits from the dashboard don't re-curate; the UI
-overlays a relation's "resolved" state on the existing corpus. (The small module
-that persists these edits is still named `orchestrator.ts` for historical reasons,
-though it no longer orchestrates anything — it's just decisions I/O now.)
+client scan), returning the fresh corpus so the client's optimistic move is
+confirmed rather than reverted. This re-curate is the **same `curate`** in both
+editions; only the doc transport differs. OSS discovers docs from the working
+tree; EE has no live checkout, so it sources them through the **doc-source seam** —
+the corpus's own known doc set (kept + skipped + the decision toggles), each body
+fetched via the repo-doc reader (`readRepoDoc` → GitHub in EE). Because the doc
+bodies come with the same content hashes `discoverDocs` computes, the per-doc
+stage caches (Postgres KV in EE) hit, so no clone is needed and — critically — a
+*restore* re-derives an excluded doc's tags straight from cache. A decision edit
+**re-curates the corpus but does not itself generate contracts**; *when* contracts
+regenerate differs by edition. OSS is user-driven: you resolve conflicts and prune
+docs, then click **Generate**. EE has no manual Generate, so it regenerates
+**automatically the moment the re-curated spec is conflict-free** — triggered off
+*any* decision that clears the last conflict, a relation or an exclude alike (an
+exclude can be the thing that removes the doc driving the last overlap). While
+conflicts remain, it's just the cheap re-curate. In EE that regeneration is a forced
+re-baseline (clone → curate → generate → verify), surfaced by the baseline's own
+progress panel — there is **no** separate contract-refresh job or popup. (Because EE
+gates regeneration on the conflict count, its relation edits re-curate too, to
+recompute it; OSS, which regenerates manually, leaves a relation as a client-side
+"resolved" overlay on the existing corpus.) (The small module that persists these
+edits is still named `orchestrator.ts` for historical reasons, though it no longer
+orchestrates anything — it's just decisions I/O now.)
 
 ---
 
@@ -3635,14 +3654,15 @@ Email goes out through Resend, and each message is sent to one recipient at a ti
 
 In the hosted edition the heavy work — scanning specs, generating contracts, verifying code — never blocks a web request. It runs on a separate background worker that pulls jobs from a queue kept in Postgres, so the app stays responsive and each run happens on a fresh clone of the repo.
 
-There are four kinds of jobs:
+There are three kinds of jobs:
 
 | Job | When it runs | What it does |
 |---|---|---|
-| **Repo baseline** | a repo is first connected, or its default branch moves | the full first pass — scan the specs, generate contracts, compute the drift baseline, run code-quality analysis, and infer undocumented decisions |
-| **Repo contracts** | someone resolves a spec conflict on a repo | regenerates that repo's contracts (on the corpus model that means re-running the baseline) and re-checks any open pull requests |
+| **Repo baseline** | a repo is first connected, its default branch moves, or a dashboard decision leaves the spec conflict-free (a forced re-baseline) | the full first pass — scan the specs, generate contracts, compute the drift baseline, run code-quality analysis, and infer undocumented decisions |
 | **Knowledge sync** | a workspace's external docs (e.g. Confluence) change | re-fetches the docs, rebuilds the shared workspace contracts, and re-verifies the repos that use them |
 | **Workspace contracts** | shared workspace contracts changed | a thin follow-up that only re-verifies the connected repos |
+
+There is no separate "refresh contracts" job. When a dashboard decision resolves the last spec conflict, contract regeneration is a **forced re-baseline** of the current head (which regenerates contracts, recomputes the drift baseline, and re-verifies open PRs) — the re-curate itself already ran in the decision request. That way the user sees one progress panel (the baseline's), not a redundant wrapper.
 
 How the jobs behave:
 

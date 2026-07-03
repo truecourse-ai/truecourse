@@ -13,15 +13,11 @@ export interface SyncJobPayload {
 
 export const REPO_BASELINE_TASK = 'repo.baseline';
 
-/** A debounced refresh of a repo's contracts after a decision. Tracked (a
- *  jobs-table row + a progress popup); jobKey coalesces a burst of decisions and
- *  the single-flight key reuses one row across the burst. */
+/** The intent a dashboard decision hands to the background-task seam when the
+ *  spec becomes conflict-free: regenerate the repo's contracts. The runner acts on
+ *  it directly (a forced re-baseline + PR re-verify) — there is no standalone
+ *  `repo.contracts` job or progress popup; the baseline's own panel shows the work. */
 export const REPO_CONTRACTS_TASK = 'repo.contracts';
-export interface ContractsJobPayload {
-  jobId: string;
-  repoKey: string;
-  workspaceOrgId: string;
-}
 
 /** The workspace analogue: refresh the workspace `.tc` corpus after a workspace
  *  Knowledge decision (same debounced, tracked model). */

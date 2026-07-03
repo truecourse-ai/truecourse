@@ -19,6 +19,7 @@
 
 import {
   curate,
+  classifyDoc,
   readDecisions,
   writeDecisions,
   type CuratedCorpus,
@@ -26,6 +27,7 @@ import {
   type CurateOptions,
   type CurateResult,
   type DecisionsFile,
+  type DocCandidate,
   type Relation,
 } from '@truecourse/spec-consolidator';
 import {
@@ -130,6 +132,7 @@ import {
   loadWorkspaceSpec,
   specsMaterializeInPlace,
 } from '../lib/spec-store.js';
+import { readRepoDoc } from '../lib/repo-doc-reader.js';
 import {
   reapplyPromoted,
   applyInferredActions,
@@ -523,6 +526,12 @@ export interface CurateInProcessOptions {
    */
   decisions?: CurateOptions['decisions'];
   /**
+   * Inject the doc set instead of walking the filesystem. Editions with no live
+   * working tree (EE) source docs through the repo-doc seam (`readRepoDoc`); OSS
+   * omits it and curate discovers from disk.
+   */
+  docSource?: CurateOptions['docSource'];
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Omit to
    * run without confirmation.
@@ -603,6 +612,7 @@ export async function curateInProcess(
       result = await curate(repoRoot, {
         models: resolveCurateModels(repoRoot),
         transport: resolveTransport(options),
+        docSource: options.docSource,
         skipGit: options.skipGit,
         skipCorpusWrite: options.skipCorpusWrite,
         decisions: options.decisions,
@@ -1787,6 +1797,76 @@ export function getDecisions(repoKey: string): Promise<DecisionsFile> {
  */
 export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
   return loadLatestSpec<CuratedCorpus>(repoKey, 'corpus');
+}
+
+/**
+ * Build a curate `docSource` from the store, for editions with no live working
+ * tree (EE). The doc universe is the corpus's own known docs (kept + relevance-
+ * dropped) plus the decision toggles — a force include/exclude never introduces a
+ * NEW file, so there's nothing to re-discover. Each doc's body is fetched through
+ * the repo-doc seam (`readRepoDoc` → GitHub in EE), and the `contentHash` is
+ * computed exactly as `discoverDocs` does (`sha256` of the utf-8 body) so the
+ * per-doc stage caches HIT: an unchanged doc re-derives its tags from cache
+ * instead of calling the LLM — which is what makes a restore cheap.
+ */
+export function buildStoredDocSource(
+  repoKey: string,
+  corpus: CuratedCorpus,
+  decisions: DecisionsFile,
+): () => Promise<DocCandidate[]> {
+  const lastTouchedByRef = new Map(corpus.docs.map((d) => [d.ref, d.lastTouched]));
+  const refs = new Set<string>();
+  for (const d of corpus.docs) refs.add(d.ref);
+  for (const s of corpus.skippedDocs ?? []) refs.add(s.ref);
+  for (const p of decisions.manualExcludes ?? []) refs.add(p);
+  for (const p of decisions.manualIncludes ?? []) refs.add(p);
+  return async () => {
+    const docs: DocCandidate[] = [];
+    for (const ref of refs) {
+      const content = await readRepoDoc(repoKey, ref);
+      if (content == null) continue; // deleted upstream — drop it from the set
+      docs.push({
+        path: ref,
+        absPath: '',
+        content,
+        kind: classifyDoc(ref, content),
+        preview: content.split(/\r?\n/).slice(0, 200).join('\n'),
+        lastTouched: lastTouchedByRef.get(ref) ?? '',
+        contentHash: createHash('sha256').update(content).digest('hex'),
+        size: Buffer.byteLength(content, 'utf-8'),
+      });
+    }
+    return docs;
+  };
+}
+
+/**
+ * Re-curate the stored corpus after a decision change (force include/exclude),
+ * for editions with no live working tree (EE). Runs the SAME `curate` the OSS path
+ * runs — differing only in transport: docs come through {@link buildStoredDocSource}
+ * (the repo-doc seam) instead of the filesystem, and the corpus is persisted to the
+ * store instead of `corpus.json`. Unchanged docs hit the per-doc caches (the EE
+ * Postgres KV store), so this is cheap and a RESTORE re-derives an excluded doc's
+ * tags from cache. Contracts are NOT regenerated here — that stays a separate step,
+ * exactly as in OSS. Returns the fresh corpus plus its open-conflict count (the
+ * caller uses `openConflicts === 0` to decide whether to regenerate contracts), or
+ * null when there is no corpus yet.
+ */
+export async function recurateStoredCorpus(
+  repoKey: string,
+): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
+  const corpus = await getCorpus(repoKey);
+  if (!corpus) return null;
+  const decisions = await loadDecisions(repoKey);
+  const { curate: result } = await curateInProcess(repoKey, {
+    docSource: buildStoredDocSource(repoKey, corpus, decisions),
+    decisions,
+    skipGit: true,
+    skipCorpusWrite: true,
+  });
+  const commitSha = await latestSpecCommit(repoKey);
+  if (commitSha) await saveSpec({ repoKey, commitSha }, 'corpus', result.corpus);
+  return { corpus: result.corpus, openConflicts: result.stats.overlapFlags };
 }
 
 // ---------------------------------------------------------------------------
