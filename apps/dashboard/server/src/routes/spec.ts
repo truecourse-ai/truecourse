@@ -98,9 +98,14 @@ async function loadCorpusForRef(
   return { corpus: null };
 }
 
-async function corpusPayload(repoPath: string, ref?: string): Promise<SpecCorpusPayload> {
+async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promise<SpecCorpusPayload> {
   const { corpus, corpusCommit } = await loadCorpusForRef(repoPath, ref);
-  const decisions = await getDecisions(repoPath);
+  // PR view: fold the PR's decisions overlay so resolved conflicts render.
+  // OSS has no overlay dimension — ignore pr there.
+  const decisions = await getDecisions(
+    repoPath,
+    pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
+  );
   return {
     corpus,
     userRelations: decisions.relations ?? [],
@@ -133,7 +138,15 @@ router.get(
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
       const ref = req.query.ref ? String(req.query.ref) : undefined;
-      const payload = await corpusPayload(repo.path, ref);
+      let pr: number | undefined;
+      if (req.query.pr !== undefined) {
+        pr = Number(req.query.pr);
+        if (!Number.isInteger(pr) || pr <= 0) {
+          res.status(400).json({ error: 'pr must be a positive integer.' });
+          return;
+        }
+      }
+      const payload = await corpusPayload(repo.path, ref, pr);
       if (!payload.corpus) {
         res.status(404).json({ error: 'No corpus has been scanned yet.' });
         return;

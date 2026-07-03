@@ -1053,8 +1053,15 @@ function prScopeQuery(opts?: { pr?: number; ref?: string }): string {
 }
 
 /** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
-export async function getSpecCorpus(repoId: string, ref?: string): Promise<SpecCorpusResponse | null> {
-  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+export async function getSpecCorpus(
+  repoId: string,
+  ref?: string,
+  pr?: number,
+): Promise<SpecCorpusResponse | null> {
+  const params = new URLSearchParams();
+  if (ref) params.set('ref', ref);
+  if (pr != null) params.set('pr', String(pr));
+  const q = params.size > 0 ? `?${params.toString()}` : '';
   try {
     return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus${q}`);
   } catch (e) {

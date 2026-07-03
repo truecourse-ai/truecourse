@@ -116,9 +116,16 @@ export interface SpecCorpusState {
 /**
  * Owns the corpus fetch + scan for one repo. `enabled` gates the initial read so
  * the page doesn't fetch a corpus until the Spec tab is actually shown. `ref`
- * (EE PR view) reads the corpus at a PR head — a change re-fetches.
+ * (EE PR view) reads the corpus at a PR head — a change re-fetches. `pr` folds
+ * the PR's decisions overlay into the returned relations, so resolutions made
+ * in the PR view render as resolved conflicts.
  */
-export function useSpecCorpus(repoId: string, enabled: boolean, ref?: string): SpecCorpusState {
+export function useSpecCorpus(
+  repoId: string,
+  enabled: boolean,
+  ref?: string,
+  pr?: number,
+): SpecCorpusState {
   const [data, setData] = useState<SpecCorpusResponse | null>(null);
   const [hydrating, setHydrating] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -132,14 +139,14 @@ export function useSpecCorpus(repoId: string, enabled: boolean, ref?: string): S
     let cancelled = false;
     setHydrating(true);
     api
-      .getSpecCorpus(repoId, ref)
+      .getSpecCorpus(repoId, ref, pr)
       .then((r) => !cancelled && setData(r))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setHydrating(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, ref]);
+  }, [repoId, enabled, ref, pr]);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -164,11 +171,11 @@ export function useSpecCorpus(repoId: string, enabled: boolean, ref?: string): S
 
   const refetch = useCallback(async () => {
     try {
-      setData(await api.getSpecCorpus(repoId, ref));
+      setData(await api.getSpecCorpus(repoId, ref, pr));
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [repoId, ref]);
+  }, [repoId, ref, pr]);
 
   const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
 

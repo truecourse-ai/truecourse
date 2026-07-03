@@ -1169,7 +1169,7 @@ function RepoPageInner() {
 
   // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
   // the panel) drives it, consistent with the other tabs.
-  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec', refForTabs);
+  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec', refForTabs, prNumber ?? undefined);
 
   const sectionActionsNode =
     leftTab === 'spec' ? (
