@@ -1426,7 +1426,6 @@ function RepoPageInner() {
               onOpen={handleOpenContracts}
               hosted={isEe}
               prDiff={blDriftDiffMode ? contractsDiff : null}
-              diffMode={blDriftDiffMode}
             />
           )}
           {leftTab === 'inferred' && (
