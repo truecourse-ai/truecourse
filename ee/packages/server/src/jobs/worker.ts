@@ -26,6 +26,7 @@ import {
   createGithubAuth,
   installationOctokit,
   selectGateStore,
+  getPrRegater,
   type BaselineResult,
 } from '@truecourse/ee-github-app';
 import type { NotificationLevel } from '@truecourse/shared';
@@ -60,9 +61,11 @@ import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
   WORKSPACE_CONTRACTS_TASK,
+  PR_REGATE_TASK,
   type SyncJobPayload,
   type BaselineJobPayload,
   type WorkspaceContractsJobPayload,
+  type PrRegateJobPayload,
 } from './constants.js';
 
 export interface StartWorkerDeps {
@@ -146,6 +149,69 @@ function contractFailureBody(message: string): string {
   return /failed to resolve/i.test(message)
     ? 'The contracts couldn’t be built — the resolved spec has conflicting or duplicate definitions. Re-resolve the conflict in Spec, then try again.'
     : 'The contracts couldn’t be generated. Open Details for the technical reason.';
+}
+
+/** Deps the `pr.regate` task body needs — the stores + the github-app re-gate
+ *  seam (null when the App isn't configured). Injected so the body is unit-testable
+ *  without standing up graphile-worker. */
+export interface RunPrRegateDeps {
+  db: EeDb;
+  jobStore: JobStore;
+  notifications: NotificationStore;
+  regate: ((repoFullName: string, prNumber: number) => Promise<void>) | null;
+}
+
+/**
+ * The `pr.regate` task body: re-gate exactly one PR after a PR-scoped decision
+ * cleared its last conflict. Mirrors `repo.baseline` — mark running, do the work,
+ * mark succeeded/failed, and post a durable notification (+ live SSE) either way.
+ * A null regater means the GitHub App isn't configured; that's a terminal failure
+ * (same shape as baseline's missing-config throw), never a silent success.
+ */
+export async function runPrRegate(deps: RunPrRegateDeps, payload: PrRegateJobPayload): Promise<void> {
+  const { db, jobStore, notifications } = deps;
+  const { jobId, workspaceOrgId, repoFullName, prNumber } = payload;
+
+  const running = await jobStore.markRunning(jobId);
+  if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
+
+  try {
+    if (!deps.regate) throw new Error('the GitHub App is not configured');
+    await deps.regate(repoFullName, prNumber);
+
+    const done = await jobStore.markSucceeded(jobId, { repoFullName, prNumber });
+    if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
+    const note = await notifications.add({
+      org: workspaceOrgId,
+      kind: PR_REGATE_TASK,
+      level: 'success',
+      title: 'PR re-gated',
+      body: `${repoFullName} — PR #${prNumber} re-gated after conflict resolution.`,
+      data: { jobId, repoFullName, prNumber },
+    });
+    await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
+  } catch (err) {
+    const message = (err as Error).message;
+    const failed = await jobStore.markFailed(jobId, message);
+    const note = await notifications.add({
+      org: workspaceOrgId,
+      kind: PR_REGATE_TASK,
+      level: 'error',
+      title: `PR re-gate failed — ${repoFullName}`,
+      body: 'The re-gate didn’t finish. Open Details for the technical reason.',
+      data: { jobId, repoFullName, prNumber, detail: message },
+    });
+    if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
+    await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
+    captureEeException(err, {
+      component: 'github-gate',
+      orgId: workspaceOrgId,
+      repo: repoFullName,
+      pr: prNumber,
+      route: 'worker pr.regate',
+    });
+    throw err; // maxAttempts:1 ⇒ permanent fail.
+  }
 }
 
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
@@ -412,6 +478,12 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     }
   };
 
+  // Re-gate one PR after a PR-scoped decision cleared its last conflict. Reads the
+  // github-app seam here (in the worker), not at enqueue time, so the enqueue stays
+  // dependency-free; the body itself lives in `runPrRegate` for unit-testability.
+  const prRegate: Task = (rawPayload) =>
+    runPrRegate({ db, jobStore, notifications, regate: getPrRegater() }, rawPayload as PrRegateJobPayload);
+
   const runner = await run({
     connectionString: deps.connectionString,
     concurrency: 2,
@@ -429,6 +501,10 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       [WORKSPACE_CONTRACTS_TASK]: withTrace<WorkspaceContractsJobPayload>(
         (p) => jobTrace(p.workspaceOrgId, p.jobId),
         workspaceContracts,
+      ),
+      [PR_REGATE_TASK]: withTrace<PrRegateJobPayload>(
+        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoFullName }),
+        prRegate,
       ),
     },
   });

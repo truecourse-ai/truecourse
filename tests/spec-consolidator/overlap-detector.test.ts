@@ -103,6 +103,41 @@ describe('flagOverlaps', () => {
     expect(out.has('core/users-entity')).toBe(true); // still flagged elsewhere
   });
 
+  it('dedups the same disagreement flagged across shared areas', async () => {
+    // One doc pair co-occurs in two areas and the runner flags it in both with
+    // identical sections — one real disagreement. It collapses to the
+    // lexicographically-first area so the user sees a single conflict.
+    const docs = [doc('a.md'), doc('b.md')];
+    const areas = [area('booking/appointments', ['a.md', 'b.md']), area('booking/auth', ['a.md', 'b.md'])];
+    const runner: OverlapRunner = async ({ a, b }) => ({
+      overlap: true,
+      note: 'cancellation window differs',
+      sections: [
+        { doc: a.path, heading: 'Core domain' },
+        { doc: b.path, heading: 'Key flows' },
+      ],
+    });
+    const out = await flagOverlaps(repo, areas, docs, { runner });
+    expect(out.has('booking/appointments')).toBe(true); // first area keeps it
+    expect(out.has('booking/auth')).toBe(false); // duplicate dropped
+    expect(out.get('booking/appointments')).toHaveLength(1);
+  });
+
+  it('keeps distinct conflicts between the same pair (different sections)', async () => {
+    // The same pair disagrees on DIFFERENT sections in each area — two genuinely
+    // different disagreements, so neither is deduped away.
+    const docs = [doc('a.md'), doc('b.md')];
+    const areas = [area('svc/x', ['a.md', 'b.md']), area('svc/y', ['a.md', 'b.md'])];
+    const runner: OverlapRunner = async ({ areaId, a }) => ({
+      overlap: true,
+      note: `differs in ${areaId}`,
+      sections: [{ doc: a.path, heading: areaId === 'svc/x' ? 'Auth' : 'Billing' }],
+    });
+    const out = await flagOverlaps(repo, areas, docs, { runner });
+    expect(out.has('svc/x')).toBe(true);
+    expect(out.has('svc/y')).toBe(true);
+  });
+
   it('caps pairs per area and reports the cap', async () => {
     const docs = [doc('a.md'), doc('b.md'), doc('c.md')]; // 3 pairs
     const capped: Array<[string, number, number]> = [];

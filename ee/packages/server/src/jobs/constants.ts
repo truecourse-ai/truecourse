@@ -21,8 +21,25 @@ export const REPO_CONTRACTS_TASK = 'repo.contracts';
 
 /** The PR-scoped analog: a PR-scoped decision cleared that PR's last conflict, so
  *  re-gate exactly that one PR (no repo-wide contract regeneration). Matches the
- *  core `PrRegateTask.type` literal. */
+ *  core `PrRegateTask.type` literal, and is also the graphile task identifier. */
 export const PR_REGATE_TASK = 'pr.regate';
+
+/** The worker's `pr.regate` task payload (the resolved re-gate target + job id). */
+export interface PrRegateJobPayload {
+  jobId: string;
+  /** The repo's workspace org — scopes the job + its notification. */
+  workspaceOrgId: string;
+  /** `owner/repo` of the PR to re-gate. */
+  repoFullName: string;
+  /** The PR to re-gate. */
+  prNumber: number;
+}
+
+/** Single-flight key for a `pr.regate` job — per repo AND PR: two different PRs of
+ *  one repo may re-gate concurrently, but the same PR must not. */
+export function prRegateJobKey(repoFullName: string, prNumber: number): string {
+  return `${PR_REGATE_TASK}:${repoFullName}#${prNumber}`;
+}
 
 /** The workspace analogue: refresh the workspace `.tc` corpus after a workspace
  *  Knowledge decision (same debounced, tracked model). */

@@ -20,7 +20,7 @@ import { JobStore, NotificationStore, ActiveJobExistsError } from '@truecourse/e
 import { log } from '@truecourse/core/lib/logger';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
-import { selectGateStore, getPrReverifier, getPrRegater } from '@truecourse/ee-github-app';
+import { selectGateStore, getPrReverifier } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import { reverifyWorkspaceRepos } from './reverify.js';
@@ -30,6 +30,7 @@ import {
   REPO_CONTRACTS_TASK,
   PR_REGATE_TASK,
   WORKSPACE_CONTRACTS_TASK,
+  prRegateJobKey,
   type SyncJobPayload,
   type BaselineEnqueueRequest,
 } from './constants.js';
@@ -197,6 +198,33 @@ export async function registerJobs(
     return job.id;
   };
 
+  // Single-flight PR re-gate enqueue — a PR-scoped decision cleared that PR's last
+  // conflict, so re-gate just that one PR (durable, tracked + notified like a
+  // baseline). Keyed per repo AND PR: distinct PRs of a repo re-gate concurrently,
+  // but a redelivered decision for the same PR is a no-op. Mirrors enqueueBaseline.
+  const enqueuePrRegate = async (
+    workspaceOrgId: string,
+    repoFullName: string,
+    prNumber: number,
+  ): Promise<string | null> => {
+    if (!runner) throw new Error('the background job worker is not running');
+    const key = prRegateJobKey(repoFullName, prNumber);
+    let job;
+    try {
+      job = await jobStore.create({ org: workspaceOrgId, type: PR_REGATE_TASK, key });
+    } catch (err) {
+      // This PR is already re-gating — skip (idempotent re-delivered decision edit).
+      if (err instanceof ActiveJobExistsError) return null;
+      throw err;
+    }
+    await runner.addJob(
+      PR_REGATE_TASK,
+      { jobId: job.id, workspaceOrgId, repoFullName, prNumber },
+      { jobKey: key, maxAttempts: 1 },
+    );
+    return job.id;
+  };
+
   // Regenerate a repo's contracts after a decision leaves the spec conflict-free:
   // re-baseline the SAME head with `force` (clone → curate → generate → verify —
   // the baseline's own progress panel shows it) so the neutral baseline becomes a
@@ -274,15 +302,17 @@ export async function registerJobs(
       // wrapper did no work of its own beyond this call, so it was pure redundancy.
       await onContractsRegenerated(task.repoKey, workspaceOrgId);
     } else if (task.type === PR_REGATE_TASK && task.repoKey) {
-      // A PR-scoped decision cleared that PR's last conflict — force a targeted
-      // re-gate of just that one PR (no repo-wide contract regeneration). Null
-      // regater = the GitHub App isn't configured (SSO-only), so nothing to do.
-      const regate = getPrRegater();
-      if (!regate) {
-        log.warn('[ee-jobs] pr.regate skipped: the GitHub App is not configured');
+      // A PR-scoped decision cleared that PR's last conflict — enqueue a durable,
+      // single-flight re-gate of just that one PR (the worker runs it off the
+      // request path and notifies on completion), not inline fire-and-forget. OSS
+      // adapters pass only repoKey, so resolve the owning workspace from the link.
+      const workspaceOrgId =
+        task.workspaceOrgId ?? (await gateStore.getRepo(task.repoKey))?.workspaceOrgId;
+      if (!workspaceOrgId) {
+        log.warn(`[ee-jobs] pr.regate skipped: ${task.repoKey} is not a connected repo`);
         return;
       }
-      await regate(task.repoKey, task.prNumber);
+      await enqueuePrRegate(workspaceOrgId, task.repoKey, task.prNumber);
     }
   });
 

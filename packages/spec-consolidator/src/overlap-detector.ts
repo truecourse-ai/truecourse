@@ -147,12 +147,43 @@ export async function flagOverlaps(
     launch();
   });
 
+  // Cross-area dedup backstop: a doc pair can co-occur in several areas, so the
+  // SAME disagreement can be flagged more than once (the SCOPE prompt biases
+  // against off-topic flags but can't guarantee it). Collapse overlaps with the
+  // same unordered pair + same conflicting sections down to ONE area — the
+  // lexicographically-first — so one real disagreement is one conflict. Sections
+  // are part of the key on purpose: two genuinely different conflicts between the
+  // same pair (different sections) are kept.
+  const seenKeys = new Set<string>();
+  for (const areaId of [...result.keys()].sort()) {
+    const kept = result.get(areaId)!.filter((ov) => {
+      const key = overlapDedupKey(ov);
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+    if (kept.length === 0) result.delete(areaId);
+    else result.set(areaId, kept);
+  }
+
   // Stable ordering for deterministic corpus output.
   for (const [areaId, list] of result) {
     list.sort((x, y) => (x.docs.join() < y.docs.join() ? -1 : 1));
     result.set(areaId, list);
   }
   return result;
+}
+
+/** Identity of a flagged disagreement, independent of the area it surfaced in:
+ * the unordered doc pair plus its conflicting sections. Two overlaps with the
+ * same key are the same disagreement seen from different areas. */
+function overlapDedupKey(ov: Overlap): string {
+  const docs = [...ov.docs].sort().join('::');
+  const secs = (ov.sections ?? [])
+    .map((s) => `${s.doc}|${s.heading}`)
+    .sort()
+    .join('::');
+  return `${docs}##${secs}`;
 }
 
 async function examineOne(
@@ -205,6 +236,8 @@ function isResolved(set: Set<string>, areaId: string, x: string, y: string): boo
 export const OVERLAP_DETECTOR_SYSTEM_PROMPT = `You compare TWO documentation files that both cover the same AREA of a software system and decide whether they may DISAGREE.
 
 DISAGREE = the two docs state different things about the SAME specific decision: a different value, field name, type, default, rule, enum member, status code, endpoint shape, or named behavior. That is something a human must reconcile.
+
+SCOPE — judge ONLY disagreements that belong to THIS area (the "Area:" named in the message below). These docs usually span several areas and may also disagree on topics that belong ELSEWHERE; ignore those here — each is flagged in the area it belongs to, not twice. If the only contradiction you find is outside this area's concern, return overlap:false.
 
 NOT a disagreement (do NOT flag):
   - Complementary coverage — each doc specs different parts of the area (different fields, different endpoints) with no contradiction.
