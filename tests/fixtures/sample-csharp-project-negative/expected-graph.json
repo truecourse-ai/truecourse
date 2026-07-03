@@ -217,6 +217,12 @@
       "layer": "service"
     },
     {
+      "name": "ConstantArrayArgumentInline",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CoordinateLabel",
       "service": "ApiGateway",
       "kind": "class",
@@ -475,6 +481,12 @@
       "layer": "api"
     },
     {
+      "name": "GuardedLocalAssignmentBug",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "HandlerBase",
       "service": "ApiGateway",
       "kind": "class",
@@ -614,6 +626,18 @@
     },
     {
       "name": "IMetricsRecorder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ImplicitPrivateMembersBug",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "InfiniteRecursionExpressionBodyProperty",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -889,6 +913,12 @@
       "layer": "service"
     },
     {
+      "name": "NonDelegatingGetAccessors",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "NotificationHub",
       "service": "ApiGateway",
       "kind": "class",
@@ -1088,6 +1118,12 @@
     },
     {
       "name": "RateCache",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RecursionGuardMode",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -1717,6 +1753,12 @@
       "layer": "data"
     },
     {
+      "name": "AvatarLink",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "BaseFormatter",
       "service": "UserService",
       "kind": "class",
@@ -1921,6 +1963,12 @@
       "layer": "service"
     },
     {
+      "name": "GroupedReportController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "GuardExpressions",
       "service": "UserService",
       "kind": "class",
@@ -2083,6 +2131,12 @@
       "layer": "service"
     },
     {
+      "name": "MemberMoreVisibleThanTypeMisleading",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "MessageComposer",
       "service": "UserService",
       "kind": "class",
@@ -2185,6 +2239,12 @@
       "layer": "service"
     },
     {
+      "name": "PaymentReconciler",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PaymentRelay",
       "service": "UserService",
       "kind": "class",
@@ -2281,6 +2341,12 @@
       "layer": "service"
     },
     {
+      "name": "RedundantReturnAtEnd",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ReferenceInterner",
       "service": "UserService",
       "kind": "class",
@@ -2353,6 +2419,18 @@
       "layer": "service"
     },
     {
+      "name": "SelfAssignedField",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SelfInheritingType",
+      "service": "UserService",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
       "name": "SessionAuditLog",
       "service": "UserService",
       "kind": "class",
@@ -2383,6 +2461,18 @@
       "layer": "service"
     },
     {
+      "name": "StandaloneStaticHolder",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StatelessScoreCombiner",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "StatementResidue",
       "service": "UserService",
       "kind": "class",
@@ -2395,6 +2485,12 @@
       "layer": "service"
     },
     {
+      "name": "StringFormattingHelpers",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "SwitchDuplication",
       "service": "UserService",
       "kind": "class",
@@ -2402,6 +2498,12 @@
     },
     {
       "name": "SyncCursor",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TagReducer",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2420,6 +2522,12 @@
     },
     {
       "name": "TimeoutPolicy",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TimestampFormatter",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2450,6 +2558,18 @@
     },
     {
       "name": "TrialExpiryService",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UnrelatedReportState",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UpdateQuotaCommand",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2954,6 +3074,11 @@
       "method": "GET",
       "path": "/users/{userId}",
       "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "file": "services/UserService/Violations/Architecture/GroupedReportController.cs"
     },
     {
       "method": "GET",

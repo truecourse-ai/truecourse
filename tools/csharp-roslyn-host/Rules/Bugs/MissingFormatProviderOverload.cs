@@ -29,6 +29,16 @@ internal sealed class MissingFormatProviderOverload : ISemanticRule
             // BCL types whose parameterless ToString is genuinely culture-sensitive.
             if (m.Name == "ToString" && !IsCultureSensitiveToString(m)) continue;
 
+            // Some standard format specifiers are defined by the .NET spec to always
+            // produce culture-invariant output regardless of any IFormatProvider:
+            //   "r"/"R" — RFC1123,  "o"/"O" — round-trip,  "s" — sortable,  "u" — universal
+            // Passing a provider to these overloads changes nothing, so flagging them
+            // as locale-dependent is incorrect.
+            if (m.Name == "ToString" && inv.ArgumentList.Arguments.Count == 1
+                && inv.ArgumentList.Arguments[0].Expression is LiteralExpressionSyntax fmtLit
+                && fmtLit.Token.ValueText is "r" or "R" or "o" or "O" or "s" or "u")
+                continue;
+
             // string.Format with a provider overload (CA1305 only meaningfully targets
             // the formattable BCL surface). Restrict Format to System.String.Format.
             if (m.Name == "Format" && m.ContainingType?.SpecialType != SpecialType.System_String) continue;

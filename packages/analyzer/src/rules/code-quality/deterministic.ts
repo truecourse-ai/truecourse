@@ -1472,6 +1472,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'deterministic',
+    engine: 'roslyn-host',
   },
   {
     key: 'code-quality/deterministic/hardcoded-url',

@@ -24,6 +24,11 @@ export const csharpUnusedPrivateMemberVisitor: CodeRuleVisitor = {
     const privateMembers = new Map<string, SyntaxNode>()
     for (const member of body.namedChildren) {
       if (!member) continue
+      // Explicit interface implementations (`T IFoo.Bar => ...`) are contract
+      // members accessed through the interface, not private members — never
+      // "unused". They carry no access modifier, so without this guard they read
+      // as default-private.
+      if (member.namedChildren.some((c) => c?.type === 'explicit_interface_specifier')) continue
       if (!isCSharpPrivateMember(member)) continue
       // Attribute-decorated members are reached via reflection
       // (serializers, DI, Unity [SerializeField], …).

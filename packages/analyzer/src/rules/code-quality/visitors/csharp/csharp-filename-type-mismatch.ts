@@ -19,12 +19,22 @@ export const csharpFilenameTypeMismatchVisitor: CodeRuleVisitor = {
   nodeTypes: ['compilation_unit'],
   visit(node, filePath, sourceCode) {
     const base = filePath.split('/').pop() ?? ''
-    const fileName = base.replace(/\.[^.]*$/, '')
+    // Razor Pages / Blazor code-behind: `X.cshtml.cs` / `X.razor.cs` pairs with a
+    // type named `X` or, by ASP.NET convention, `XModel`. Strip the full compound
+    // extension so the page base name (not `X.cshtml`) is what we match against.
+    const lower = base.toLowerCase()
+    const compoundExt = ['.cshtml.cs', '.razor.cs'].find((ext) => lower.endsWith(ext))
+    const fileName = compoundExt
+      ? base.slice(0, base.length - compoundExt.length)
+      : base.replace(/\.[^.]*$/, '')
     if (!fileName) return null
 
     const identifiers = topLevelTypeIdentifiers(node)
     if (identifiers.length === 0) return null
-    if (identifiers.some((id) => nameMatches(fileName, id.text))) return null
+    // For code-behind files the conventional `Model` suffix is an accepted match.
+    const matches = (id: SyntaxNode): boolean =>
+      nameMatches(fileName, id.text) || (compoundExt !== undefined && id.text === `${fileName}Model`)
+    if (identifiers.some(matches)) return null
 
     const first = identifiers[0]
     return makeViolation(

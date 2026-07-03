@@ -3527,6 +3527,58 @@ public sealed class Toggle
 `, key)
     expect(found.length).toBe(0)
   })
+
+  it('does not flag a guarded assignment to an enclosing-type property (observable setter)', () => {
+    const found = matches(`namespace Domain;
+public class FeatureRecord
+{
+    public string Name { get; set; }
+
+    public void Patch(FeatureRecord other)
+    {
+        if (Name != other.Name)
+        {
+            Name = other.Name;
+        }
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a guarded this.Property assignment', () => {
+    const found = matches(`namespace Domain;
+public class SettingRecord
+{
+    public int Value { get; set; }
+
+    public void Copy(SettingRecord other)
+    {
+        if (this.Value != other.Value)
+            this.Value = other.Value;
+    }
+}
+`, key)
+    expect(found).toHaveLength(0)
+  })
+
+  it('still flags a guarded assignment to a local variable', () => {
+    const found = matches(`namespace Domain;
+public class Calc
+{
+    public int Clamp(int value)
+    {
+        int result = 0;
+        if (result != value)
+        {
+            result = value;
+        }
+        return result;
+    }
+}
+`, key)
+    expect(found.length).toBe(1)
+  })
 })
 
 describe('bugs/deterministic/collection-passed-to-own-method (C#)', () => {

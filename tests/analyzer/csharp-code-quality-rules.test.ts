@@ -912,43 +912,9 @@ public class PagingService
 })
 
 // ---------------------------------------------------------------------------
-// unused-function-parameter
+// unused-function-parameter — now a roslyn-host rule for C#; tested in
+// roslyn-rules-code-quality.test.ts
 // ---------------------------------------------------------------------------
-
-describe('code-quality/deterministic/unused-function-parameter (C#)', () => {
-  it('detects a parameter never used in the body', () => {
-    const found = matches(`namespace App;
-public class PricingService
-{
-    public decimal ApplyDiscount(decimal price, string promoCode)
-    {
-        return price * 0.9m;
-    }
-}
-`, 'unused-function-parameter')
-    expect(found.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('does not flag overrides, event handlers, or NotImplemented stubs', () => {
-    const found = matches(`namespace App;
-public class ExportJob : JobBase
-{
-    public override Task RunAsync(JobContext context) => Task.CompletedTask;
-
-    private void OnTimer(object sender, ElapsedEventArgs e)
-    {
-        _ticks++;
-    }
-
-    public void Rollback(string reason)
-    {
-        throw new NotImplementedException();
-    }
-}
-`, 'unused-function-parameter')
-    expect(found).toHaveLength(0)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // parameter-reassignment
@@ -2617,6 +2583,16 @@ public class InvoiceService
         }
         throw new InvoiceNotFoundException(id);
     }
+}
+`, 'unused-private-member')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag an explicit interface property implementation', () => {
+    const found = matches(`namespace App;
+public sealed class Repo : IContextHolder
+{
+    DbContext IContextHolder.Context => _factory.Create();
 }
 `, 'unused-private-member')
     expect(found).toHaveLength(0)
@@ -8422,6 +8398,28 @@ public class Order
 `, 'property-name-matches-get-method')
     expect(found).toHaveLength(0)
   })
+
+  it('does not flag an expression-bodied property that delegates to GetX()', () => {
+    const found = matches(`namespace App;
+public class ClientInfo
+{
+    public string BrowserInfo => GetBrowserInfo();
+    protected string GetBrowserInfo() => "n/a";
+}
+`, 'property-name-matches-get-method')
+    expect(found).toHaveLength(0)
+  })
+
+  it('does not flag a get accessor that returns GetX()', () => {
+    const found = matches(`namespace App;
+public class ThemeManager
+{
+    public string CurrentTheme { get { return GetCurrentTheme(); } }
+    protected string GetCurrentTheme() => "default";
+}
+`, 'property-name-matches-get-method')
+    expect(found).toHaveLength(0)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -8924,6 +8922,14 @@ describe('code-quality/deterministic/missing-access-modifier (C#)', () => {
 
   it('does not flag a partial type (covered by the partial rule)', () => {
     expect(matches(`namespace N; partial class C { }`, 'missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag an explicit interface property implementation', () => {
+    expect(matches(`namespace N; public class C : IRepo { DbContext IRepo.DbContext => _ctx; }`, 'missing-access-modifier').length).toBe(0)
+  })
+
+  it('does not flag an explicit interface indexer implementation', () => {
+    expect(matches(`namespace N; public class C : ILoc { string ILoc.this[int i] => _values[i]; }`, 'missing-access-modifier').length).toBe(0)
   })
 })
 

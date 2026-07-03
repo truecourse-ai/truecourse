@@ -40,11 +40,11 @@ internal static class Program
 
     private static int Main()
     {
-        // NOTE: MSBuild is registered lazily, inside AnalyzeProject — NOT here.
-        // MSBuildLocator.RegisterDefaults() honours the spawn cwd's global.json
-        // and throws if that SDK isn't installed. Registering at startup coupled
-        // the SDK-free tiers (ping / loose-text `analyze`) to the target repo's
-        // SDK pin and hard-crashed the whole host. Only analyze-project needs it.
+        // Deliberately do NOT resolve an SDK here. `ping` and the loose-text
+        // `analyze` op need only the .NET *runtime*, so they must work even when
+        // no SDK is installed, or the ambient global.json pins an uninstalled one
+        // (the analyze cwd may be a target repo with such a pin — see issue #658).
+        // MSBuildLocator runs lazily, and guarded, only for `analyze-project`.
 
         // Line-buffered request/response loop. Blocks until stdin closes.
         for (string? line; (line = Console.In.ReadLine()) is not null;)
@@ -71,9 +71,34 @@ internal static class Program
     {
         "ping" => new Response(true),
         "analyze" => Analyze(req),
-        "analyze-project" => AnalyzeProject(req).GetAwaiter().GetResult(),
+        "analyze-project" => AnalyzeProjectGuarded(req),
         _ => new Response(false, Error: $"unknown op: {req.Op}"),
     };
+
+    // analyze-project is the only op that needs MSBuild. Register an installed SDK
+    // lazily and BEFORE any MSBuild type resolves — MSBuildLocator lives in its own
+    // assembly, so referencing it here does not pull MSBuild in, and AnalyzeProject
+    // (which does touch MSBuild types) stays NoInlining so its body JITs only after
+    // this returns. If no SDK can be resolved — none installed, or the ambient
+    // global.json pins an uninstalled one — report it as a normal protocol error so
+    // the caller can skip the project-aware tier, rather than letting RegisterDefaults
+    // throw and abort the whole process (which surfaced as an EPIPE crash on the Node
+    // side — see issue #658).
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Response AnalyzeProjectGuarded(Request req)
+    {
+        try
+        {
+            if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
+        }
+        catch (Exception ex)
+        {
+            return new Response(false, Error:
+                $"could not locate a .NET SDK to open the project via MSBuild: {ex.Message}. " +
+                "Install a compatible .NET SDK (and restore the project) for project-aware C# rules.");
+        }
+        return AnalyzeProject(req).GetAwaiter().GetResult();
+    }
 
     private static Response Analyze(Request req)
     {
@@ -108,8 +133,9 @@ internal static class Program
 
     // Open a real project/solution via MSBuildWorkspace and run every host rule
     // (single-model and project-aware) against its documents with the project's
-    // own references. NoInlining: keeps MSBuild types out of Main's JIT body so
-    // MSBuildLocator.RegisterDefaults runs before they resolve.
+    // own references. NoInlining: keeps MSBuild types out of the caller's JIT body
+    // so AnalyzeProjectGuarded's MSBuildLocator.RegisterDefaults runs before they
+    // resolve.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static async Task<Response> AnalyzeProject(Request req)
     {
@@ -118,13 +144,7 @@ internal static class Program
         if (!File.Exists(req.Project))
             return new Response(false, Error: $"project not found: {req.Project}");
 
-        // Register MSBuild here, on first project-tier use — this is the only path
-        // that needs an SDK. If the project's global.json pins an SDK that isn't
-        // installed, RegisterDefaults throws; that surfaces to the caller as a
-        // failed response and the run fails hard (the dev must install that SDK).
-        // Safe inside this NoInlining method: it runs before any MSBuild type below.
-        if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
-
+        // MSBuild is already registered by AnalyzeProjectGuarded before this runs.
         var enabled = req.Rules is { Count: > 0 } ? new HashSet<string>(req.Rules) : null;
 
         using var workspace = MSBuildWorkspace.Create();
