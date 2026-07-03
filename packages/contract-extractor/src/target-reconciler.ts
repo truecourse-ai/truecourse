@@ -24,9 +24,12 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { parserOhm, resolver, type ArtifactRef } from '@truecourse/contract-verifier';
 import { coverageKey, type TargetSpec } from './corpus-prompt.js';
 import { slugIdentity } from './identity.js';
 import type { AreaGenInput } from './corpus-reader.js';
+// Type-only (erased at runtime → no cycle; merger imports nothing from here).
+import type { MergedArtifact } from './merger.js';
 
 /** Per-area enumerated targets — the input and output shape of reconciliation. */
 export interface AreaTargets {
@@ -547,6 +550,161 @@ export function rewriteReferencesToCanonical(
     i++;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Dangling-reference snapping (deterministic ref → declared-identity resolution)
+// ---------------------------------------------------------------------------
+
+/** One deterministic snap: a dangling cross-reference rewritten onto a declared
+ *  identity of the SAME kind, plus which ladder rung matched (for provenance). */
+export interface ReferenceSnap {
+  /** The reference as the LLM wrote it (dangling). */
+  from: { kind: string; identity: string };
+  /** The declared identity it was snapped onto. */
+  to: { kind: string; identity: string };
+  via: 'canonical-fold' | 'token-set' | 'unique-token';
+}
+
+interface DeclaredIdentity {
+  identity: string;
+  ck: string;
+  multiset: string;
+  tokens: Set<string>;
+}
+
+/**
+ * Minimal singular/plural fold for ONE identity token — the identity-token analog
+ * of spec-consolidator's trailing-`s` alias fold (`corpus-types.applyAlias`),
+ * kept local because identities aren't the tagger's product/concern vocabulary.
+ * Normalizes a token to a comparison form so `customers` matches `customer` and
+ * `categories` matches `category`. Deliberately conservative — it never touches
+ * `class`/`ss` words or tokens too short to safely singularize.
+ */
+function foldToken(tok: string): string {
+  if (tok.length > 3 && tok.endsWith('ies')) return `${tok.slice(0, -3)}y`;
+  if (tok.length > 3 && tok.endsWith('s') && !tok.endsWith('ss')) return tok.slice(0, -1);
+  return tok;
+}
+
+/** Order-insensitive folded token-multiset key (rung b). */
+function foldedMultisetKey(identity: string): string {
+  return identityTokens(identity).map(foldToken).sort().join(' ');
+}
+
+/** Folded meaningful tokens (≥3 chars, like the clustering token filter) — rung c. */
+function foldedMeaningfulTokens(identity: string): Set<string> {
+  return new Set(identityTokens(identity).map(foldToken).filter((t) => t.length >= 3));
+}
+
+function sharesToken(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  for (const t of a) if (b.has(t)) return true;
+  return false;
+}
+
+/**
+ * The resolution ladder for one dangling reference against the declared identities
+ * of its kind. Each rung requires a UNIQUE declared candidate; ambiguity (or a
+ * looser-but-non-unique match) stops the ladder — a wrong snap is worse than a
+ * tolerated soft dangling ref. Rungs, most-precise first:
+ *
+ *   a. coverage-key equality — folds the benign drift the resolver's exact match
+ *      misses (HTTP method case, trailing slash, `:id`↔`{id}`, whitespace).
+ *   b. folded token-multiset equality — the same identity reordered/re-punctuated
+ *      (`order-line` ↔ `line.order`), plural-folded.
+ *   c. unique meaningful-token overlap (plural-folded) — the conservative rung that
+ *      catches the observed `core.customers` → `Customer` case, snapping only when
+ *      exactly one declared identity of the kind shares a meaningful token.
+ */
+function snapCandidate(
+  ref: ArtifactRef,
+  declared: readonly DeclaredIdentity[],
+): { to: DeclaredIdentity; via: ReferenceSnap['via'] } | null {
+  const byCk = declared.filter((d) => d.ck === coverageKey(ref.type, ref.identity));
+  if (byCk.length === 1) return { to: byCk[0], via: 'canonical-fold' };
+  if (byCk.length > 1) return null;
+
+  const refMulti = foldedMultisetKey(ref.identity);
+  const byMulti = declared.filter((d) => d.multiset === refMulti);
+  if (byMulti.length === 1) return { to: byMulti[0], via: 'token-set' };
+  if (byMulti.length > 1) return null;
+
+  const refTokens = foldedMeaningfulTokens(ref.identity);
+  if (refTokens.size === 0) return null;
+  const overlapping = declared.filter((d) => sharesToken(refTokens, d.tokens));
+  return overlapping.length === 1 ? { to: overlapping[0], via: 'unique-token' } : null;
+}
+
+/**
+ * Snap dangling cross-references onto the corpus's DECLARED identities,
+ * deterministically. The extract LLM sometimes writes a reference from whole
+ * cloth — a regenerated `Order` emitting `references Entity:core.customers` while
+ * the customer entity is declared `entity Customer`. Reconcile's rewrite only
+ * covers references to MERGED enumerated targets, so an invented dangling ref
+ * used to sail through as a tolerated soft "unresolved reference" and never got
+ * checked at verify. This closes that hole before repair: the resolver is the
+ * single source of truth for both the declared index and the unresolved refs, and
+ * every snap goes through the same token-accurate rewriter {@link
+ * rewriteReferencesToCanonical} uses, so quoting and token boundaries are honored.
+ *
+ * Guards (references left verbatim, never snapped): a ref to a kind with no
+ * lifter (`Unknown`, e.g. a `PerformanceSLA` forward ref) and a ref to a kind with
+ * no declared artifacts at all — both are legitimate forward refs to as-yet-
+ * unmodelled artifacts. What can't be snapped stays dangling for repair / the
+ * soft-issue tolerance. Mutates each artifact's winning body in place; returns the
+ * snaps for provenance.
+ */
+export function snapReferencesToDeclared(artifacts: MergedArtifact[]): ReferenceSnap[] {
+  const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
+  for (const a of artifacts) {
+    try {
+      fileNodes.push(parserOhm.parseTcFile(`<llm:${a.kind}:${a.identity}>`, a.winning.tcSource));
+    } catch {
+      // Unparseable artifacts contribute no refs; validate/repair handle them.
+    }
+  }
+  const resolution = resolver.resolve(fileNodes);
+  if (resolution.unresolvedRefs.length === 0) return [];
+
+  const declaredByKind = new Map<string, DeclaredIdentity[]>();
+  for (const art of resolution.index.values()) {
+    const kind = art.ref.type;
+    const bucket = declaredByKind.get(kind) ?? [];
+    bucket.push({
+      identity: art.ref.identity,
+      ck: coverageKey(kind, art.ref.identity),
+      multiset: foldedMultisetKey(art.ref.identity),
+      tokens: foldedMeaningfulTokens(art.ref.identity),
+    });
+    declaredByKind.set(kind, bucket);
+  }
+
+  const snapMap: Record<string, { kind: string; identity: string }> = {};
+  const snaps: ReferenceSnap[] = [];
+  const seen = new Set<string>();
+  for (const { ref } of resolution.unresolvedRefs) {
+    if (ref.type === 'Unknown') continue; // forward ref to an unmodelled kind
+    const declared = declaredByKind.get(ref.type);
+    if (!declared || declared.length === 0) continue; // kind not declared at all
+    const refCk = coverageKey(ref.type, ref.identity);
+    if (seen.has(refCk)) continue;
+    seen.add(refCk);
+    const match = snapCandidate(ref, declared);
+    if (!match) continue;
+    snapMap[refCk] = { kind: ref.type, identity: match.to.identity };
+    snaps.push({
+      from: { kind: ref.type, identity: ref.identity },
+      to: { kind: ref.type, identity: match.to.identity },
+      via: match.via,
+    });
+  }
+
+  if (snaps.length === 0) return [];
+  for (const a of artifacts) {
+    const rewritten = rewriteReferencesToCanonical(a.winning.tcSource, snapMap);
+    if (rewritten !== a.winning.tcSource) a.winning = { ...a.winning, tcSource: rewritten };
+  }
+  return snaps;
 }
 
 // ---------------------------------------------------------------------------

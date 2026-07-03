@@ -13,7 +13,7 @@ import { propagateCrossCuttingTags } from './tag-propagator.js';
 import { normalizeMergedArtifacts } from './normalizer.js';
 import { repair, type RepairProgress } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
-import { rewriteReferencesToCanonical } from './target-reconciler.js';
+import { rewriteReferencesToCanonical, snapReferencesToDeclared } from './target-reconciler.js';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { SpecSlice } from './types.js';
 // Type-only (erased at runtime → no cycle with index.ts which imports this module).
@@ -69,6 +69,32 @@ export async function assembleArtifacts(
       message: `normalize: entity-refs=${normalized.stats.entityRefsRewritten}, raw→structured=${normalized.stats.rawPredicatesLifted}, identities=${normalized.stats.identitiesAssigned}, dedup=${normalized.stats.artifactsDeduplicated}`,
     });
   }
+  // Deterministic cross-reference canonicalization, run BEFORE repair (repair is
+  // the LLM last resort). Two steps, in order:
+  //   1. Rewrite references to reconcile-MERGED non-canonical identities onto their
+  //      canonical spelling, so a cache-hit fragment can't ship a dangling ref and
+  //      identities stay byte-stable across runs.
+  //   2. Snap any remaining dangling reference onto a DECLARED identity of the same
+  //      kind via the resolution ladder (coverage-key fold → token-multiset →
+  //      unique meaningful-token overlap). This catches a reference the LLM invents
+  //      from whole cloth (`Entity:core.customers` vs the declared `Entity:Customer`)
+  //      that reconcile's merge map — enumerated targets only — can't see.
+  // Both run before repair so a snapped ref resolves and repair spends no re-prompt
+  // trying to GENERATE an artifact that already exists under its real identity.
+  if (opts.referenceMerges && Object.keys(opts.referenceMerges).length > 0) {
+    for (const a of merged.artifacts) {
+      const rewritten = rewriteReferencesToCanonical(a.winning.tcSource, opts.referenceMerges);
+      if (rewritten !== a.winning.tcSource) a.winning = { ...a.winning, tcSource: rewritten };
+    }
+  }
+  const snaps = snapReferencesToDeclared(merged.artifacts);
+  // Each snap is surfaced as a soft note (visible provenance, not a silent rewrite).
+  const snapNotes: ValidationIssue[] = snaps.map((s) => ({
+    artifactKey: `${s.from.kind}:${s.from.identity}`,
+    message: `cross-reference ${s.from.kind}:${s.from.identity} snapped to declared ${s.to.kind}:${s.to.identity} (${s.via})`,
+    severity: 'soft',
+  }));
+
   // `repair` runs LLM-targeted re-prompts when an artifact references a
   // missing cross-ref or violates a per-kind structural rule. Tests
   // opt out via `disableRepair: true` because repair spawns `claude`
@@ -89,17 +115,6 @@ export async function assembleArtifacts(
         message,
       })),
     );
-  }
-
-  // Canonicalize cross-references against reconcile's merges (deterministic, before
-  // validate): a reference to a merged non-canonical identity is rewritten to the
-  // canonical so it resolves and stays byte-stable. Applied to the winning body,
-  // which is what the writer emits.
-  if (opts.referenceMerges && Object.keys(opts.referenceMerges).length > 0) {
-    for (const a of merged.artifacts) {
-      const rewritten = rewriteReferencesToCanonical(a.winning.tcSource, opts.referenceMerges);
-      if (rewritten !== a.winning.tcSource) a.winning = { ...a.winning, tcSource: rewritten };
-    }
   }
 
   const validation = validateMerged(merged.artifacts);
@@ -140,8 +155,9 @@ export async function assembleArtifacts(
 
   return {
     artifactsToWrite,
-    // Report the ORIGINAL issues so the user sees exactly what was dropped.
-    validationIssues: validation.issues,
+    // Report the ORIGINAL issues so the user sees exactly what was dropped, plus a
+    // soft note per deterministic reference snap (provenance for the rewrite).
+    validationIssues: [...snapNotes, ...validation.issues],
     mergeDiagnostics: merged.diagnostics,
     resolverHard,
   };

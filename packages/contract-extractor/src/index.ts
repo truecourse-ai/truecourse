@@ -75,6 +75,7 @@ export {
   reconcileTargets,
   planReconcileCalls,
   rewriteReferencesToCanonical,
+  snapReferencesToDeclared,
   RECONCILE_SYSTEM_PROMPT,
   buildReconcileUserPrompt,
 } from './target-reconciler.js';
@@ -82,6 +83,7 @@ export type {
   ReconcileRunner,
   ReconcileRunnerInput,
   ReconcileResult,
+  ReferenceSnap,
   AreaTargets,
   TargetReconcilerOptions,
 } from './target-reconciler.js';

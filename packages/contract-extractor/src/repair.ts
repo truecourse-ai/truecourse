@@ -561,7 +561,19 @@ export async function repair(
 
   // Pass 1 — missing artifacts. Resolve the merged corpus once; the
   // resolver enumerates every unresolved cross-reference.
-  const missing = detectMissingArtifacts(resolveCorpus(artifacts));
+  const missingResolution = resolveCorpus(artifacts);
+  const missing = detectMissingArtifacts(missingResolution);
+  // The declared identities per kind, so the re-prompt can name them: a reference
+  // the deterministic snapper couldn't resolve (wrong kind, or ambiguous among
+  // same-kind candidates) may still be a mis-spelling of one of these — telling the
+  // model lets it fix the REFERRING side (decline to invent a duplicate) rather
+  // than fabricate the missing target.
+  const declaredByKind = new Map<string, string[]>();
+  for (const a of missingResolution.index.values()) {
+    const bucket = declaredByKind.get(a.ref.type) ?? [];
+    bucket.push(a.ref.identity);
+    declaredByKind.set(a.ref.type, bucket);
+  }
   allIssues.push(...missing);
   const missingTasks = missing.map((issue) => ({
     issue,
@@ -575,6 +587,16 @@ export async function repair(
     }
     done += 1;
     const targetKey = issue.artifactKey;
+    // Declared identities of the referenced kind — appended to the re-prompt so the
+    // model can recognize a mis-referenced existing identity instead of inventing
+    // the missing target from whole cloth.
+    const declaredOfKind = declaredByKind.get(targetKey.slice(0, targetKey.indexOf(':'))) ?? [];
+    const declaredNote =
+      declaredOfKind.length > 0
+        ? `Already-declared ${targetKey.slice(0, targetKey.indexOf(':'))} identities in this corpus: ${declaredOfKind.join(', ')}. ` +
+          `If this reference is a mis-spelling of one of these, do NOT invent a new artifact — emit an ` +
+          `unenforceable-obligation (same identity) noting the reference should target the correct existing identity instead.`
+        : null;
     // The repair LLM sees the full extraction system prompt, so a fix request can
     // return fragments unrelated to the missing artifact (entities the slice
     // mentions, peer effect-groups, …). Accept the target if produced, otherwise a
@@ -590,8 +612,11 @@ export async function repair(
       slice,
       stage: 'contract.repair',
       initialError: null,
-      buildIssues: (err) =>
-        err ? [issue.detail, `Your previous attempt failed to parse: ${err}`] : [issue.detail],
+      buildIssues: (err) => {
+        const issues = err ? [issue.detail, `Your previous attempt failed to parse: ${err}`] : [issue.detail];
+        if (declaredNote) issues.push(declaredNote);
+        return issues;
+      },
       message: (attempt) =>
         `missing ${targetKey} — re-prompting "${slice.headingPath.join(' → ')}" (attempt ${attempt}/${PARSE_REPAIR_ATTEMPTS})`,
       select: (fragments) =>
