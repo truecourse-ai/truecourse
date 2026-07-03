@@ -83,11 +83,6 @@ function renderSteps(steps: AnalysisStep[]): void {
   if (renderedLineCount > 0) {
     process.stderr.write(`\x1b[${renderedLineCount}A`);
   }
-  // Erase from the cursor to the end of the screen before repainting, so a
-  // shorter frame — or a list that changed size mid-run — leaves no ghost
-  // lines behind. The bare cursor-up alone overwrote line-by-line and left
-  // leftovers whenever the new frame had fewer lines than the previous one.
-  process.stderr.write("\x1b[0J");
   for (const step of visible) {
     const detail = step.detail ? ` — ${step.detail}` : "";
     let icon: string;
