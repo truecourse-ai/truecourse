@@ -19,7 +19,7 @@ truecourse contracts generate       # → .tc
 | `README.md` | both products; Appointment base fields; **24h** cancellation |
 | `docs/prd/booking-app-v1.md` | **superseded**; 24h; no reschedule |
 | `docs/prd/booking-app-v2.md` | current; **48h**; reschedule; extra Appointment fields |
-| `docs/prd/ops-console.md` | ops product; agent flows; agent `appointment.created` |
+| `docs/prd/ops-console.md` | ops product; agent flows; agent `appointment.created`; **`Refund`** record |
 | `docs/adr/0001-auth.md` | JWT (booking) + Okta SSO (ops) |
 | `docs/adr/0002-data-store.md` | Postgres + transactional outbox |
 | `docs/adr/0003-timezones.md` | store UTC, render IANA tz |
@@ -57,7 +57,8 @@ truecourse contracts generate       # → .tc
   entity (booking-app product) whose fields are the UNION of README's base set
   (`id, providerId, customerId, startsAt, status`) AND v2's extensions
   (`rescheduleCount, cancellationReason, timezone`). NOT two/five Appointment
-  variants.
+  variants. The ops console reuses this same entity — no separate ops Appointment
+  variant.
 - **G3 — multi-product event separation.** `appointment.created` is produced for
   BOTH products as DISTINCT contracts — the booking app's customer-initiated one
   (`source: customer`) and the ops console's agent one (`source: agent`, `agentId`).
@@ -79,3 +80,14 @@ truecourse contracts generate       # → .tc
   silent, unflagged pick of 24h.
 - **G8 — noise excluded.** No contracts for Twilio / MessageBird / external SMS
   endpoints, and nothing derived from the sprint task board.
+- **G9 — Refund entity (ops console).** `ops-console.md` defines a `Refund` record
+  (`id, appointmentId, amountCents, reason, status, agentId, createdAt`). Generate
+  produces a `Refund` entity in the **ops-console** area, distinct from
+  `Appointment`, with money as integer minor units (`amountCents`). It must NOT be
+  folded into the booking-app area.
+- **G10 — no fabricated `no_show` event.** ADR 0002's event set is exactly
+  `appointment.created/.cancelled/.rescheduled/.completed`; `no_show` is a *status*
+  with no event. Generate must NOT invent an `appointment.no_show` event contract —
+  the no-show endpoint is an operation that transitions status, and the "should we
+  add `appointment.no_show`?" line in `ops-console.md` is an open question →
+  process, not a contract.

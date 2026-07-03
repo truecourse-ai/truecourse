@@ -1,0 +1,79 @@
+// Prisma schema for Slate. Postgres is the single system of record for BOTH
+// the booking app and the ops console (ADR 0002) — there is no sync layer
+// between them. Money is integer minor units; all timestamps are UTC (ADR 0003).
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Provider {
+  id           String        @id @default(uuid())
+  name         String
+  timezone     String // IANA tz, e.g. "America/New_York" (ADR 0003)
+  createdAt    DateTime      @default(now())
+  slots        Slot[]
+  appointments Appointment[]
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String
+  createdAt    DateTime      @default(now())
+  appointments Appointment[]
+}
+
+model Slot {
+  id              String        @id @default(uuid())
+  providerId      String
+  provider        Provider      @relation(fields: [providerId], references: [id])
+  startsAt        DateTime // UTC (ADR 0003)
+  durationMinutes Int
+  booked          Boolean       @default(false)
+  appointments    Appointment[]
+}
+
+model Appointment {
+  id                 String   @id @default(uuid())
+  providerId         String
+  provider           Provider @relation(fields: [providerId], references: [id])
+  customerId         String
+  customer           Customer @relation(fields: [customerId], references: [id])
+  slotId             String
+  slot               Slot     @relation(fields: [slotId], references: [id])
+  startsAt           DateTime // UTC, copied from the slot (ADR 0003)
+  status             String   @default("booked") // booked | cancelled | completed | no_show
+  rescheduleCount    Int      @default(0) // max 3 (booking-app-v2)
+  cancellationReason String?
+  timezone           String? // IANA tz the customer saw; display only (ADR 0003)
+  createdBy          String // "customer" (booking app) or "agent" (ops console)
+  agentId            String? // set when createdBy = "agent"
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  refunds            Refund[]
+}
+
+model Refund {
+  id            String      @id @default(uuid())
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  amountCents   Int // integer minor units
+  reason        String
+  status        String      @default("pending") // pending | settled | failed (PSP-driven)
+  agentId       String
+  createdAt     DateTime    @default(now())
+}
+
+// Transactional outbox: a domain event row is written in the SAME transaction
+// as the state change, and a relay publishes it to the bus (ADR 0002).
+model OutboxEvent {
+  id          String    @id @default(uuid())
+  type        String // appointment.created | .cancelled | .rescheduled | .completed
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+}
