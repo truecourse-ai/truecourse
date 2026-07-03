@@ -295,6 +295,12 @@
       "layer": "service"
     },
     {
+      "name": "DiagnosticsCollector",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "DiagnosticsHarness",
       "service": "ApiGateway",
       "kind": "class",
