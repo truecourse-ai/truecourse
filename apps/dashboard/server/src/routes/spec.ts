@@ -252,6 +252,32 @@ async function mutateAndRecurate(
   return corpusPayload(repoPath);
 }
 
+// A doc include/exclude mutation, edition-aware. OSS re-curates the live working
+// tree in-process and returns the fresh corpus (needs git). EE has no local tree:
+// the decision persists to the store (by repoKey), and the re-curate + regenerate
+// runs in the background job (repo.contracts: clone → curate w/ decisions →
+// generate → verify), exactly like the relations routes. The current corpus is
+// returned immediately (it already reflects the persisted decision); the job
+// refreshes the kept-doc set and the UI updates when it completes.
+async function mutateSpecDecision(
+  repoPath: string,
+  repoId: string,
+  res: Response,
+  mutate: () => Promise<unknown>,
+): Promise<void> {
+  if (!contractsMaterializeInPlace()) {
+    await mutate();
+    await enqueueContractsRefresh(repoPath);
+    res.json(await corpusPayload(repoPath));
+    return;
+  }
+  if (!(await isGitRepo(repoPath))) {
+    res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+    return;
+  }
+  res.json(await mutateAndRecurate(repoPath, repoId, mutate));
+}
+
 // Force-include / un-include a relevance-dropped doc, then re-curate so the
 // corpus + overlaps reflect it immediately.
 router.post(
@@ -264,12 +290,8 @@ router.post(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      if (!(await isGitRepo(repo.path))) {
-        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
-        return;
-      }
       const ref = body.ref;
-      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => addManualInclude(repo.path, ref)));
+      await mutateSpecDecision(repo.path, req.params.id as string, res, () => addManualInclude(repo.path, ref));
     } catch (e) {
       next(e);
     }
@@ -286,12 +308,8 @@ router.delete(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      if (!(await isGitRepo(repo.path))) {
-        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
-        return;
-      }
       const ref = body.ref;
-      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => removeManualInclude(repo.path, ref)));
+      await mutateSpecDecision(repo.path, req.params.id as string, res, () => removeManualInclude(repo.path, ref));
     } catch (e) {
       next(e);
     }
@@ -310,12 +328,8 @@ router.post(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      if (!(await isGitRepo(repo.path))) {
-        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
-        return;
-      }
       const ref = body.ref;
-      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => addManualExclude(repo.path, ref)));
+      await mutateSpecDecision(repo.path, req.params.id as string, res, () => addManualExclude(repo.path, ref));
     } catch (e) {
       next(e);
     }
@@ -332,12 +346,8 @@ router.delete(
         res.status(400).json({ error: 'Missing ref.' });
         return;
       }
-      if (!(await isGitRepo(repo.path))) {
-        res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
-        return;
-      }
       const ref = body.ref;
-      res.json(await mutateAndRecurate(repo.path, req.params.id as string, () => removeManualExclude(repo.path, ref)));
+      await mutateSpecDecision(repo.path, req.params.id as string, res, () => removeManualExclude(repo.path, ref));
     } catch (e) {
       next(e);
     }

@@ -48,6 +48,11 @@ import {
   type BackgroundTask,
 } from '@truecourse/core/lib/background-tasks';
 import {
+  setContractStore,
+  resetContractStore,
+  type ContractStore,
+} from '@truecourse/core/lib/contract-store';
+import {
   setupTestFixture,
   teardownTestFixture,
   type TestFixture,
@@ -257,6 +262,76 @@ describe('corpus routes (spec-scan redesign)', () => {
       .post(`/api/repos/${fixture.project.slug}/spec/relations`)
       .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
       .expect(200);
+  });
+});
+
+// EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there
+// is no local git tree. The include/exclude routes must NOT gate on git or
+// re-curate in-process — they persist the decision and defer the re-curate to the
+// background job (repo.contracts), exactly like the relations routes. A
+// non-materializing contract store is what flips the route onto that path.
+describe('corpus routes — EE (stored corpus, no live tree)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+
+  const seedCorpus = (): void => {
+    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
+    fs.mkdirSync(specs, { recursive: true });
+    fs.writeFileSync(
+      path.join(specs, 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [{ ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] }],
+        areas: [{ id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v2.md'], overlaps: [] }],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+  };
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture(); // deliberately NOT git-initialized
+    // A store that reports it does NOT materialize in place = hosted EE. Only the
+    // capability flag is read by these routes, so a bare stub is sufficient.
+    setContractStore({ materializesInPlace: false } as unknown as ContractStore);
+    vi.mocked(curateInProcess).mockClear();
+    app = createApp({ serveStatic: false });
+  });
+  afterEach(async () => {
+    resetContractStore();
+    setBackgroundTaskRunner(null);
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('POST /spec/excludes on a non-git repo persists the decision + enqueues, does NOT re-curate in-process', async () => {
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus();
+    const res = await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200); // was 400 "not a git repository" before the fix
+    expect(res.body.manualExcludes).toContain('docs/v2.md');
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+    // The re-curate is deferred to the background job, not run in the request.
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /spec/excludes on a non-git repo restores the doc', async () => {
+    setBackgroundTaskRunner(async () => {});
+    seedCorpus();
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    const del = await request(app)
+      .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
   });
 });
 
