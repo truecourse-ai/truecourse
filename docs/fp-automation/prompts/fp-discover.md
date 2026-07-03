@@ -78,9 +78,15 @@ byte-identical to an unscoped run.
 - `git clone --depth=1 https://github.com/<target_repo>.git /tmp/target`.
 - Record the commit SHA as `target_ref` (full hash). Get it with
   `git -C /tmp/target rev-parse HEAD`.
-- **C# campaigns only** (`tech_stack: csharp`): `dotnet restore` the target's
+- **C# campaigns only** (`tech_stack: csharp`): the analyze needs the .NET
+  toolchain, and `build:dist` silently *skips* the Roslyn host when `dotnet` is
+  missing (a green build is not enough). If `dotnet` is not on PATH, run
+  `bash $TRUECOURSE_DIR/docs/fp-automation/setup-csharp-env.sh` to install it —
+  it fails with a clear message if this environment's egress policy blocks the
+  .NET hosts, which is an env-provisioning problem (post the blocker and stop;
+  do **not** route around the policy). Then `dotnet restore` the target's
   top-most `.sln`/`.slnx` **before** analyze. The project-aware (Roslyn
-  workspace) tier now **fails-hard** on an unrestored project or a missing SDK —
+  workspace) tier **fails-hard** on an unrestored project or a missing SDK —
   it aborts the whole run, it does not skip. This needs the .NET SDK in the
   session: **10.x** (or ≥ 9.0.2xx), which is what opens `.slnx` solutions and
   modern targets; the host is `net8.0` and runs on any ≥ 8 runtime. A target that

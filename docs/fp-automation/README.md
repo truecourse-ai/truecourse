@@ -525,7 +525,28 @@ One-time, before the first run:
      it, and it opens `.slnx` solutions + modern targets at analyze time.
      The default (TS/JS/Python) account needs **no** .NET: the host build
      is tolerant — `build:dist` warns and skips it when `dotnet` is absent,
-     and C# analysis simply stays unavailable.
+     and C# analysis simply stays unavailable (fail-hard on the next analyze).
+
+     Provisioning the C# account has **two** required parts. The .NET SDK is
+     **not** on the Default environment (that image ships no `dotnet`, and
+     Default's Trusted allowlist covers npm/GitHub but **not** the Microsoft
+     .NET CDN — so a mid-session install returns 403 from the egress proxy):
+     1. **Setup script.** Give the C# account its **own** environment whose
+        setup script runs `docs/fp-automation/setup-csharp-env.sh` — it
+        installs the 10.x SDK plus a net8 runtime for the host, once per
+        container, and is idempotent. (The routine prompts also run it as a
+        fallback when `dotnet` is missing.)
+     2. **Network policy.** Widen that environment's egress allowlist to the
+        .NET download + NuGet hosts — at least `dot.net`,
+        `builds.dotnet.microsoft.com`, `dotnetcli.azureedge.net`,
+        `dotnetbuilds.azureedge.net`, and `api.nuget.org` / `*.nuget.org`
+        (the last for the `dotnet restore` the workspace-tier rule triggers
+        on the target solution). Without this, both the install **and** the
+        restore 403 — this is the most common C#-account failure.
+
+     If `dotnet` is still absent at session time the environment is
+     mis-provisioned: the routine posts the blocker and stops — it must
+     **not** route around the egress policy.
 4. **Bootstrap the first campaign** by clicking **Run now** on
    `fp-discover` (no campaign-close PR has merged yet, so the GitHub
    trigger has nothing to fire on). It reads `campaigns.yaml`, finds
