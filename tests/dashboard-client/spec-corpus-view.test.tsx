@@ -115,6 +115,47 @@ describe('SpecCorpusView (left nav)', () => {
     render(<SpecCorpusView corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
   });
+
+  // A corpus the scan re-curated so the (now relation-covered) overlap was dropped,
+  // yet the user relation persists in decisions. The resolved conflict must stay
+  // visible instead of vanishing.
+  const noOverlapResp: SpecCorpusResponse = {
+    corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
+    userRelations: [
+      { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
+    ],
+  };
+
+  it('synthesizes a resolved conflict for a user relation the corpus no longer flags', () => {
+    render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getByText('Conflicts')).toBeInTheDocument();
+    expect(screen.getByText('v1.md ↔ v2.md')).toBeInTheDocument();
+    // The badge names the relation type + winner (v2.md is newer).
+    expect(screen.getByText('resolved — precedence: v2.md wins')).toBeInTheDocument();
+  });
+
+  it('opens a synthesized resolved entry with its overlap key (no open overlap needed)', async () => {
+    const onOpen = vi.fn();
+    const user = userEvent.setup();
+    render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={onOpen} />);
+    await user.click(screen.getByText('v1.md ↔ v2.md'));
+    expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
+  });
+
+  it('does not double-render a pair that has both an open overlap and a covering relation', () => {
+    // RESP already carries an OPEN overlap for (v1,v2); a covering user relation
+    // must NOT add a second synthesized row — one row, legacy "resolved" badge.
+    const covered: SpecCorpusResponse = {
+      ...RESP,
+      userRelations: [
+        { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
+      ],
+    };
+    render(<SpecCorpusView corpus={state({ data: covered })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getAllByText('v1.md ↔ v2.md')).toHaveLength(1);
+    expect(screen.getByText('resolved')).toBeInTheDocument();
+    expect(screen.queryByText(/resolved — /)).not.toBeInTheDocument();
+  });
 });
 
 describe('SpecDocViewer (right pane)', () => {
@@ -200,6 +241,26 @@ describe('SpecOverlapDetail (right pane)', () => {
     expect(screen.queryByRole('button', { name: 'Prefer newer' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Change' }));
     expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeInTheDocument();
+  });
+
+  // A synthesized pair: the corpus flags no overlap for it (re-curated away), but
+  // the user relation persists — the detail still shows the resolution and Revoke
+  // deletes it (the server re-curate then re-flags the conflict).
+  const NO_OVERLAP_RESOLVED: SpecCorpusResponse = {
+    corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
+    userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
+  };
+
+  it('a synthesized resolved pair (no open overlap) still shows the resolution + revokes', async () => {
+    const onResolved = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={NO_OVERLAP_RESOLVED} onResolved={onResolved} />,
+    );
+    expect(screen.getByText(/Resolved →/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Revoke' }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    expect(lastDelete).toMatchObject({ older: 'docs/v1.md', newer: 'docs/v2.md' });
   });
 });
 
@@ -376,5 +437,22 @@ describe('SpecOverlapDetail (PR-scoped resolution)', () => {
     expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Use newer only' })).toBeDisabled();
     expect(screen.getAllByText('Available after the PR gate runs.').length).toBeGreaterThan(0);
+  });
+
+  it('carries pr+ref when re-resolving a synthesized pair (no open overlap)', async () => {
+    const onResolved = vi.fn();
+    const user = userEvent.setup();
+    // No open overlap for the pair, but a user relation covers it (synthesized).
+    const noOverlap: SpecCorpusResponse = {
+      corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
+      userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
+    };
+    render(
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={noOverlap} prNumber={4} prRef="head-1" onResolved={onResolved} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Change' })); // reveal the action buttons
+    await user.click(screen.getByRole('button', { name: 'Use newer only' }));
+    await waitFor(() => expect(onResolved).toHaveBeenCalled());
+    expect(calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url).toContain('?pr=4&ref=head-1');
   });
 });

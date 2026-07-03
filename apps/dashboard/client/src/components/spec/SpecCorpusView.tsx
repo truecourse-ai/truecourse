@@ -55,6 +55,11 @@ export function coveringRelation(rels: SpecRelation[], a: string, b: string, are
   });
 }
 
+/** Resolved-badge text for a synthesized conflict — names the relation type + winner. */
+function resolvedSummary(rel: SpecRelation): string {
+  return rel.type === 'keep-both' ? 'resolved — keep both' : `resolved — ${rel.type}: ${base(rel.newer)} wins`;
+}
+
 type DecisionAction = 'exclude' | 'unexclude' | 'include' | 'uninclude';
 
 /**
@@ -286,18 +291,36 @@ export function SpecCorpusView({
       return next;
     });
 
-  // Overlaps are within-area; flatten them into ONE Conflicts list (each carries
-  // its area) so docs are never duplicated across area groups.
-  const overlaps = c.areas.flatMap((area) =>
+  // Conflicts = the union of two sources, flattened into ONE list (each carries
+  // its area) so docs are never duplicated across area groups:
+  //  (a) OPEN overlaps the corpus flags — including the legacy case where a
+  //      covering relation exists (shown resolved), unchanged.
+  //  (b) SYNTHESIZED resolved entries for user relations the corpus no longer
+  //      flags: the scan drops relation-covered pairs by invariant (and EE
+  //      re-curates on every edit), so a resolved conflict would otherwise vanish.
+  // Deduped by pair (order-insensitive) + area: a relation that covers an open
+  // overlap isn't synthesized again (that overlap already renders it resolved).
+  const openConflicts = c.areas.flatMap((area) =>
     area.overlaps.map((ov) => ({
       area: area.id,
-      ov,
+      a: ov.docs[0],
+      b: ov.docs[1],
       resolved: !!coveringRelation(effectiveRels, ov.docs[0], ov.docs[1], area.id),
+      summary: undefined as string | undefined,
     })),
   );
+  const coversOpenConflict = (r: SpecRelation): boolean =>
+    openConflicts.some((o) => {
+      const samePair = (o.a === r.older && o.b === r.newer) || (o.a === r.newer && o.b === r.older);
+      return samePair && (r.scope === undefined || r.scope === o.area);
+    });
+  const resolvedConflicts = userRelations
+    .filter((r) => !coversOpenConflict(r))
+    .map((r) => ({ area: r.scope ?? '', a: r.older, b: r.newer, resolved: true, summary: resolvedSummary(r) }));
+  const conflicts = [...openConflicts, ...resolvedConflicts];
   // The tag filter narrows BOTH lists — conflicts by their area (tag).
-  const visibleOverlaps =
-    selectedTags.size === 0 ? overlaps : overlaps.filter((o) => selectedTags.has(fmtArea(o.area)));
+  const visibleConflicts =
+    selectedTags.size === 0 ? conflicts : conflicts.filter((o) => selectedTags.has(fmtArea(o.area)));
 
   return (
     <div className="flex h-full flex-col">
@@ -325,16 +348,17 @@ export function SpecCorpusView({
       {/* pb-1 only (no top pad): a scroll container's top padding leaves a band
           above `sticky top-0` section headers where scrolled rows bleed through. */}
       <div className="min-h-0 flex-1 overflow-auto pb-1">
-        {visibleOverlaps.length > 0 && (
-          <Section title="Conflicts" count={visibleOverlaps.length} icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}>
-            {visibleOverlaps.map(({ area, ov, resolved }, i) => (
+        {visibleConflicts.length > 0 && (
+          <Section title="Conflicts" count={visibleConflicts.length} icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}>
+            {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
-                label={`${base(ov.docs[0])} ↔ ${base(ov.docs[1])}`}
+                label={`${base(a)} ↔ ${base(b)}`}
                 area={fmtArea(area)}
                 resolved={resolved}
-                active={activeKey === overlapKey(area, ov.docs[0], ov.docs[1])}
-                onOpen={(pinned) => onOpen(overlapKey(area, ov.docs[0], ov.docs[1]), pinned)}
+                resolvedLabel={summary}
+                active={activeKey === overlapKey(area, a, b)}
+                onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
               />
             ))}
           </Section>
@@ -735,12 +759,15 @@ function OverlapRow({
   label,
   area,
   resolved,
+  resolvedLabel,
   active,
   onOpen,
 }: {
   label: string;
   area: string;
   resolved: boolean;
+  /** Rich resolved-badge text for a synthesized entry; falls back to "resolved". */
+  resolvedLabel?: string;
   active: boolean;
   onOpen: (pinned: boolean) => void;
 }) {
@@ -761,7 +788,7 @@ function OverlapRow({
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-              resolved
+              {resolvedLabel ?? 'resolved'}
             </span>
           )}
         </span>

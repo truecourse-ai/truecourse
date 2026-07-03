@@ -99,7 +99,9 @@ export function SpecOverlapDetail({
     ?.overlaps.find(
       (o) => (o.docs[0] === docA && o.docs[1] === docB) || (o.docs[0] === docB && o.docs[1] === docA),
     );
-  const note = overlap?.note;
+  // A synthesized entry (a resolved pair the corpus no longer flags) has no
+  // overlap record — fall back to the recorded relation's own note.
+  const note = overlap?.note ?? relation?.note;
   const sectionsFor = (d: string): string[] => (overlap?.sections ?? []).filter((s) => s.doc === d).map((s) => s.heading);
 
   // On open (or when the overlap changes), scroll each pane to its first
