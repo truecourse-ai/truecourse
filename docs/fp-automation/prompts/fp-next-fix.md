@@ -74,8 +74,14 @@ Before the per-issue loop:
   to `/tmp/target` and `git -C /tmp/target checkout <target_ref>`.
   All `<SCOPE>fp-fix` issues in a single campaign share `target_repo` +
   `target_ref`, so you only clone once per session.
-- **C# campaigns only** (`tech_stack: csharp`): `dotnet restore` the target's
-  top-most `.sln`/`.slnx` **before** analyze. The project-aware (Roslyn
+- **C# campaigns only** (`tech_stack: csharp`): the analyze needs the .NET
+  toolchain, and `build:dist` silently *skips* the Roslyn host when `dotnet` is
+  missing (so a green build is not enough). If `dotnet` is not on PATH, run
+  `bash $TRUECOURSE_DIR/docs/fp-automation/setup-csharp-env.sh` to install it —
+  it fails with a clear message if this environment's egress policy blocks the
+  .NET hosts, which is an env-provisioning problem (post the blocker and stop;
+  do **not** route around the policy). Then `dotnet restore` the target's
+  top-most `.sln`/`.slnx` **before** analyze: the project-aware (Roslyn
   workspace) tier **fails-hard** on an unrestored project / missing SDK — it
   aborts the run, it does not skip. Needs the .NET SDK in the session (**10.x**,
   or ≥ 9.0.2xx for `.slnx`); a target pinning an SDK via `global.json` needs it.
