@@ -925,6 +925,12 @@
       "layer": "service"
     },
     {
+      "name": "NoticeFormatter",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "NotificationHub",
       "service": "ApiGateway",
       "kind": "class",
@@ -2167,6 +2173,12 @@
       "layer": "service"
     },
     {
+      "name": "MetricsCollector",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "MoneyAmount",
       "service": "UserService",
       "kind": "class",
@@ -2336,6 +2348,12 @@
     },
     {
       "name": "Program",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "QueueStats",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2558,6 +2576,12 @@
     },
     {
       "name": "TenantSnapshot",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ThrottleWindow",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

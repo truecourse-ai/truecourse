@@ -96,6 +96,11 @@ export const csharpMagicNumberVisitor: CodeRuleVisitor = {
     if (parentType !== 'binary_expression' && parentType !== 'argument') return null
     // Indexer access (`items[3]`) is excluded, like array subscripts in JS.
     if (parentType === 'argument' && parent.parent?.type === 'bracketed_argument_list') return null
+    // A named argument (`maxLength: 128`) documents the literal via the parameter
+    // name, so the number is already self-describing — not a magic number. This
+    // is the idiomatic shape of tool-generated code (EF migration column specs
+    // like `table.Column<string>(maxLength: 128, …)`).
+    if (parentType === 'argument' && parent.childForFieldName('name')) return null
 
     // Time conversion factor multiplied by another time factor — idiomatic.
     if (parentType === 'binary_expression' && TIME_FACTORS.has(val)) {
