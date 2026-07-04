@@ -2,8 +2,18 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-function hasInterpolation(node: SyntaxNode): boolean {
-  return node.namedChildren.some((c) => c?.type === 'interpolation')
+/**
+ * True when the string has a real `{expr}` interpolation hole. The normal case
+ * is an `interpolation` child node. But a hole wrapped in escaped braces —
+ * `$"{{{x}}}"`, which renders `{` + value + `}` — is parsed by
+ * tree-sitter-c-sharp as a single `string_content` run with no `interpolation`
+ * child, so also scan the raw text: after removing every escaped `{{`/`}}`
+ * pair, a remaining `{` marks a genuine hole.
+ */
+function hasRealHole(node: SyntaxNode): boolean {
+  if (node.namedChildren.some((c) => c?.type === 'interpolation')) return true
+  const stripped = node.text.replace(/\{\{/g, '').replace(/\}\}/g, '')
+  return stripped.includes('{')
 }
 
 /**
@@ -19,7 +29,7 @@ export const csharpFstringMissingPlaceholdersVisitor: CodeRuleVisitor = {
   languages: ['csharp'],
   nodeTypes: ['interpolated_string_expression'],
   visit(node, filePath, sourceCode) {
-    if (hasInterpolation(node)) return null
+    if (hasRealHole(node)) return null
 
     let top: SyntaxNode = node
     while (top.parent?.type === 'binary_expression' &&
@@ -30,7 +40,7 @@ export const csharpFstringMissingPlaceholdersVisitor: CodeRuleVisitor = {
       let siblingHasHoles = false
       const walk = (n: SyntaxNode): void => {
         if (siblingHasHoles) return
-        if (n.type === 'interpolated_string_expression' && n.id !== node.id && hasInterpolation(n)) {
+        if (n.type === 'interpolated_string_expression' && n.id !== node.id && hasRealHole(n)) {
           siblingHasHoles = true
           return
         }

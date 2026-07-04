@@ -5,6 +5,50 @@ import { getCSharpFunctionName } from './_helpers.js'
 
 const COMPARED_TYPES = new Set(['method_declaration', 'local_function_statement', 'constructor_declaration'])
 
+/**
+ * A "trivial" returned expression carries no real computation: a literal,
+ * `default`, `this`, a bare identifier or member access, or a call whose
+ * arguments are themselves all trivial (`Task.FromResult(true)`,
+ * `Task.CompletedTask`). Two functions sharing such a body — framework
+ * default hooks, null-object stubs — are idiomatically identical with nothing
+ * worth extracting, so they must not be reported as duplication.
+ */
+function isTrivialExpr(e: SyntaxNode): boolean {
+  switch (e.type) {
+    case 'integer_literal':
+    case 'real_literal':
+    case 'boolean_literal':
+    case 'string_literal':
+    case 'verbatim_string_literal':
+    case 'null_literal':
+    case 'character_literal':
+    case 'identifier':
+    case 'this_expression':
+    case 'default_expression':
+    case 'member_access_expression':
+      return true
+    case 'invocation_expression': {
+      const args = e.childForFieldName('arguments')
+      if (!args) return true
+      return args.namedChildren.every((a) => {
+        if (a?.type !== 'argument') return true
+        const value = a.namedChildren.find((c) => c && c.type !== 'name_colon')
+        return !value || isTrivialExpr(value)
+      })
+    }
+    default:
+      return false
+  }
+}
+
+/** A block body that is a single `return` of a trivial expression (or bare `return;`). */
+function isTrivialReturnBody(body: SyntaxNode): boolean {
+  const stmts = body.namedChildren.filter((c) => c && c.type !== 'comment')
+  if (stmts.length !== 1 || stmts[0]?.type !== 'return_statement') return false
+  const expr = stmts[0].namedChildren.find((c) => c && c.type !== 'comment')
+  return !expr || isTrivialExpr(expr)
+}
+
 export const csharpIdenticalFunctionsVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/identical-functions',
   languages: ['csharp'],
@@ -21,7 +65,7 @@ export const csharpIdenticalFunctionsVisitor: CodeRuleVisitor = {
           // A single `throw` body is an intentional stub
           // (NotImplementedException etc.) — skip.
           const onlyThrow = body.namedChildCount === 1 && body.namedChildren[0]?.type === 'throw_statement'
-          if (!onlyThrow) {
+          if (!onlyThrow && !isTrivialReturnBody(body)) {
             const normalized = body.text.replace(/\s+/g, ' ').trim()
             bodies.push({ body: normalized, fnNode: n })
           }
