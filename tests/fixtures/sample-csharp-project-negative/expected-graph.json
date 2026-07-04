@@ -2269,6 +2269,12 @@
       "layer": "service"
     },
     {
+      "name": "PaymentGatewayClient",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "PaymentReconciler",
       "service": "UserService",
       "kind": "class",

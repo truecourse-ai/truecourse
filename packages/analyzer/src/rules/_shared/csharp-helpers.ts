@@ -145,3 +145,20 @@ export function walkCSharp(node: SyntaxNode, visit: (n: SyntaxNode) => void): vo
     if (child) walkCSharp(child, visit)
   }
 }
+
+/**
+ * True when `filePath` lives in a C# test project, matched by the .NET
+ * test-project directory naming convention: `Acme.Foo.Tests` / `Acme.Foo.Test`,
+ * a shared `Acme.Foo.TestBase`, or an integration test-app (`Acme.FooTestApp`).
+ * Rules whose signal is a real bug only in production code (e.g. hardcoded
+ * endpoints) use this to exempt test seed/fixture data, where sample URLs and
+ * constants are intentional. Keyed on the project-dir name rather than a bare
+ * `test`/`tests` folder so unrelated paths (e.g. a repo's own test tree) don't
+ * falsely match.
+ */
+export function isCSharpTestPath(filePath: string): boolean {
+  return filePath.split(/[\\/]/).some((segment) => {
+    const s = segment.toLowerCase()
+    return /\.tests?$/.test(s) || s.endsWith('.testbase') || s.endsWith('testapp')
+  })
+}
