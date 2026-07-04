@@ -2239,6 +2239,12 @@
       "layer": "data"
     },
     {
+      "name": "OversizedLookupTable",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PassthroughFormatter",
       "service": "UserService",
       "kind": "class",
