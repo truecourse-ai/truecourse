@@ -325,8 +325,6 @@ After the loop:
     - A "## Fixes" overview table: `rule_key | issue | positive-fixture | negative-fixture`.
     - One "## <rule_key>" section per fixed issue, each containing:
       - OSS source URLs from the issue's `samples[].url`.
-      - Inline diff of the positive-fixture file.
-      - Inline diff of the negative-fixture file.
       - The `visitor_summary` for that issue.
     - A "## Skipped this batch" section (only if any `attempts >
       successes`): brief list of issues that were attempted but
