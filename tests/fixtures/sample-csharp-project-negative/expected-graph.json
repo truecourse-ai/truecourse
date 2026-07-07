@@ -787,6 +787,24 @@
       "layer": "service"
     },
     {
+      "name": "LabelStage",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LabelStageBase",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LabelTruncator",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "LedgerProjection",
       "service": "ApiGateway",
       "kind": "class",
@@ -1156,6 +1174,12 @@
       "name": "ReflectionAndUnsafe",
       "service": "ApiGateway",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RefundLedger",
+      "service": "ApiGateway",
+      "kind": "interface",
       "layer": "service"
     },
     {
@@ -2455,7 +2479,19 @@
       "layer": "data"
     },
     {
+      "name": "ReportFormatter",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ReportSectionBase",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RetryOptionsBuilder",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -2755,6 +2791,18 @@
       "layer": "external"
     },
     {
+      "name": "BackgroundSyncer",
+      "service": "Utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ComponentBase",
+      "service": "Utils",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
       "name": "Formatters",
       "service": "Utils",
       "kind": "standalone",
@@ -2770,6 +2818,12 @@
       "name": "ModuleBootstrap",
       "service": "Utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationPanel",
+      "service": "Utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -3075,6 +3129,10 @@
     {
       "source": "services/UserService/Services/UserService.cs",
       "target": "services/UserService/Repositories/UserRepository.cs"
+    },
+    {
+      "source": "shared/Utils/Violations/Reliability/NotificationPanel.cs",
+      "target": "shared/Utils/Components/ComponentBase.cs"
     }
   ],
   "routes": [

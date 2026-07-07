@@ -32,6 +32,12 @@ internal sealed class OptionalParameterHazard : ISemanticRule
             foreach (var p in node.ParameterList.Parameters)
             {
                 if (p.Default is null) continue;
+                // A `CancellationToken token = default` tail is the universal async
+                // cancellation idiom: the default is the immutable, well-known
+                // CancellationToken.None, so there is no per-call-site baking hazard
+                // and no confusing overload-resolution surprise across assemblies.
+                if (model.GetDeclaredSymbol(p) is IParameterSymbol ps && IsCancellationToken(ps.Type))
+                    continue;
                 var pos = p.Identifier.GetLocation().GetLineSpan().StartLinePosition;
                 yield return new Violation(
                     RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
@@ -39,6 +45,10 @@ internal sealed class OptionalParameterHazard : ISemanticRule
             }
         }
     }
+
+    private static bool IsCancellationToken(ITypeSymbol type) =>
+        type.Name == "CancellationToken" &&
+        type.ContainingNamespace?.ToDisplayString() == "System.Threading";
 
     private static bool IsExternallyVisible(IMethodSymbol method)
     {

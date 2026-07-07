@@ -39,6 +39,15 @@ internal sealed class UnusedFunctionParameter : ISemanticRule
             // can choose to do explicitly; we do not flag.
             if (IsImplicitInterfaceImplementation(method)) continue;
 
+            // Loose-text analysis can leave an implemented interface (or a base type)
+            // unresolved when its assembly is not in the reference set — e.g. a class
+            // implementing ASP.NET Core's IAsyncPageFilter / IAuthorizationService. In
+            // that case IsImplicitInterfaceImplementation cannot see the contract
+            // member, so we cannot prove this method is NOT a contract-fixed
+            // implementation whose parameter names/types are mandated. Be conservative
+            // and do not flag parameters on such a type.
+            if (HasUnresolvedContract(method.ContainingType)) continue;
+
             if (method.Name == "Main") continue;
             if (method.Parameters.IsEmpty) continue;
 
@@ -84,6 +93,18 @@ internal sealed class UnusedFunctionParameter : ISemanticRule
                 }
             }
         }
+    }
+
+    // True when the type implements an interface — or derives from a base — that the
+    // compilation could not resolve (an error type), so its inherited contract is
+    // unknown to this pass.
+    private static bool HasUnresolvedContract(INamedTypeSymbol type)
+    {
+        if (type.Interfaces.Any(i => i.TypeKind == TypeKind.Error)) return true;
+        if (type.AllInterfaces.Any(i => i.TypeKind == TypeKind.Error)) return true;
+        for (var b = type.BaseType; b is not null; b = b.BaseType)
+            if (b.TypeKind == TypeKind.Error) return true;
+        return false;
     }
 
     private static bool IsImplicitInterfaceImplementation(IMethodSymbol method)
