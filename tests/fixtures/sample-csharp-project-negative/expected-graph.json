@@ -175,6 +175,12 @@
       "layer": "service"
     },
     {
+      "name": "CheckpointRecorder",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Circle",
       "service": "ApiGateway",
       "kind": "class",
@@ -1279,6 +1285,12 @@
       "layer": "service"
     },
     {
+      "name": "RequestTagBag",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "RequestValidation",
       "service": "ApiGateway",
       "kind": "class",
@@ -1580,6 +1592,12 @@
     },
     {
       "name": "ThreadPoolSection",
+      "service": "ApiGateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ThresholdReader",
       "service": "ApiGateway",
       "kind": "class",
       "layer": "service"
@@ -2060,6 +2078,12 @@
     },
     {
       "name": "ICache",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "IdentifierNormalizer",
       "service": "UserService",
       "kind": "class",
       "layer": "service"

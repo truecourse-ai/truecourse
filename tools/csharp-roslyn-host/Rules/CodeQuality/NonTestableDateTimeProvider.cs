@@ -38,10 +38,41 @@ internal sealed class NonTestableDateTimeProvider : ISemanticRule
             // DateTimeOffset has no `Today`; guard so we only report real members.
             if (owner == "DateTimeOffset" && name == "Today") continue;
 
+            // The clock abstraction itself is the sanctioned place to read ambient
+            // time — a clock must read DateTime.Now/UtcNow somewhere. Don't flag reads
+            // inside a type that IS the injectable clock (named like a clock, or
+            // implementing IClock / TimeProvider) — that is exactly what the rule tells
+            // callers to inject, so flagging the provider is self-defeating.
+            if (IsClockAbstraction(access.FirstAncestorOrSelf<TypeDeclarationSyntax>())) continue;
+
             var pos = access.GetLocation().GetLineSpan().StartLinePosition;
             yield return new Violation(
                 RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
                 $"Direct {owner}.{name} makes time-dependent code untestable; inject a clock abstraction (e.g. TimeProvider) instead.");
         }
+    }
+
+    // True when the enclosing type IS a clock abstraction — named like a clock, or
+    // implementing/deriving IClock / TimeProvider. Such a type is the single place a
+    // codebase reads the ambient clock; the rule recommends injecting it, so flagging
+    // it would be self-defeating. Syntax-based so it holds even in loose-text analysis
+    // where a project's own IClock interface is unresolved.
+    private static bool IsClockAbstraction(TypeDeclarationSyntax? decl)
+    {
+        if (decl is null) return false;
+        if (decl.Identifier.ValueText.EndsWith("Clock", StringComparison.Ordinal)) return true;
+        if (decl.BaseList is null) return false;
+        foreach (var baseType in decl.BaseList.Types)
+        {
+            var name = baseType.Type switch
+            {
+                GenericNameSyntax g => g.Identifier.ValueText,
+                IdentifierNameSyntax i => i.Identifier.ValueText,
+                QualifiedNameSyntax q => q.Right.Identifier.ValueText,
+                _ => null,
+            };
+            if (name is "IClock" or "TimeProvider" or "ITimeProvider") return true;
+        }
+        return false;
     }
 }
