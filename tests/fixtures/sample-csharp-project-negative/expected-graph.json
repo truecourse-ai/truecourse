@@ -2239,6 +2239,12 @@
       "layer": "data"
     },
     {
+      "name": "OversizedLookupTable",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "PassthroughFormatter",
       "service": "UserService",
       "kind": "class",
@@ -2267,6 +2273,12 @@
       "service": "UserService",
       "kind": "standalone",
       "layer": "service"
+    },
+    {
+      "name": "PaymentGatewayClient",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "external"
     },
     {
       "name": "PaymentReconciler",
