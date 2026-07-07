@@ -142,8 +142,7 @@ Against fp-next-fix "Open the batched PR", the body MUST contain:
 - A `## Fixes` overview table
   (`rule_key | issue | positive-fixture | negative-fixture`).
 - One `## <rule_key>` section per fixed issue, each with: the OSS
-  source URL(s), an inline diff of the positive fixture, an inline diff
-  of the negative fixture, and a 2–3 sentence visitor summary.
+  source URL(s) and a 2–3 sentence visitor summary.
 - A `## FP-count delta …` section (validated in check 8).
 - A trailing `cc @mushgev` line.
 - **Internal consistency:** the count of `Closes #…` lines, `## Fixes`
@@ -154,11 +153,10 @@ Against fp-next-fix "Open the batched PR", the body MUST contain:
 
 The body describes the fixes; the diff is the ground truth. Cross-check
 them:
-- Every fixture path named in the `## Fixes` table (and in each
-  per-rule inline diff) must actually appear as an **added/changed
-  file** in the PR diff. A path claimed in the body but absent from the
-  diff (or vice versa: a fixture added in the diff but not documented)
-  → violation.
+- Every fixture path named in the `## Fixes` table must actually appear
+  as an **added/changed file** in the PR diff. A path claimed in the
+  body but absent from the diff (or vice versa: a fixture added in the
+  diff but not documented) → violation.
 - Each fixed rule must add **both** a positive fixture (under a
   `*-positive` project) **and** a negative fixture (under a
   `*-negative` project) — fp-next-fix steps 5 and 6 both run per fix. A
