@@ -275,6 +275,12 @@ truecourse drifts list --offset 20 / --severity critical,high  # Page through / 
 truecourse infer                                  # Write inferred .tc files to contracts/_inferred/
 truecourse infer --dry-run                        # Report what would be written, touch nothing
 truecourse contracts list --inferred              # Review what infer produced (kind · confidence · code location)
+
+# Guard — spec-section-bound scenario tests (author once, run deterministically)
+truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
+truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
+truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
+truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
 
 ---

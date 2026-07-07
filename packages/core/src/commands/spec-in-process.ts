@@ -68,7 +68,7 @@ import { getModelPrices } from '../services/llm/model-prices.js';
  * falls back to deterministic-only). Callers catch this to exit cleanly.
  */
 export class EstimateDeclined extends Error {
-  constructor(public readonly kind: 'scan' | 'generate') {
+  constructor(public readonly kind: 'scan' | 'generate' | 'guard') {
     super(`${kind} declined at the LLM cost estimate`);
     this.name = 'EstimateDeclined';
   }
@@ -236,7 +236,15 @@ export function setShowResolvedStageModel(show: boolean): void {
  * (EE) transport is active. Empty string when there's nothing to add.
  */
 function stepUsageTag(stepKey: string, repoRoot: string): string {
-  const stages = STEP_STAGES[stepKey] ?? [];
+  return stageUsageTag(STEP_STAGES[stepKey] ?? [], repoRoot);
+}
+
+/**
+ * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
+ * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
+ * SAME live tag from their own stage mapping, sharing the EE model-name toggle.
+ */
+export function stageUsageTag(stages: StageId[], repoRoot: string): string {
   if (stages.length === 0) return '';
   const usage = getStageUsage();
   let tok = 0;

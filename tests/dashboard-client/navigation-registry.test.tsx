@@ -38,15 +38,19 @@ import {
 const STUB_ICON = SECTIONS[0].icon;
 
 describe('navigation registry — pure lookups', () => {
-  it('ships OSS analysis and drift sections', () => {
+  it('ships OSS analysis, drift, and guard sections', () => {
     const ids = SECTIONS.map((s) => s.id);
     expect(ids).toContain('codequality');
     expect(ids).toContain('verification');
+    expect(ids).toContain('guard');
+    // Guard is registered as the third module, after BL Drift.
+    expect(ids.indexOf('guard')).toBe(ids.indexOf('verification') + 1);
   });
 
   it('getSection returns descriptor or undefined', () => {
     expect(getSection('codequality')?.label).toBe('Code Analysis');
     expect(getSection('verification')?.label).toBe('BL Drift');
+    expect(getSection('guard')?.label).toBe('Guard');
     expect(getSection('nope')).toBeUndefined();
   });
 
@@ -54,6 +58,7 @@ describe('navigation registry — pure lookups', () => {
     const tabs = tabsForSection('verification').map((t) => t.id);
     // `pulls` + `settings` are EE-only (capability-gated; the raw lookup is
     // unfiltered, so they appear here — visibility filtering happens elsewhere).
+    // Guard is no longer a drift tab — it is its own top-level section.
     expect(tabs).toEqual([
       'verify',
       'pulls',
@@ -67,9 +72,37 @@ describe('navigation registry — pure lookups', () => {
     expect(tabsForSection('nope')).toEqual([]);
   });
 
+  it('the guard section carries coverage / scenarios / drifts tabs (Generate folded into Scenarios; Coverage absorbed the Spec tab)', () => {
+    expect(tabsForSection('guard').map((t) => t.id)).toEqual([
+      'coverage',
+      'scenarios',
+      'guarddrifts',
+    ]);
+  });
+
+  it('the guard Runs tab shares BL Drift Runs\' icon (not the Drifts-leftover TriangleAlert)', () => {
+    // Icons are compared by reference so this file needn't import lucide-react.
+    // guarddrifts must match the BL Drift `runs` tab (ClipboardList, the run
+    // idiom) and must NOT be the `violations` tab's TriangleAlert.
+    expect(getTab('guarddrifts')?.icon).toBe(getTab('runs')?.icon);
+    expect(getTab('guarddrifts')?.icon).not.toBe(getTab('violations')?.icon);
+  });
+
+  it('no longer registers a guardreport tab — its generate story folded into the Scenarios strip', () => {
+    expect(getTab('guardreport')).toBeUndefined();
+    expect(tabsForSection('guard').map((t) => t.id)).not.toContain('guardreport');
+    expect(tabsForSection('guard').find((t) => t.id === 'scenarios')?.label).toBe('Scenarios');
+  });
+
+  it('no longer registers a guardspec tab — Coverage absorbs the spec surface', () => {
+    expect(getTab('guardspec')).toBeUndefined();
+    expect(tabsForSection('guard').map((t) => t.id)).not.toContain('guardspec');
+  });
+
   it('defaultTabForSection returns the registered default', () => {
     expect(defaultTabForSection('codequality')).toBe('home');
     expect(defaultTabForSection('verification')).toBe('verify');
+    expect(defaultTabForSection('guard')).toBe('coverage');
     expect(defaultTabForSection('nope')).toBe('');
   });
 
@@ -141,7 +174,9 @@ describe('navigation registry — capability gating', () => {
         <VisibleSectionsProbe />
       </AppProvider>,
     );
-    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,verification$/);
+    // Guard is OSS (ungated) so it shows alongside analysis + drift; the
+    // capability-gated `governance` section stays hidden.
+    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,verification,guard$/);
   });
 
   it('enterprise edition with the capability shows the gated section', () => {
@@ -154,7 +189,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('sections')).toHaveTextContent(
-      /^codequality,verification,governance$/,
+      /^codequality,verification,guard,governance$/,
     );
   });
 

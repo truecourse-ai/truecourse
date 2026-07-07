@@ -156,6 +156,30 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
   });
 
+  it('scan estimate honors spec.include and agrees with discovery', async () => {
+    // In-scope + out-of-scope markdown, plus a config that scopes to docs/**.
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
+    fs.writeFileSync(path.join(docsDir, 'b.md'), '# B\n' + 'more spec. '.repeat(200));
+    fs.mkdirSync(path.join(repo, 'reference'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'reference', 'out.md'), '# Out\n' + 'ignored. '.repeat(200));
+    fs.mkdirSync(path.join(repo, '.truecourse'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, '.truecourse', 'config.json'),
+      JSON.stringify({ spec: { include: ['docs/**'] } }),
+    );
+
+    // The scan's discovery sees only the two in-scope docs...
+    const discovered = discoverDocs(repo).map((d) => d.path).sort();
+    expect(discovered).toEqual(['docs/a.md', 'docs/b.md']);
+
+    // ...and the estimate, sharing that discovery, counts exactly the same docs.
+    const est = await estimateScanTokens(repo);
+    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
+    expect(est.subjectLabel).toMatch(/2 docs?$/);
+  });
+
   it('scan estimate is cache-aware: unchanged docs are skipped', async () => {
     const docsDir = path.join(repo, 'docs');
     fs.mkdirSync(docsDir, { recursive: true });

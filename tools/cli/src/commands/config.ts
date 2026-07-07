@@ -33,6 +33,9 @@ const STAGE_LABEL: Record<StageId, string> = {
   "contract.repair": "Contract · repair",
   "contract.repairParse": "Contract · repair (syntax)",
   "contract.gapJudge": "Contract · gap judge",
+  "guard.extract": "Guard  · claim extract",
+  "guard.generate": "Guard  · scenario gen",
+  "guard.recipe": "Guard  · recipe discover",
   "rules.violationGen": "Rules  · violation gen",
 };
 

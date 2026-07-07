@@ -34,10 +34,55 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'spec', 'contract', 'drift'];
+const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'spec', 'contract', 'drift', 'guard', 'gsec', 'gconf', 'gdrift', 'gscn', 'gview'];
+
+/** Map the retired `?gview` sub-view onto the Guard section's tabs. */
+function guardTabForGview(gview: string | null): LeftTab {
+  if (gview === 'drifts') return 'guarddrifts';
+  // The Generate/Report sub-view folded into Scenarios (its "last generate" strip).
+  if (gview === 'report') return 'scenarios';
+  return 'coverage';
+}
+
+/**
+ * Derive the tab the URL implies WITHOUT needing the section: an explicit
+ * (still-registered) ?tab wins, then the legacy guard alias, then the deep-link
+ * shortcuts. Returns null when nothing is implied so the caller can fall back to
+ * the section default.
+ */
+function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
+  const tabParam = searchParams?.get('tab') ?? null;
+  if (tabParam && allTabIds().has(tabParam)) return tabParam;
+  // Legacy: the Guard tab was `?tab=guard` with a `?gview` sub-view — both retired,
+  // so re-point them at the Guard section's tabs.
+  if (tabParam === 'guard') return guardTabForGview(searchParams?.get('gview') ?? null);
+  // Retired: the Guard Generate/Report tab folded into Scenarios (the "last
+  // generate" strip) — re-point old `?tab=guardreport` links at it.
+  if (tabParam === 'guardreport') return 'scenarios';
+  // Retired: the Guard Spec tab merged into Coverage (which absorbed the spec
+  // surface) — re-point old `?tab=guardspec` links at it.
+  if (tabParam === 'guardspec') return 'coverage';
+  if (searchParams?.get('flow')) return 'flows';
+  if (searchParams?.get('file')) return 'files';
+  if (searchParams?.get('spec')) return 'spec';
+  if (searchParams?.get('contract')) return 'contracts';
+  // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
+  // the Guard coverage tab.
+  if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
+  // A Guard scenario deep-link (`?gscn=<id>`) implies the Scenarios tab.
+  if (searchParams?.get('gscn')) return 'scenarios';
+  if (searchParams?.get('drift')) return 'verify';
+  return null;
+}
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
-  return searchParams?.get('section') === 'verification' ? 'verification' : 'codequality';
+  const explicit = searchParams?.get('section');
+  if (explicit === 'verification' || explicit === 'guard' || explicit === 'codequality') {
+    return explicit;
+  }
+  // No explicit section: infer it from whichever tab the URL implies.
+  const tab = tabFromParams(searchParams);
+  return (tab && sectionForTab(tab)) || 'codequality';
 }
 
 /**
@@ -45,14 +90,7 @@ function resolveSection(searchParams: URLSearchParams | null): DashboardSection 
  * shortcuts, falling back to the section default.
  */
 function resolveTab(searchParams: URLSearchParams | null): LeftTab {
-  const tabParam = searchParams?.get('tab') ?? null;
-  if (tabParam && allTabIds().has(tabParam)) return tabParam;
-  if (searchParams?.get('flow')) return 'flows';
-  if (searchParams?.get('file')) return 'files';
-  if (searchParams?.get('spec')) return 'spec';
-  if (searchParams?.get('contract')) return 'contracts';
-  if (searchParams?.get('drift')) return 'verify';
-  return defaultTabForSection(resolveSection(searchParams));
+  return tabFromParams(searchParams) ?? defaultTabForSection(resolveSection(searchParams));
 }
 
 export interface NavigationContextValue {

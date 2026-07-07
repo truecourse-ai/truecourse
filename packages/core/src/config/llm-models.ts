@@ -41,6 +41,10 @@ export type StageId =
   | 'contract.repair'
   | 'contract.repairParse'
   | 'contract.gapJudge'
+  // --- guard generate (scenario tests) ---
+  | 'guard.extract'
+  | 'guard.generate'
+  | 'guard.recipe'
   | 'rules.violationGen';
 
 /**
@@ -66,6 +70,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'contract.repairParse': 'sonnet',
   // Auditing already-written gaps is a judgement call, not generation — sonnet.
   'contract.gapJudge': 'sonnet',
+  // Reading a whole document for its testable claims is a judgement call — sonnet.
+  'guard.extract': 'sonnet',
+  // Authoring an executable scenario faithful to a spec claim is the hard,
+  // load-bearing call (a weak scenario is false confidence) — opus.
+  'guard.generate': 'opus',
+  // Proposing a build/entry recipe is a modest structured task — sonnet.
+  'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',
 };
 

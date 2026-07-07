@@ -93,6 +93,78 @@ describe('NavigationContext — initial state from URL', () => {
   });
 });
 
+describe('NavigationContext — guard section routing', () => {
+  it('infers the guard section from a guard tab param (no explicit ?section)', () => {
+    renderAt('/repos/abc?tab=coverage');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('routes ?tab=guarddrifts to the guard section', () => {
+    renderAt('/repos/abc?tab=guarddrifts');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guarddrifts');
+  });
+
+  it('reads ?section=guard and defaults its tab to coverage', () => {
+    renderAt('/repos/abc?section=guard');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?guard=<doc> deep link opens guard/coverage', () => {
+    renderAt('/repos/abc?guard=docs%2FSPEC.md&gsec=intro');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?gconf=<overlap> conflict deep link opens guard/coverage', () => {
+    renderAt('/repos/abc?gconf=overlap%3A%3Acore%2Fauth%3A%3Aa.md%3A%3Ab.md');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?gscn=<scenario> deep link opens guard/scenarios', () => {
+    renderAt('/repos/abc?gscn=a1');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+  });
+
+  // The retired Guard Spec tab (merged into Coverage) — old links must still land.
+  it('maps the retired ?tab=guardspec to guard/coverage', () => {
+    renderAt('/repos/abc?tab=guardspec');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  // Legacy URLs from the retired GuardView segmented host must still resolve.
+  it('maps the legacy ?tab=guard to guard/coverage', () => {
+    renderAt('/repos/abc?tab=guard');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('maps the legacy ?tab=guard&gview=drifts to the guard drifts tab', () => {
+    renderAt('/repos/abc?tab=guard&gview=drifts');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guarddrifts');
+  });
+
+  // The Generate/Report tab folded into Scenarios (its "last generate" strip), so
+  // both the legacy `?gview=report` chain and the retired `?tab=guardreport` land there.
+  it('maps the legacy ?tab=guard&gview=report to the guard scenarios tab', () => {
+    renderAt('/repos/abc?tab=guard&gview=report');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+  });
+
+  it('maps the retired ?tab=guardreport to the guard scenarios tab', () => {
+    renderAt('/repos/abc?tab=guardreport');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+  });
+});
+
 describe('NavigationContext — setters write the URL', () => {
   it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=verify', async () => {
     const user = userEvent.setup();

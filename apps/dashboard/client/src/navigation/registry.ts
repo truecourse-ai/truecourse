@@ -31,12 +31,14 @@ import {
   ClipboardList,
   BookOpen,
   FileCode2,
+  FlaskConical,
   ShieldCheck,
   GitPullRequest,
   Settings,
   BarChart3,
   TriangleAlert,
   Lightbulb,
+  ListChecks,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
 import { useMemo } from 'react';
@@ -153,6 +155,30 @@ export const SECTIONS: SectionDescriptor[] = [
         noPanel: true,
         requiredCapability: 'github-gate',
       },
+    ],
+  },
+  {
+    // Spec-section scenario coverage as a top-level module (OSS — never gated).
+    id: 'guard',
+    label: 'Guard',
+    description: 'Spec-section scenario coverage, generation, drifts',
+    icon: FlaskConical,
+    defaultTab: 'coverage',
+    tabs: [
+      // Coverage-over-doc surface — the doc-picker + conflict list sidebar (the
+      // reused SpecCorpusView) absorbs the spec curation surface; no separate Spec
+      // tab. Doc → coverage bands + section detail; conflict → resolution detail.
+      { id: 'coverage', label: 'Coverage', icon: ListChecks },
+      // Committed-scenario inventory (the Contracts-tab analog): the left panel
+      // lists every generated and hand-written guard grouped doc › section;
+      // selecting opens preview/pinned tabs in the main pane, whose overview
+      // (nothing selected) is the recipe card + "last generate" strip.
+      { id: 'scenarios', label: 'Scenarios', icon: FileCode2 },
+      // Run inspector (analyze-style list + evidence detail): full results —
+      // severity-led drifts, then the passed group; no panel. Shares BL Drift's
+      // Runs idiom (ClipboardList) — the two live in different sections, so a
+      // shared icon never crowds one rail.
+      { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },
     ],
   },
 ];

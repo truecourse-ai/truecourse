@@ -31,3 +31,6 @@ assets/*.pdf
 # .NET build artifacts (fixture projects)
 tests/fixtures/**/bin/
 tests/fixtures/**/obj/
+
+# Local TrueCourse store
+.truecourse/

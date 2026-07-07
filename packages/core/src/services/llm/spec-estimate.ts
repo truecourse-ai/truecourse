@@ -46,6 +46,15 @@ import {
   type AreaGenInput,
   type TargetSpec,
 } from '@truecourse/contract-extractor';
+import {
+  planGuardWork,
+  collectWorkDocs,
+  countExtractViews,
+  countUncachedExtractViews,
+  EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
+  GENERATE_SYSTEM_PROMPT,
+  RECIPE_SYSTEM_PROMPT,
+} from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
@@ -75,6 +84,10 @@ const STAGE_LABELS: Record<string, string> = {
   extract: 'Generating contracts',
   gapJudge: 'Reviewing gaps',
   repairParse: 'Fixing syntax',
+  // guard generate
+  guardRecipe: 'Discovering recipe',
+  guardExtract: 'Extracting claims',
+  guardAuthor: 'Authoring scenarios',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -293,6 +306,91 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
   ];
 
   return estimateStageTokens(withLabels(stages), changedSubject(allAreas.length, areas.length, 'area'), prices);
+}
+
+// Guard heuristics (claims/section grounded in real extractions: whole-document
+// reads average ~2 cli claims per changed section, with dense sections higher).
+const GUARD_CLI_CLAIMS_PER_SECTION = 2.0; // rough cli claims a changed section yields (point)
+const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
+const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
+const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
+const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
+// Grounded authoring injects real empty-sandbox probe transcripts into each batch
+// prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
+// representative block: a handful of probes, each a short command's output.
+const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
+
+/**
+ * Pre-flight token estimate for `guard generate`. Pass `prices` to add a ceiling
+ * cost. Same convention as scan/generate: cache-aware, "N of M sections changed",
+ * no stages ⇒ confirm skipped.
+ *
+ * Change-aware via the committed scenarios manifest (the deterministic work plan).
+ * Extraction is EXACT in call count — one call per uncached document view across
+ * the work documents (read straight from the per-view extract cache). Authoring is
+ * a heuristic on the changed sections (claims aren't known until extraction runs),
+ * surfaced as a range: batches of ~0.8–1.5 cli claims per changed section.
+ */
+export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+  const plan = planGuardWork(repoRoot);
+  const work = plan.work;
+  const batchSize = defaultGenerateBatch();
+
+  // Extraction: one call per uncached view across the documents with changed
+  // sections. The per-view extract cache makes this exact.
+  const workDocs = collectWorkDocs(repoRoot, plan);
+  let extractCalls = 0;
+  let totalViews = 0;
+  let workDocChars = 0;
+  for (const doc of workDocs) {
+    totalViews += countExtractViews(doc);
+    extractCalls += await countUncachedExtractViews(repoRoot, doc);
+    workDocChars += doc.content.length;
+  }
+  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_AUTHOR_DOC_BUDGET, workDocChars / totalViews)) : 0;
+
+  // Authoring: batches of cli claims from the changed sections. Claim counts are
+  // unknown until extraction runs, so range around the per-section heuristic.
+  const claimsPoint = Math.round(work.length * GUARD_CLI_CLAIMS_PER_SECTION);
+  const claimsMax = Math.ceil(work.length * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
+  const authorPoint = Math.ceil(claimsPoint / batchSize);
+  const authorMax = Math.ceil(claimsMax / batchSize);
+  const avgOwnChars = work.length ? Math.round(work.reduce((n, s) => n + s.ownText.length, 0) / work.length) : 0;
+  const docContextChars = Math.min(GUARD_AUTHOR_DOC_BUDGET, avgViewChars);
+
+  const stages: StageCallEstimate[] = [
+    {
+      stage: 'guardRecipe',
+      model: resolveModel('guard.recipe', undefined, repoRoot),
+      // One discovery call only when no recipe.json exists yet.
+      calls: plan.recipeMissing ? 1 : 0,
+      avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
+      avgOutputTokens: 120,
+    },
+    {
+      stage: 'guardExtract',
+      model: resolveModel('guard.extract', undefined, repoRoot),
+      calls: extractCalls,
+      avgInputTokens: tokensFromChars(GUARD_EXTRACT_SYSTEM_PROMPT.length, avgViewChars),
+      avgOutputTokens: GUARD_EXTRACT_OUTPUT_TOKENS,
+    },
+    {
+      stage: 'guardAuthor',
+      model: resolveModel('guard.generate', undefined, repoRoot),
+      calls: authorPoint,
+      minCalls: 0,
+      maxCalls: authorMax,
+      // A batch carries the system prompt + the doc context + ~batchSize claims'
+      // own text + the injected grounding transcripts.
+      avgInputTokens: tokensFromChars(
+        GENERATE_SYSTEM_PROMPT.length,
+        docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
+      ),
+      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
+    },
+  ];
+
+  return estimateStageTokens(withLabels(stages), changedSubject(plan.sections.length, work.length, 'section'), prices);
 }
 
 /** Confirm-copy subject surfacing how many of `total` units are changed vs cached. */

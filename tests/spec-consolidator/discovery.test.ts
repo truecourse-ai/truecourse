@@ -314,3 +314,64 @@ describe('discoverDocs — walker', () => {
     expect(() => discoverDocs(root, { skipGit: true })).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Include-scope (`spec.include` in .truecourse/config.json)
+// ---------------------------------------------------------------------------
+
+describe('discoverDocs — include-scope', () => {
+  const config = (include: string[]): void =>
+    place('.truecourse/config.json', JSON.stringify({ spec: { include } }));
+
+  it('restricts the universe to markdown matching a scope glob', () => {
+    config(['docs/**']);
+    place('docs/spec.md', '# in');
+    place('docs/nested/api.md', '# in');
+    place('reference/answers.md', '# out');
+    place('README.md', '# out');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toEqual(['docs/nested/api.md', 'docs/spec.md']);
+  });
+
+  it('out-of-scope files are not candidates at all (never enter the universe)', () => {
+    config(['docs/**']);
+    place('docs/spec.md', '# in');
+    place('scratch/notes.md', '# out');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).not.toContain('scratch/notes.md');
+  });
+
+  it('an empty include array is inactive — same as no config (everything)', () => {
+    config([]);
+    place('docs/spec.md', '# a');
+    place('reference/x.md', '# b');
+    place('README.md', '# c');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toEqual(['README.md', 'docs/spec.md', 'reference/x.md']);
+  });
+
+  it('ignore subtracts after include — an ignored file inside a scope glob stays out', () => {
+    // `docs/**` is in scope, but `.truecourseignore` drops the generated one.
+    // The include glob must not resurrect it.
+    config(['docs/**']);
+    place('.truecourseignore', 'docs/api.generated.md\n');
+    place('docs/spec.md', '# kept');
+    place('docs/api.generated.md', '# ignored — must stay out');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toEqual(['docs/spec.md']);
+  });
+
+  it('supports multiple globs and file-level patterns', () => {
+    config(['docs/**', 'SPEC.md']);
+    place('docs/a.md', '# in');
+    place('SPEC.md', '# in');
+    place('other/b.md', '# out');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toEqual(['SPEC.md', 'docs/a.md']);
+  });
+});

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2, Info } from 'lucide-react';
+import { Loader2, Info, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -66,6 +66,7 @@ export function SpecOverlapDetail({
   prNumber = null,
   prRef,
   onResolved,
+  onClose,
 }: {
   repoId: string;
   area: string;
@@ -78,6 +79,9 @@ export function SpecOverlapDetail({
   prRef?: string;
   /** In PR scope the server returns the re-curated corpus; the page applies it. */
   onResolved: (res?: SpecCorpusResponse) => void;
+  /** When set, render a close affordance in the header (Guard's detail pane has no
+   *  tab bar to close from). BL Drift omits it — closing is the spec tab's X. */
+  onClose?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -173,6 +177,16 @@ export function SpecOverlapDetail({
           <span className="text-muted-foreground">↔</span>
           <span>{base(docB)}</span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close conflict detail"
+              className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
         {note && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{note}</p>}
         {relation && !editing ? (

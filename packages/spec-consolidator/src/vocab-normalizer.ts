@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import {
   normalizeArea,
   splitArea,
@@ -130,6 +130,8 @@ function sanitize(map: VocabMap, input: VocabRunnerInput): VocabMap {
 // ---------------------------------------------------------------------------
 
 export const VOCAB_NORMALIZER_SYSTEM_PROMPT = `You reconcile the AREA VOCABULARY that emerged from tagging ONE repository's docs. Each doc was tagged independently, so the same thing may appear under different names. Your job: cluster names that mean the SAME thing and pick ONE canonical label per cluster — WITHOUT merging things that are genuinely different.
+
+${OUTPUT_ONLY_GUARDRAIL}
 
 You get two lists from ONE repo: "products" (apps/services) and "concerns" (slices within them). For each, output a mapping from every non-canonical name to its canonical name.
 

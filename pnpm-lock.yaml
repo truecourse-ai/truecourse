@@ -41,6 +41,12 @@ importers:
       '@truecourse/ee-storage':
         specifier: workspace:*
         version: link:ee/packages/storage
+      '@truecourse/guard-generator':
+        specifier: workspace:*
+        version: link:packages/guard-generator
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:packages/guard-runner
       '@truecourse/llm':
         specifier: workspace:*
         version: link:packages/llm
@@ -702,6 +708,12 @@ importers:
       '@truecourse/contract-verifier':
         specifier: workspace:*
         version: link:../contract-verifier
+      '@truecourse/guard-generator':
+        specifier: workspace:*
+        version: link:../guard-generator
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
@@ -720,6 +732,9 @@ importers:
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
@@ -742,12 +757,68 @@ importers:
       '@types/dagre':
         specifier: ^0.7.52
         version: 0.7.54
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/guard-generator:
+    dependencies:
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
+      '@truecourse/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/guard-runner:
+    dependencies:
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -819,6 +890,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../packages/guard-runner
       '@truecourse/shared':
         specifier: workspace:^
         version: link:../../packages/shared

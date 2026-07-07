@@ -1,4 +1,14 @@
-import type { CapabilitiesResponse } from '@truecourse/shared';
+import type {
+  CapabilitiesResponse,
+  GuardDocCoverage,
+  GuardGenerateReport,
+  GuardHistory,
+  GuardLatest,
+  GuardScenarioInventory,
+  GuardScenarioSource,
+  GuardStaleness,
+} from '@truecourse/shared';
+import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -44,11 +54,22 @@ async function fetchApi<T>(
   return res.json();
 }
 
+/** Verbs a repo card shows for its most-recent lifecycle event. */
+export type LatestEventKind =
+  | 'analyzed'
+  | 'scanned'
+  | 'generated'
+  | 'verified'
+  | 'guarded'
+  | 'scenarios-generated';
+
 export type RepoResponse = {
   id: string;
   name: string;
   path: string;
   lastAnalyzed?: string;
+  /** Most recent lifecycle event across features (home-page card), or null. */
+  latestEvent?: { kind: LatestEventKind; at: string } | null;
   branches?: string[];
   defaultBranch?: string;
   isGitRepo?: boolean;
@@ -1088,11 +1109,145 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
   );
 }
 
+// ---------------------------------------------------------------------------
+// Guard — spec-section scenario coverage (read-only, diff-free).
+// ---------------------------------------------------------------------------
+
+/** The two amber-dot signals for the Guard tab (generate / run staleness). */
+export function getGuardStaleness(repoId: string): Promise<GuardStaleness> {
+  return fetchApi<GuardStaleness>(`/api/repos/${repoId}/guard/staleness`);
+}
+
+/** The last guard run's materialized state; null on 404 (never run). */
+export async function getGuardLatest(repoId: string): Promise<GuardLatest | null> {
+  try {
+    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/latest`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The append-only run-summary history (empty `{ runs: [] }` until a run exists). */
+export function getGuardHistory(repoId: string): Promise<GuardHistory> {
+  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history`);
+}
+
+/** One past run's materialized state by id; null on 404 (unknown run). */
+export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatest | null> {
+  try {
+    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The last `guard generate` report; null on 404 (never generated). */
+export async function getGuardReport(repoId: string): Promise<GuardGenerateReport | null> {
+  try {
+    return await fetchApi<GuardGenerateReport>(`/api/repos/${repoId}/guard/report`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). */
+export async function getGuardCoverage(repoId: string, doc: string): Promise<GuardDocCoverage | null> {
+  try {
+    return await fetchApi<GuardDocCoverage>(
+      `/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`,
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The committed-scenario inventory + recipe card for the Scenarios tab. */
+export function getGuardScenarios(repoId: string): Promise<GuardScenarioInventory> {
+  return fetchApi<GuardScenarioInventory>(`/api/repos/${repoId}/guard/scenarios`);
+}
+
+/** A scenario's raw YAML source; null on 404 (unknown id). */
+export async function getGuardScenarioSource(repoId: string, id: string): Promise<GuardScenarioSource | null> {
+  try {
+    return await fetchApi<GuardScenarioSource>(
+      `/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`,
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * A failed scenario's evidence transcript (text/plain). `fetchApi` is JSON-only,
+ * so this reads the raw body itself. Throws `ApiError` on a non-OK response
+ * (e.g. 404 when no transcript was captured).
+ */
+export async function getGuardEvidence(
+  repoId: string,
+  runId: string,
+  scenarioId: string,
+  file?: string,
+): Promise<string> {
+  const params = new URLSearchParams({ runId, scenarioId });
+  if (file) params.set('file', file);
+  const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/evidence?${params.toString()}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  return res.text();
+}
+
 /** Run inference — reverse-engineer undocumented decisions from code into `_inferred/`. */
 export function runInferContracts(repoId: string): Promise<{ decisions: number; written: number }> {
   return fetchApi<{ decisions: number; written: number }>(`/api/repos/${repoId}/inferred/run`, {
     method: 'POST',
   });
+}
+
+// Guard actions — trigger `guard generate` / `guard run` from the dashboard. The
+// estimate is the SAME estimateGuardTokens the CLI prompt renders (no re-derive);
+// progress streams over `spec:progress` and completes with `spec:complete`
+// (`kind: guard-generate | guard-run`).
+
+/** The pre-flight guard-generate estimate. `stages: []` ⇒ nothing changed ⇒ the
+ *  client skips the modal and triggers directly. */
+export function getGuardEstimate(repoId: string): Promise<{ estimate: LlmEstimateData }> {
+  return fetchApi<{ estimate: LlmEstimateData }>(`/api/repos/${repoId}/guard/estimate`);
+}
+
+export interface GuardGenerateTriggerResult {
+  status?: string;
+  noChanges?: boolean;
+  written?: number;
+  birthFindings?: number;
+  /** True when the user declined the estimate — a clean no-op, not an error. */
+  cancelled?: boolean;
+}
+
+/** Trigger `guard generate`. `confirmed` is the user's answer to the estimate modal
+ *  (always true once the modal is confirmed, or when there were no stages). */
+export function triggerGuardGenerate(repoId: string, confirmed: boolean): Promise<GuardGenerateTriggerResult> {
+  return fetchApi<GuardGenerateTriggerResult>(`/api/repos/${repoId}/guard/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed }),
+  });
+}
+
+export interface GuardRunTriggerResult {
+  status: string;
+  summary?: { total: number; pass: number; fail: number; stale: number; orphaned: number; error: number };
+  /** Present on a non-ok status (no recipe / no scenarios / build failure). */
+  message?: string;
+}
+
+/** Trigger `guard run` — deterministic, LLM-free, no estimate. */
+export function triggerGuardRun(repoId: string): Promise<GuardRunTriggerResult> {
+  return fetchApi<GuardRunTriggerResult>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
 }
 
 // Include/exclude mutations re-curate server-side and return the fresh corpus

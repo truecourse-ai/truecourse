@@ -49,6 +49,32 @@ export async function listPrFiles(
   return files.map((f) => f.filename);
 }
 
+/**
+ * Raw text of a repo file at `ref` (default branch when omitted), or null when
+ * it's missing / unreadable. Used to read `.truecourse/config.json` before any
+ * clone; the caller degrades a null to "no config".
+ */
+export async function getFileContent(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  filePath: string,
+  ref?: string,
+): Promise<string | null> {
+  try {
+    const res = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+      ...(ref ? { ref } : {}),
+      // `format: 'raw'` returns the file body directly as text.
+      mediaType: { format: 'raw' },
+    });
+    return typeof res.data === 'string' ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Our bot-authored comment carrying `marker` on the PR, or null. */
 export async function findComment(
   octokit: Octokit,

@@ -16,6 +16,21 @@ export interface ProjectConfig {
   enableLlmRules?: boolean | null;
   /** Rule keys explicitly disabled for this project. Defaults are enabled. */
   disabledRules?: string[];
+  /** Spec-consolidation settings (`truecourse spec scan`). */
+  spec?: SpecConfig;
+}
+
+export interface SpecConfig {
+  /**
+   * Opt-in include-scope for spec-doc discovery — gitignore-style globs. When
+   * present and non-empty, only markdown matching a glob enters the scan
+   * universe; absent or empty (`[]`) means everything, the default. Applied
+   * before `.truecourseignore`, which always subtracts on top — an include glob
+   * can never resurrect an ignored path. Read from disk by the discovery walk
+   * (see `@truecourse/shared`'s `loadSpecScope`), so it need not be re-plumbed
+   * through every caller.
+   */
+  include?: string[];
 }
 
 const EMPTY: ProjectConfig = {};

@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { defaultConcurrency } from './runner.js';
 
@@ -301,6 +301,8 @@ async function classifyOne(
 // ---------------------------------------------------------------------------
 
 export const RELEVANCE_SYSTEM_PROMPT = `You are a documentation relevance classifier. Classify by CONTENT, not by folder or filename: does this doc state durable, intended behavior or decisions about THE SYSTEM IN THIS REPOSITORY (its endpoints, data, auth, events, invariants, business rules, architecture)?
+
+${OUTPUT_ONLY_GUARDRAIL}
 
 INCLUDE (spec-source material):
   - PRDs, ADRs, RFCs, design proposals, spec / API docs, module-level design docs, pipeline/workflow guides

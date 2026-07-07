@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmTransport } from '@truecourse/shared/llm';
+import { loadSpecScope } from '@truecourse/shared';
 import { discoverDocs, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import { tagDocs, type AreaTagRunner } from './area-tagger.js';
@@ -79,6 +80,15 @@ export interface CurateStats {
   /** Overlaps still awaiting a relation — carries refs; passages derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
   skippedDocs: Array<{ path: string; reason: string }>;
+  /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
+  scopeGlobs: string[];
+  /**
+   * Configured manualIncludes that fall outside the active include-scope. A
+   * manual include is a relevance-level override, not a universe one, so an
+   * out-of-scope include never gets discovered — surfaced here so a scope typo
+   * isn't a silent no-op.
+   */
+  outOfScopeManualIncludes: string[];
 }
 
 export interface CurateResult {
@@ -103,7 +113,22 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const fallbackModel = models.fallback;
 
   // ---- Discover -------------------------------------------------------
-  const allDocs = opts.docSource ? await opts.docSource() : discoverDocs(repoRoot, { skipGit: opts.skipGit });
+  // Include-scope (`spec.include`) narrows the universe to matching markdown
+  // before anything else runs. Loaded once so discovery and the out-of-scope
+  // manualInclude check below agree. Injected doc sources (EE) carry no scope.
+  let allDocs: DocCandidate[];
+  let scopeGlobs: string[] = [];
+  let outOfScopeManualIncludes: string[] = [];
+  if (opts.docSource) {
+    allDocs = await opts.docSource();
+  } else {
+    const scope = loadSpecScope(repoRoot);
+    allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope });
+    scopeGlobs = scope.globs;
+    if (scope.active) {
+      outOfScopeManualIncludes = (decisions.manualIncludes ?? []).filter((p) => !scope.includes(p));
+    }
+  }
 
   // ---- Relevance keep/drop --------------------------------------------
   const relevance = await filterByRelevance(repoRoot, allDocs, {
@@ -203,6 +228,8 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     resolvedRelations: relations.length,
     openOverlaps,
     skippedDocs,
+    scopeGlobs,
+    outOfScopeManualIncludes,
   };
 
   return { corpus, relations, skippedDocs, decisions, stats };

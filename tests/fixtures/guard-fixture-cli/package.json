@@ -1,0 +1,9 @@
+{
+  "name": "relkit",
+  "version": "2.4.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "relkit": "./bin.mjs"
+  }
+}

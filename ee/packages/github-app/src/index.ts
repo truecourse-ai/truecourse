@@ -210,6 +210,7 @@ export * from './store/index.js';
 export {
   isSpecDoc,
   detectSpecDocChanges,
+  specScopeFromConfigJson,
   isCodeFile,
   hasCodeChanges,
 } from './spec-detect.js';
@@ -219,6 +220,7 @@ export {
   splitRepo,
   findComment,
   listPrsForCommit,
+  getFileContent,
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';

@@ -11,9 +11,13 @@ const TRUECOURSE_DIR = '.truecourse';
 // inherit a baseline; commit it (and the other LATEST-convention files) only
 // after merging to main, to avoid PR conflicts on generated JSON.
 //
-// Ignored below: the analyze store snapshots, the `.cache/` re-run caches, and
+// Ignored below: the analyze store snapshots, the `.cache/` re-run caches,
 // `contracts/result.json` — the last-generate run result (transient run output
-// the dashboard reads back; the rest of `contracts/` stays tracked).
+// the dashboard reads back; the rest of `contracts/` stays tracked) — and the
+// guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
+// report), `guard/evidence/` transcripts, and `guard/history.json` (covered by
+// the unanchored `history.json` rule). `guard/LATEST.json` stays committable,
+// same LATEST convention as the analyze/verify baselines.
 const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',
@@ -23,6 +27,9 @@ const GITIGNORE_CONTENTS = [
   '.analyze.lock',
   '.cache/',
   'contracts/result.json',
+  'guard/runs/',
+  'guard/result.json',
+  'guard/evidence/',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------

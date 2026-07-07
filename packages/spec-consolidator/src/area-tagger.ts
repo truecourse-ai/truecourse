@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import { AreaTagSchema, type AreaTag } from './corpus-types.js';
 import { StatusSchema, type Status } from './types.js';
@@ -201,6 +201,8 @@ function classifyStatusValue(rawValue: string): Status | undefined {
 // ---------------------------------------------------------------------------
 
 export const AREA_TAGGER_SYSTEM_PROMPT = `You classify ONE documentation file by the AREAS of a software system it covers. You do NOT extract facts — you only tag the whole doc.
+
+${OUTPUT_ONLY_GUARDRAIL}
 
 An AREA is two levels: { "product", "concern" }.
 

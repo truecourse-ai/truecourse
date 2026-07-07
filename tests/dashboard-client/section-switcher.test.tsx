@@ -33,6 +33,28 @@ describe('SectionSwitcher (harness smoke test)', () => {
     ).toBeInTheDocument();
   });
 
+  it('exposes all three OSS sections (Code Analysis, BL Drift, Guard)', async () => {
+    const user = userEvent.setup();
+    render(<SectionSwitcher value="codequality" onChange={() => {}} />);
+
+    await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
+
+    expect(screen.getByRole('menuitemradio', { name: /Code Analysis/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: /BL Drift/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: /Guard/i })).toBeInTheDocument();
+  });
+
+  it('switches into the Guard section when picked', async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<SectionSwitcher value="codequality" onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Guard/i }));
+
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('guard');
+  });
+
   it('invokes onChange when a different section is picked', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

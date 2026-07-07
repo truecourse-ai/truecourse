@@ -24,6 +24,22 @@
       "types": "./dist/commands/spec-in-process.d.ts",
       "import": "./dist/commands/spec-in-process.js"
     },
+    "./commands/guard-in-process": {
+      "types": "./dist/commands/guard-in-process.d.ts",
+      "import": "./dist/commands/guard-in-process.js"
+    },
+    "./commands/guard-summary": {
+      "types": "./dist/commands/guard-summary.d.ts",
+      "import": "./dist/commands/guard-summary.js"
+    },
+    "./commands/guard-read": {
+      "types": "./dist/commands/guard-read.d.ts",
+      "import": "./dist/commands/guard-read.js"
+    },
+    "./commands/repo-events": {
+      "types": "./dist/commands/repo-events.d.ts",
+      "import": "./dist/commands/repo-events.js"
+    },
     "./progress": {
       "types": "./dist/progress.d.ts",
       "import": "./dist/progress.js"
@@ -190,12 +206,15 @@
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/contract-verifier": "workspace:*",
+    "@truecourse/guard-generator": "workspace:*",
+    "@truecourse/guard-runner": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
+    "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
     "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
@@ -205,6 +224,7 @@
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
     "@types/dagre": "^0.7.52",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

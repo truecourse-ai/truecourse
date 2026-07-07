@@ -26,9 +26,10 @@ import {
   updateComment,
   listPrFiles,
   listOpenPrs,
+  getFileContent,
   type OctokitClient,
 } from './octokit.js';
-import { detectSpecDocChanges } from './spec-detect.js';
+import { detectSpecDocChanges, specScopeFromConfigJson } from './spec-detect.js';
 import { decideGate, decideCodeQuality, type GateSeverity } from './gate.js';
 import {
   GATE_MARKER,
@@ -127,8 +128,14 @@ export async function handlePullRequestGate(
     // against the base's resolved contracts (no re-scan). If so, it scans the
     // head for its own contracts (the cold path).
     await opts.onPhase?.('spec');
+    // Honor the repo's `spec.include` scope (committed to `.truecourse/config.json`
+    // on the base branch) so a PR touching only out-of-scope markdown isn't
+    // treated as a spec change. A missing/unreadable config → scan everything.
+    const specScope = specScopeFromConfigJson(
+      await getFileContent(octokit, coords, '.truecourse/config.json', baseBranch),
+    );
     const specChanged =
-      detectSpecDocChanges(await listPrFiles(octokit, coords, prNumber)).length > 0;
+      detectSpecDocChanges(await listPrFiles(octokit, coords, prNumber), specScope).length > 0;
 
     const enableLlmAnalysis = link.workspaceOrgId
       ? (await deps.codeAnalysisLlm?.(link.workspaceOrgId)) ?? false

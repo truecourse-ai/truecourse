@@ -51,10 +51,16 @@ Per-repo layout under `<repo>/.truecourse/`:
 - `contracts/` (+ `contracts/_inferred/`, `contracts/_shared/`) — the generated `.tc` contract corpus, **committable / git-tracked**. Although it's a materialization of `specs/corpus.json`, it's kept in git on purpose: the OSS Contracts BL-Drift view diffs working-tree `.tc` against HEAD (`/contracts/diff`), so committing your contracts is how PRs review spec changes.
 - `contracts/manifest.json` — **committable / git-tracked**. The spec→contract map: each area's spec content-hash from the last generate. Travels with the repo so `contracts generate` is a deterministic no-op when specs are unchanged (a cloner re-running generate regenerates nothing) — only new/edited areas call the LLM, deleted specs drop their contracts. The estimate reads it too (deterministic, clone-safe). See `packages/contract-extractor/src/manifest.ts`.
 - `contracts/result.json` — **gitignored** run-result of the last `contracts generate` (written count, coverage gaps, validation issues), living next to the `.tc` tree it describes. The dashboard reads it back so a page reload still shows them, and its mtime drives the staleness dots. (The rest of `contracts/` is tracked; this one file is ignored.)
+- `guard/` — the guard run store for `truecourse guard run`, mirroring the verifier store (there is **no** `diff.json` — guard shows current state only). See `packages/guard-runner/src/store.ts`; the committed scenarios it runs live in `scenarios/` (`recipe.json`, `manifest.json`, `<area>/*.yaml` — committable).
+  - `guard/runs/<iso>_<short-uuid>.json` — per-run snapshots (gitignored)
+  - `guard/LATEST.json` — materialized current run state (**committable**, same convention as the analyze/verify `LATEST.json`)
+  - `guard/history.json` — append-only per-run summaries (gitignored)
+  - `guard/evidence/<runId>/` — per-failure transcripts (gitignored)
+  - `guard/result.json` — **gitignored** run-result of the last `guard generate` (written/settled/punt/birth-finding/error counts, per-section gap reasons, call+token+cost totals). The CLI `guard status` and the dashboard coverage view render the same summary from it.
 
 The gitignored vs committable split is materialized by the `.truecourse/.gitignore` template in `packages/core/src/config/paths.ts` (`GITIGNORE_CONTENTS`) — keep it in sync when adding store files.
 
-`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline) and `specs/corpus.json` (the spec snapshot): commit it only after merging to main.
+`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON. The same applies to `verifier/LATEST.json` (the drift baseline), `guard/LATEST.json` (the guard run baseline), and `specs/corpus.json` (the spec snapshot): commit it only after merging to main.
 
 Global layout under `~/.truecourse/`:
 - `config.json` — LLM keys, provider

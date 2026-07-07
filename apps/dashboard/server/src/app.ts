@@ -17,6 +17,8 @@ import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import contractsRouter from './routes/contracts.js';
 import verifyRouter from './routes/verify.js';
+import guardRouter from './routes/guard.js';
+import guardActionsRouter from './routes/guard-actions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import { enterpriseAuthGate } from './middleware/ee-auth.js';
 import { getPublicRouters, getProtectedRouters } from './ee-loader.js';
@@ -83,6 +85,8 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   app.use('/api/repos', projectResolver, specRouter);
   app.use('/api/repos', projectResolver, contractsRouter);
   app.use('/api/repos', projectResolver, verifyRouter);
+  app.use('/api/repos', projectResolver, guardRouter);
+  app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/rules', rulesRouter);
 
   app.use(errorHandler);

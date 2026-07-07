@@ -1,11 +1,21 @@
 
 import { Link } from 'react-router-dom';
 import { Folder, Clock, Trash2, ArrowRight } from 'lucide-react';
-import type { RepoResponse } from '@/lib/api';
+import type { LatestEventKind, RepoResponse } from '@/lib/api';
 
 type RepoListProps = {
   repos: RepoResponse[];
   onDelete: (id: string) => void;
+};
+
+// Past-tense verb per lifecycle event kind, shown before the card's date.
+const EVENT_VERBS: Record<LatestEventKind, string> = {
+  analyzed: 'Analyzed',
+  scanned: 'Scanned',
+  generated: 'Generated',
+  verified: 'Verified',
+  guarded: 'Guarded',
+  'scenarios-generated': 'Scenarios generated',
 };
 
 export function RepoList({ repos, onDelete }: RepoListProps) {
@@ -68,12 +78,12 @@ export function RepoList({ repos, onDelete }: RepoListProps) {
 
           {/* Footer */}
           <div className="mt-4 flex items-center justify-between">
-            {repo.lastAnalyzed ? (
+            {repo.latestEvent ? (
               <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Clock className="h-3 w-3" />
                 <span>
-                  Analyzed{' '}
-                  {new Date(repo.lastAnalyzed).toLocaleDateString(undefined, {
+                  {EVENT_VERBS[repo.latestEvent.kind]}{' '}
+                  {new Date(repo.latestEvent.at).toLocaleDateString(undefined, {
                     month: 'short',
                     day: 'numeric',
                     hour: '2-digit',

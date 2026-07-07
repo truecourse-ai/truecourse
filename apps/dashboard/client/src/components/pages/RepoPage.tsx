@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, Network, Lightbulb, Play } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, Network, Lightbulb, Play } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -70,6 +70,26 @@ import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
+import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
+import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
+import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
+import { GuardScenarioDetail } from '@/components/guard/GuardScenarioDetail';
+import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
+import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
+import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
+import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
+import { EmptyState } from '@/components/ui/empty-state';
+import { LlmEstimateModal } from '@/components/spec/LlmEstimateModal';
+import { useGuardStaleness } from '@/hooks/useGuardStaleness';
+import { useGuardReport } from '@/hooks/useGuardReport';
+import { useGuardGenerate } from '@/hooks/useGuardGenerate';
+import { useGuardRun } from '@/hooks/useGuardRun';
+import { useGuardView } from '@/hooks/useGuardView';
+import { useGuardSelection } from '@/hooks/useGuardSelection';
+import { useGuardScenarios } from '@/hooks/useGuardScenarios';
+import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
+import { buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
+import { docBasename, sectionLeaf } from '@/lib/guard-drifts';
 import { GenerateResultDetail } from '@/components/drift/GenerateResultDetail';
 import { useGraph } from '@/hooks/useGraph';
 import { useContractsTree } from '@/hooks/useContractsTree';
@@ -381,6 +401,49 @@ function RepoPageInner() {
     verifyStale,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
+  const {
+    staleness: guardStaleness,
+    loaded: guardStaleLoaded,
+    refetch: refetchGuardStaleness,
+  } = useGuardStaleness(repoId);
+  // Bumped on a guard-generate / guard-run completion so the page-level report and
+  // the child views (coverage / scenarios / runs) refetch — the guard analog of the
+  // spec:complete refresh (the views own their own data hooks, so they take this as
+  // a reload signal rather than being refetched imperatively).
+  const [guardReloadKey, setGuardReloadKey] = useState(0);
+  // The last-generate report feeds the Scenarios overview's "last generate"
+  // strip, which auto-expands when it carries birth findings or errors.
+  const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey);
+  // UI-triggered guard actions: Generate (Scenarios tab, estimate-gated) and Run
+  // (Drifts tab, deterministic). Held at page level so the in-flight state survives
+  // tab switches, exactly like specCorpus / contractsGenerating / verifyRunning.
+  const guardGen = useGuardGenerate(repoId);
+  const guardRun = useGuardRun(repoId);
+  // The bidirectional jump from a guard drift into the coverage tab.
+  const { openSpecSection } = useGuardView();
+  // Guard's OWN spec-surface selection slice (`?guard`/`?gsec`/`?gconf`) — kept
+  // separate from BL Drift's `?spec`/DriftViewContext so the two never bleed. The
+  // coverage sidebar (reused SpecCorpusView) routes through `open`/`activeKey`.
+  const guardSel = useGuardSelection();
+  // Scenarios-tab data, hoisted here (like contractsTree/verifyState) so the left
+  // panel and the main pane read ONE fetch and the guard reload key refreshes both.
+  const guardScenarios = useGuardScenarios(repoId, leftTab === 'scenarios', guardReloadKey);
+  // Guard's OWN scenario tab set (`?gscn=`) — the Spec-doc transient/pinned tab
+  // model (single-click preview, double-click pin), guard-scoped so nothing
+  // bleeds into BL Drift's DriftViewContext tab sets.
+  const guardScenarioTabs = useGuardScenarioTabs(repoId);
+  // Birth findings live in the SAME left-panel list as committed scenarios (the
+  // plan: they are section-bound artifacts that failed to become guards). Lifted
+  // from the last-generate report + joined to the committed rows so their group
+  // headings resolve the same way scenario rows do.
+  const guardFindingRows = useMemo(
+    () => buildFindingRows(guardReport, guardScenarios.rows),
+    [guardReport, guardScenarios.rows],
+  );
+  const guardListRows = useMemo(
+    () => buildListRows(guardScenarios.rows, guardFindingRows),
+    [guardScenarios.rows, guardFindingRows],
+  );
 
   // Switching to a data tab re-fetches its data, so the panel reflects the latest
   // server state without a full page reload. These hooks live at page level (they
@@ -388,8 +451,8 @@ function RepoPageInner() {
   // A ref holds the latest refetchers so the effect depends ONLY on `leftTab` —
   // it fires on a tab change, never on a refetcher's identity (so no refetch loop).
   // Cheap reads only; we deliberately don't trigger a re-scan here.
-  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchStaleness });
-  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchStaleness };
+  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchStaleness, refetchGuardStaleness });
+  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchStaleness, refetchGuardStaleness };
   useEffect(() => {
     const r = tabRefetchersRef.current;
     if (leftTab === 'verify') {
@@ -398,6 +461,12 @@ function RepoPageInner() {
     } else if (leftTab === 'contracts') {
       void r.refetchContracts();
       void r.refetchStaleness();
+    } else if (
+      leftTab === 'coverage' ||
+      leftTab === 'scenarios' ||
+      leftTab === 'guarddrifts'
+    ) {
+      void r.refetchGuardStaleness();
     }
   }, [leftTab]);
   // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
@@ -654,7 +723,7 @@ function RepoPageInner() {
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'generate' | 'verify' }
+        | { kind?: 'scan' | 'generate' | 'verify' | 'guard-generate' | 'guard-run' }
         | undefined;
       if (payload?.kind === 'generate') {
         refetchContracts();
@@ -671,9 +740,23 @@ function RepoPageInner() {
       ) {
         refetchStaleness();
       }
+      // A spec scan rewrites the corpus, which can flip the Guard generate-stale
+      // dot (specs changed since the last guard generate) — refresh it so the
+      // Coverage tab's staleness stays in sync with the corpus the sidebar shows.
+      if (payload?.kind === 'scan') {
+        refetchGuardStaleness();
+      }
+      // A guard generate wrote scenarios + a report; a guard run wrote a new run.
+      // Both flip guard staleness and must refresh the guard read surfaces —
+      // refetch the page-level staleness/report and bump the reload key so the
+      // child views (coverage / scenarios / runs / trend) re-fetch their data.
+      if (payload?.kind === 'guard-generate' || payload?.kind === 'guard-run') {
+        refetchGuardStaleness();
+        setGuardReloadKey((k) => k + 1);
+      }
     });
     return unsub;
-  }, [onEvent, refetchContracts, refetchVerify, refetchStaleness]);
+  }, [onEvent, refetchContracts, refetchVerify, refetchStaleness, refetchGuardStaleness]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -1131,8 +1214,12 @@ function RepoPageInner() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
+  // The Spec surface is the BL-Drift `spec` tab. The Guard Coverage tab reuses the
+  // same corpus components (SpecCorpusView sidebar + SpecOverlapDetail) but under
+  // its own selection slice, so it is deliberately NOT part of `isSpecTab`.
+  const isSpecTab = leftTab === 'spec';
   // Corpus Spec tab: a selected doc / overlap opens in the right pane (`?spec=`).
-  const showingSpec = activeSpecPath !== null && leftTab === 'spec';
+  const showingSpec = activeSpecPath !== null && isSpecTab;
   const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
   // Generate result (validation issues + gaps): prefer the live run, else the
   // persisted last-generate summary. Detail opens in the Contracts right pane.
@@ -1169,14 +1256,15 @@ function RepoPageInner() {
 
   // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
   // the panel) drives it, consistent with the other tabs.
-  const specCorpus = useSpecCorpus(repoId, leftTab === 'spec', refForTabs, prNumber ?? undefined);
+  // Shared by the Spec tab and the Guard coverage doc picker (both read the corpus docs).
+  const specCorpus = useSpecCorpus(repoId, isSpecTab || leftTab === 'coverage', refForTabs, prNumber ?? undefined);
 
   const sectionActionsNode =
-    leftTab === 'spec' ? (
-      // The Spec tab is the curated corpus: the header owns Scan/Rescan, which
-      // curates the docs into areas, detects relations, and flags overlaps.
-      // Hidden in EE — hosted repos have no working tree and re-scan
-      // automatically on merge to the default branch / when a PR is opened.
+    isSpecTab || leftTab === 'coverage' ? (
+      // The Spec tab and the Guard Coverage tab share the curated corpus: the
+      // header owns Scan/Rescan, which curates the docs into areas, detects
+      // relations, and flags overlaps. Hidden in EE — hosted repos have no working
+      // tree and re-scan automatically on merge / when a PR is opened.
       !isEe && repo?.isGitRepo !== false ? (
         <Button size="sm" variant="outline" onClick={() => void specCorpus.scan()} disabled={specCorpus.scanning}>
           {specCorpus.scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
@@ -1211,6 +1299,26 @@ function RepoPageInner() {
         onSelectRun={setSelectedVerifyRunId}
         viewingHistory={isViewingVerifyRun}
       />
+    ) : leftTab === 'scenarios' ? (
+      // Generate lives where its output lives — the Scenarios tab. Opens the
+      // estimate modal first, then triggers; disabled while a run is in flight.
+      <GuardHeaderActions
+        kind="generate"
+        onClick={guardGen.begin}
+        busy={guardGen.busy}
+        otherBusy={guardRun.running}
+        stale={guardStaleness.generateStale}
+      />
+    ) : leftTab === 'guarddrifts' ? (
+      // Run lives on the Drifts tab (it produces the results shown there).
+      // Deterministic — no estimate; disabled while a generate is in flight.
+      <GuardHeaderActions
+        kind="run"
+        onClick={guardRun.run}
+        busy={guardRun.running}
+        otherBusy={guardGen.busy}
+        stale={guardStaleness.runStale}
+      />
     ) : null;
 
   return (
@@ -1239,7 +1347,7 @@ function RepoPageInner() {
           prNumber={prNumber}
           prBranch={verifyDiff?.branch ?? null}
           prConclusion={activePrRun?.conclusion}
-          actions={leftTab === 'spec' ? sectionActionsNode : undefined}
+          actions={isSpecTab ? sectionActionsNode : undefined}
         />
       ) : (
         <Header
@@ -1409,10 +1517,10 @@ function RepoPageInner() {
               }}
             />
           )}
-          {leftTab === 'spec' && (
-            // The curated corpus Spec tab: an area-grouped prose nav (areas →
+          {isSpecTab && (
+            // The curated corpus Spec surface: an area-grouped prose nav (areas →
             // docs + overlaps); selecting opens the right pane (?spec=). Scan
-            // lives in the header.
+            // lives in the header. Shared by the BL-Drift Spec tab and Guard Spec.
             <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} prNumber={prNumber} prRef={refForTabs} />
           )}
           {leftTab === 'contracts' && (
@@ -1439,14 +1547,40 @@ function RepoPageInner() {
               diffMode={inferred.diffMode}
             />
           )}
+          {leftTab === 'coverage' && (
+            // Guard Coverage reuses the BL-Drift corpus sidebar (docs + area-tag
+            // filter + open/resolved conflicts + skipped/force-in/excluded docs),
+            // but routes selection through Guard's own params: a doc opens the
+            // coverage surface (`?guard`), a conflict opens the resolution detail
+            // (`?gconf`). No shared state with BL Drift's `?spec` view.
+            <SpecCorpusView
+              repoId={repoId}
+              corpus={specCorpus}
+              activeKey={guardSel.activeKey}
+              onOpen={guardSel.open}
+            />
+          )}
+          {leftTab === 'scenarios' && (
+            // The committed-scenario inventory as a doc › section grouped list
+            // with the search/doc/status filters on top. Single-click previews a
+            // scenario in the main pane (transient tab), double-click pins it.
+            <GuardScenariosPanel
+              rows={guardListRows}
+              loading={guardScenarios.loading}
+              error={guardScenarios.error}
+              activeId={guardScenarioTabs.activeId}
+              onOpen={guardScenarioTabs.open}
+            />
+          )}
         </LeftSidebar>
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec/Contracts/Verify) */}
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec/Contracts/Verify).
+              Scenarios/Runs render their own GuardTabStrip (permanent Overview tab), not this shared bar. */}
           {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
-          (leftTab === 'spec' && openSpecTabs.length > 0) ||
+          (isSpecTab && openSpecTabs.length > 0) ||
           (leftTab === 'contracts' && openContractsFiles.length > 0) ||
           (leftTab === 'inferred' && openInferredTabs.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
@@ -1541,7 +1675,7 @@ function RepoPageInner() {
                 );
               })}
               {/* Corpus Spec tabs (docs + overlaps) */}
-              {leftTab === 'spec' && openSpecTabs.map((f) => {
+              {isSpecTab && openSpecTabs.map((f) => {
                 const k = parseSpecKey(f.path);
                 const label =
                   k.kind === 'overlap'
@@ -1707,7 +1841,7 @@ function RepoPageInner() {
                 />
               );
             })()
-          ) : leftTab === 'spec' ? (
+          ) : isSpecTab ? (
             <SpecPanePlaceholder />
           ) : showingContractsFile && activeContractsPath ? (
             isResultKey(activeContractsPath) ? (
@@ -1845,6 +1979,106 @@ function RepoPageInner() {
                 </div>
               );
             })()
+          ) : leftTab === 'coverage' ? (
+            <GuardCoveragePage
+              repoId={repoId}
+              corpus={specCorpus}
+              staleness={guardStaleness}
+              staleLoaded={guardStaleLoaded}
+              prNumber={prNumber}
+              prRef={refForTabs}
+              reloadKey={guardReloadKey}
+            />
+          ) : leftTab === 'scenarios' ? (
+            // Guard Scenarios: the shared GuardTabStrip (permanent Overview tab +
+            // any opened scenarios, `?gscn=`) over the scenario detail / overview.
+            <div className="flex h-full flex-col overflow-hidden">
+              <GuardTabStrip
+                tabs={guardScenarioTabs.openTabs.map((t) => {
+                  // Tabs label by HUMAN title (truncated); the machine handle (a
+                  // scenario id, a finding's binding) rides the hover. Findings take
+                  // a distinct glyph so a tab reads as a finding, not a scenario.
+                  const scenario = guardScenarios.rows.find((r) => r.id === t.id);
+                  if (scenario) return { ...t, label: scenario.title, title: scenario.id };
+                  const finding = guardFindingRows.find((r) => r.id === t.id);
+                  if (finding) {
+                    return {
+                      ...t,
+                      label: finding.title,
+                      title: `${docBasename(finding.doc)} · ${finding.headingText ?? sectionLeaf(finding.anchor)}`,
+                      icon: FlaskConicalOff,
+                    };
+                  }
+                  return { ...t, label: t.id, title: t.id };
+                })}
+                activeId={guardScenarioTabs.activeId}
+                onSelect={(t) => guardScenarioTabs.open(t.id, t.pinned)}
+                onSelectOverview={guardScenarioTabs.selectOverview}
+                onClose={guardScenarioTabs.close}
+              />
+              <div className="relative min-h-0 flex-1 overflow-hidden">
+                {(() => {
+                  // A scenario tab shows the full detail; a finding tab shows the
+                  // finding detail; nothing open → the overview (recipe + last generate).
+                  const activeScenario = guardScenarioTabs.activeId
+                    ? guardScenarios.rows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                    : null;
+                  if (activeScenario) {
+                    return (
+                      <GuardScenarioDetail
+                        key={activeScenario.id}
+                        repoId={repoId}
+                        row={activeScenario}
+                        runId={guardScenarios.runId}
+                        onClose={() => guardScenarioTabs.close(activeScenario.id)}
+                        onOpenSpec={openSpecSection}
+                      />
+                    );
+                  }
+                  const activeFinding = guardScenarioTabs.activeId
+                    ? guardFindingRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                    : null;
+                  if (activeFinding) {
+                    return (
+                      <GuardFindingDetail
+                        key={activeFinding.id}
+                        row={activeFinding}
+                        onClose={() => guardScenarioTabs.close(activeFinding.id)}
+                        onOpenSpec={openSpecSection}
+                      />
+                    );
+                  }
+                  if (guardScenarioTabs.activeId) {
+                    // A deep link / stale tab pointing at an id the committed corpus
+                    // no longer has (or that is still loading).
+                    return guardScenarios.loading ? (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <EmptyState
+                        icon={FlaskConical}
+                        title="Scenario not found"
+                        body="This scenario is not in the committed corpus — it may have been removed or regenerated under a new id."
+                      />
+                    );
+                  }
+                  return (
+                    <GuardScenariosOverview
+                      recipe={guardScenarios.recipe}
+                      report={guardReport}
+                      scenarioRows={guardScenarios.rows}
+                      hasScenarios={guardScenarios.rows.length > 0}
+                      loading={guardScenarios.loading}
+                      error={guardScenarios.error}
+                      onOpenSpec={openSpecSection}
+                    />
+                  );
+                })()}
+              </div>
+            </div>
+          ) : leftTab === 'guarddrifts' ? (
+            <GuardDriftsView repoId={repoId} reloadKey={guardReloadKey} />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -2077,119 +2311,23 @@ function RepoPageInner() {
           </div>
         </div>
       )}
+      {/* The scan / analyze estimate gate — pushed over the socket, confirmed back
+          over the socket. */}
       {llmEstimate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card p-5 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {(() => {
-              const est = llmEstimate.estimate;
-              const staged = !!est.stages && est.stages.length > 0;
-              const tokensK = Math.round(est.totalEstimatedTokens / 1000);
-              const totalCalls = staged ? est.stages!.reduce((s, x) => s + x.calls, 0) : 0;
-              const fmtUsd = (usd: number) => (usd > 0 && usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`);
-              return (
-                <>
-                  <div className="mb-4 flex items-start justify-between">
-                    <span className="text-sm font-semibold text-foreground">
-                      {staged ? 'Proceed with this run?' : 'Run LLM rules?'}
-                    </span>
-                    <button
-                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      title="Cancel"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                  {staged ? (
-                    <div className="mb-5 text-xs text-muted-foreground">
-                      <p className="mb-3 leading-relaxed">
-                        {est.subjectLabel ? `${est.subjectLabel} · ` : ''}~{totalCalls} LLM calls · ~
-                        {tokensK}k tokens
-                        {est.estimatedCostUsd != null && (
-                          <>
-                            {' '}
-                            · up to{' '}
-                            <span className="font-semibold text-foreground">
-                              {fmtUsd(est.estimatedCostUsd)}
-                            </span>
-                          </>
-                        )}
-                      </p>
-                      <div className="overflow-hidden rounded-md border border-border/60">
-                        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 border-b border-border/60 bg-muted/40 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                          <span>Stage</span>
-                          <span className="text-right">Calls</span>
-                          <span className="text-right">Model</span>
-                          <span className="text-right">Cost</span>
-                        </div>
-                        {est.stages!.map((s, i) => (
-                          <div
-                            key={s.stage}
-                            className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2 ${
-                              i > 0 ? 'border-t border-border/40' : ''
-                            }`}
-                          >
-                            <span className="text-foreground">{s.label ?? s.stage}</span>
-                            <span className="text-right tabular-nums">
-                              {s.callsRange && s.callsRange.high !== s.calls
-                                ? `${s.callsRange.low}–${s.callsRange.high}`
-                                : s.calls}
-                            </span>
-                            <span className="text-right text-muted-foreground/70">{s.model}</span>
-                            <span className="text-right tabular-nums text-foreground">
-                              {s.estimatedCostUsd != null ? fmtUsd(s.estimatedCostUsd) : '—'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-3 leading-relaxed text-[11px] text-muted-foreground/80">
-                        Ranges (e.g. 12–24) show fewest–most calls — the actual count depends on what
-                        the run finds.
-                        {est.estimatedCostUsd != null && (
-                          <>
-                            {' '}
-                            Cost is a ceiling; prompt caching may lower it
-                            {est.costSource === 'bundled' ? ' (prices approximate)' : ''}.
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
-                      {(() => {
-                        const totalRules = est.tiers.reduce((s, t) => s + t.ruleCount, 0);
-                        const totalFiles = est.tiers.reduce((s, t) => s + t.fileCount, 0);
-                        return `${totalFiles} files, ${totalRules} rules (~${tokensK}k tokens).`;
-                      })()}
-                    </p>
-                  )}
-                  <div className="flex flex-col gap-2">
-                    <button
-                      className="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
-                    >
-                      {staged ? 'Proceed' : 'Run LLM rules'}
-                    </button>
-                    <button
-                      className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
-                      onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-                    >
-                      {staged ? 'Cancel' : 'Skip — deterministic rules only'}
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+        <LlmEstimateModal
+          estimate={llmEstimate.estimate}
+          onConfirm={() => respondToLlmEstimate(llmEstimate.repoId, true)}
+          onCancel={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+        />
+      )}
+      {/* The guard Generate estimate gate — fetched via GET, confirmed → POST. Same
+          modal, same numbers as the CLI. */}
+      {guardGen.modalOpen && guardGen.estimate && (
+        <LlmEstimateModal
+          estimate={guardGen.estimate}
+          onConfirm={guardGen.confirm}
+          onCancel={guardGen.cancel}
+        />
       )}
       {analysisProgress && (
         <div

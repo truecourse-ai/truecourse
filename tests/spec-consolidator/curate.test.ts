@@ -209,3 +209,79 @@ describe('curate', () => {
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Include-scope — exercises the real filesystem discovery path (NOT docSource,
+// which bypasses scoping) so config `spec.include` actually applies.
+// ---------------------------------------------------------------------------
+
+describe('curate — include-scope', () => {
+  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
+  const tagOne: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'x' }], status: 'shipped' });
+
+  function place(rel: string, body: string): void {
+    const full = path.join(repo, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, body);
+  }
+  function config(include: string[]): void {
+    place('.truecourse/config.json', JSON.stringify({ spec: { include } }));
+  }
+  function runFs(decisions: DecisionsFile = EMPTY_DECISIONS) {
+    return curate(repo, {
+      decisions,
+      relevanceRunner: keepAll,
+      areaTagRunner: tagOne,
+      disableOverlapDetection: true,
+      disableLlmRelationDetection: true,
+      skipGit: true,
+    });
+  }
+
+  it('scans only in-scope docs and reports the active scope', async () => {
+    config(['docs/**']);
+    place('docs/spec.md', '# in scope');
+    place('reference/answers.md', '# out of scope');
+
+    const result = await runFs();
+    expect(result.stats.scopeGlobs).toEqual(['docs/**']);
+    expect(result.stats.docsScanned).toBe(1);
+    expect(result.corpus.docs.map((d) => d.ref)).toEqual(['docs/spec.md']);
+  });
+
+  it('an out-of-scope doc never appears in skippedDocs', async () => {
+    config(['docs/**']);
+    place('docs/spec.md', '# in scope');
+    place('reference/answers.md', '# out of scope');
+
+    const result = await runFs();
+    // Out-of-scope docs never enter the universe, so they are neither kept nor
+    // "skipped" — they must not surface in the dashboard's not-included list.
+    const skippedPaths = result.skippedDocs.map((s) => s.path);
+    expect(skippedPaths).not.toContain('reference/answers.md');
+    expect(result.corpus.skippedDocs.map((s) => s.ref)).not.toContain('reference/answers.md');
+  });
+
+  it('surfaces an out-of-scope manualInclude instead of silently dropping it', async () => {
+    config(['docs/**']);
+    place('docs/spec.md', '# in scope');
+    place('reference/answers.md', '# out of scope, but force-included');
+
+    const decisions: DecisionsFile = { ...EMPTY_DECISIONS, manualIncludes: ['reference/answers.md'] };
+    const result = await runFs(decisions);
+    // A manual include is a relevance-level override, not a universe override:
+    // the out-of-scope path stays out, but is surfaced so it isn't a silent no-op.
+    expect(result.stats.outOfScopeManualIncludes).toEqual(['reference/answers.md']);
+    expect(result.corpus.docs.map((d) => d.ref)).toEqual(['docs/spec.md']);
+  });
+
+  it('no scope configured → empty scopeGlobs, everything scanned', async () => {
+    place('docs/spec.md', '# a');
+    place('reference/x.md', '# b');
+
+    const result = await runFs();
+    expect(result.stats.scopeGlobs).toEqual([]);
+    expect(result.stats.outOfScopeManualIncludes).toEqual([]);
+    expect(result.stats.docsScanned).toBe(2);
+  });
+});

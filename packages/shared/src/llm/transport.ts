@@ -23,9 +23,14 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { resolveClaudeBinary } from '../claude-binary.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
+
+// Re-exported here so every output-only prompt reaches it through the same
+// `@truecourse/shared/llm` entry it already imports the transport from.
+export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `contract.extract:<sliceId>`).
@@ -148,9 +153,9 @@ export interface EnvelopeUsage {
 }
 
 /**
- * Pull token/cost/timing/model usage out of a `claude -p --output-format json`
- * envelope. The `agent` transport has no such envelope, so usage there is
- * simply absent (returns null).
+ * Pull token/cost/timing/model usage out of the terminal `result` event (same
+ * shape as the buffered `claude -p --output-format json` envelope). The `agent`
+ * transport has no such envelope, so usage there is simply absent (returns null).
  */
 function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
   if (!envelope || typeof envelope !== 'object') return null;
@@ -405,6 +410,28 @@ export function resolveTimeoutScale(): number {
   return 1;
 }
 
+/** Default stall timeout (ms) when `TRUECOURSE_LLM_STALL_TIMEOUT_MS` is unset. */
+export const DEFAULT_STALL_TIMEOUT_MS = 300_000;
+
+/**
+ * Effective stall timeout for the streaming cli transport: once the stream has
+ * started, no NDJSON event for this long → the call is killed as a stall. Reads
+ * `TRUECOURSE_LLM_STALL_TIMEOUT_MS` (default 5 min) and applies the same
+ * `resolveTimeoutScale` multiplier as the wall-clock ceiling, so one knob widens
+ * both. Invalid/zero/negative → the default. This is NOT a first-token timeout:
+ * pre-first-event silence is legitimate deep reasoning and only the ceiling
+ * covers it; the stall clock arms only after the first event arrives.
+ */
+export function resolveStallTimeoutMs(): number {
+  const env = process.env.TRUECOURSE_LLM_STALL_TIMEOUT_MS;
+  let base = DEFAULT_STALL_TIMEOUT_MS;
+  if (env) {
+    const parsed = parseFloat(env);
+    if (Number.isFinite(parsed) && parsed > 0) base = parsed;
+  }
+  return base * resolveTimeoutScale();
+}
+
 // ---------------------------------------------------------------------------
 // cli backend — spawn `claude -p`
 // ---------------------------------------------------------------------------
@@ -419,6 +446,18 @@ export interface CliTransportOptions {
   bin?: string;
 }
 
+/** True for the NDJSON events that carry the model's first visible token — a
+ *  text or thinking `content_block_delta`. Anthropic streams thinking deltas
+ *  first, so ttft is the earlier of the two. */
+function isFirstTokenDelta(ev: unknown): boolean {
+  if (!ev || typeof ev !== 'object') return false;
+  const e = ev as { type?: unknown; event?: { type?: unknown; delta?: { type?: unknown } } };
+  if (e.type !== 'stream_event') return false;
+  if (e.event?.type !== 'content_block_delta') return false;
+  const d = e.event.delta?.type;
+  return d === 'text_delta' || d === 'thinking_delta';
+}
+
 export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
   const bin = opts.bin ?? resolveClaudeBinary();
   return (req) =>
@@ -430,7 +469,26 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       const id = req.id ?? '';
       const stage = req.stage ?? 'unknown';
       let reported = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
+      let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // Observed streaming telemetry: spawn → first NDJSON event, and spawn →
+      // first text/thinking delta. Populated live from the stream (not the
+      // envelope) so the call log carries real ttft even for proxy models whose
+      // envelope timing is unreliable, and on a stall/ceiling kill too.
+      let firstEventAt: number | undefined;
+      let firstDeltaAt: number | undefined;
+      const obsTimeToRequestMs = (): number | undefined =>
+        firstEventAt !== undefined ? firstEventAt - t0 : undefined;
+      const obsTtftMs = (): number | undefined =>
+        firstDeltaAt !== undefined ? firstDeltaAt - t0 : undefined;
+
+      const clearTimers = (): void => {
+        if (ceilingTimer) clearTimeout(ceilingTimer);
+        if (stallTimer) clearTimeout(stallTimer);
+        ceilingTimer = null;
+        stallTimer = null;
+      };
 
       // Emit exactly one call record, on the first terminal path. A timeout
       // SIGKILLs the proc, whose `close` then fires too — the guard prevents a
@@ -438,10 +496,11 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       const fail = (error: string, exitCode: number | null): void => {
         if (reported) return;
         reported = true;
-        if (timer) clearTimeout(timer);
+        clearTimers();
         emitCall({
           ts, stage, model: req.model ?? '', id, itemCount,
           ok: false, error, exitCode, wallMs: Date.now() - t0,
+          ttftMs: obsTtftMs(), timeToRequestMs: obsTimeToRequestMs(),
           inputChars, outputChars: 0,
           inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0,
           system: req.system, user: req.user, responseText: '',
@@ -450,7 +509,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       const succeed = (usage: EnvelopeUsage | null, text: string): void => {
         if (reported) return;
         reported = true;
-        if (timer) clearTimeout(timer);
+        clearTimers();
         emitCall({
           ts, stage, model: usage?.model || req.model || '', id, itemCount,
           ok: true, exitCode: 0, wallMs: Date.now() - t0,
@@ -459,7 +518,8 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
           cacheReadTokens: usage?.cacheReadTokens ?? 0, cacheCreateTokens: usage?.cacheCreateTokens ?? 0,
           costUsd: usage?.costUsd ?? 0, numTurns: usage?.numTurns,
           claudeDurationMs: usage?.claudeDurationMs, apiDurationMs: usage?.apiDurationMs,
-          ttftMs: usage?.ttftMs, timeToRequestMs: usage?.timeToRequestMs,
+          // ttft/timeToRequest are OUR observations of the stream, not the envelope.
+          ttftMs: obsTtftMs(), timeToRequestMs: obsTimeToRequestMs(),
           system: req.system, user: req.user, responseText: text,
         });
       };
@@ -471,9 +531,21 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         '-p',
         req.user,
         ...modelArgs,
+        // stream-json emits one NDJSON event per line: system:init, stream_event
+        // deltas, then a terminal `result` object identical to the buffered
+        // `--output-format json` envelope. `--verbose` is REQUIRED by the CLI
+        // for `-p` + stream-json; `--include-partial-messages` surfaces the
+        // token-level deltas that drive ttft + stall telemetry.
         '--output-format',
-        'json',
-        '--append-system-prompt',
+        'stream-json',
+        '--include-partial-messages',
+        '--verbose',
+        // Full REPLACE (not `--append-system-prompt`): the claude harness's
+        // built-in system prompt teaches tool/agent behavior and costs ~3.1K
+        // input tokens per call — pure contamination for these output-only
+        // stages. `--system-prompt` swaps it out entirely; `req.system` already
+        // carries everything the stage needs.
+        '--system-prompt',
         req.system,
         // `user` (not `project`): these stages are pure text-in/JSON-out and
         // never need the *scanned* repo's CLAUDE.md or tools. Loading `project`
@@ -481,43 +553,133 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         // per block of pure overhead. `user` keeps only the operator's own config.
         '--setting-sources',
         'user',
+        // Every pipeline stage is output-only by design: the prompt carries all
+        // needed context and the model must never explore or modify the repo.
+        // Without this an eager model turns a one-shot completion into a
+        // multi-turn agentic session (observed: 47-60 turns fabricating repo
+        // files — ~10x the cost and latency, plus timeouts).
+        '--tools',
+        '',
       ];
       const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const out: Buffer[] = [];
       const err: Buffer[] = [];
-      // Effective (scaled) deadline; the error message reports it so logs stay truthful.
+
+      // Effective (scaled) wall-clock ceiling — the backstop that also covers
+      // legitimate pre-first-event silence. Message unchanged for parity.
       const timeoutMs = req.timeoutMs ? req.timeoutMs * resolveTimeoutScale() : undefined;
-      timer = timeoutMs
+      ceilingTimer = timeoutMs
         ? setTimeout(() => {
             proc.kill('SIGKILL');
             fail(`claude timed out after ${timeoutMs}ms`, null);
             reject(new Error(`claude timed out after ${timeoutMs}ms`));
           }, timeoutMs)
         : null;
-      proc.stdout.on('data', (b: Buffer) => out.push(b));
+
+      // Stall timeout: armed on the FIRST event, reset on every subsequent one.
+      // A started-then-silent stream (hung proxy) is killed here, distinct from
+      // the ceiling. Not a first-token timeout — it never runs before the stream
+      // begins.
+      const stallMs = resolveStallTimeoutMs();
+      const armOrResetStall = (): void => {
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          proc.kill('SIGKILL');
+          const msg = `claude stalled: no stream event for ${stallMs}ms (TRUECOURSE_LLM_STALL_TIMEOUT_MS)`;
+          fail(msg, null);
+          reject(new Error(msg));
+        }, stallMs);
+      };
+
+      // Incremental NDJSON parse. A StringDecoder keeps multibyte chars intact
+      // across chunk boundaries; `pending` buffers the partial trailing line.
+      const decoder = new StringDecoder('utf-8');
+      let pending = '';
+      let resultEvent: Record<string, unknown> | undefined;
+      // Proof the process actually streamed: at least one non-`result` event
+      // (system:init always leads a real stream-json run). Its absence when a
+      // lone `result` object arrives means the OLD buffered format was produced.
+      let sawStreamEvent = false;
+
+      const handleLine = (raw: string): void => {
+        const line = raw.trim();
+        if (!line) return;
+        const now = Date.now();
+        if (firstEventAt === undefined) firstEventAt = now;
+        armOrResetStall();
+        let ev: unknown;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          return; // non-JSON noise line — liveness counted, content ignored
+        }
+        if (!ev || typeof ev !== 'object') return;
+        const type = (ev as { type?: unknown }).type;
+        if (type === 'result') {
+          resultEvent = ev as Record<string, unknown>;
+        } else {
+          sawStreamEvent = true;
+          if (firstDeltaAt === undefined && isFirstTokenDelta(ev)) firstDeltaAt = now;
+        }
+      };
+
+      proc.stdout.on('data', (b: Buffer) => {
+        pending += decoder.write(b);
+        let nl: number;
+        while ((nl = pending.indexOf('\n')) !== -1) {
+          const line = pending.slice(0, nl);
+          pending = pending.slice(nl + 1);
+          handleLine(line);
+        }
+      });
       proc.stderr.on('data', (b: Buffer) => err.push(b));
       proc.on('error', (e) => {
         fail(e instanceof Error ? e.message : String(e), null);
         reject(e);
       });
       proc.on('close', (code) => {
+        if (reported) {
+          clearTimers();
+          return;
+        }
+        // Flush the decoder + any final line that lacked a trailing newline.
+        pending += decoder.end();
+        if (pending) handleLine(pending);
+        pending = '';
+        clearTimers();
+
         if (code !== 0) {
           const msg = `claude exited ${code}: ${Buffer.concat(err).toString('utf-8')}`;
           fail(msg, code);
           reject(new Error(msg));
           return;
         }
+        if (!resultEvent) {
+          const msg = 'claude produced no result event (expected --output-format stream-json output)';
+          fail(msg, 0);
+          reject(new Error(msg));
+          return;
+        }
+        if (!sawStreamEvent) {
+          // A single `result` object with no preceding stream lifecycle is the
+          // OLD buffered `--output-format json` shape — fail honestly rather
+          // than silently tolerating both formats.
+          const msg =
+            'claude did not stream: expected --output-format stream-json events but got a single buffered result object';
+          fail(msg, 0);
+          reject(new Error(msg));
+          return;
+        }
         try {
-          const envelope = JSON.parse(Buffer.concat(out).toString('utf-8'));
+          const envelope = resultEvent;
           // An API error can surface as exit 0 WITH `is_error: true` in the
-          // envelope (e.g. 429 usage-limit, 5xx). Treat that as a transport
+          // result event (e.g. 429 usage-limit, 5xx). Treat that as a transport
           // failure too — so callers (the batch runner) see a thrown error and
           // do NOT fan out into per-block retries against a degraded API.
-          if (envelope && typeof envelope === 'object' && envelope.is_error === true) {
+          if (envelope.is_error === true) {
             const status = envelope.api_error_status ? ` (api ${envelope.api_error_status})` : '';
             const detail = typeof envelope.result === 'string' ? `: ${envelope.result}` : '';
             const msg = `claude API error${status}${detail}`.slice(0, 500);
-            fail(msg, code);
+            fail(msg, 0);
             reject(new Error(msg));
             return;
           }
@@ -528,7 +690,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
           } catch {
             /* usage is observational only */
           }
-          const text = typeof envelope === 'string' ? envelope : envelope.result;
+          const text = envelope.result;
           if (typeof text !== 'string') {
             fail('claude returned no text', 0);
             reject(new Error('claude returned no text'));

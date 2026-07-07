@@ -333,6 +333,10 @@ function printSummary(s: LlmCallSummary, callsPath: string, ioDir: string | null
       `~${s.effectiveParallelism.toFixed(1)}x parallel · $${s.totalCostUsd.toFixed(2)}` +
       (s.totalFailures ? ` · ${s.totalFailures} failed` : ''),
   );
+  w(`written: ${callsPath}`);
+  if (ioDir) w(`full I/O: ${ioDir}`);
+  // The per-stage diagnostics table is operator detail — opt in.
+  if (!truthyEnv(process.env.TRUECOURSE_LLM_LOG_VERBOSE)) return;
   w(
     `overhead: ${humanTokens(s.overheadTokens)} cache vs ${humanTokens(s.freshTokens)} fresh ` +
       `(${(s.overheadFraction * 100).toFixed(0)}% of tokens are per-call overhead)`,
@@ -367,6 +371,4 @@ function printSummary(s: LlmCallSummary, callsPath: string, ioDir: string | null
         padL(String(st.multiTurnCalls), 9),
     );
   }
-  w(`written: ${callsPath}`);
-  if (ioDir) w(`full I/O: ${ioDir}`);
 }

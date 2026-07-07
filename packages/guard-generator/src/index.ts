@@ -1,0 +1,96 @@
+/**
+ * `@truecourse/guard-generator` — the LLM side of guard: whole-document claim
+ * extraction, recipe discovery, batched scenario authoring, and birth validation.
+ * Authorship is output-only — the model returns content through the shared
+ * transport seam and the engine (this package) parses, validates, birth-validates,
+ * and writes. Depends on `@truecourse/guard-runner` (the deterministic engine) and
+ * `@truecourse/shared`; those never depend back on it.
+ */
+
+export {
+  generateGuards,
+  defaultGenerateBatch,
+  GENERATE_CACHE_NAME,
+  type GenerateGuardsOptions,
+  type GuardGenerateResult,
+  type GuardGenerateModels,
+  type GeneratedScenarioInfo,
+  type GuardBirthFinding,
+  type GuardGenerateError,
+  type GuardExtractionFailure,
+} from './generate.js'
+
+export {
+  planGuardWork,
+  collectWorkDocs,
+  hasGuardUniverse,
+  readCorpusAreaTags,
+  generationInputsHash,
+  type GuardWorkPlan,
+  type GuardDoc,
+  type SectionInput,
+} from './section-plan.js'
+
+export {
+  extractDocClaims,
+  docExtractionCached,
+  countExtractViews,
+  countUncachedExtractViews,
+  EXTRACT_CACHE_NAME,
+  type DocClaims,
+  type ExtractResult,
+} from './extract.js'
+
+export { discoverRecipe, RECIPE_CACHE_NAME, type RecipeDiscoveryResult } from './recipe-discovery.js'
+
+export {
+  deriveProbes,
+  captureProbes,
+  defaultProbeExecutor,
+  GROUND_CACHE_NAME,
+  MAX_PROBES_PER_BATCH,
+  PROBE_OUTPUT_LIMIT,
+  PROBE_TIMEOUT_MS,
+  type ProbeTranscript,
+  type ProbeExecutor,
+  type CaptureProbesOptions,
+} from './ground.js'
+
+export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'
+
+export {
+  EXTRACT_SYSTEM_PROMPT,
+  GENERATE_SYSTEM_PROMPT,
+  RECIPE_SYSTEM_PROMPT,
+  buildAuthorUserPrompt,
+  type AuthorUserContext,
+  type AuthorClaim,
+} from './prompts.js'
+
+export {
+  spawnExtractRunner,
+  spawnGenerateRunner,
+  spawnRecipeRunner,
+  type ExtractRunner,
+  type GenerateRunner,
+  type RecipeRunner,
+} from './runners.js'
+
+export {
+  TestabilityVerdictSchema,
+  RecipeProposalSchema,
+  ExtractedClaimSchema,
+  UntestableNoteSchema,
+  DocExtractionSchema,
+  RawGeneratedScenarioSchema,
+  AuthoredClaimSchema,
+  AuthoredBatchSchema,
+  CLAIM_DRIVERS,
+  type TestabilityVerdict,
+  type RecipeProposal,
+  type ExtractedClaim,
+  type UntestableNote,
+  type DocExtraction,
+  type RawGeneratedScenario,
+  type AuthoredClaim,
+} from './schemas.js'

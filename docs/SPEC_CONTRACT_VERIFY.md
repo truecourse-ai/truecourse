@@ -154,7 +154,7 @@ Here is the whole tree this module owns. Other subsystems (the analyze store, th
 ```
 <repo>/.truecourse/
   .gitignore                       ← written once by ensureRepoTruecourseDir (paths.ts)
-  config.json                      ← COMMITTABLE (per-repo settings incl. llm.stages model overrides)
+  config.json                      ← COMMITTABLE (per-repo settings incl. llm.stages model overrides + spec.include discovery scope)
   specs/
     corpus.json                    ← COMMITTABLE (LATEST convention). CuratedCorpus v3.
     decisions.json                 ← COMMITTABLE, user-authored (relations / manualAreas / manualIncludes / manualExcludes)
@@ -681,6 +681,26 @@ unconditionally — this is specifically what stops `.truecourse/`'s own output
 from being re-discovered and compounding on itself every run. The repo's
 `.truecourseignore` (the same ignore file the code analyzer honors) is applied,
 and anything that isn't a `.md` file is dropped.
+
+A repo can also flip discovery from opt-out to opt-in with an **include-scope**:
+set `spec.include` in `config.json` to an array of gitignore-style globs and only
+markdown matching one of them enters the universe. It is spec-only — the ignore
+file is shared with code analysis, so include-only semantics can't live there.
+Absent or empty (`[]`), discovery looks at everything, exactly as before. The
+precedence is fixed: **include selects, then `.truecourseignore` subtracts on
+top** — an include glob can never resurrect an ignored path (an ignored file is
+already gone before the scope check runs). Everything else — the skip-dirs, the
+dotfile rule, dedupe, relevance — still applies within the scope. Out-of-scope
+files are *not* "skipped docs": they never become candidates, so they don't show
+up in `skippedDocs` or the dashboard's not-included list. A force-include
+(`decisions.manualIncludes`) is a *relevance*-level override, not a universe one,
+so an out-of-scope manual include stays out; the scan surfaces any such
+configured-but-out-of-scope include (in `stats.outOfScopeManualIncludes` and the
+CLI summary) rather than dropping it silently. The scope is read straight from
+disk by the walk (`loadSpecScope` in `@truecourse/shared`), so the pre-flight
+estimator — which shares this discovery — scopes identically without extra
+plumbing, and when a scope is active the CLI scan summary states it once
+(`scope  docs/** (config)`).
 
 Each surviving file becomes a **doc candidate** — the unit every later stage
 works with. Beyond the obvious path and body, a candidate carries three things
@@ -3673,7 +3693,7 @@ This handler ties the whole PR flow together and posts two GitHub Checks — one
 
 It starts with guards and idempotency. It only proceeds for an enabled, connected repo, and it won't run two gates for the same commit at once. It also skips webhook redeliveries: if a run already exists for this exact head commit it returns early. (A forced re-gate — the kind fired after a conflict is resolved — skips that redelivery check but still respects the concurrency guard.) Both Checks are put into an "in progress" state immediately, and a cleanup step guarantees that if anything leaves a Check hanging, it's closed out as a neutral "did not complete" rather than spinning forever.
 
-It then works out whether the PR touched any spec docs — using the exact same deterministic discovery rule the scanner uses, so the two never disagree — and runs the verify described in [§11.5.7](#ee-edition). If verify throws, it posts a neutral "gate error" drift Check and stops there. Otherwise it feeds the base and head drifts into the decision logic from [§11.5.8](#ee-edition) and posts the authoritative drift Check, anchored to the head commit. That Check is **always the plain, structured verdict — never the LLM-enriched prose**, so the merge signal is deterministic. The Code Quality Check is decided and posted the same way, in its own try/catch so that a failure to post it only logs.
+It then works out whether the PR touched any spec docs — using the exact same deterministic discovery rule the scanner uses, so the two never disagree. That includes the repo's `spec.include` scope ([§3.3](#scan)): since detection runs before any clone, the gate fetches `.truecourse/config.json` from the base branch over the GitHub API and applies the same scope, so a PR touching only out-of-scope markdown isn't treated as a spec change. A config that can't be fetched or parsed degrades to "scan everything" — never an error. It then runs the verify described in [§11.5.7](#ee-edition). If verify throws, it posts a neutral "gate error" drift Check and stops there. Otherwise it feeds the base and head drifts into the decision logic from [§11.5.8](#ee-edition) and posts the authoritative drift Check, anchored to the head commit. That Check is **always the plain, structured verdict — never the LLM-enriched prose**, so the merge signal is deterministic. The Code Quality Check is decided and posted the same way, in its own try/catch so that a failure to post it only logs.
 
 The run is then recorded — the row that both anchors idempotency and feeds the dashboard. There's no separate PR-diff written here: the transient verify already stored the head snapshot, and the dashboard derives the diff from it on read. If the run warrants it and the repo has recipients configured, an email goes out — a "conflicts need resolution" note or a "gate failed" note, each gated on that repo's notification preferences.
 

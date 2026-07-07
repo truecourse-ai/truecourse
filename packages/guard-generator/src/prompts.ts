@@ -1,0 +1,448 @@
+/**
+ * The three guard-generator prompts — whole-document claim extraction, batched
+ * scenario authoring, and recipe discovery — plus their content fingerprints
+ * (folded into the cache keys so a prompt edit re-runs the affected stage).
+ *
+ * Every output shape a prompt asks for is the JSON Schema rendered from the SAME
+ * Zod definition the engine validates the reply with — never hand-written prose
+ * that could drift from the engine. `GENERATE_SYSTEM_PROMPT` embeds
+ * `RawGeneratedScenarioSchema` (the behavioral fields the model authors — engine-
+ * owned fields like `id`/`binds`/`guard` are not in the model's vocabulary at
+ * all); `EXTRACT_SYSTEM_PROMPT` the per-document `DocExtractionSchema`;
+ * `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalSchema`). Hand-written
+ * prose that can drift from the schema is exactly what burned the contract
+ * prompts; here the schema IS the documentation.
+ *
+ * The prompts are written to be reliable on the smallest supported model: closed
+ * enumerations, one canonical schema, a single JSON object/array out, and an
+ * explicit "copy this verbatim" rule for the anchors and refs the engine keys on.
+ */
+
+import { createHash } from 'node:crypto'
+import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { DocExtractionSchema, RecipeProposalSchema, RawGeneratedScenarioSchema } from './schemas.js'
+import type { GuardDoc, SectionInput } from './section-plan.js'
+import type { ProbeTranscript } from './ground.js'
+
+/** The authored-scenario JSON Schema — the behavioral fields only, rendered from
+ *  the SAME Zod schema the engine parses replies with (`.strip()` renders it
+ *  without the parse-side unknown-key tolerance, so the hint stays closed). */
+const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedScenarioSchema.strip())
+/** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
+const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
+const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+
+function fingerprint(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16)
+}
+
+/** A corrective addendum for a re-ask after the prior output failed validation. */
+export interface OutputCorrection {
+  /** The invalid output quoted back to the model. */
+  invalidOutput: string
+}
+
+/** One section as it appears in the outline the extractor picks anchors from. */
+export interface OutlineEntry {
+  anchor: string
+  headingText: string
+  level: number
+}
+
+/** Render the document outline as a compact, one-anchor-per-line list. The anchor
+ *  already carries the heading path, so no extra heading text is needed. */
+function renderOutline(outline: OutlineEntry[]): string {
+  return outline.map((e) => e.anchor).join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Claim extraction
+// ---------------------------------------------------------------------------
+
+export const EXTRACT_SYSTEM_PROMPT = `\
+You read ONE specification document and extract the CLAIMS in it that an executable
+test could verify — each a single, externally-observable behavior the document
+guarantees. You return JSON only: the claims, plus a note for every section that
+states no testable behavior. No prose outside the JSON.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+# What a claim is
+A claim is ONE concrete, observable behavior a program guarantees: an exit code,
+text written to stdout/stderr, a file created or changed, an HTTP response, a
+datastore change, a rendered UI element. Write each claim as a single declarative
+sentence, in the document's own terms.
+
+# Be selective — extract behaviors, not sentences
+Return the SMALLEST set of claims that captures what a section actually guarantees.
+This is the most important rule after faithfulness:
+- A well-covered section yields a HANDFUL of claims (roughly 1–8), not dozens. If
+  you are emitting more than ~8 claims for one section, you are almost certainly
+  over-splitting — consolidate.
+- ONE claim per distinct behavior, not one per sentence, per listed flag, or per
+  example. A command documented with several options is usually ONE claim about
+  its primary observable outcome; give a flag its own claim only when the section
+  states a SEPARATE, distinct observable behavior for it.
+- Do not extract a claim for every item merely because a section lists it (a
+  command map, an options table, an enumeration). Extract the behaviors the
+  section explicitly specifies an outcome for.
+- Skip trivial, obvious, or restated behaviors. Prefer fewer, higher-value claims;
+  when unsure whether something is a distinct testable behavior, leave it out.
+
+# Drivers — which kind of test could assert the claim
+- cli — a command-line program's behavior when invoked with arguments (and
+  optional stdin): its exit code, what it writes to stdout/stderr, or the files it
+  creates or changes. This is the ONLY driver a test is authored for today; still
+  extract api/web/tui claims so the coverage picture stays honest.
+- api — an HTTP/RPC service's response, or the datastore state a request leaves.
+- web — a browser UI (navigation, clicks, visible content).
+- tui — an interactive terminal UI (keystrokes, on-screen contents).
+
+# Faithfulness — the prime directive
+Extract ONLY what the text states. Never infer a behavior the words do not state.
+A claim that overreaches the prose is worse than a missing one. When a section is
+background, rationale, definitions, naming, design history, a pure cross-
+reference, or needs a capability no driver has, record an untestable note instead
+of forcing a weak claim.
+
+# Sections and anchors
+The OUTLINE below lists every section with its exact ANCHOR. Each claim MUST carry
+the anchor of the section whose own text states it, copied VERBATIM from the
+outline — never invent, abbreviate, translate, or reformat an anchor. Bind a claim
+to the NARROWEST section that states it (a claim stated in a subsection belongs to
+that subsection, not its parent).
+
+# Untestable notes — honesty about gaps
+For every section whose own text states NO externally-observable behavior any
+driver could assert, add ONE untestable note: its anchor and a one-sentence
+reason. A section that yields at least one claim needs no note. Do not note a
+section that is only a container for subsections.
+
+# Output schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition; your reply must
+validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
+${EXTRACTION_JSON_SCHEMA}
+Concretely:
+  { "claims": [
+      { "claim": "<one declarative sentence>",
+        "driver": "cli" | "api" | "web" | "tui",
+        "sectionAnchor": "<an anchor copied verbatim from the outline>",
+        "reason": "<the observable behavior a test would assert>" } ],
+    "untestable": [
+      { "sectionAnchor": "<an anchor copied verbatim>",
+        "reason": "<why no driver can assert anything here>" } ] }`
+
+export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
+
+export interface ExtractUserContext {
+  /** Repo-relative doc path. */
+  doc: string
+  /** The full document outline (every section) — the closed anchor set. */
+  outline: OutlineEntry[]
+  /** The text of this view (the whole doc, or one chunk when the doc is large). */
+  viewText: string
+  /** 1-based view position + count, present only when the doc was chunked. */
+  view?: { index: number; total: number }
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
+  const lines = [
+    `Document: ${ctx.doc}`,
+    '',
+    'OUTLINE — copy one of these anchors verbatim into every claim/note (this is the',
+    'complete section list; it stays the same across parts of a chunked document):',
+    renderOutline(ctx.outline),
+    '',
+    ctx.view
+      ? `DOCUMENT TEXT (part ${ctx.view.index} of ${ctx.view.total} — extract only from this part; the outline above is complete):`
+      : 'DOCUMENT TEXT:',
+    '"""',
+    ctx.viewText,
+    '"""',
+  ]
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT valid. You returned:',
+      ctx.correction.invalidOutput,
+      'Return exactly ONE JSON object with "claims" and "untestable" arrays matching',
+      'the schema above, and NOTHING else. Every "driver" is one of cli|api|web|tui;',
+      'every "sectionAnchor" is an anchor copied verbatim from the outline.',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Scenario authoring
+// ---------------------------------------------------------------------------
+
+export const GENERATE_SYSTEM_PROMPT = `\
+You author guard SCENARIOS — declarative, executable tests that bind a spec CLAIM
+to a command-line program's observable behavior. You are given one document's
+context and a BATCH of claims drawn from it (each already judged CLI-testable),
+with the program's entrypoint. For EACH claim you return the scenarios that assert
+it. No prose, only JSON.
+
+# No tools, no repository access
+You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
+invalid output — your response can ONLY be the JSON array described below. You never
+need to inspect code: when a claim names a command, its REAL BEHAVIOR transcript
+(captured in an empty sandbox) is provided below, and birth validation supplies the
+program's actual output on retry. Ground every assertion about output in those
+transcripts when present, rather than guessing; a claim about behavior in a
+NON-empty world (existing files or git state) still needs a \`setup\` block — the
+transcripts show only the empty-world baseline.
+
+# Faithfulness — the prime directive
+Assert only what the claim, read against its section's text, states. A scenario
+must never claim more than the prose does. A weaker-than-spec test — green but
+proving less than the claim — is the worst failure mode. If, on reflection, a
+claim states nothing a CLI invocation can actually observe, return an empty
+scenarios array for it rather than inventing behavior.
+
+# How a scenario runs
+The program is built once from the recipe and invoked per step. Each step's
+\`run\` is ARGV APPENDED to the recipe entrypoint: with entry ["node","cli.js"],
+\`run: ["check","--strict"]\` invokes \`node cli.js check --strict\`. Do NOT repeat
+the entrypoint in \`run\` — list only the arguments. \`stdin\` is piped in; \`repeat\`
+runs the step N times (each iteration must satisfy \`expect\`). A step asserts on
+\`exit\` (exact code), \`stdout\`/\`stderr\` (one of equals | contains | matches — a
+regex — compared AFTER normalization), and \`files\` (a sandbox-relative path →
+exists | absent | equals | contains). Seed inputs declaratively with
+\`setup.files\` (path → content) and \`setup.env\`; there is no shell escape.
+
+# World-state capabilities
+\`setup\` declares the WORLD a test needs — never code, never shell. Beyond
+\`setup.files\`/\`setup.env\`, \`setup.git\` declares a git repo the sandbox starts
+with (its commits, its staged working-index, its branch); the engine materializes
+it deterministically with pinned author/committer + dates and hooks off, so its
+mere presence means a repo exists in the sandbox cwd. Declare only WHAT the world
+looks like — the schema below carries the fields.
+The sandbox is otherwise bare: no network egress, no credentials (env is
+allowlisted — the host's API keys never reach the program), no shell. When a claim
+needs world-state NO setup block can express — a running service, a database,
+network, credentials — author NOTHING for it: return an empty \`scenarios\` array
+AND name the missing capability in \`blockedOn\` (see the output shape). An honest
+blocked claim is right; a scenario that fakes the missing world is wrong.
+
+# The scenario schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition — match it exactly.
+It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
+assigns each scenario's id and section binding itself, so do not emit any field
+that is not in the schema.
+${SCENARIO_JSON_SCHEMA}
+
+# Determinism
+No network, no timing assumptions, no retries. When asserted output contains a
+timestamp, absolute path, version string, or duration, list the matching
+\`normalize\` entry (timestamps | abs-paths | versions | durations) instead of
+hard-coding the volatile value, and prefer \`contains\`/\`matches\` on the meaningful
+substring over \`equals\` on a whole line that carries volatile text.
+
+# Output — one entry per input claim, echoing its ref
+Return a JSON ARRAY with EXACTLY ONE object per claim in the batch, in any order:
+  [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. service|db|network|credentials>"] } ]
+Author one or more scenarios per claim (one per distinct way to assert it), or an
+empty \`scenarios\` array if the claim is not CLI-assertable after all. Set
+\`blockedOn\` ONLY on an empty-scenarios claim that needs world-state the sandbox
+can't provide, naming what's missing (free-form nouns); omit it otherwise. Include
+every \`ref\` you were given exactly once. No prose — only the JSON array.`
+
+export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
+
+/** A birth-validation failure attached to a claim on a retry so the model can fix it. */
+export interface BirthRetryContext {
+  scenarioTitle: string
+  step: number
+  expected: string
+  actual: string
+}
+
+/** One claim in an authoring batch — its stable ref, text, driver, and section. */
+export interface AuthorClaim {
+  /** Stable ref the model echoes so the engine maps scenarios back to the claim. */
+  ref: string
+  /** The claim text as extraction stated it. */
+  claim: string
+  /** The section this claim binds to (its anchor + own text drive authoring). */
+  section: SectionInput
+  /** On a birth-validation retry, the prior attempt's failure evidence. */
+  retry?: BirthRetryContext
+}
+
+/** Char budget above which authoring sends outline + section texts instead of the
+ *  full document. */
+export const AUTHOR_DOC_BUDGET = 48_000
+
+/**
+ * Build the whole-document context for an authoring batch: the full text when the
+ * doc fits the budget, otherwise a titles-only outline (the model never outputs
+ * anchors — the engine binds scenarios itself, so slugs would be dead weight) plus
+ * each batch section's own text exactly ONCE (the per-claim blocks reference their
+ * section by title instead of re-carrying its text).
+ */
+export function buildAuthorDocContext(gd: GuardDoc, anchors: string[]): string {
+  if (gd.content.length <= AUTHOR_DOC_BUDGET) return gd.content
+  const outline = gd.sections
+    .map((s) => `${'  '.repeat(Math.max(0, s.level - 1))}- ${s.headingText}`)
+    .join('\n')
+  const byAnchor = new Map(gd.sections.map((s) => [s.anchor, s]))
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const a of anchors) {
+    if (seen.has(a)) continue
+    seen.add(a)
+    const text = byAnchor.get(a)?.ownText
+    if (text) parts.push(text)
+  }
+  return `OUTLINE (titles only):\n${outline}\n\nTEXT OF THE SECTIONS THE CLAIMS CITE:\n${parts.join('\n\n')}`
+}
+
+export interface AuthorUserContext {
+  /** Repo-relative doc path the claims come from. */
+  doc: string
+  /** Whole-document context: the full text when it fits, else a titles-only
+   *  outline + each batch section's text once (see {@link buildAuthorDocContext}). */
+  docContext: string
+  /** Canonical area ids the doc covers, from the corpus (may be empty). */
+  areaTags: string[]
+  /** The recipe entrypoint argv, so the model knows what `run` is appended to. */
+  recipeEntry: string[]
+  /** Recipe build command — context on what is built before scenarios run. */
+  recipeBuild: string
+  /** The claims to author this call. */
+  claims: AuthorClaim[]
+  /** Real empty-sandbox transcripts for the commands the claims name (may be empty
+   *  — ungrounded when the build failed or no command was named). */
+  probes?: ProbeTranscript[]
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
+  const lines: string[] = [
+    `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
+    `Build command: ${ctx.recipeBuild}`,
+  ]
+  if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
+  lines.push(
+    '',
+    `Document: ${ctx.doc}`,
+    'Document context (for the global picture — each claim cites its section by',
+    'title; that section\'s text is in here exactly once):',
+    '"""',
+    ctx.docContext,
+    '"""',
+  )
+  if (ctx.probes && ctx.probes.length > 0) {
+    lines.push('', 'REAL BEHAVIOR (captured in an empty sandbox — trust these transcripts over guesses):')
+    for (const p of ctx.probes) {
+      lines.push(`$ ${p.command}`)
+      lines.push(p.timedOut ? 'exit (timed out)' : `exit ${p.exit ?? '(killed, no exit code)'}`)
+      if (p.stdout) lines.push('stdout:', p.stdout + (p.stdoutTruncated ? '\n…(truncated)' : ''))
+      if (p.stderr) lines.push('stderr:', p.stderr + (p.stderrTruncated ? '\n…(truncated)' : ''))
+      if (!p.stdout && !p.stderr) lines.push('(no output)')
+    }
+  }
+  lines.push(
+    '',
+    'CLAIMS TO AUTHOR — return exactly one output object per ref below:',
+  )
+  for (const c of ctx.claims) {
+    lines.push(
+      '',
+      `--- ref: ${c.ref}`,
+      `claim: ${c.claim}`,
+      `section: ${c.section.headingText}`,
+    )
+    if (c.retry) {
+      lines.push(
+        'RETRY — a scenario you authored for this claim FAILED birth validation (it did',
+        'not pass against the current, correct code). Either you asserted the wrong',
+        'behavior, or the claim is not actually CLI-observable. Fix the assertion to',
+        'match the code, or return an empty scenarios array for this ref if it is not',
+        'CLI-assertable:',
+        `  scenario: ${c.retry.scenarioTitle}`,
+        `  failing step: ${c.retry.step}`,
+        `  expected: ${c.retry.expected}`,
+        `  actual:   ${c.retry.actual}`,
+      )
+    }
+  }
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT a valid output array. You returned:',
+      ctx.correction.invalidOutput,
+      'Return a JSON ARRAY with exactly one { "ref", "scenarios" } object per claim ref',
+      'above; each scenario matches the schema (title, driver "cli", non-empty steps,',
+      'optional setup/normalize). Use an empty scenarios array for a claim that is not',
+      'CLI-assertable — and add "blockedOn": ["<capability>"] when it is empty because',
+      'the claim needs world-state the sandbox cannot provide. No prose — only the JSON array.',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Recipe discovery
+// ---------------------------------------------------------------------------
+
+export const RECIPE_SYSTEM_PROMPT = `\
+You propose how to turn a repository's working tree into a runnable command-line
+entrypoint that guard scenarios can invoke. You return JSON only. You never run
+commands — the engine verifies your proposal by building and probing it.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+Given the repository's manifest files, return exactly one JSON object matching
+this schema (CANONICAL — generated from the engine's Zod definition; your reply
+must validate against it exactly):
+${RECIPE_JSON_SCHEMA}
+Concretely:
+  { "build": "<shell command run once in the repo root to produce the entrypoint>",
+    "entry": ["<argv>", "..."] }
+
+- build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
+  no-op "true" when nothing needs building.
+- entry is the argv that invokes the built program; scenario arguments are
+  appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
+  the package's declared bin/main and its build script. Paths are repo-relative.
+
+Output exactly one JSON object with \`build\` and \`entry\`. No prose.`
+
+export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
+
+export interface RecipeDiscoveryInput {
+  /** package.json contents (or a note that it's absent). */
+  packageJson: string
+  /** Names of the lockfiles / build-config files present in the repo root. */
+  presentInputs: string[]
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
+  const lines = [
+    `Files present in the repo root: ${input.presentInputs.join(', ') || '(none of the usual manifests)'}`,
+    '',
+    'package.json:',
+    '"""',
+    input.packageJson,
+    '"""',
+  ]
+  if (input.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
+      input.correction.invalidOutput,
+      'Return exactly one JSON object with a non-empty "build" string and a non-empty',
+      '"entry" argv array (and optional "env" object), and nothing else:',
+      '  { "build": "<shell command>", "entry": ["<argv>", "..."] }',
+    )
+  }
+  return lines.join('\n')
+}

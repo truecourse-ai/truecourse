@@ -6,6 +6,7 @@ import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
 import { readLatest } from '@truecourse/core/lib/analysis-store';
+import { resolveLatestEvent } from '@truecourse/core/commands/repo-events';
 import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
@@ -51,19 +52,24 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 // GET /api/repos - List all registered projects (home page).
-// Reads `lastAnalyzed` straight from the registry so unanalyzed projects
-// don't surface a fake date and the list endpoint never opens any DB.
+// `lastAnalyzed` comes straight from the registry so unanalyzed projects don't
+// surface a fake date. `latestEvent` is the repo's most recent lifecycle event
+// (analyze / spec scan / contracts generate / verify / guard generate|run)
+// composed from the per-repo stores' own timestamps — tolerant of missing,
+// corrupt, or unreadable repos (`resolveLatestEvent` never throws).
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const entries = await readRegistry();
-    res.json(
-      entries.map((e) => ({
+    const repos = await Promise.all(
+      entries.map(async (e) => ({
         id: e.slug,
         name: e.name,
         path: e.path,
         lastAnalyzed: e.lastAnalyzed ?? null,
+        latestEvent: await resolveLatestEvent(e.path, e.lastAnalyzed ?? null),
       })),
     );
+    res.json(repos);
   } catch (error) {
     next(error);
   }

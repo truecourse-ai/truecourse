@@ -50,6 +50,7 @@ import {
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
 import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
+import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -417,6 +418,57 @@ driftsCmd
       limit: options.all ? Infinity : (options.limit ?? 20),
       offset: options.offset ?? 0,
       severity: parseDriftSeverityFlag(options.severity),
+    });
+  });
+
+// Guard — run committed spec-section scenario tests (build once via recipe, run
+// scenarios in parallel sandboxes). Deterministic, LLM-free; exits non-zero on
+// any failure/error so it works as a CI gate.
+const guardCmd = program
+  .command("guard")
+  .description("Run spec-section-bound scenario tests");
+
+guardCmd
+  .command("run")
+  .description("Build via the recipe and run the committed scenarios")
+  .option("--scenario <id>", "Run only the scenario with this id")
+  .action(async (options) => {
+    await runGuardRun({ scenario: options.scenario });
+  });
+
+guardCmd
+  .command("generate")
+  .description("Author spec-section-bound scenarios (classify → generate → birth-validate)")
+  .option("-y, --yes", "Skip the pre-flight cost-estimate confirmation")
+  .option("--llm-transport <mode>", "LLM transport: cli (default) or agent")
+  .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  .action(async (options) => {
+    await runGuardGenerate({
+      yes: options.yes,
+      llmTransport: options.llmTransport,
+      io: options.io,
+    });
+  });
+
+guardCmd
+  .command("status")
+  .description("Compact guard summary — section coverage, last run, last generate (LLM-free)")
+  .action(async () => {
+    await runGuardStatus();
+  });
+
+guardCmd
+  .command("drifts")
+  .description("List the current non-pass scenarios from the latest guard run (paginated)")
+  .option("--limit <n>", "Number of drifts to show (default: 20)", parseInt)
+  .option("--offset <n>", "Skip first N drifts", parseInt)
+  .option("--all", "Show all drifts")
+  .option("--json", "Emit machine-readable JSON")
+  .action(async (options) => {
+    await runGuardDrifts({
+      limit: options.all ? Infinity : (options.limit ?? 20),
+      offset: options.offset ?? 0,
+      json: !!options.json,
     });
   });
 

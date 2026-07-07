@@ -92,10 +92,17 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     return;
   }
   const s = curate.stats;
+  if (s.scopeGlobs.length > 0) {
+    p.log.step(`scope       ${s.scopeGlobs.join(", ")} (config)`);
+  }
   p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`relations   ${s.resolvedRelations}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
+  if (s.outOfScopeManualIncludes.length > 0) {
+    p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
+    for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);
+  }
   if (s.openOverlaps.length > 0) {
     p.log.message("");
     p.log.message("Open overlaps (areas where two docs may disagree — resolve with a relation):");

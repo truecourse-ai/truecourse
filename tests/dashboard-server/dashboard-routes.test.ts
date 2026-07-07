@@ -354,6 +354,38 @@ describe('dashboard routes (seeded store)', () => {
       expect(match!.lastAnalyzed).toBeTruthy();
     });
 
+    it('GET /api/repos carries latestEvent from the analyze store', async () => {
+      const res = await request(app).get('/api/repos').expect(200);
+      const match = (res.body as Array<{ id: string; latestEvent: { kind: string; at: string } | null }>)
+        .find((r) => r.id === fixture.project.slug);
+      // Only the analyze LATEST is seeded, so the newest event is the analysis.
+      expect(match!.latestEvent).toEqual({ kind: 'analyzed', at: '2026-04-21T10:00:00.000Z' });
+    });
+
+    it('GET /api/repos latestEvent reflects the newest store (a guard run wins)', async () => {
+      const guardLatest = {
+        run: {
+          runId: 'r1',
+          ranAt: '2026-05-01T00:00:00.000Z', // newer than the analyze createdAt
+          branch: 'main',
+          commit: 'abc',
+          recipeFingerprint: 'sha256:r',
+          scenarioFormat: 1,
+        },
+        summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
+        scenarios: [],
+        sections: [],
+      };
+      const guardFile = path.join(fixture.repoPath, '.truecourse', 'guard', 'LATEST.json');
+      fs.mkdirSync(path.dirname(guardFile), { recursive: true });
+      fs.writeFileSync(guardFile, JSON.stringify(guardLatest));
+
+      const res = await request(app).get('/api/repos').expect(200);
+      const match = (res.body as Array<{ id: string; latestEvent: { kind: string; at: string } | null }>)
+        .find((r) => r.id === fixture.project.slug);
+      expect(match!.latestEvent).toEqual({ kind: 'guarded', at: '2026-05-01T00:00:00.000Z' });
+    });
+
     it('GET /api/repos/:unknown returns 404 via projectResolver', async () => {
       await request(app).get('/api/repos/no-such-slug/config').expect(404);
     });

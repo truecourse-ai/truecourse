@@ -1,0 +1,199 @@
+/**
+ * The deterministic, LLM-free front of the generator: derive the doc universe,
+ * its sections, and which sections are WORK (need classifying / generating) vs
+ * unchanged (skipped entirely). Reuses guard-runner's section index and recipe
+ * fingerprint so the anchors/fingerprints it plans against are byte-identical to
+ * what a `guard run` binds against.
+ *
+ * Doc universe = the corpus-kept docs (`.truecourse/specs/corpus.json`, read
+ * tolerantly) — the corpus is the single authority on which docs are spec.
+ * A repo without a corpus has nothing to generate against: run `spec scan`.
+ * (The RUNNER additionally indexes scenario-bound docs, which it must for
+ * stale/orphan detection; generation deliberately does not.)
+ */
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { z } from 'zod'
+import {
+  indexRepoDocs,
+  extractSectionTexts,
+  computeRecipeFingerprint,
+  recipePath,
+  readManifest,
+} from '@truecourse/guard-runner'
+import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
+import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT } from './prompts.js'
+
+/** One section fed to the LLM stages — its identity, its text, and area context. */
+export interface SectionInput {
+  /** Repo-relative doc path. */
+  doc: string
+  /** Slugified heading path (the binding anchor). */
+  anchor: string
+  /** `sha256:…` over the full (descendant-inclusive) section text. */
+  fingerprint: string
+  /** Raw heading text, for display. */
+  headingText: string
+  /** Heading level (0 for a whole-doc, non-markdown section). */
+  level: number
+  /** Heading + preamble before the first subsection — the binding-rule unit. */
+  ownText: string
+  /** Heading + everything up to the next same-or-higher heading. */
+  fullText: string
+  /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
+  areaTags: string[]
+}
+
+export interface GuardWorkPlan {
+  /** False when no corpus has been scanned yet. */
+  hasUniverse: boolean
+  /** Every section across the doc universe, in doc + document order. */
+  sections: SectionInput[]
+  /** Sections whose generation inputs changed (or are new) since the manifest. */
+  work: SectionInput[]
+  /** Manifest entries whose section no longer exists — reported, never deleted. */
+  orphaned: GuardManifestSection[]
+  /** `sha256:…` over the recipe's discovery-input files. */
+  recipeFingerprint: string
+  /** True when `recipe.json` is absent (discovery will run). */
+  recipeMissing: boolean
+}
+
+// A tolerant local view of the corpus — just the kept docs' refs + area tags. We
+// never import the consolidator; a shape we don't understand degrades to no tags.
+const CorpusShape = z
+  .object({
+    docs: z
+      .array(z.object({ ref: z.string(), areaTags: z.array(z.string()).optional() }).passthrough())
+      .optional(),
+  })
+  .passthrough()
+
+/** Doc ref → its canonical area ids, read tolerantly from the corpus (or empty). */
+export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
+  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
+  const map = new Map<string, string[]>()
+  if (!fs.existsSync(file)) return map
+  try {
+    const parsed = CorpusShape.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    if (!parsed.success) return map
+    for (const d of parsed.data.docs ?? []) map.set(d.ref, d.areaTags ?? [])
+  } catch {
+    /* unreadable corpus → no area context, not a failure */
+  }
+  return map
+}
+
+/**
+ * The generation-inputs hash stamped per section: it moves when the section text
+ * changes, the recipe inputs change, the scenario format version bumps, or EITHER
+ * LLM stage's prompt changes (extraction or authoring). A section is WORK exactly
+ * when this differs from (or is absent in) the committed manifest — so an
+ * unchanged section is skipped, and a prompt edit re-runs the whole pipeline.
+ */
+export function generationInputsHash(fingerprint: string, recipeFingerprint: string): string {
+  return (
+    'sha256:' +
+    createHash('sha256')
+      .update(
+        [
+          fingerprint,
+          recipeFingerprint,
+          String(GUARD_FORMAT_VERSION),
+          EXTRACT_PROMPT_FINGERPRINT,
+          GENERATE_PROMPT_FINGERPRINT,
+        ].join('\0'),
+      )
+      .digest('hex')
+  )
+}
+
+/** Whether a corpus exists — the corpus is generation's only doc authority. */
+export function hasGuardUniverse(repoRoot: string): boolean {
+  return fs.existsSync(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
+}
+
+/**
+ * Plan the deterministic work for a generate run. `recipeFingerprint` defaults to
+ * the current recipe-input fingerprint; the driver passes the fingerprint of a
+ * just-discovered recipe when it differs.
+ */
+export function planGuardWork(repoRoot: string, recipeFingerprint?: string): GuardWorkPlan {
+  const recipeFp = recipeFingerprint ?? computeRecipeFingerprint(repoRoot)
+  const recipeMissing = !fs.existsSync(recipePath(repoRoot))
+
+  const hasUniverse = hasGuardUniverse(repoRoot)
+  const { indexes } = indexRepoDocs(repoRoot, [])
+  const areaTags = readCorpusAreaTags(repoRoot)
+
+  const sections: SectionInput[] = []
+  for (const [doc, index] of indexes) {
+    const texts = extractSectionTexts(doc, fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'))
+    for (const s of index.sections) {
+      const t = texts.get(s.anchor)
+      sections.push({
+        doc,
+        anchor: s.anchor,
+        fingerprint: s.fingerprint,
+        headingText: s.headingText,
+        level: s.level,
+        ownText: t?.ownText ?? '',
+        fullText: t?.fullText ?? '',
+        areaTags: areaTags.get(doc) ?? [],
+      })
+    }
+  }
+  sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
+
+  const manifest = readManifest(repoRoot)
+  const byKey = new Map((manifest?.sections ?? []).map((e) => [`${e.doc}\0${e.anchor}`, e]))
+  const seen = new Set<string>()
+
+  const work: SectionInput[] = []
+  for (const s of sections) {
+    const key = `${s.doc}\0${s.anchor}`
+    seen.add(key)
+    const prior = byKey.get(key)
+    const inputsHash = generationInputsHash(s.fingerprint, recipeFp)
+    if (!prior || prior.generationInputsHash !== inputsHash) work.push(s)
+  }
+
+  const orphaned = (manifest?.sections ?? []).filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
+
+  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing }
+}
+
+/** One work document fed to extraction: its full text plus ALL its sections. */
+export interface GuardDoc {
+  /** Repo-relative doc path. */
+  doc: string
+  /** The document's full text — the extraction input (chunked when over budget). */
+  content: string
+  /** Every section of the doc, in document order — the outline + snapping set. */
+  sections: SectionInput[]
+}
+
+/**
+ * The documents that contain at least one WORK (changed/new) section — the unit
+ * extraction reads. Each carries its full text and ALL its sections (the outline
+ * the model picks anchors from), even the unchanged ones; the caller filters
+ * extracted claims down to the work sections. Sections come straight from the
+ * plan, so their anchors/fingerprints match what a run binds against.
+ */
+export function collectWorkDocs(repoRoot: string, plan: GuardWorkPlan): GuardDoc[] {
+  const workDocs = new Set(plan.work.map((s) => s.doc))
+  const byDoc = new Map<string, SectionInput[]>()
+  for (const s of plan.sections) {
+    if (!workDocs.has(s.doc)) continue
+    const list = byDoc.get(s.doc)
+    if (list) list.push(s)
+    else byDoc.set(s.doc, [s])
+  }
+  return [...byDoc].map(([doc, sections]) => ({
+    doc,
+    content: fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
+    sections,
+  }))
+}
