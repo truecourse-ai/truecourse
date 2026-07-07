@@ -43,6 +43,12 @@ internal sealed class MissingFormatProviderOverload : ISemanticRule
             // the formattable BCL surface). Restrict Format to System.String.Format.
             if (m.Name == "Format" && m.ContainingType?.SpecialType != SpecialType.System_String) continue;
 
+            // Some BCL types parse identically under every culture — their .NET 7
+            // IParsable/ISpanParsable IFormatProvider overloads exist only to satisfy
+            // the interface and ignore the provider entirely. Passing one changes
+            // nothing, so flagging Guid/bool/Version parsing is a false positive.
+            if (m.Name is "Parse" or "TryParse" && IsCultureInvariantParseType(m.ContainingType)) continue;
+
             var hasOverload = m.ContainingType?.GetMembers(m.Name).OfType<IMethodSymbol>()
                 .Any(o => o.Parameters.Any(IsFormatProvider)) == true;
             if (!hasOverload) continue;
@@ -53,6 +59,11 @@ internal sealed class MissingFormatProviderOverload : ISemanticRule
                 $"{m.ContainingType?.Name}.{m.Name} omits an IFormatProvider — pass CultureInfo.InvariantCulture (or the appropriate culture) for portable, predictable results.");
         }
     }
+
+    // Types whose Parse/TryParse ignore any IFormatProvider (culture-invariant by
+    // spec), even though a provider-taking overload exists via IParsable&lt;T&gt;.
+    private static bool IsCultureInvariantParseType(INamedTypeSymbol? t) =>
+        t is { ContainingNamespace.Name: "System" } && t.Name is "Guid" or "Boolean" or "Version";
 
     private static bool IsFormatProvider(IParameterSymbol p) =>
         p.Type is { Name: "IFormatProvider", ContainingNamespace.Name: "System" } ||
