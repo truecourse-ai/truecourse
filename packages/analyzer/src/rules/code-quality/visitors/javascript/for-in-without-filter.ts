@@ -31,6 +31,14 @@ export const forInWithoutFilterVisitor: CodeRuleVisitor = {
           if (prop?.text === 'hasOwnProperty' || prop?.text === 'hasOwn') return true
         }
       }
+      // `hasOwnProperty` / `hasOwn` accessed as a member anywhere in the body is
+      // a filter too — this catches `Object.prototype.hasOwnProperty.call(obj,
+      // key)` / `.apply(...)`, where the invoked method is `call`/`apply` and
+      // `hasOwnProperty` is only the receiver, not the called property.
+      if (n.type === 'member_expression') {
+        const prop = n.childForFieldName('property')
+        if (prop?.text === 'hasOwnProperty' || prop?.text === 'hasOwn') return true
+      }
       if (n.type === 'string' && (n.text.includes('hasOwnProperty') || n.text.includes('hasOwn'))) return true
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

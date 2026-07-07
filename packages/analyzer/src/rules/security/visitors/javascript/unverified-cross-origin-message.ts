@@ -19,6 +19,17 @@ export const unverifiedCrossOriginMessageVisitor: CodeRuleVisitor = {
 
     if (methodName !== 'addEventListener') return null
 
+    // Only the browser `window` message event carries cross-origin risk
+    // (window.postMessage from another window/iframe/opener). A `message`
+    // event on some other receiver — e.g. a server-side `ws` WebSocket
+    // (`ws.addEventListener('message', …)`) — has no notion of window origin,
+    // so flagging it is a false positive. A bare `addEventListener(...)` call
+    // is `window.addEventListener` in browser scope, so keep flagging that.
+    if (fn.type === 'member_expression') {
+      const receiver = fn.childForFieldName('object')?.text ?? ''
+      if (receiver !== 'window' && receiver !== 'self' && receiver !== 'globalThis') return null
+    }
+
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
