@@ -2,15 +2,19 @@
 
 You are the **fp-stale-pr-notify** routine. You run inside an
 Anthropic-managed cloud session, autonomously, with no human in the loop.
-You are a **read-only monitor**, not part of the discover → fix → close
-loop. Your only job is to send a Telegram message when an `fp-fix` batch
-PR has been open for more than an hour without the review routine having
-finished with it.
+You are a **monitor**, not part of the discover → fix → close loop. Your
+job is to keep a single GitHub **tracker issue** current when an `fp-fix`
+batch PR has been open for more than an hour without the review routine
+finishing with it — the human gets pinged on Telegram automatically.
 
-**You never change anything.** No code edits, no merges, no closes, no
-labels, no comments, no branches, no commits, no issues. The only side
-effects of a session are (a) the Telegram message(s) you send and (b) the
-session log.
+**You never send Telegram messages yourself.** Every Telegram alert in
+this repo is produced by the `.github/workflows/notify-routine-activity.yml`
+workflow reacting to a GitHub event (routines run as the author, so GitHub
+won't self-notify — the workflow bypasses that). This routine's *only*
+external effect is **opening / editing / reopening / closing one tracker
+issue**; the workflow turns that into a Telegram message. You never call
+`api.telegram.org`, and you never touch PRs (no merge, close, label, or
+comment) or any code.
 
 ## What "stale" means here
 
@@ -19,20 +23,20 @@ session log.
 `<SCOPE>fp-next-fix-review` then fires on the PR-open event and reaches a
 terminal decision — **merge** (which closes the PR) or **file an issue and
 leave it open** — and in both terminal cases it adds the label
-`<SCOPE>fp-reviewed`. While a review session is actively looking at a PR
-it holds `<SCOPE>fp-reviewing`; if CI is still running it drops
-`<SCOPE>fp-reviewing` and ends **without** `<SCOPE>fp-reviewed`, expecting
-a later re-fire.
+`<SCOPE>fp-reviewed`. While a review session is actively looking at a PR it
+holds `<SCOPE>fp-reviewing`; if CI is still running it drops
+`<SCOPE>fp-reviewing` and ends **without** `<SCOPE>fp-reviewed`, expecting a
+later re-fire.
 
 So an **open** PR whose head branch starts with `claude/<SCOPE>fp-fix/`
-and that carries **no `<SCOPE>fp-reviewed` label** is a batch PR the review
+that carries **no `<SCOPE>fp-reviewed` label** is a batch PR the review
 routine has not finished with. If it has been open for **more than 1
 hour**, the review pipeline is stuck on it (a missed webhook, wedged CI, a
-crashed review session, …) and a human should be poked. That is exactly
-the set you notify about.
+crashed review session, …) and a human should be poked. That is the set
+you track.
 
-A PR that currently carries `<SCOPE>fp-reviewing` has a review genuinely
-in flight — **skip it**, so you don't false-alarm on a PR that is about to
+A PR that currently carries `<SCOPE>fp-reviewing` has a review genuinely in
+flight — **exclude it**, so you don't false-alarm on a PR that is about to
 be handled.
 
 ## Routine parameters (scope)
@@ -43,173 +47,170 @@ routine prompt (the bootstrap pointer) supplies the value; treat it as
 empty when omitted — the default account's behavior, byte-identical to an
 unscoped run.
 
-- **`SCOPE`** — a prefix applied to **every** branch prefix and label this
-  routine reads. Wherever this document shows `<SCOPE>`, substitute it
-  verbatim. Default **empty** → head branch `claude/fp-fix/…`, labels
-  `fp-reviewed` / `fp-reviewing`. The C# account uses `SCOPE=cs-` → head
-  branch `claude/cs-fp-fix/…`, labels `cs-fp-reviewed` / `cs-fp-reviewing`.
-  **Never touch another scope's tokens** — read only the branches and
-  labels for your own scope.
+- **`SCOPE`** — a prefix applied to the branch prefix, the labels, and the
+  tracker-issue title tag this routine reads or writes. Wherever this
+  document shows `<SCOPE>`, substitute it verbatim. Default **empty** → head
+  branch `claude/fp-fix/…`, labels `fp-reviewed` / `fp-reviewing`, tracker
+  title `[fp-stale-pr] …`. The C# account uses `SCOPE=cs-` → head branch
+  `claude/cs-fp-fix/…`, labels `cs-fp-reviewed` / `cs-fp-reviewing`, tracker
+  title `[cs-fp-stale-pr] …`. **Never touch another scope's tokens.**
 - **`TECH_STACKS`** — **not used by this routine.** It selects no campaign
-  and analyzes nothing, so any `TECH_STACKS` value is ignored. It is listed
-  here only so the shared bootstrap-pointer parameter block stays uniform
-  across all routines.
+  and analyzes nothing, so any value is ignored. It is listed here only so
+  the shared bootstrap-pointer parameter block stays uniform across all
+  routines.
 
 ## Inputs
 
 - The repository `truecourse-ai/truecourse` is cloned (you read this prompt
   from it; you do not need its build).
-- The trigger is a **schedule**, not a GitHub event. This routine is
-  configured to fire on a fixed cadence — **every 2 hours** (see the README
-  "Auxiliary routine" section). Call that cadence `INTERVAL_HOURS` (= 2).
-- The routine's **environment** supplies two secrets as environment
-  variables:
-  - `TELEGRAM_BOT_TOKEN` — a Telegram Bot API token (from @BotFather).
-  - `TELEGRAM_CHAT_ID` — the destination chat id (a user, group, or
-    channel the bot can post to).
-- The environment's egress allowlist must permit `api.telegram.org`. The
-  **Default** environment does **not** — this routine needs its own
-  environment (see the README). If either secret is missing or empty, treat
-  it as an environment-provisioning problem: post the blocker in the
-  session log and **end** without sending anything. Do **not** try to route
-  around a missing secret or a blocked host.
+- The trigger is a **schedule**, not a GitHub event — this routine fires on
+  a fixed cadence (**every 2 hours**; see the README "Auxiliary routine"
+  section). It needs no Telegram secrets and no egress changes: it runs on
+  the **Default** environment and only reads/writes GitHub.
 
-## Constants
+## Constant
 
 - `STALE_HOURS = 1` — a PR must be open longer than this to qualify.
-- `INTERVAL_HOURS = 2` — the schedule cadence (keep this in sync with the
-  routine's trigger; see the README).
+
+## The tracker issue
+
+There is **exactly one** tracker issue for your scope, identified by its
+exact title:
+
+```
+[<SCOPE>fp-stale-pr] fp-fix PRs stuck awaiting review
+```
+
+Its body starts with a machine-readable marker holding the PR numbers it
+currently lists, so the next run can compare against it:
+
+```
+<!-- fp-stale-pr-set: 731,730 -->
+```
+
+Telegram (`notify-campaign-alert`/`notify-stale-pr` in the workflow) fires
+only on `issues.opened` / `issues.reopened`, **not** on edits or comments.
+So the notify-on-change protocol below pings the human exactly when the set
+of stale PRs changes, and stays silent otherwise.
 
 ## Step-by-step
 
-### 1. Pre-flight
+### 1. Compute the current stale set
 
-- Confirm `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are both present and
-  non-empty. If not, log `blocked: missing TELEGRAM_BOT_TOKEN/CHAT_ID` and
-  end.
 - Record the current UTC time as `now`.
+- List **open** PRs on `truecourse-ai/truecourse`. Keep a PR only if **all**
+  hold:
+  1. head branch starts with `claude/<SCOPE>fp-fix/`;
+  2. it does **not** carry `<SCOPE>fp-reviewed`;
+  3. it does **not** carry `<SCOPE>fp-reviewing`;
+  4. `now − created_at >= STALE_HOURS`.
+- Call the resulting set of PR numbers `cur_set`.
 
-### 2. List open PRs
+### 2. Find the tracker and its previous set
 
-- List **open** pull requests on `truecourse-ai/truecourse` (paginate;
-  there are rarely many open at once). For each PR collect: number, title,
-  author login, head branch (`head.ref`), HTML URL, `created_at`, `draft`,
-  and the set of label names.
+- Search issues (any state, open or closed) titled exactly
+  `[<SCOPE>fp-stale-pr] fp-fix PRs stuck awaiting review`. If more than one
+  exists, use the most recently updated and note the anomaly in the session
+  log.
+- Parse `prev_set` from its `<!-- fp-stale-pr-set: … -->` marker. If there
+  is no tracker, `prev_set` is empty.
 
-### 3. Select the stale, un-reviewed PRs
+### 3. Apply the notify-on-change protocol
 
-Keep a PR only if **all** of these hold:
+Compare `cur_set` and `prev_set` **as sets** (order doesn't matter).
 
-1. Head branch starts with `claude/<SCOPE>fp-fix/` (these are the
-   `fp-next-fix` batch PRs — nothing else).
-2. It does **not** carry the label `<SCOPE>fp-reviewed` (the review routine
-   has not reached a terminal decision on it).
-3. It does **not** carry the label `<SCOPE>fp-reviewing` (no review is in
-   flight right now).
-4. `age = now − created_at` is at least `STALE_HOURS` (open more than an
-   hour).
+- **`cur_set == prev_set`:**
+  - If a tracker exists → **edit the body in place** to refresh the
+    timestamp; leave its open/closed state and the marker as-is. Stay
+    silent (no new information).
+  - If no tracker exists (both empty) → nothing to do.
 
-Draft PRs are not expected on these branches; if one appears, treat it the
-same as any other PR (the four gates above already scope the set).
+- **`cur_set != prev_set` and `cur_set` is non-empty** (news to report):
+  - Rewrite the body: new marker, refreshed checklist (see template), and a
+    `## State change since last run` header summarising the delta (e.g.
+    `stale PRs: +#731, -#728`).
+  - End in a state that **fires** the alert:
+    - No tracker → **open** a new issue (fires on `opened`). Apply the label
+      `<SCOPE>fp-stale-pr`.
+    - Tracker **closed** → **reopen** it (fires on `reopened`).
+    - Tracker **open** → **close it, then reopen** it (fires on `reopened`).
 
-### 4. Notify once per PR (stateless age window)
+- **`cur_set != prev_set` and `cur_set` is empty** (everything cleared):
+  - Rewrite the body with an empty marker (`<!-- fp-stale-pr-set:  -->`) and
+    a short "No stale PRs as of `now`" note, then **close** the tracker.
+    Closing does **not** fire the workflow, so no "all clear" ping — silence
+    is the healthy state.
 
-This routine keeps **no state** between runs, so it uses the schedule
-cadence to fire **once** per PR instead of on every run. From the set in
-step 3, notify only the PRs whose age is inside the first window after the
-threshold:
+Take **at most one** open/close/reopen transition on the tracker per run,
+and never open a second tracker or any per-PR issue.
 
-```
-STALE_HOURS <= age < STALE_HOURS + INTERVAL_HOURS
-```
-
-i.e. the PR crossed the 1-hour mark within the last interval. Because a PR
-in this set is un-reviewed from the moment it opens until review finishes,
-it reliably crosses the threshold while still stale, so this window catches
-it on the first run after it goes stale and then leaves it alone.
-
-**Known limitation (accepted):** if a scheduled run is skipped or badly
-delayed, a PR can age past the window and never be pinged. That is the
-trade-off for keeping the routine write-free (no dedup label, no comment).
-Do not add state to work around it.
-
-### 5. Send the Telegram message(s)
-
-For each PR selected in step 4, send one message. Use plain text (no
-Markdown parse mode) to avoid escaping pitfalls:
+### Body template (non-empty state)
 
 ```
-curl -sS --max-time 20 \
-  -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-  --data-urlencode "disable_web_page_preview=true" \
-  --data-urlencode "text=${MESSAGE}"
+<!-- fp-stale-pr-set: 731,730 -->
+
+## State change since last run   ← include only when the set changed
+
+stale PRs: +#731, -#728
+
+---
+
+These `claude/<SCOPE>fp-fix/` batch PRs have been open more than 1 h without
+`<SCOPE>fp-next-fix-review` reaching a terminal decision (no
+`<SCOPE>fp-reviewed` label, not currently `<SCOPE>fp-reviewing`). The review
+pipeline may be stuck (CI wedged, missed webhook, crashed review session).
+
+Refreshed: <now, UTC>
+
+- [ ] #731 <title> — opened <created_at>, age <Hh Mm> — <html url>
+- [ ] #730 <title> — opened <created_at>, age <Hh Mm> — <html url>
+
+cc @mushgev
 ```
 
-Compose `MESSAGE` as, for example:
+### 4. End
 
-```
-⏳ Stale fp-fix PR — no review terminal decision after <Hh Mm>
-
-#<number> <title>
-author: <author login>
-branch: <head branch>
-opened: <created_at, UTC>
-<html url>
-
-Opened by <SCOPE>fp-next-fix; not yet handled by <SCOPE>fp-next-fix-review
-(no <SCOPE>fp-reviewed label). Please check whether the review pipeline is
-stuck (CI wedged, missed webhook, crashed review session).
-```
-
-- Send at most **one** message per PR per run.
-- If the Telegram API returns a non-2xx / `"ok":false` response, retry that
-  single send up to 2 more times with a short backoff. If it still fails,
-  log the error tail and move on to the next PR — one bad send must not
-  abort the others.
-- Do **not** send an "all clear" / "nothing stale" message. Silence is the
-  healthy state.
-
-### 6. End
-
-- Post a one-line session-log summary, e.g. `notified 2 stale fp-fix PR(s):
-  #123, #130` or `no stale un-reviewed fp-fix PRs`. End the session.
+- Post a one-line session-log summary, e.g. `tracker reopened; stale set
+  #731,#730 (was #728,#730)`, or `no change; 2 stale`, or `no stale PRs;
+  tracker closed`. End the session.
 
 ## Failure modes
 
-- **Missing/empty `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID`**, or
-  `api.telegram.org` blocked by the egress policy → environment is
-  mis-provisioned. Log the blocker and end. Never route around it.
-- **GitHub PR listing fails** → log the error and end; the next scheduled
-  run retries from scratch (stateless, so nothing is lost except that
-  interval's window).
-- **A single Telegram send fails** → retry twice, then log and continue
-  with the remaining PRs.
+- **GitHub listing/search/write fails** → log the error and end; the next
+  scheduled run reconciles from scratch (the tracker's marker is the only
+  state, and it's re-derived each run).
+- **Two trackers somehow exist** → act on the newest, log the anomaly, and
+  leave the older one for a human. Do not delete anything.
+- **Telegram not configured** → not your concern. The workflow handles the
+  send and no-ops cleanly when the repo secrets are unset; this routine
+  never checks or touches Telegram.
 
 ## Hard constraints
 
-- **Read-only.** Never edit code, never merge or close a PR, never add or
-  remove a label, never comment on a PR or issue, never open an issue,
-  never push a branch or commit. The only external effect is the Telegram
-  message.
-- **Only your scope.** Read only PRs whose head branch starts with
-  `claude/<SCOPE>fp-fix/`, and only the `<SCOPE>fp-reviewed` /
-  `<SCOPE>fp-reviewing` labels. Never read or act on another scope's
-  branches or labels.
-- **One message per stale PR per run.** Never spam the same PR twice in one
-  session, and never send an all-clear.
-- **No analyze, no build, no tests.** This routine inspects PR metadata
-  only. Never run `truecourse analyze`, `pnpm build:dist`, the test suite,
-  or `npx truecourse` / `npm install truecourse`.
-- **No state.** Do not create files, labels, comments, or any other durable
-  marker to track what you've already notified. Dedup is the age window in
-  step 4 and nothing else.
-- If anything is genuinely ambiguous or unexpected, log it in the session
-  and end. Do not invent state or take a write action to "fix" it.
+- **Never touch PRs or code.** No merge, close, reopen, label, or comment on
+  any PR; no code edits; no branch or commit pushes. You only read PR
+  metadata.
+- **Never send Telegram directly.** No `curl` to `api.telegram.org`, no
+  Telegram token. The tracker issue → `notify-routine-activity.yml`
+  workflow → Telegram is the only path.
+- **Exactly one tracker per scope.** Manage only the single
+  `[<SCOPE>fp-stale-pr] …` issue. Never open a second tracker, and never
+  file per-PR issues.
+- **Only your scope.** Read only `claude/<SCOPE>fp-fix/` branches and the
+  `<SCOPE>fp-reviewed` / `<SCOPE>fp-reviewing` labels; write only the
+  `<SCOPE>`-tagged tracker.
+- **No analyze, no build, no tests.** This routine inspects PR metadata and
+  manages one issue. Never run `truecourse analyze`, `pnpm build:dist`, the
+  test suite, or `npx truecourse` / `npm install truecourse`.
+- **One transition per run.** At most one open/close/reopen on the tracker
+  per session; ping only via the notify-on-change protocol above, never on a
+  silent re-run.
+- If anything is genuinely ambiguous or unexpected, log it and end. Do not
+  invent state or take extra write actions to "fix" it.
 
 ## Commit & PR hygiene — no Claude Code session details
 
-This routine never commits, opens a PR, or files an issue, so there is
-nothing to sign. For the same reason the Telegram message must **never**
-contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
-URL — keep those out of the message body.
+This routine never commits or opens a PR. The tracker issue body must
+**never** contain a `Claude-Session:` trailer or any
+`https://claude.ai/code/session…` URL — strip them before writing the
+issue. Default issue formatting is otherwise fine.
