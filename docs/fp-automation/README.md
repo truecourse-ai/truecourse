@@ -307,6 +307,13 @@ The three actual bootstrap prompts (paste verbatim into each routine):
 - `fp-campaign-close`:
   > Execute the instructions in `docs/fp-automation/prompts/fp-campaign-close.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
 
+The **auxiliary** monitoring routine (schedule-triggered, outside the
+discover → fix → close loop — see "Auxiliary routine" below) uses the same
+pointer convention:
+
+- `fp-stale-pr-notify`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-stale-pr-notify.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
 To change a prompt: edit the file under `docs/fp-automation/prompts/`,
 open a PR, merge. The next routine fire reads the new version. No
 web-UI edit needed.
@@ -490,6 +497,59 @@ Steps the session takes:
 `fp-discover` listens to the same merge event and runs in parallel,
 starting the next pending campaign from `campaigns.yaml`.
 
+## Auxiliary routine: `fp-stale-pr-notify` (monitoring)
+
+This routine is **not** part of the discover → fix → close loop. It is a
+schedule-triggered monitor that maintains a single GitHub **tracker issue**
+when an `fp-fix` batch PR has been open for more than an hour without
+`fp-next-fix-review` reaching a terminal decision on it — i.e. the review
+pipeline is stuck (missed webhook, wedged CI, crashed review session). It
+**never touches PRs or code** (no merge, close, label, comment, or push) and
+**never sends Telegram itself** — it opens/edits the tracker issue, and the
+existing `notify-routine-activity.yml` workflow forwards it to Telegram,
+exactly like every other alert in this repo.
+
+| Field | Value |
+|---|---|
+| **Trigger** | **Schedule** (cron), **every 2 hours** — not a GitHub event |
+| **Filters** | n/a (schedule). Selection happens in the prompt: open PR, head branch `claude/<SCOPE>fp-fix/`, **no** `<SCOPE>fp-reviewed` label, **not** currently `<SCOPE>fp-reviewing`, open > 1 h |
+| **Repositories** | `truecourse-ai/truecourse` |
+| **Branch push policy** | n/a — never pushes |
+| **Environment** | **Default** — no Telegram secrets or egress changes needed (the workflow holds the secrets) |
+| **Prompt** | Bootstrap pointer → `docs/fp-automation/prompts/fp-stale-pr-notify.md` |
+
+**Telegram goes through the workflow, not the routine.** Every Telegram
+message in this repo comes from `.github/workflows/notify-routine-activity.yml`
+reacting to a GitHub event (routine sessions run as the author, and GitHub
+never self-notifies — the workflow bypasses that; the token/chat live in
+**repo secrets**, one place). This routine therefore just manages a tracker
+**issue** titled `[<SCOPE>fp-stale-pr] fp-fix PRs stuck awaiting review`; the
+workflow's `notify-stale-pr` job matches that title tag and sends the
+Telegram message. No dedicated environment, no `api.telegram.org` egress,
+no per-routine secret.
+
+**Notify-on-change (no spam, no state files).** State lives in the tracker
+issue itself — its body carries a `<!-- fp-stale-pr-set: … -->` marker of
+the PR numbers it lists. The workflow fires only on `issues.opened` /
+`reopened`, so each run:
+- **set unchanged** → edits the body in place (refresh timestamp). Silent.
+- **set changed, non-empty** → rewrites the body with a `## State change
+  since last run` delta and **close+reopens** (or opens) the tracker → one
+  Telegram ping.
+- **set now empty** → writes an empty marker and **closes** the tracker.
+  Closing doesn't fire the workflow, so no "all clear" ping.
+
+This pings the human exactly when the stuck set changes, and — unlike a
+stateless age window — has no skipped-run gap, because the set is
+recomputed and reconciled against the issue every run.
+
+**Scope.** Like the loop routines, it is scope-parameterized — the C#
+account runs it with `SCOPE=cs-` (reads `claude/cs-fp-fix/` branches and
+`cs-fp-reviewed` / `cs-fp-reviewing` labels; tracker `[cs-fp-stale-pr] …`).
+`TECH_STACKS` is ignored (it selects no campaign). One routine per scope;
+all scopes share the same Telegram destination via the workflow's repo
+secrets (the `notify-stale-pr` job's `contains()` matches any prefix).
+
 ## Setup checklist
 
 One-time, before the first run:
@@ -566,6 +626,21 @@ One-time, before the first run:
    the next pending campaign's discovery) in parallel — and merging
    *that* next discovery PR restarts the inner loop. No "Run now"
    needed after the very first campaign.
+
+**Optional — the `fp-stale-pr-notify` monitor** (see "Auxiliary routine"
+above). Independent of the loop; set up only if you want Telegram alerts
+for stuck `fp-fix` batch PRs. It reuses the existing Telegram plumbing, so
+there's almost nothing to configure:
+
+1. Ensure the repo secrets `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set
+   (the same ones `notify-routine-activity.yml` already uses — no new
+   secrets, no dedicated environment, no egress change).
+2. Create a routine with a **schedule** trigger (every 2 hours) on
+   `truecourse-ai/truecourse`, using the **Default** environment and the
+   `fp-stale-pr-notify` bootstrap pointer. On the C# account append
+   `Parameters: SCOPE=cs-`. No "Run now" bootstrap is needed — it fires on
+   its own cadence. The `notify-stale-pr` job in
+   `notify-routine-activity.yml` forwards the tracker issue to Telegram.
 
 ## Acceptance criteria
 
