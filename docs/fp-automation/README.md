@@ -307,6 +307,13 @@ The three actual bootstrap prompts (paste verbatim into each routine):
 - `fp-campaign-close`:
   > Execute the instructions in `docs/fp-automation/prompts/fp-campaign-close.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
 
+The **auxiliary** monitoring routine (schedule-triggered, outside the
+discover → fix → close loop — see "Auxiliary routine" below) uses the same
+pointer convention:
+
+- `fp-stale-pr-notify`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-stale-pr-notify.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
 To change a prompt: edit the file under `docs/fp-automation/prompts/`,
 open a PR, merge. The next routine fire reads the new version. No
 web-UI edit needed.
@@ -490,6 +497,56 @@ Steps the session takes:
 `fp-discover` listens to the same merge event and runs in parallel,
 starting the next pending campaign from `campaigns.yaml`.
 
+## Auxiliary routine: `fp-stale-pr-notify` (monitoring)
+
+This routine is **not** part of the discover → fix → close loop. It is a
+read-only, schedule-triggered monitor that pings Telegram when an `fp-fix`
+batch PR has been open for more than an hour without
+`fp-next-fix-review` reaching a terminal decision on it — i.e. the review
+pipeline is stuck (missed webhook, wedged CI, crashed review session). It
+never edits code, merges, closes, labels, comments, or pushes; the only
+side effect is the Telegram message.
+
+| Field | Value |
+|---|---|
+| **Trigger** | **Schedule** (cron), **every 2 hours** — not a GitHub event |
+| **Filters** | n/a (schedule). Selection happens in the prompt: open PR, head branch `claude/<SCOPE>fp-fix/`, **no** `<SCOPE>fp-reviewed` label, **not** currently `<SCOPE>fp-reviewing`, open > 1 h |
+| **Repositories** | `truecourse-ai/truecourse` |
+| **Branch push policy** | n/a — never pushes |
+| **Environment** | **Dedicated** (see below) — the Default env does **not** allow `api.telegram.org` egress and carries no Telegram secrets |
+| **Prompt** | Bootstrap pointer → `docs/fp-automation/prompts/fp-stale-pr-notify.md` |
+
+**Why a dedicated environment.** Sending a Telegram message needs two
+things the Default environment doesn't provide:
+
+1. **Secrets.** `TELEGRAM_BOT_TOKEN` (from @BotFather) and
+   `TELEGRAM_CHAT_ID` (the destination chat) as environment variables on
+   this routine's environment.
+2. **Egress.** `api.telegram.org` added to that environment's Trusted
+   allowlist. Default's allowlist covers npm/GitHub/OSS clones but **not**
+   Telegram, so a `sendMessage` from the Default env is refused by the
+   egress proxy.
+
+If either secret is missing/empty, or `api.telegram.org` is blocked, the
+routine treats it as a mis-provisioned environment: it logs the blocker and
+ends without sending. It never routes around the egress policy.
+
+**Dedup without state.** The routine holds no cross-run state, so it fires
+**once** per PR using an age window keyed to the schedule cadence: it
+notifies only PRs whose age is in `[1 h, 1 h + interval)`. Because a batch
+PR is un-reviewed from the moment it opens until review finishes, it
+reliably crosses the 1-hour mark while still stale, so the window catches
+it on the first run after it goes stale and then leaves it alone. Trade-off:
+a skipped/badly-delayed run can let a PR age past the window and miss its
+ping — accepted, in exchange for a fully write-free routine. Keep
+`INTERVAL_HOURS` in the prompt in sync with this trigger's cadence.
+
+**Scope.** Like the loop routines, it is scope-parameterized — the C#
+account runs it with `SCOPE=cs-` (reads `claude/cs-fp-fix/` branches and
+`cs-fp-reviewed` / `cs-fp-reviewing` labels). `TECH_STACKS` is ignored (it
+selects no campaign). One routine per scope, each with its own Telegram
+destination if desired.
+
 ## Setup checklist
 
 One-time, before the first run:
@@ -566,6 +623,21 @@ One-time, before the first run:
    the next pending campaign's discovery) in parallel — and merging
    *that* next discovery PR restarts the inner loop. No "Run now"
    needed after the very first campaign.
+
+**Optional — the `fp-stale-pr-notify` monitor** (see "Auxiliary routine"
+above). Independent of the loop; set up only if you want Telegram alerts
+for stuck `fp-fix` batch PRs:
+
+1. Create a Telegram bot with @BotFather and note its token; get the
+   destination `chat_id`.
+2. Create a **dedicated environment** for this routine with
+   `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` env vars and `api.telegram.org`
+   on the egress allowlist (the Default env has neither).
+3. Create a routine with a **schedule** trigger (every 2 hours) on
+   `truecourse-ai/truecourse`, using that environment and the
+   `fp-stale-pr-notify` bootstrap pointer. On the C# account append
+   `Parameters: SCOPE=cs-`. No "Run now" bootstrap is needed — it fires on
+   its own cadence.
 
 ## Acceptance criteria
 
