@@ -1,5 +1,9 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isCommentedOutCode, lineCommentRunInner } from '../_shared/commented-out-code.js'
+
+// A `//` line comment, excluding `///` (which the TS grammar still emits as `//`).
+const isLineComment = (t: string): boolean => t.startsWith('//')
 
 export const commentedOutCodeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/commented-out-code',
@@ -10,21 +14,19 @@ export const commentedOutCodeVisitor: CodeRuleVisitor = {
 
     if (text.startsWith('/**')) return null
 
-    let inner = text
-    if (inner.startsWith('//')) inner = inner.slice(2).trim()
-    else if (inner.startsWith('/*')) inner = inner.slice(2, -2).trim()
+    let inner: string | null
+    if (isLineComment(text)) {
+      inner = lineCommentRunInner(node, { isLineComment, strip: (t) => t.replace(/^\/\/+/, '') })
+      if (inner === null) return null
+    } else if (text.startsWith('/*')) {
+      inner = text.slice(2, -2)
+    } else {
+      return null
+    }
 
-    if (inner.length < 10) return null
+    if (inner.trim().length < 10) return null
 
-    const codePatterns = [
-      /^\s*(const|let|var|function|return|if|for|while|import|export|class|throw|try|catch)\s/,
-      /[;{}]\s*$/,
-      /=>/,
-      /\w+\(.*\)\s*[;{]?\s*$/,
-    ]
-
-    const matchCount = codePatterns.filter((p) => p.test(inner)).length
-    if (matchCount >= 2) {
+    if (isCommentedOutCode(inner, {})) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Commented-out code',

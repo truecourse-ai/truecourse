@@ -1,12 +1,9 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isCommentedOutCode, lineCommentRunInner } from '../_shared/commented-out-code.js'
 
-const CODE_PATTERNS = [
-  /^\s*(var|int|string|bool|double|decimal|long|float|return|if|for|foreach|while|using|throw|try|catch|switch|await|new|public|private|protected|internal|static)\s/,
-  /[;{}]\s*$/,
-  /=>/,
-  /\w+\(.*\)\s*[;{]?\s*$/,
-]
+// A `//` line comment, excluding `///` XML doc comments.
+const isLineComment = (t: string): boolean => t.startsWith('//') && !t.startsWith('///')
 
 export const csharpCommentedOutCodeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/commented-out-code',
@@ -18,14 +15,21 @@ export const csharpCommentedOutCodeVisitor: CodeRuleVisitor = {
     // XML doc comments (`///`, `/** */`) are documentation, not code.
     if (text.startsWith('///') || text.startsWith('/**')) return null
 
-    let inner = text
-    if (inner.startsWith('//')) inner = inner.slice(2).trim()
-    else if (inner.startsWith('/*')) inner = inner.slice(2, -2).trim()
+    let inner: string | null
+    if (isLineComment(text)) {
+      // Evaluate the whole contiguous `//` run at its head so a multi-line
+      // instructional block is judged as a block, not line by line.
+      inner = lineCommentRunInner(node, { isLineComment, strip: (t) => t.replace(/^\/\/+/, '') })
+      if (inner === null) return null
+    } else if (text.startsWith('/*')) {
+      inner = text.slice(2, -2)
+    } else {
+      return null
+    }
 
-    if (inner.length < 10) return null
+    if (inner.trim().length < 10) return null
 
-    const matchCount = CODE_PATTERNS.filter((p) => p.test(inner)).length
-    if (matchCount >= 2) {
+    if (isCommentedOutCode(inner, {})) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Commented-out code',

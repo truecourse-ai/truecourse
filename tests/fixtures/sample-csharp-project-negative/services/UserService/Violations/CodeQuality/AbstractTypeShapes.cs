@@ -15,18 +15,17 @@ internal abstract class LedgerEntryBase
     protected abstract decimal Settle();
 }
 
+// An abstract class with no reason to be abstract: no abstract members, no
+// virtual/override member (no extension point), no protected constructor, and no
+// base type. It should simply be a concrete class.
 // VIOLATION: code-quality/deterministic/abstract-class-without-abstract-members
 internal abstract class ReportSectionBase
 {
-    protected readonly string Title;
+    private int _renders;
 
-    protected ReportSectionBase(string title)
+    internal int Render()
     {
-        Title = title;
-    }
-
-    protected string Describe()
-    {
-        return Title;
+        _renders++;
+        return _renders;
     }
 }
