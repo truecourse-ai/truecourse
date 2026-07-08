@@ -22,6 +22,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resolveClaudeBinary } from '../claude-binary.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -151,34 +152,64 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       const modelArgs: string[] = [];
       if (req.model) modelArgs.push('--model', req.model);
       if (req.fallbackModel) modelArgs.push('--fallback-model', req.fallbackModel);
+
+      // Keep both prompts OFF the command line. The system prompt (the
+      // contract-extractor's is ~52 KB) and the user prompt (an unbounded spec
+      // slice) are large enough to blow Windows' 32,767-char command-line limit
+      // (CreateProcessW → `spawn ENAMETOOLONG`; issue #660). So the system
+      // prompt goes to a temp file passed via `--append-system-prompt-file`, and
+      // the user prompt is streamed over stdin (`-p` reads the prompt from stdin
+      // when no positional is given — the same path cli-provider.ts uses).
+      const sysFile = path.join(tmpdir(), `tc-claude-sys-${randomUUID()}.txt`);
+      try {
+        fs.writeFileSync(sysFile, req.system, 'utf-8');
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
+        return;
+      }
+      const cleanup = () => {
+        try {
+          fs.rmSync(sysFile, { force: true });
+        } catch {
+          /* best-effort temp cleanup */
+        }
+      };
+
       const args = [
         '-p',
-        req.user,
         ...modelArgs,
         '--output-format',
         'json',
-        '--append-system-prompt',
-        req.system,
+        '--append-system-prompt-file',
+        sysFile,
         '--setting-sources',
         'project',
       ];
-      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
       const timer = req.timeoutMs
         ? setTimeout(() => {
             proc.kill('SIGKILL');
+            cleanup();
             reject(new Error(`claude timed out after ${req.timeoutMs}ms`));
           }, req.timeoutMs)
         : null;
+      // The prompt routinely exceeds the OS pipe buffer (~64 KB); write + end
+      // streams it in. Swallow stdin errors (EPIPE if the child already exited).
+      proc.stdin.on('error', () => {});
+      proc.stdin.write(req.user);
+      proc.stdin.end();
       proc.stdout.on('data', (b: Buffer) => out.push(b));
       proc.stderr.on('data', (b: Buffer) => err.push(b));
       proc.on('error', (e) => {
         if (timer) clearTimeout(timer);
+        cleanup();
         reject(e);
       });
       proc.on('close', (code) => {
         if (timer) clearTimeout(timer);
+        cleanup();
         if (code !== 0) {
           reject(new Error(`claude exited ${code}: ${Buffer.concat(err).toString('utf-8')}`));
           return;
