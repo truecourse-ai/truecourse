@@ -30,8 +30,10 @@ jobs:
           dotnet-version: '8.0.x'
 
       # OIDC trusted publishing needs a recent npm; Node 20 ships npm 10.x.
+      # Pinned to the npm 11 line: npm@latest crossed to 12 (needs node >=22)
+      # and broke this step on the node-20 runner (2026-07-08).
       - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
