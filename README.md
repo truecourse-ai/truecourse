@@ -20,7 +20,7 @@
 TrueCourse catches two classes of defect, through two independent tools — use either on its own or both together:
 
 - **Code defects** (`truecourse analyze`) — from the categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
-- **Business-logic drift** (`truecourse verify`) — when the implementation no longer matches what the docs say it should do. Wrong response codes, missing entity fields, illegal state transitions, bypassed auth, silently-dropped effects, formulas that have lost an input. TrueCourse extracts a contract from your PRDs/ADRs/READMEs and checks the code against it.
+- **Business-logic drift** (`truecourse guard`) — when the implementation no longer matches what the docs say it should do. TrueCourse curates your PRDs/ADRs/READMEs into a spec corpus, an LLM authors **scenario tests bound to each spec section** once, and `guard run` executes them deterministically — a failing scenario means that section and the code disagree.
 
 Both store their results under `.truecourse/` and surface them in a shared [dashboard](#dashboard-web-ui) for human review, with plain-text CLI output an agent can read directly.
 
@@ -28,7 +28,7 @@ Both store their results under `.truecourse/` and surface them in a shared [dash
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
 </p>
 
-Jump to: **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Verify](#2-spec--verify--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
+Jump to: **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Guard](#2-spec--guard--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
 
 No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. It uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for LLM-powered work — if `claude` isn't on your PATH, deterministic analysis still runs and LLM-dependent features are skipped.
 
@@ -175,11 +175,13 @@ pre-commit:
 
 ---
 
-# 2. Spec → Verify — business-logic drift
+# 2. Spec → Guard — business-logic drift
 
-TrueCourse builds a machine-readable spec from your docs and verifies the code against it — catching where the implementation has drifted from documented intent. This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
+TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenario tests bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
-> **Prerequisite:** the spec scan and contract extractor shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `contracts generate`.
+> **Prerequisite:** the spec scan and guard generator shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `guard generate`. `guard run` needs neither — it's deterministic.
+
+> **Discontinued: contract generation & verify.** Guard replaces the earlier contracts pipeline (`contracts generate` / `contracts list` / `contracts validate`, `truecourse verify`, `truecourse drifts`, `truecourse infer`, and the dashboard's BL Drift section). Those commands still exist in this release but are **no longer maintained** and will be removed; the BL Drift section is already hidden from the dashboard. Use Guard instead: it verifies what the code *does* (by executing scenarios) rather than what it *says* (static contract matching), and its coverage isn't capped by a contract-kind taxonomy.
 
 ## Quick Start
 
@@ -187,52 +189,55 @@ TrueCourse builds a machine-readable spec from your docs and verifies the code a
 cd <your-repo>
 truecourse spec scan                    # Curate docs → corpus (areas + relations + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
-truecourse contracts generate           # Curated corpus → .tc contract artifacts
-truecourse verify                       # Check code against the contracts → drifts
+truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
+truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
 
-Resolve conflicts and review drifts visually in the [dashboard](#dashboard-web-ui)'s BL Drift section, or drive every step from the CLI.
+Resolve conflicts and review section coverage, scenarios, and run results visually in the [dashboard](#dashboard-web-ui)'s Guard section, or drive every step from the CLI.
 
-> Like `analyze`, the spec → contracts → verify track requires a **git repository** — TrueCourse's baselines are commit-anchored (committable `LATEST.json`, diff vs HEAD, stashing the committed state). On a non-git folder these commands stop with a clear message and the dashboard hides their actions.
+> Like `analyze`, the spec → guard track requires a **git repository** — TrueCourse's baselines are commit-anchored (committable `LATEST.json`, diff vs HEAD). On a non-git folder these commands stop with a clear message and the dashboard hides their actions.
 
 ## How it works
 
-Three stages run in order, each producing artifacts the next consumes:
+Stages run in order, each producing committable artifacts the next consumes:
 
 **1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`), auto-detects doc→doc **relations** (version chains, supersession), and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, relations, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: doc→doc `relations`, `manualAreas`, `manualIncludes`, and `manualExcludes` — committable).
 
-Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. Version chains (e.g. `v1`→`v2`) are auto-detected; you resolve the rest with doc→doc relations, in the dashboard Spec tab or via `spec conflicts` / `spec chains`. [Plan](docs/SPEC_SCAN_REDESIGN_PLAN.md).
+Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. Version chains (e.g. `v1`→`v2`) are auto-detected; you resolve the rest with doc→doc relations, in the dashboard's Guard → Coverage tab or via `spec conflicts` / `spec chains`. [Plan](docs/SPEC_SCAN_REDESIGN_PLAN.md).
 
-**2. Contract extraction** — Reads `corpus.json` and emits `.truecourse/contracts/*.tc` files in a hand-written DSL covering 13 artifact kinds: `operation`, `entity`, `enum`, `state-machine`, `auth-requirement`, `authorization-rule`, `error-envelope`, `pagination-contract`, `idempotency-contract`, `effect-group`, `formula`, plus `unenforceable-obligation` for prose the verifier can't structurally check. A post-extraction **repair pass** validates structural completeness and re-prompts the LLM to fix deficient artifacts (missing forbids clauses, broad role selectors, unresolved cross-references). On the bundled fixture this hits **22/22 planted bugs with 0 false positives**.
+**2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (today's driver runs your project's CLI; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — a scenario that fails at birth is reported as a finding (the spec and the code already disagree) instead of being silently committed. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
 
-**3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations, and on the CLI through `truecourse verify`. It's its own command — not a stage of `truecourse analyze`.
+**3. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario, and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
-**4. Inference** — The mirror image of verification. `verify` asks "the spec says X — does the code do X?"; `truecourse infer` asks "the code does X — does any spec mention X?". It runs the code-side extractors *un-driven by a spec*, subtracts whatever the authored contracts already cover, and writes the remainder to `.truecourse/contracts/_inferred/` as `.tc` artifacts tagged with an `inferred-from "<code-path>" a..b` provenance line and a `confidence` level (instead of the authored `origin SOURCE "section" a..b`). It covers the full artifact spread — undocumented endpoints, entities (from ORM schema), enums, named constants, query policies, emitted events, computed formulas, architecture choices, and the cross-cutting conventions (auth, pagination, idempotency, error envelope). Confidence reflects fidelity: a value read straight from code is `high`; a synthesized convention (e.g. an assumed auth scheme) is a `low`-confidence draft to confirm. Because coverage is computed from authored contracts only, a decision drops out of `_inferred/` the moment it's documented — the directory is a shrinking backlog of "decisions your code made that your docs never recorded". Inferred contracts are descriptive, not prescriptive, so `verify` skips `_inferred/` by default.
+The section ↔ scenario binding is **bidirectional**: code changed → its scenarios fail (code-side drift); a spec section edited → its scenarios go stale (spec-side drift). The spec document itself becomes the coverage UI — every section visibly carries its proof and its status.
 
 ## What it catches
 
-Operations whose responses, status codes, or headers don't match the spec. Entities with missing or mistyped fields. Immutability and lifecycle violations on state machines. Missing or forbidden side-effect emissions. Auth requirements bypassed. Pagination, idempotency, and error-envelope contracts violated. Formulas producing wrong results from drifted inputs.
+Any documented behavior a scenario can drive and assert (today through your project's CLI; api/web/tui drivers are planned): wrong responses and exit codes, missing or mistyped output fields, illegal state transitions, bypassed validation and auth rules, silently-dropped side effects, formulas producing wrong results — plus the reverse direction: spec sections whose scenarios went stale because the docs changed out from under them.
 
 ## Setup
 
-The spec and a verify baseline are committable so they travel with the repo; everything else is local-only. Per-repo layout under `.truecourse/`:
+The spec, the scenarios, and a guard baseline are committable so they travel with the repo; everything else is local-only. Per-repo layout under `.truecourse/`:
 
 ```
 .truecourse/
 ├── specs/                  ← curated corpus (committable)
 │   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, relations, dropped docs
 │   └── decisions.json       ← user resolutions: doc→doc relations + manual areas + manual includes/excludes
-├── contracts/               ← generated TC contract artifacts (gitignored by default)
-│   └── _inferred/            ← reverse-engineered, undocumented decisions (`truecourse infer`)
-├── verifier/                ← drift store (mirrors analyze; `truecourse verify`)
-│   ├── runs/                 ← per-run drift snapshots (gitignored)
-│   ├── LATEST.json           ← current drift state + diff baseline (committable)
+├── scenarios/               ← the guard scenario corpus (committable)
+│   ├── recipe.json           ← how to build/prepare the repo for a run
+│   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
+│   └── <area>/*.yaml         ← the scenario tests
+├── guard/                   ← guard run store (mirrors analyze; `truecourse guard run`)
+│   ├── runs/                 ← per-run snapshots (gitignored)
+│   ├── LATEST.json           ← current run state (committable)
 │   ├── history.json          ← per-run summaries (gitignored)
-│   └── diff.json             ← current-vs-baseline drift diff (gitignored)
-└── .cache/                  ← LLM + slice cache (gitignored)
+│   ├── evidence/<runId>/     ← per-failure transcripts (gitignored)
+│   └── result.json           ← last `guard generate` summary (gitignored)
+└── .cache/                  ← LLM caches (gitignored)
 ```
 
-Like analyze, `verifier/LATEST.json` is the committable baseline — commit it after merging to `main` (re-run `truecourse verify`, commit the result), not from feature branches. `truecourse verify --diff` then shows the drifts your uncommitted changes add or resolve against it.
+Like analyze, `guard/LATEST.json` is the committable baseline — commit it after merging to `main` (re-run `truecourse guard run`, commit the result), not from feature branches.
 
 ## Commands
 
@@ -257,37 +262,23 @@ truecourse spec docs uninclude <path>             # Remove a force-include overr
 truecourse spec docs exclude <path>               # Force-exclude a kept doc (re-scans)
 truecourse spec docs unexclude <path>             # Remove a force-exclude override
 
-# Contract extraction (curated corpus → .tc artifacts)
-truecourse contracts generate                     # Generate .tc from corpus.json (enumerate → batch → completeness gate)
-truecourse contracts list                         # List artifacts (kind · identity · location)
-truecourse contracts list --inferred / --authored # Only reverse-engineered (_inferred/) / only authored
-truecourse contracts validate                     # Parse + resolve TC files; report unresolved refs
-
-# Verification (code against contracts)
-truecourse verify                                 # Full run: stashes dirty tree (prompts), writes verifier/runs + LATEST + history
-truecourse verify --diff                          # Git diff: working-tree drifts vs committed baseline (added/resolved/unchanged)
-truecourse verify --stash / --no-stash            # Pre-approve / skip stashing on a full run
-truecourse drifts list                            # List drifts from the latest verify (paginated; reads LATEST, no re-run)
-truecourse drifts list --all                      # Show every drift (no pagination)
-truecourse drifts list --offset 20 / --severity critical,high  # Page through / filter by severity
-
-# Inference (code → inferred contracts) — reverse-engineer undocumented decisions
-truecourse infer                                  # Write inferred .tc files to contracts/_inferred/
-truecourse infer --dry-run                        # Report what would be written, touch nothing
-truecourse contracts list --inferred              # Review what infer produced (kind · confidence · code location)
-
 # Guard — spec-section-bound scenario tests (author once, run deterministically)
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
+truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
+
+### Discontinued: contracts & verify
+
+The static contract pipeline that predates Guard still ships in this release but is **discontinued and unmaintained** — it will be removed in a future release. `truecourse contracts generate|list|validate` (corpus → `.tc` artifacts), `truecourse verify` / `truecourse drifts` (per-kind static comparators), and `truecourse infer` (reverse-engineered `.tc` from code) all keep working against the same spec corpus for now, but new work — including new artifact-kind coverage — happens only in Guard.
 
 ---
 
 # Dashboard (web UI)
 
-One web UI for both capabilities — browse code findings and business-logic drift side by side, with the architecture graph, analytics, and the spec/contracts/verify workflow.
+One web UI for both capabilities — browse code findings and business-logic drift side by side, with the architecture graph, analytics, and the spec-curation + guard workflow.
 
 ```bash
 truecourse dashboard                  # Start + open the dashboard
@@ -299,7 +290,9 @@ truecourse dashboard uninstall        # Remove the background service
 ```
 
 - **Code Analysis** — architecture graph, violations list, severity/category analytics, code hotspots, trend over time; toggle rules and silence noisy ones inline.
-- **BL Drift** — the Spec tab walks you through resolving each conflict (pick / write custom / mark superseded / include skipped doc); Contracts shows the generated `.tc` artifacts; Verify shows the drift analytics + list, with a Runs history and a Normal / Git-Diff toggle.
+- **Guard** — Coverage shows each spec doc's sections with their scenario coverage and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; Runs shows each run's drifts with per-failure evidence.
+
+(The BL Drift section — the discontinued contracts/verify workflow — is hidden from the section switcher; existing deep links into it still render.)
 
 ---
 
@@ -339,27 +332,27 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 
 ## LLM transport (`--llm-transport`)
 
-Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Verify pipeline (`spec scan`, `contracts generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
+Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Guard pipeline (`spec scan`, `guard generate`) — reaches the model through a pluggable **transport**, chosen with `--llm-transport`:
 
 | Mode | How it reaches the model | Needs |
 |---|---|---|
 | **`cli`** *(default)* | spawns `claude -p …` per call | the `claude` binary on PATH, signed in. No API key. |
 | **`agent`** | a **filesystem mailbox** under `--io <dir>` | nothing — no `claude` binary, no API key |
 
-In **`agent`** mode the tool doesn't call the model itself: for each prompt it writes `requests/<id>.json` (`{ stage, system, user, schema, … }`) into the `--io` directory and waits for a matching `responses/<id>.json` (`{ text }`). An **orchestrating agent that is itself an LLM** — e.g. a [Claude Code routine](https://code.claude.com/docs/en/routines) — watches that directory and answers each prompt. This lets contract generation and `analyze`'s LLM rules run **inside a headless cloud session with no `claude` binary and no API key**.
+In **`agent`** mode the tool doesn't call the model itself: for each prompt it writes `requests/<id>.json` (`{ stage, system, user, schema, … }`) into the `--io` directory and waits for a matching `responses/<id>.json` (`{ text }`). An **orchestrating agent that is itself an LLM** — e.g. a [Claude Code routine](https://code.claude.com/docs/en/routines) — watches that directory and answers each prompt. This lets guard generation and `analyze`'s LLM rules run **inside a headless cloud session with no `claude` binary and no API key**.
 
 ```bash
 # default: spawn the claude CLI
 truecourse analyze --llm
-truecourse contracts generate
+truecourse guard generate
 
 # agent transport: the tool parks prompts in ./io and an external agent answers them
 truecourse analyze --llm --llm-transport agent --io ./io
-truecourse spec scan          --llm-transport agent --io ./io
-truecourse contracts generate --llm-transport agent --io ./io
+truecourse spec scan      --llm-transport agent --io ./io
+truecourse guard generate --llm-transport agent --io ./io
 ```
 
-Accepted by: `analyze`, `spec scan`, `contracts generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
+Accepted by: `analyze`, `spec scan`, `guard generate` (and the discontinued `contracts generate`). (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
 
 ## Configuration
 
@@ -375,7 +368,7 @@ CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failu
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
 ```
 
-Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `contracts generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
+Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `guard generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
 
 **`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single run. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
 
@@ -387,7 +380,7 @@ CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
 
 ### Per-stage model selection
 
-Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for contract generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › the built-in default. `truecourse config llm` prints the effective model + source for every stage.
+Each LLM-powered pipeline stage resolves its model independently, so you can run cheap stages on Haiku and reserve Opus for scenario generation. Resolution precedence: `TRUECOURSE_MODEL_<STAGE>` (per-stage) › `TRUECOURSE_MODEL` (global) › `.truecourse/config.json` (`llm.stages.<id>`) › the built-in default. `truecourse config llm` prints the effective model + source for every stage.
 
 | stage | env override | default |
 |---|---|---|
@@ -395,11 +388,13 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | area tagging | `TRUECOURSE_MODEL_SPEC_AREA_TAG` | sonnet |
 | overlap flagging | `TRUECOURSE_MODEL_SPEC_OVERLAP` | haiku |
 | relation detection | `TRUECOURSE_MODEL_SPEC_RELATION` | sonnet |
-| target enumeration | `TRUECOURSE_MODEL_CONTRACT_ENUMERATE` | sonnet |
-| contract generate | `TRUECOURSE_MODEL_CONTRACT_EXTRACT` | opus |
-| contract repair | `TRUECOURSE_MODEL_CONTRACT_REPAIR` | opus |
+| guard section classify/extract | `TRUECOURSE_MODEL_GUARD_EXTRACT` | sonnet |
+| guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
+| guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
 
-`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_GENERATE_BATCH` sets how many contracts each generate call targets (default ~10–20). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
+(The discontinued contract pipeline's stages — `TRUECOURSE_MODEL_CONTRACT_ENUMERATE`, `TRUECOURSE_MODEL_CONTRACT_EXTRACT`, `TRUECOURSE_MODEL_CONTRACT_REPAIR` — still resolve the same way.)
+
+`TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis
 

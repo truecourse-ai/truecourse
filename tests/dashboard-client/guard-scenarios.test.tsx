@@ -5,7 +5,8 @@
  * label by human TITLE with the id demoted to mono meta so a long slug can't
  * overflow; findings carry a distinct red chip and a "finding" status filter),
  * the MAIN-PANE OVERVIEW (recipe card + the flat "last generate" strip with its
- * birth-findings preview and the deferred-authoring-errors detail), and the
+ * stat chips and the deferred-authoring-errors detail; findings live only in the
+ * left list, not here), and the
  * TAB/PIN mechanism (single-click preview, double-click pin, `?gscn=` deep links)
  * with the scenario AND finding detail panes. The harness mirrors RepoPage's
  * scenarios-tab wiring: hoisted useGuardScenarios/useGuardReport + the guard-scoped
@@ -557,8 +558,9 @@ describe('Scenarios surface — title-first labels + long-id overflow', () => {
     expect(idMeta).toHaveClass('font-mono');
     expect(idMeta).toHaveClass('truncate');
     expect(idMeta).toHaveClass('min-w-0');
-    // Rows sit at the house nested-list depth, not a column pushed far right.
-    expect(within(list).getByRole('listitem')).toHaveClass('pl-7');
+    // Rows sit flush at the house `px-3` edge (like the Runs list), not a column
+    // pushed far right by a doc→section→row indent stair.
+    expect(within(list).getByRole('listitem')).toHaveClass('px-3');
   });
 
   it('the tab strip labels by title, truncated within a max width, so a long id cannot stretch it', () => {
@@ -589,15 +591,22 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(screen.getByText('inputs changed')).toBeInTheDocument();
   });
 
-  it('renders the compact summary line (settled/unsettled · authored vs birth-passed · calls/cost)', async () => {
+  it('renders prominent stat chips (settled/unsettled · authored · birth-passed · findings · calls/cost)', async () => {
     stubFetch();
     renderHarness();
     await screen.findByText('Last generate');
-    const line = screen.getByText(/8\/4 settled/);
-    expect(line).toHaveTextContent('2 authored');
-    expect(line).toHaveTextContent('2 birth-passed');
-    expect(line).toHaveTextContent('14 calls');
-    expect(line).toHaveTextContent('$1.23');
+    const region = overview();
+    // Envelope line: when · status.
+    expect(within(region).getByText(/· ok/)).toBeInTheDocument();
+    // Each stat is a number-first chip: label span, its enclosing chip carries the value.
+    const chip = (label: string) => within(region).getByText(label).closest('div') as HTMLElement;
+    expect(chip('settled')).toHaveTextContent('8');
+    expect(chip('unsettled')).toHaveTextContent('4');
+    expect(chip('authored')).toHaveTextContent('2');
+    expect(chip('birth-passed')).toHaveTextContent('2');
+    expect(chip('findings')).toHaveTextContent('1');
+    expect(chip('calls')).toHaveTextContent('14');
+    expect(chip('cost')).toHaveTextContent('$1.23');
   });
 
   it('renders the Last generate block FLAT — a small-cap heading + summary, no boxed panel', async () => {
@@ -613,13 +622,13 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(blockRoot.className).not.toMatch(/bg-muted/);
   });
 
-  it('lists birth findings and the deferred-errors line when the last generate had any', async () => {
+  it('renders the deferred-errors line but NOT birth findings (findings live only in the left list)', async () => {
     stubFetch();
     renderHarness();
     await screen.findByText('Last generate');
-    // The findings list (flat strip is always shown) and the ONE deferred line —
-    // counted as DISTINCT sections, not a raw error count.
-    expect(within(overview()).getByText('login rate limits')).toBeInTheDocument();
+    // Birth findings are gone from the overview — they live only in the left panel.
+    expect(within(overview()).queryByText('login rate limits')).not.toBeInTheDocument();
+    // The ONE deferred line stays — counted as DISTINCT sections, not a raw error count.
     expect(
       within(overview()).getByText('3 sections deferred — will re-attempt on the next generate'),
     ).toBeInTheDocument();
@@ -642,24 +651,16 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
     expect(onOpenSpec).toHaveBeenCalledWith('docs/auth.md', 'auth/beta');
   });
 
-  it('renders only the summary line when the last generate settled clean — no findings, no deferred line', async () => {
+  it('renders the stats but no deferred line when the last generate settled clean', async () => {
     stubFetch(INVENTORY, LATEST, CLEAN_REPORT);
     renderHarness();
     await screen.findByText('Last generate');
-    expect(within(overview()).queryByText(/Birth findings/)).not.toBeInTheDocument();
-    expect(within(overview()).queryByText(/deferred/)).not.toBeInTheDocument();
-  });
-
-  it('previews a birth finding in the overview and jumps into the coverage view', async () => {
-    const user = userEvent.setup();
-    stubFetch();
-    const { onOpenSpec } = renderHarness();
-    await screen.findByText('Last generate');
-    await user.click(within(overview()).getByText('login rate limits'));
-    expect(within(overview()).getByText('exit code 1')).toBeInTheDocument();
-    expect(within(overview()).getByText('exit code 0')).toBeInTheDocument();
-    await user.click(within(overview()).getByText('View in spec'));
-    expect(onOpenSpec).toHaveBeenCalledWith('docs/auth.md', 'authentication/login/rate-limiting');
+    // Stats still render — findings is 0 (honest), settled absorbs the clean sections.
+    const region = overview();
+    expect(within(region).getByText('findings')).toBeInTheDocument();
+    expect(within(region).getByText('settled')).toBeInTheDocument();
+    // Nothing unsettled → no deferred housekeeping line.
+    expect(within(region).queryByText(/deferred/)).not.toBeInTheDocument();
   });
 
   it('hides the strip entirely when there is no generate report', async () => {

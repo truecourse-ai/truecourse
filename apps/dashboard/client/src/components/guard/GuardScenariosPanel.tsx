@@ -14,7 +14,7 @@
  * identifiers, never UI copy. The row PRIMARY text is always the human title
  * (truncated); the scenario id demotes to small mono meta so a long slug id can
  * never be a primary label or stretch the panel. Both grouping levels use the
- * sticky-header idiom with rows indented under their section header.
+ * sticky-header idiom; rows sit flush beneath their section header.
  */
 
 import { useMemo, useState } from 'react';
@@ -35,11 +35,10 @@ import { GuardFindingBadge } from './GuardFindingBadge';
 const SELECT =
   'rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
 
-// Rows sit at the house nested-list depth (SpecCorpusView rows use `pl-7`), a
-// modest indent under the `pl-5` section header so they read as belonging to it —
-// not a column pushed far right.
+// Rows sit flush at the house `px-3` edge, like the Runs list (GuardDriftList)
+// rows — hierarchy is carried by the tinted/uppercase headers, not indentation.
 const ROW =
-  'flex w-full flex-col items-start gap-0.5 border-b border-border/60 py-2 pl-7 pr-3 text-left transition-colors';
+  'flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors';
 
 function ScenarioRow({
   row,
@@ -266,9 +265,9 @@ export function GuardScenariosPanel({
                 <div key={anchor}>
                   {/* Section header — the HUMAN heading text, sticky just below
                       the doc header (GuardDriftList idiom: solid wrapper, tinted
-                      inner row) with its rows indented beneath it. */}
+                      inner row); its rows sit flush beneath it. */}
                   <div className="sticky top-7 z-10 bg-card" title={anchor}>
-                    <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 py-1 pl-5 pr-3 text-[11px] font-medium text-foreground">
+                    <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] font-medium text-foreground">
                       <span className="min-w-0 truncate">{list[0].headingText ?? sectionLeaf(anchor)}</span>
                       <span className="shrink-0 text-[10px] text-muted-foreground">{list.length}</span>
                     </div>

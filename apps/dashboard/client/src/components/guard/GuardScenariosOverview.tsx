@@ -1,30 +1,27 @@
 /**
  * The Scenarios tab's MAIN-PANE OVERVIEW — what shows when the permanent Overview
  * tab is active (no scenario tab open). Composes the preparation-recipe card and
- * the "last generate" content flowing beneath it (the generation story —
- * settled/unsettled, authored vs birth-passed, calls/cost, plus birth findings
- * with view-in-spec + grouped authoring errors when present). The scenario list
- * itself lives in the left panel; selecting a row there opens a preview/pinned tab
- * over this overview. Read-only.
+ * the "last generate" stats flowing beneath it (the generation story in numbers —
+ * settled/unsettled, authored, birth-passed, findings, calls/cost as stat chips)
+ * plus the deferred-authoring-errors housekeeping line when present. Birth findings
+ * live only in the left-panel list, not here. Selecting a row there opens a
+ * preview/pinned tab over this overview. Read-only.
  */
 
 import { useMemo, useState } from 'react';
 import { ArrowUpRight, FileCode2, Loader2 } from 'lucide-react';
 import type {
-  GuardBirthFinding,
   GuardGenerateError,
   GuardGenerateReport,
   GuardRecipeCard as GuardRecipeCardData,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatGuardTime, sectionLeaf } from '@/lib/guard-drifts';
+import { formatGuardTime } from '@/lib/guard-drifts';
 import { deferredSectionCount, groupErrorsByPattern, settledCounts } from '@/lib/guard-report';
 import { makeHeadingResolver, type HeadingResolver } from '@/lib/guard-list-rows';
 import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 import { GuardRecipeCard } from './GuardRecipeCard';
 
-const PRE =
-  'mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -33,94 +30,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <div className={`mb-1.5 ${LABEL}`}>{title}</div>
       {children}
     </div>
-  );
-}
-
-/** One birth finding row — previewable; expands to the expected/actual + spec jump. */
-function BirthFindingRow({
-  finding,
-  expanded,
-  onPreview,
-  onPin,
-  onOpenSpec,
-}: {
-  finding: GuardBirthFinding;
-  expanded: boolean;
-  onPreview: () => void;
-  onPin: () => void;
-  onOpenSpec: (doc: string, section: string) => void;
-}) {
-  return (
-    <div className="border-b border-border/60">
-      <button
-        type="button"
-        onClick={onPreview}
-        onDoubleClick={onPin}
-        title="Click to preview, double-click to pin"
-        className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/40"
-      >
-        <span className="text-[13px] text-foreground">{finding.title}</span>
-        <span className="truncate text-[10px] text-muted-foreground">{sectionLeaf(finding.anchor)}</span>
-      </button>
-      {expanded && (
-        <div className="px-3 pb-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            Failed at step {finding.step}
-          </div>
-          <div>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Expected</span>
-            <pre className={PRE}>{finding.expected}</pre>
-          </div>
-          <div className="mt-1">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
-            <pre className={PRE}>{finding.actual}</pre>
-          </div>
-          <button
-            type="button"
-            onClick={() => onOpenSpec(finding.doc, finding.anchor)}
-            className="mt-1.5 inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-          >
-            View in spec
-            <ArrowUpRight className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BirthFindingsSection({
-  findings,
-  onOpenSpec,
-}: {
-  findings: GuardBirthFinding[];
-  onOpenSpec: (doc: string, section: string) => void;
-}) {
-  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
-  const [pinned, setPinned] = useState<Set<number>>(new Set());
-  const togglePin = (i: number) =>
-    setPinned((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
-
-  return (
-    <Section title={`Birth findings — ${findings.length} (generation defect or real drift — your call)`}>
-      <div className="rounded border border-border">
-        {findings.map((f, i) => (
-          <BirthFindingRow
-            key={`${f.doc}\0${f.anchor}\0${i}`}
-            finding={f}
-            expanded={previewIdx === i || pinned.has(i)}
-            onPreview={() => setPreviewIdx(i)}
-            onPin={() => togglePin(i)}
-            onOpenSpec={onOpenSpec}
-          />
-        ))}
-      </div>
-    </Section>
   );
 }
 
@@ -194,8 +103,10 @@ function ErrorsSection({
 
 /**
  * The "last generate" content — plain, flowing under the recipe card, not a boxed
- * panel: a small-cap heading, the one-line summary, then the birth-findings and
- * grouped-authoring-errors sections when the last generate had any.
+ * panel: a small-cap heading, the when/status envelope line, a wrap row of stat
+ * chips (settled/unsettled · authored · birth-passed · findings · calls/cost),
+ * then the deferred-authoring-errors housekeeping line when any section stayed
+ * unsettled.
  */
 function GuardLastGenerateStrip({
   report,
@@ -211,26 +122,39 @@ function GuardLastGenerateStrip({
   const usage = report.usage;
   const resolveHeading = useMemo(() => makeHeadingResolver(scenarioRows), [scenarioRows]);
 
-  // One line, one text node (so it reads — and tests — as a single summary):
-  // when · status · sections settled/unsettled · authored vs birth-passed · calls/cost.
-  const summary = [
-    formatGuardTime(report.generatedAt),
-    report.status,
-    `${settle.settled}/${settle.unsettled} settled`,
-    `${report.written.length} authored`,
-    ...(report.birthPassed != null ? [`${report.birthPassed} birth-passed`] : []),
-    ...(usage ? [`${usage.calls} calls`, `$${usage.costUsd.toFixed(2)}`] : []),
-  ].join(' · ');
+  // The generation story as numbers: number-first stat chips. Findings render
+  // always (0 is honest); birth-passed/calls/cost only when the report carries them.
+  const stats: { label: string; value: string | number }[] = [
+    { label: 'settled', value: settle.settled },
+    { label: 'unsettled', value: settle.unsettled },
+    { label: 'authored', value: report.written.length },
+    ...(report.birthPassed != null ? [{ label: 'birth-passed', value: report.birthPassed }] : []),
+    { label: 'findings', value: report.birthFindings.length },
+    ...(usage
+      ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
+      : []),
+  ];
 
   return (
     <div className="space-y-3">
       <div>
-        <div className={`mb-1 ${LABEL}`}>Last generate</div>
-        <div className="truncate text-xs text-muted-foreground">{summary}</div>
+        <div className={`mb-1.5 ${LABEL}`}>Last generate</div>
+        <div className="text-sm text-foreground">
+          {formatGuardTime(report.generatedAt)}{' '}
+          <span className="text-xs text-muted-foreground">· {report.status}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {stats.map((stat) => (
+            <div
+              key={stat.label}
+              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1"
+            >
+              <span className="text-sm font-semibold text-foreground">{stat.value}</span>
+              <span className="text-xs text-muted-foreground">{stat.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
-      {report.birthFindings.length > 0 && (
-        <BirthFindingsSection findings={report.birthFindings} onOpenSpec={onOpenSpec} />
-      )}
       <ErrorsSection errors={report.errors} resolveHeading={resolveHeading} onOpenSpec={onOpenSpec} />
     </div>
   );

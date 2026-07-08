@@ -5,10 +5,14 @@ follow-ups and decided-not-built items in the body (fidelity review v1.5, stub/h
 capabilities, OSS AI-SDK transport, scan-staleness signal) and Phases 6–8 (api/tui/web
 drivers, EE). This plan adds **generated, spec-section-bound
 scenario tests** ("guards") as the new verification artifact, built alongside the existing
-contract system. The spec side (scan → curated corpus → areas → decisions) is untouched. The
-contract surface (`contracts *`, `verify`, `infer`, dashboard contract/BL-Drift views, EE gate
-signal) is **left exactly as it is** — no removals, no re-pointing; retiring it is a separate
-future decision once guard has proven itself.
+contract system. The spec side (scan → curated corpus → areas → decisions) is untouched.
+
+RETIREMENT DECIDED (2026-07-07): the contract surface (`contracts *`, `verify`, `infer`,
+dashboard contract/BL-Drift views) is **discontinued** in favor of guard. Step 1 (done): the
+BL Drift dashboard section is hidden from the section switcher in both OSS and EE (still
+URL-reachable — the EE Pulls feed deep-links into it) and the README documents the
+discontinuation. Step 2 (future): delete the contract-related code once guard covers the
+remaining gaps (the EE gate signal still runs on verify drifts until guard's EE phase lands).
 
 **Scope: OSS first.** Everything in this plan lands in the OSS surface — core packages, CLI,
 local dashboard, file-based store. EE adaptation (hosted store adapters, PR-scoped guard runs,
@@ -481,9 +485,13 @@ PANE (like Contracts/Spec/Inferred) — never a full-width in-page list. Left pa
 scenario list grouped doc › section (every committed guard — generated AND hand-written,
 orphaned flagged, last-run outcome badge per row) with the search/doc/status filters on top.
 Group headers use the section's HUMAN heading text ("10.7 The Local Developer Loop"), NEVER
-the raw anchor slug ("10-7-the-local-developer-loop"), and must be visually bound to the rows
-they head (sticky-header idiom, indented rows) so a header is never ambiguous between the item
+the raw anchor slug ("10-7-the-anchor-slug"), and must be visually bound to the rows
+they head (sticky-header idiom) so a header is never ambiguous between the item
 above and below; slugs are engine identifiers, not UI copy (user feedback 2026-07-07).
+Rows sit FLUSH at the house `px-3` left edge — same anatomy and same edge as the Runs list
+rows — with hierarchy carried by header tint/typography, never by indentation: a
+doc→section→row indent stair (12→20→28px) makes every row read "shifted right" against the
+Runs tab (user reported twice; sixth review pass 2026-07-07).
 Main pane with NOTHING selected: the tab's overview — the recipe card (build/entry/env/short
 fingerprint/provenance/staleness; the preparation layer gets a card here, not its own tab) +
 the "last generate" strip (envelope · settled/unsettled · authored vs birthPassed · findings
@@ -530,8 +538,8 @@ and the main-pane contents change.
 **Dot policy (revised 2026-07-07 — user final): dots on ACTION BUTTONS ONLY.** Amber staleness
 dots live on the header action buttons (Scan/Generate/Run — hidden while the action runs),
 exactly like Verify/Contracts. NO rail-tab dots of ANY kind — the findings marker is removed
-too; the "findings never bury" rule is served by the Scenarios overview's "last generate"
-strip auto-expanding when findings/errors exist.
+too; the "findings never bury" rule is served by findings being first-class rows in the
+Scenarios left-panel list plus a findings tally among the overview's last-generate stats.
 
 **Engineering rule (user directive 2026-07-07): never fine-tune to the current case; no
 hardcoded specializations.** Guard has ONE driver today (cli) and more coming (api, web, tui,
@@ -556,8 +564,9 @@ section-bound artifacts that failed to become guards), each with a distinct "fin
 (red-tinted, clearly not a run outcome), included in the list counts, and filterable — the
 status filter gains a "finding" option so they can be isolated in one click. Selecting a
 finding opens a tab via the same preview/pin model: the tab shows the finding detail
-(failed step, expected vs actual, view-in-spec). The overview's findings section remains as
-the generation-story summary; the list is where they're WORKED.
+(failed step, expected vs actual, view-in-spec). The overview has NO findings section
+(sixth review pass 2026-07-07) — the left list is the ONLY findings surface; the overview
+carries only their COUNT among the last-generate stats.
 
 **Authoring errors are housekeeping, not a work list (user feedback 2026-07-07, fifth review
 pass).** Unlike findings (user decisions), authoring errors are self-healing: their sections
@@ -576,8 +585,16 @@ recurring pattern is an engine bug to fix (see speed-program item 6b), not user 
    last item tab lands on it.
 2. The "Last generate" content is NOT a boxed panel — the bordered panel container was the
    collapsible affordance's chrome and lost its purpose when the strip went flat. Render it
-   as plain content: a small heading, the summary line, findings/errors sections below —
-   no border box, no panel header.
+   as plain content: a small heading with the content flowing beneath — no border box, no
+   panel header.
+
+**Overview is numbers and stats (user feedback 2026-07-07, sixth review pass).** The
+Scenarios overview = recipe card + the last-generate story told in NUMBERS. The "Last
+generate" block renders the envelope (when · status) and then PROMINENT stat tallies —
+settled / unsettled sections, authored, birth-passed, findings, calls, cost — using the Runs
+overview's tally-chip idiom (semibold number + small label), never one muted truncated text
+line. Birth-finding rows are GONE from the overview (they live only in the left-panel list);
+the deferred-errors housekeeping line stays beneath the stats.
 
 **Runs view bugs (user feedback 2026-07-07, third review pass):**
 1. **Evidence state leaks across selections.** Toggling evidence open on a FAILED scenario,

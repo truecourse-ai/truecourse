@@ -174,9 +174,10 @@ describe('navigation registry — capability gating', () => {
         <VisibleSectionsProbe />
       </AppProvider>,
     );
-    // Guard is OSS (ungated) so it shows alongside analysis + drift; the
-    // capability-gated `governance` section stays hidden.
-    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,verification,guard$/);
+    // Guard is OSS (ungated) so it shows alongside analysis; the
+    // capability-gated `governance` section stays hidden, and `verification`
+    // (BL Drift) is registry-hidden — discontinued in favor of Guard.
+    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,guard$/);
   });
 
   it('enterprise edition with the capability shows the gated section', () => {
@@ -189,7 +190,24 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('sections')).toHaveTextContent(
-      /^codequality,verification,guard,governance$/,
+      /^codequality,guard,governance$/,
+    );
+  });
+
+  it('a hidden section is never listed, in any edition, but keeps resolving its tabs for URL-driven rendering', () => {
+    // BL Drift is hidden (discontinued in favor of Guard) yet must stay
+    // registered: the EE Pulls feed deep-links into ?section=verification.
+    expect(getSection('verification')?.hidden).toBe(true);
+    render(
+      <AppProvider initial={{ edition: 'community', capabilities: [] }}>
+        <VisibleSectionsProbe />
+        <VisibleTabsProbe section="verification" />
+      </AppProvider>,
+    );
+    expect(screen.getByTestId('sections')).not.toHaveTextContent('verification');
+    // Tabs still resolve (EE-gated pulls/driftanalytics/settings drop in OSS).
+    expect(screen.getByTestId('tabs')).toHaveTextContent(
+      /^verify,spec,contracts,inferred,runs$/,
     );
   });
 

@@ -251,20 +251,21 @@ function RepoPageInner() {
   const eeSectionTabs = dashboardSection === 'codequality' ? analysisTabs : eeTabs;
   useEffect(() => {
     if (!isEe) return;
-    // Keep EE in a coherent state: either Verification (drift) or Code Quality
-    // (analysis), each with its own curated tab set. Keyed off the EXPLICIT
-    // ?section param so the default (no param) lands on Verification — picking
-    // Code Quality writes ?section=codequality, which is allowed here.
+    // Keep EE in a coherent state: either Code Quality (analysis) or Verification
+    // (drift), each with its own curated tab set. Keyed off the EXPLICIT
+    // ?section param so the default (no param) lands on Code Quality —
+    // Verification is registry-hidden (discontinued in favor of Guard) and only
+    // renders via explicit deep links (the Pulls feed's ?section=verification).
     const url = new URL(window.location.href);
-    const isAnalysis = url.searchParams.get('section') === 'codequality';
-    const order = isAnalysis ? EE_ANALYSIS_TAB_ORDER : EE_REPO_TAB_ORDER;
+    const isVerification = url.searchParams.get('section') === 'verification';
+    const order = isVerification ? EE_REPO_TAB_ORDER : EE_ANALYSIS_TAB_ORDER;
     // Settings is common to both lenses but repo-wide — hidden while viewing a PR.
     const settingsInPr = prNumber != null && leftTab === 'settings';
-    const sectionExplicit = isAnalysis || url.searchParams.get('section') === 'verification';
+    const sectionExplicit = isVerification || url.searchParams.get('section') === 'codequality';
     if (sectionExplicit && leftTab && order.includes(leftTab) && !settingsInPr) return;
-    if (!isAnalysis) url.searchParams.set('section', 'verification');
+    if (!isVerification) url.searchParams.set('section', 'codequality');
     const t = url.searchParams.get('tab');
-    const defaultTab = isAnalysis ? 'analytics' : 'driftanalytics';
+    const defaultTab = isVerification ? 'driftanalytics' : 'analytics';
     if (!t || !order.includes(t) || (prNumber != null && t === 'settings'))
       url.searchParams.set('tab', defaultTab);
     navigate(url.pathname + url.search, { replace: true });

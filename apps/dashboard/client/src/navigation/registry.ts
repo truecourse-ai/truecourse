@@ -81,6 +81,12 @@ export interface SectionDescriptor {
   tabs: TabDescriptor[];
   /** Gate the entire section on this capability. Omit for OSS sections. */
   requiredCapability?: Capability;
+  /**
+   * Hidden sections stay registered — their tabs resolve and explicit
+   * `?section=` URLs still render them — but they are omitted from the
+   * section switcher in every edition.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -118,6 +124,10 @@ export const SECTIONS: SectionDescriptor[] = [
     label: 'BL Drift',
     description: 'Spec consolidation, contracts, verification',
     icon: ShieldCheck,
+    // The contracts → verify pipeline is discontinued in favor of Guard.
+    // Hidden from the switcher (OSS and EE) but still URL-reachable —
+    // the EE Pulls feed deep-links into it — until the code is removed.
+    hidden: true,
     defaultTab: 'verify',
     tabs: [
       { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
@@ -235,7 +245,9 @@ export function useVisibleSections(): SectionDescriptor[] {
   const { capabilities } = useCapabilityContext();
   return useMemo(
     () =>
-      SECTIONS.filter((s) => isEnabled(s.requiredCapability, capabilities)).map(
+      SECTIONS.filter(
+        (s) => !s.hidden && isEnabled(s.requiredCapability, capabilities),
+      ).map(
         (s) => ({
           ...s,
           tabs: s.tabs.filter((t) =>

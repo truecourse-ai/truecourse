@@ -6,7 +6,7 @@
  */
 
 import { Network, ShieldCheck } from 'lucide-react';
-import type { DashboardSection, NavIcon } from '@/navigation/registry';
+import { getSection, type DashboardSection, type NavIcon } from '@/navigation/registry';
 
 const SEGMENTS: { id: DashboardSection; label: string; icon: NavIcon }[] = [
   { id: 'verification', label: 'Verification', icon: ShieldCheck },
@@ -20,13 +20,20 @@ export function EeSectionSwitch({
   section: DashboardSection;
   onSectionChange: (next: DashboardSection) => void;
 }) {
+  // Registry-hidden lenses (Verification — discontinued in favor of Guard) are
+  // offered only while active (a PR deep link lands there and needs a way out).
+  const segments = SEGMENTS.filter(
+    (seg) => !getSection(seg.id)?.hidden || seg.id === section,
+  );
+  // A single lens needs no switch.
+  if (segments.length < 2) return null;
   return (
     <div
       role="tablist"
       aria-label="Repository view"
       className="inline-flex items-center rounded-md border border-border bg-muted/60 p-0.5"
     >
-      {SEGMENTS.map((seg) => {
+      {segments.map((seg) => {
         const Icon = seg.icon;
         const active = section === seg.id;
         return (
