@@ -14,6 +14,14 @@ export const globalThisUsageVisitor: CodeRuleVisitor = {
       if (
         t === 'function_declaration' ||
         t === 'function' ||
+        // Modern tree-sitter-javascript names a `function () {}` expression
+        // `function_expression` (only the legacy grammar used bare `function`).
+        // Without it, `this` inside any function-expression callback / IIFE /
+        // prototype-assigned method walks up to program scope and is wrongly
+        // reported as a global reference.
+        t === 'function_expression' ||
+        t === 'generator_function' ||
+        t === 'generator_function_declaration' ||
         t === 'method_definition' ||
         t === 'class_declaration' ||
         t === 'class'

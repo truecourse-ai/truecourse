@@ -72,37 +72,40 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
 
     const methodName = property.text
 
-    // Walk the enclosing class body to figure out whether `methodName` refers
-    // to an actual method (callable, has `this` binding) or just a data field.
-    // Fields whose value/type isn't a function never had `this` bound to
-    // begin with, so referencing them as values is not an unbound-method risk.
+    // Only a reference to an actual method loses its `this` when detached, so
+    // require positive evidence: `methodName` must resolve to a `method_definition`
+    // in an enclosing class body. Without a class context (plain functions,
+    // prototype-style objects) `this.<name>` is far more likely a data-property
+    // read — e.g. `widget(this.checked)`, `closest(this.element)` — than a
+    // method reference, and flagging those is the dominant false positive.
     let classBody: SyntaxNode | null = node.parent
     while (classBody && classBody.type !== 'class_body') classBody = classBody.parent
-    if (classBody) {
-      for (const member of classBody.namedChildren) {
-        if (member.type === 'public_field_definition' || member.type === 'field_definition') {
-          // Private fields use `#name` and parse as `private_property_identifier`,
-          // not `property_identifier`. Include both so `this.#x` references can
-          // be resolved against their declaring field.
-          const nameNode = member.children.find(
-            (c) => c.type === 'property_identifier' || c.type === 'private_property_identifier',
-          )
-          if (nameNode?.text !== methodName) continue
-          const value = member.childForFieldName('value')
-          // Arrow / function field — bound by construction.
-          if (value?.type === 'arrow_function' || value?.type === 'function_expression') return null
-          // Field with any other initializer — data, not a method.
-          if (value) return null
-          // No initializer: look at the type annotation. Anything that isn't
-          // a function type means it's a data field assigned later.
-          const typeAnnot = member.namedChildren.find((c) => c.type === 'type_annotation')
-          const typeChild = typeAnnot?.namedChildren[0]
-          if (typeChild && typeChild.type !== 'function_type' && typeChild.type !== 'constructor_type') {
-            return null
-          }
-        }
+    if (!classBody) return null
+
+    let resolvesToMethod = false
+    for (const member of classBody.namedChildren) {
+      if (member.type === 'method_definition') {
+        const nameNode = member.childForFieldName('name')
+        if (nameNode?.text !== methodName) continue
+        // A getter/setter is accessed as a value, not invoked as a callback —
+        // reading `this.x` runs the accessor, it does not detach a method.
+        const isAccessor = member.children.some(
+          (c) => (c.text === 'get' || c.text === 'set') && c.type !== 'property_identifier',
+        )
+        resolvesToMethod = !isAccessor
+        break
+      }
+      if (member.type === 'public_field_definition' || member.type === 'field_definition') {
+        // A same-named field is data (or a bound arrow/function field) — never an
+        // unbound-method risk. Private fields use `#name`, which parses as
+        // `private_property_identifier`; include both.
+        const nameNode = member.children.find(
+          (c) => c.type === 'property_identifier' || c.type === 'private_property_identifier',
+        )
+        if (nameNode?.text === methodName) return null
       }
     }
+    if (!resolvesToMethod) return null
 
     return makeViolation(
       this.ruleKey,
