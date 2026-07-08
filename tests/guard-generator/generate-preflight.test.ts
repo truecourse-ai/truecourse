@@ -60,6 +60,38 @@ describe('generateGuards — entry pre-flight', () => {
     expect((manifest?.sections ?? []).some((s) => s.anchor === 'version')).toBe(false)
   })
 
+  it('an entry naming a NONEXISTENT script → ONE entry-preflight error, ZERO findings (the live cli.js/cli.mjs failure)', async () => {
+    // The exact production case (2026-07-08): recipe entry `dist/cli.js`, build
+    // produces `dist/cli.mjs`. Pre-fix, birth ran and produced 27 findings; the
+    // per-probe sandbox path in node's crash output defeated the invariance check.
+    const r = repo()
+    fs.mkdirSync(path.join(r, 'dist'))
+    fs.writeFileSync(path.join(r, 'dist', 'cli.mjs'), 'export {}\n')
+    writeRecipe(r, { build: 'true', entry: ['node', 'dist/cli.js'] })
+    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.entryPreflight).toBeDefined()
+    expect(res.entryPreflight!.entry).toBe('node dist/cli.js')
+    expect(res.entryPreflight!.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/) // real node stderr
+    expect(res.entryPreflight!.stderr).toContain('entry file not found: dist/cli.js')
+    expect(res.entryPreflight!.stderr).toContain('dist/ contains: cli.mjs') // the one-glance mixup hint
+
+    // ONE loud error; zero findings; nothing written; section unsettled.
+    expect(res.errors).toHaveLength(1)
+    expect(res.birthFindings).toEqual([])
+    expect(res.written).toEqual([])
+    const manifest = readManifest(r)
+    expect((manifest?.sections ?? []).some((s) => s.anchor === 'version')).toBe(false)
+  })
+
   it('a healthy entry (usage-on-no-args) generates normally — no entryPreflight', async () => {
     const r = repo()
     writeRecipe(r) // default fixture entry; relkit exits 64 on no-args but reacts to argv
@@ -77,5 +109,31 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
     expect(res.errors).toEqual([])
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.scenarioIds).toEqual(['version.1'])
+  })
+})
+
+describe('recipe discovery — post-build entry existence check', () => {
+  it('a discovered recipe whose entry file does not exist after the build fails verification with the sibling listing', async () => {
+    // No recipe.json → discovery runs. The proposal names dist/cli.js while the
+    // (no-op) build leaves only dist/cli.mjs — verification must fail LOUDLY with
+    // what WAS found nearby, never write recipe.json, and never reach birth.
+    const r = repo()
+    fs.mkdirSync(path.join(r, 'dist'))
+    fs.writeFileSync(path.join(r, 'dist', 'cli.mjs'), 'export {}\n')
+    writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
+      extractRunner: extractBy({}),
+      generateRunner: authorBy({}),
+    })
+
+    expect(res.status).toBe('recipe-failed')
+    expect(res.reason).toContain('entry file not found: dist/cli.js')
+    expect(res.reason).toContain('dist/ contains: cli.mjs') // the one-glance mixup hint
+    expect(res.reason).toContain('`true`') // names the build that ran
+    expect(fs.existsSync(path.join(r, '.truecourse', 'scenarios', 'recipe.json'))).toBe(false)
   })
 })

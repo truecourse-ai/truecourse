@@ -43,6 +43,40 @@ describe('runGuard — entry pre-flight', () => {
     expect(fs.existsSync(guardRunsDir(r))).toBe(false)
   })
 
+  it('an entry naming a NONEXISTENT script (cli.js vs cli.mjs mixup) fails preflight with the sibling listing', async () => {
+    // The live production failure: recipe entry `dist/cli.js`, build produces
+    // `dist/cli.mjs`. Node crashes MODULE_NOT_FOUND on every invocation; the crash
+    // output embeds the sandbox cwd, which per-probe sandboxes turned into a fake
+    // "reacted to argv" difference — the false-ALIVE this test pins down.
+    const r = repo()
+    fs.mkdirSync(path.join(r, 'dist'))
+    fs.writeFileSync(path.join(r, 'dist', 'cli.mjs'), 'export {}\n')
+    writeRecipe(r, { build: 'true', entry: ['node', 'dist/cli.js'] })
+    writeScenario(r, 'v.yaml', scenario({ id: 'v', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+
+    const res = await runGuard({ repoRoot: r })
+
+    expect(res.status).toBe('entry-preflight-failed')
+    if (res.status !== 'entry-preflight-failed') return
+    expect(res.preflight.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/) // real node stderr
+    expect(res.preflight.stderr).toContain('entry file not found: dist/cli.js')
+    expect(res.preflight.stderr).toContain('dist/ contains: cli.mjs') // the one-glance hint
+    expect(fs.existsSync(guardLatestPath(r))).toBe(false)
+  })
+
+  it('an entry naming a missing ABSOLUTE script fails preflight', async () => {
+    const r = repo()
+    const abs = path.join(r, 'nowhere', 'cli.js') // never created
+    writeRecipe(r, { build: 'true', entry: ['node', abs] })
+    writeScenario(r, 'v.yaml', scenario({ id: 'v', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+
+    const res = await runGuard({ repoRoot: r })
+    expect(res.status).toBe('entry-preflight-failed')
+    if (res.status !== 'entry-preflight-failed') return
+    expect(res.preflight.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/)
+    expect(res.preflight.stderr).toContain('entry file not found')
+  })
+
   it('a healthy entry that exits nonzero with usage on no-args passes preflight and runs scenarios', async () => {
     // relkit exits 64 on no-args AND on `--help`, but with DIFFERENT stderr — so the
     // preflight (which never string-matches) sees it react to argv and lets it run.

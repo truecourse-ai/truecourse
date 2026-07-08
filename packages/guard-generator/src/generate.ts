@@ -458,7 +458,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const build = await buildPromise
       if (!build.ok) return null
       resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
-      return preflightEntry({ resolvedEntry: resolvedEntryMemo, displayEntry: recipe.entry, recipeEnv: recipe.env })
+      return preflightEntry({ resolvedEntry: resolvedEntryMemo, displayEntry: recipe.entry, recipeEnv: recipe.env, repoRoot })
     })()
     return entryPreflightMemo
   }

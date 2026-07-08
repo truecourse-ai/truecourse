@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import {
   preflightEntry,
   entryStarts,
+  missingEntryScript,
+  formatMissingEntryScript,
   type EntryProbe,
   type EntryProbeExecutor,
   type StepCapture,
@@ -104,5 +109,103 @@ describe('preflightEntry', () => {
     })
     expect(result.ok).toBe(true)
     expect(result.stderr).toBe('')
+  })
+})
+
+// The live false-ALIVE (2026-07-08): a recipe entry naming a script that does not
+// exist. Node's crash embeds the resolved script path — with per-probe sandboxes the
+// harness's own temp path made two identical failures differ, judging the dead entry
+// ALIVE. These run the REAL executor (real node, real shared sandbox), no stubs.
+describe('preflightEntry — missing entry script (real executor)', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
+  })
+  function tempRepo(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-preflight-'))
+    dirs.push(dir)
+    return dir
+  }
+
+  it('a missing RELATIVE script path is DEAD with the real node stderr (the exact production repro)', async () => {
+    // `dist/cli.js` does not exist anywhere — resolveEntry leaves it relative, so
+    // node resolves it against the (shared) sandbox cwd and crashes identically.
+    const result = await preflightEntry({
+      resolvedEntry: [process.execPath, 'dist/cli.js'],
+      displayEntry: ['node', 'dist/cli.js'],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/)
+  })
+
+  it('a missing ABSOLUTE script path is DEAD with the real node stderr', async () => {
+    const abs = path.join(tempRepo(), 'nowhere', 'cli.js') // parent dir never created
+    const result = await preflightEntry({
+      resolvedEntry: [process.execPath, abs],
+      displayEntry: ['node', abs],
+    })
+    expect(result.ok).toBe(false)
+    expect(result.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/)
+  })
+
+  it('with repoRoot, the dead verdict appends the missing-file diagnostic listing the siblings', async () => {
+    // The production mixup: the entry names dist/cli.js, the build produced dist/cli.mjs.
+    const repo = tempRepo()
+    fs.mkdirSync(path.join(repo, 'dist'))
+    fs.writeFileSync(path.join(repo, 'dist', 'cli.mjs'), 'export {}\n')
+    const result = await preflightEntry({
+      resolvedEntry: [process.execPath, 'dist/cli.js'],
+      displayEntry: ['node', 'dist/cli.js'],
+      repoRoot: repo,
+    })
+    expect(result.ok).toBe(false)
+    expect(result.stderr).toMatch(/Cannot find module|MODULE_NOT_FOUND/) // the real startup stderr, kept
+    expect(result.stderr).toContain('entry file not found: dist/cli.js')
+    expect(result.stderr).toContain('dist/ contains: cli.mjs') // the one-glance mixup hint
+  })
+})
+
+describe('missingEntryScript', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true })
+  })
+  function tempRepo(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-mes-'))
+    dirs.push(dir)
+    return dir
+  }
+
+  it('reports the first missing path-bearing arg with its sorted siblings', () => {
+    const repo = tempRepo()
+    fs.mkdirSync(path.join(repo, 'dist'))
+    fs.writeFileSync(path.join(repo, 'dist', 'cli.mjs'), '')
+    fs.writeFileSync(path.join(repo, 'dist', 'chunk.mjs'), '')
+    const m = missingEntryScript(repo, ['node', 'dist/cli.js'])!
+    expect(m).toMatchObject({ arg: 'dist/cli.js', parentDir: 'dist', siblings: ['chunk.mjs', 'cli.mjs'] })
+    expect(formatMissingEntryScript(m)).toContain('dist/ contains: chunk.mjs, cli.mjs')
+  })
+
+  it('returns null when every path-bearing arg exists', () => {
+    const repo = tempRepo()
+    fs.mkdirSync(path.join(repo, 'dist'))
+    fs.writeFileSync(path.join(repo, 'dist', 'cli.js'), '')
+    expect(missingEntryScript(repo, ['node', 'dist/cli.js'])).toBeNull()
+  })
+
+  it('ignores bare commands, flags, and non-path args', () => {
+    const repo = tempRepo()
+    expect(missingEntryScript(repo, ['node', '--experimental-vm-modules', '-m', 'pkg'])).toBeNull()
+    expect(missingEntryScript(repo, ['python3'])).toBeNull()
+    // A flag whose VALUE looks path-like is still a flag — never checked.
+    expect(missingEntryScript(repo, ['deno', '--allow-read=/etc'])).toBeNull()
+  })
+
+  it('flags a path-anchored command (arg 0) that is missing', () => {
+    const repo = tempRepo()
+    const m = missingEntryScript(repo, ['./bin/tool'])!
+    expect(m.arg).toBe('./bin/tool')
+    expect(m.siblings).toBeNull() // bin/ was never created
+    expect(formatMissingEntryScript(m)).toContain('does not exist')
   })
 })

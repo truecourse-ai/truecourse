@@ -18,6 +18,8 @@ import {
   computeRecipeFingerprint,
   recipePath,
   executeStep,
+  missingEntryScript,
+  formatMissingEntryScript,
   type Recipe,
 } from '@truecourse/guard-runner'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
@@ -80,6 +82,19 @@ export async function discoverRecipe(
     return {
       status: 'verify-failed',
       reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
+      proposal,
+    }
+  }
+
+  // Deterministic post-build check: the proposed entry's script file must EXIST
+  // after the build ran. A file-existence check, no output parsing — it catches the
+  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
+  // listing what WAS found next to the missing path so the mixup is one glance.
+  const missing = missingEntryScript(repoRoot, proposal.entry)
+  if (missing) {
+    return {
+      status: 'verify-failed',
+      reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}`,
       proposal,
     }
   }

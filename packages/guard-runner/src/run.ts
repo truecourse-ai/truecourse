@@ -144,6 +144,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       resolvedEntry,
       displayEntry: loaded.recipe.entry,
       recipeEnv: loaded.recipe.env,
+      repoRoot,
     })
     if (!preflight.ok) {
       return { status: 'entry-preflight-failed', preflight, buildCommand: loaded.recipe.build, loadErrors }

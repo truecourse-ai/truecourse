@@ -42,6 +42,8 @@ export {
   defaultEntryProbeExecutor,
   entryPreflightHeadline,
   formatEntryPreflightError,
+  missingEntryScript,
+  formatMissingEntryScript,
   ENTRY_PROBE_ARGVS,
   ENTRY_PREFLIGHT_TIMEOUT_MS,
 } from './preflight.js'
@@ -49,6 +51,8 @@ export type {
   EntryPreflightResult,
   EntryProbe,
   EntryProbeExecutor,
+  EntryProbeWorld,
+  MissingEntryScript,
   PreflightEntryOptions,
 } from './preflight.js'
 

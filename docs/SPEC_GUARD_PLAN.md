@@ -410,8 +410,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    matching baked into the engine; the same probe result short-circuits birth AND `guard
    run`). Zero findings from a dead binary.
    STATUS: BUILT 2026-07-08 — judgment is ARGUMENT-INVARIANCE (no string matching):
-   `preflightEntry` probes the built entry with two distinct argvs (`[]` and `--help`) in
-   fresh sandboxes and judges it DEAD only when BOTH probes fail AND their
+   `preflightEntry` probes the built entry with two distinct argvs (`[]` and `--help`) and
+   judges it DEAD only when BOTH probes fail AND their
    (exit/signal/spawnError/stdout/stderr) are byte-identical — a crash before argv parsing
    is invariant under its arguments, whereas a healthy CLI reacts (a clean exit, or
    differing failures, e.g. usage-on-no-args vs `--help`). `guard run` (run.ts,
@@ -420,6 +420,16 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    ONE error + an `entryPreflight` report field (full untruncated stderr + the recipe
    build command as the rebuild hint), sections left unsettled. CLI + dashboard render it
    via the existing run/generate error surfaces.
+   FALSE-ALIVE FIX 2026-07-08 (live: entry `dist/cli.js` vs built `dist/cli.mjs` sailed
+   through): per-probe sandboxes let the harness's own temp path — embedded in node's
+   "Cannot find module <cwd>/…" crash output — differ between probes, defeating the
+   invariance check. Both probes now run sequentially in ONE shared sandbox (argv is the
+   only varying input; the executor seam receives the shared world so it can't recreate
+   the bug). Plus a deterministic entry-file existence check (`missingEntryScript`, pure
+   fs, no output parsing): recipe DISCOVERY fails verification post-build when the
+   proposed entry file doesn't exist (reason lists the parent dir's contents so a
+   cli.js/cli.mjs mixup is one glance), and the preflight error appends the same
+   diagnostic on a dead verdict when `repoRoot` is known.
 15. **Recipes are user-editable, documented (user decision 2026-07-08).** `recipe.json` is
    discovered once (LLM, proposal-only) and an EXISTING file always wins — already true in
    the engine (recipe-discovery skips when present). Made official: README's guard Setup
