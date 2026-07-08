@@ -1,5 +1,8 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isCommentedOutCode, lineCommentRunInner } from '../_shared/commented-out-code.js'
+
+const isLineComment = (t: string): boolean => t.startsWith('#')
 
 export const pythonCommentedOutCodeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/commented-out-code',
@@ -7,20 +10,14 @@ export const pythonCommentedOutCodeVisitor: CodeRuleVisitor = {
   nodeTypes: ['comment'],
   visit(node, filePath, sourceCode) {
     const text = node.text
-    if (!text.startsWith('#')) return null
+    if (!isLineComment(text)) return null
 
-    const inner = text.slice(1).trim()
-    if (inner.length < 10) return null
+    // Group the contiguous `#` run so a multi-line block is judged together.
+    const inner = lineCommentRunInner(node, { isLineComment, strip: (t) => t.replace(/^#+/, '') })
+    if (inner === null) return null
+    if (inner.trim().length < 10) return null
 
-    const codePatterns = [
-      /\b(def|class|import|from|return|if|for|while|try|except|with|raise|print)\b/,
-      /[;:]\s*$/,
-      /\w+\(.*\)/,
-      /=\s*\w/,
-    ]
-
-    const matchCount = codePatterns.filter((p) => p.test(inner)).length
-    if (matchCount >= 2) {
+    if (isCommentedOutCode(inner, { colonTerminates: true })) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Commented-out code',

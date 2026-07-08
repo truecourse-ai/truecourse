@@ -1,6 +1,7 @@
 namespace ApiGateway.Violations.Bugs;
 
-// VIOLATION: code-quality/deterministic/abstract-class-without-abstract-members
+// A legitimate abstract base: the `virtual` hook is a real extension point, so
+// abstract-class-without-abstract-members must not fire here.
 internal abstract class RouteHandlerBase
 {
     internal virtual void Configure()

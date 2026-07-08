@@ -9,11 +9,17 @@ import { getCSharpAttributeNames, hasCSharpModifier } from '../../../_shared/csh
  * when the field is missing from the request — "under-posting" — instead of
  * surfacing a validation error. Make it nullable (`int?`) or `required`.
  *
- * Scoped to model-shaped types by name suffix (Request/Dto/Model/Input/Form/
- * Command/ViewModel/Query) so plain domain entities and config objects, where a
+ * Scoped to request/input-shaped types by name suffix (Request/Input/Form/
+ * Command/Query/Payload) so plain domain entities and config objects, where a
  * defaulted value type is perfectly fine, are not flagged.
+ *
+ * The ambiguous `Dto`/`Model`/`ViewModel` suffixes are deliberately excluded:
+ * they overwhelmingly name server-produced *output/response* shapes (audit DTOs,
+ * projection DTOs, error view models) whose value types are set in code and are
+ * never request-bound, so they cannot under-post. Only names that signal a
+ * bound *input* carry the under-posting risk.
  */
-const MODEL_NAME_SUFFIX = /(Request|Dto|DTO|Model|ViewModel|Input|Form|Command|Query|Payload)$/
+const MODEL_NAME_SUFFIX = /(Request|Input|Form|Command|Query|Payload)$/
 
 // Value types whose default (0/false) is a genuine, valid value and so does not
 // silently mask a missing field worth flagging.
