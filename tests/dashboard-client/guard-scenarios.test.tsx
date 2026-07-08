@@ -244,8 +244,9 @@ describe('GuardScenariosPanel — grouped inventory + flags', () => {
     renderHarness();
     await screen.findByText('alpha claim');
     const list = inventoryList();
-    // Doc group headers…
-    expect(within(list).getByText('auth.md')).toBeInTheDocument();
+    // Doc group headers… (auth.md heads a group in BOTH the findings block and the
+    // scenarios block, so it renders more than once — hence getAllByText.)
+    expect(within(list).getAllByText('auth.md').length).toBeGreaterThan(0);
     expect(within(list).getByText('other.md')).toBeInTheDocument();
     // Generated fail, hand-written pass, orphaned, and a never-run (neutral guarded).
     expect(within(list).getByText('Failing')).toBeInTheDocument();
@@ -314,9 +315,137 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
     // The finding row: its title + the distinct red chip (lowercase DOM text).
     expect(within(list).getByText('login rate limits')).toBeInTheDocument();
     expect(within(list).getByText('finding')).toBeInTheDocument();
-    // Its findings-only section still gets a group header — no scenario binds this
-    // anchor, so the heading falls back to the slug leaf.
+    // Its findings-only section still gets a group header. This finding carries no
+    // server-joined headingText and no scenario binds its anchor, so the header
+    // falls back to the slug leaf.
     expect(within(list).getByText('rate-limiting')).toBeInTheDocument();
+  });
+
+  it("a finding's server-joined headingText renders as its section header, never the slug", async () => {
+    // A finding's section is unsettled, so no committed scenario donates the
+    // heading — the report enriches it server-side and the client prefers it.
+    const withHeading: GuardGenerateReport = {
+      ...REPORT,
+      birthFindings: [{ ...REPORT.birthFindings[0], headingText: 'Login Rate Limiting' }],
+    };
+    stubFetch(INVENTORY, LATEST, withHeading);
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    expect(within(list).getByText('Login Rate Limiting')).toBeInTheDocument();
+    expect(within(list).queryByText('rate-limiting')).not.toBeInTheDocument();
+  });
+
+  it('floats the findings block to the TOP — a labeled "Findings" header before the scenarios', async () => {
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    // A red-tinted "Findings" block header carries the visible finding count, and a
+    // neutral "Scenarios" header labels the block below.
+    const findingsHeader = within(list).getByText('Findings');
+    expect(findingsHeader.closest('div')).toHaveTextContent('1');
+    expect(within(list).getByText('Scenarios')).toBeInTheDocument();
+    // The finding row is the FIRST listitem, and it precedes the first scenario row.
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('login rate limits');
+    const finding = within(list).getByText('login rate limits');
+    const scenario = within(list).getByText('alpha claim');
+    expect(finding.compareDocumentPosition(scenario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('collapses the Findings block header, hiding its rows while scenarios stay', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    const findingsBtn = within(list).getByText('Findings').closest('button') as HTMLElement;
+    expect(findingsBtn).toHaveAttribute('aria-expanded', 'true');
+    // Collapse → findings rows disappear, scenario rows stay.
+    await user.click(findingsBtn);
+    expect(findingsBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(within(list).queryByText('login rate limits')).not.toBeInTheDocument();
+    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
+    // Re-open → findings rows return.
+    await user.click(findingsBtn);
+    expect(findingsBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
+  });
+
+  it('collapses the Scenarios block header, hiding its rows while findings stay', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    const scenariosBtn = within(list).getByText('Scenarios').closest('button') as HTMLElement;
+    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'true');
+    await user.click(scenariosBtn);
+    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
+    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
+    await user.click(scenariosBtn);
+    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
+  });
+
+  it('anchors each block header on a SOLID bg-card sticky wrapper (no see-through tint)', async () => {
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    const findingsWrapper = within(list).getByText('Findings').closest('button')?.parentElement as HTMLElement;
+    expect(findingsWrapper).toHaveClass('sticky', 'bg-card');
+    const scenariosWrapper = within(list).getByText('Scenarios').closest('button')?.parentElement as HTMLElement;
+    expect(scenariosWrapper).toHaveClass('sticky', 'bg-card');
+  });
+
+  it('collapses a doc group via its header — rows hide, aria-expanded flips, click restores', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    // auth.md heads a doc group in BOTH blocks (findings first) — [1] is the
+    // scenarios block's.
+    const authDocBtn = within(list).getAllByText('auth.md')[1].closest('button') as HTMLElement;
+    expect(authDocBtn).toHaveAttribute('aria-expanded', 'true');
+    await user.click(authDocBtn);
+    expect(authDocBtn).toHaveAttribute('aria-expanded', 'false');
+    // Its section headers + rows hide; the sibling doc group stays.
+    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
+    expect(within(list).queryByText('hand rolled')).not.toBeInTheDocument();
+    expect(within(list).queryByText('10.7 The Local Developer Loop')).not.toBeInTheDocument();
+    expect(within(list).getByText('orphan claim')).toBeInTheDocument();
+    await user.click(authDocBtn);
+    expect(authDocBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
+  });
+
+  it('doc collapse is independent per block — collapsing scenarios-block auth.md leaves the findings-block auth.md group open', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    const list = inventoryList();
+    const [findingsAuthBtn, scenariosAuthBtn] = within(list)
+      .getAllByText('auth.md')
+      .map((el) => el.closest('button') as HTMLElement);
+    await user.click(scenariosAuthBtn);
+    expect(scenariosAuthBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
+    // The findings block's same-doc group is untouched — open, row still visible.
+    expect(findingsAuthBtn).toHaveAttribute('aria-expanded', 'true');
+    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
+  });
+
+  it('renders neither block header when no findings are visible', async () => {
+    const user = userEvent.setup();
+    renderHarness();
+    await panelRowAsync('login rate limits');
+    // Isolate a scenario status → the finding drops out of the visible set.
+    await user.selectOptions(screen.getByLabelText('Filter by status'), 'fail');
+    const list = inventoryList();
+    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
+    expect(within(list).queryByText('login rate limits')).not.toBeInTheDocument();
+    // With no visible findings the list reads as one plain doc › section inventory —
+    // neither the "Findings" nor the "Scenarios" block label renders.
+    expect(within(list).queryByText('Findings')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Scenarios')).not.toBeInTheDocument();
   });
 
   it('counts scenarios and findings separately in the count line', async () => {
@@ -392,6 +521,33 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
   });
 });
 
+describe('buildFindingRows — section-heading preference', () => {
+  // A committed scenario donates a DIFFERENT heading for the same doc/anchor so the
+  // preference order is observable.
+  const scenarioRows = [
+    { id: 'h1', title: 'h1', doc: 'docs/auth.md', anchor: 'auth/beta', headingText: 'Client Resolver Heading', file: 'h1.yaml', handWritten: true, lastResult: null },
+  ] as const;
+  const reportWith = (headingText?: string): GuardGenerateReport => ({
+    ...REPORT,
+    birthFindings: [{ doc: 'docs/auth.md', anchor: 'auth/beta', title: 'f', step: 1, expected: 'x', actual: 'y', ...(headingText ? { headingText } : {}) }],
+  });
+
+  it('prefers the report server-joined headingText over the client resolver', () => {
+    const [row] = buildFindingRows(reportWith('Server Joined Heading'), scenarioRows);
+    expect(row.headingText).toBe('Server Joined Heading');
+  });
+
+  it('falls back to the client resolver when the report carries no headingText', () => {
+    const [row] = buildFindingRows(reportWith(), scenarioRows);
+    expect(row.headingText).toBe('Client Resolver Heading');
+  });
+
+  it('leaves headingText undefined when neither the report nor a scenario joins', () => {
+    const [row] = buildFindingRows(reportWith(), []);
+    expect(row.headingText).toBeUndefined();
+  });
+});
+
 describe('Guard scenario tabs — preview / replace / pin / close', () => {
   beforeEach(() => stubFetch());
 
@@ -457,13 +613,16 @@ describe('Guard scenario tabs — permanent Overview tab', () => {
     const user = userEvent.setup();
     renderHarness();
     await screen.findByText('Recipe');
+    // No item tabs → no strip and no Overview chip; the overview content is the pane.
+    expect(screen.queryByText('Overview')).toBeNull();
+    // Open a scenario: the strip appears with Overview FIRST — non-italic, never a
+    // close affordance — sitting before the item tab.
+    await user.click(panelRow('alpha claim'));
     expect(overviewTab()).toBeInTheDocument();
     expect(overviewTab()).not.toHaveClass('italic');
     expect(overviewTab()).toHaveClass('font-medium');
-    // Open a scenario: the Overview stays, still with no close affordance, and it
-    // sits before the item tab in the strip.
-    await user.click(panelRow('alpha claim'));
     expect(screen.queryByLabelText('Close Overview')).toBeNull();
+    expect(tabLabel('a1', 'alpha claim')).toBeInTheDocument();
     expect(
       overviewTab().compareDocumentPosition(closeBtn('a1')) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -473,7 +632,8 @@ describe('Guard scenario tabs — permanent Overview tab', () => {
     const user = userEvent.setup();
     renderHarness();
     await screen.findByText('Recipe');
-    expect(overviewTab().parentElement).toHaveClass('bg-background');
+    // No item tabs yet → no strip at all.
+    expect(screen.queryByText('Overview')).toBeNull();
 
     await user.dblClick(panelRow('alpha claim'));
     expect(gscn()).toBe('a1');
@@ -489,10 +649,12 @@ describe('Guard scenario tabs — permanent Overview tab', () => {
     renderHarness();
     await user.click(await screen.findByText('alpha claim'));
     expect(gscn()).toBe('a1');
+    expect(overviewTab()).toBeInTheDocument();
     await user.click(closeBtn('a1'));
     expect(gscn()).toBe('∅');
-    expect(overviewTab().parentElement).toHaveClass('bg-background');
+    // Last item tab closed → overview content returns AND the strip/chip is gone.
     expect(await screen.findByText('Recipe')).toBeInTheDocument();
+    expect(screen.queryByText('Overview')).toBeNull();
   });
 });
 

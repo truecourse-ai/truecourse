@@ -567,6 +567,28 @@ finding opens a tab via the same preview/pin model: the tab shows the finding de
 (failed step, expected vs actual, view-in-spec). The overview has NO findings section
 (sixth review pass 2026-07-07) — the left list is the ONLY findings surface; the overview
 carries only their COUNT among the last-generate stats.
+Findings order FIRST (user decision 2026-07-07, seventh review pass): the Runs view's
+bad-news-first idiom applied to the inventory — findings form their own labeled block at the
+TOP of the list (grouped doc › section inside it), with the committed scenarios following
+below in spec order. Grouping headers follow the Coverage tab's Documents header idiom
+(SpecCorpusView `Section`): COLLAPSIBLE — chevron, aria-expanded, default open — and
+sticky-SOLID: a bg-card wrapper with any tint layered inside it, never a bare alpha tint
+that lets scrolling rows show through (user caught both inconsistencies same day). The rule
+is general: BLOCK headers (Findings/Scenarios) and DOC headers both collapse — any header
+that can hide dozens of rows earns a toggle. SECTION headers stay static BY DESIGN: sections
+hold ~1–3 rows, and a chevron per near-empty group is noise, not control.
+Findings' section headings join SERVER-SIDE from the live doc's section index (the same
+read-time `headingTextIndex` join scenarios get in `listGuardScenarios`): a finding's
+section is unsettled by definition, so it NEVER has a committed scenario to donate
+`headingText` client-side — without the server join every findings group header degrades to
+a slug, violating "slugs are never UI copy". The report read for the dashboard enriches
+each birth finding with optional `headingText`; the client prefers it over any resolver
+fallback. A finding is the one row asking for a
+user decision; it must never sit below a page of green rows. No resolve/dismiss action
+exists BY DESIGN: a finding's section is unsettled in the engine (files + manifest entry
+dropped), so the resolution loop is fix the doc or the code in the repo, then Generate —
+which re-attempts exactly the unsettled sections. The dashboard's per-finding affordances
+are the detail (expected vs actual) and view-in-spec; Generate is the closing action.
 
 **Authoring errors are housekeeping, not a work list (user feedback 2026-07-07, fifth review
 pass).** Unlike findings (user decisions), authoring errors are self-healing: their sections
@@ -578,11 +600,13 @@ linking view-in-spec. No pretend to-do list; the pattern grouping exists for dia
 recurring pattern is an engine bug to fix (see speed-program item 6b), not user work.
 
 **Pinned Overview tab + flat strip (user feedback 2026-07-07, fourth review pass):**
-1. Both Scenarios and Runs get a PERMANENT "Overview" tab as the first tab in the strip —
-   always present, never closable, showing exactly the no-selection content (Scenarios:
-   recipe + last-generate; Runs: the selected run's overview). Opening item tabs never hides
-   the way back; the Overview tab is active when no item tab is selected, and closing the
-   last item tab lands on it.
+1. Both Scenarios and Runs get an "Overview" tab as the first tab in the strip — never
+   closable, showing exactly the no-selection content (Scenarios: recipe + last-generate;
+   Runs: the selected run's overview). It renders ONLY while at least one item tab is open
+   (revised 2026-07-07, user): with no item tabs the strip shows no Overview chip — the
+   overview content is already the whole main pane, so a lone chip is noise. Opening item
+   tabs never hides the way back; the Overview tab is active when no item tab is selected,
+   and closing the last item tab lands back on the overview (chip gone again).
 2. The "Last generate" content is NOT a boxed panel — the bordered panel container was the
    collapsible affordance's chrome and lost its purpose when the strip went flat. Render it
    as plain content: a small heading with the content flowing beneath — no border box, no
@@ -594,7 +618,9 @@ generate" block renders the envelope (when · status) and then PROMINENT stat ta
 settled / unsettled sections, authored, birth-passed, findings, calls, cost — using the Runs
 overview's tally-chip idiom (semibold number + small label), never one muted truncated text
 line. Birth-finding rows are GONE from the overview (they live only in the left-panel list);
-the deferred-errors housekeeping line stays beneath the stats.
+the deferred-errors housekeeping line stays beneath the stats. Density: the overview's
+top-level blocks (recipe · stats · deferred) breathe at a space-y-6 rhythm — the user read
+the earlier space-y-3 clump as "noisy, everything too close to each other".
 
 **Runs view bugs (user feedback 2026-07-07, third review pass):**
 1. **Evidence state leaks across selections.** Toggling evidence open on a FAILED scenario,

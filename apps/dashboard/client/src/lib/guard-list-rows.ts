@@ -29,9 +29,10 @@ export interface GuardFindingRowData {
   doc: string;
   anchor: string;
   /**
-   * The bound section's human heading, reused from a co-bound scenario the same
-   * way scenario rows resolve it; absent when none joins (the group header then
-   * falls back to the slug leaf, exactly like scenario rows).
+   * The bound section's human heading — the report's server-joined `headingText`
+   * (a finding's section is unsettled, so no committed scenario donates it), else a
+   * co-bound scenario's; absent when neither joins (the group header then falls
+   * back to the slug leaf, exactly like scenario rows).
    */
   headingText?: string;
   /** Position in `report.birthFindings` — stable while the report is on disk. */
@@ -68,8 +69,10 @@ export function makeHeadingResolver(scenarioRows: readonly GuardScenarioRowData[
   return (doc, anchor) => m.get(`${doc}\0${anchor}`) ?? sectionLeaf(anchor);
 }
 
-/** Lift a generate report's birth findings into inventory rows, resolving each
- *  heading from the co-bound scenarios (undefined → panel falls back to the slug). */
+/** Lift a generate report's birth findings into inventory rows. The heading
+ *  prefers the report's server-joined `headingText` (a finding's section is
+ *  unsettled, so no co-bound scenario donates it), then the client resolver, else
+ *  undefined → panel falls back to the slug. */
 export function buildFindingRows(
   report: GuardGenerateReport | null,
   scenarioRows: readonly GuardScenarioRowData[],
@@ -81,7 +84,7 @@ export function buildFindingRows(
     title: finding.title,
     doc: finding.doc,
     anchor: finding.anchor,
-    headingText: m.get(`${finding.doc}\0${finding.anchor}`),
+    headingText: finding.headingText ?? m.get(`${finding.doc}\0${finding.anchor}`),
     index,
     finding,
   }));

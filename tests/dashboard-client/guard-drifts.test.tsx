@@ -430,12 +430,16 @@ describe('GuardDriftsView — permanent Overview tab', () => {
     const user = userEvent.setup();
     renderView();
     await screen.findByText('login rate limits');
+    // No item tabs → no strip and no Overview chip; the run overview is the pane.
+    expect(screen.queryByText('Overview')).toBeNull();
+    // Open a drift: the strip appears with Overview FIRST — non-italic, never a
+    // close affordance — sitting before the item tab.
+    await user.click(screen.getByText('login rate limits'));
     expect(overviewTab()).toBeInTheDocument();
     expect(overviewTab()).not.toHaveClass('italic');
     expect(overviewTab()).toHaveClass('font-medium');
-    // Open a drift: the Overview stays with no close affordance, before the item tab.
-    await user.click(screen.getByText('login rate limits'));
     expect(screen.queryByLabelText('Close Overview')).toBeNull();
+    expect(tabLabel('s-fail')).toBeInTheDocument();
     expect(
       overviewTab().compareDocumentPosition(closeBtn('s-fail')) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -445,8 +449,8 @@ describe('GuardDriftsView — permanent Overview tab', () => {
     const user = userEvent.setup();
     renderView();
     await screen.findByText('login rate limits');
-    // Active by default (its container carries the active bg) with the overview shown.
-    expect(overviewTab().parentElement).toHaveClass('bg-background');
+    // No item tabs yet → no strip; the run overview is the whole pane.
+    expect(screen.queryByText('Overview')).toBeNull();
     expect(screen.getByText('Provenance')).toBeInTheDocument();
 
     // Pin a drift, then click Overview: the selection clears, the overview returns,
@@ -466,10 +470,12 @@ describe('GuardDriftsView — permanent Overview tab', () => {
     renderView();
     await user.click(await screen.findByText('login rate limits'));
     expect(gdrift()).toBe('s-fail');
+    expect(overviewTab()).toBeInTheDocument();
     await user.click(closeBtn('s-fail'));
     expect(gdrift()).toBeNull();
-    expect(overviewTab().parentElement).toHaveClass('bg-background');
+    // Last item tab closed → run overview returns AND the strip/chip is gone.
     expect(await screen.findByText('Provenance')).toBeInTheDocument();
+    expect(screen.queryByText('Overview')).toBeNull();
   });
 });
 

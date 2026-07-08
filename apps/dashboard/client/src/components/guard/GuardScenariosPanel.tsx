@@ -1,24 +1,35 @@
 /**
  * The Scenarios tab's LEFT PANEL — the committed-scenario inventory AND birth
- * findings as one doc › section grouped list (the Contracts-panel analog). Every
- * generated / hand-written guard is a previewable row (last-run outcome badge +
- * title + id meta, hand-written rows chipped); every birth finding is a row too —
- * a distinct red "finding" chip, section-bound in the same grouping (a finding is
- * a candidate that failed to become a guard). Search / doc / status filters sit at
- * the top; the status filter gains a "finding" option to isolate them. Single-click
- * previews a row in a transient main-pane tab, double-click pins it — the recipe
- * card and "last generate" strip live in the main pane's overview, not here.
+ * findings. Findings float to the TOP in their own labeled "Findings" block (a
+ * red-tinted group header, the Runs view's bad-news-first idiom) so the rows asking
+ * for a user decision are never buried below green scenarios; the committed
+ * scenarios follow in a neutral "Scenarios" block below. When there are no visible
+ * findings the findings block and the "Scenarios" label both drop and the list
+ * reads as one plain doc › section inventory. Inside each block, rows group
+ * doc › section: every generated / hand-written guard is a previewable row (last-run
+ * outcome badge + title + id meta, hand-written rows chipped); every birth finding
+ * is a row too — a distinct red "finding" chip (a candidate that failed to become a
+ * guard). Search / doc / status filters sit at the top; the status filter gains a
+ * "finding" option to isolate them. Single-click previews a row in a transient
+ * main-pane tab, double-click pins it — the recipe card and "last generate" strip
+ * live in the main pane's overview, not here.
  *
  * Group headers show the section's HUMAN heading text (joined onto scenario rows
  * as `headingText`, reused by findings, else the slug leaf) — slugs are engine
  * identifiers, never UI copy. The row PRIMARY text is always the human title
  * (truncated); the scenario id demotes to small mono meta so a long slug id can
- * never be a primary label or stretch the panel. Both grouping levels use the
- * sticky-header idiom; rows sit flush beneath their section header.
+ * never be a primary label or stretch the panel. Block, doc, and section headers
+ * all use the sticky-header idiom, stacked by z-index so a header never overlaps
+ * the one above it while scrolling; rows sit flush beneath their section header.
+ * Block headers (Findings / Scenarios) AND doc headers are collapsible per
+ * Coverage's `Section` idiom (chevron, aria-expanded, default open) and
+ * sticky-SOLID (bg-card base, any tint layered inside) so scrolling rows never
+ * show through; section headers stay static — sections hold ~1-3 rows and a
+ * chevron per near-empty group is noise.
  */
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, FileCode2, FileText, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, FileCode2, FileText, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { docBasename, sectionLeaf } from '@/lib/guard-drifts';
@@ -39,6 +50,19 @@ const SELECT =
 // rows — hierarchy is carried by the tinted/uppercase headers, not indentation.
 const ROW =
   'flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors';
+
+/** doc › section grouping of a row set, in first-seen order. */
+function groupByDocSection(rows: GuardListRow[]) {
+  const byDoc = new Map<string, Map<string, GuardListRow[]>>();
+  for (const r of rows) {
+    const sections = byDoc.get(r.doc) ?? new Map<string, GuardListRow[]>();
+    const list = sections.get(r.anchor) ?? [];
+    list.push(r);
+    sections.set(r.anchor, list);
+    byDoc.set(r.doc, sections);
+  }
+  return byDoc;
+}
 
 function ScenarioRow({
   row,
@@ -101,6 +125,142 @@ function FindingRow({
   );
 }
 
+/**
+ * One doc group — a collapsible sticky header (Coverage `Section` idiom: whole
+ * header is the toggle, chevron, aria-expanded, default open; solid bg-card so
+ * rows never show through) plus its STATIC section groups (sections hold ~1-3
+ * rows — a chevron per near-empty group is noise, not control). Per-instance
+ * open state keeps collapse independent per doc AND per block.
+ */
+function DocGroup({
+  doc,
+  sections,
+  docTop,
+  sectionTop,
+  activeId,
+  onOpen,
+}: {
+  doc: string;
+  sections: Map<string, GuardListRow[]>;
+  docTop: string;
+  sectionTop: string;
+  activeId: string | null;
+  onOpen: (id: string, pinned: boolean) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={`sticky ${docTop} z-20 flex h-7 w-full items-center gap-1.5 border-b border-border bg-card px-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground`}
+      >
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <FileText className="h-3 w-3 shrink-0" />
+        <span className="min-w-0 truncate" title={doc}>
+          {docBasename(doc)}
+        </span>
+        <span className="ml-auto shrink-0">
+          {[...sections.values()].reduce((n, list) => n + list.length, 0)}
+        </span>
+      </button>
+      {open &&
+        [...sections.entries()].map(([anchor, list]) => (
+          <div key={anchor}>
+            {/* Section header — the HUMAN heading text, sticky just below the doc
+                header (GuardDriftList idiom: solid wrapper, tinted inner row); its
+                rows sit flush beneath it. */}
+            <div className={`sticky ${sectionTop} z-10 bg-card`} title={anchor}>
+              <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] font-medium text-foreground">
+                <span className="min-w-0 truncate">{list[0].headingText ?? sectionLeaf(anchor)}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{list.length}</span>
+              </div>
+            </div>
+            {list.map((row) =>
+              row.kind === 'finding' ? (
+                <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+              ) : (
+                <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+              ),
+            )}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+/**
+ * A block's doc › section grouped rows — shared by the findings and scenarios
+ * blocks. `withBlockHeader` pushes the sticky doc/section offsets down by the
+ * block-header height (h-7) so headers stack instead of overlapping; without a
+ * block header the doc header sticks flush at the top like a lone list.
+ */
+function GroupedRows({
+  groups,
+  withBlockHeader,
+  activeId,
+  onOpen,
+}: {
+  groups: Map<string, Map<string, GuardListRow[]>>;
+  withBlockHeader: boolean;
+  activeId: string | null;
+  onOpen: (id: string, pinned: boolean) => void;
+}) {
+  const docTop = withBlockHeader ? 'top-7' : 'top-0';
+  const sectionTop = withBlockHeader ? 'top-14' : 'top-7';
+  return (
+    <>
+      {[...groups.entries()].map(([doc, sections]) => (
+        <DocGroup
+          key={doc}
+          doc={doc}
+          sections={sections}
+          docTop={docTop}
+          sectionTop={sectionTop}
+          activeId={activeId}
+          onOpen={onOpen}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * A collapsible block header (Findings / Scenarios) — Coverage's `Section` idiom
+ * (chevron, aria-expanded, default open). Solid `bg-card` sticky WRAPPER so
+ * scrolling rows never show through; the tint lives on the inner toggle button,
+ * never on the sticky base.
+ */
+function BlockHeader({
+  title,
+  count,
+  open,
+  onToggle,
+  tone,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  tone: string;
+}) {
+  return (
+    <div className="sticky top-0 z-30 bg-card">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`flex h-7 w-full items-center gap-1.5 border-b border-border px-3 text-left text-[10px] font-semibold uppercase tracking-wider ${tone}`}
+      >
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <span className="flex-1 truncate">{title}</span>
+        <span>{count}</span>
+      </button>
+    </div>
+  );
+}
+
 export function GuardScenariosPanel({
   rows,
   loading,
@@ -118,6 +278,8 @@ export function GuardScenariosPanel({
   const [docFilter, setDocFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [findingsOpen, setFindingsOpen] = useState(true);
+  const [scenariosOpen, setScenariosOpen] = useState(true);
 
   const docs = useMemo(() => [...new Set(rows.map((r) => r.doc))].sort(), [rows]);
   const statuses = useMemo(
@@ -141,24 +303,19 @@ export function GuardScenariosPanel({
     });
   }, [rows, docFilter, statusFilter, search]);
 
-  // doc › section grouping, in first-seen order (scenarios before findings).
-  const groups = useMemo(() => {
-    const byDoc = new Map<string, Map<string, GuardListRow[]>>();
-    for (const r of visible) {
-      const sections = byDoc.get(r.doc) ?? new Map<string, GuardListRow[]>();
-      const list = sections.get(r.anchor) ?? [];
-      list.push(r);
-      sections.set(r.anchor, list);
-      byDoc.set(r.doc, sections);
-    }
-    return byDoc;
-  }, [visible]);
+  // Split the visible rows into the findings block (floated to the top) and the
+  // scenarios block below it, each grouped doc › section in first-seen order.
+  const findingRows = useMemo(() => visible.filter((r) => r.kind === 'finding'), [visible]);
+  const scenarioRows = useMemo(() => visible.filter((r) => r.kind === 'scenario'), [visible]);
+  const findingGroups = useMemo(() => groupByDocSection(findingRows), [findingRows]);
+  const scenarioGroups = useMemo(() => groupByDocSection(scenarioRows), [scenarioRows]);
 
   // Split counts for the honest "N of M scenarios · K findings" line.
   const totalScenarios = useMemo(() => rows.filter((r) => r.kind === 'scenario').length, [rows]);
   const totalFindings = rows.length - totalScenarios;
-  const visScenarios = visible.filter((r) => r.kind === 'scenario').length;
-  const visFindings = visible.length - visScenarios;
+  const visScenarios = scenarioRows.length;
+  const visFindings = findingRows.length;
+  const hasFindings = visFindings > 0;
 
   if (loading && rows.length === 0) {
     return (
@@ -242,47 +399,62 @@ export function GuardScenariosPanel({
         </div>
       </div>
 
-      {/* doc › section grouped inventory */}
+      {/* Findings-first inventory: the "Findings" block (when any) then "Scenarios". */}
       {visible.length === 0 ? (
         <div className="px-3 py-6 text-center text-xs text-muted-foreground">
           No scenarios match these filters.
         </div>
       ) : (
         <div className="flex-1 overflow-auto" role="list" aria-label="Scenario inventory">
-          {[...groups.entries()].map(([doc, sections]) => (
-            <div key={doc}>
-              {/* Doc-level header — sticks above its sections while they scroll. */}
-              <div className="sticky top-0 z-20 flex h-7 items-center gap-1.5 border-b border-border bg-card px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <FileText className="h-3 w-3 shrink-0" />
-                <span className="min-w-0 truncate" title={doc}>
-                  {docBasename(doc)}
-                </span>
-                <span className="ml-auto shrink-0">
-                  {[...sections.values()].reduce((n, list) => n + list.length, 0)}
-                </span>
-              </div>
-              {[...sections.entries()].map(([anchor, list]) => (
-                <div key={anchor}>
-                  {/* Section header — the HUMAN heading text, sticky just below
-                      the doc header (GuardDriftList idiom: solid wrapper, tinted
-                      inner row); its rows sit flush beneath it. */}
-                  <div className="sticky top-7 z-10 bg-card" title={anchor}>
-                    <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] font-medium text-foreground">
-                      <span className="min-w-0 truncate">{list[0].headingText ?? sectionLeaf(anchor)}</span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">{list.length}</span>
-                    </div>
-                  </div>
-                  {list.map((row) =>
-                    row.kind === 'finding' ? (
-                      <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-                    ) : (
-                      <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-                    ),
-                  )}
-                </div>
-              ))}
+          {hasFindings && (
+            <div>
+              {/* Findings block header — red-tinted attention, sticks above its
+                  doc/section headers (higher z-index); collapsible. */}
+              <BlockHeader
+                title="Findings"
+                count={visFindings}
+                open={findingsOpen}
+                onToggle={() => setFindingsOpen((v) => !v)}
+                tone="bg-red-500/15 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              />
+              {findingsOpen && (
+                <GroupedRows groups={findingGroups} withBlockHeader activeId={activeId} onOpen={onOpen} />
+              )}
             </div>
-          ))}
+          )}
+          {scenarioRows.length > 0 && (
+            <div>
+              {/* A "Scenarios" label only when a findings block precedes it, so the
+                  boundary between the two blocks is never ambiguous; a lone list
+                  needs no label. */}
+              {hasFindings ? (
+                <>
+                  <BlockHeader
+                    title="Scenarios"
+                    count={visScenarios}
+                    open={scenariosOpen}
+                    onToggle={() => setScenariosOpen((v) => !v)}
+                    tone="bg-muted text-muted-foreground hover:text-foreground"
+                  />
+                  {scenariosOpen && (
+                    <GroupedRows
+                      groups={scenarioGroups}
+                      withBlockHeader
+                      activeId={activeId}
+                      onOpen={onOpen}
+                    />
+                  )}
+                </>
+              ) : (
+                <GroupedRows
+                  groups={scenarioGroups}
+                  withBlockHeader={false}
+                  activeId={activeId}
+                  onOpen={onOpen}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

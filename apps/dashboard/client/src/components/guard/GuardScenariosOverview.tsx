@@ -27,7 +27,7 @@ const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-for
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className={`mb-1.5 ${LABEL}`}>{title}</div>
+      <div className={`mb-2 ${LABEL}`}>{title}</div>
       {children}
     </div>
   );
@@ -136,18 +136,18 @@ function GuardLastGenerateStrip({
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <div>
-        <div className={`mb-1.5 ${LABEL}`}>Last generate</div>
+        <div className={`mb-2 ${LABEL}`}>Last generate</div>
         <div className="text-sm text-foreground">
           {formatGuardTime(report.generatedAt)}{' '}
           <span className="text-xs text-muted-foreground">· {report.status}</span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           {stats.map((stat) => (
             <div
               key={stat.label}
-              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2 py-1"
+              className="flex items-center gap-1.5 rounded border border-border bg-muted/30 px-2.5 py-1.5"
             >
               <span className="text-sm font-semibold text-foreground">{stat.value}</span>
               <span className="text-xs text-muted-foreground">{stat.label}</span>
@@ -213,7 +213,7 @@ export function GuardScenariosOverview({
 
   return (
     <div role="region" aria-label="Scenarios overview" className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-3 px-5 py-4">
+      <div className="mx-auto max-w-3xl space-y-6 px-5 py-5">
         {recipe && <GuardRecipeCard recipe={recipe} />}
         {report && (
           <GuardLastGenerateStrip report={report} scenarioRows={scenarioRows} onOpenSpec={onOpenSpec} />

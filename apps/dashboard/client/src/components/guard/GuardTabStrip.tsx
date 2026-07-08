@@ -5,7 +5,9 @@
  * italic, each with a hover/active close X. Click selects (preserving pin state),
  * the close X stops propagation so it never re-selects the tab. A permanent
  * "Overview" tab renders FIRST — never closable, never italic, active exactly when
- * no item tab is (the way back to the no-selection overview). Presentation only;
+ * no item tab is (the way back to the no-selection overview). The whole strip
+ * renders ONLY while at least one item tab is open; with none, the overview content
+ * already fills the pane, so a lone Overview chip would be noise. Presentation only;
  * the reducer lives in {@link useGuardTabs}.
  *
  * The visible label is the HUMAN text (a scenario/finding title) — truncated
@@ -41,6 +43,8 @@ export function GuardTabStrip({
   onSelectOverview: () => void;
   onClose: (id: string) => void;
 }) {
+  // No item tabs → no strip: the overview content is already the whole pane.
+  if (tabs.length === 0) return null;
   const overviewActive = activeId === null;
   return (
     <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-card text-xs">

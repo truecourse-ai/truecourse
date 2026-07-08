@@ -147,6 +147,24 @@ describe('Guard routes', () => {
     expect(res.body.coverageGaps).toEqual(RESULT.coverageGaps);
   });
 
+  it('report enriches each birth finding with the live section heading; a gone section carries none', async () => {
+    seed();
+    // A finding bound to a live section (docs/spec.md § alpha, heading "Alpha") and
+    // one bound to a section that no longer exists — the join is tolerant, so the
+    // gone section contributes no headingText (never a slug in UI copy).
+    writeJson('.truecourse/guard/result.json', {
+      ...RESULT,
+      birthFindings: [
+        { doc: DOC, anchor: 'alpha', title: 'alpha finding', step: 1, expected: 'x', actual: 'y' },
+        { doc: DOC, anchor: 'ghost', title: 'ghost finding', step: 2, expected: 'a', actual: 'b' },
+      ],
+    });
+    const res = await request(app).get(url('report')).expect(200);
+    expect(res.body.birthFindings[0]).toMatchObject({ anchor: 'alpha', headingText: 'Alpha' });
+    expect(res.body.birthFindings[1].anchor).toBe('ghost');
+    expect(res.body.birthFindings[1].headingText).toBeUndefined();
+  });
+
   it('coverage joins each live section to its status', async () => {
     seed();
     const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);

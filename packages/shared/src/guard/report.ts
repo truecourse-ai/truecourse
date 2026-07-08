@@ -135,6 +135,13 @@ export const GuardBirthFindingSchema = z
     actual: z.string(),
     /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
     evidencePath: z.string().optional(),
+    /**
+     * The bound section's human heading, joined SERVER-SIDE at report read time
+     * (never written to `result.json` — the enrichment is read-side). A finding's
+     * section is unsettled by definition, so it never has a committed scenario to
+     * donate the heading client-side; slugs are engine ids, not UI copy.
+     */
+    headingText: z.string().optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>

@@ -25,6 +25,7 @@ import {
   readGuardLatest,
   readGuardHistory,
   readGuardResult,
+  readGuardReport,
   readGuardRun,
   readGuardScenarioSource,
   readGuardEvidence,
@@ -89,7 +90,7 @@ router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: N
 router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const report = readGuardResult(repo.path);
+    const report = readGuardReport(repo.path);
     if (!report) {
       res.status(404).json({ error: 'No guard generate report yet.' });
       return;
@@ -125,7 +126,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
       composeDocCoverage(doc, content, {
         manifest: readManifest(repo.path),
         latest: readGuardLatest(repo.path),
-        result: readGuardResult(repo.path),
+        result: readGuardReport(repo.path),
       }),
     );
   } catch (e) {

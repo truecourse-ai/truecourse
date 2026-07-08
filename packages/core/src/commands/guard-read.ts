@@ -23,6 +23,7 @@ import {
   loadScenarios,
   manifestPath,
   readGuardLatest as readGuardLatestStore,
+  readGuardResult as readGuardResultStore,
   readManifest as readManifestStore,
   recipePath,
   scenariosDir,
@@ -334,6 +335,29 @@ function headingTextIndex(repoRoot: string, docs: readonly string[]): Map<string
     }
   }
   return map
+}
+
+/**
+ * The last-generate report for the DASHBOARD, with each birth finding enriched
+ * with its section's human `headingText` — joined at read time from the live doc's
+ * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
+ * finding's section is unsettled by definition (it persists no scenario), so it
+ * NEVER has a committed scenario to donate the heading client-side; without this
+ * server join every findings group header degrades to a slug — and slugs are never
+ * UI copy. `result.json` on disk carries no `headingText`; the enrichment is
+ * read-side only. A doc/section that is gone contributes no key (tolerant).
+ */
+export function readGuardReport(repoRoot: string): GuardGenerateReport | null {
+  const report = readGuardResultStore(repoRoot)
+  if (!report || report.birthFindings.length === 0) return report
+  const headingByDocAnchor = headingTextIndex(repoRoot, report.birthFindings.map((f) => f.doc))
+  return {
+    ...report,
+    birthFindings: report.birthFindings.map((f) => {
+      const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
+      return { ...f, ...(headingText ? { headingText } : {}) }
+    }),
+  }
 }
 
 /**
