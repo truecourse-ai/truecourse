@@ -64,7 +64,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.7.0-next.2")
+  .version("0.7.0-next.3")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
