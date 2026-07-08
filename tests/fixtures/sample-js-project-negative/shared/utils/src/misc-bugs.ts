@@ -279,4 +279,48 @@ export function squaredOnly(nums: readonly number[]): number[] {
   });
 }
 
+// True bug: a non-nullable Promise placed directly in a condition. The promise
+// object is always truthy, so the branch runs regardless of the resolved
+// value — the author almost certainly meant to `await` it first.
+export function decideFromResult(): string {
+  const settled = Promise.resolve(1);
+  // VIOLATION: bugs/deterministic/misused-promise
+  if (settled) {
+    return "done";
+  }
+  return "pending";
+}
+
+// True bug: a real, routable production endpoint hardcoded in source — it
+// should be an environment variable so staging/prod/local can differ without a
+// redeploy. Unlike a loopback dev default, this host is not localhost-equivalent.
+export async function pushMetrics(payload: string): Promise<unknown> {
+  // VIOLATION: code-quality/deterministic/hardcoded-url
+  const response = await fetch("https://metrics.acme-telemetry.io/v1/ingest", {
+    method: "POST",
+    body: payload,
+  });
+  return response.json();
+}
+
+// True bug: writes an arbitrary caller-supplied key into an externally-supplied
+// object. A caller passing "__proto__" pollutes the object's prototype chain —
+// unlike a fresh local container, `target` is not built here.
+export function assignInto(
+  target: Record<string, unknown>,
+  dynamicKey: string,
+  value: unknown,
+): void {
+  // VIOLATION: bugs/deterministic/prototype-pollution
+  target[dynamicKey] = value;
+}
+
+// True bug: reduce without an initial value and no emptiness guard — throws
+// `TypeError: Reduce of empty array with no initial value` when the array is
+// empty.
+export function sumAll(values: number[]): number {
+  // VIOLATION: bugs/deterministic/reduce-missing-initial
+  return values.reduce((acc, val) => acc + val);
+}
+
 export { readFile };
