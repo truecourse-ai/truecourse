@@ -61,25 +61,22 @@ function resolvedSummary(rel: SpecRelation): string {
 type DecisionAction = 'exclude' | 'unexclude' | 'include' | 'uninclude';
 
 /**
- * Optimistically reflect a force-include/exclude before the server re-curate
- * returns, so only the DOC jumps immediately — out of Documents into
- * Force-excluded (or between the include lists). Conflicts are deliberately left
- * untouched here: they're the authoritative product of the recompute, so they
- * appear/disappear only when the server corpus lands (the progress popup covers
- * that window).
+ * Optimistically toggle a force-include/exclude in the decision lists. The corpus
+ * itself stays untouched: the Documents / Not included / Force-* rows are DERIVED
+ * from these lists over the corpus at render, so a toggle moves the row in BOTH
+ * directions (skip and restore alike) with nothing to revert. Conflicts are
+ * deliberately left untouched — they're the authoritative product of the
+ * recompute, so they appear/disappear only when a fresh corpus lands.
  */
 function optimisticDecision(data: SpecCorpusResponse, ref: string, action: DecisionAction): SpecCorpusResponse {
   const without = (arr?: string[]): string[] => (arr ?? []).filter((r) => r !== ref);
   const withRef = (arr?: string[]): string[] => [...new Set([...(arr ?? []), ref])];
   let manualIncludes = data.manualIncludes;
   let manualExcludes = data.manualExcludes;
-  let corpus = data.corpus;
   switch (action) {
     case 'exclude':
       manualExcludes = withRef(manualExcludes);
       manualIncludes = without(manualIncludes);
-      // Move the doc out of Documents only — leave overlaps for the re-curate.
-      corpus = { ...corpus, docs: corpus.docs.filter((d) => d.ref !== ref) };
       break;
     case 'unexclude':
       manualExcludes = without(manualExcludes);
@@ -87,13 +84,12 @@ function optimisticDecision(data: SpecCorpusResponse, ref: string, action: Decis
     case 'include':
       manualIncludes = withRef(manualIncludes);
       manualExcludes = without(manualExcludes);
-      corpus = { ...corpus, skippedDocs: (corpus.skippedDocs ?? []).filter((s) => s.ref !== ref) };
       break;
     case 'uninclude':
       manualIncludes = without(manualIncludes);
       break;
   }
-  return { ...data, corpus, manualIncludes, manualExcludes };
+  return { ...data, manualIncludes, manualExcludes };
 }
 
 export interface SpecCorpusState {
@@ -231,14 +227,6 @@ export function SpecCorpusView({
   // The doc ref currently mutating — while set, every include/exclude action is
   // disabled (one write at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
-  // OSS: refs whose decision is recorded but not yet materialized by a Scan — the
-  // row shows a "pending rescan" hint until the corpus is re-curated. Cleared when a
-  // fresh scan lands (the corpus's `generatedAt` changes).
-  const [pendingRefs, setPendingRefs] = useState<Set<string>>(() => new Set());
-  const generatedAt = data?.corpus.generatedAt;
-  useEffect(() => {
-    setPendingRefs(new Set());
-  }, [generatedAt]);
 
   // EE PR view: every decision is scoped to the PR + head SHA. With no gate run
   // yet (no head SHA) reads fall back to baseline but writes can't be scoped, so
@@ -249,12 +237,12 @@ export function SpecCorpusView({
   );
   const decisionsDisabled = prNumber != null && !prRef;
 
-  // Force-include / exclude. Move the row optimistically so it jumps immediately.
+  // Force-include / exclude. Toggle the decision lists optimistically so the row
+  // moves immediately (both directions — the presentation derives from the lists).
   // OSS records the decision without re-curating (a Scan later materializes the
-  // batch), so the response is a decision-list ack: keep the optimistic corpus,
-  // reconcile the decision lists, mark the ref pending, and let the parent light the
-  // Rescan dot. PR scope (EE) re-curates and returns the full corpus, which replaces
-  // the optimistic state.
+  // batch), so the response is a decision-list ack: reconcile the lists and let the
+  // parent light the Rescan dot. PR scope (EE) re-curates and returns the full
+  // corpus, which replaces the optimistic state.
   const runDecision = useCallback(
     async (ref: string, action: DecisionAction, call: () => Promise<SpecCorpusResponse | SpecDecisionAck>) => {
       setBusyRef(ref);
@@ -265,7 +253,6 @@ export function SpecCorpusView({
           corpus.apply(res);
         } else {
           corpus.applyDecisions(res);
-          setPendingRefs((prev) => new Set(prev).add(ref));
           onDecision?.();
         }
       } catch {
@@ -313,9 +300,19 @@ export function SpecCorpusView({
 
   const { corpus: c, userRelations } = data;
   const effectiveRels = [...c.relations, ...userRelations];
-  const skippedDocs = c.skippedDocs ?? [];
   const manualIncludes = data.manualIncludes ?? [];
   const manualExcludes = data.manualExcludes ?? [];
+  // The section rows derive from the decision lists over the unchanged corpus, so
+  // an OSS decision (no re-curate) moves a row in both directions: an excluded doc
+  // leaves Documents, a restored one returns. A row whose decision the corpus
+  // hasn't materialized yet (excluded doc still kept, included doc not yet kept)
+  // shows the pending-rescan hint — derived, so it survives a reload and clears
+  // naturally when the next scan lands.
+  const keptRefs = new Set(c.docs.map((d) => d.ref));
+  const excludedSet = new Set(manualExcludes);
+  const includedSet = new Set(manualIncludes);
+  const keptDocs = c.docs.filter((d) => !excludedSet.has(d.ref));
+  const skippedDocs = (c.skippedDocs ?? []).filter((s) => !includedSet.has(s.ref) && !excludedSet.has(s.ref));
   // PR view fell back to the base corpus because this PR changed no docs.
   const baselineFallback = !!prRef && !!data.corpusCommit && data.corpusCommit !== prRef;
   const decisionsHint = decisionsDisabled ? PR_GATE_HINT : null;
@@ -326,11 +323,11 @@ export function SpecCorpusView({
 
   // Tag filter: the distinct area tags across docs; selecting some narrows the
   // Documents list to docs carrying ANY selected tag (OR).
-  const allTags = [...new Set(c.docs.flatMap((d) => d.areaTags.map(fmtArea)))].sort();
+  const allTags = [...new Set(keptDocs.flatMap((d) => d.areaTags.map(fmtArea)))].sort();
   const visibleDocs =
     selectedTags.size === 0
-      ? c.docs
-      : c.docs.filter((d) => d.areaTags.map(fmtArea).some((t) => selectedTags.has(t)));
+      ? keptDocs
+      : keptDocs.filter((d) => d.areaTags.map(fmtArea).some((t) => selectedTags.has(t)));
   const toggleTag = (t: string): void =>
     setSelectedTags((prev) => {
       const next = new Set(prev);
@@ -459,7 +456,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="remove"
                 busy={busyRef !== null}
-                pending={pendingRefs.has(ref)}
+                pending={!keptRefs.has(ref)}
                 disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setInclude(ref, false)}
@@ -481,7 +478,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="restore"
                 busy={busyRef !== null}
-                pending={pendingRefs.has(ref)}
+                pending={keptRefs.has(ref)}
                 disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setExclude(ref, false)}

@@ -196,25 +196,49 @@ describe('SpecCorpusView (left nav)', () => {
 });
 
 // OSS batch model: skip/include records the decision and returns immediately (no
-// re-curate). The row moves optimistically with a "pending rescan" hint, and the
-// parent is signalled to light the Rescan dot. One later Scan materializes the batch.
+// re-curate). The row moves optimistically — in BOTH directions, since the section
+// rows derive from the decision lists — with a "pending rescan" hint on rows the
+// corpus hasn't materialized, and the parent is signalled to light the Rescan dot.
+// One later Scan materializes the batch.
 describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round-trip)', () => {
-  let calls: { url: string; method?: string }[];
+  // A corpus with a relevance-dropped doc, for the include flow.
+  const RESP_WITH_SKIPPED: SpecCorpusResponse = {
+    ...RESP,
+    corpus: { ...RESP.corpus, skippedDocs: [{ ref: 'docs/notes.md', reason: 'low relevance' }] },
+  };
+
+  let calls: { url: string; method: string }[];
   beforeEach(() => {
     calls = [];
+    // A stateful decisions stub: POST adds, DELETE removes, and every mutation
+    // returns the OSS ack (decision lists only, no corpus).
+    let excludes: string[] = [];
+    let includes: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, opts?: RequestInit) => {
         const u = String(url);
-        calls.push({ url: u, method: opts?.method });
-        // OSS include/exclude ack: decision lists only, no corpus.
-        if (u.includes('/spec/excludes')) return json({ manualIncludes: [], manualExcludes: ['docs/v1.md'] });
+        const method = opts?.method ?? 'GET';
+        calls.push({ url: u, method });
+        if (u.includes('/spec/excludes')) {
+          const { ref } = JSON.parse(String(opts?.body)) as { ref: string };
+          excludes = method === 'POST' ? [...excludes, ref] : excludes.filter((r) => r !== ref);
+          return json({ manualIncludes: includes, manualExcludes: excludes });
+        }
+        if (u.includes('/spec/includes')) {
+          const { ref } = JSON.parse(String(opts?.body)) as { ref: string };
+          includes = method === 'POST' ? [...includes, ref] : includes.filter((r) => r !== ref);
+          return json({ manualIncludes: includes, manualExcludes: excludes });
+        }
         // The corpus GET the hook makes on mount.
-        return json(RESP);
+        return json(RESP_WITH_SKIPPED);
       }),
     );
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  const corpusReads = () =>
+    calls.filter((c) => c.method === 'GET' && c.url.includes('/spec/corpus')).length;
 
   // Uses the real hook so apply/applyDecisions actually update state (the mock
   // `state()` helper's vi.fn()s don't re-render).
@@ -230,12 +254,60 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
     await screen.findByText('docs/v1.md'); // corpus loaded
     await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
 
-    // The doc jumps into Force-excluded and carries the pending hint.
+    // The doc jumps into Force-excluded (ONE row — not still in Documents too)
+    // and carries the pending hint (the corpus still keeps it until a rescan).
     await screen.findByText('Force-excluded');
+    expect(screen.getAllByText('docs/v1.md')).toHaveLength(1);
     expect(screen.getByText('pending rescan')).toBeInTheDocument();
     // No re-curate: the scan endpoint was never hit; only the decision POST.
     expect(calls.some((c) => c.url.includes('/spec/corpus/scan'))).toBe(false);
     expect(calls.some((c) => c.url.includes('/spec/excludes') && c.method === 'POST')).toBe(true);
+  });
+
+  it('skip then restore returns the doc to Documents — no refetch, no pending residue', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText('docs/v1.md');
+    await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
+    await screen.findByText('Force-excluded');
+
+    // The write settles (busy clears) before the follow-up action.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'restore' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'restore' }));
+
+    // The doc is back in Documents as a normal kept row; the excluded section
+    // and the pending hint are gone.
+    await waitFor(() => expect(screen.queryByText('Force-excluded')).not.toBeInTheDocument());
+    expect(screen.getByText('docs/v1.md')).toBeInTheDocument();
+    expect(screen.queryByText('pending rescan')).not.toBeInTheDocument();
+    // Its skip action is live again (3 kept docs → 3 skip buttons).
+    expect(screen.getAllByRole('button', { name: 'skip' })).toHaveLength(3);
+    // The whole round-trip used only the mount read — no corpus refetch, no scan.
+    expect(corpusReads()).toBe(1);
+    expect(calls.some((c) => c.url.includes('/spec/corpus/scan'))).toBe(false);
+  });
+
+  it('include a skipped doc then undo returns it to Not included (mirror case)', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText('docs/notes.md'); // the relevance-dropped doc
+    await user.click(screen.getByRole('button', { name: 'include' }));
+
+    // Moves to Force-included with the pending hint (not kept until a rescan);
+    // the Not included section empties away.
+    await screen.findByText('Force-included');
+    expect(screen.getByText('pending rescan')).toBeInTheDocument();
+    expect(screen.queryByText('Not included')).not.toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'remove' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'remove' }));
+
+    // Back in Not included, no pending residue, still no refetch.
+    await waitFor(() => expect(screen.queryByText('Force-included')).not.toBeInTheDocument());
+    expect(screen.getByText('Not included')).toBeInTheDocument();
+    expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
+    expect(screen.queryByText('pending rescan')).not.toBeInTheDocument();
+    expect(corpusReads()).toBe(1);
   });
 
   it('fires onDecision so the parent can refresh the Rescan staleness dot', async () => {

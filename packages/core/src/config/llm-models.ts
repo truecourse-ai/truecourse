@@ -44,6 +44,7 @@ export type StageId =
   // --- guard generate (scenario tests) ---
   | 'guard.extract'
   | 'guard.generate'
+  | 'guard.retry'
   | 'guard.recipe'
   | 'rules.violationGen';
 
@@ -75,6 +76,9 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // Authoring an executable scenario faithful to a spec claim is the hard,
   // load-bearing call (a weak scenario is false confidence) — opus.
   'guard.generate': 'opus',
+  // The one evidence-retry per birth-failed claim — the same authoring task, so
+  // the same tier; a distinct stage so retry spend is attributed to the birth line.
+  'guard.retry': 'opus',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',

@@ -36,6 +36,22 @@ export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 export { runBuild, DEFAULT_BUILD_TIMEOUT_MS } from './build.js'
 export type { BuildResult } from './build.js'
 
+export {
+  preflightEntry,
+  entryStarts,
+  defaultEntryProbeExecutor,
+  entryPreflightHeadline,
+  formatEntryPreflightError,
+  ENTRY_PROBE_ARGVS,
+  ENTRY_PREFLIGHT_TIMEOUT_MS,
+} from './preflight.js'
+export type {
+  EntryPreflightResult,
+  EntryProbe,
+  EntryProbeExecutor,
+  PreflightEntryOptions,
+} from './preflight.js'
+
 export { writeEvidence } from './evidence.js'
 export type { EvidenceStep, WriteEvidenceParams } from './evidence.js'
 

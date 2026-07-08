@@ -108,6 +108,49 @@ export function prefilterDocs(
   };
 }
 
+/**
+ * The deterministic pre-run PLAN of the relevance stage: exactly which docs
+ * `filterByRelevance` would send to the LLM, reading the same prefilter + the
+ * same content-keyed cache. Shared by the runtime (which then executes the
+ * calls) and the pre-flight estimate (which counts them), so the two can never
+ * disagree on the doc set — a doc kept, dropped, or manual-included here is
+ * treated identically by both. `known` carries the verdicts resolvable without a
+ * call (cached verdicts + synthetic manual-include verdicts).
+ */
+export interface RelevancePlan {
+  /** Prefilter-kept docs — the classify universe (the "changed" denominator). */
+  toClassify: DocCandidate[];
+  /** Docs the deterministic prefilter dropped, with reasons. */
+  prefilterSkipped: Array<{ path: string; reason: string }>;
+  /** Docs that need an LLM relevance call (uncached, non-manual-include). */
+  needsCall: DocCandidate[];
+  /** Verdicts known without a call, keyed by doc path (cached ∪ manual-include). */
+  known: Map<string, RelevanceVerdict>;
+}
+
+export async function planRelevanceWork(
+  repoRoot: string,
+  docs: DocCandidate[],
+  manualIncludes: string[] = [],
+): Promise<RelevancePlan> {
+  const manualSet = new Set(manualIncludes);
+  const { toClassify, skipped } = prefilterDocs(docs, manualIncludes);
+  const needsCall: DocCandidate[] = [];
+  const known = new Map<string, RelevanceVerdict>();
+  await Promise.all(
+    toClassify.map(async (doc) => {
+      if (manualSet.has(doc.path)) {
+        known.set(doc.path, { path: doc.path, include: true, reason: 'manual include' });
+        return;
+      }
+      const cached = await readCache(repoRoot, computeCacheKey(doc));
+      if (cached) known.set(doc.path, cached);
+      else needsCall.push(doc);
+    }),
+  );
+  return { toClassify, prefilterSkipped: skipped, needsCall, known };
+}
+
 export async function filterByRelevance(
   repoRoot: string,
   docs: DocCandidate[],
@@ -116,37 +159,35 @@ export async function filterByRelevance(
   if (opts.enabled === false || docs.length === 0) {
     return { included: docs, skipped: [] };
   }
-  const manualSet = new Set(opts.manualIncludes ?? []);
   const runner =
     opts.runner ??
     spawnRelevanceRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? defaultConcurrency();
 
-  // Deterministic pre-filter (no LLM): drop archived/agent-instruction files by
-  // path, then near-duplicate copies. Manual includes bypass it unconditionally.
-  const { toClassify, skipped: prefilterSkipped } = prefilterDocs(docs, opts.manualIncludes ?? []);
-  const prefilterReason = new Map(prefilterSkipped.map((s) => [s.path, s.reason]));
+  // Single source of truth for the doc set: the same plan the estimate reads.
+  // Prefilter-skipped + cached/manual docs resolve with no LLM call; only
+  // `needsCall` reaches the runner.
+  const plan = await planRelevanceWork(repoRoot, docs, opts.manualIncludes ?? []);
+  const prefilterReason = new Map(plan.prefilterSkipped.map((s) => [s.path, s.reason]));
 
   const total = docs.length;
   let done = 0;
   const markDone = (): void => opts.onProgress?.(++done, total);
   opts.onProgress?.(0, total);
-  // Pre-filtered docs need no LLM call — count them toward progress up front.
-  for (let i = 0; i < prefilterReason.size; i++) markDone();
+  // Everything already resolved (prefilter-skipped + cached + manual) needs no
+  // LLM call — count it toward progress up front.
+  const resolvedUpfront = prefilterReason.size + plan.known.size;
+  for (let i = 0; i < resolvedUpfront; i++) markDone();
 
-  const verdicts = new Map<string, RelevanceVerdict>();
+  const verdicts = new Map<string, RelevanceVerdict>(plan.known);
+  const pending = plan.needsCall;
   let cursor = 0;
   let active = 0;
   await new Promise<void>((resolve) => {
+    if (pending.length === 0) return resolve();
     const launch = (): void => {
-      while (active < concurrency && cursor < toClassify.length) {
-        const doc = toClassify[cursor++];
-        if (manualSet.has(doc.path)) {
-          verdicts.set(doc.path, { path: doc.path, include: true, reason: 'manual include' });
-          markDone();
-          if (cursor >= toClassify.length && active === 0) resolve();
-          continue;
-        }
+      while (active < concurrency && cursor < pending.length) {
+        const doc = pending[cursor++];
         active++;
         classifyOne(repoRoot, doc, runner)
           .then((verdict) => {
@@ -163,11 +204,10 @@ export async function filterByRelevance(
           .finally(() => {
             markDone();
             active--;
-            if (cursor >= toClassify.length && active === 0) resolve();
+            if (cursor >= pending.length && active === 0) resolve();
             else launch();
           });
       }
-      if (cursor >= toClassify.length && active === 0) resolve();
     };
     launch();
   });

@@ -111,6 +111,7 @@ export type { VersionChain } from './version-chain.js';
 
 export {
   filterByRelevance,
+  planRelevanceWork,
   readRelevanceCache,
   buildRelevanceUserPrompt,
   RELEVANCE_SYSTEM_PROMPT,
@@ -118,6 +119,7 @@ export {
 export type {
   RelevanceFilterOptions,
   RelevanceFilterOutcome,
+  RelevancePlan,
   RelevanceRunner,
   RelevanceRunnerInput,
   RelevanceVerdict,

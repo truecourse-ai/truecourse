@@ -155,6 +155,24 @@ export const GuardGenerateErrorSchema = z
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
 
+/**
+ * The built entry failed to START — a stale/orphaned dist, a missing interpreter, a
+ * module-resolution crash. Recorded ONCE (never per section) so a dead binary reads
+ * as one loud entry-level failure; the birth validation never ran, so no scenario
+ * settled. The `stderr` is the full, untruncated startup output.
+ */
+export const GuardEntryPreflightSchema = z
+  .object({
+    /** Display form of the entry argv, e.g. `node tools/cli/dist/index.js`. */
+    entry: z.string(),
+    /** The recipe build command, for the rebuild hint. */
+    buildCommand: z.string(),
+    /** The full, UNTRUNCATED startup output the dead entry produced. */
+    stderr: z.string(),
+  })
+  .strict()
+export type GuardEntryPreflight = z.infer<typeof GuardEntryPreflightSchema>
+
 /** A document whose claim extraction could not complete — its sections re-attempt next run. */
 export const GuardExtractionFailureSchema = z
   .object({
@@ -222,6 +240,12 @@ export const GuardGenerateReportSchema = z
     birthPassed: z.number().int().nonnegative().optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
+    /**
+     * Present ONLY when the built entry failed to start — the whole birth phase was
+     * short-circuited, so every changed section stayed unsettled. Optional so older
+     * reports (written before this field existed) keep parsing.
+     */
+    entryPreflight: GuardEntryPreflightSchema.optional(),
   })
   .strict()
 export type GuardGenerateReport = z.infer<typeof GuardGenerateReportSchema>

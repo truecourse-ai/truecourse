@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
-import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process'
+import { guardGenerateInProcess, GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process'
+import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress'
 import { composeGuardStatus, orderGuardDrifts } from '@truecourse/shared'
 import {
   writeGuardLatest,
   writeGuardResult,
   readGuardResult,
   guardResultPath,
+  writeManifest,
 } from '@truecourse/guard-runner'
 import {
   GuardGenerateReportSchema,
@@ -29,7 +31,10 @@ import {
   authorBy,
   raw,
   PASSING_STEPS,
+  FAILING_STEPS,
 } from '../guard-generator/helpers.js'
+import { recordStageUsage } from '@truecourse/shared/llm'
+import type { GenerateRunner } from '@truecourse/guard-generator'
 
 const repos: string[] = []
 function repo(): string {
@@ -111,6 +116,138 @@ describe('guardGenerateInProcess — persisted report', () => {
     ).rejects.toThrow(/declined/)
 
     expect(fs.existsSync(guardResultPath(r))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Grounding progress reaches the tracker (CLI + dashboard consume the same one).
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — grounding progress on the author step', () => {
+  /** Collect every distinct detail the author step showed across the run. */
+  function trackAuthorDetails(): { tracker: StepTracker; details: string[] } {
+    const details: string[] = []
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      const author = payload.steps?.find((s) => s.key === 'author')
+      if (author?.detail && details[details.length - 1] !== author.detail) details.push(author.detail)
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+    return { tracker, details }
+  }
+
+  it('surfaces "grounding probes X/Y · authoring Z/W claims" on the author detail', async () => {
+    const r = repo()
+    writeRecipe(r) // build 'true' → probing runs
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const { tracker, details } = trackAuthorDetails()
+    await guardGenerateInProcess(r, {
+      tracker,
+      extractRunner: extractBy({
+        version: [{ claim: '`--version` prints the version and exits 0' }],
+        background: { untestable: 'design history' },
+      }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    // The grounding counter rode the author step's detail line at least once.
+    expect(details.some((d) => /grounding probes \d+\/\d+ · authoring \d+\/\d+ claim/.test(d))).toBe(true)
+  })
+
+  it('shows the plain claim counter (no grounding prefix) when no probes run', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const runners = {
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    }
+    await guardGenerateInProcess(r, runners) // warm the authoring cache
+
+    // Re-work `version` (empty manifest); authoring is now a per-claim cache HIT, so
+    // no batch enters grounding and no probes run.
+    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    const { tracker, details } = trackAuthorDetails()
+    await guardGenerateInProcess(r, { tracker, ...runners })
+
+    expect(details.some((d) => d.includes('grounding'))).toBe(false)
+    expect(details.some((d) => /\d+\/\d+ claim/.test(d))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Sections-led birth line + retry spend attribution (stage guard.retry).
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — sections-led birth line + retry usage', () => {
+  /** Collect every distinct detail the validate (birth) step showed across the run. */
+  function trackValidateDetails(): { tracker: StepTracker; details: string[] } {
+    const details: string[] = []
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      const step = payload.steps?.find((s) => s.key === 'validate')
+      if (step?.detail && details[details.length - 1] !== step.detail) details.push(step.detail)
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+    return { tracker, details }
+  }
+
+  it('leads the birth line with the fixed sections denominator and a plain birth count', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const { tracker, details } = trackValidateDetails()
+    await guardGenerateInProcess(r, {
+      tracker,
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    // Every live line leads with the fixed work-section denominator (2 for DOC).
+    const live = details.filter((d) => /^sections /.test(d))
+    expect(live.length).toBeGreaterThan(0)
+    expect(live.every((d) => /^sections \d+\/2 · (building…|birth \d+)/.test(d))).toBe(true)
+    // The birth count carries NO denominator — its total grows per section.
+    expect(live.some((d) => /birth \d+\//.test(d))).toBe(false)
+  })
+
+  it('shows retrying R/T with the live guard.retry usage tag, and totals retry spend in the report', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // Round 1 fails birth, the evidence-retry fixes it. The runner records usage
+    // the way the transport would: round 1 under guard.generate, the retry under
+    // guard.retry.
+    const runner: GenerateRunner = async ({ claims }) => {
+      const isRetry = claims.some((c) => c.retry)
+      recordStageUsage(isRetry ? 'guard.retry' : 'guard.generate', {
+        model: isRetry ? 'retry-model' : 'gen-model',
+        inputTokens: 100,
+        outputTokens: 50,
+        costUsd: isRetry ? 0.5 : 0.25,
+      })
+      return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
+    }
+
+    const { tracker, details } = trackValidateDetails()
+    const { guard } = await guardGenerateInProcess(r, {
+      tracker,
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: runner,
+    })
+    expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
+
+    // The retry counter and the guard.retry usage (model recorded on the retry
+    // call) ride the SAME birth line.
+    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
+
+    // result.json totals include the retry spend under the new stage.
+    const report = readGuardResult(r)!
+    expect(report.usage).toEqual({ calls: 2, inputTokens: 200, outputTokens: 100, costUsd: 0.75 })
   })
 })
 

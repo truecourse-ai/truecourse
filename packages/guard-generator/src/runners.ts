@@ -55,17 +55,19 @@ export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
   }
 }
 
-export function spawnGenerateRunner(opts: SpawnOptions = {}): GenerateRunner {
+export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string } = {}): GenerateRunner {
   const transport = opts.transport ?? cliTransport()
   const timeoutMs = opts.timeoutMs ?? 600_000
   return async (ctx) => {
     const refs = ctx.claims.map((c) => c.ref).join(',')
     const isRetry = ctx.claims.some((c) => c.retry)
-    const suffix = `${isRetry ? ':retry' : ''}${ctx.correction ? ':correction' : ''}`
+    // Retries log under their own stage so their spend is attributed to the birth
+    // phase (which drives the retry), not the already-completed authoring line.
+    const stage = isRetry ? 'guard.retry' : 'guard.generate'
     const raw = await transport({
-      id: `guard.generate:${ctx.doc}:${refs}${suffix}`,
-      stage: 'guard.generate',
-      model: opts.model,
+      id: `${stage}:${ctx.doc}:${refs}${ctx.correction ? ':correction' : ''}`,
+      stage,
+      model: isRetry ? (opts.retryModel ?? opts.model) : opts.model,
       fallbackModel: opts.fallbackModel,
       system: GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),

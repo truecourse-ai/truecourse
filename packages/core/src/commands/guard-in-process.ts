@@ -51,13 +51,16 @@ export const GUARD_GENERATE_STEPS = [
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, and both round-1 and retry authoring ride `author` (stage
- * `guard.generate`). Birth is deterministic sandbox work — no LLM stage.
+ * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
+ * EXECUTION is deterministic sandbox work, but the one evidence-retry per
+ * birth-failed claim is a full re-author (stage `guard.retry`) — its spend rides
+ * the `validate` line, where the retry happens.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
   author: ['guard.generate'],
+  validate: ['guard.retry'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -91,6 +94,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
   return {
     extract: resolveModel('guard.extract', undefined, repoRoot),
     generate: resolveModel('guard.generate', undefined, repoRoot),
+    retry: resolveModel('guard.retry', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -145,14 +149,33 @@ export async function guardGenerateInProcess(
   // A step's detail line = base text + its live usage tag (model/tokens/$).
   const withUsage = (key: string, base: string): string => `${base}${stageUsageTag(GUARD_STEP_STAGES[key] ?? [], repoRoot)}`;
 
-  // The validate step's detail composes the build phase, the per-scenario birth
-  // counter, and the retry-authoring counter — so no sub-phase looks idle while it
-  // runs: "building…" → "birth k/N" → "birth N/N · retrying failed claims R/T" →
-  // (round-2 ticks fold back into the birth counter as its total grows).
+  // Grounding (real-CLI probe capture) runs per section batch BEFORE that batch's
+  // authoring call — a sweep that can take minutes on a cold run. It rides the
+  // author step's detail so the phase never looks idle: "grounding probes X/Y ·
+  // authoring Z/W claims". The probe total grows as later sections enter grounding.
+  let authorDone = 0;
+  let authorTotal = 0;
+  let authorFinished = false;
+  let groundCaptured = 0;
+  let groundPlanned = 0;
+  const authorDetail = (): string => {
+    const claims = `${authorDone}/${authorTotal} claim${authorTotal === 1 ? '' : 's'}`;
+    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${claims}` : claims;
+    return withUsage('author', base);
+  };
+
+  // The validate step's detail LEADS with the fixed work-section denominator
+  // (known at indexing, ticking as sections settle — monotonic, never
+  // fake-complete), then the build phase / plain birth count / retry counter:
+  // "sections 21/28 · building…" → "sections 21/28 · birth 49" → "sections 21/28 ·
+  // birth 49 · retrying 19/20". Birth counts carry no denominator — under the
+  // per-section pipeline their total grows, reading as complete while sections
+  // still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
+  // live usage tag rides this line.
   let building = false;
-  let birthSeen = false;
   let birthDone = 0;
-  let birthTotal = 0;
+  let sectionsDone = 0;
+  let sectionsTotal = 0;
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -168,9 +191,9 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    const parts = [building ? 'building…' : `birth ${birthDone}/${birthTotal}`];
-    if (retrySeen) parts.push(`retrying failed claims ${retryDone}/${retryTotal}`);
-    tracker?.detail('validate', parts.join(' · '));
+    const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
+    if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
+    tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
   tracker?.start('index');
@@ -185,6 +208,7 @@ export async function guardGenerateInProcess(
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
+        sectionsTotal = work;
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
         cur = STEPS.indexOf('extract');
         tracker?.start('extract', `0 views`);
@@ -203,26 +227,34 @@ export async function guardGenerateInProcess(
       },
       onAuthorProgress: (done, total) => {
         advanceTo('author');
-        const detail = withUsage('author', `${done}/${total} claim${total === 1 ? '' : 's'}`);
-        // The author step ticks until the last claim resolves, then completes —
-        // even if validate (early-section birth) is already running concurrently.
-        if (done >= total) tracker?.done('author', detail);
-        else tracker?.detail('author', detail);
-      },
-      onBirthPhase: (phase, total) => {
-        if (phase === 'build') {
-          building = true;
+        authorDone = done;
+        authorTotal = total;
+        // The author step ticks (grounding + claim counters) until the last claim
+        // resolves, then completes — even if validate (early-section birth) is
+        // already running concurrently. A completed step drops the grounding prefix.
+        if (done >= total) {
+          authorFinished = true;
+          tracker?.done('author', withUsage('author', `${done}/${total} claim${total === 1 ? '' : 's'}`));
         } else {
-          building = false;
-          if (!birthSeen && total !== undefined) birthTotal = total;
+          tracker?.detail('author', authorDetail());
         }
+      },
+      onGroundProgress: (captured, planned) => {
+        groundCaptured = captured;
+        groundPlanned = planned;
+        // Round-2 (retry) grounding fires after authoring finished — it rides the
+        // validate step's retry counter, so never reopen the completed author line.
+        if (authorFinished) return;
+        advanceTo('author');
+        tracker?.detail('author', authorDetail());
+      },
+      onBirthPhase: (phase) => {
+        building = phase === 'build';
         renderValidate();
       },
-      onBirthProgress: (done, total) => {
+      onBirthProgress: (done) => {
         building = false;
-        birthSeen = true;
         birthDone = done;
-        birthTotal = total;
         renderValidate();
       },
       onRetryProgress: (done, total) => {
@@ -230,6 +262,13 @@ export async function guardGenerateInProcess(
         retryDone = done;
         retryTotal = total;
         renderValidate();
+      },
+      onSectionSettled: (settled, total) => {
+        sectionsDone = settled;
+        sectionsTotal = total;
+        // Gap sections settle during extract/author — only re-render a LIVE
+        // validate line; never start the birth step early.
+        if (validateStarted) renderValidate();
       },
     });
 
@@ -268,7 +307,7 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate'] as const;
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`
@@ -354,6 +393,10 @@ export async function guardRunInProcess(
     tracker?.done('run', `${n} scenario${n === 1 ? '' : 's'}`);
   } else if (result.status === 'build-failed') {
     tracker?.error('build', `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}`);
+  } else if (result.status === 'entry-preflight-failed') {
+    // Build succeeded but the entry can't start — the run never began; mark the build
+    // phase (where the entry is prepared) errored so the popup shows the sticky error.
+    tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
   }
   return result;
 }

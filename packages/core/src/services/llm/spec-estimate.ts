@@ -22,8 +22,8 @@
 
 import {
   discoverDocs,
-  prefilterDocs,
-  readRelevanceCache,
+  planRelevanceWork,
+  readCorpusDecisions,
   isAreaTagCached,
   RELEVANCE_SYSTEM_PROMPT,
   AREA_TAGGER_SYSTEM_PROMPT,
@@ -109,15 +109,26 @@ function previewChars(): number {
  * the confirm prompt is skipped.
  */
 export async function estimateScanTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
-  const docs = discoverDocs(repoRoot);
-  const { toClassify } = prefilterDocs(docs); // manualIncludes not loaded here — upper bound on skips
-  const nClassify = toClassify.length;
+  // Load the user's decisions so the estimate probes the SAME doc set the run
+  // classifies. Without the manualIncludes the prefilter (dedup pool) and the
+  // kept set diverge from the runtime — the estimate would report "all cached"
+  // while the run cache-misses and spends (silent-spend bug).
+  const decisions = readCorpusDecisions(repoRoot);
+  const manualIncludes = decisions.manualIncludes ?? [];
+  const manualExcludes = new Set(decisions.manualExcludes ?? []);
 
-  // Relevance: one LLM call per doc whose verdict isn't cached. Cached verdicts
-  // also tell us which docs are kept (feed area-tagging).
-  const relevance = await Promise.all(toClassify.map((d) => readRelevanceCache(repoRoot, d)));
-  const relevanceMissDocs = toClassify.filter((_, i) => relevance[i] === null);
-  const cachedKeptDocs = toClassify.filter((_, i) => relevance[i]?.include === true);
+  const docs = discoverDocs(repoRoot);
+  // Exact same planner `filterByRelevance` runs: one LLM call per doc whose
+  // verdict isn't cached (manual-includes never call). Its `known` verdicts also
+  // tell us which docs are kept (feed area-tagging).
+  const plan = await planRelevanceWork(repoRoot, docs, manualIncludes);
+  const nClassify = plan.toClassify.length;
+  const relevanceMissDocs = plan.needsCall;
+  // Kept without a call = cached-include ∪ manual-include, minus force-excludes
+  // (the run drops excluded docs before tagging).
+  const cachedKeptDocs = plan.toClassify.filter(
+    (d) => plan.known.get(d.path)?.include === true && !manualExcludes.has(d.path),
+  );
 
   // Area-tag: cached-kept docs that still lack tags + the kept share of changed
   // docs (whose tags are necessarily uncached — same content key).

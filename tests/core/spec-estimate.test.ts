@@ -26,6 +26,7 @@ import {
   discoverDocs,
   filterByRelevance,
   tagDocs,
+  curate,
 } from '../../packages/spec-consolidator/src/index.js';
 
 // A fixed price table so cost assertions are deterministic (no network).
@@ -199,6 +200,107 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(est.subjectLabel).toBe('all 2 docs cached');
     expect(est.stages).toEqual([]); // every doc cached → no LLM work
     expect(est.totalEstimatedTokens).toBe(0);
+  });
+
+  function writeDecisions(d: Record<string, unknown>): void {
+    const dir = path.join(repo, '.truecourse', 'specs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'decisions.json'),
+      JSON.stringify({ version: 1, manualIncludes: [], manualExcludes: [], relations: [], manualAreas: [], ...d }),
+    );
+  }
+
+  // How many relevance + area-tag LLM calls a real curate() would make.
+  async function runtimeCalls(decisions?: unknown): Promise<{ rel: number; tag: number }> {
+    let rel = 0;
+    let tag = 0;
+    await curate(repo, {
+      skipGit: true,
+      skipCorpusWrite: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      decisions: decisions as any,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      disableLlmRelationDetection: true,
+      relevanceRunner: async ({ doc }) => {
+        rel++;
+        return { path: doc.path, include: doc.path === 'docs/keep.md', reason: 'stub' };
+      },
+      areaTagRunner: async () => {
+        tag++;
+        return { tags: [{ product: 'core', concern: 'x' }] };
+      },
+    });
+    return { rel, tag };
+  }
+
+  // The live 2026-07-07 silent-spend bug: the estimate reported "all cached" (no
+  // gate) while the scan cache-missed and spent. It happened because the estimate
+  // never loaded decisions.json — so a force-INCLUDED doc the relevance filter had
+  // dropped (cached include:false) was absent from the estimate's kept set, yet
+  // the run keeps it and area-tags it (a real LLM call). Estimate and run now
+  // share `planRelevanceWork` over the same decisions, so the gate can't be skipped.
+  it('scan estimate: a force-included dropped doc still gates (no silent spend)', async () => {
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'keep.md'), '# Keep\n' + 'Endpoint requires auth. '.repeat(50));
+    fs.writeFileSync(path.join(docsDir, 'vendor.md'), '# Vendor research\n' + 'ServiceTitan third-party. '.repeat(50));
+
+    // Warm caches as a prior scan would: keep -> included+tagged, vendor -> DROPPED.
+    const discovered = discoverDocs(repo, { skipGit: true });
+    await filterByRelevance(repo, discovered, {
+      runner: async ({ doc }) => ({ path: doc.path, include: doc.path === 'docs/keep.md', reason: 's' }),
+    });
+    await tagDocs(repo, discovered.filter((d) => d.path === 'docs/keep.md'), {
+      runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }),
+    });
+
+    // User force-includes the dropped doc.
+    const decisions = { manualIncludes: ['docs/vendor.md'] };
+    writeDecisions(decisions);
+
+    // The estimate is the pre-flight gate — measured BEFORE the run. It MUST
+    // surface at least one stage for the force-included doc's area-tag call.
+    const est = await estimateScanTokens(repo);
+    expect((est.stages ?? []).length).toBeGreaterThan(0);
+    expect(est.stages!.some((s) => s.stage === 'areaTag' && s.calls >= 1)).toBe(true);
+
+    // ...and the run really would make that call (guardrail direction).
+    const rt = await runtimeCalls(decisions);
+    expect(rt.tag).toBeGreaterThanOrEqual(1);
+  });
+
+  // Regression guardrail: whenever the runtime would make >=1 relevance/area
+  // call, the estimate has >=1 stage. Exercised across the states that broke it
+  // (force-include a dropped doc; a manual-include that changes the dedup pool so
+  // a near-duplicate the estimate would drop gets classified at runtime).
+  it('scan estimate: runtime would call => estimate has a stage (guardrail)', async () => {
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    // keep.md is the only doc the stub keeps; make a near-duplicate pair to move
+    // the dedup pool when full.md is force-included.
+    const body = Array.from({ length: 30 }, (_, i) => `Line ${i}: invariant ${i} holds.`).join('\n');
+    fs.writeFileSync(path.join(docsDir, 'keep.md'), '# Full\n' + body + '\nunique tail line');
+    fs.writeFileSync(path.join(docsDir, 'copy.md'), '# Copy\n' + body);
+
+    // Warm caches WITHOUT the include, so the near-dup copy is deduped away and
+    // never cached — exactly the stale state a prior scan leaves.
+    const discovered = discoverDocs(repo, { skipGit: true });
+    const kept = await filterByRelevance(repo, discovered, {
+      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 's' }),
+    });
+    await tagDocs(repo, kept.included, { runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }) });
+
+    const decisions = { manualIncludes: ['docs/keep.md'] };
+    writeDecisions(decisions);
+
+    // Estimate first (the pre-flight gate), then confirm the run would call.
+    const est = await estimateScanTokens(repo);
+    const rt = await runtimeCalls(decisions);
+    if (rt.rel + rt.tag > 0) {
+      expect((est.stages ?? []).length).toBeGreaterThan(0);
+    }
   });
 
   function writeCorpusFixture(): void {

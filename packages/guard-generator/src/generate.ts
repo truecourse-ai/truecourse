@@ -30,14 +30,18 @@ import {
   manifestPath,
   runBuild,
   resolveEntry,
+  preflightEntry,
+  formatEntryPreflightError,
   type Recipe,
   type BuildResult,
+  type EntryPreflightResult,
 } from '@truecourse/guard-runner'
 import {
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
   isRunnableDriver,
   type GuardCoverageGap,
+  type GuardEntryPreflight,
   type GuardManifestSection,
   type GuardScenario,
 } from '@truecourse/shared'
@@ -87,6 +91,9 @@ import {
 } from './serialize.js'
 
 export const GENERATE_CACHE_NAME = 'guard/generate'
+
+/** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
+const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
 
 // ---------------------------------------------------------------------------
 // Result + option types
@@ -161,11 +168,19 @@ export interface GuardGenerateResult {
    */
   birthPassed: number
   manifestPath?: string
+  /**
+   * Present ONLY when the built entry failed to start — the birth phase was
+   * short-circuited into ONE loud error (in `errors`), so every changed section
+   * stayed unsettled. Zero birth findings.
+   */
+  entryPreflight?: GuardEntryPreflight
 }
 
 export interface GuardGenerateModels {
   extract?: string
   generate?: string
+  /** Evidence-retry re-authoring (stage `guard.retry`); defaults to `generate`. */
+  retry?: string
   recipe?: string
   fallback?: string
 }
@@ -187,12 +202,19 @@ export interface GenerateGuardsOptions {
   /** Per-VIEW extraction progress (a chunked doc is many view calls) — the live counter. */
   onExtractViewProgress?: (done: number, total: number) => void
   onAuthorProgress?: (done: number, total: number) => void
+  /** Grounding probe progress — captured vs planned probes across all authoring
+   *  batches; the planned total grows as later sections enter grounding. */
+  onGroundProgress?: (captured: number, planned: number) => void
   /** Birth build/run phase transitions (forwarded from the runner) — for a "building…" detail. */
   onBirthPhase?: (phase: 'build' | 'run', total?: number) => void
   /** Birth progress, ticking per settled scenario across both rounds. */
   onBirthProgress?: (done: number, total: number) => void
   /** Retry-authoring progress: `total` = failed claims being re-authored, bumped as each settles. */
   onRetryProgress?: (done: number, total: number) => void
+  /** Per-section settle progress: `total` = the run's work-section count, fixed at
+   *  indexing. Unsettled sections (extraction/authoring/birth failures) never tick,
+   *  so `settled` may honestly end below `total`. */
+  onSectionSettled?: (settled: number, total: number) => void
 }
 
 function defaultConcurrency(): number {
@@ -290,7 +312,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     spawnExtractRunner({ transport: options.transport, model: options.models?.extract, fallbackModel: options.models?.fallback })
   const generateRunner =
     options.generateRunner ??
-    spawnGenerateRunner({ transport: options.transport, model: options.models?.generate, fallbackModel: options.models?.fallback })
+    spawnGenerateRunner({
+      transport: options.transport,
+      model: options.models?.generate,
+      retryModel: options.models?.retry,
+      fallbackModel: options.models?.fallback,
+    })
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -396,10 +423,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // probing entirely, leaving authoring ungrounded exactly as before. The build's
   // birth-phase announcement stays owned by the birth path (`awaitBuild`).
   let resolvedEntryMemo: string[] | null = null
+  // Grounding progress: probes are counted as PLANNED when a batch enters grounding
+  // (the total grows as later sections arrive) and as CAPTURED as each transcript
+  // resolves (cache hit or fresh run). Surfaced on the author step so the pre-author
+  // probe sweep never looks like a hang.
+  let groundPlanned = 0
+  let groundCaptured = 0
   const groundClaims = async (claimTexts: string[]): Promise<ProbeTranscript[]> => {
     const probes = deriveProbes(claimTexts, recipe.entry)
     const build = await buildPromise
-    if (!build.ok) return []
+    if (!build.ok || probes.length === 0) return []
+    groundPlanned += probes.length
+    options.onGroundProgress?.(groundCaptured, groundPlanned)
     resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
     return captureProbes({
       repoRoot,
@@ -408,7 +443,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       displayEntry: recipe.entry,
       recipeFingerprint,
       recipeEnv: recipe.env,
+      onProbeCaptured: () => options.onGroundProgress?.(++groundCaptured, groundPlanned),
     })
+  }
+
+  // Pre-flight the built entry ONCE (after the build succeeds), before any birth
+  // candidate runs against it. A dead entry short-circuits the whole birth phase into
+  // ONE loud error; the judgment is GENERAL (no string matching) — see
+  // `@truecourse/guard-runner` `preflightEntry`. Null when the build failed (that has
+  // its own error path).
+  let entryPreflightMemo: Promise<EntryPreflightResult | null> | null = null
+  const preflightEntryOnce = (): Promise<EntryPreflightResult | null> => {
+    entryPreflightMemo ??= (async () => {
+      const build = await buildPromise
+      if (!build.ok) return null
+      resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
+      return preflightEntry({ resolvedEntry: resolvedEntryMemo, displayEntry: recipe.entry, recipeEnv: recipe.env })
+    })()
+    return entryPreflightMemo
   }
 
   // Id allocation seeds with EVERY existing id (hand-written + all work-owned). A
@@ -445,11 +497,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
     settledKeys.add(k)
     writeWorkingManifest()
+    options.onSectionSettled?.(settledKeys.size, plan.work.length)
   }
 
   // Result accumulators + progress counters — appended/bumped as sections settle.
   const written: GeneratedScenarioInfo[] = []
   const birthFindings: GuardBirthFinding[] = []
+  // Set the first time a section reaches birth and finds the entry can't start; from
+  // then on every cli section short-circuits (no birth, unsettled) and the failure is
+  // recorded ONCE, in `errors`, never as per-section findings.
+  let entryPreflightFailure: GuardEntryPreflight | null = null
   let birthTotal = 0
   let birthSettled = 0
   let birthPassed = 0
@@ -506,6 +563,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     settleChain = settleChain.then(() => settleCliSection(sectionByKey.get(k)!, refsBySection.get(k)!))
   }
 
+  // True when the built entry cannot start — the memoized pre-flight verdict. On the
+  // FIRST dead detection it records the ONE loud entry-level error (with the full,
+  // untruncated startup stderr) and the structured `entryPreflight` record; later
+  // calls short-circuit silently. Never true when the build itself failed.
+  const deadEntry = async (): Promise<boolean> => {
+    const preflight = await preflightEntryOnce()
+    if (!preflight || preflight.ok) return false
+    if (!entryPreflightFailure) {
+      entryPreflightFailure = { entry: preflight.entry, buildCommand: recipe.build, stderr: preflight.stderr }
+      errors.push({
+        doc: preflight.entry,
+        anchor: ENTRY_PREFLIGHT_ANCHOR,
+        message: formatEntryPreflightError(entryPreflightFailure),
+      })
+    }
+    return true
+  }
+
   // Settle one cli section: birth its authored scenarios, retry the failing claims
   // once, and persist green survivors — or record findings/errors and leave it
   // unsettled (its prior files/entry are cleared at run end for a clean re-attempt).
@@ -548,6 +623,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       if (!build.ok) {
         const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
         for (const c of round1) localErrors.push(errorFrom({ candidate: c, result: { failure: { actual: message } } }))
+      } else if (await deadEntry()) {
+        // The built entry can't start — birthing anything against it would produce N
+        // indistinguishable failures. Leave THIS section unsettled (run-end cleanup
+        // drops it for a re-attempt) and return; the ONE loud error was recorded once.
+        return
       } else {
         birthTotal += round1.length
         const r1 = await birthValidate(repoRoot, round1, { skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
@@ -631,6 +711,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const authorTotal = authTasks.length
   let authorDone = 0
   const bumpAuthor = (n: number): void => options.onAuthorProgress?.((authorDone += n), authorTotal)
+  // Establish the author denominator before grounding fires — the grounding counter
+  // rides the author step's detail, which needs the claim total up front (on a cold
+  // run every batch grounds before its first author tick).
+  if (authorTotal > 0) options.onAuthorProgress?.(authorDone, authorTotal)
 
   // Per-claim cache read up front; a hit resolves the claim immediately (its
   // section can settle without waiting on the LLM), only misses are sent.
@@ -717,6 +801,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     orphaned,
     birthPassed,
     manifestPath: manifestPath(repoRoot),
+    ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
 }
 

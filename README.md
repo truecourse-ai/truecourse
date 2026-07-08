@@ -239,6 +239,29 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 
 Like analyze, `guard/LATEST.json` is the committable baseline — commit it after merging to `main` (re-run `truecourse guard run`, commit the result), not from feature branches.
 
+### The recipe — `scenarios/recipe.json`
+
+The recipe tells guard how to build your repo and what binary the scenarios exercise:
+
+```json
+{
+  "build": "pnpm turbo build --filter=...{./tools/cli}",
+  "entry": ["node", "tools/cli/dist/index.js"],
+  "env": { "MY_FLAG": "1" }
+}
+```
+
+- `build` — one shell command, run in the repo root before scenarios execute.
+- `entry` — the entrypoint argv; each scenario's command is appended to it. Repo-relative.
+- `env` *(optional)* — extra environment variables for every scenario run.
+
+It's discovered by the LLM **once**, on your first `guard generate`, and never touched again —
+**the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the
+whole team runs the same preparation. Edit it when the discovered command isn't what you want —
+for example, if your build tool's cache can serve stale output across branch switches, harden the
+build (`turbo build --force …`, or a clean step) at the cost of slower runs. Recipe edits change
+the recipe fingerprint, so the dashboard flags runs made under an older recipe.
+
 ## Commands
 
 ```bash

@@ -31,7 +31,7 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
-import type { RunGuardResult } from '@truecourse/guard-runner';
+import { formatEntryPreflightError, type RunGuardResult } from '@truecourse/guard-runner';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -132,10 +132,12 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
       res.json({ status: 'ok', summary: result.latest.summary });
       return;
     }
-    // Non-ok: a build failure already put the popup into its sticky error state
-    // (the driver called tracker.error). The other statuses never started the
-    // popup, so clear any lifecycle state and let the client toast the message.
-    if (result.status !== 'build-failed') emitSpecComplete(repoId, 'guard-run');
+    // Non-ok: a build failure or a dead-entry pre-flight already put the popup into
+    // its sticky error state (the driver called tracker.error). The other statuses
+    // never started the popup, so clear any lifecycle state and toast the message.
+    if (result.status !== 'build-failed' && result.status !== 'entry-preflight-failed') {
+      emitSpecComplete(repoId, 'guard-run');
+    }
     res.json({ status: result.status, message: runFailureMessage(result) });
   } catch (e) {
     emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
@@ -156,6 +158,12 @@ function runFailureMessage(result: Exclude<RunGuardResult, { status: 'ok' }>): s
       return 'No scenarios found under .truecourse/scenarios/. Generate scenarios first.';
     case 'build-failed':
       return `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}. No scenarios ran.`;
+    case 'entry-preflight-failed':
+      return formatEntryPreflightError({
+        entry: result.preflight.entry,
+        buildCommand: result.buildCommand,
+        stderr: result.preflight.stderr,
+      });
   }
 }
 

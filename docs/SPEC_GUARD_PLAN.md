@@ -367,6 +367,69 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    relevance is the drop point. Prompt change ⇒ relevance-cache invalidation (every doc
    re-judged once) — batch it. Available TODAY without engine changes: the doc row's "skip"
    force-exclude, or `tests/fixtures/**` in `.truecourseignore`.
+11. **Estimate gate must agree with the runtime (live bug 2026-07-07: silent spend).** The
+   dashboard Rescan proceeded with NO estimate modal, then the run made ~55 relevance calls
+   ($0.05+) — `estimateScanTokens` returned zero stages (gate skipped as "all cached") while
+   the runtime cache-missed everywhere. Estimate and runtime MUST derive from the same
+   fingerprints/keys (single exported cache-probe used by both); regression test: for any
+   state where the runtime would make at least one call, the estimate has at least one
+   stage. Root-cause the divergence (dist-vs-src fingerprint skew is the known suspect —
+   the spec-estimate test hit exactly this during item 10) — never patch by re-ordering.
+   STATUS: BUILT — root cause was NOT fingerprint skew: `estimateScanTokens` never loaded
+   `decisions.json`, so it planned over a different doc set than the run (manualIncludes
+   missing from its prefilter/kept set, manualExcludes ignored); fixed by a single shared
+   `planRelevanceWork` (spec-consolidator) consumed by both `filterByRelevance` and the
+   estimate, with the estimate now loading decisions via `readCorpusDecisions`.
+12. **Grounding needs progress (live report 2026-07-07: 5-minute silent gap).** Between
+   "Extracting claims" and the first "Authoring scenarios" tick the engine grounds claims
+   (real-CLI probe transcripts, 20s timeouts, per-section batches) with NO progress step —
+   minutes of apparent hang. Surface probe progress through the tracker (grounding counter
+   on the authoring step's detail, or a dedicated step — match the per-section pipeline's
+   interleaving honestly; the progress rule: all long work visibly ticks). STATUS: BUILT
+   2026-07-08 — `onGroundProgress(captured, planned)` from generate.ts/ground.ts rides the
+   author step's detail as `grounding probes X/Y · authoring Z/W claims` (planned grows as
+   sections enter grounding); flows unchanged to CLI + dashboard via the shared tracker.
+13. **Retry authoring spend must be visible on the birth line (user report 2026-07-08).**
+   Birth execution is deterministic (no LLM), but the one evidence-retry per birth-failed
+   claim is a full Opus re-author — today it logs under `guard.generate`, so its cost
+   silently accrues to the already-completed "Authoring scenarios" line while the birth line
+   shows "retrying failed claims 19/20" with NO usage tag. Fix: retries log under their own
+   `guard.retry` stage; the birth step's usage tag maps to it (live model/tok/$ on the birth
+   line during retries); `GUARD_USAGE_STAGES` includes it so result.json totals stay
+   complete. Pairs with Phase 3 gap 6 (sections-led birth denominator) — built together.
+   STATUS: BUILT 2026-07-08 — the generate runner switches stage (and optional
+   `guard.retry`-resolved model) on retry contexts; the validate line carries the tag.
+14. **A broken entry must be ONE loud error, never N findings (live failure 2026-07-08).**
+   A stale cross-branch `tools/cli/dist` (turbo cache + branch switch; tsc never cleans
+   orphans) made the recipe entry crash with ERR_MODULE_NOT_FOUND on EVERY invocation —
+   generate faithfully produced 25 "expected exit 0, got exit 1" birth findings and
+   persisted nothing, burying the real cause. Fix: after the recipe build, PRE-FLIGHT the
+   entry once in a scratch sandbox before any birth/run work — if the entry itself fails to
+   start, fail the run with ONE entry-level error carrying the startup stderr (general
+   design: judge "starts" by the probe transcript, no language/tool-specific string
+   matching baked into the engine; the same probe result short-circuits birth AND `guard
+   run`). Zero findings from a dead binary.
+   STATUS: BUILT 2026-07-08 — judgment is ARGUMENT-INVARIANCE (no string matching):
+   `preflightEntry` probes the built entry with two distinct argvs (`[]` and `--help`) in
+   fresh sandboxes and judges it DEAD only when BOTH probes fail AND their
+   (exit/signal/spawnError/stdout/stderr) are byte-identical — a crash before argv parsing
+   is invariant under its arguments, whereas a healthy CLI reacts (a clean exit, or
+   differing failures, e.g. usage-on-no-args vs `--help`). `guard run` (run.ts,
+   build-owned only) returns a new `entry-preflight-failed` status; `guard generate`
+   (generate.ts) short-circuits every cli section's birth on a memoized verdict, recording
+   ONE error + an `entryPreflight` report field (full untruncated stderr + the recipe
+   build command as the rebuild hint), sections left unsettled. CLI + dashboard render it
+   via the existing run/generate error surfaces.
+15. **Recipes are user-editable, documented (user decision 2026-07-08).** `recipe.json` is
+   discovered once (LLM, proposal-only) and an EXISTING file always wins — already true in
+   the engine (recipe-discovery skips when present). Made official: README's guard Setup
+   documents the schema (`build` / `entry` / optional `env`), that the file is committable
+   and hand-editable, and the hardening example (`turbo build --force`) for build tools
+   whose caches can serve stale output across branch switches. Recipe edits roll the recipe
+   fingerprint → older runs flag as stale. STATUS: BUILT (README section added 2026-07-08).
+
+
+
 
 ## guard generate (the LLM pipeline)
 
@@ -834,10 +897,9 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   onScenarioSettled; visible "retrying failed claims R/T" detail);
   (4) written-count mislabeled "passed" — FIXED (birthPassed reported separately);
   (5) per-DOC extraction counter stuck at "0 docs" — FIXED (onExtractViewProgress, counts views);
-  (6) OPEN — under the per-section pipeline the birth counter's TOTAL grows as sections reach
-  birth ("43/43", then "95/95"), each reading as complete while sections still settle. Fix:
-  lead with the FIXED denominator — "sections 154/208 · birth 95 · retrying 20/21" — sections
-  settled/total-work is monotonic and never fake-completes.
+  (6) FIXED — the birth line leads with the FIXED denominator ("sections 154/208 · birth 95 ·
+  retrying 20/21"): `onSectionSettled` ticks settled/total-work (monotonic, never
+  fake-completes; unsettled sections honestly end below total), birth is a plain count.
   The governing rule stands: EVERY phase that does real work (LLM calls, sandbox runs, builds)
   renders a live moving counter while it runs — no phase may sit visually complete or idle
   while work continues.

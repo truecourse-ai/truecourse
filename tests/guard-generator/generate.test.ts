@@ -4,13 +4,17 @@ import path from 'node:path'
 import {
   generateGuards,
   birthValidate,
+  spawnGenerateRunner,
   type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
   type SectionInput,
   type ExtractedClaim,
   type ProbeTranscript,
+  type AuthorUserContext,
+  type AuthorClaim,
 } from '@truecourse/guard-generator'
+import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
   readManifest,
@@ -777,6 +781,48 @@ describe('generateGuards — live progress', () => {
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
     expect(res.birthPassed).toBe(2) // diverges from written.length (0) — the honest count
   })
+
+  it('fires onSectionSettled per settle with the fixed work-section denominator', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const ticks: Array<[number, number]> = []
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      onSectionSettled: (settled, total) => ticks.push([settled, total]),
+    })
+
+    expect(res.written).toHaveLength(1)
+    // background (untestable gap) settles first, version after birth; the total is
+    // the run's work-section count, fixed from indexing.
+    expect(ticks).toEqual([
+      [1, 2],
+      [2, 2],
+    ])
+  })
+
+  it('an unsettled section never ticks onSectionSettled — the counter honestly ends below the total', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const ticks: Array<[number, number]> = []
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      // Fails birth in both rounds → `version` never settles.
+      generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
+      onSectionSettled: (settled, total) => ticks.push([settled, total]),
+    })
+
+    expect(res.written).toEqual([])
+    expect(ticks).toEqual([[1, 2]]) // only the untestable gap settled
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -841,6 +887,51 @@ describe('generateGuards — grounded authoring', () => {
     expect(received).toEqual([])
     expect(res.written).toEqual([])
     expect(res.errors.length).toBeGreaterThan(0)
+  })
+
+  it('fires onGroundProgress as probes are planned then captured', async () => {
+    const r = repo()
+    writeRecipe(r) // build 'true' → probing runs
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const ground: Array<[number, number]> = []
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: extractBy({
+        version: [{ claim: '`--version` prints the version and exits 0' }],
+        background: { untestable: 'bg' },
+      }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      onGroundProgress: (captured, planned) => ground.push([captured, planned]),
+    })
+
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    // One probe (`--version`): planned announced (0/1) before capture, captured after (1/1).
+    expect(ground).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
+  })
+
+  it('does not fire onGroundProgress when authoring is fully cached (no probes run)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const runners = {
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    }
+    await generateGuards({ repoRoot: r, ...runners })
+
+    // Reset the manifest so `version` is work again; authoring is a per-claim cache
+    // HIT → no authoring call and therefore no grounding.
+    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    let groundCalls = 0
+    await generateGuards({ repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
+    expect(groundCalls).toBe(0)
   })
 })
 
@@ -987,5 +1078,53 @@ describe('generateGuards — per-section pipeline', () => {
     expect(retryCalls).toBe(0) // retry authoring cache hit
     expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res2.birthPassed).toBe(1)
+  })
+})
+
+describe('spawnGenerateRunner — retry stage attribution', () => {
+  const section: SectionInput = {
+    doc: DOC,
+    anchor: 'version',
+    fingerprint: 'sha256:x',
+    headingText: 'version',
+    level: 2,
+    ownText: '',
+    fullText: '',
+    areaTags: [],
+  }
+  const ctxFor = (claims: AuthorClaim[]): AuthorUserContext => ({
+    doc: DOC,
+    docContext: 'doc context',
+    areaTags: [],
+    recipeEntry: ['node', 'bin.mjs'],
+    recipeBuild: 'true',
+    claims,
+  })
+  const retry = { scenarioTitle: 't', step: 1, expected: 'e', actual: 'a' }
+
+  it('logs round-1 under guard.generate and a retry under guard.retry with the retry model', async () => {
+    const seen: Array<{ stage: string; model?: string }> = []
+    const transport: LlmTransport = async (req) => {
+      seen.push({ stage: req.stage, model: req.model })
+      return '[]'
+    }
+    const runner = spawnGenerateRunner({ transport, model: 'opus', retryModel: 'sonnet' })
+    await runner(ctxFor([{ ref: 'c0', claim: 'v', section }]))
+    await runner(ctxFor([{ ref: 'c0', claim: 'v', section, retry }]))
+    expect(seen).toEqual([
+      { stage: 'guard.generate', model: 'opus' },
+      { stage: 'guard.retry', model: 'sonnet' },
+    ])
+  })
+
+  it('a retry defaults to the generate model when no retry model is configured', async () => {
+    const seen: Array<{ stage: string; model?: string }> = []
+    const transport: LlmTransport = async (req) => {
+      seen.push({ stage: req.stage, model: req.model })
+      return '[]'
+    }
+    const runner = spawnGenerateRunner({ transport, model: 'opus' })
+    await runner(ctxFor([{ ref: 'c0', claim: 'v', section, retry }]))
+    expect(seen).toEqual([{ stage: 'guard.retry', model: 'opus' }])
   })
 })

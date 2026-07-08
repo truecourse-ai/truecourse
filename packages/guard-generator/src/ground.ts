@@ -178,6 +178,8 @@ export interface CaptureProbesOptions {
   recipeEnv?: Record<string, string>
   /** Test seam; production uses {@link defaultProbeExecutor}. */
   exec?: ProbeExecutor
+  /** Fired once as each probe's transcript resolves (cache hit or fresh capture) — a live-counter seam. */
+  onProbeCaptured?: () => void
 }
 
 /**
@@ -194,11 +196,15 @@ export async function captureProbes(opts: CaptureProbesOptions): Promise<ProbeTr
       const cached = await getCacheEntry(opts.repoRoot, GROUND_CACHE_NAME, key)
       if (cached) {
         const parsed = ProbeTranscriptSchema.safeParse(cached)
-        if (parsed.success) return parsed.data
+        if (parsed.success) {
+          opts.onProbeCaptured?.()
+          return parsed.data
+        }
       }
       const capture = await exec([...opts.resolvedEntry, ...argv], opts.recipeEnv)
       const transcript = toTranscript(argv, [...opts.displayEntry, ...argv], capture)
       await setCacheEntry(opts.repoRoot, GROUND_CACHE_NAME, key, transcript)
+      opts.onProbeCaptured?.()
       return transcript
     }),
   )

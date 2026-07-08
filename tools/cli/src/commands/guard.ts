@@ -82,6 +82,17 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
       process.exit(1);
       return;
     }
+    case "entry-preflight-failed": {
+      // The build succeeded but the entry can't start — ONE loud error with the FULL
+      // (untruncated) startup stderr, never N identical scenario failures.
+      p.log.error(`The recipe entry \`${result.preflight.entry}\` failed to start — every scenario would fail identically.`);
+      for (const line of result.preflight.stderr.trimEnd().split("\n")) console.log(`  ${line}`);
+      p.log.step(`Rebuild it with \`${result.buildCommand}\` (its build output is likely stale or incomplete), then re-run \`truecourse guard run\`.`);
+      printLoadErrors(result.loadErrors);
+      p.outro("Aborted — the entry could not start; no scenarios ran.");
+      process.exit(1);
+      return;
+    }
     case "ok":
       break;
   }
@@ -200,6 +211,18 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   if (guard.status === "recipe-failed") {
     p.log.error(`Recipe discovery failed: ${guard.reason}`);
     p.outro("Add or fix `.truecourse/scenarios/recipe.json` and retry.");
+    process.exit(1);
+  }
+
+  // The built entry couldn't start — birth validation never ran, so every changed
+  // section stayed unsettled. ONE loud error with the FULL startup stderr (also
+  // recorded in guard/result.json errors); a rebuild + re-run picks up where it left
+  // off (authoring is cached).
+  if (guard.entryPreflight) {
+    p.log.error(`The recipe entry \`${guard.entryPreflight.entry}\` failed to start — every scenario would fail identically, so nothing was validated.`);
+    for (const line of guard.entryPreflight.stderr.trimEnd().split("\n")) console.log(`  ${line}`);
+    p.log.step(`Rebuild it with \`${guard.entryPreflight.buildCommand}\` (its build output is likely stale or incomplete), then re-run \`truecourse guard generate\`.`);
+    p.outro("Aborted — the entry could not start; no scenarios were validated.");
     process.exit(1);
   }
 
