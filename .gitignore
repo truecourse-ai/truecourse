@@ -34,3 +34,5 @@ tests/fixtures/**/obj/
 
 # Local TrueCourse store
 .truecourse/
+
+.truecourse_/

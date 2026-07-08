@@ -343,6 +343,30 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    counts per outcome kind + the top ~3 findings one line each + pointers (`guard drifts`,
    `guard status`, the report file). The detail already lives in the store surfaces; the
    terminal is for the story.
+9. **Preamble conflict pointers (BUILT 2026-07-07, same fingerprint batch).** STATUS:
+   `OverlapSectionSchema.heading` is now `z.string().nullable()` (null = preamble; old string
+   headings still parse); the overlap prompt spells out the null-heading preamble case with a
+   README↔PLAN example (edit rolls the overlap-stage PROMPT_FINGERPRINT, re-judging pairs once);
+   `DocMarkdown`/`SpecDocViewer` band the pre-first-heading block via a `highlightPreamble` prop;
+   `GuardCoveragePage`'s conflict-heading index skips null pointers. Overlap section pointers are
+   heading-anchored, so a conflict whose passage lives
+   in a doc's PREAMBLE (before the first heading — e.g. README badges/tagline claims) gets NO
+   pointer for that side and the conflict viewer can't highlight it (found live:
+   README.md ↔ docs/PLAN.md highlighted only the PLAN side). Fix: the overlap prompt may emit
+   a null/preamble pointer meaning "the pre-first-heading block", schema + viewer band that
+   block. Prompt change ⇒ overlap-stage cache invalidation — never ship alone.
+10. **Path-aware relevance (BUILT 2026-07-07, same fingerprint batch).** STATUS: relevance-filter
+   now passes the repo-relative PATH into the user prompt and the system prompt weighs path as
+   evidence (fixture/sample/example test-data specs dropped, path evidence-not-verdict);
+   system-prompt edit rolls PROMPT_FINGERPRINT so every doc re-judges once. The realistic scan
+   KEPT fixture specs (tests/fixtures/sample-js-project-il/reference/specs/… — well-formed
+   docs describing a FICTIONAL sample project) because the relevance prompt judges content
+   without ever seeing the doc's PATH. Fix: pass the repo-relative path alongside the content
+   and instruct that docs under test/fixture/sample trees describing another product are
+   irrelevant to THIS repo's spec corpus. Discovery stays a signal-not-filter (by design);
+   relevance is the drop point. Prompt change ⇒ relevance-cache invalidation (every doc
+   re-judged once) — batch it. Available TODAY without engine changes: the doc row's "skip"
+   force-exclude, or `tests/fixtures/**` in `.truecourseignore`.
 
 ## guard generate (the LLM pipeline)
 
@@ -478,6 +502,66 @@ into `packages/core/src/services/llm/spec-estimate.ts` alongside the existing su
 **Placement (user directive, 2026-07-03, made explicit 2026-07-07): Guard is a TOP-LEVEL
 SECTION** in the section switcher — a third module next to Code Analysis and BL Drift, never a
 tab inside BL Drift. Its tabs: Coverage (default), Drifts, Report.
+
+**First-run coverage fixes (user bug reports 2026-07-07, post-scan fresh store — eighth
+review pass).** Four defects found running the published build on a scan-only store (corpus
+present, generate never run):
+1. **Onboarding empty states must never shadow a selection.** The Coverage main pane's
+   stage CTAs (scan → generate → run) render ONLY when nothing is selected. A selected doc
+   ALWAYS renders: raw markdown pre-generate (conflicts stay resolvable in context — the
+   fallback already existed but an early-return `!hasGenerated` empty state made it
+   unreachable), the coverage-banded view once generated. "No guards generated" is the
+   no-selection onboarding card, nothing more.
+2. **A selected conflict owns the WHOLE main pane.** The two-column SpecOverlapDetail
+   renders full-width; the doc center pane hides while a conflict is open (closing the
+   conflict returns to the selected doc). Never render a doc — least of all a previously
+   selected, unrelated one — squeezed beside a conflict; the conflict columns carry their
+   own doc context.
+3. **Empty states are never duplicated across panes.** With an empty inventory the
+   Scenarios LEFT panel shows one quiet muted line ("No scenarios yet."); the MAIN pane
+   carries the single EmptyState with the CTA. Two identical cards side by side read as a
+   rendering bug.
+4. **No hand-written clause in onboarding copy.** "…or commit hand-written ones under
+   .truecourse/scenarios/" is dropped everywhere — hand-written scenarios stay supported
+   (chip, inventory), but the empty state says the one thing to do: run
+   `truecourse guard generate`.
+
+**Skips batch — decisions write instantly, ONE rescan applies them (user request
+2026-07-07).** Force-exclude/include used to trigger a full re-curate PER CLICK (tens of
+seconds each; set-level stages re-run every time) — skipping five docs meant five scans.
+New model, both surfaces:
+- **Dashboard (OSS)**: the skip/include row action persists the decision to
+  `specs/decisions.json` and returns immediately — no re-curate. The row moves
+  optimistically (pending tint until the next scan materializes it), and the Rescan header
+  button gains the amber staleness dot whenever recorded decisions are newer than the
+  corpus (`decisions.json` mtime vs corpus `generatedAt` — the decisions half of the logged
+  scan-staleness follow-up; docs-content staleness remains open). One Rescan applies any
+  number of queued decisions. EE keeps its existing recurate-over-seam flow (no live tree,
+  auto-regen gating — untouched).
+- **CLI**: `truecourse spec docs exclude|include <path...>` accepts MULTIPLE paths and
+  re-curates ONCE at the end, not per path.
+Conflict-relation resolutions keep their immediate re-curate (a resolution wants instant
+confirmation that the conflict cleared).
+
+**Doc labels are repo-relative paths, not basenames (user bug report 2026-07-07, ninth
+review pass).** Real corpora hold many same-named docs (six README.md's in this repo's own
+scan) — basename-only labels made doc rows indistinguishable and conflict rows read
+"README.md ↔ README.md". Everywhere the spec sidebar names a doc (doc rows, conflict labels,
+resolution summaries — the shared SpecCorpusView, so BL Drift's Spec tab inherits the fix)
+the label is the full repo-relative path, truncated with the full path on hover. Root-level
+files stay short; nested files show the path that distinguishes them. Never a bare basename
+for anything user-distinguishing.
+
+**DocMarkdown renders raw HTML (user bug report 2026-07-07, ninth review pass).** READMEs
+open with HTML blocks (`<p align="center"><img …>`, badge links) that react-markdown was
+rendering as literal text. DocMarkdown — the ONE markdown pipeline (Spec tab + guard
+coverage + raw-doc fallback all use it) — gains rehype-raw + rehype-sanitize (GitHub-style
+schema extended with img/align/id) so doc HTML renders instead of leaking source. Side
+effect: the logged "Spec-tab anchor artifact" follow-up resolves — `<a id>` becomes a real
+invisible anchor element instead of visible text (guard coverage's pre-render
+`stripDocAnchors` stays, harmless, for chunk alignment). Relative image srcs may 404 in the
+dashboard (no asset route) — the broken-image/alt fallback is acceptable and honest;
+external badge images load normally.
 
 **Scenarios tab layout (revised 2026-07-07 — house pattern, list-in-panel).** The Scenarios
 tab is the corpus INVENTORY and follows the app-wide shape LIST IN LEFT PANEL → DETAIL IN MAIN

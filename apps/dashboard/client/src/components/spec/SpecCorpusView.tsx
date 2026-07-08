@@ -17,9 +17,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
-import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation } from '@/lib/api';
-
-const base = (ref: string): string => ref.split('/').pop() ?? ref;
+import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation, SpecDecisionAck } from '@/lib/api';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
@@ -57,7 +55,7 @@ export function coveringRelation(rels: SpecRelation[], a: string, b: string, are
 
 /** Resolved-badge text for a synthesized conflict — names the relation type + winner. */
 function resolvedSummary(rel: SpecRelation): string {
-  return rel.type === 'keep-both' ? 'resolved — keep both' : `resolved — ${rel.type}: ${base(rel.newer)} wins`;
+  return rel.type === 'keep-both' ? 'resolved — keep both' : `resolved — ${rel.type}: ${rel.newer} wins`;
 }
 
 type DecisionAction = 'exclude' | 'unexclude' | 'include' | 'uninclude';
@@ -109,8 +107,10 @@ export interface SpecCorpusState {
   scan: () => Promise<void>;
   /** Re-read corpus + relations after an inline resolution. */
   refetch: () => Promise<void>;
-  /** Replace corpus data from a mutation response (include/exclude re-curate server-side). */
+  /** Replace corpus data from a mutation response (PR-scoped re-curate, or a scan). */
   apply: (res: SpecCorpusResponse) => void;
+  /** Reconcile the decision lists onto the current corpus (OSS include/exclude ack — no re-curate). */
+  applyDecisions: (dec: SpecDecisionAck) => void;
 }
 
 /**
@@ -179,7 +179,28 @@ export function useSpecCorpus(
 
   const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
 
-  return { data, hydrating, scanning, error, corpusCommit: data?.corpusCommit ?? null, scan, refetch, apply };
+  // OSS include/exclude: the corpus is unchanged (no re-curate), so keep the
+  // optimistically-moved corpus and only reconcile the persisted decision lists.
+  // Functional update so it merges onto the latest (post-optimistic) data.
+  const applyDecisions = useCallback(
+    (dec: SpecDecisionAck) =>
+      setData((prev) =>
+        prev ? { ...prev, manualIncludes: dec.manualIncludes, manualExcludes: dec.manualExcludes } : prev,
+      ),
+    [],
+  );
+
+  return {
+    data,
+    hydrating,
+    scanning,
+    error,
+    corpusCommit: data?.corpusCommit ?? null,
+    scan,
+    refetch,
+    apply,
+    applyDecisions,
+  };
 }
 
 export function SpecCorpusView({
@@ -187,6 +208,7 @@ export function SpecCorpusView({
   corpus,
   activeKey,
   onOpen,
+  onDecision,
   prNumber = null,
   prRef,
 }: {
@@ -196,6 +218,8 @@ export function SpecCorpusView({
   activeKey: string | null;
   /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
+  /** Fired after an OSS include/exclude is recorded, so the parent can refresh the Rescan dot. */
+  onDecision?: () => void;
   /** EE PR view: scope decisions to this PR. Repo view when null/undefined. */
   prNumber?: number | null;
   /** EE PR view: the PR head SHA. Undefined until the gate runs. */
@@ -205,8 +229,16 @@ export function SpecCorpusView({
   // Declared before the early returns to satisfy the rules of hooks.
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set());
   // The doc ref currently mutating — while set, every include/exclude action is
-  // disabled (one re-curate at a time) and this ref's row shows a spinner.
+  // disabled (one write at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
+  // OSS: refs whose decision is recorded but not yet materialized by a Scan — the
+  // row shows a "pending rescan" hint until the corpus is re-curated. Cleared when a
+  // fresh scan lands (the corpus's `generatedAt` changes).
+  const [pendingRefs, setPendingRefs] = useState<Set<string>>(() => new Set());
+  const generatedAt = data?.corpus.generatedAt;
+  useEffect(() => {
+    setPendingRefs(new Set());
+  }, [generatedAt]);
 
   // EE PR view: every decision is scoped to the PR + head SHA. With no gate run
   // yet (no head SHA) reads fall back to baseline but writes can't be scoped, so
@@ -217,23 +249,32 @@ export function SpecCorpusView({
   );
   const decisionsDisabled = prNumber != null && !prRef;
 
-  // Force-include / exclude. Move the row optimistically so it jumps immediately,
-  // then let the server-driven re-curate run (its step-progress popup shows via
-  // the socket, since removing/adding a doc re-runs the relation + vocab stages
-  // and can take tens of seconds) and apply the authoritative corpus it returns.
+  // Force-include / exclude. Move the row optimistically so it jumps immediately.
+  // OSS records the decision without re-curating (a Scan later materializes the
+  // batch), so the response is a decision-list ack: keep the optimistic corpus,
+  // reconcile the decision lists, mark the ref pending, and let the parent light the
+  // Rescan dot. PR scope (EE) re-curates and returns the full corpus, which replaces
+  // the optimistic state.
   const runDecision = useCallback(
-    async (ref: string, action: DecisionAction, call: () => Promise<SpecCorpusResponse>) => {
+    async (ref: string, action: DecisionAction, call: () => Promise<SpecCorpusResponse | SpecDecisionAck>) => {
       setBusyRef(ref);
       if (corpus.data) corpus.apply(optimisticDecision(corpus.data, ref, action));
       try {
-        corpus.apply(await call());
+        const res = await call();
+        if ('corpus' in res) {
+          corpus.apply(res);
+        } else {
+          corpus.applyDecisions(res);
+          setPendingRefs((prev) => new Set(prev).add(ref));
+          onDecision?.();
+        }
       } catch {
-        await corpus.refetch(); // re-curate failed — resync to server truth
+        await corpus.refetch(); // write failed — resync to server truth
       } finally {
         setBusyRef(null);
       }
     },
-    [corpus],
+    [corpus, onDecision],
   );
 
   const setInclude = useCallback(
@@ -360,7 +401,7 @@ export function SpecCorpusView({
             {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
-                label={`${base(a)} ↔ ${base(b)}`}
+                label={`${a} ↔ ${b}`}
                 area={fmtArea(area)}
                 resolved={resolved}
                 resolvedLabel={summary}
@@ -418,6 +459,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="remove"
                 busy={busyRef !== null}
+                pending={pendingRefs.has(ref)}
                 disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setInclude(ref, false)}
@@ -439,6 +481,7 @@ export function SpecCorpusView({
                 active={activeKey === ref}
                 actionLabel="restore"
                 busy={busyRef !== null}
+                pending={pendingRefs.has(ref)}
                 disabledReason={decisionsHint}
                 onOpen={(pinned) => onOpen(ref, pinned)}
                 onAction={() => setExclude(ref, false)}
@@ -665,7 +708,7 @@ function DocRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{base(doc.ref)}</span>
+        <span className="truncate">{doc.ref}</span>
         {tags.length > 0 && (
           <span className="flex flex-wrap gap-1">
             {tags.slice(0, 2).map((t) => (
@@ -711,6 +754,7 @@ function IncludeRow({
   active,
   actionLabel,
   busy,
+  pending = false,
   disabledReason,
   onOpen,
   onAction,
@@ -720,6 +764,8 @@ function IncludeRow({
   active: boolean;
   actionLabel: string;
   busy: boolean;
+  /** The decision is recorded but not yet materialized — shows a "pending rescan" hint. */
+  pending?: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
   disabledReason?: string | null;
   onOpen: (pinned: boolean) => void;
@@ -738,12 +784,13 @@ function IncludeRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{base(docRef)}</span>
+        <span className="truncate">{docRef}</span>
         {reason && (
           <span className="truncate text-[10px] text-muted-foreground/70" title={reason}>
             {reason}
           </span>
         )}
+        {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
         <button

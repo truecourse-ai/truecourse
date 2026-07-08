@@ -348,10 +348,10 @@ docsCmd
   });
 
 docsCmd
-  .command("include <path>")
-  .description("Force-include a skipped doc and re-scan")
-  .action(async (docPath) => {
-    await runSpecDocsInclude(docPath);
+  .command("include <path...>")
+  .description("Force-include one or more skipped docs and re-scan once")
+  .action(async (docPaths) => {
+    await runSpecDocsInclude(docPaths);
   });
 
 docsCmd
@@ -362,10 +362,10 @@ docsCmd
   });
 
 docsCmd
-  .command("exclude <path>")
-  .description("Force-exclude a kept doc from the corpus and re-scan")
-  .action(async (docPath) => {
-    await runSpecDocsExclude(docPath);
+  .command("exclude <path...>")
+  .description("Force-exclude one or more kept docs from the corpus and re-scan once")
+  .action(async (docPaths) => {
+    await runSpecDocsExclude(docPaths);
   });
 
 docsCmd

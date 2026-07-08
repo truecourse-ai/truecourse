@@ -7,14 +7,41 @@
  *
  * `highlight` marks the conflicting sections in place: the WHOLE section (its
  * heading + body up to the next heading) gets an amber band, so the user sees
- * exactly where two docs disagree, right on the document.
+ * exactly where two docs disagree, right on the document. `highlightPreamble`
+ * bands the PREAMBLE block (everything before the first heading) the same way,
+ * for conflicts whose passage is a badge/tagline above any heading.
  */
 
 import type { ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 
 const norm = (s: string): string => s.trim().toLowerCase();
+
+// Extend GitHub's sanitize schema so README-style raw HTML renders instead of
+// leaking as source: images (logos/badges), alignment wrappers, and invisible
+// `<a id>`/heading anchors. Everything else stays on the default allowlist and
+// `<script>` is still stripped.
+const SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    img: [...(defaultSchema.attributes?.img ?? []), 'src', 'alt', 'width', 'height'],
+    a: [...(defaultSchema.attributes?.a ?? []), 'id'],
+    h1: [...(defaultSchema.attributes?.h1 ?? []), 'id'],
+    h2: [...(defaultSchema.attributes?.h2 ?? []), 'id'],
+    h3: [...(defaultSchema.attributes?.h3 ?? []), 'id'],
+    h4: [...(defaultSchema.attributes?.h4 ?? []), 'id'],
+    h5: [...(defaultSchema.attributes?.h5 ?? []), 'id'],
+    h6: [...(defaultSchema.attributes?.h6 ?? []), 'id'],
+    p: [...(defaultSchema.attributes?.p ?? []), 'align'],
+    div: [...(defaultSchema.attributes?.div ?? []), 'align'],
+    td: [...(defaultSchema.attributes?.td ?? []), 'align'],
+    th: [...(defaultSchema.attributes?.th ?? []), 'align'],
+  },
+};
 
 const COMPONENTS: Components = {
   h1: ({ children }) => <h1 className="mb-3 mt-5 border-b border-border pb-1 text-xl font-semibold first:mt-0">{children}</h1>,
@@ -31,9 +58,10 @@ const COMPONENTS: Components = {
   ),
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
-  a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
+  a: ({ children, href, id }) => (
+    <a href={href} id={id} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
   ),
+  img: ({ node, ...props }) => <img {...props} className="inline-block max-w-full" />,
   blockquote: ({ children }) => (
     <blockquote className="my-3 border-l-2 border-border pl-3 italic text-muted-foreground">{children}</blockquote>
   ),
@@ -52,7 +80,11 @@ const COMPONENTS: Components = {
 
 function Md({ source }: { source: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
+      components={COMPONENTS}
+    >
       {source}
     </ReactMarkdown>
   );
@@ -81,10 +113,19 @@ function splitSections(source: string): Section[] {
   return sections;
 }
 
-export function DocMarkdown({ source, highlight = [] }: { source: string; highlight?: string[] }): ReactNode {
+export function DocMarkdown({
+  source,
+  highlight = [],
+  highlightPreamble = false,
+}: {
+  source: string;
+  highlight?: string[];
+  /** Band the preamble block (before the first heading) — for preamble conflicts. */
+  highlightPreamble?: boolean;
+}): ReactNode {
   const hl = new Set(highlight.map(norm));
 
-  if (hl.size === 0) {
+  if (hl.size === 0 && !highlightPreamble) {
     return (
       <div className="text-[13px] leading-relaxed text-foreground">
         <Md source={source} />
@@ -96,7 +137,8 @@ export function DocMarkdown({ source, highlight = [] }: { source: string; highli
   return (
     <div className="text-[13px] leading-relaxed text-foreground">
       {splitSections(source).map((sec, i) => {
-        const on = sec.heading !== '' && hl.has(norm(sec.heading));
+        // The preamble block is the leading section with no heading.
+        const on = sec.heading === '' ? highlightPreamble : hl.has(norm(sec.heading));
         return (
           <div
             key={i}

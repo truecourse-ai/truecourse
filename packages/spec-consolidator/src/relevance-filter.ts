@@ -300,7 +300,7 @@ async function classifyOne(
 // Subprocess runner
 // ---------------------------------------------------------------------------
 
-export const RELEVANCE_SYSTEM_PROMPT = `You are a documentation relevance classifier. Classify by CONTENT, not by folder or filename: does this doc state durable, intended behavior or decisions about THE SYSTEM IN THIS REPOSITORY (its endpoints, data, auth, events, invariants, business rules, architecture)?
+export const RELEVANCE_SYSTEM_PROMPT = `You are a documentation relevance classifier. Judge mainly by CONTENT — does this doc state durable, intended behavior or decisions about THE SYSTEM IN THIS REPOSITORY (its endpoints, data, auth, events, invariants, business rules, architecture)? The doc's PATH (given below) is evidence too, never an automatic verdict: weigh path and content together.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
@@ -313,24 +313,25 @@ INCLUDE (spec-source material):
 SKIP (not spec-source material):
   - Pure status / TODO checklists, kanban boards, release notes / changelog drafts
   - Docs about a THIRD-PARTY / external system (vendor API research, integration notes) — that is someone else's contract, not ours, and cannot be verified against this codebase
+  - TEST-DATA specs: a doc under a test / fixture / sample / example tree (PATH segments like tests/, fixtures/, __fixtures__/, examples/, sample-*) that describes a FICTIONAL or sample product used as test data for THIS repo's own tooling — that product is not this repository's system, so its "spec" is not ours. (The path is evidence, not proof: if the doc plainly describes THIS repository's real product or engineering, keep it.)
   - SUPERSEDED docs — an older version of a newer doc covering the same subject
   - Process / meta docs not about product behavior: contribution / onboarding guides, code-style guides, deployment runbooks (keep a deployment doc ONLY if it states our runtime contracts)
   - Exploratory scratch with no committed decisions (brain dumps, open-questions-only notes)
   - AI-agent instructions / prompt templates; personal engineering journals
 
-Distinguish "states a decision about our system" (INCLUDE) from "tracks status / describes an external system / is superseded / is process" (SKIP). The SKIP categories above are explicit — they are not "doubt." WHEN GENUINELY AMBIGUOUS: include (dropping a real spec doc costs more than keeping noise).
+Distinguish "states a decision about our system" (INCLUDE) from "tracks status / describes an external or test-data product / is superseded / is process" (SKIP). The SKIP categories above are explicit — they are not "doubt." WHEN GENUINELY AMBIGUOUS: include (dropping a real spec doc costs more than keeping noise).
 
 Output ONLY a JSON object:
 
   { "include": true|false, "reason": "short explanation" }
 
-The reason is shown to the user in the dashboard — be specific ("vendor API research (ServiceTitan)", "superseded by capacity-ml-plan-v3", "deployment runbook, no product contracts") so they can verify the call.`;
+The reason is shown to the user in the dashboard — be specific ("vendor API research (ServiceTitan)", "superseded by capacity-ml-plan-v3", "deployment runbook, no product contracts", "test-data spec for a sample product (tests/fixtures/…)") so they can verify the call.`;
 
-function buildRelevanceUserPrompt(doc: DocCandidate): string {
+export function buildRelevanceUserPrompt(doc: DocCandidate): string {
   // Cap the preview hard — classification doesn't need the full doc.
   const preview = doc.preview.split('\n').slice(0, 60).join('\n');
   return [
-    `Path: ${doc.path}`,
+    `PATH (repo-relative): ${doc.path}`,
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
     '',

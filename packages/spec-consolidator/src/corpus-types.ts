@@ -246,8 +246,14 @@ export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 export const OverlapSectionSchema = z.object({
   /** The doc this section lives in, by ref (one of the overlap's two docs). */
   doc: DocRefSchema,
-  /** The heading text of the conflicting section (verbatim from the doc). */
-  heading: z.string(),
+  /**
+   * The heading text of the conflicting section (verbatim from the doc), or
+   * `null` when the conflicting passage sits in the doc's PREAMBLE — the block
+   * before its first heading (README badges/tagline, intro line). A plain string
+   * from older corpora still parses; `null` is the preamble marker the viewer
+   * bands as the pre-first-heading block.
+   */
+  heading: z.string().nullable(),
 });
 export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
 

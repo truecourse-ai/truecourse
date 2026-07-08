@@ -3,9 +3,9 @@
  *
  *   list                                  list the kept (corpus) docs + area tags
  *   skipped                               list docs the LLM filter dropped
- *   include     <path>                    force-include a skipped doc + re-scan
+ *   include     <path...>                 force-include skipped docs + one re-scan
  *   uninclude   <path>                    remove a force-include override + re-scan
- *   exclude     <path>                    force-exclude a kept doc + re-scan
+ *   exclude     <path...>                 force-exclude kept docs + one re-scan
  *   unexclude   <path>                    remove a force-exclude override + re-scan
  *
  * Force-includes (decisions.json#manualIncludes) bypass the relevance filter;
@@ -83,12 +83,23 @@ export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise
   );
 }
 
-export async function runSpecDocsInclude(docPath: string, opts: RunSpecDocsOptions = {}): Promise<void> {
+// Force-include one or more skipped docs, then re-curate ONCE. Each path is
+// validated + persisted first (idempotent), so recording five docs costs one scan
+// instead of five.
+export async function runSpecDocsInclude(docPaths: string[], opts: RunSpecDocsOptions = {}): Promise<void> {
   const root = repoRoot(opts);
-  if (!docPath) return fail('Missing doc path');
-  await addManualInclude(root, docPath);
+  const paths = docPaths.filter(Boolean);
+  if (paths.length === 0) return fail('Missing doc path');
+  for (const docPath of paths) {
+    await addManualInclude(root, docPath);
+    p.log.step(`Force-included ${docPath}`);
+  }
   await reScan(root);
-  p.outro(`Force-include ${docPath} — re-scanned. Review \`truecourse spec conflicts list\`.`);
+  p.outro(
+    paths.length === 1
+      ? `Force-include ${paths[0]} — re-scanned. Review \`truecourse spec conflicts list\`.`
+      : `Force-included ${paths.length} docs — re-scanned once. Review \`truecourse spec conflicts list\`.`,
+  );
 }
 
 export async function runSpecDocsUninclude(docPath: string, opts: RunSpecDocsOptions = {}): Promise<void> {
@@ -99,12 +110,22 @@ export async function runSpecDocsUninclude(docPath: string, opts: RunSpecDocsOpt
   p.outro(`Removed force-include for ${docPath} — re-scanned.`);
 }
 
-export async function runSpecDocsExclude(docPath: string, opts: RunSpecDocsOptions = {}): Promise<void> {
+// Force-exclude one or more kept docs, then re-curate ONCE. Each path is validated +
+// persisted first (idempotent), so excluding five docs costs one scan instead of five.
+export async function runSpecDocsExclude(docPaths: string[], opts: RunSpecDocsOptions = {}): Promise<void> {
   const root = repoRoot(opts);
-  if (!docPath) return fail('Missing doc path');
-  await addManualExclude(root, docPath);
+  const paths = docPaths.filter(Boolean);
+  if (paths.length === 0) return fail('Missing doc path');
+  for (const docPath of paths) {
+    await addManualExclude(root, docPath);
+    p.log.step(`Force-excluded ${docPath}`);
+  }
   await reScan(root);
-  p.outro(`Force-exclude ${docPath} — re-scanned. Review \`truecourse spec conflicts list\`.`);
+  p.outro(
+    paths.length === 1
+      ? `Force-exclude ${paths[0]} — re-scanned. Review \`truecourse spec conflicts list\`.`
+      : `Force-excluded ${paths.length} docs — re-scanned once. Review \`truecourse spec conflicts list\`.`,
+  );
 }
 
 export async function runSpecDocsUnexclude(docPath: string, opts: RunSpecDocsOptions = {}): Promise<void> {

@@ -12,8 +12,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, renderHook, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
+import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/SpecScanButton';
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '../../apps/dashboard/client/src/components/spec/SpecOverlapDetail';
+import { DocMarkdown } from '../../apps/dashboard/client/src/components/spec/DocMarkdown';
 import type { SpecCorpusResponse } from '../../apps/dashboard/client/src/lib/api';
 
 const RESP: SpecCorpusResponse = {
@@ -58,6 +60,7 @@ const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
   scan: vi.fn(),
   refetch: vi.fn(),
   apply: vi.fn(),
+  applyDecisions: vi.fn(),
   ...over,
 });
 
@@ -70,18 +73,52 @@ describe('SpecCorpusView (left nav)', () => {
     expect(screen.getByText('Documents')).toBeInTheDocument();
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
     // doc shown ONCE; its area tag is a badge (single-product → concern only)
-    expect(screen.getAllByText('v1.md')).toHaveLength(1);
+    expect(screen.getAllByText('docs/v1.md')).toHaveLength(1);
     expect(screen.getAllByText('appointments').length).toBeGreaterThan(0);
-    expect(screen.getByText('v1.md ↔ v2.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+  });
+
+  it('distinguishes same-named docs by full repo-relative path (rows + conflict), never a bare basename', () => {
+    // A corpus with two README.md's in different dirs — basenames alone would be
+    // indistinguishable and the conflict would read "README.md ↔ README.md".
+    const collision: SpecCorpusResponse = {
+      corpus: {
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [
+          { ref: 'a/README.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/setup'] },
+          { ref: 'b/README.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['core/setup'] },
+        ],
+        areas: [
+          {
+            id: 'core/setup',
+            product: 'core',
+            concern: 'setup',
+            docRefs: ['a/README.md', 'b/README.md'],
+            overlaps: [{ docs: ['a/README.md', 'b/README.md'], note: 'both claim setup', sections: [] }],
+          },
+        ],
+        relations: [],
+      },
+      userRelations: [],
+    };
+    render(<SpecCorpusView corpus={state({ data: collision })} activeKey={null} onOpen={vi.fn()} />);
+    // Each README is labelled by its full path, so the two rows are distinct.
+    expect(screen.getByText('a/README.md')).toBeInTheDocument();
+    expect(screen.getByText('b/README.md')).toBeInTheDocument();
+    // The conflict names both full paths, not "README.md ↔ README.md".
+    expect(screen.getByText('a/README.md ↔ b/README.md')).toBeInTheDocument();
+    // Never a bare basename anywhere.
+    expect(screen.queryByText('README.md')).not.toBeInTheDocument();
   });
 
   it('opens a doc by its ref (preview on click, pin on double-click)', async () => {
     const onOpen = vi.fn();
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state()} activeKey={null} onOpen={onOpen} />);
-    await user.click(screen.getByText('v1.md'));
+    await user.click(screen.getByText('docs/v1.md'));
     expect(onOpen).toHaveBeenCalledWith('docs/v1.md', false);
-    await user.dblClick(screen.getByText('v1.md'));
+    await user.dblClick(screen.getByText('docs/v1.md'));
     expect(onOpen).toHaveBeenCalledWith('docs/v1.md', true);
   });
 
@@ -89,25 +126,25 @@ describe('SpecCorpusView (left nav)', () => {
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state()} activeKey={null} onOpen={vi.fn()} />);
     // All docs + the appointments conflict visible initially.
-    expect(screen.getByText('v1.md')).toBeInTheDocument();
-    expect(screen.getByText('auth.md')).toBeInTheDocument();
-    expect(screen.getByText('v1.md ↔ v2.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
     // Filter to `auth` → only the auth doc remains; the appointments conflict is filtered out.
     await user.click(screen.getByRole('button', { name: 'auth' }));
-    expect(screen.getByText('auth.md')).toBeInTheDocument();
-    expect(screen.queryByText('v1.md')).not.toBeInTheDocument();
-    expect(screen.queryByText('v1.md ↔ v2.md')).not.toBeInTheDocument();
+    expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
+    expect(screen.queryByText('docs/v1.md')).not.toBeInTheDocument();
+    expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
     // Clear → all back.
     await user.click(screen.getByRole('button', { name: 'clear' }));
-    expect(screen.getByText('v1.md')).toBeInTheDocument();
-    expect(screen.getByText('v1.md ↔ v2.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
   });
 
   it('opens an overlap with its overlap key', async () => {
     const onOpen = vi.fn();
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state()} activeKey={null} onOpen={onOpen} />);
-    await user.click(screen.getByText('v1.md ↔ v2.md'));
+    await user.click(screen.getByText('docs/v1.md ↔ docs/v2.md'));
     expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
   });
 
@@ -129,16 +166,16 @@ describe('SpecCorpusView (left nav)', () => {
   it('synthesizes a resolved conflict for a user relation the corpus no longer flags', () => {
     render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
-    expect(screen.getByText('v1.md ↔ v2.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
     // The badge names the relation type + winner (v2.md is newer).
-    expect(screen.getByText('resolved — precedence: v2.md wins')).toBeInTheDocument();
+    expect(screen.getByText('resolved — precedence: docs/v2.md wins')).toBeInTheDocument();
   });
 
   it('opens a synthesized resolved entry with its overlap key (no open overlap needed)', async () => {
     const onOpen = vi.fn();
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={onOpen} />);
-    await user.click(screen.getByText('v1.md ↔ v2.md'));
+    await user.click(screen.getByText('docs/v1.md ↔ docs/v2.md'));
     expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
   });
 
@@ -152,9 +189,87 @@ describe('SpecCorpusView (left nav)', () => {
       ],
     };
     render(<SpecCorpusView corpus={state({ data: covered })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.getAllByText('v1.md ↔ v2.md')).toHaveLength(1);
+    expect(screen.getAllByText('docs/v1.md ↔ docs/v2.md')).toHaveLength(1);
     expect(screen.getByText('resolved')).toBeInTheDocument();
     expect(screen.queryByText(/resolved — /)).not.toBeInTheDocument();
+  });
+});
+
+// OSS batch model: skip/include records the decision and returns immediately (no
+// re-curate). The row moves optimistically with a "pending rescan" hint, and the
+// parent is signalled to light the Rescan dot. One later Scan materializes the batch.
+describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round-trip)', () => {
+  let calls: { url: string; method?: string }[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, opts?: RequestInit) => {
+        const u = String(url);
+        calls.push({ url: u, method: opts?.method });
+        // OSS include/exclude ack: decision lists only, no corpus.
+        if (u.includes('/spec/excludes')) return json({ manualIncludes: [], manualExcludes: ['docs/v1.md'] });
+        // The corpus GET the hook makes on mount.
+        return json(RESP);
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Uses the real hook so apply/applyDecisions actually update state (the mock
+  // `state()` helper's vi.fn()s don't re-render).
+  function Harness({ onDecision }: { onDecision?: () => void }) {
+    const corpus = useSpecCorpus('r1', true);
+    if (!corpus.data) return null;
+    return <SpecCorpusView repoId="r1" corpus={corpus} activeKey={null} onOpen={() => {}} onDecision={onDecision} />;
+  }
+
+  it('moves the skipped doc to Force-excluded with a pending hint, no /spec/corpus/scan call', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByText('docs/v1.md'); // corpus loaded
+    await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
+
+    // The doc jumps into Force-excluded and carries the pending hint.
+    await screen.findByText('Force-excluded');
+    expect(screen.getByText('pending rescan')).toBeInTheDocument();
+    // No re-curate: the scan endpoint was never hit; only the decision POST.
+    expect(calls.some((c) => c.url.includes('/spec/corpus/scan'))).toBe(false);
+    expect(calls.some((c) => c.url.includes('/spec/excludes') && c.method === 'POST')).toBe(true);
+  });
+
+  it('fires onDecision so the parent can refresh the Rescan staleness dot', async () => {
+    const onDecision = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness onDecision={onDecision} />);
+    await screen.findByText('docs/v1.md');
+    await user.click(screen.getAllByRole('button', { name: 'skip' })[0]);
+    await waitFor(() => expect(onDecision).toHaveBeenCalled());
+  });
+});
+
+describe('SpecScanButton — decisions staleness dot', () => {
+  it('carries the amber dot when decisions are pending', () => {
+    render(<SpecScanButton hasCorpus scanning={false} stale onClick={() => {}} />);
+    expect(screen.getByRole('button', { name: /rescan/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('pending decisions')).toBeInTheDocument();
+  });
+
+  it('shows no dot when nothing is pending', () => {
+    render(<SpecScanButton hasCorpus scanning={false} stale={false} onClick={() => {}} />);
+    expect(screen.queryByLabelText('pending decisions')).not.toBeInTheDocument();
+  });
+
+  it('hides the dot while scanning', () => {
+    render(<SpecScanButton hasCorpus scanning stale onClick={() => {}} />);
+    expect(screen.queryByLabelText('pending decisions')).not.toBeInTheDocument();
+  });
+
+  it('reads "Scan" with no corpus, "Rescan" with one', () => {
+    const { rerender } = render(<SpecScanButton hasCorpus={false} scanning={false} stale={false} onClick={() => {}} />);
+    expect(screen.getByRole('button', { name: /^scan/i })).toBeInTheDocument();
+    rerender(<SpecScanButton hasCorpus scanning={false} stale={false} onClick={() => {}} />);
+    expect(screen.getByRole('button', { name: /rescan/i })).toBeInTheDocument();
   });
 });
 
@@ -167,6 +282,59 @@ describe('SpecDocViewer (right pane)', () => {
   it('renders the doc markdown', async () => {
     render(<SpecDocViewer repoId="r1" docRef="docs/v2.md" />);
     expect(await screen.findByText('48h window.')).toBeInTheDocument();
+  });
+});
+
+describe('DocMarkdown — raw HTML (rehype-raw + sanitize)', () => {
+  it('renders a README HTML image block, not literal `<p align=` source text', () => {
+    const { container } = render(
+      <DocMarkdown source={'<p align="center"><img src="assets/logo.svg" alt="Logo"/></p>\n\n# Title'} />,
+    );
+    // The raw <img> becomes a real element (found by its alt), never leaked source.
+    expect(screen.getByAltText('Logo').tagName).toBe('IMG');
+    expect(container.textContent).not.toContain('<p align=');
+    expect(container.textContent).not.toContain('<img');
+  });
+
+  it('renders a standalone `<a id>` anchor invisibly (no visible id or tag text)', () => {
+    const { container } = render(<DocMarkdown source={'<a id="anchor-x"></a>\n\n## Heading'} />);
+    // A real anchor element exists, but nothing user-visible leaks.
+    expect(container.querySelector('a')).not.toBeNull();
+    expect(container.textContent).not.toContain('anchor-x');
+    expect(container.textContent).not.toContain('<a id=');
+    expect(screen.getByRole('heading', { name: 'Heading' })).toBeInTheDocument();
+  });
+
+  it('sanitizes away a `<script>` embedded in a doc', () => {
+    const { container } = render(<DocMarkdown source={'Intro text.\n\n<script>alert(1)</script>'} />);
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.textContent).not.toContain('alert(1)');
+  });
+});
+
+describe('DocMarkdown — conflict highlight (amber band)', () => {
+  const SRC = 'Intro tagline: C# is supported.\n\n# Title\n\nBody under the heading.';
+
+  it('bands the preamble block (before the first heading) when highlightPreamble is set', () => {
+    const { container } = render(<DocMarkdown source={SRC} highlightPreamble />);
+    const band = container.querySelector('.border-amber-500');
+    expect(band).not.toBeNull();
+    expect(band?.textContent).toContain('Intro tagline: C# is supported.');
+    // The band stops at the first heading — the Title section is not swept in.
+    expect(band?.textContent).not.toContain('Body under the heading.');
+  });
+
+  it('bands a heading section (not the preamble) for a heading highlight', () => {
+    const { container } = render(<DocMarkdown source={SRC} highlight={['Title']} />);
+    const band = container.querySelector('.border-amber-500');
+    expect(band).not.toBeNull();
+    expect(band?.textContent).toContain('Body under the heading.');
+    expect(band?.textContent).not.toContain('Intro tagline');
+  });
+
+  it('renders no band without a highlight or preamble marker', () => {
+    const { container } = render(<DocMarkdown source={SRC} />);
+    expect(container.querySelector('.border-amber-500')).toBeNull();
   });
 });
 

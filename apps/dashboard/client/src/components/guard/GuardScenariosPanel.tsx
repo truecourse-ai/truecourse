@@ -29,10 +29,9 @@
  */
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronRight, FileCode2, FileText, Loader2 } from 'lucide-react';
-import { EmptyState } from '@/components/ui/empty-state';
+import { AlertCircle, ChevronDown, ChevronRight, FileText, Loader2 } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { docBasename, sectionLeaf } from '@/lib/guard-drifts';
+import { sectionLeaf } from '@/lib/guard-drifts';
 import { guardRowStatus } from '@/hooks/useGuardScenarios';
 import {
   guardListRowStatus,
@@ -159,7 +158,7 @@ function DocGroup({
         {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <FileText className="h-3 w-3 shrink-0" />
         <span className="min-w-0 truncate" title={doc}>
-          {docBasename(doc)}
+          {doc}
         </span>
         <span className="ml-auto shrink-0">
           {[...sections.values()].reduce((n, list) => n + list.length, 0)}
@@ -333,18 +332,12 @@ export function GuardScenariosPanel({
     );
   }
   if (rows.length === 0) {
+    // The MAIN pane carries the single CTA empty state — here the left panel stays
+    // quiet (one muted line) so two identical cards never sit side by side.
     return (
-      <EmptyState
-        icon={FileCode2}
-        title="No scenarios yet"
-        body={
-          <>
-            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-            scenarios, or commit hand-written ones under{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">.truecourse/scenarios/</code>.
-          </>
-        }
-      />
+      <div className="flex h-full items-center justify-center px-4">
+        <p className="text-center text-xs text-muted-foreground">No scenarios yet.</p>
+      </div>
     );
   }
 
@@ -370,7 +363,7 @@ export function GuardScenariosPanel({
             <option value="all">All documents</option>
             {docs.map((d) => (
               <option key={d} value={d}>
-                {docBasename(d)}
+                {d}
               </option>
             ))}
           </select>

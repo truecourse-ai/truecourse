@@ -71,6 +71,41 @@ describe('flagOverlaps', () => {
     ]);
   });
 
+  it('carries a preamble section pointer (null heading) through the cache round-trip', async () => {
+    const docs = [doc('README.md'), doc('docs/PLAN.md')];
+    const runner: OverlapRunner = async ({ a, b }) => ({
+      overlap: true,
+      note: 'README preamble lists C#; PLAN omits it',
+      sections: [
+        { doc: a.path, heading: null },
+        { doc: b.path, heading: 'Tech Stack' },
+      ],
+    });
+    const out = await flagOverlaps(repo, [area('core/languages', ['README.md', 'docs/PLAN.md'])], docs, { runner });
+    expect(out.get('core/languages')?.[0].sections).toEqual([
+      { doc: 'README.md', heading: null },
+      { doc: 'docs/PLAN.md', heading: 'Tech Stack' },
+    ]);
+  });
+
+  it('the default LLM runner maps a null-heading (preamble) side into the verdict', async () => {
+    const docs = [doc('README.md'), doc('docs/PLAN.md')];
+    // Side A sits in the preamble → heading null; side B is under a heading.
+    const transport = async (): Promise<string> =>
+      JSON.stringify({
+        overlap: true,
+        note: 'README preamble lists C#; PLAN omits it',
+        sections: [
+          { side: 'A', heading: null },
+          { side: 'B', heading: 'Tech Stack' },
+        ],
+      });
+    const out = await flagOverlaps(repo, [area('core/languages', ['README.md', 'docs/PLAN.md'])], docs, { transport });
+    const sections = out.get('core/languages')?.[0].sections;
+    expect(sections).toContainEqual({ doc: 'README.md', heading: null });
+    expect(sections).toContainEqual({ doc: 'docs/PLAN.md', heading: 'Tech Stack' });
+  });
+
   it('does not flag complementary docs', async () => {
     const docs = [doc('a.md'), doc('b.md')];
     const runner: OverlapRunner = async () => ({ overlap: false, note: '' });

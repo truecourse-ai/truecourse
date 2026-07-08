@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { GuardScenarioResult } from '@truecourse/shared';
 import { guardStatusMeta } from '@/lib/guard-status';
-import { GUARD_DRIFT_ORDER, docBasename, formatGuardDuration, sectionLeaf } from '@/lib/guard-drifts';
+import { GUARD_DRIFT_ORDER, formatGuardDuration, sectionLeaf } from '@/lib/guard-drifts';
 import { GuardStatusBadge } from './GuardStatusBadge';
 
 /**
@@ -100,7 +100,7 @@ export function GuardDriftList({
                 key={d.id}
                 scenario={d}
                 active={d.id === activeId}
-                meta={`${docBasename(d.binds.doc)} › ${sectionLeaf(d.binds.section)}`}
+                meta={`${d.binds.doc} › ${sectionLeaf(d.binds.section)}`}
                 onPreview={() => onPreview(d.id)}
                 onPin={() => onPin(d.id)}
               />

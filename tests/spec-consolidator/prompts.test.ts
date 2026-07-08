@@ -26,3 +26,12 @@ describe('spec-consolidator prompts carry the output-only guardrail', () => {
     expect(prompt).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 })
+
+describe('OVERLAP_DETECTOR_SYSTEM_PROMPT preamble pointer', () => {
+  it('instructs the model to use a null heading for a preamble conflict', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toContain('PREAMBLE')
+    // The exact JSON shape must be spelled out for the small-tier model.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toContain('"heading": null')
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/before its first|above its first|ABOVE its first/i)
+  })
+})

@@ -26,11 +26,6 @@ export function sectionLeaf(anchor: string): string {
   return anchor.split('/').pop() || anchor;
 }
 
-/** File name of a repo-relative doc path (`docs/spec.md` → `spec.md`). */
-export function docBasename(ref: string): string {
-  return ref.split('/').pop() || ref;
-}
-
 /** A compact fingerprint for display (`sha256:9f2c…` → `9f2c…`, first 12 chars). */
 export function shortFingerprint(fp: string): string {
   return fp.replace(/^sha256:/, '').slice(0, 12);

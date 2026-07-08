@@ -28,7 +28,7 @@ import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardReport } from '@/hooks/useGuardReport';
 import { buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
-import { docBasename, sectionLeaf } from '@/lib/guard-drifts';
+import { sectionLeaf } from '@/lib/guard-drifts';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -165,7 +165,7 @@ function Harness({ onOpenSpec }: { onOpenSpec: (doc: string, section: string) =>
           const f = findingRows.find((r) => r.id === t.id);
           // (RepoPage also passes a distinct finding glyph; the icon is cosmetic
           // and unasserted, so the harness leaves the strip's default.)
-          if (f) return { ...t, label: f.title, title: `${docBasename(f.doc)} · ${f.headingText ?? sectionLeaf(f.anchor)}` };
+          if (f) return { ...t, label: f.title, title: `${f.doc} · ${f.headingText ?? sectionLeaf(f.anchor)}` };
           return { ...t, label: t.id, title: t.id };
         })}
         activeId={tabs.activeId}
@@ -244,10 +244,11 @@ describe('GuardScenariosPanel — grouped inventory + flags', () => {
     renderHarness();
     await screen.findByText('alpha claim');
     const list = inventoryList();
-    // Doc group headers… (auth.md heads a group in BOTH the findings block and the
-    // scenarios block, so it renders more than once — hence getAllByText.)
-    expect(within(list).getAllByText('auth.md').length).toBeGreaterThan(0);
-    expect(within(list).getByText('other.md')).toBeInTheDocument();
+    // Doc group headers use the full repo-relative path (docs/auth.md heads a
+    // group in BOTH the findings block and the scenarios block, so it renders
+    // more than once — hence getAllByText.)
+    expect(within(list).getAllByText('docs/auth.md').length).toBeGreaterThan(0);
+    expect(within(list).getByText('docs/other.md')).toBeInTheDocument();
     // Generated fail, hand-written pass, orphaned, and a never-run (neutral guarded).
     expect(within(list).getByText('Failing')).toBeInTheDocument();
     expect(within(list).getByText('Orphaned')).toBeInTheDocument();
@@ -280,7 +281,7 @@ describe('GuardScenariosPanel — grouped inventory + flags', () => {
     expect(within(list).getByText('orphan claim')).toBeInTheDocument();
     expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
     expect(within(list).queryByText('hand rolled')).not.toBeInTheDocument();
-    expect(within(list).queryByText('auth.md')).not.toBeInTheDocument();
+    expect(within(list).queryByText('docs/auth.md')).not.toBeInTheDocument();
   });
 
   it('filters by status', async () => {
@@ -401,9 +402,9 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const list = inventoryList();
-    // auth.md heads a doc group in BOTH blocks (findings first) — [1] is the
+    // docs/auth.md heads a doc group in BOTH blocks (findings first) — [1] is the
     // scenarios block's.
-    const authDocBtn = within(list).getAllByText('auth.md')[1].closest('button') as HTMLElement;
+    const authDocBtn = within(list).getAllByText('docs/auth.md')[1].closest('button') as HTMLElement;
     expect(authDocBtn).toHaveAttribute('aria-expanded', 'true');
     await user.click(authDocBtn);
     expect(authDocBtn).toHaveAttribute('aria-expanded', 'false');
@@ -423,7 +424,7 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
     await panelRowAsync('login rate limits');
     const list = inventoryList();
     const [findingsAuthBtn, scenariosAuthBtn] = within(list)
-      .getAllByText('auth.md')
+      .getAllByText('docs/auth.md')
       .map((el) => el.closest('button') as HTMLElement);
     await user.click(scenariosAuthBtn);
     expect(scenariosAuthBtn).toHaveAttribute('aria-expanded', 'false');
@@ -667,7 +668,9 @@ describe('GuardScenarioDetail — full scenario story', () => {
     await user.click(await screen.findByText('alpha claim'));
     expect(await screen.findByText('exit code 1')).toBeInTheDocument();
     expect(screen.getByText('exit code 0')).toBeInTheDocument();
-    expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
+    // The doc now also heads the left-list group, so scope to the detail's binding.
+    const binding = screen.getByText('Binding').parentElement as HTMLElement;
+    expect(within(binding).getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.getByText('§ auth/10-7-the-local-developer-loop')).toBeInTheDocument();
     await user.click(screen.getByText('View evidence'));
     expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
@@ -834,11 +837,19 @@ describe('GuardScenariosOverview — recipe + last-generate strip', () => {
 });
 
 describe('Guard Scenarios — empty state', () => {
-  it('points at guard generate in both the panel and the overview when nothing exists', async () => {
+  it('carries a single CTA card in the main pane and a quiet muted line in the left panel', async () => {
     stubFetch(null, null, null);
     renderHarness();
-    expect(await screen.findAllByText('No scenarios yet')).toHaveLength(2);
-    expect(screen.getAllByText('truecourse guard generate').length).toBeGreaterThan(0);
+    // The main pane owns the ONE CTA empty state — its title renders exactly once,
+    // never a duplicate card in the left panel.
+    expect(await screen.findAllByText('No scenarios yet')).toHaveLength(1);
+    // The left panel is quiet: one muted line (period), not a second card.
+    expect(screen.getByText('No scenarios yet.')).toBeInTheDocument();
+    // The CTA points at guard generate…
+    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
+    // …with no hand-written clause anywhere in the onboarding copy.
+    expect(screen.queryByText(/hand-written ones under/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\.truecourse\/scenarios\//)).not.toBeInTheDocument();
   });
 });
 

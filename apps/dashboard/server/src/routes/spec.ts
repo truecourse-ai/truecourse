@@ -15,7 +15,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   corpusFilePath,
+  decisionsPath,
   type CuratedCorpus,
+  type DecisionsFile,
   type Relation,
   type RelationType,
 } from '@truecourse/spec-consolidator';
@@ -379,59 +381,34 @@ router.delete(
   },
 );
 
-// OSS force-include/exclude: the corpus lives in the live working tree, so the
-// recheck runs server-side and atomically — the client no longer drives a separate
-// scan. It re-curates with the socket tracker so the dashboard shows the same
-// step-progress popup as a scan (removing/adding a doc changes the doc set, so the
-// relation + vocab stages re-run and this can take tens of seconds). No cost gate:
-// there's no confirm on include/exclude. Contracts are NOT regenerated — that's the
-// manual "Generate" step. Returns the freshly-curated corpus.
-async function mutateAndRecurate(
-  repoPath: string,
-  repoId: string,
-  mutate: () => Promise<unknown>,
-): Promise<Awaited<ReturnType<typeof corpusPayload>>> {
-  await mutate();
-  const tracker = createSocketSpecTracker(repoId, CURATE_STEPS.map((s) => ({ ...s })));
-  try {
-    await curateInProcess(repoPath, { tracker, source: 'dashboard' });
-    emitSpecComplete(repoId, 'scan');
-  } catch (e) {
-    emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
-    throw e;
-  }
-  return corpusPayload(repoPath);
-}
-
-// A doc include/exclude mutation, edition-aware. OSS re-curates the live working
-// tree in-process and returns the fresh corpus (needs git). EE has no local tree,
-// so it re-curates the stored corpus over the repo-doc seam in the same request
-// (see recurateAndRegenIfResolved) and returns it — no clone, no separate job. In
-// both editions contracts regenerate only when the spec is conflict-free: OSS via
-// the manual Generate step, EE automatically via the conflict-free check.
+// A doc include/exclude mutation, edition-aware.
+//
+// OSS persists the decision to decisions.json and returns WITHOUT re-curating: the
+// corpus is unchanged by this call, so a single later Scan materializes any batch of
+// queued decisions (a full re-curate per click re-ran the set-level LLM stages every
+// time). The client moves the row optimistically and the Rescan dot lights via
+// `decisionsPending`. Contracts are NOT regenerated — that's the manual "Generate"
+// step. No git gate: a decision write needs no working tree.
+//
+// EE has no local tree, so it re-curates the stored corpus over the repo-doc seam in
+// the same request (see recurateAndRegenIfResolved) and returns it — no clone, no
+// separate job. Contracts regenerate automatically once the spec is conflict-free.
 async function mutateSpecDecision(
   repoPath: string,
-  repoId: string,
   res: Response,
-  mutate: () => Promise<unknown>,
+  mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
   if (!contractsMaterializeInPlace()) {
-    // EE: no live tree. Persist the decision, then re-curate the corpus over the
-    // repo-doc seam — the SAME curate OSS runs, docs sourced from the store/GitHub
-    // instead of disk (unchanged docs hit the Postgres cache, so a restore is a
-    // cache hit). Contract regeneration is enqueued only if this leaves the spec
-    // conflict-free; while conflicts remain it's just the cheap re-curate. Returns
-    // the freshly re-curated corpus so the client's optimistic move is confirmed.
     await mutate();
     await recurateAndRegenIfResolved(repoPath);
     res.json(await corpusPayload(repoPath));
     return;
   }
-  if (!(await isGitRepo(repoPath))) {
-    res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
-    return;
-  }
-  res.json(await mutateAndRecurate(repoPath, repoId, mutate));
+  const decisions = await mutate();
+  res.json({
+    manualIncludes: decisions.manualIncludes ?? [],
+    manualExcludes: decisions.manualExcludes ?? [],
+  });
 }
 
 // Dispatch an include/exclude mutation: a PR-scoped edit (EE, `?pr` + `?ref`)
@@ -440,8 +417,7 @@ async function applySpecMutation(
   req: Request,
   res: Response,
   repoPath: string,
-  repoId: string,
-  mutate: (opts?: { pr?: number }) => Promise<unknown>,
+  mutate: (opts?: { pr?: number }) => Promise<DecisionsFile>,
 ): Promise<void> {
   const parsed = parsePrScope(req);
   if ('error' in parsed) {
@@ -452,7 +428,7 @@ async function applySpecMutation(
     await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
     return;
   }
-  await mutateSpecDecision(repoPath, repoId, res, () => mutate());
+  await mutateSpecDecision(repoPath, res, () => mutate());
 }
 
 // Force-include / un-include a relevance-dropped doc, then re-curate so the
@@ -468,7 +444,7 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+      await applySpecMutation(req, res, repo.path, (opts) =>
         addManualInclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -488,7 +464,7 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+      await applySpecMutation(req, res, repo.path, (opts) =>
         removeManualInclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -510,7 +486,7 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+      await applySpecMutation(req, res, repo.path, (opts) =>
         addManualExclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -530,7 +506,7 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, req.params.id as string, (opts) =>
+      await applySpecMutation(req, res, repo.path, (opts) =>
         removeManualExclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -550,6 +526,10 @@ router.delete(
 //   verifyStale     last generate marker is newer than verifier/LATEST.json
 //                   (or LATEST.json is missing → never verified against
 //                   current contracts).
+//   decisionsPending recorded include/exclude/relation decisions are newer than
+//                   the curated corpus — a Scan would materialize them (the
+//                   decisions half of the scan-staleness signal; docs-content
+//                   staleness stays a logged follow-up).
 // ---------------------------------------------------------------------------
 
 router.get(
@@ -571,6 +551,8 @@ router.get(
         res.json({
           contractsStale: false,
           verifyStale: false,
+          // EE re-curates on every decision, so decisions never outrun the corpus.
+          decisionsPending: false,
           hasCorpus: corpus !== null,
           hasGenerated: contractFiles.length > 0,
           hasVerified: verify !== null,
@@ -594,6 +576,7 @@ router.get(
       res.json({
         contractsStale,
         verifyStale,
+        decisionsPending: hasPendingDecisions(repo.path),
         hasCorpus: corpusMtime !== null,
         hasGenerated: generatedMtime !== null,
         hasVerified: verifiedMtime !== null,
@@ -609,6 +592,24 @@ function mtimeIfExists(file: string): number | null {
     return fs.statSync(file).mtimeMs;
   } catch {
     return null;
+  }
+}
+
+// The decisions half of the scan-staleness signal: true when decisions.json is newer
+// than the curated corpus, so a Scan would materialize the recorded include/exclude/
+// relation decisions. Compared against the corpus's own `generatedAt` (the curate
+// timestamp) rather than corpus.json's mtime, which lies on the committable
+// LATEST-convention file. Tolerant — any missing/unreadable file → false.
+function hasPendingDecisions(repoPath: string): boolean {
+  const decisionsMtime = mtimeIfExists(decisionsPath(repoPath));
+  if (decisionsMtime === null) return false;
+  try {
+    const corpus = JSON.parse(fs.readFileSync(corpusFilePath(repoPath), 'utf8')) as { generatedAt?: string };
+    const generatedAt = Date.parse(corpus.generatedAt ?? '');
+    if (Number.isNaN(generatedAt)) return false;
+    return decisionsMtime > generatedAt;
+  } catch {
+    return false;
   }
 }
 

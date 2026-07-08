@@ -148,7 +148,8 @@ export function GuardCoveragePage({
       for (const ov of area.overlaps) {
         const key = overlapKey(area.id, ov.docs[0], ov.docs[1]);
         for (const s of ov.sections ?? []) {
-          if (s.doc === doc) map.set(s.heading.trim().toLowerCase(), key);
+          // A preamble pointer (null heading) has no heading row to tag — skip it.
+          if (s.doc === doc && s.heading !== null) map.set(s.heading.trim().toLowerCase(), key);
         }
       }
     }
@@ -179,45 +180,10 @@ export function GuardCoveragePage({
       />
     );
   }
-  if (!showConflict) {
-    if (!hasGenerated) {
-      return (
-        <EmptyState
-          icon={FlaskConical}
-          title="No guards generated"
-          body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-              scenarios for each spec section.
-            </>
-          }
-        />
-      );
-    }
-    if (!doc) {
-      if (!hasRun) {
-        return (
-          <EmptyState
-            icon={PlayCircle}
-            title="No guard run yet"
-            body={
-              <>
-                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
-                scenarios and see pass/fail on the document.
-              </>
-            }
-          />
-        );
-      }
-      return (
-        <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
-      );
-    }
-  }
-
-  // --- The detail pane: a selected conflict wins over a selected section --------
-  const detailPane = showConflict ? (
-    <div className="flex min-w-0 flex-1 border-l border-border">
+  // A selected conflict owns the WHOLE main pane — its two columns carry their own
+  // doc context, so no doc center renders beside it. Closing returns to the doc.
+  if (showConflict) {
+    return (
       <SpecOverlapDetail
         repoId={repoId}
         area={overlapSel!.area}
@@ -232,8 +198,47 @@ export function GuardCoveragePage({
         }}
         onClose={() => selectConflict(null)}
       />
-    </div>
-  ) : selectedSection ? (
+    );
+  }
+  // Stage CTAs render only when nothing is selected. A selected doc ALWAYS falls
+  // through to the render path below: raw markdown pre-generate (conflicts stay
+  // resolvable in context), the coverage-banded view once generated.
+  if (!doc) {
+    if (!hasGenerated) {
+      return (
+        <EmptyState
+          icon={FlaskConical}
+          title="No guards generated"
+          body={
+            <>
+              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
+              scenarios for each spec section.
+            </>
+          }
+        />
+      );
+    }
+    if (!hasRun) {
+      return (
+        <EmptyState
+          icon={PlayCircle}
+          title="No guard run yet"
+          body={
+            <>
+              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
+              scenarios and see pass/fail on the document.
+            </>
+          }
+        />
+      );
+    }
+    return (
+      <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
+    );
+  }
+
+  // --- The detail pane: a selected section's scenario detail -------------------
+  const detailPane = selectedSection ? (
     <GuardSectionDetail
       repoId={repoId}
       section={selectedSection}
@@ -245,15 +250,7 @@ export function GuardCoveragePage({
 
   // --- The center: the coverage-banded doc, or the raw doc before guards exist --
   let center: React.ReactNode;
-  if (!doc) {
-    center = (
-      <Centered>
-        <p className="max-w-sm px-6 text-center text-sm text-muted-foreground">
-          Choose a spec document from the list to view its coverage.
-        </p>
-      </Centered>
-    );
-  } else if (coverageLoading || content == null) {
+  if (coverageLoading || content == null) {
     center =
       coverageError || contentError ? (
         <Centered>

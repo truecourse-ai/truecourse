@@ -157,15 +157,15 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
     );
     // Documents + their area tag (single product → concern only).
     expect(screen.getByText('Documents')).toBeInTheDocument();
-    expect(screen.getByText('SPEC.md')).toBeInTheDocument();
-    expect(screen.getByText('OTHER.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/SPEC.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/OTHER.md')).toBeInTheDocument();
     expect(screen.getAllByText('auth').length).toBeGreaterThan(0);
     // Conflicts.
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
-    expect(screen.getByText('SPEC.md ↔ OTHER.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/SPEC.md ↔ docs/OTHER.md')).toBeInTheDocument();
     // Skipped ("Not included") docs.
     expect(screen.getByText('Not included')).toBeInTheDocument();
-    expect(screen.getByText('DROPPED.md')).toBeInTheDocument();
+    expect(screen.getByText('docs/DROPPED.md')).toBeInTheDocument();
   });
 
   it('a doc click routes to ?guard= and never ?spec= (no BL-Drift bleed)', async () => {
@@ -175,7 +175,7 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
         <GuardSidebar corpus={corpusState()} />
       </MemoryRouter>,
     );
-    await user.click(screen.getByText('SPEC.md'));
+    await user.click(screen.getByText('docs/SPEC.md'));
     const search = screen.getByTestId('search').textContent ?? '';
     expect(search).toContain('guard=docs%2FSPEC.md');
     expect(search).not.toContain('spec=');
@@ -188,7 +188,7 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
         <GuardSidebar corpus={corpusState()} />
       </MemoryRouter>,
     );
-    await user.click(screen.getByText('SPEC.md ↔ OTHER.md'));
+    await user.click(screen.getByText('docs/SPEC.md ↔ docs/OTHER.md'));
     const search = screen.getByTestId('search').textContent ?? '';
     expect(search).toContain('gconf=');
     expect(decodeURIComponent(search)).toContain(OVERLAP_KEY);

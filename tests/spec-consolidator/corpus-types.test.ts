@@ -14,6 +14,7 @@ import {
   CORE_PRODUCT,
   PROCESS_PRODUCT,
   CuratedCorpusSchema,
+  OverlapSectionSchema,
 } from '../../packages/spec-consolidator/src/index.js';
 
 describe('slugifyAxis', () => {
@@ -131,5 +132,51 @@ describe('CuratedCorpusSchema', () => {
       areas: [],
     });
     expect(parsed.relations).toEqual([]);
+  });
+
+  it('parses an overlap whose section pointer is a preamble marker (null heading)', () => {
+    const parsed = CuratedCorpusSchema.parse({
+      version: 3,
+      generatedAt: '2026-06-26T00:00:00Z',
+      docs: [],
+      areas: [
+        {
+          id: 'core/languages',
+          product: 'core',
+          concern: 'languages',
+          docRefs: ['README.md', 'docs/PLAN.md'],
+          overlaps: [
+            {
+              docs: ['README.md', 'docs/PLAN.md'],
+              note: 'README preamble lists C#; PLAN omits it',
+              sections: [
+                { doc: 'README.md', heading: null },
+                { doc: 'docs/PLAN.md', heading: 'Tech Stack' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.areas[0].overlaps[0].sections).toEqual([
+      { doc: 'README.md', heading: null },
+      { doc: 'docs/PLAN.md', heading: 'Tech Stack' },
+    ]);
+  });
+});
+
+describe('OverlapSectionSchema (preamble-marker heading)', () => {
+  it('accepts a plain string heading (older corpora)', () => {
+    expect(OverlapSectionSchema.parse({ doc: 'a.md', heading: 'Tech Stack' })).toEqual({
+      doc: 'a.md',
+      heading: 'Tech Stack',
+    });
+  });
+
+  it('accepts a null heading (preamble pointer)', () => {
+    expect(OverlapSectionSchema.parse({ doc: 'a.md', heading: null })).toEqual({
+      doc: 'a.md',
+      heading: null,
+    });
   });
 });

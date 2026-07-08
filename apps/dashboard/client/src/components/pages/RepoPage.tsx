@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, Network, Lightbulb, Play } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, Network, Lightbulb } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -68,6 +68,7 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
+import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
@@ -89,7 +90,7 @@ import { useGuardSelection } from '@/hooks/useGuardSelection';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
-import { docBasename, sectionLeaf } from '@/lib/guard-drifts';
+import { sectionLeaf } from '@/lib/guard-drifts';
 import { GenerateResultDetail } from '@/components/drift/GenerateResultDetail';
 import { useGraph } from '@/hooks/useGraph';
 import { useContractsTree } from '@/hooks/useContractsTree';
@@ -400,6 +401,7 @@ function RepoPageInner() {
   const {
     contractsStale,
     verifyStale,
+    decisionsPending,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
   const {
@@ -1267,10 +1269,12 @@ function RepoPageInner() {
       // relations, and flags overlaps. Hidden in EE — hosted repos have no working
       // tree and re-scan automatically on merge / when a PR is opened.
       !isEe && repo?.isGitRepo !== false ? (
-        <Button size="sm" variant="outline" onClick={() => void specCorpus.scan()} disabled={specCorpus.scanning}>
-          {specCorpus.scanning ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
-          {specCorpus.data ? 'Rescan' : 'Scan'}
-        </Button>
+        <SpecScanButton
+          hasCorpus={specCorpus.data != null}
+          scanning={specCorpus.scanning}
+          stale={decisionsPending}
+          onClick={() => void specCorpus.scan()}
+        />
       ) : null
     ) : leftTab === 'contracts' ? (
       <div className="flex items-center gap-2">
@@ -1522,7 +1526,7 @@ function RepoPageInner() {
             // The curated corpus Spec surface: an area-grouped prose nav (areas →
             // docs + overlaps); selecting opens the right pane (?spec=). Scan
             // lives in the header. Shared by the BL-Drift Spec tab and Guard Spec.
-            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} prNumber={prNumber} prRef={refForTabs} />
+            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} onDecision={refetchStaleness} prNumber={prNumber} prRef={refForTabs} />
           )}
           {leftTab === 'contracts' && (
             <ContractsPanel
@@ -1559,6 +1563,7 @@ function RepoPageInner() {
               corpus={specCorpus}
               activeKey={guardSel.activeKey}
               onOpen={guardSel.open}
+              onDecision={refetchStaleness}
             />
           )}
           {leftTab === 'scenarios' && (
@@ -2006,7 +2011,7 @@ function RepoPageInner() {
                     return {
                       ...t,
                       label: finding.title,
-                      title: `${docBasename(finding.doc)} · ${finding.headingText ?? sectionLeaf(finding.anchor)}`,
+                      title: `${finding.doc} · ${finding.headingText ?? sectionLeaf(finding.anchor)}`,
                       icon: FlaskConicalOff,
                     };
                   }

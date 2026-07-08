@@ -203,8 +203,7 @@ export function GuardScenariosOverview({
         body={
           <>
             Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-            scenarios, or commit hand-written ones under{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">.truecourse/scenarios/</code>.
+            scenarios.
           </>
         }
       />

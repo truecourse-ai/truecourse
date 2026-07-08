@@ -176,38 +176,67 @@ describe('corpus routes (spec-scan redesign)', () => {
       .expect(400);
   });
 
-  it('POST then DELETE /spec/includes round-trips a force-include + re-curates', async () => {
+  // OSS batches decisions: an include/exclude persists to decisions.json and returns
+  // the decision lists (no corpus) WITHOUT re-curating. One later Scan materializes
+  // the batch. (The old per-click re-curate re-ran the set-level LLM stages each time.)
+  it('POST then DELETE /spec/includes records the decision without re-curating (OSS)', async () => {
     seedCorpus([]);
     const add = await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/includes`)
       .send({ ref: 'docs/v1.md' })
       .expect(200);
     expect(add.body.manualIncludes).toContain('docs/v1.md');
-    // The route drives the recheck server-side — not the client.
-    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
+    // No corpus in the ack — the client keeps its optimistic row move until the next Scan.
+    expect(add.body.corpus).toBeUndefined();
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
 
     const del = await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/includes`)
       .send({ ref: 'docs/v1.md' })
       .expect(200);
     expect(del.body.manualIncludes).toEqual([]);
-    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
   });
 
-  it('POST then DELETE /spec/excludes round-trips a force-exclude + re-curates', async () => {
+  it('POST then DELETE /spec/excludes records the decision without re-curating (OSS)', async () => {
     seedCorpus([]);
     const add = await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
     expect(add.body.manualExcludes).toContain('docs/v2.md');
-    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
+    expect(add.body.corpus).toBeUndefined();
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
 
     const del = await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
     expect(del.body.manualExcludes).toEqual([]);
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+  });
+
+  it('GET /spec/staleness → decisionsPending true after a decision, false after a fresh scan', async () => {
+    seedCorpus([]); // corpus generatedAt = 2026-01-01
+    // No decisions yet → nothing pending.
+    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(before.body.decisionsPending).toBe(false);
+
+    // Recording a decision writes decisions.json (now) → newer than the corpus.
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    const pending = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(pending.body.decisionsPending).toBe(true);
+
+    // A fresh scan re-curates with a newer generatedAt → the pending signal clears.
+    const corpusFile = path.join(fixture.repoPath, '.truecourse', 'specs', 'corpus.json');
+    const corpus = JSON.parse(fs.readFileSync(corpusFile, 'utf8'));
+    corpus.generatedAt = '2099-01-01T00:00:00Z';
+    fs.writeFileSync(corpusFile, JSON.stringify(corpus));
+    const cleared = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(cleared.body.decisionsPending).toBe(false);
   });
 
   it('force-exclude clears a force-include for the same doc (mutually exclusive)', async () => {

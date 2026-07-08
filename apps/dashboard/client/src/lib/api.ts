@@ -973,6 +973,8 @@ export function postContractsGenerate(
 export type SpecStalenessResponse = {
   contractsStale: boolean;
   verifyStale: boolean;
+  /** Recorded include/exclude/relation decisions are newer than the corpus — a Scan applies them. */
+  decisionsPending: boolean;
   hasCorpus: boolean;
   hasGenerated: boolean;
   hasVerified: boolean;
@@ -1001,7 +1003,8 @@ export interface SpecRelation {
 
 export interface SpecOverlapSection {
   doc: string;
-  heading: string;
+  /** Heading of the conflicting section, or null when it lives in the doc's preamble. */
+  heading: string | null;
 }
 
 export interface SpecOverlap {
@@ -1063,6 +1066,17 @@ export interface SpecCorpusResponse {
 /** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
 export interface SpecScanCancelled {
   cancelled: true;
+}
+
+/**
+ * OSS include/exclude ack: the persisted decision lists only. The corpus is
+ * unchanged by an OSS decision (no re-curate), so no corpus is returned — the
+ * client keeps its optimistic row move until the next Scan. PR scope (EE) returns
+ * the full re-curated `SpecCorpusResponse` instead.
+ */
+export interface SpecDecisionAck {
+  manualIncludes: string[];
+  manualExcludes: string[];
 }
 
 /**
@@ -1258,33 +1272,36 @@ export function triggerGuardRun(repoId: string): Promise<GuardRunTriggerResult> 
 // routes included). Repo scope is unchanged — no query, relations return `{relations}`.
 type SpecMutationScope = { pr?: number; ref?: string };
 
-/** Force-include a relevance-dropped doc. Returns the re-curated corpus. */
-export function addSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
+// OSS records the decision and returns a `SpecDecisionAck` (no re-curate); PR scope
+// (EE) re-curates and returns the full `SpecCorpusResponse`.
+
+/** Force-include a relevance-dropped doc. */
+export function addSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
     method: 'POST',
     body: JSON.stringify({ ref }),
   });
 }
 
-/** Remove a force-include override. Returns the re-curated corpus. */
-export function removeSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
+/** Remove a force-include override. */
+export function removeSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
     method: 'DELETE',
     body: JSON.stringify({ ref }),
   });
 }
 
-/** Force-exclude an otherwise-kept doc (drops it + its conflicts). Returns the re-curated corpus. */
-export function addSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
+/** Force-exclude an otherwise-kept doc (drops it + its conflicts on the next Scan). */
+export function addSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
     method: 'POST',
     body: JSON.stringify({ ref }),
   });
 }
 
-/** Remove a force-exclude override (restore the doc). Returns the re-curated corpus. */
-export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse> {
-  return fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
+/** Remove a force-exclude override (restore the doc). */
+export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
     method: 'DELETE',
     body: JSON.stringify({ ref }),
   });

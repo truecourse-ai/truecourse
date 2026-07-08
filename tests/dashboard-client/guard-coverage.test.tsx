@@ -200,6 +200,83 @@ describe('GuardCoveragePage — onboarding empty states', () => {
     expect(screen.getByText('No guard run yet')).toBeInTheDocument();
     expect(screen.getByText('truecourse guard run')).toBeInTheDocument();
   });
+
+  it('renders the raw doc markdown pre-generate when a doc is selected — never the generate empty state', async () => {
+    // Corpus present, generate never run, but a doc IS selected → the doc's raw
+    // markdown renders so conflicts stay resolvable in context (no coverage fetch,
+    // so no totals strip), and the onboarding card never shadows the selection.
+    renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false });
+    expect(await screen.findByText('Intro paragraph.')).toBeInTheDocument();
+    expect(screen.queryByText('No guards generated')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Coverage totals' })).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardCoveragePage — a selected conflict owns the whole main pane', () => {
+  beforeEach(stubFetch);
+
+  const CONFLICT_URL =
+    '/repos/r?guard=docs%2FSPEC.md&gconf=' +
+    encodeURIComponent('overlap::area1::docs/SPEC.md::docs/OTHER.md');
+
+  it('renders the overlap detail full-width and hides the doc coverage center', async () => {
+    renderPage(ALL_TRUE, CONFLICT_URL);
+    // The overlap detail takes over the pane…
+    expect(await screen.findByLabelText('Close conflict detail')).toBeInTheDocument();
+    // …and the selected doc's coverage center (its totals strip) does NOT render beside it.
+    expect(screen.queryByRole('group', { name: 'Coverage totals' })).not.toBeInTheDocument();
+  });
+
+  it('brings the doc coverage back when the conflict is closed', async () => {
+    const user = userEvent.setup();
+    renderPage(ALL_TRUE, CONFLICT_URL);
+    await user.click(await screen.findByLabelText('Close conflict detail'));
+    // The selected doc (?guard) survives the close → its coverage center returns.
+    expect(await screen.findByRole('group', { name: 'Coverage totals' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Close conflict detail')).not.toBeInTheDocument();
+  });
+
+  // A preamble conflict points at the selected doc with a null heading. The
+  // conflict-heading index must skip it (no heading row to tag) rather than throw
+  // on `null.trim()`.
+  it('tolerates an overlap section with a null (preamble) heading on the selected doc', async () => {
+    stubFetch();
+    const corpus = {
+      ...CORPUS,
+      data: {
+        ...CORPUS.data,
+        corpus: {
+          ...CORPUS.data.corpus,
+          areas: [
+            {
+              id: 'core/languages',
+              product: 'core',
+              concern: 'languages',
+              docRefs: ['docs/SPEC.md', 'docs/OTHER.md'],
+              overlaps: [
+                {
+                  docs: ['docs/SPEC.md', 'docs/OTHER.md'],
+                  note: 'README preamble lists C#; OTHER omits it',
+                  sections: [
+                    { doc: 'docs/SPEC.md', heading: null },
+                    { doc: 'docs/OTHER.md', heading: 'Tech Stack' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as SpecCorpusState;
+
+    render(
+      <MemoryRouter initialEntries={['/repos/r?guard=docs%2FSPEC.md']}>
+        <GuardCoveragePage repoId="r" corpus={corpus} staleness={ALL_TRUE} staleLoaded />
+      </MemoryRouter>,
+    );
+    // Renders the coverage surface instead of crashing on the null heading.
+    expect(await screen.findByRole('group', { name: 'Coverage totals' })).toBeInTheDocument();
+  });
 });
 
 describe('GuardCoveragePage — coverage surface', () => {

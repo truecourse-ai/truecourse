@@ -11,6 +11,7 @@ import * as api from '@/lib/api';
 export function useSpecStaleness(repoId: string | undefined) {
   const [contractsStale, setContractsStale] = useState(false);
   const [verifyStale, setVerifyStale] = useState(false);
+  const [decisionsPending, setDecisionsPending] = useState(false);
 
   const refetch = useCallback(async () => {
     if (!repoId) return;
@@ -18,6 +19,7 @@ export function useSpecStaleness(repoId: string | undefined) {
       const r = await api.getSpecStaleness(repoId);
       setContractsStale(r.contractsStale);
       setVerifyStale(r.verifyStale);
+      setDecisionsPending(r.decisionsPending);
     } catch {
       // Best-effort: the dots are advisory, not load-bearing. Silently
       // ignore failures so a flaky probe never blocks the page.
@@ -28,5 +30,5 @@ export function useSpecStaleness(repoId: string | undefined) {
     refetch();
   }, [refetch]);
 
-  return { contractsStale, verifyStale, refetch };
+  return { contractsStale, verifyStale, decisionsPending, refetch };
 }

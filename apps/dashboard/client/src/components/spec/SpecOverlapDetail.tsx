@@ -14,8 +14,6 @@ import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecRelation, SpecRelationType } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
 
-const base = (ref: string): string => ref.split('/').pop() ?? ref;
-
 /** How the resolved-state summary reads, e.g. "old.md replaced by new.md". */
 const RESOLVED_VERB: Record<SpecRelationType, string> = {
   replace: 'replaced by',
@@ -106,7 +104,14 @@ export function SpecOverlapDetail({
   // A synthesized entry (a resolved pair the corpus no longer flags) has no
   // overlap record — fall back to the recorded relation's own note.
   const note = overlap?.note ?? relation?.note;
-  const sectionsFor = (d: string): string[] => (overlap?.sections ?? []).filter((s) => s.doc === d).map((s) => s.heading);
+  // Heading pointers for a doc (null pointers — preamble conflicts — excluded).
+  const sectionsFor = (d: string): string[] =>
+    (overlap?.sections ?? [])
+      .filter((s) => s.doc === d && s.heading !== null)
+      .map((s) => s.heading as string);
+  // Whether this doc's conflict lives in its preamble (a null-heading pointer).
+  const preambleFor = (d: string): boolean =>
+    (overlap?.sections ?? []).some((s) => s.doc === d && s.heading === null);
 
   // On open (or when the overlap changes), scroll each pane to its first
   // conflicting section so the disagreement is in view immediately.
@@ -125,10 +130,10 @@ export function SpecOverlapDetail({
   // One flat set of buttons — each is a complete decision (relation type +
   // direction), no separate "authoritative" toggle.
   const actions: { key: string; type: SpecRelationType; winner: string; label: string; hint: string }[] = [
-    { key: 'replace-newer', type: 'replace', winner: newerDoc, label: 'Use newer only', hint: `${base(newerDoc)} replaces ${base(olderDoc)} — ${base(olderDoc)} is dropped from generation.` },
-    { key: 'replace-older', type: 'replace', winner: olderDoc, label: 'Use older only', hint: `${base(olderDoc)} replaces ${base(newerDoc)} — ${base(newerDoc)} is dropped from generation.` },
-    { key: 'prefer-newer', type: 'precedence', winner: newerDoc, label: 'Prefer newer', hint: `Both feed generation, but ${base(newerDoc)} wins where they overlap.` },
-    { key: 'prefer-older', type: 'precedence', winner: olderDoc, label: 'Prefer older', hint: `Both feed generation, but ${base(olderDoc)} wins where they overlap.` },
+    { key: 'replace-newer', type: 'replace', winner: newerDoc, label: 'Use newer only', hint: `${newerDoc} replaces ${olderDoc} — ${olderDoc} is dropped from generation.` },
+    { key: 'replace-older', type: 'replace', winner: olderDoc, label: 'Use older only', hint: `${olderDoc} replaces ${newerDoc} — ${newerDoc} is dropped from generation.` },
+    { key: 'prefer-newer', type: 'precedence', winner: newerDoc, label: 'Prefer newer', hint: `Both feed generation, but ${newerDoc} wins where they overlap.` },
+    { key: 'prefer-older', type: 'precedence', winner: olderDoc, label: 'Prefer older', hint: `Both feed generation, but ${olderDoc} wins where they overlap.` },
     { key: 'keep-both', type: 'keep-both', winner: newerDoc, label: 'Keep both', hint: 'Both are current peers — combine them.' },
   ];
 
@@ -173,9 +178,9 @@ export function SpecOverlapDetail({
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <span>{base(docA)}</span>
+          <span>{docA}</span>
           <span className="text-muted-foreground">↔</span>
-          <span>{base(docB)}</span>
+          <span>{docB}</span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
           {onClose && (
             <button
@@ -192,7 +197,7 @@ export function SpecOverlapDetail({
         {relation && !editing ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-emerald-600 dark:text-emerald-400">
-              Resolved → {base(relation.older)} {RESOLVED_VERB[relation.type]} {base(relation.newer)}
+              Resolved → {relation.older} {RESOLVED_VERB[relation.type]} {relation.newer}
             </span>
             <button type="button" onClick={() => setEditing(true)} className="text-muted-foreground underline hover:text-foreground">
               Change
@@ -230,10 +235,10 @@ export function SpecOverlapDetail({
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-1 divide-x divide-border">
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <SpecDocViewer repoId={repoId} docRef={docA} commit={prRef} badge={docA === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollA} highlight={sectionsFor(docA)} />
+          <SpecDocViewer repoId={repoId} docRef={docA} commit={prRef} badge={docA === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollA} highlight={sectionsFor(docA)} highlightPreamble={preambleFor(docA)} />
         </div>
         <div className="flex min-h-0 flex-col overflow-hidden">
-          <SpecDocViewer repoId={repoId} docRef={docB} commit={prRef} badge={docB === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollB} highlight={sectionsFor(docB)} />
+          <SpecDocViewer repoId={repoId} docRef={docB} commit={prRef} badge={docB === newerDoc ? 'Newer' : 'Older'} scrollTo={scrollB} highlight={sectionsFor(docB)} highlightPreamble={preambleFor(docB)} />
         </div>
       </div>
     </div>

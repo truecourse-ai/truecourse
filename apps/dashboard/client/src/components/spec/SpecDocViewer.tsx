@@ -18,6 +18,7 @@ export function SpecDocViewer({
   badge,
   scrollTo,
   highlight,
+  highlightPreamble,
   tags,
   notIncludedReason,
 }: {
@@ -32,6 +33,8 @@ export function SpecDocViewer({
   scrollTo?: { heading: string; nonce: number };
   /** Headings to mark in-place as conflicting (amber band + "conflict" tag). */
   highlight?: string[];
+  /** Band the preamble block (before the first heading) — for preamble conflicts. */
+  highlightPreamble?: boolean;
   /** The doc's area tags — shown in full in the header (the list caps them). */
   tags?: string[];
   /** When set, this doc was dropped by the relevance filter — show why, above the content. */
@@ -109,7 +112,7 @@ export function SpecDocViewer({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : (
-          <DocMarkdown source={content ?? ''} highlight={highlight} />
+          <DocMarkdown source={content ?? ''} highlight={highlight} highlightPreamble={highlightPreamble} />
         )}
       </div>
     </div>
