@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, Network, Lightbulb } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, PauseCircle, Network, Lightbulb } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -76,6 +76,7 @@ import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
 import { GuardScenarioDetail } from '@/components/guard/GuardScenarioDetail';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
+import { GuardHeldDetail } from '@/components/guard/GuardHeldDetail';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
 import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
 import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
@@ -89,7 +90,8 @@ import { useGuardView } from '@/hooks/useGuardView';
 import { useGuardSelection } from '@/hooks/useGuardSelection';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
-import { buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
+import { useGuardDecisions } from '@/hooks/useGuardDecisions';
+import { buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { GenerateResultDetail } from '@/components/drift/GenerateResultDetail';
 import { useGraph } from '@/hooks/useGraph';
@@ -435,17 +437,36 @@ function RepoPageInner() {
   // model (single-click preview, double-click pin), guard-scoped so nothing
   // bleeds into BL Drift's DriftViewContext tab sets.
   const guardScenarioTabs = useGuardScenarioTabs(repoId);
+  // The committable dismissals (`scenarios/decisions.json`) — a finding the user
+  // dismissed still lists here until the next generate (the report is a snapshot),
+  // so the rows/detail derive their "dismissed" state from this, not the report.
+  const { decisions: guardDecisions, refetch: refetchGuardDecisions } = useGuardDecisions(
+    repoId,
+    leftTab === 'scenarios',
+    guardReloadKey,
+  );
+  const guardDismissedKeys = useMemo(
+    () => dismissedKeySet(guardDecisions.dismissedClaims),
+    [guardDecisions],
+  );
   // Birth findings live in the SAME left-panel list as committed scenarios (the
   // plan: they are section-bound artifacts that failed to become guards). Lifted
   // from the last-generate report + joined to the committed rows so their group
-  // headings resolve the same way scenario rows do.
+  // headings resolve the same way scenario rows do; each row carries whether its
+  // claim is already dismissed.
   const guardFindingRows = useMemo(
-    () => buildFindingRows(guardReport, guardScenarios.rows),
+    () => buildFindingRows(guardReport, guardScenarios.rows, guardDismissedKeys),
+    [guardReport, guardScenarios.rows, guardDismissedKeys],
+  );
+  // Ready-but-held scenarios (birth-passed, section withheld) join the SAME left
+  // list as scenarios + findings — a first-class block between them.
+  const guardHeldRows = useMemo(
+    () => buildHeldRows(guardReport, guardScenarios.rows),
     [guardReport, guardScenarios.rows],
   );
   const guardListRows = useMemo(
-    () => buildListRows(guardScenarios.rows, guardFindingRows),
-    [guardScenarios.rows, guardFindingRows],
+    () => buildListRows(guardScenarios.rows, guardFindingRows, guardHeldRows),
+    [guardScenarios.rows, guardFindingRows, guardHeldRows],
   );
 
   // Switching to a data tab re-fetches its data, so the panel reflects the latest
@@ -2015,6 +2036,15 @@ function RepoPageInner() {
                       icon: FlaskConicalOff,
                     };
                   }
+                  const held = guardHeldRows.find((r) => r.id === t.id);
+                  if (held) {
+                    return {
+                      ...t,
+                      label: held.title,
+                      title: `${held.doc} · ${held.headingText ?? sectionLeaf(held.anchor)}`,
+                      icon: PauseCircle,
+                    };
+                  }
                   return { ...t, label: t.id, title: t.id };
                 })}
                 activeId={guardScenarioTabs.activeId}
@@ -2048,9 +2078,32 @@ function RepoPageInner() {
                     return (
                       <GuardFindingDetail
                         key={activeFinding.id}
+                        repoId={repoId}
                         row={activeFinding}
                         onClose={() => guardScenarioTabs.close(activeFinding.id)}
                         onOpenSpec={openSpecSection}
+                        onDismiss={async (claim) => {
+                          await api.dismissGuardClaim(repoId, claim);
+                          refetchGuardDecisions();
+                        }}
+                        onUndismiss={async (claim) => {
+                          await api.undismissGuardClaim(repoId, claim);
+                          refetchGuardDecisions();
+                        }}
+                      />
+                    );
+                  }
+                  const activeHeld = guardScenarioTabs.activeId
+                    ? guardHeldRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                    : null;
+                  if (activeHeld) {
+                    return (
+                      <GuardHeldDetail
+                        key={activeHeld.id}
+                        row={activeHeld}
+                        onClose={() => guardScenarioTabs.close(activeHeld.id)}
+                        onOpenSpec={openSpecSection}
+                        onOpenFinding={(findingId) => guardScenarioTabs.open(findingId, false)}
                       />
                     );
                   }

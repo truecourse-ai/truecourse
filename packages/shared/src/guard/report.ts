@@ -33,8 +33,12 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * Why a section has no CLI guard, UN-CONFLATED so a postponement never reads as a
  * verdict: `awaiting-driver` (the claim needs a driver that isn't runnable yet —
  * which one is the `driver` field, not the kind), `untestable`/`no-claim` (nothing
- * a CLI run can assert), or `blocked-on` (needs world-state no `setup` block can
- * express — a running service, database, network, credentials).
+ * a CLI run can assert), `blocked-on` (needs world-state no `setup` block can
+ * express — a running service, database, network, credentials), or `dismissed`
+ * (the user judged the claim's finding noise/won't-fix in `scenarios/decisions.json`,
+ * so generate settles it explicitly instead of silently disappearing it). A
+ * `dismissed` gap carries no driver (it never reached a driver), like the residual
+ * kinds — the refine below holds.
  *
  * A single `awaiting-driver` kind (+ a `driver` discriminator) replaces the old
  * flat `api`/`web`/`tui` kinds: one code path handles every future driver, and a
@@ -45,6 +49,7 @@ export const GuardCoverageGapKindSchema = z.enum([
   'untestable',
   'no-claim',
   'blocked-on',
+  'dismissed',
 ])
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
 
@@ -136,6 +141,22 @@ export const GuardBirthFindingSchema = z
     /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
     evidencePath: z.string().optional(),
     /**
+     * The failed candidate's authored YAML, serialized inline AT FINDING CREATION
+     * (same serialize-at-creation as heldSections' readyScenarios). The finding
+     * detail renders it in the scenario-source code block so the user can judge
+     * "defect or drift" with the exact commands the scenario ran on-screen.
+     * Optional so older `result.json` files keep parsing.
+     */
+    yaml: z.string().optional(),
+    /**
+     * The EXTRACTED CLAIM's stable text — the claim identity a dismissal keys on
+     * (anchor + this). The finding detail's Dismiss action writes it into
+     * `scenarios/decisions.json`; generate then skips a matching claim before
+     * authoring. Distinct from `title` (the scenario title). Optional so older
+     * reports (and the internal retry-evidence findings) parse.
+     */
+    claim: z.string().optional(),
+    /**
      * The bound section's human heading, joined SERVER-SIDE at report read time
      * (never written to `result.json` — the enrichment is read-side). A finding's
      * section is unsettled by definition, so it never has a committed scenario to
@@ -154,6 +175,43 @@ export const GuardGenerateErrorSchema = z
   })
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
+
+/**
+ * One birth-passed-but-withheld candidate under a held section — validated work
+ * the all-or-nothing persist held back. The authored `yaml` rides inline (the
+ * exact bytes the section would have committed): `result.json` is gitignored and
+ * a few KB per scenario is trivial, so the inline copy beats a server-side
+ * authoring-cache lookup for robustness (a cleared cache never blanks the UI).
+ */
+export const GuardReadyScenarioSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    /** The committed YAML the scenario would have been written as. */
+    yaml: z.string(),
+  })
+  .strict()
+export type GuardReadyScenario = z.infer<typeof GuardReadyScenarioSchema>
+
+/**
+ * A section that stayed UNSETTLED (a sibling finding/error) yet whose candidates
+ * ALL passed birth — the "ready but held" scenarios the all-or-nothing persist
+ * withheld. First-class so the validated work is never invisible. The blockers
+ * (what holds it) are the report's top-level `birthFindings`/`errors` keyed by the
+ * same `doc`+`anchor`, so they are never duplicated here. `headingText` is the
+ * section's human heading, joined SERVER-SIDE at report read time (never written
+ * to `result.json` — a held section is unsettled, so no committed scenario donates
+ * it; slugs are engine ids, not UI copy).
+ */
+export const GuardHeldSectionSchema = z
+  .object({
+    doc: z.string(),
+    anchor: z.string(),
+    headingText: z.string().optional(),
+    readyScenarios: z.array(GuardReadyScenarioSchema),
+  })
+  .strict()
+export type GuardHeldSection = z.infer<typeof GuardHeldSectionSchema>
 
 /**
  * The built entry failed to START — a stale/orphaned dist, a missing interpreter, a
@@ -181,6 +239,22 @@ export const GuardExtractionFailureSchema = z
   })
   .strict()
 export type GuardExtractionFailure = z.infer<typeof GuardExtractionFailureSchema>
+
+/**
+ * A dismissal in `scenarios/decisions.json` that matched NO live claim in a doc
+ * generate actually re-extracted this run — the claim's section content changed
+ * (or the doc was edited) so the dismissed text no longer exists. Surfaced so a
+ * stale dismissal is never silently honored forever; the user re-dismisses the new
+ * claim text or drops the entry.
+ */
+export const GuardOrphanedDismissalSchema = z
+  .object({
+    doc: z.string(),
+    anchor: z.string(),
+    title: z.string(),
+  })
+  .strict()
+export type GuardOrphanedDismissal = z.infer<typeof GuardOrphanedDismissalSchema>
 
 /** A bound section whose scenarios remain but the section itself is gone. */
 export const GuardOrphanedSectionSchema = z
@@ -238,6 +312,19 @@ export const GuardGenerateReportSchema = z
      * `written.length` when a passing scenario's section didn't settle.
      */
     birthPassed: z.number().int().nonnegative().optional(),
+    /**
+     * Unsettled sections whose birth-passed candidates were withheld — the
+     * ready-but-held scenarios, each carrying its authored YAML inline. Optional so
+     * older reports (written before this field existed) keep parsing; absent reads
+     * as "no held work".
+     */
+    heldSections: z.array(GuardHeldSectionSchema).optional(),
+    /**
+     * Dismissals whose claim text matched nothing in a doc this run re-extracted —
+     * stale entries in `scenarios/decisions.json`, surfaced (never silently
+     * honored). Optional so older reports parse; absent reads as "none".
+     */
+    orphanedDismissals: z.array(GuardOrphanedDismissalSchema).optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

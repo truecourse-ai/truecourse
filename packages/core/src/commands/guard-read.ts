@@ -14,6 +14,7 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import {
   buildDocSectionIndex,
+  guardDir,
   evidenceRunDir,
   evidenceScenarioDir,
   guardLatestPath,
@@ -61,6 +62,14 @@ import {
 // The dashboard reads the whole guard surface through core (never guard-runner
 // directly), mirroring how verify routes read through spec-in-process.
 export { readGuardLatest, readGuardHistory, readGuardResult, readManifest } from '@truecourse/guard-runner'
+// The committable guard decisions file (dismissed claims) — read + mutated through
+// core so the dashboard depends only on `@truecourse/core`.
+export {
+  readGuardDecisions,
+  writeGuardDecisions,
+  dismissGuardClaim,
+  undismissGuardClaim,
+} from '@truecourse/guard-runner'
 
 // ---------------------------------------------------------------------------
 // Per-section coverage join (pure).
@@ -349,14 +358,29 @@ function headingTextIndex(repoRoot: string, docs: readonly string[]): Map<string
  */
 export function readGuardReport(repoRoot: string): GuardGenerateReport | null {
   const report = readGuardResultStore(repoRoot)
-  if (!report || report.birthFindings.length === 0) return report
-  const headingByDocAnchor = headingTextIndex(repoRoot, report.birthFindings.map((f) => f.doc))
+  if (!report) return report
+  const held = report.heldSections ?? []
+  // A held section is unsettled by definition, so — like a finding — no committed
+  // scenario donates its heading client-side; join it server-side the same way.
+  if (report.birthFindings.length === 0 && held.length === 0) return report
+  const headingByDocAnchor = headingTextIndex(repoRoot, [
+    ...report.birthFindings.map((f) => f.doc),
+    ...held.map((h) => h.doc),
+  ])
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {
       const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
       return { ...f, ...(headingText ? { headingText } : {}) }
     }),
+    ...(held.length > 0
+      ? {
+          heldSections: held.map((h) => {
+            const headingText = headingByDocAnchor.get(`${h.doc}\0${h.anchor}`)
+            return { ...h, ...(headingText ? { headingText } : {}) }
+          }),
+        }
+      : {}),
   }
 }
 
@@ -454,6 +478,30 @@ export function readGuardEvidence(
   const full = path.resolve(evidenceScenarioDir(repoRoot, runId, scenarioId), file)
   const runDir = path.resolve(evidenceRunDir(repoRoot, runId))
   if (full !== runDir && !full.startsWith(runDir + path.sep)) return null
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null
+  return fs.readFileSync(full, 'utf-8')
+}
+
+/**
+ * Read one evidence file addressed by its repo-relative evidence DIRECTORY (a birth
+ * finding's `evidencePath`, `.truecourse/guard/evidence/<runId>/<scenarioId>`) — the
+ * `readGuardEvidence` sibling for findings, which store the whole pointer rather
+ * than a run id. `file` is charset-validated and the resolved path is confined to
+ * the guard evidence root (`guard/evidence/`), the same traversal guard, so a
+ * `../`-laced `evidenceDir` can never escape it. Returns `null` for an unsafe
+ * segment, a path outside the evidence root, or a missing file.
+ */
+export function readGuardEvidenceAt(
+  repoRoot: string,
+  evidenceDir: string,
+  file = 'transcript.txt',
+): string | null {
+  if (!SAFE_SEGMENT.test(file)) return null
+  const evidenceRoot = path.resolve(guardDir(repoRoot), 'evidence')
+  const dir = path.resolve(repoRoot, evidenceDir)
+  if (dir !== evidenceRoot && !dir.startsWith(evidenceRoot + path.sep)) return null
+  const full = path.resolve(dir, file)
+  if (!full.startsWith(dir + path.sep)) return null
   if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null
   return fs.readFileSync(full, 'utf-8')
 }

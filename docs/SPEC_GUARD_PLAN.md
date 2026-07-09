@@ -322,7 +322,8 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    cancel during the retry round loses all retry work (tonight: 231 calls ≈ $58 would have
    evaporated). Cache per claim keyed on (prompt fingerprint, claim, section, retry-evidence
    hash) so stopping is always cheap and resume is exact.
-6b. **Retry capability-declaration errors (from the 2026-07-07 Anthropic run: 19 sections
+6b. **Retry capability-declaration errors — SPLIT 2026-07-08: retry-routing half IN BUILD (engine-only, cache-safe); prompt-loudness half stays queued for the next fingerprint batch (rolling the authoring prompt re-keys the authoring cache and would re-author everything, including the currently held-ready scenarios).**
+   Original item: **Retry capability-declaration errors (from the 2026-07-07 Anthropic run: 19 sections
    lost).** A scenario declaring `setup.git` commit files it never seeded fails materialization
    with a precise message ("declared file does not exist in the sandbox: seed it via
    setup.files or an earlier commit") — but capability errors surface as infra `error`, which
@@ -332,6 +333,11 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    make the seeding constraint LOUD in the capabilities block — "every path in
    `git.commits[].files`/`staged` MUST also appear in `setup.files`" (the model made the
    identical mistake 19×; per the prompt rule, it never clearly saw the constraint).
+   STATUS (retry-routing half): BUILT — a setup-phase birth error (capability/materialization,
+   caught before any step) is now detected by `isSetupDefectResult` (runner) and routed through
+   the SAME one evidence-retry as a birth `fail` in `settleCliSection`, with the provider message
+   as evidence; retry counter/`guard.retry` stage + the retry cache participate identically. The
+   prompt-loudness half stays queued (would re-key the authoring cache).
 7. **Pin the resolved entrypoint interpreter** (correctness, found by a live false-red): a
    scenario legitimately overrode `PATH` via `setup.env` to inject a fake `claude` stub — and
    the override also swapped which `node` ran the CLI (an ancient host node resolved first and
@@ -437,6 +443,70 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    and hand-editable, and the hardening example (`turbo build --force`) for build tools
    whose caches can serve stale output across branch switches. Recipe edits roll the recipe
    fingerprint → older runs flag as stale. STATUS: BUILT (README section added 2026-07-08).
+16. **Ready-but-held scenarios are a first-class product concept (user decision
+   2026-07-08).** Birth-passed scenarios withheld by an unsettled section (a sibling
+   finding/error) are today INVISIBLE — result.json keeps only a global `birthPassed`
+   count, so validated work vanishes into the authoring cache with no user-facing trace,
+   and findings hide their real weight (resolving one releases its section's held guards).
+   The settle rules do NOT change (all-or-nothing persist stays); this is reporting + UI:
+   - result.json: each unsettled section's entry carries `readyScenarios: [{id,title}]`
+     (its birth-passed-but-withheld claims) alongside its blockers.
+   - CLI: generate summary + `guard status` print `N written · M ready but held
+     (F findings · E errors)`.
+   - Dashboard Scenarios list: a HELD block between Findings and Scenarios (bad-news-first
+     order: decisions → limbo → healthy inventory), same doc › section grouping, distinct
+     "held" chip, counted and filterable like findings. Held-row detail: title + binding +
+     WHAT HOLDS IT (its section's findings/errors, click-through) + the authored YAML read
+     from the authoring cache so the user can inspect what will land.
+   - Findings show their blast radius: row/detail gains "holds back N ready scenarios";
+     coverage section detail shows the same. The two surfaces cross-link — see a held
+     guard → open its blocker → judge doc-vs-code → re-generate lands the section whole.
+   STATUS: BUILT — report `heldSections[{doc,anchor,readyScenarios[{id,title,yaml}]}]` (inline YAML), engine capture in `settleCliSection`, CLI held line + `guard status`, dashboard HELD block + held detail + finding blast radius + overview chip (2026-07-08).
+
+17. **Cross-section retries serialize (observed live 2026-07-08, queued).** Sections settle
+   through a SERIAL chain and run their evidence-retries DURING their settle turn — so one
+   section's minutes of Opus retries block every section queued behind it, and retries
+   across sections never run concurrently even though nothing couples them. Restructure so
+   retries parallelize across sections (the settle chain's serialization exists for id
+   allocation + manifest writes — keep THOSE serial, free the retry LLM calls). Throughput
+   only; no behavior change.
+
+18. **Generate estimate must model retries or stop claiming "ceiling" (trust bug, observed
+   twice 2026-07-08, queued).** The pre-flight promised "up to $7.14" → billed $12.56, then
+   "up to $3.18" → billed $8.43 — the estimate covers extraction + round-1 authoring but
+   retries (up to one full re-author per claim, Opus) are absent from the model, so the
+   "cost is a ceiling" copy is false whenever retries fire. Fix: include the retry bound in
+   the ceiling (worst case = every estimated claim retries once — honest and still
+   deterministic) or, if that reads absurdly high, present two numbers ("$X, up to $Y if
+   every claim needs its retry") — never a "ceiling" the bill can exceed. Same trust family
+   as item 11 (estimate/runtime agreement).
+
+19. **Findings must be judgeable on one screen (user decision 2026-07-08).** A finding asks
+   "generation defect or real drift — your call" while withholding the material for the
+   call: (a) the candidate's scenario YAML is discarded (held rows carry theirs since item
+   16 — findings don't); (b) the birth evidence IS fully captured on disk
+   (transcript/stdout/stderr/invocation under the finding's `evidencePath`) but
+   GuardFindingDetail renders the path as inert text instead of loading the transcript
+   like the run-failure detail's evidence viewer. Fix: findings carry `yaml` inline (same
+   serialize-at-creation as heldSections), and the finding detail embeds the existing
+   evidence viewer on `evidencePath`. (The doc excerpt was considered and dropped —
+   view-in-spec suffices; user call.)
+   STATUS: BUILT — findings carry `yaml` + `claim` inline (serialized at finding creation); GuardFindingDetail renders the YAML code block and loads the full transcript via a path-keyed `/guard/finding-evidence` route (`readGuardEvidenceAt`, evidence-root confined).
+
+20. **Dismissing findings (user decision 2026-07-08).** A finding the user judges as noise
+   or won't-fix needs a persisted dismissal: a committable guard decisions file (spec
+   `decisions.json` analog) holding `dismissedClaims` keyed by section + claim identity
+   (anchor + claim/title). Generate consults it: a dismissed claim is not re-authored,
+   not retried, never re-findinged — it settles as an explicit `dismissed` GAP (a visible
+   coverage status, never a silent disappearance), which lets its section settle and
+   RELEASES its held siblings on the next generate. Un-dismiss via the decisions file or
+   the UI. If the doc section's content changes, extraction re-runs and a dismissal that
+   no longer matches a live claim is surfaced as orphaned, not silently honored. UI:
+   dismiss action on the finding detail (inline actions stopPropagation per house rule),
+   dismissed entries visible somewhere honest (coverage status + a way to review/undo).
+   STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count.
+
+
 
 
 

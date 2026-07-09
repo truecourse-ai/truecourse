@@ -27,11 +27,13 @@ import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   writeManifest,
   readManifest,
+  readGuardDecisions,
   manifestPath,
   runBuild,
   resolveEntry,
   preflightEntry,
   formatEntryPreflightError,
+  isSetupDefectResult,
   type Recipe,
   type BuildResult,
   type EntryPreflightResult,
@@ -39,10 +41,14 @@ import {
 import {
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
+  dismissedClaimKey,
   isRunnableDriver,
   type GuardCoverageGap,
+  type GuardDismissedClaim,
   type GuardEntryPreflight,
+  type GuardHeldSection,
   type GuardManifestSection,
+  type GuardOrphanedDismissal,
   type GuardScenario,
 } from '@truecourse/shared'
 import {
@@ -86,6 +92,7 @@ import {
   buildScenario,
   areaOrDocSlug,
   writeScenarioFile,
+  serializeScenarioYaml,
   deleteScenarioFiles,
   existingScenarioIds,
 } from './serialize.js'
@@ -123,6 +130,10 @@ export interface GuardBirthFinding {
   actual: string
   /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
   evidencePath?: string
+  /** The failed candidate's authored YAML, serialized inline at finding creation. */
+  yaml?: string
+  /** The extracted claim's stable text — the identity a dismissal keys on. */
+  claim?: string
 }
 
 export interface GuardGenerateError {
@@ -167,6 +178,19 @@ export interface GuardGenerateResult {
    * birth finding / authoring error). The honest "N passed" for the closing detail.
    */
   birthPassed: number
+  /**
+   * Unsettled sections whose birth-passed candidates were withheld by the
+   * all-or-nothing persist — the ready-but-held scenarios (with their authored YAML
+   * inline). Empty when every changed section either settled or had nothing pass at
+   * birth. The blockers live in `birthFindings`/`errors` (same doc+anchor).
+   */
+  heldSections: GuardHeldSection[]
+  /**
+   * Dismissals in `scenarios/decisions.json` whose claim text matched nothing in a
+   * doc this run re-extracted — stale entries surfaced (never silently honored).
+   * Empty when every dismissal matched a live claim (or its doc wasn't re-read).
+   */
+  orphanedDismissals: GuardOrphanedDismissal[]
   manifestPath?: string
   /**
    * Present ONLY when the built entry failed to start — the birth phase was
@@ -302,6 +326,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       extractionFailures: [],
       orphaned,
       birthPassed: 0,
+      heldSections: [],
+      orphanedDismissals: [],
     }
   }
 
@@ -322,6 +348,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
   const extractionFailures: GuardExtractionFailure[] = []
+
+  // The user's dismissals (committable `scenarios/decisions.json`). A dismissed
+  // claim (identity = doc + anchor + the extracted claim's stable text) is skipped
+  // BEFORE authoring — never re-authored, never re-findinged — and recorded as a
+  // `dismissed` coverage gap so it settles visibly and RELEASES its held siblings.
+  const decisions = readGuardDecisions(repoRoot)
+  const dismissalByKey = new Map<string, GuardDismissedClaim>(
+    decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
+  )
+  // Orphan honesty: a dismissal whose claim text matched NOTHING in a doc actually
+  // re-extracted this run is stale — surfaced, never silently honored. Only docs we
+  // re-read can be judged, so track the extracted claim identities + the docs read.
+  const extractedClaimKeys = new Set<string>()
+  const extractedDocs = new Set<string>()
 
   // 3. Extract — one (cached) whole-document read per work doc. Anchors are snapped
   // to the live index; a doc whose extraction fails leaves its work sections
@@ -370,13 +410,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         reason: `${result.failedViews} extraction view(s) failed — re-run to complete coverage for affected sections`,
       })
     }
+    // Record every extracted claim identity (all sections of this re-read doc) so
+    // orphan detection below can tell a stale dismissal from an un-read section.
+    extractedDocs.add(doc.doc)
+    for (const c of result.data.claims) {
+      extractedClaimKeys.add(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))
+    }
     const { claimsByAnchor, noteByAnchor } = groupExtraction(result.data)
     for (const s of doc.sections) {
       if (!workKeys.has(key(s))) continue
       const claims = claimsByAnchor.get(s.anchor) ?? []
-      const cli = claims.filter((c) => isRunnableDriver(c.driver))
+      const cliAll = claims.filter((c) => isRunnableDriver(c.driver))
       const others = claims.filter((c) => !isRunnableDriver(c.driver))
       const note = noteByAnchor.get(s.anchor)
+
+      // A dismissed cli claim is not authored, not birthed, never a finding: record
+      // it as an explicit `dismissed` gap and drop it from the authoring set. Its
+      // section can then settle on its remaining (live) claims alone.
+      const cli = cliAll.filter((c) => !dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
+      const dismissed = cliAll.filter((c) => dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
+      for (const d of dismissed) {
+        const entry = dismissalByKey.get(dismissedClaimKey(s.doc, s.anchor, d.claim))
+        coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'dismissed', reason: dismissedReason(d.claim, entry?.note) })
+      }
 
       // Every non-runnable-driver claim is a recorded coverage gap (its driver isn't
       // authored yet) — one un-conflated `awaiting-driver` kind carrying the driver.
@@ -384,23 +440,38 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: o.driver, reason: o.reason })
       }
       if (cli.length === 0 && others.length === 0) {
-        // No claim and no note. In a COMPLETE doc that's an honest gap; in an
-        // incomplete doc the section may live in a failed view — don't settle it.
-        if (!result.complete && !note) {
-          extractFailedKeys.add(key(s))
-          continue
+        // A section whose only cli claims were all dismissed settles on those
+        // `dismissed` gaps alone — never re-classified as no-claim/untestable.
+        if (dismissed.length === 0) {
+          // No claim and no note. In a COMPLETE doc that's an honest gap; in an
+          // incomplete doc the section may live in a failed view — don't settle it.
+          if (!result.complete && !note) {
+            extractFailedKeys.add(key(s))
+            continue
+          }
+          coverageGaps.push({
+            doc: s.doc,
+            anchor: s.anchor,
+            kind: note ? 'untestable' : 'no-claim',
+            reason: note?.reason ?? 'the section states no CLI-assertable claim',
+          })
         }
-        coverageGaps.push({
-          doc: s.doc,
-          anchor: s.anchor,
-          kind: note ? 'untestable' : 'no-claim',
-          reason: note?.reason ?? 'the section states no CLI-assertable claim',
-        })
       }
       classificationByKey.set(key(s), deriveClassification(cli, others, note))
       for (const c of cli) authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c })
     }
   }
+
+  // Orphan honesty: a dismissal whose doc was re-extracted but whose claim text
+  // matched no live claim is stale — surfaced so it is never silently honored. A
+  // dismissal for a doc we did NOT re-read (unchanged) is left alone (can't judge).
+  const orphanedDismissals: GuardOrphanedDismissal[] = decisions.dismissedClaims
+    .filter(
+      (d) =>
+        extractedDocs.has(d.doc) &&
+        !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)),
+    )
+    .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
   // 4. Kick the recipe build ONCE, parallel with authoring — every birth round
   // reuses it (skipBuild). The build phase is announced the first time a section
@@ -503,6 +574,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Result accumulators + progress counters — appended/bumped as sections settle.
   const written: GeneratedScenarioInfo[] = []
   const birthFindings: GuardBirthFinding[] = []
+  // Sections left unsettled (a sibling finding/error) whose candidates ALL passed
+  // birth — recorded so the report/UI can surface the withheld validated work.
+  const heldSections: GuardHeldSection[] = []
   // Set the first time a section reaches birth and finds the entry can't start; from
   // then on every cli section short-circuits (no birth, unsettled) and the failure is
   // recorded ONCE, in `errors`, never as per-section findings.
@@ -638,9 +712,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
         const retryEntries: { task: AuthTask; evidence: GuardBirthFinding }[] = []
         for (const [ref, outcomes] of r1ByRef) {
-          const fail = outcomes.find((o) => o.result.outcome === 'fail')
-          if (fail) {
-            retryEntries.push({ task: taskByRef.get(ref)!, evidence: toFinding(fail) })
+          // A birth `fail` OR a setup-declaration defect (a capability/materialization
+          // error caught before any step ran — e.g. `setup.git` naming an unseeded
+          // file) is a generation defect: regenerate the whole claim ONCE with the
+          // failure as evidence. The capability message ("declared file does not
+          // exist… seed it via setup.files or an earlier commit") is exactly what the
+          // model needs. A genuine infra error is surfaced as-is, never retried.
+          const retriable = outcomes.find(
+            (o) => o.result.outcome === 'fail' || isSetupDefectResult(o.result),
+          )
+          if (retriable) {
+            retryEntries.push({ task: taskByRef.get(ref)!, evidence: toFinding(retriable) })
             continue // whole claim is regenerated; round-1 candidates are discarded
           }
           for (const o of outcomes) {
@@ -704,6 +786,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         ids.push(c.scenario.id)
       }
       upsertSection(section, ids)
+    } else if (persistedHere.length > 0) {
+      // Unsettled (a sibling finding/error), but these candidates passed at birth in
+      // one of the rounds — record them as ready-but-held so the validated work is
+      // visible. Their YAML rides inline (they were never written to disk).
+      heldSections.push({
+        doc: section.doc,
+        anchor: section.anchor,
+        readyScenarios: persistedHere.map((c) => ({
+          id: c.scenario.id,
+          title: c.scenario.title,
+          yaml: serializeScenarioYaml(c.scenario),
+        })),
+      })
     }
   }
 
@@ -800,6 +895,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     extractionFailures,
     orphaned,
     birthPassed,
+    heldSections,
+    orphanedDismissals,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
@@ -872,6 +969,8 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     extractionFailures: [],
     orphaned: [],
     birthPassed: 0,
+    heldSections: [],
+    orphanedDismissals: [],
   }
 }
 
@@ -1008,7 +1107,18 @@ function toFinding(o: { candidate: BirthCandidate; result: { failure?: { step: n
     expected: f?.expected ?? '',
     actual: f?.actual ?? '',
     ...(o.result.evidencePath ? { evidencePath: o.result.evidencePath } : {}),
+    // Judge-on-one-screen (item 19): the failed candidate's exact YAML rides inline
+    // so the finding detail shows the commands it ran; `claim` is the dismissal
+    // identity (item 20) so the detail's Dismiss action can key on it.
+    yaml: serializeScenarioYaml(o.candidate.scenario),
+    claim: o.candidate.claim.claim,
   }
+}
+
+/** The `dismissed` coverage-gap reason: the claim one-liner, plus the note if any. */
+function dismissedReason(claim: string, note?: string): string {
+  const base = `dismissed: ${oneLine(claim)}`
+  return note ? `${base} — ${oneLine(note)}` : base
 }
 
 function errorFrom(o: { candidate: BirthCandidate; result: { failure?: { actual: string } } }): GuardGenerateError {

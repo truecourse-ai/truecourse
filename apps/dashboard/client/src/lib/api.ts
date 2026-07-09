@@ -1,5 +1,6 @@
 import type {
   CapabilitiesResponse,
+  GuardDecisions,
   GuardDocCoverage,
   GuardGenerateReport,
   GuardHistory,
@@ -1214,6 +1215,59 @@ export async function getGuardEvidence(
   });
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
   return res.text();
+}
+
+/**
+ * A birth finding's evidence transcript, addressed by its stored `evidencePath`
+ * (the finding carries the whole pointer, not a run id + scenario id). text/plain;
+ * throws `ApiError` on a non-OK response (404 when no transcript was written).
+ */
+export async function getGuardFindingEvidence(
+  repoId: string,
+  evidencePath: string,
+  file?: string,
+): Promise<string> {
+  const params = new URLSearchParams({ path: evidencePath });
+  if (file) params.set('file', file);
+  const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/finding-evidence?${params.toString()}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  return res.text();
+}
+
+/** The committable guard decisions (dismissed claims) — always 200 (empty until
+ *  the user dismisses anything). */
+export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
+}
+
+/** The identity a dismissal keys on: doc + section anchor + the extracted claim's
+ *  stable text (a finding's `claim`). */
+export interface GuardClaimIdentity {
+  doc: string;
+  anchor: string;
+  title: string;
+}
+
+/** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
+ *  updated decisions so the caller re-derives dismissed state without a GET. */
+export function dismissGuardClaim(
+  repoId: string,
+  claim: GuardClaimIdentity & { note?: string },
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify(claim),
+  });
+}
+
+/** Reverse a dismissal by its identity; returns the updated decisions. */
+export function undismissGuardClaim(repoId: string, claim: GuardClaimIdentity): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
+    method: 'POST',
+    body: JSON.stringify(claim),
+  });
 }
 
 /** Run inference — reverse-engineer undocumented decisions from code into `_inferred/`. */

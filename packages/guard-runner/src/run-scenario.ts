@@ -25,6 +25,30 @@ export interface RunScenarioContext {
   stepTimeoutMs: number
 }
 
+/**
+ * The two fixed `failure.expected` sentinels a scenario run emits when its declared
+ * SETUP could not materialize BEFORE any step ran — a bad `setup.files` path (a
+ * sandbox escape) or a `setup` capability that failed (e.g. `setup.git` naming an
+ * unseeded file). Both are generation defects the model can fix from the `actual`
+ * message, not infrastructure, so the guard generator routes them through the one
+ * evidence-retry. Named constants (not inline literals) so the produce sites below
+ * and the {@link isSetupDefectResult} consume site can never drift.
+ */
+export const SANDBOX_SETUP_EXPECTED = 'sandbox setup to succeed'
+export const CAPABILITY_SETUP_EXPECTED = 'setup capabilities to materialize'
+
+/**
+ * True when an `error` outcome is a setup-declaration defect (a bad `setup.files`
+ * path or a failed `setup` capability, per the sentinels above) rather than genuine
+ * infrastructure (build/spawn/timeout/entry). The guard generator retries these
+ * once with the failure message as evidence, exactly like a birth `fail`.
+ */
+export function isSetupDefectResult(result: GuardScenarioResult): boolean {
+  if (result.outcome !== 'error') return false
+  const expected = result.failure?.expected
+  return expected === SANDBOX_SETUP_EXPECTED || expected === CAPABILITY_SETUP_EXPECTED
+}
+
 export async function runScenario(
   scenario: GuardScenario,
   ctx: RunScenarioContext,
@@ -50,7 +74,7 @@ export async function runScenario(
       ...base,
       outcome: 'error',
       durationMs: Date.now() - start,
-      failure: { step: 1, expected: 'sandbox setup to succeed', actual: message },
+      failure: { step: 1, expected: SANDBOX_SETUP_EXPECTED, actual: message },
     }
   }
 
@@ -70,7 +94,7 @@ export async function runScenario(
         ...base,
         outcome: 'error',
         durationMs: Date.now() - start,
-        failure: { step: 1, expected: 'setup capabilities to materialize', actual: message },
+        failure: { step: 1, expected: CAPABILITY_SETUP_EXPECTED, actual: message },
       }
     }
 

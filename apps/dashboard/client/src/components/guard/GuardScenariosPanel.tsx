@@ -1,18 +1,20 @@
 /**
  * The Scenarios tab's LEFT PANEL — the committed-scenario inventory AND birth
- * findings. Findings float to the TOP in their own labeled "Findings" block (a
- * red-tinted group header, the Runs view's bad-news-first idiom) so the rows asking
- * for a user decision are never buried below green scenarios; the committed
- * scenarios follow in a neutral "Scenarios" block below. When there are no visible
- * findings the findings block and the "Scenarios" label both drop and the list
- * reads as one plain doc › section inventory. Inside each block, rows group
- * doc › section: every generated / hand-written guard is a previewable row (last-run
- * outcome badge + title + id meta, hand-written rows chipped); every birth finding
- * is a row too — a distinct red "finding" chip (a candidate that failed to become a
- * guard). Search / doc / status filters sit at the top; the status filter gains a
- * "finding" option to isolate them. Single-click previews a row in a transient
- * main-pane tab, double-click pins it — the recipe card and "last generate" strip
- * live in the main pane's overview, not here.
+ * findings AND ready-but-held scenarios. Bad-news-first (the Runs view idiom): a
+ * red-tinted "Findings" block floats to the TOP (rows asking for a decision), then
+ * an amber "Held" block (birth-passed scenarios an unsettled section withheld —
+ * limbo, not error), then the committed scenarios in a neutral "Scenarios" block.
+ * When no findings or held rows are visible those blocks and the "Scenarios" label
+ * all drop and the list reads as one plain doc › section inventory. Inside each
+ * block, rows group doc › section: every generated / hand-written guard is a
+ * previewable row (last-run outcome badge + title + id meta, hand-written rows
+ * chipped); every birth finding is a row with a distinct red "finding" chip (a
+ * candidate that failed to become a guard, carrying its blast-radius "holds N" when
+ * its section holds ready work); every held scenario is a row with an amber "held"
+ * chip. Search / doc / status filters sit at the top; the status filter gains
+ * "finding" and "held" options to isolate them. Single-click previews a row in a
+ * transient main-pane tab, double-click pins it — the recipe card and "last
+ * generate" strip live in the main pane's overview, not here.
  *
  * Group headers show the section's HUMAN heading text (joined onto scenario rows
  * as `headingText`, reused by findings, else the slug leaf) — slugs are engine
@@ -41,6 +43,7 @@ import {
 } from '@/lib/guard-list-rows';
 import { GuardStatusBadge } from './GuardStatusBadge';
 import { GuardFindingBadge } from './GuardFindingBadge';
+import { GuardHeldBadge } from './GuardHeldBadge';
 
 const SELECT =
   'rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
@@ -112,12 +115,64 @@ function FindingRow({
       role="listitem"
       onClick={() => onOpen(row.id, false)}
       onDoubleClick={() => onOpen(row.id, true)}
-      title={`${row.title} — birth finding; click to preview, double-click to pin`}
+      title={
+        row.dismissed
+          ? `${row.title} — dismissed; takes effect next generate`
+          : `${row.title} — birth finding; click to preview, double-click to pin`
+      }
       className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
     >
       <div className="flex w-full items-center gap-2">
         <GuardFindingBadge />
+        {/* Dismissed: the report is a snapshot, so the row lingers until the next
+            generate — mark it so the state is legible (severity, not "removed"). */}
+        {row.dismissed && (
+          <span className="shrink-0 rounded bg-zinc-400/15 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:text-zinc-400">
+            dismissed
+          </span>
+        )}
+        {/* Blast radius: this finding's section holds N birth-passed scenarios back. */}
+        {!row.dismissed && row.heldCount > 0 && (
+          <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            holds {row.heldCount}
+          </span>
+        )}
         <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">step {row.finding.step}</span>
+      </div>
+      <span
+        className={`w-full truncate text-[13px] leading-snug ${
+          row.dismissed ? 'text-muted-foreground line-through' : 'text-foreground'
+        }`}
+      >
+        {row.title}
+      </span>
+    </button>
+  );
+}
+
+function HeldRow({
+  row,
+  active,
+  onOpen,
+}: {
+  row: Extract<GuardListRow, { kind: 'held' }>;
+  active: boolean;
+  onOpen: (id: string, pinned: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="listitem"
+      onClick={() => onOpen(row.id, false)}
+      onDoubleClick={() => onOpen(row.id, true)}
+      title={`${row.title} — ready but held; click to preview, double-click to pin`}
+      className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
+    >
+      <div className="flex w-full items-center gap-2">
+        <GuardHeldBadge />
+        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+          {row.ready.id}
+        </span>
       </div>
       <span className="w-full truncate text-[13px] leading-snug text-foreground">{row.title}</span>
     </button>
@@ -179,6 +234,8 @@ function DocGroup({
             {list.map((row) =>
               row.kind === 'finding' ? (
                 <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+              ) : row.kind === 'held' ? (
+                <HeldRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
               ) : (
                 <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
               ),
@@ -278,6 +335,7 @@ export function GuardScenariosPanel({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [findingsOpen, setFindingsOpen] = useState(true);
+  const [heldOpen, setHeldOpen] = useState(true);
   const [scenariosOpen, setScenariosOpen] = useState(true);
 
   const docs = useMemo(() => [...new Set(rows.map((r) => r.doc))].sort(), [rows]);
@@ -302,19 +360,26 @@ export function GuardScenariosPanel({
     });
   }, [rows, docFilter, statusFilter, search]);
 
-  // Split the visible rows into the findings block (floated to the top) and the
-  // scenarios block below it, each grouped doc › section in first-seen order.
+  // Split the visible rows into three blocks (bad-news-first: findings → held →
+  // healthy scenarios), each grouped doc › section in first-seen order.
   const findingRows = useMemo(() => visible.filter((r) => r.kind === 'finding'), [visible]);
+  const heldRows = useMemo(() => visible.filter((r) => r.kind === 'held'), [visible]);
   const scenarioRows = useMemo(() => visible.filter((r) => r.kind === 'scenario'), [visible]);
   const findingGroups = useMemo(() => groupByDocSection(findingRows), [findingRows]);
+  const heldGroups = useMemo(() => groupByDocSection(heldRows), [heldRows]);
   const scenarioGroups = useMemo(() => groupByDocSection(scenarioRows), [scenarioRows]);
 
-  // Split counts for the honest "N of M scenarios · K findings" line.
+  // Split counts for the honest "N of M scenarios · K findings · H held" line.
   const totalScenarios = useMemo(() => rows.filter((r) => r.kind === 'scenario').length, [rows]);
-  const totalFindings = rows.length - totalScenarios;
+  const totalFindings = useMemo(() => rows.filter((r) => r.kind === 'finding').length, [rows]);
+  const totalHeld = useMemo(() => rows.filter((r) => r.kind === 'held').length, [rows]);
   const visScenarios = scenarioRows.length;
   const visFindings = findingRows.length;
+  const visHeld = heldRows.length;
   const hasFindings = visFindings > 0;
+  const hasHeld = visHeld > 0;
+  // The "Scenarios" label appears only when a bad-news block precedes it.
+  const hasPrecedingBlock = hasFindings || hasHeld;
 
   if (loading && rows.length === 0) {
     return (
@@ -389,10 +454,17 @@ export function GuardScenariosPanel({
               {visFindings} finding{visFindings === 1 ? '' : 's'}
             </>
           )}
+          {totalHeld > 0 && (
+            <>
+              {' · '}
+              {visHeld} held
+            </>
+          )}
         </div>
       </div>
 
-      {/* Findings-first inventory: the "Findings" block (when any) then "Scenarios". */}
+      {/* Bad-news-first inventory: "Findings" (red) → "Held" (amber limbo) →
+          "Scenarios" (healthy) — decisions, then withheld work, then inventory. */}
       {visible.length === 0 ? (
         <div className="px-3 py-6 text-center text-xs text-muted-foreground">
           No scenarios match these filters.
@@ -415,12 +487,27 @@ export function GuardScenariosPanel({
               )}
             </div>
           )}
+          {hasHeld && (
+            <div>
+              {/* Held block header — amber "limbo" (birth-passed but withheld), never
+                  the findings' red; collapsible. */}
+              <BlockHeader
+                title="Held"
+                count={visHeld}
+                open={heldOpen}
+                onToggle={() => setHeldOpen((v) => !v)}
+                tone="bg-amber-500/15 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+              />
+              {heldOpen && (
+                <GroupedRows groups={heldGroups} withBlockHeader activeId={activeId} onOpen={onOpen} />
+              )}
+            </div>
+          )}
           {scenarioRows.length > 0 && (
             <div>
-              {/* A "Scenarios" label only when a findings block precedes it, so the
-                  boundary between the two blocks is never ambiguous; a lone list
-                  needs no label. */}
-              {hasFindings ? (
+              {/* A "Scenarios" label only when a bad-news block precedes it, so the
+                  boundary between blocks is never ambiguous; a lone list needs none. */}
+              {hasPrecedingBlock ? (
                 <>
                   <BlockHeader
                     title="Scenarios"

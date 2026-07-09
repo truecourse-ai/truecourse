@@ -20,8 +20,14 @@ import {
   readManifest,
   writeManifest,
   scenariosDir,
+  dismissGuardClaim,
 } from '@truecourse/guard-runner'
-import { GuardManifestSchema, GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
+import {
+  GuardManifestSchema,
+  GuardGenerateReportSchema,
+  GUARD_FORMAT_VERSION,
+  type GuardScenario,
+} from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -425,6 +431,302 @@ describe('generateGuards — birth validation', () => {
     // Nothing written to disk, and NOT recorded as settled → re-attempted next run.
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+  })
+})
+
+describe('generateGuards — ready-but-held scenarios', () => {
+  it('records an unsettled section\'s birth-passers as heldSections with their YAML', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // One claim, two scenarios: `good` passes birth in both rounds, `bad` always
+    // fails — so the section never settles, yet `good` is validated work withheld.
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
+    })
+
+    expect(res.written).toEqual([])
+    expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
+    // The birth-passed candidate lands as a ready-but-held scenario on its section.
+    expect(res.heldSections).toHaveLength(1)
+    const held = res.heldSections[0]
+    expect(held.doc).toBe(DOC)
+    expect(held.anchor).toBe('version')
+    expect(held.readyScenarios.map((s) => s.title)).toEqual(['good'])
+    // The authored YAML rides inline — parseable, bound to the section, its id.
+    const ready = held.readyScenarios[0]
+    expect(ready.id).toBe('version.1')
+    expect(ready.yaml).toContain('title: good')
+    expect(ready.yaml).toContain('section: version')
+    // It was NOT committed to disk — it's held, not persisted.
+    expect(loadScenarios(r).scenarios).toEqual([])
+  })
+
+  it('a cleanly settled section contributes no held scenarios', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.heldSections).toEqual([])
+  })
+
+  it('a report carrying heldSections round-trips through the report schema', () => {
+    const rep = {
+      generatedAt: '2026-01-02T03:04:05.000Z',
+      status: 'ok' as const,
+      sectionsTotal: 1,
+      sectionsChanged: 1,
+      skippedUnchanged: 0,
+      noChanges: false,
+      written: [],
+      coverageGaps: [],
+      birthFindings: [{ doc: DOC, anchor: 'version', title: 'bad', step: 1, expected: 'e', actual: 'a' }],
+      errors: [],
+      extractionFailures: [],
+      orphaned: [],
+      birthPassed: 1,
+      heldSections: [
+        {
+          doc: DOC,
+          anchor: 'version',
+          headingText: 'version',
+          readyScenarios: [{ id: 'version.1', title: 'good', yaml: 'guard: 1\nid: version.1\n' }],
+        },
+      ],
+    }
+    expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
+  })
+
+  it('an old-shape report with no heldSections still parses (optional field)', () => {
+    const rep = {
+      generatedAt: '2026-01-02T03:04:05.000Z',
+      status: 'ok' as const,
+      sectionsTotal: 0,
+      sectionsChanged: 0,
+      skippedUnchanged: 0,
+      noChanges: false,
+      written: [],
+      coverageGaps: [],
+      birthFindings: [],
+      errors: [],
+      extractionFailures: [],
+      orphaned: [],
+    }
+    expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
+  })
+})
+
+describe('generateGuards — dismissed claims (decisions.json)', () => {
+  // Two cli claims in ONE section: BAD authors a failing scenario (→ finding), GOOD
+  // a passing one (→ held, because its sibling finding unsettles the section).
+  const twoClaims = extractBy({
+    version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
+    background: { untestable: 'bg' },
+  })
+  const authorPerClaim: GenerateRunner = async ({ claims }) =>
+    claims.map((c) => ({
+      ref: c.ref,
+      scenarios: c.claim === 'CLAIM_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)],
+    }))
+
+  it('findings carry their authored YAML and the extracted claim text (items 19 + 20)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: twoClaims,
+      generateRunner: authorPerClaim,
+    })
+
+    const finding = res.birthFindings.find((f) => f.title === 'bad')!
+    expect(finding.claim).toBe('CLAIM_BAD')
+    expect(finding.yaml).toContain('title: bad')
+    expect(finding.yaml).toContain('section: version')
+  })
+
+  it('dismissing a claim skips it, records a dismissed gap, settles the section, and RELEASES its held sibling', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // Run 1 — the finding (BAD) holds back the birth-passed sibling (GOOD).
+    const first = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    expect(first.birthFindings.map((f) => f.title)).toEqual(['bad'])
+    expect(first.heldSections.flatMap((h) => h.readyScenarios.map((s) => s.title))).toEqual(['good'])
+    expect(first.written).toEqual([])
+    expect(loadScenarios(r).scenarios).toEqual([]) // nothing committed — held
+
+    // The user dismisses BAD as a generation defect / noise.
+    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
+
+    // Run 2 — BAD is skipped (dismissed gap), so the section settles on GOOD alone.
+    const second = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    expect(second.birthFindings).toEqual([]) // never re-findinged
+    expect(second.heldSections).toEqual([]) // its held sibling is released
+    expect(second.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
+    const dismissedGap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
+    expect(dismissedGap).toMatchObject({ doc: DOC, anchor: 'version' })
+    expect(dismissedGap.reason).toContain('CLAIM_BAD')
+
+    // GOOD is now committed — the released sibling landed.
+    expect(second.written.map((w) => w.title)).toEqual(['good'])
+    const committed = loadScenarios(r).scenarios
+    expect(committed.map((s) => s.title)).toEqual(['good'])
+    const manifestVersion = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
+    expect(manifestVersion.scenarioIds).toEqual(committed.map((s) => s.id))
+  })
+
+  it('a dismissal whose claim text no longer matches any live claim surfaces as orphaned', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // The section's real claim is the default "version claim"; this dismissal names
+    // text that no longer exists (the section content changed since it was authored).
+    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT', dismissedAt: '2026-07-08T00:00:00.000Z' })
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
+    // The live claim is unaffected — it authors + commits normally.
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+  })
+})
+
+describe('generateGuards — capability/materialization-error retry routing', () => {
+  // A scenario declaring a git commit of a file it never seeded via `setup.files`
+  // fails materialization with a precise provider message — a generation defect,
+  // routed through the same one evidence-retry as a birth `fail`.
+  const UNSEEDED_GIT = { git: { commits: [{ files: ['README.md'] }] } }
+
+  it('retries a materialization error ONCE with the capability message as evidence, then persists the fix', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let calls = 0
+    let retryEvidence: { expected?: string; actual?: string } | undefined
+    const runner: GenerateRunner = async ({ claims }) => {
+      calls++
+      return claims.map((c) => {
+        if (c.retry) {
+          retryEvidence = { expected: c.retry.expected, actual: c.retry.actual }
+          return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] } // drops the bad git decl
+        }
+        // Round 1: a git commit of an unseeded file → materialization fails.
+        return { ref: c.ref, scenarios: [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })] }
+      })
+    }
+
+    const retries: Array<[number, number]> = []
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: runner,
+      onRetryProgress: (done, total) => retries.push([done, total]),
+    })
+
+    expect(calls).toBe(2) // round-1 batch + exactly one retry
+    // The retry carried the git provider's precise message as its evidence.
+    expect(retryEvidence?.actual).toContain('declared file does not exist in the sandbox: README.md')
+    expect(retryEvidence?.actual).toContain('seed it via setup.files')
+    // The capability error ticked the retry round exactly like a birth fail.
+    expect(retries).toEqual([
+      [0, 1],
+      [1, 1],
+    ])
+    // The re-authored clean scenario births green and is persisted.
+    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(res.errors).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    expect(res.birthPassed).toBe(1)
+    expect(loadScenarios(r).scenarios).toHaveLength(1)
+  })
+
+  it('records an error and leaves the section unsettled when the materialization error persists on retry (one retry, never two)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let calls = 0
+    const runner: GenerateRunner = async ({ claims }) => {
+      calls++
+      // Both round 1 AND the retry declare the same unseeded git file → the second
+      // materialization failure is recorded as an error, never re-retried.
+      return claims.map((c) => ({
+        ref: c.ref,
+        scenarios: [raw(c.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
+      }))
+    }
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect(calls).toBe(2) // round-1 batch + exactly one retry, no second
+    expect(res.written).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    const err = res.errors.find((e) => e.anchor === 'version')!
+    expect(err.message).toContain('declared file does not exist in the sandbox: README.md')
+    // Unsettled → no manifest entry, nothing on disk → re-attempted next run.
+    expect(loadScenarios(r).scenarios).toEqual([])
+    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+  })
+
+  it('caches the materialization-error retry: a rerun reaches the same outcome without re-authoring', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let round1Calls = 0
+    let retryCalls = 0
+    const runner: GenerateRunner = async ({ claims }) => {
+      if (claims.some((c) => c.retry)) retryCalls++
+      else round1Calls++
+      return claims.map((c) => ({
+        ref: c.ref,
+        scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT })],
+      }))
+    }
+
+    const res1 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(round1Calls).toBe(1)
+    expect(retryCalls).toBe(1)
+
+    // Reset the manifest so `version` is work again; BOTH the round-1 authoring and
+    // the capability-error retry are now per-claim cache hits — the runner is not called.
+    writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
+    round1Calls = 0
+    retryCalls = 0
+    const res2 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+
+    expect(round1Calls).toBe(0) // round-1 authoring cache hit
+    expect(retryCalls).toBe(0) // capability-error retry cache hit
+    expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(res2.birthPassed).toBe(1)
   })
 })
 

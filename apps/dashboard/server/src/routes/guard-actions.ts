@@ -14,11 +14,14 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
+ *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
+ *   POST /:id/guard/undismiss  reverse a dismissal.
  *
  * Concurrency: one guard job per repo at a time. A second trigger while one is in
  * flight is rejected with 409 (the client also disables the buttons). The spec
  * scan route relies on the disabled button alone; guard adds the server guard so
- * a duplicate POST can never double-run the engine.
+ * a duplicate POST can never double-run the engine. Dismiss/undismiss are instant
+ * file writes (no job, no lock) — they never mutate the store the engine touches.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -31,6 +34,7 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
+import { dismissGuardClaim, undismissGuardClaim } from '@truecourse/core/commands/guard-read';
 import { formatEntryPreflightError, type RunGuardResult } from '@truecourse/guard-runner';
 import {
   createSocketSpecTracker,
@@ -144,6 +148,49 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
     next(e);
   } finally {
     if (held) guardJobs.delete(repoId);
+  }
+});
+
+// POST — dismiss a finding's claim. `{ doc, anchor, title, note? }` where `title`
+// is the extracted claim's stable text (the finding's `claim`). Idempotent; returns
+// the updated decisions file so the client re-derives dismissed state without a
+// second GET. The next `guard generate` skips the claim and settles it as a
+// `dismissed` gap — this write does NOT touch the current report snapshot.
+router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string; note?: string };
+    if (!body.doc || !body.anchor || !body.title) {
+      res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
+      return;
+    }
+    const decisions = dismissGuardClaim(repo.path, {
+      doc: body.doc,
+      anchor: body.anchor,
+      title: body.title,
+      dismissedAt: new Date().toISOString(),
+      ...(body.note ? { note: body.note } : {}),
+    });
+    res.json(decisions);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — reverse a dismissal by its identity `{ doc, anchor, title }`. No-op when
+// absent; returns the updated decisions file.
+router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string };
+    if (!body.doc || !body.anchor || !body.title) {
+      res.status(400).json({ error: 'undismiss requires { doc, anchor, title }.' });
+      return;
+    }
+    const decisions = undismissGuardClaim(repo.path, { doc: body.doc, anchor: body.anchor, title: body.title });
+    res.json(decisions);
+  } catch (e) {
+    next(e);
   }
 });
 

@@ -96,6 +96,16 @@ export const GUARD_STATUS_META: Record<GuardSectionCoverageStatus, GuardStatusMe
   'blocked-on': { label: 'Blocked on', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
   untestable: { label: 'Untestable', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
   'no-claim': { label: 'No claim', group: 'gap', band: GREY_BAND, dot: 'bg-slate-400', badge: GREY_BADGE },
+  // The user dismissed this claim's finding (won't-fix / noise) — an honest,
+  // muted status, never a fail. Its own zinc tint separates it from the "can't
+  // test" gaps (untestable / no-claim / blocked-on).
+  dismissed: {
+    label: 'Dismissed',
+    group: 'gap',
+    band: 'border-zinc-400/50 bg-zinc-400/[0.07]',
+    dot: 'bg-zinc-400',
+    badge: 'bg-zinc-400/15 text-zinc-600 dark:text-zinc-400',
+  },
   unguarded: {
     label: 'Unguarded',
     group: 'unguarded',
@@ -118,6 +128,7 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'blocked-on',
   'untestable',
   'no-claim',
+  'dismissed',
   'unguarded',
 ];
 

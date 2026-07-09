@@ -33,6 +33,7 @@ const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
+const DECISIONS_FILE = 'decisions.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -69,6 +70,12 @@ export function recipePath(repoRoot: string): string {
 
 export function manifestPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), MANIFEST_FILE)
+}
+
+/** The committable, user-authored guard decisions file — next to recipe/manifest,
+ *  NOT under the mostly-gitignored `guard/` run store. */
+export function guardDecisionsPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {

@@ -14,7 +14,12 @@ export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from 
 export type { Recipe, LoadedRecipe } from './recipe.js'
 export { RecipeSchema } from './recipe.js'
 
-export { runScenario } from './run-scenario.js'
+export {
+  runScenario,
+  isSetupDefectResult,
+  SANDBOX_SETUP_EXPECTED,
+  CAPABILITY_SETUP_EXPECTED,
+} from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
@@ -69,6 +74,7 @@ export {
   scenariosDir,
   recipePath,
   manifestPath,
+  guardDecisionsPath,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
@@ -98,3 +104,10 @@ export { indexRepoDocs } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'
 
 export { readManifest, writeManifest, rebuildManifestFromScenarios } from './manifest.js'
+
+export {
+  readGuardDecisions,
+  writeGuardDecisions,
+  dismissGuardClaim,
+  undismissGuardClaim,
+} from './decisions.js'

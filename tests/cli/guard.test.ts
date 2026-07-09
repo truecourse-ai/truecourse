@@ -469,6 +469,60 @@ describe('runGuardStatus (printer)', () => {
     await runGuardStatus({ cwd: r })
     expect(out).toContain('2 blocked-on (git 2, db 1)')
   })
+
+  it('surfaces the ready-but-held count in the last-generate block', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 2,
+        written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+        birthPassed: 2,
+        errors: [{ doc: DOC, anchor: 'auth/login', message: 'boom' }],
+        heldSections: [{ doc: DOC, anchor: 'auth/login', readyScenarios: [{ id: 'login.1', title: 'g', yaml: 'y' }] }],
+      }),
+    )
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('1 ready but held')
+  })
+
+  it('mentions the dismissed count as a gaps segment', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 1,
+        coverageGaps: [{ doc: DOC, anchor: 'version', kind: 'dismissed', reason: 'dismissed: the --version claim' }],
+      }),
+    )
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('1 dismissed')
+  })
+})
+
+describe('printGuardGenerateSummary (printer)', () => {
+  let out: string
+  let spy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    out = ''
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  it('surfaces orphaned dismissals (stale decisions) as a line', () => {
+    printGuardGenerateSummary(
+      report({
+        sectionsChanged: 1,
+        orphanedDismissals: [{ doc: DOC, anchor: 'version', title: 'a claim that no longer exists' }],
+      }),
+      '.truecourse/guard/result.json',
+    )
+    expect(out).toContain('1 orphaned')
+    expect(out).toContain('decisions.json')
+  })
 })
 
 describe('runGuardDrifts (printer)', () => {
@@ -648,6 +702,31 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('2 changed · 2 settled · 0 unsettled')
     expect(out).not.toContain('Top birth finding')
     expect(out).not.toContain('Top authoring error')
+    expect(out).not.toContain('ready but held')
     expect(out).toContain('REPORT_PATH')
+  })
+
+  it('renders the ready-but-held line, blamed on its sections\' findings + errors', () => {
+    const rep = report({
+      sectionsChanged: 3,
+      written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+      birthPassed: 4,
+      birthFindings: [{ doc: DOC, anchor: 'auth/login', title: 'f', step: 1, expected: 'e', actual: 'a' }],
+      errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
+      heldSections: [
+        {
+          doc: DOC,
+          anchor: 'auth/login',
+          readyScenarios: [
+            { id: 'login.1', title: 'g1', yaml: 'y' },
+            { id: 'login.2', title: 'g2', yaml: 'y' },
+          ],
+        },
+        { doc: DOC, anchor: 'auth/logout', readyScenarios: [{ id: 'logout.1', title: 'g3', yaml: 'y' }] },
+      ],
+    })
+    printGuardGenerateSummary(rep, 'p')
+    // 3 held (2 + 1); blocked by 1 finding (auth/login) and 1 error (auth/logout).
+    expect(out).toContain('3 ready but held (1 finding · 1 error)')
   })
 })

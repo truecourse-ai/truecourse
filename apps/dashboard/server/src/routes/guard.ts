@@ -12,6 +12,8 @@
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
  *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
+ *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
+ *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  */
 
@@ -29,6 +31,8 @@ import {
   readGuardRun,
   readGuardScenarioSource,
   readGuardEvidence,
+  readGuardEvidenceAt,
+  readGuardDecisions,
   computeGuardStaleness,
   composeDocCoverage,
   listGuardScenarios,
@@ -183,6 +187,41 @@ router.get('/:id/guard/evidence', async (req: Request, res: Response, next: Next
       return;
     }
     res.type('text/plain').send(content);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// One evidence file for a BIRTH FINDING, addressed by its stored `evidencePath`
+// (`.truecourse/guard/evidence/<runId>/<scenarioId>`). Path-safe: the driver
+// confines the read to the guard evidence root and rejects unsafe filenames.
+router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const evidencePath = String(req.query.path ?? '');
+    if (!evidencePath) {
+      res.status(400).json({ error: 'Missing ?path=<evidence dir>.' });
+      return;
+    }
+    const file = req.query.file ? String(req.query.file) : undefined;
+    const content = readGuardEvidenceAt(repo.path, evidencePath, file);
+    if (content == null) {
+      res.status(404).json({ error: 'Evidence not found.' });
+      return;
+    }
+    res.type('text/plain').send(content);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// The committable guard decisions file (dismissed claims). Always 200 (an empty
+// file until the user dismisses anything), so the client can derive per-finding
+// dismissed state without a 404 branch.
+router.get('/:id/guard/decisions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    res.json(readGuardDecisions(repo.path));
   } catch (e) {
     next(e);
   }

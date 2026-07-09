@@ -96,12 +96,18 @@ export function existingScenarioIds(repoRoot: string): Set<string> {
   return new Set(loadScenarios(repoRoot).scenarios.map((s) => s.id))
 }
 
+/** The committed YAML form of a scenario — the exact bytes {@link writeScenarioFile}
+ *  writes. Reused to carry a ready-but-held candidate's source into the report. */
+export function serializeScenarioYaml(scenario: GuardScenario): string {
+  return yaml.dump(scenario, { lineWidth: -1, noRefs: true })
+}
+
 /** Write a scenario to `<scenarios>/<slug>/<id>.yaml`, returning its repo-relative path. */
 export function writeScenarioFile(repoRoot: string, slug: string, scenario: GuardScenario): string {
   const dir = path.join(scenariosDir(repoRoot), slug)
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `${scenario.id}.yaml`)
-  fs.writeFileSync(file, yaml.dump(scenario, { lineWidth: -1, noRefs: true }))
+  fs.writeFileSync(file, serializeScenarioYaml(scenario))
   return path.relative(repoRoot, file)
 }
 

@@ -48,6 +48,9 @@ const MD = [
   '## Untestable bit',
   'Nothing assertable.',
   '',
+  '## Dismissed bit',
+  'Dismissed by decision.',
+  '',
   '## Unguarded bit',
   'Nothing binds here.',
 ].join('\n');
@@ -94,6 +97,7 @@ const SECTIONS: GuardSectionCoverage[] = [
   sec('Blocked bit', 2, 'blocked-on', { reason: 'blocked on db: needs a database', blockedOnCapabilities: ['db'] }),
   sec('Api bit', 2, 'api', { reason: 'HTTP boundary' }),
   sec('Untestable bit', 2, 'untestable', { reason: 'nothing assertable' }),
+  sec('Dismissed bit', 2, 'dismissed', { reason: 'dismissed: the rate-limit claim' }),
   sec('Unguarded bit', 2, 'unguarded'),
 ];
 
@@ -110,6 +114,7 @@ const TOTALS: Record<GuardSectionCoverageStatus, number> = {
   'blocked-on': 1,
   untestable: 1,
   'no-claim': 1,
+  dismissed: 1,
   unguarded: 1,
 };
 
@@ -299,8 +304,9 @@ describe('GuardCoveragePage — coverage surface', () => {
     const cli = within(strip).getByRole('group', { name: 'CLI' });
     const others = within(strip).getByRole('group', { name: 'Other drivers' });
 
-    // CLI verdicts + coverage gaps live in the CLI cluster, never among the drivers.
-    for (const label of ['Passing', 'Failing', 'Stale', 'Guarded (no run)', 'Blocked on', 'Untestable', 'No claim', 'Unguarded']) {
+    // CLI verdicts + coverage gaps (incl. the user's dismissals) live in the CLI
+    // cluster, never among the drivers.
+    for (const label of ['Passing', 'Failing', 'Stale', 'Guarded (no run)', 'Blocked on', 'Untestable', 'No claim', 'Dismissed', 'Unguarded']) {
       expect(within(cli).getByText(label)).toBeInTheDocument();
       expect(within(others).queryByText(label)).not.toBeInTheDocument();
     }

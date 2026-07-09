@@ -49,8 +49,9 @@ export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
 }
 
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),
- *  then the residual kinds. A new driver slots in without touching this list. */
-const GAP_KINDS: readonly GuardGapDisplayKind[] = ['blocked-on', ...awaitingDriverIds, 'untestable', 'no-claim'];
+ *  then the residual kinds (dismissed — a user choice — last). A new driver slots
+ *  in without touching this list. */
+const GAP_KINDS: readonly GuardGapDisplayKind[] = ['blocked-on', ...awaitingDriverIds, 'untestable', 'no-claim', 'dismissed'];
 
 /** Coverage gaps grouped by display kind (every kind present, zero when none). An
  *  awaiting-driver gap counts under its driver id so the drivers stay separate. */

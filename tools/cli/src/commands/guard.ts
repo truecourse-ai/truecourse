@@ -273,6 +273,13 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled · ${unsettled.size} unsettled · ${report.skippedUnchanged} unchanged`);
   const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
   p.log.step(`scenarios   ${g.written} written${birth}`);
+  // Ready-but-held: birth-passed scenarios an unsettled sibling withheld — validated
+  // work that would otherwise vanish into the authoring cache. Only when any exist.
+  if (g.readyButHeld > 0) {
+    p.log.step(
+      `held        ${g.readyButHeld} ready but held (${g.heldByFindings} finding${g.heldByFindings === 1 ? "" : "s"} · ${g.heldByErrors} error${g.heldByErrors === 1 ? "" : "s"})`,
+    );
+  }
 
   const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
   if (gapTotal > 0) {
@@ -286,6 +293,12 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   }
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
+  }
+  // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
+  // live claim in a re-read doc — surfaced so it is never silently honored forever.
+  if (report.orphanedDismissals && report.orphanedDismissals.length > 0) {
+    const n = report.orphanedDismissals.length;
+    p.log.step(`dismissals  ${n} orphaned — the dismissed claim no longer exists; re-dismiss the new text or drop it from decisions.json`);
   }
   if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
@@ -396,6 +409,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
           .map(([k, n]) => (k === "blocked-on" ? `${n} blocked-on${blockedOnBreakdown(g.blockedOnCapabilities)}` : `${n} ${k}`));
         detail.push(`${gapTotal} gap${gapTotal === 1 ? "" : "s"} (${kinds.join(", ")})`);
       }
+      if (g.readyButHeld > 0) detail.push(`${g.readyButHeld} ready but held`);
       if (g.birthFindings > 0) detail.push(`${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);
