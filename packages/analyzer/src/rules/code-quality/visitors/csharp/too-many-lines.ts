@@ -1,6 +1,12 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { CSHARP_METHODLIKE_TYPES, getCSharpFunctionBody, getCSharpFunctionName } from './_helpers.js'
+import {
+  CSHARP_METHODLIKE_TYPES,
+  getCSharpFunctionBody,
+  getCSharpFunctionName,
+  isCSharpEfMigration,
+  isCSharpGeneratedSource,
+} from './_helpers.js'
 
 export const csharpTooManyLinesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/too-many-lines',
@@ -9,6 +15,11 @@ export const csharpTooManyLinesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const bodyNode = getCSharpFunctionBody(node)
     if (!bodyNode) return null
+
+    // Generated code — source-generator / T4 output and scaffolded EF Core
+    // migrations — is regenerated wholesale, so its method length is inherent to
+    // the generated content and not a maintainability signal for a human author.
+    if (isCSharpGeneratedSource(filePath, sourceCode) || isCSharpEfMigration(node)) return null
 
     const lineCount = bodyNode.endPosition.row - bodyNode.startPosition.row + 1
     if (lineCount > 50) {

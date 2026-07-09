@@ -15,6 +15,14 @@ export class BatchProcessor {
     items.forEach(this.handleItem);
   }
 
+  // Second paraphrased true-bug at a distinct call site: `this.handleItem`
+  // resolves to a real method_definition, so detaching it as a bare callback
+  // value loses the receiver — the case the rule must keep catching.
+  dispatch(batch: readonly string[]): void {
+    // VIOLATION: bugs/deterministic/unbound-method
+    batch.forEach(this.handleItem);
+  }
+
   handleItem(item: string): void {
     console.log(`${this.tag}: ${item}`);
   }

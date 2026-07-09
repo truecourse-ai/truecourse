@@ -285,6 +285,17 @@ using the `cs-` prefix (e.g. `claude/cs-fp-fix/`), and paste the bootstrap point
 keeps its behavior byte-identical. (Note: the analysis/`fp` loop requires analyzer C# rule
 support to produce findings; the `drift-fp` loop verifies C# via the contract-verifier.)
 
+**C# account .NET prerequisites** (default account needs none):
+- The session must have the **.NET SDK — 10.x** recommended (or ≥ 9.0.2xx). It
+  builds the Roslyn host during `build:dist` and, at analyze time, opens `.slnx`
+  solutions (common in modern C# repos) and modern targets. The host itself is
+  `net8.0` with roll-forward, so it *runs* on any ≥ 8 runtime.
+- Each C# target must be **`dotnet restore`d before analyze** (see the discover /
+  next-fix prompts). The project-aware Roslyn tier **fails-hard** on an
+  unrestored project or a missing/unsatisfiable SDK — it aborts the run rather
+  than skipping, so a target that pins an SDK via `global.json` needs that SDK
+  present too.
+
 The three actual bootstrap prompts (paste verbatim into each routine):
 
 - `fp-discover`:
@@ -295,6 +306,13 @@ The three actual bootstrap prompts (paste verbatim into each routine):
 
 - `fp-campaign-close`:
   > Execute the instructions in `docs/fp-automation/prompts/fp-campaign-close.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
+The **auxiliary** monitoring routine (schedule-triggered, outside the
+discover → fix → close loop — see "Auxiliary routine" below) uses the same
+pointer convention:
+
+- `fp-stale-pr-notify`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-stale-pr-notify.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
 
 To change a prompt: edit the file under `docs/fp-automation/prompts/`,
 open a PR, merge. The next routine fire reads the new version. No
@@ -479,6 +497,59 @@ Steps the session takes:
 `fp-discover` listens to the same merge event and runs in parallel,
 starting the next pending campaign from `campaigns.yaml`.
 
+## Auxiliary routine: `fp-stale-pr-notify` (monitoring)
+
+This routine is **not** part of the discover → fix → close loop. It is a
+schedule-triggered monitor that maintains a single GitHub **tracker issue**
+when an `fp-fix` batch PR has been open for more than an hour without
+`fp-next-fix-review` reaching a terminal decision on it — i.e. the review
+pipeline is stuck (missed webhook, wedged CI, crashed review session). It
+**never touches PRs or code** (no merge, close, label, comment, or push) and
+**never sends Telegram itself** — it opens/edits the tracker issue, and the
+existing `notify-routine-activity.yml` workflow forwards it to Telegram,
+exactly like every other alert in this repo.
+
+| Field | Value |
+|---|---|
+| **Trigger** | **Schedule** (cron), **every 2 hours** — not a GitHub event |
+| **Filters** | n/a (schedule). Selection happens in the prompt: open PR, head branch `claude/<SCOPE>fp-fix/`, **no** `<SCOPE>fp-reviewed` label, **not** currently `<SCOPE>fp-reviewing`, open > 1 h |
+| **Repositories** | `truecourse-ai/truecourse` |
+| **Branch push policy** | n/a — never pushes |
+| **Environment** | **Default** — no Telegram secrets or egress changes needed (the workflow holds the secrets) |
+| **Prompt** | Bootstrap pointer → `docs/fp-automation/prompts/fp-stale-pr-notify.md` |
+
+**Telegram goes through the workflow, not the routine.** Every Telegram
+message in this repo comes from `.github/workflows/notify-routine-activity.yml`
+reacting to a GitHub event (routine sessions run as the author, and GitHub
+never self-notifies — the workflow bypasses that; the token/chat live in
+**repo secrets**, one place). This routine therefore just manages a tracker
+**issue** titled `[<SCOPE>fp-stale-pr] fp-fix PRs stuck awaiting review`; the
+workflow's `notify-stale-pr` job matches that title tag and sends the
+Telegram message. No dedicated environment, no `api.telegram.org` egress,
+no per-routine secret.
+
+**Notify-on-change (no spam, no state files).** State lives in the tracker
+issue itself — its body carries a `<!-- fp-stale-pr-set: … -->` marker of
+the PR numbers it lists. The workflow fires only on `issues.opened` /
+`reopened`, so each run:
+- **set unchanged** → edits the body in place (refresh timestamp). Silent.
+- **set changed, non-empty** → rewrites the body with a `## State change
+  since last run` delta and **close+reopens** (or opens) the tracker → one
+  Telegram ping.
+- **set now empty** → writes an empty marker and **closes** the tracker.
+  Closing doesn't fire the workflow, so no "all clear" ping.
+
+This pings the human exactly when the stuck set changes, and — unlike a
+stateless age window — has no skipped-run gap, because the set is
+recomputed and reconciled against the issue every run.
+
+**Scope.** Like the loop routines, it is scope-parameterized — the C#
+account runs it with `SCOPE=cs-` (reads `claude/cs-fp-fix/` branches and
+`cs-fp-reviewed` / `cs-fp-reviewing` labels; tracker `[cs-fp-stale-pr] …`).
+`TECH_STACKS` is ignored (it selects no campaign). One routine per scope;
+all scopes share the same Telegram destination via the workflow's repo
+secrets (the `notify-stale-pr` job's `contains()` matches any prefix).
+
 ## Setup checklist
 
 One-time, before the first run:
@@ -501,7 +572,7 @@ One-time, before the first run:
    (they fire in parallel on each campaign-close PR merge).
 
    Use the **Default** environment for all three — no custom env is
-   needed because:
+   needed (except the .NET SDK on the **C# account**, below) because:
    - Default already uses **Trusted** network access (allowlist covers
      npm, GitHub, and the OSS repos we clone over HTTPS).
    - pnpm is pre-installed; project deps (`pnpm install && pnpm build:dist`)
@@ -509,6 +580,33 @@ One-time, before the first run:
      setup script. (Setup scripts run **before** the per-session repo
      clone, so they can't `pnpm install` anything from the repo.)
    - No env vars are required.
+   - **C# account only:** the session needs the **.NET SDK — 10.x**
+     recommended (or ≥ 9.0.2xx). `build:dist` builds the Roslyn host with
+     it, and it opens `.slnx` solutions + modern targets at analyze time.
+     The default (TS/JS/Python) account needs **no** .NET: the host build
+     is tolerant — `build:dist` warns and skips it when `dotnet` is absent,
+     and C# analysis simply stays unavailable (fail-hard on the next analyze).
+
+     Provisioning the C# account has **two** required parts. The .NET SDK is
+     **not** on the Default environment (that image ships no `dotnet`, and
+     Default's Trusted allowlist covers npm/GitHub but **not** the Microsoft
+     .NET CDN — so a mid-session install returns 403 from the egress proxy):
+     1. **Setup script.** Give the C# account its **own** environment whose
+        setup script runs `docs/fp-automation/setup-csharp-env.sh` — it
+        installs the 10.x SDK plus a net8 runtime for the host, once per
+        container, and is idempotent. (The routine prompts also run it as a
+        fallback when `dotnet` is missing.)
+     2. **Network policy.** Widen that environment's egress allowlist to the
+        .NET download + NuGet hosts — at least `dot.net`,
+        `builds.dotnet.microsoft.com`, `dotnetcli.azureedge.net`,
+        `dotnetbuilds.azureedge.net`, and `api.nuget.org` / `*.nuget.org`
+        (the last for the `dotnet restore` the workspace-tier rule triggers
+        on the target solution). Without this, both the install **and** the
+        restore 403 — this is the most common C#-account failure.
+
+     If `dotnet` is still absent at session time the environment is
+     mis-provisioned: the routine posts the blocker and stops — it must
+     **not** route around the egress policy.
 4. **Bootstrap the first campaign** by clicking **Run now** on
    `fp-discover` (no campaign-close PR has merged yet, so the GitHub
    trigger has nothing to fire on). It reads `campaigns.yaml`, finds
@@ -528,6 +626,21 @@ One-time, before the first run:
    the next pending campaign's discovery) in parallel — and merging
    *that* next discovery PR restarts the inner loop. No "Run now"
    needed after the very first campaign.
+
+**Optional — the `fp-stale-pr-notify` monitor** (see "Auxiliary routine"
+above). Independent of the loop; set up only if you want Telegram alerts
+for stuck `fp-fix` batch PRs. It reuses the existing Telegram plumbing, so
+there's almost nothing to configure:
+
+1. Ensure the repo secrets `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set
+   (the same ones `notify-routine-activity.yml` already uses — no new
+   secrets, no dedicated environment, no egress change).
+2. Create a routine with a **schedule** trigger (every 2 hours) on
+   `truecourse-ai/truecourse`, using the **Default** environment and the
+   `fp-stale-pr-notify` bootstrap pointer. On the C# account append
+   `Parameters: SCOPE=cs-`. No "Run now" bootstrap is needed — it fires on
+   its own cadence. The `notify-stale-pr` job in
+   `notify-routine-activity.yml` forwards the tracker issue to Telegram.
 
 ## Acceptance criteria
 

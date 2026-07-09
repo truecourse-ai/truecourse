@@ -39,6 +39,7 @@ internal sealed class PasswordPolicy
         return password.Trim();
     }
 
+    // VIOLATION: code-quality/deterministic/unused-function-parameter
     /// <summary>Joins the policy requirements into one description.</summary>
     public string Describe(params string[] requirements)
     {

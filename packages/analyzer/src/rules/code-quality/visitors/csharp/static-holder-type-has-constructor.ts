@@ -29,6 +29,14 @@ export const csharpStaticHolderTypeHasConstructorVisitor: CodeRuleVisitor = {
     if (hasCSharpModifier(node, 'static')) return null
     if (hasCSharpModifier(node, 'abstract')) return null
 
+    // A type that derives from a base class inherits instance state and is
+    // genuinely instantiated through the hierarchy, so its constructor is not a
+    // static-holder artifact. (A type listing a base also cannot be made
+    // `static`, so the rule's fix would not apply.) Skip any type with a base
+    // list — the "all members static" shape only implies a static holder for a
+    // standalone type.
+    if (node.namedChildren.some((c) => c?.type === 'base_list')) return null
+
     const body = node.namedChildren.find((c) => c?.type === 'declaration_list')
     if (!body) return null
 

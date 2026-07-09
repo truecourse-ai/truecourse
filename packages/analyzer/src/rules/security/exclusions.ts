@@ -38,6 +38,13 @@ export const GLOBAL_ALLOWLIST: RegExp[] = [
   // Docker / container image references
   /^(?:docker|ghcr|quay|gcr|ecr)\.io\//,
 
+  // PostHog public project API key (phc_…) — intentionally client-exposed,
+  // embedded in frontend code to send analytics events. Its 40+ char base62
+  // body collides with the generic Cohere-token shape, but it is not a
+  // private credential. Private PostHog keys use the phx_/phs_ prefixes and
+  // are deliberately NOT allowlisted here.
+  /^phc_[A-Za-z0-9]{30,}$/,
+
   // Common config patterns that aren't secrets
   /^\*+$/, // All asterisks (masked values)
   /^x+$/i, // All x's (placeholder)

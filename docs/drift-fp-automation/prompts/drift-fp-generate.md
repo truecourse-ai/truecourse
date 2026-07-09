@@ -203,3 +203,9 @@ contracts.
   branch or open the PR; report and stop.
 - Never paste OSS code into the PR body — link by URL only.
 - If anything is ambiguous, post the blocker (`cc @mushgev`) and stop. Do not invent state.
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

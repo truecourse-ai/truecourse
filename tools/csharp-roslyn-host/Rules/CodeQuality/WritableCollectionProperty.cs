@@ -26,6 +26,13 @@ internal sealed class WritableCollectionProperty : ISemanticRule
             // init-only setters already prevent post-construction replacement.
             if (sym.SetMethod.IsInitOnly) continue;
             if (sym.IsStatic) continue;
+            // Framework binding attributes mandate a public setter so the binding
+            // model can assign through it (Blazor [Parameter], [CascadingParameter]).
+            // The setter does not expose a replaceable backing collection — it is
+            // contract-required by the framework, not a CA2227 hazard.
+            if (sym.GetAttributes().Any(a =>
+                    a.AttributeClass?.Name is "ParameterAttribute" or "CascadingParameterAttribute"))
+                continue;
 
             var type = sym.Type;
             // Arrays are intentionally assignable and out of CA2227's scope.
@@ -37,12 +44,35 @@ internal sealed class WritableCollectionProperty : ISemanticRule
             // to expose with a setter because callers can't mutate the elements anyway —
             // CA2227 targets the writable ones.
             if (!ImplementsMutableCollection(type)) continue;
+            // CA2227 targets a RAW collection exposed via a setter — a BCL collection
+            // type (List<T>, Dictionary<K,V>, HashSet<T>, …) or a collection interface.
+            // A user-defined type that merely DERIVES from a collection is a domain
+            // object with its own identity (e.g. a keyed config bag), not a collection
+            // the caller would replace wholesale, so it is not the invariant-bypass
+            // hazard — skip it.
+            if (!IsBclCollectionType(type)) continue;
 
             var pos = prop.Identifier.GetLocation().GetLineSpan().StartLinePosition;
             yield return new Violation(
                 RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
                 $"Collection property '{sym.Name}' has a public setter; expose it as get-only so callers cannot replace the whole collection.");
         }
+    }
+
+    // True when the property's DECLARED type is itself a framework collection (defined
+    // in a System.Collections* namespace) or a collection interface — the raw-collection
+    // surface CA2227 guards. A user-defined subclass has its own namespace and is
+    // excluded, so it is treated as a domain value rather than a raw collection.
+    private static bool IsBclCollectionType(ITypeSymbol type)
+    {
+        var ns = (type as INamedTypeSymbol)?.ContainingNamespace?.ToDisplayString();
+        return ns is "System.Collections.Generic"
+            or "System.Collections"
+            or "System.Collections.ObjectModel"
+            or "System.Collections.Concurrent"
+            or "System.Collections.Immutable"
+            or "System.Collections.Specialized"
+            or "System.Collections.Frozen";
     }
 
     private static bool ImplementsMutableCollection(ITypeSymbol type)

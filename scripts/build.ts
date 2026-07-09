@@ -61,17 +61,20 @@ fs.mkdirSync(DIST, { recursive: true });
 // files MUST exist before core compiles. The intra-package graph:
 //
 //   shared             ←  no truecourse deps
+//   llm                ←  no truecourse deps
 //   analyzer           ←  shared
-//   spec-consolidator  ←  shared
+//   spec-consolidator  ←  shared + llm
 //   contract-verifier  ←  shared + analyzer
-//   contract-extractor ←  shared + contract-verifier + spec-consolidator
+//   contract-extractor ←  shared + contract-verifier + spec-consolidator + llm
 //   core               ←  all of the above
 //
 // Sequential order below honors that graph. Prior to this, fresh-checkout
 // `pnpm build:dist` failed at core's tsc because the contract/spec
-// packages weren't built yet.
+// packages weren't built yet — and later at spec-consolidator's tsc because
+// its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
+run('pnpm --filter @truecourse/llm build');
 run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
@@ -139,6 +142,29 @@ run(
 
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
+
+// 5b. Build the C# Roslyn semantic host (framework-dependent, portable). Ships
+// as `dist/roslyn-host/csharp-roslyn-host.dll` and is launched via the user's
+// `dotnet` at runtime — one build runs on every OS (no per-platform matrix).
+// Not self-contained on purpose: C# devs already have .NET, and the project-
+// aware tier needs their SDK regardless. `UseAppHost=false` drops the per-OS
+// native launcher so the published output is fully portable IL.
+//
+// Tolerant by design: a build box that only ships JS/TS/Python analysis (or has
+// no .NET SDK) must NOT fail the whole build. If `dotnet` is missing or the
+// publish fails, warn and continue — the host is simply absent from dist, and
+// C# analysis fails-hard at runtime with a clear "build the host" message. For
+// C# analysis (incl. `.slnx` solutions) install the .NET SDK — 10.x recommended.
+console.log('\n=== Building C# Roslyn host ===');
+try {
+  execSync('dotnet --version', { cwd: ROOT, stdio: 'ignore' });
+  run('dotnet publish tools/csharp-roslyn-host -c Release -p:UseAppHost=false -o dist/roslyn-host');
+} catch {
+  console.warn(
+    '  ⚠ Skipped C# Roslyn host build — the .NET SDK is unavailable or `dotnet publish` failed.\n' +
+    '    C# semantic analysis will be unavailable in this dist. Install the .NET SDK (10.x for .slnx) to enable it.',
+  );
+}
 
 // 6. Copy tree-sitter WASM assets into dist/wasm/ so parser.ts finds them via
 // BUNDLED_WASM_DIR at runtime. These are shipped alongside the bundle — no

@@ -1,8 +1,9 @@
 namespace ApiGateway.Violations.Bugs;
 
-// Base retry strategy with a virtual hook that has an optional parameter.
+// Base retry strategy with a virtual hook that has an optional parameter. The
+// `virtual` member is a real extension point, so abstract-class-without-abstract-members
+// does not fire — only too-many-classes-per-file does.
 // VIOLATION: code-quality/deterministic/too-many-classes-per-file
-// VIOLATION: code-quality/deterministic/abstract-class-without-abstract-members
 internal abstract class RetryStrategy
 {
     // VIOLATION: code-quality/deterministic/non-private-field

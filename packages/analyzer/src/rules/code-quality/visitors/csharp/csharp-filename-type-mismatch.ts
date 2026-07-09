@@ -19,12 +19,29 @@ export const csharpFilenameTypeMismatchVisitor: CodeRuleVisitor = {
   nodeTypes: ['compilation_unit'],
   visit(node, filePath, sourceCode) {
     const base = filePath.split('/').pop() ?? ''
-    const fileName = base.replace(/\.[^.]*$/, '')
+    // Razor Pages / Blazor code-behind: `X.cshtml.cs` / `X.razor.cs` pairs with a
+    // type named `X` or, by ASP.NET convention, `XModel`. Strip the full compound
+    // extension so the page base name (not `X.cshtml`) is what we match against.
+    const lower = base.toLowerCase()
+    const compoundExt = ['.cshtml.cs', '.razor.cs'].find((ext) => lower.endsWith(ext))
+    const fileName = compoundExt
+      ? base.slice(0, base.length - compoundExt.length)
+      : base.replace(/\.[^.]*$/, '')
     if (!fileName) return null
+
+    // EF Core migrations are generated as `<14-digit-timestamp>_<MigrationName>.cs`
+    // and the type is named after the migration, not the numeric prefix. Accept the
+    // name with that leading timestamp prefix stripped so the type still matches.
+    const migrationName = fileName.match(/^\d{14}_(.+)$/)?.[1]
+    const candidateNames = migrationName ? [fileName, migrationName] : [fileName]
 
     const identifiers = topLevelTypeIdentifiers(node)
     if (identifiers.length === 0) return null
-    if (identifiers.some((id) => nameMatches(fileName, id.text))) return null
+    // For code-behind files the conventional `Model` suffix is an accepted match.
+    const matches = (id: SyntaxNode): boolean =>
+      candidateNames.some((fn) => nameMatches(fn, id.text)) ||
+      (compoundExt !== undefined && id.text === `${fileName}Model`)
+    if (identifiers.some(matches)) return null
 
     const first = identifiers[0]
     return makeViolation(
@@ -61,6 +78,9 @@ function topLevelTypeIdentifiers(root: SyntaxNode): SyntaxNode[] {
 
 function nameMatches(fileName: string, typeName: string): boolean {
   if (fileName === typeName) return true
+  // C# `Attribute` suffix convention: the attribute `[Foo]` is the class
+  // `FooAttribute`, and the file is conventionally named after the usage (`Foo.cs`).
+  if (typeName === `${fileName}Attribute`) return true
   const brace = fileName.indexOf('{')
   if (brace > 0 && fileName.slice(0, brace) === typeName) return true
   const dot = fileName.indexOf('.')

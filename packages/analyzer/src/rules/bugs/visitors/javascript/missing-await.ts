@@ -33,6 +33,14 @@ export const missingAwaitVisitor: CodeRuleVisitor = {
 
     if (!isInsideAsyncFunction(node)) return null
 
+    // Variables explicitly named `...Promise` follow the convention that they
+    // intentionally hold an un-awaited promise — e.g. the Remix / React Router
+    // `defer` pattern, where a still-pending promise is handed to a deferred
+    // response and resolved later during render. Adding `await` would defeat
+    // that streaming pattern, so this naming signals deliberate deferral.
+    const declaredName = node.childForFieldName('name')
+    if (declaredName?.type === 'identifier' && /Promise$/.test(declaredName.text)) return null
+
     // Check if the call expression returns a Promise using the type system
     const isPromise = typeQuery.isPromiseLike(
       filePath,

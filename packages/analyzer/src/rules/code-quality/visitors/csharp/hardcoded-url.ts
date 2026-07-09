@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isCSharpTestPath } from '../../../_shared/csharp-helpers.js'
 
 // XML/SOAP/schema namespace hosts — fixed identifiers, not service endpoints.
 // `tempuri.org` and `schemas.microsoft.com` are the .NET-specific additions.
@@ -44,6 +45,9 @@ export const csharpHardcodedUrlVisitor: CodeRuleVisitor = {
     const text = node.text
 
     if (!/https?:\/\/[a-zA-Z0-9]/.test(text)) return null
+    // Test seed/fixture data intentionally hardcodes sample URLs (mock avatars,
+    // example endpoints); they are not configurable production endpoints.
+    if (isCSharpTestPath(filePath)) return null
     if (text.includes('example.com') || text.includes('localhost')
       || text.includes('127.0.0.1') || text.includes('placeholder')) return null
     if (NAMESPACE_URI_HOSTS.test(text)) return null

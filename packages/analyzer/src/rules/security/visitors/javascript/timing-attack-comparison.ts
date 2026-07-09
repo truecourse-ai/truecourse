@@ -105,7 +105,18 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
     const leftLeaf = leafIdentifier(left)
     const rightLeaf = leafIdentifier(right)
 
-    if (SENSITIVE_COMPARISON_PATTERNS.test(leftLeaf) || SENSITIVE_COMPARISON_PATTERNS.test(rightLeaf)) {
+    // A string/template literal is a public, known value — e.g. a
+    // discriminated-union tag like `config.type === 'tokenBucket'`, where
+    // 'tokenBucket' merely contains the substring "token". A timing attack
+    // requires the compared value to be secret to the attacker, which a
+    // literal never is, so the sensitive-name check must ignore literal
+    // sides and only consider identifier-derived leaves.
+    const leftIsLiteral = left.type === 'string' || left.type === 'template_string'
+    const rightIsLiteral = right.type === 'string' || right.type === 'template_string'
+    const leftMatches = !leftIsLiteral && SENSITIVE_COMPARISON_PATTERNS.test(leftLeaf)
+    const rightMatches = !rightIsLiteral && SENSITIVE_COMPARISON_PATTERNS.test(rightLeaf)
+
+    if (leftMatches || rightMatches) {
       // Skip if the file already uses timingSafeEqual — the === is likely a format check, not a secret comparison
       if (sourceCode.includes('timingSafeEqual')) return null
       return makeViolation(

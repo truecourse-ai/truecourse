@@ -74,6 +74,17 @@ Before the per-issue loop:
   to `/tmp/target` and `git -C /tmp/target checkout <target_ref>`.
   All `<SCOPE>fp-fix` issues in a single campaign share `target_repo` +
   `target_ref`, so you only clone once per session.
+- **C# campaigns only** (`tech_stack: csharp`): the analyze needs the .NET
+  toolchain, and `build:dist` silently *skips* the Roslyn host when `dotnet` is
+  missing (so a green build is not enough). If `dotnet` is not on PATH, run
+  `bash $TRUECOURSE_DIR/docs/fp-automation/setup-csharp-env.sh` to install it —
+  it fails with a clear message if this environment's egress policy blocks the
+  .NET hosts, which is an env-provisioning problem (post the blocker and stop;
+  do **not** route around the policy). Then `dotnet restore` the target's
+  top-most `.sln`/`.slnx` **before** analyze: the project-aware (Roslyn
+  workspace) tier **fails-hard** on an unrestored project / missing SDK — it
+  aborts the run, it does not skip. Needs the .NET SDK in the session (**10.x**,
+  or ≥ 9.0.2xx for `.slnx`); a target pinning an SDK via `global.json` needs it.
 - Lazily analyze: run `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs
   analyze --no-llm --no-stash --no-skills` once after the clone.
   Re-read `/tmp/target/.truecourse/LATEST.json` per issue to filter
@@ -314,8 +325,6 @@ After the loop:
     - A "## Fixes" overview table: `rule_key | issue | positive-fixture | negative-fixture`.
     - One "## <rule_key>" section per fixed issue, each containing:
       - OSS source URLs from the issue's `samples[].url`.
-      - Inline diff of the positive-fixture file.
-      - Inline diff of the negative-fixture file.
       - The `visitor_summary` for that issue.
     - A "## Skipped this batch" section (only if any `attempts >
       successes`): brief list of issues that were attempted but
@@ -476,3 +485,9 @@ hit a true empty queue and run the close logic.
 - If anything is ambiguous, document it on the issue and continue the
   loop (or end the loop if it's session-wide). Do not invent state,
   do not skip steps, do not "try one more thing."
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

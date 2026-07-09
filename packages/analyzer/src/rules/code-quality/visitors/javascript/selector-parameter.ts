@@ -24,6 +24,19 @@ export const selectorParameterVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: JS_FUNCTION_TYPES,
   visit(node, filePath, sourceCode) {
+    // Skip callbacks: a function passed as a call argument (`promise.then(cb)`,
+    // `useCallback(cb)`) or a JSX prop (`onCollapseChange={cb}`) receives its
+    // parameters from the consumer's API contract, not from a public API the
+    // author is designing. The "split into two functions" remedy does not
+    // apply — the callback's signature is fixed by its caller.
+    const fnParent = node.parent
+    if (
+      (node.type === 'arrow_function' || node.type === 'function_expression')
+      && (fnParent?.type === 'arguments' || fnParent?.type === 'jsx_expression')
+    ) {
+      return null
+    }
+
     const params = node.childForFieldName('parameters')
     if (!params) return null
 

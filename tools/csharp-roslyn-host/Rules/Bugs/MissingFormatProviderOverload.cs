@@ -29,9 +29,25 @@ internal sealed class MissingFormatProviderOverload : ISemanticRule
             // BCL types whose parameterless ToString is genuinely culture-sensitive.
             if (m.Name == "ToString" && !IsCultureSensitiveToString(m)) continue;
 
+            // Some standard format specifiers are defined by the .NET spec to always
+            // produce culture-invariant output regardless of any IFormatProvider:
+            //   "r"/"R" — RFC1123,  "o"/"O" — round-trip,  "s" — sortable,  "u" — universal
+            // Passing a provider to these overloads changes nothing, so flagging them
+            // as locale-dependent is incorrect.
+            if (m.Name == "ToString" && inv.ArgumentList.Arguments.Count == 1
+                && inv.ArgumentList.Arguments[0].Expression is LiteralExpressionSyntax fmtLit
+                && fmtLit.Token.ValueText is "r" or "R" or "o" or "O" or "s" or "u")
+                continue;
+
             // string.Format with a provider overload (CA1305 only meaningfully targets
             // the formattable BCL surface). Restrict Format to System.String.Format.
             if (m.Name == "Format" && m.ContainingType?.SpecialType != SpecialType.System_String) continue;
+
+            // Some BCL types parse identically under every culture — their .NET 7
+            // IParsable/ISpanParsable IFormatProvider overloads exist only to satisfy
+            // the interface and ignore the provider entirely. Passing one changes
+            // nothing, so flagging Guid/bool/Version parsing is a false positive.
+            if (m.Name is "Parse" or "TryParse" && IsCultureInvariantParseType(m.ContainingType)) continue;
 
             var hasOverload = m.ContainingType?.GetMembers(m.Name).OfType<IMethodSymbol>()
                 .Any(o => o.Parameters.Any(IsFormatProvider)) == true;
@@ -43,6 +59,11 @@ internal sealed class MissingFormatProviderOverload : ISemanticRule
                 $"{m.ContainingType?.Name}.{m.Name} omits an IFormatProvider — pass CultureInfo.InvariantCulture (or the appropriate culture) for portable, predictable results.");
         }
     }
+
+    // Types whose Parse/TryParse ignore any IFormatProvider (culture-invariant by
+    // spec), even though a provider-taking overload exists via IParsable&lt;T&gt;.
+    private static bool IsCultureInvariantParseType(INamedTypeSymbol? t) =>
+        t is { ContainingNamespace.Name: "System" } && t.Name is "Guid" or "Boolean" or "Version";
 
     private static bool IsFormatProvider(IParameterSymbol p) =>
         p.Type is { Name: "IFormatProvider", ContainingNamespace.Name: "System" } ||

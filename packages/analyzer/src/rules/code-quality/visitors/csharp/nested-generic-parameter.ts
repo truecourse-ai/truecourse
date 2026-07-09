@@ -9,7 +9,20 @@ import { makeViolation } from '../../../types.js'
  * on a `parameter` whose type is a `generic_name` containing another
  * `generic_name` in its `type_argument_list`. `Dictionary<K, V>`,
  * `List<Order>`, `Task<int>` and other single-level generics are fine.
+ *
+ * Delegate and expression-tree shapes are exempt: `Func<…>`, `Action<…>`,
+ * `Predicate<…>` and `Expression<…>` routinely nest a generic type argument
+ * (`Func<X, Task<Y>>`, `Expression<Func<T, bool>>`) as their canonical idiom,
+ * and many are externally mandated (ASP.NET Core `IHubFilter` `next`, LINQ
+ * expression trees). A named type cannot replace them, so flagging is noise.
  */
+const DELEGATE_OR_EXPRESSION_GENERICS = new Set(['Func', 'Action', 'Predicate', 'Expression'])
+
+/** The simple identifier of a generic_name (`Func` for `Func<…>`). */
+function genericBaseName(generic: SyntaxNode): string {
+  return generic.namedChildren.find((c) => c?.type === 'identifier')?.text ?? ''
+}
+
 /** The generic_name a type position resolves to, unwrapping a qualified name's
  *  final segment (`System.Collections.Generic.IEnumerable<…>`). */
 function asGenericName(typeNode: SyntaxNode | null): SyntaxNode | null {
@@ -25,6 +38,8 @@ function asGenericName(typeNode: SyntaxNode | null): SyntaxNode | null {
 function hasNestedGeneric(typeNode: SyntaxNode): boolean {
   const generic = asGenericName(typeNode)
   if (!generic) return false
+  // Delegate/expression-tree generics nest by design and can't be named away.
+  if (DELEGATE_OR_EXPRESSION_GENERICS.has(genericBaseName(generic))) return false
   const args = generic.namedChildren.find((c) => c?.type === 'type_argument_list')
   if (!args) return false
   return args.namedChildren.some((arg) => asGenericName(arg) !== null)

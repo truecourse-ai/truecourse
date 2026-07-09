@@ -22,6 +22,28 @@ function isNestedInType(node: SyntaxNode): boolean {
   return parent.parent != null && TYPE_DECL_TYPES.has(parent.parent.type)
 }
 
+/**
+ * A `static` class whose members are all constants (`const` / `static
+ * readonly` fields) is an intentional namespacing idiom — grouping related
+ * names (permission keys, bundle names, option names) under an owning type —
+ * not a leaked implementation helper. Such a constant container is deliberately
+ * public and should not be flagged.
+ */
+function isConstantContainer(node: SyntaxNode): boolean {
+  if (node.type !== 'class_declaration') return false
+  if (!hasCSharpModifier(node, 'static')) return false
+  const body = node.childForFieldName('body')
+  if (!body) return false
+  const members = body.namedChildren.filter((c) => c && c.type !== 'comment')
+  if (members.length === 0) return false
+  return members.every(
+    (m) =>
+      m?.type === 'field_declaration' &&
+      (hasCSharpModifier(m, 'const') ||
+        (hasCSharpModifier(m, 'static') && hasCSharpModifier(m, 'readonly'))),
+  )
+}
+
 export const csharpNestedTypePubliclyVisibleVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/nested-type-publicly-visible',
   languages: ['csharp'],
@@ -30,6 +52,7 @@ export const csharpNestedTypePubliclyVisibleVisitor: CodeRuleVisitor = {
     if (!isNestedInType(node)) return null
     if (!hasCSharpModifier(node, 'public') && !hasCSharpModifier(node, 'protected')) return null
     if (getCSharpAttributeNames(node).length > 0) return null
+    if (isConstantContainer(node)) return null
 
     const name = node.childForFieldName('name')?.text ?? 'type'
     return makeViolation(

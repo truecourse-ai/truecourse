@@ -31,6 +31,18 @@ internal sealed class MissingPublicArgumentValidation : ISemanticRule
             if (!IsExternallyVisible(sym) || sym.ContainingType is null || !IsExternallyVisible(sym.ContainingType))
                 continue;
 
+            // Overrides and interface implementations inherit their argument contract
+            // from the base method / interface member: the parameter's nullability and
+            // any guard obligation are dictated there, and the caller — very often a
+            // framework that always supplies a non-null argument (an overridden
+            // `ConfigureServices(context)` / `Execute(context)` hook) — controls the
+            // value. A missing guard on such a signature is not actionable here, so
+            // flagging it is a false positive. This mirrors the other public-surface
+            // rules, which likewise exempt inherited signatures.
+            if (sym.IsOverride || sym.ExplicitInterfaceImplementations.Length > 0 ||
+                IsImplicitInterfaceImplementation(sym))
+                continue;
+
             foreach (var p in method.ParameterList.Parameters)
             {
                 if (model.GetDeclaredSymbol(p) is not IParameterSymbol ps) continue;
@@ -58,6 +70,20 @@ internal sealed class MissingPublicArgumentValidation : ISemanticRule
 
     private static bool IsExternallyVisible(ISymbol s) =>
         s.DeclaredAccessibility is Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal;
+
+    // An implicit interface implementation (`void Configure(context)` satisfying
+    // `IFoo.Configure(context)` without the explicit `IFoo.` prefix) has a
+    // contract-fixed signature just like an override, so it carries the same
+    // inherited argument contract.
+    private static bool IsImplicitInterfaceImplementation(IMethodSymbol method)
+    {
+        var containingType = method.ContainingType;
+        if (containingType is null) return false;
+        return containingType.AllInterfaces
+            .SelectMany(i => i.GetMembers(method.Name).OfType<IMethodSymbol>())
+            .Any(im => SymbolEqualityComparer.Default.Equals(
+                containingType.FindImplementationForInterfaceMember(im), method));
+    }
 
     private static bool IsGuardableReferenceParameter(IParameterSymbol p)
     {

@@ -72,20 +72,35 @@ internal sealed class UnusedThisParameter : ISemanticRule
                 case ThisExpressionSyntax:
                 case BaseExpressionSyntax:
                     return true;
-                case IdentifierNameSyntax id:
+                // SimpleNameSyntax covers both `Foo` (IdentifierNameSyntax) and the
+                // GENERIC form `Foo<T>` (GenericNameSyntax). Handling only the former
+                // missed unqualified inherited generic calls like `Configure<TOptions>(…)`
+                // — a use of the receiver the rule wrongly reported as static-eligible.
+                case SimpleNameSyntax id:
                     // Skip the right-hand name of a member access (`x.Foo`) — that's
                     // qualified and resolved via the receiver, not the implicit `this`.
                     if (id.Parent is MemberAccessExpressionSyntax ma && ma.Name == id) break;
-                    var symbol = model.GetSymbolInfo(id).Symbol;
-                    if (symbol is null) break;
-                    if (symbol.IsStatic) break;
-                    // An unqualified instance field/property/method/event of THIS type
-                    // (or a base) means the method depends on the receiver.
-                    if (symbol is IFieldSymbol or IPropertySymbol or IEventSymbol
-                        || (symbol is IMethodSymbol { MethodKind: MethodKind.Ordinary }))
+                    var info = model.GetSymbolInfo(id);
+                    // Normally one resolved symbol. But when an argument's type is
+                    // unresolved (loose-text analysis without the full reference set),
+                    // overload resolution can fail to commit to a single symbol even
+                    // though every candidate is an instance member of THIS type — e.g.
+                    // an unqualified call `Configure<TOptions>(option)` where `option`'s
+                    // type lives in an unreferenced assembly. Fall back to the candidate
+                    // set so such a call still counts as receiver use, not a phantom "static".
+                    foreach (var symbol in info.Symbol is { } resolved
+                                 ? new[] { resolved }
+                                 : info.CandidateSymbols.AsEnumerable())
                     {
-                        if (symbol.ContainingType is { } owner && InheritsFrom(type, owner))
-                            return true;
+                        if (symbol.IsStatic) continue;
+                        // An unqualified instance field/property/method/event of THIS type
+                        // (or a base) means the method depends on the receiver.
+                        if (symbol is IFieldSymbol or IPropertySymbol or IEventSymbol
+                            || (symbol is IMethodSymbol { MethodKind: MethodKind.Ordinary }))
+                        {
+                            if (symbol.ContainingType is { } owner && InheritsFrom(type, owner))
+                                return true;
+                        }
                     }
                     break;
             }

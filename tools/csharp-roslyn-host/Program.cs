@@ -40,9 +40,11 @@ internal static class Program
 
     private static int Main()
     {
-        // Register an installed .NET SDK with MSBuildLocator before any MSBuild
-        // type is touched (the analyze-project path). Must run first.
-        if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
+        // Deliberately do NOT resolve an SDK here. `ping` and the loose-text
+        // `analyze` op need only the .NET *runtime*, so they must work even when
+        // no SDK is installed, or the ambient global.json pins an uninstalled one
+        // (the analyze cwd may be a target repo with such a pin — see issue #658).
+        // MSBuildLocator runs lazily, and guarded, only for `analyze-project`.
 
         // Line-buffered request/response loop. Blocks until stdin closes.
         for (string? line; (line = Console.In.ReadLine()) is not null;)
@@ -69,9 +71,34 @@ internal static class Program
     {
         "ping" => new Response(true),
         "analyze" => Analyze(req),
-        "analyze-project" => AnalyzeProject(req).GetAwaiter().GetResult(),
+        "analyze-project" => AnalyzeProjectGuarded(req),
         _ => new Response(false, Error: $"unknown op: {req.Op}"),
     };
+
+    // analyze-project is the only op that needs MSBuild. Register an installed SDK
+    // lazily and BEFORE any MSBuild type resolves — MSBuildLocator lives in its own
+    // assembly, so referencing it here does not pull MSBuild in, and AnalyzeProject
+    // (which does touch MSBuild types) stays NoInlining so its body JITs only after
+    // this returns. If no SDK can be resolved — none installed, or the ambient
+    // global.json pins an uninstalled one — report it as a normal protocol error so
+    // the caller can skip the project-aware tier, rather than letting RegisterDefaults
+    // throw and abort the whole process (which surfaced as an EPIPE crash on the Node
+    // side — see issue #658).
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Response AnalyzeProjectGuarded(Request req)
+    {
+        try
+        {
+            if (!MSBuildLocator.IsRegistered) MSBuildLocator.RegisterDefaults();
+        }
+        catch (Exception ex)
+        {
+            return new Response(false, Error:
+                $"could not locate a .NET SDK to open the project via MSBuild: {ex.Message}. " +
+                "Install a compatible .NET SDK (and restore the project) for project-aware C# rules.");
+        }
+        return AnalyzeProject(req).GetAwaiter().GetResult();
+    }
 
     private static Response Analyze(Request req)
     {
@@ -86,13 +113,18 @@ internal static class Program
             "analysis", trees, References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        // Tree-major, not rule-major: build each tree's semantic model ONCE and
+        // reuse it across all rules. GetSemanticModel returns a fresh model per
+        // call (no cross-call cache), so the old rule-major order rebuilt — and
+        // rebound — every tree once per rule (rules × trees models). Binding is
+        // the dominant cost, so this is ~O(rules) faster. Matches AnalyzeProject.
         var violations = new List<Violation>();
-        foreach (var rule in SemanticRules.All)
+        foreach (var tree in trees)
         {
-            if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
-            foreach (var tree in trees)
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var rule in SemanticRules.All)
             {
-                var model = compilation.GetSemanticModel(tree);
+                if (enabled is not null && !enabled.Contains(rule.RuleKey)) continue;
                 violations.AddRange(rule.Analyze(model, tree));
             }
         }
@@ -101,8 +133,9 @@ internal static class Program
 
     // Open a real project/solution via MSBuildWorkspace and run every host rule
     // (single-model and project-aware) against its documents with the project's
-    // own references. NoInlining: keeps MSBuild types out of Main's JIT body so
-    // MSBuildLocator.RegisterDefaults runs before they resolve.
+    // own references. NoInlining: keeps MSBuild types out of the caller's JIT body
+    // so AnalyzeProjectGuarded's MSBuildLocator.RegisterDefaults runs before they
+    // resolve.
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static async Task<Response> AnalyzeProject(Request req)
     {
@@ -111,6 +144,7 @@ internal static class Program
         if (!File.Exists(req.Project))
             return new Response(false, Error: $"project not found: {req.Project}");
 
+        // MSBuild is already registered by AnalyzeProjectGuarded before this runs.
         var enabled = req.Rules is { Count: > 0 } ? new HashSet<string>(req.Rules) : null;
 
         using var workspace = MSBuildWorkspace.Create();
@@ -121,7 +155,11 @@ internal static class Program
         };
 
         var projects = new List<Project>();
-        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase))
+        // `.slnx` (newer XML solution format) opens as a solution too — and note
+        // ".slnx".EndsWith(".sln") is false, so it needs its own check or it would
+        // wrongly fall through to OpenProjectAsync.
+        if (req.Project.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || req.Project.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
         {
             var solution = await workspace.OpenSolutionAsync(req.Project);
             projects.AddRange(solution.Projects);

@@ -15,6 +15,22 @@ export function csharpEmptyBodyIsIntentional(node: SyntaxNode, body: SyntaxNode)
   }
   // No-op lambdas in callback positions are deliberate placeholders.
   if (isCSharpNoOpCallbackPosition(node)) return true
+  // Null-object / no-op pattern: a type named `Null…`/`Noop…`/`Empty…` exists
+  // precisely to satisfy an interface or base contract with do-nothing members
+  // (e.g. `NullLogger.Log`, `EmptyDisposable.Dispose`). Empty bodies there are
+  // the intended implementation, not a missing one. The guard requires an
+  // uppercase letter or digit after the prefix so `Nullable`/`Emptiness` don't
+  // match.
+  let enclosingType: SyntaxNode | null = node.parent
+  while (enclosingType
+    && enclosingType.type !== 'class_declaration'
+    && enclosingType.type !== 'struct_declaration'
+    && enclosingType.type !== 'record_declaration'
+    && enclosingType.type !== 'record_struct_declaration') {
+    enclosingType = enclosingType.parent
+  }
+  const typeName = enclosingType?.childForFieldName('name')?.text
+  if (typeName && /^(Null|Noop|NoOp|Empty)[A-Z0-9]/.test(typeName)) return true
   // `virtual`/`override` empty methods are template-method hooks or
   // intentional suppression of inherited behavior; `partial` methods may be
   // filled in by a generator.

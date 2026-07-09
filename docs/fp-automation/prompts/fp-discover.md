@@ -78,6 +78,19 @@ byte-identical to an unscoped run.
 - `git clone --depth=1 https://github.com/<target_repo>.git /tmp/target`.
 - Record the commit SHA as `target_ref` (full hash). Get it with
   `git -C /tmp/target rev-parse HEAD`.
+- **C# campaigns only** (`tech_stack: csharp`): the analyze needs the .NET
+  toolchain, and `build:dist` silently *skips* the Roslyn host when `dotnet` is
+  missing (a green build is not enough). If `dotnet` is not on PATH, run
+  `bash $TRUECOURSE_DIR/docs/fp-automation/setup-csharp-env.sh` to install it —
+  it fails with a clear message if this environment's egress policy blocks the
+  .NET hosts, which is an env-provisioning problem (post the blocker and stop;
+  do **not** route around the policy). Then `dotnet restore` the target's
+  top-most `.sln`/`.slnx` **before** analyze. The project-aware (Roslyn
+  workspace) tier **fails-hard** on an unrestored project or a missing SDK —
+  it aborts the whole run, it does not skip. This needs the .NET SDK in the
+  session: **10.x** (or ≥ 9.0.2xx), which is what opens `.slnx` solutions and
+  modern targets; the host is `net8.0` and runs on any ≥ 8 runtime. A target that
+  pins an SDK via its own `global.json` needs that exact SDK installed.
 - Run analyze **from inside the target repo** — the CLI operates on the
   current working directory and writes results to `<cwd>/.truecourse/`:
   ```
@@ -177,3 +190,9 @@ fp-next-fix; you do not need to fire it yourself.
 - If anything is ambiguous (cannot pick a campaign, analyze output
   unparseable, etc.), comment on the discovery PR with the ambiguity
   and stop. Do not invent state.
+
+## Commit & PR hygiene — no Claude Code session details
+
+**Never include Claude Code session details in anything you create or push.** No commit message,
+PR body, or issue body may contain a `Claude-Session:` trailer or any `https://claude.ai/code/session…`
+URL — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.

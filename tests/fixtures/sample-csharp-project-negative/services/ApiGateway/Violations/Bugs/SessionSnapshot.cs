@@ -18,7 +18,6 @@ internal sealed class SessionSnapshot : ISerializable
     }
 
     /// <summary>Serializes the snapshot's identity.</summary>
-    // VIOLATION: code-quality/deterministic/unused-function-parameter
     public void GetObjectData(SerializationInfo info, StreamingContext context)
     {
         info.AddValue("id", _id);

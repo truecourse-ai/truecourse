@@ -39,6 +39,14 @@ export const PURE_ARRAY_METHODS = new Set([
   'indexOf', 'lastIndexOf', 'includes', 'every', 'some', 'reduce', 'reduceRight',
 ])
 
+// Receiver names that denote a socket.io-style realtime connection. Its
+// `.join(room)` is a side-effecting room-subscription command that returns
+// void — NOT `Array.prototype.join`, whose joined-string result must be
+// consumed. The two collide on the bare method name, and type information is
+// usually unavailable (the socket.io types live in uninstalled node_modules),
+// so the receiver name is the reliable signal.
+export const SOCKET_IO_RECEIVERS = new Set(['socket', 'sockets'])
+
 export const KNOWN_ARG_ORDERS: Array<{ fn: string; params: string[][] }> = [
   { fn: 'startsWith', params: [['prefix', 'str', 'string', 'start', 'needle', 'search']] },
   { fn: 'endsWith', params: [['suffix', 'str', 'string', 'end', 'needle', 'search']] },

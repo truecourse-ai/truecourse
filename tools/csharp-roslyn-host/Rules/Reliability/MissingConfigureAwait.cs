@@ -37,10 +37,29 @@ internal sealed class MissingConfigureAwait : IProjectAwareRule
             if (type is null || type.TypeKind == TypeKind.Error) continue;
             if (!type.GetMembers("ConfigureAwait").OfType<IMethodSymbol>().Any()) continue;
 
+            // Blazor components (types deriving from Microsoft.AspNetCore.Components.
+            // ComponentBase) run on the renderer's SynchronizationContext, and their
+            // awaits frequently mutate component state (StateHasChanged, bound fields).
+            // Those continuations MUST resume on the captured context, so
+            // ConfigureAwait(false) is the wrong advice — flagging it is a false
+            // positive even though the assembly is a library.
+            if (IsInBlazorComponent(awaitExpr, model)) continue;
+
             var pos = expr.GetLocation().GetLineSpan().StartLinePosition;
             yield return new Violation(
                 RuleKey, tree.FilePath, pos.Line + 1, pos.Character + 1,
                 "await in library code without ConfigureAwait(false) captures the caller's synchronization context and can deadlock callers that block on the task; add .ConfigureAwait(false).");
         }
+    }
+
+    private static bool IsInBlazorComponent(SyntaxNode node, SemanticModel model)
+    {
+        var typeDecl = node.Ancestors().OfType<TypeDeclarationSyntax>().FirstOrDefault();
+        if (typeDecl is null) return false;
+        for (var t = model.GetDeclaredSymbol(typeDecl) as INamedTypeSymbol; t is not null; t = t.BaseType)
+            if (t.Name == "ComponentBase" &&
+                t.ContainingNamespace?.ToDisplayString() == "Microsoft.AspNetCore.Components")
+                return true;
+        return false;
     }
 }

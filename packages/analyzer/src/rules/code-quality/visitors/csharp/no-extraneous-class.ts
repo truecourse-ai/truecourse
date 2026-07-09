@@ -18,6 +18,11 @@ export const csharpNoExtraneousClassVisitor: CodeRuleVisitor = {
     if (hasCSharpModifier(node, 'partial')) return null
     // Inheritance / interface implementation requires an instance type.
     if (node.namedChildren.some((c) => c?.type === 'base_list')) return null
+    // A class decorated with an attribute is metadata-bearing — a marker/token type
+    // (often consumed as a generic type argument, where a `static class` is illegal,
+    // or carrying framework metadata). Converting it to `static` would change its
+    // meaning or break compilation, so it is not an extraneous static holder.
+    if (node.namedChildren.some((c) => c?.type === 'attribute_list')) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null

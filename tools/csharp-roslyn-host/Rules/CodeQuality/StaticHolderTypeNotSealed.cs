@@ -19,6 +19,12 @@ internal sealed class StaticHolderTypeNotSealed : ISemanticRule
         {
             if (model.GetDeclaredSymbol(classDecl) is not INamedTypeSymbol type) continue;
             if (type.IsStatic || type.IsSealed || type.IsAbstract) continue;
+            // A class decorated with an attribute is a metadata-bearing marker/token
+            // type — frequently consumed as a generic type argument, where a `static`
+            // class is illegal. Making it static (or sealed) would change its meaning
+            // or break callers, so it is not a pointless static holder. Checked on the
+            // syntax so it holds even when the attribute type is unresolved.
+            if (classDecl.AttributeLists.Count > 0) continue;
             // A base class other than object means it participates in a hierarchy; out of scope.
             if (type.BaseType is { SpecialType: not SpecialType.System_Object }) continue;
             if (type.Interfaces.Length > 0) continue;

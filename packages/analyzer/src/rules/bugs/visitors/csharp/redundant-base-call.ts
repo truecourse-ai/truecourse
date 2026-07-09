@@ -62,7 +62,14 @@ export const csharpRedundantBaseCallVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const receiver = node.childForFieldName('expression')
     if (receiver?.type !== 'base' && receiver?.text !== 'base') return null
-    const memberName = node.childForFieldName('name')?.text
+    // A generic member access (`base.Execute<TResult>()`) exposes a `generic_name`
+    // node whose text includes the type arguments (`Execute<TResult>`), whereas a
+    // declaring method's `name` field is the bare identifier (`Execute`). Compare
+    // on the bare name so a generic override is recognized as declared.
+    const nameNode = node.childForFieldName('name')
+    const memberName = nameNode?.type === 'generic_name'
+      ? nameNode.namedChildren.find((c) => c?.type === 'identifier')?.text
+      : nameNode?.text
     if (!memberName) return null
 
     const typeDecl = enclosingType(node)
