@@ -481,6 +481,36 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    every claim needs its retry") — never a "ceiling" the bill can exceed. Same trust family
    as item 11 (estimate/runtime agreement).
 
+24. **Discontinued CLI commands: deprecation notice + hidden from help (user decision
+   2026-07-08).** STATUS: BUILT.
+   The contracts/verify pipeline commands (`contracts`, `verify`, `infer`,
+   `drifts`) stay REGISTERED and functional — EE's verification gate still rides the code —
+   but each prints a one-line deprecation notice on invocation (discontinued in favor of
+   `guard`, see README, removal planned for 0.8) and is hidden from `--help` so new users
+   never discover them. Outright removal deliberately deferred until the EE gate migrates.
+   The dashboard analog already shipped (BL Drift registry-hidden in both editions,
+   URL-reachable for EE Pulls deep links).
+
+21. **Stacked non-interactive gates defeat the single retry (findings analysis
+   2026-07-08, queued).** `analyze` demands two sequential decisions non-interactively
+   (`--llm/--no-llm`, then `--stash/--no-stash`); a scenario fails gate 1, the retry fixes
+   it and dies on gate 2 — one retry cannot fix N stacked gates. Candidate fixes (pick at
+   build time): grounding probes walk the gates (probe output IS the next gate's message —
+   feed the chain into authoring), or the retry loop allows one retry PER DISTINCT gate
+   message (bounded by distinct evidence, still never re-torturing the same failure).
+22. **Ground catalog-dependent claims with a catalog probe (findings analysis 2026-07-08,
+   queued).** Four findings were `rules disable <key>` → "Unknown rule" — the model
+   invented eslint-flavored keys because TrueCourse's catalog is unknowable from the doc.
+   Grounding should probe enumerating commands (`rules list`-shaped) when claims reference
+   catalog entries, so authoring gets real keys. General: driven by the claim's backtick
+   fragments, never a hardcoded command list.
+23. **LLM-dependent commands must classify as blocked-on, not author (findings analysis
+   2026-07-08, queued).** `infer --dry-run` was authored as a CLI scenario and failed in
+   the sandbox (fresh HOME → no claude auth) — the run correctly classified 5 OTHER
+   sections `blocked-on: llm-provider`; the classifier missed this one. Tighten the
+   extraction/classification prompt (rides the next fingerprint batch with 6b's
+   prompt-loudness half).
+
 19. **Findings must be judgeable on one screen (user decision 2026-07-08).** A finding asks
    "generation defect or real drift — your call" while withholding the material for the
    call: (a) the candidate's scenario YAML is discarded (held rows carry theirs since item
