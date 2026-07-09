@@ -1,18 +1,21 @@
 /**
  * The Guard main pane: the spec doc as the coverage surface, with the spec
- * curation surface absorbed. Picks an onboarding empty state from the
- * pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
- * generated but no run → run), else renders the selected doc with its per-section
- * statuses, a filtering totals strip, and a detail pane that multiplexes between a
- * clicked section's scenario detail and a clicked conflict's resolution detail
- * (the same five-option SpecOverlapDetail the BL-Drift Spec tab uses). The doc
- * picker and conflict list live in the sidebar (the reused SpecCorpusView);
- * selection flows through the URL (`?guard`/`?gsec`/`?gconf`). Read-only for
- * coverage; conflict resolution + force include/exclude are the spec decisions.
+ * curation surface absorbed, presented through the shared preview/pin tab model
+ * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Scenarios and
+ * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
+ * renders only while ≥1 item tab is open, with a permanent Overview chip first.
+ * The Overview is the no-selection content: an onboarding empty state picked from
+ * the pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
+ * generated but no run → run) or "select a document". A doc tab renders that doc
+ * with its per-section statuses, a filtering totals strip, and a within-doc detail
+ * pane multiplexing a clicked section's scenario detail and a clicked conflict's
+ * resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
+ * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, FlaskConical, Loader2, PlayCircle } from 'lucide-react';
+import { BookOpen, FileText, FlaskConical, GitMerge, Loader2, PlayCircle } from 'lucide-react';
 import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
 import {
   overlapKey,
@@ -26,12 +29,16 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { tallyCapabilities } from '@/lib/guard-report';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
-import { useGuardSelection } from '@/hooks/useGuardSelection';
+import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
+import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 import { GuardTotalsStrip } from './GuardTotalsStrip';
 
 const FILTER_MODE_KEY = 'truecourse:guardFilterMode';
+
+/** Conflict tab ids are overlap keys; doc tab ids are plain refs. */
+const isOverlapId = (id: string): boolean => id.startsWith('overlap::');
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full w-full items-center justify-center">{children}</div>;
@@ -45,6 +52,7 @@ export function GuardCoveragePage({
   prNumber = null,
   prRef,
   reloadKey = 0,
+  tabs,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
@@ -56,8 +64,14 @@ export function GuardCoveragePage({
   prRef?: string;
   /** Bumped on a guard generate/run completion → refetch the per-doc coverage. */
   reloadKey?: number;
+  /** The doc/conflict tab set (shared with the sidebar) + the within-doc section. */
+  tabs: GuardCoverageTabsState;
 }) {
-  const { doc, section, conflict, selectDoc, selectSection, selectConflict } = useGuardSelection();
+  const { activeId, openTabs, open, close, selectOverview, section, selectSection } = tabs;
+  // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
+  const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
+  const doc = activeId && !activeConflict ? activeId : null;
+
   const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
     if (typeof window === 'undefined') return 'blur';
@@ -88,13 +102,28 @@ export function GuardCoveragePage({
   // works whenever there's a corpus, so a conflict can be resolved before guards
   // are even generated.
   const overlapSel = useMemo(() => {
-    if (!conflict) return null;
-    const k = parseSpecKey(conflict);
+    if (!activeConflict) return null;
+    const k = parseSpecKey(activeConflict);
     return k.kind === 'overlap' ? k : null;
-  }, [conflict]);
+  }, [activeConflict]);
   const showConflict = overlapSel != null && corpus.data != null;
 
-  // Fetch the raw markdown for the selected doc (the coverage payload carries
+  // Each open tab as its strip item: a doc labels by its repo-relative path, a
+  // conflict by "a ↔ b" (both paths) — truncated in the strip, full on hover.
+  const tabItems = useMemo<GuardTabStripItem[]>(
+    () =>
+      openTabs.map((t) => {
+        if (isOverlapId(t.id)) {
+          const k = parseSpecKey(t.id);
+          const label = k.kind === 'overlap' ? `${k.a} ↔ ${k.b}` : t.id;
+          return { ...t, label, title: label, icon: GitMerge };
+        }
+        return { ...t, label: t.id, title: t.id, icon: FileText };
+      }),
+    [openTabs],
+  );
+
+  // Fetch the raw markdown for the active doc (the coverage payload carries
   // section metadata, not the body). Same file the Spec tab reads.
   useEffect(() => {
     if (!doc) {
@@ -114,10 +143,11 @@ export function GuardCoveragePage({
   }, [repoId, doc]);
 
   // With a run present and a single doc, land straight on its coverage — unless a
-  // conflict is deep-linked (auto-selecting a doc would clear it).
+  // tab is already active (auto-opening would fight a deep link). Pinned so the
+  // lone doc's tab is stable.
   useEffect(() => {
-    if (!doc && !conflict && hasRun && docs.length === 1) selectDoc(docs[0].ref);
-  }, [doc, conflict, hasRun, docs, selectDoc]);
+    if (!activeId && hasRun && docs.length === 1) open(docs[0].ref, true);
+  }, [activeId, hasRun, docs, open]);
 
   const selectedSection = useMemo(
     () => (section && coverage ? coverage.sections.find((s) => s.anchor === section) ?? null : null),
@@ -156,176 +186,193 @@ export function GuardCoveragePage({
     return map;
   }, [doc, corpus.data]);
 
-  // --- Onboarding empty states (driven by the staleness flags) ----------------
-  // A selected conflict renders the curation surface even before guards exist, so
-  // it takes precedence over the generate/run onboarding states below.
-  if (!staleLoaded && !coverage && !showConflict) {
-    return (
-      <Centered>
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </Centered>
-    );
-  }
-  if (!hasCorpus) {
-    return (
-      <EmptyState
-        icon={BookOpen}
-        title="No spec corpus"
-        body={
-          <>
-            Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
-            documents this coverage view reads.
-          </>
-        }
-      />
-    );
-  }
-  // A selected conflict owns the WHOLE main pane — its two columns carry their own
-  // doc context, so no doc center renders beside it. Closing returns to the doc.
-  if (showConflict) {
-    return (
-      <SpecOverlapDetail
-        repoId={repoId}
-        area={overlapSel!.area}
-        docA={overlapSel!.a}
-        docB={overlapSel!.b}
-        data={corpus.data!}
-        prNumber={prNumber}
-        prRef={prRef}
-        onResolved={(res) => {
-          if (res) corpus.apply(res);
-          else void corpus.refetch();
-        }}
-        onClose={() => selectConflict(null)}
-      />
-    );
-  }
-  // Stage CTAs render only when nothing is selected. A selected doc ALWAYS falls
-  // through to the render path below: raw markdown pre-generate (conflicts stay
-  // resolvable in context), the coverage-banded view once generated.
-  if (!doc) {
-    if (!hasGenerated) {
+  // --- The pane for the active tab (or the Overview) --------------------------
+  const pane = (() => {
+    // A conflict tab owns the WHOLE pane — its two columns carry their own doc
+    // context, so no doc center renders beside it. Closing returns to the doc.
+    if (showConflict) {
       return (
-        <EmptyState
-          icon={FlaskConical}
-          title="No guards generated"
-          body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-              scenarios for each spec section.
-            </>
-          }
+        <SpecOverlapDetail
+          repoId={repoId}
+          area={overlapSel!.area}
+          docA={overlapSel!.a}
+          docB={overlapSel!.b}
+          data={corpus.data!}
+          prNumber={prNumber}
+          prRef={prRef}
+          onResolved={(res) => {
+            if (res) corpus.apply(res);
+            else void corpus.refetch();
+          }}
+          onClose={() => close(activeConflict!)}
         />
       );
     }
-    if (!hasRun) {
+
+    // Initial hydration: nothing determined yet.
+    if (!staleLoaded && !coverage) {
       return (
-        <EmptyState
-          icon={PlayCircle}
-          title="No guard run yet"
-          body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
-              scenarios and see pass/fail on the document.
-            </>
-          }
-        />
-      );
-    }
-    return (
-      <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
-    );
-  }
-
-  // --- The detail pane: a selected section's scenario detail -------------------
-  const detailPane = selectedSection ? (
-    <GuardSectionDetail
-      repoId={repoId}
-      section={selectedSection}
-      runId={coverage?.runId ?? null}
-      hasRun={hasRun}
-      onClose={() => selectSection(null)}
-    />
-  ) : null;
-
-  // --- The center: the coverage-banded doc, or the raw doc before guards exist --
-  let center: React.ReactNode;
-  if (coverageLoading || content == null) {
-    center =
-      coverageError || contentError ? (
-        <Centered>
-          <p className="max-w-sm px-6 text-center text-sm text-muted-foreground">{coverageError ?? contentError}</p>
-        </Centered>
-      ) : (
         <Centered>
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </Centered>
       );
-  } else if (coverage) {
-    center = (
-      <GuardDocCoverage
-        content={content}
-        coverage={coverage}
-        activeFilter={filter}
-        filterMode={filterMode}
-        selectedAnchor={selectedSection?.anchor ?? null}
-        onSelectSection={selectSection}
-        conflictHeadings={conflictHeadings}
-        activeConflictKey={conflict}
-        onOpenConflict={selectConflict}
-      />
-    );
-  } else {
-    // Corpus present but no guard coverage (e.g. before generate) — show the doc so
-    // conflicts stay resolvable in context.
-    center = (
-      <div className="h-full overflow-auto px-4 py-3 text-[13px] leading-relaxed text-foreground">
-        <DocMarkdown source={content} />
-      </div>
-    );
-  }
+    }
 
-  // --- Coverage surface -------------------------------------------------------
-  return (
-    <div className="flex h-full flex-col">
-      {hasGenerated && !hasRun && (
-        <div className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-          <PlayCircle className="h-3.5 w-3.5 shrink-0" />
-          <span>
-            No guard run yet — statuses reflect generate-time coverage. Run{' '}
-            <code className="rounded bg-amber-500/20 px-1 py-0.5">truecourse guard run</code> for pass/fail.
-          </span>
-        </div>
-      )}
-
-      {coverage && coverage.orphanedSections.length > 0 && (
-        <HoverPopover
-          width="wide"
-          align="start"
-          content={coverage.orphanedSections.map((o) => o.anchor).join('\n')}
-        >
-          <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-            {coverage.orphanedSections.length} orphaned guard
-            {coverage.orphanedSections.length === 1 ? '' : 's'} — section removed since generation
-          </div>
-        </HoverPopover>
-      )}
-
-      {coverage && (
-        <GuardTotalsStrip
-          totals={coverage.totals}
-          activeFilter={filter}
-          onFilter={setFilter}
-          filterMode={filterMode}
-          onFilterModeChange={changeFilterMode}
-          blockedOnCapabilities={blockedOnCapabilities}
+    if (!hasCorpus) {
+      return (
+        <EmptyState
+          icon={BookOpen}
+          title="No spec corpus"
+          body={
+            <>
+              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
+              documents this coverage view reads.
+            </>
+          }
         />
-      )}
+      );
+    }
 
-      <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">{center}</div>
-        {detailPane}
+    // Overview (no doc tab active): the stage CTAs, then "select a document". A
+    // selected doc ALWAYS falls through to the render path below: raw markdown
+    // pre-generate (conflicts stay resolvable in context), the coverage-banded
+    // view once generated.
+    if (!doc) {
+      if (!hasGenerated) {
+        return (
+          <EmptyState
+            icon={FlaskConical}
+            title="No guards generated"
+            body={
+              <>
+                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
+                scenarios for each spec section.
+              </>
+            }
+          />
+        );
+      }
+      if (!hasRun) {
+        return (
+          <EmptyState
+            icon={PlayCircle}
+            title="No guard run yet"
+            body={
+              <>
+                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
+                scenarios and see pass/fail on the document.
+              </>
+            }
+          />
+        );
+      }
+      return (
+        <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
+      );
+    }
+
+    // --- The detail pane: a selected section's scenario detail ---------------
+    const detailPane = selectedSection ? (
+      <GuardSectionDetail
+        repoId={repoId}
+        section={selectedSection}
+        runId={coverage?.runId ?? null}
+        hasRun={hasRun}
+        onClose={() => selectSection(null)}
+      />
+    ) : null;
+
+    // --- The center: the coverage-banded doc, or the raw doc before guards ----
+    let center: React.ReactNode;
+    if (coverageLoading || content == null) {
+      center =
+        coverageError || contentError ? (
+          <Centered>
+            <p className="max-w-sm px-6 text-center text-sm text-muted-foreground">{coverageError ?? contentError}</p>
+          </Centered>
+        ) : (
+          <Centered>
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </Centered>
+        );
+    } else if (coverage) {
+      center = (
+        <GuardDocCoverage
+          content={content}
+          coverage={coverage}
+          activeFilter={filter}
+          filterMode={filterMode}
+          selectedAnchor={selectedSection?.anchor ?? null}
+          onSelectSection={selectSection}
+          conflictHeadings={conflictHeadings}
+          activeConflictKey={activeConflict}
+          onOpenConflict={(key) => open(key, false)}
+        />
+      );
+    } else {
+      // Corpus present but no guard coverage (e.g. before generate) — show the doc so
+      // conflicts stay resolvable in context.
+      center = (
+        <div className="h-full overflow-auto px-4 py-3 text-[13px] leading-relaxed text-foreground">
+          <DocMarkdown source={content} />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex h-full flex-col">
+        {hasGenerated && !hasRun && (
+          <div className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+            <PlayCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              No guard run yet — statuses reflect generate-time coverage. Run{' '}
+              <code className="rounded bg-amber-500/20 px-1 py-0.5">truecourse guard run</code> for pass/fail.
+            </span>
+          </div>
+        )}
+
+        {coverage && coverage.orphanedSections.length > 0 && (
+          <HoverPopover
+            width="wide"
+            align="start"
+            content={coverage.orphanedSections.map((o) => o.anchor).join('\n')}
+          >
+            <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+              {coverage.orphanedSections.length} orphaned guard
+              {coverage.orphanedSections.length === 1 ? '' : 's'} — section removed since generation
+            </div>
+          </HoverPopover>
+        )}
+
+        {coverage && (
+          <GuardTotalsStrip
+            totals={coverage.totals}
+            activeFilter={filter}
+            onFilter={setFilter}
+            filterMode={filterMode}
+            onFilterModeChange={changeFilterMode}
+            blockedOnCapabilities={blockedOnCapabilities}
+          />
+        )}
+
+        <div className="flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1">{center}</div>
+          {detailPane}
+        </div>
       </div>
+    );
+  })();
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <GuardTabStrip
+        tabs={tabItems}
+        activeId={activeId}
+        onSelect={(t) => open(t.id, t.pinned)}
+        onSelectOverview={selectOverview}
+        onClose={close}
+      />
+      <div className="min-h-0 flex-1 overflow-hidden">{pane}</div>
     </div>
   );
 }

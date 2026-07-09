@@ -1,15 +1,16 @@
 /**
  * A scenario tab's MAIN-PANE detail (the GuardDriftDetail analog for the
  * Scenarios inventory). Composes the full scenario story: the header (last-run
- * outcome badge, id, duration, hand-written chip, title, close), the binding
+ * outcome badge, id, duration, hand-written chip, title), the binding
  * (doc § section + a "view in spec" jump), the last result — failing step's
  * expected/actual, stale/orphaned binding notes, or the "never run" hint — the
- * YAML source (loaded eagerly; it IS the scenario), and the on-demand evidence
- * transcript (monospace, scrollable). Read-only.
+ * evidence transcript (monospace, scrollable, fetched with the tab), and the YAML
+ * source (it IS the scenario). Both render open. Read-only; the tab strip owns the
+ * close.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowUpRight, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
@@ -24,6 +25,7 @@ export function GuardScenarioDetail({
   repoId,
   row,
   runId,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for RepoPage's wiring; the tab strip owns the close now (unused, clean up later)
   onClose,
   onOpenSpec,
 }: {
@@ -31,17 +33,19 @@ export function GuardScenarioDetail({
   row: GuardScenarioRowData;
   /** The run the row's outcome was joined from (for evidence fetches); null when never run. */
   runId: string | null;
+  /** Unused — the tab strip's X is the only close. Kept for the RepoPage caller. */
   onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const [yaml, setYaml] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<string | null>(null);
-  const [showEvidence, setShowEvidence] = useState(false);
-  const [busy, setBusy] = useState<'evidence' | null>(null);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
 
   const result = row.lastResult;
-  const failed = result?.outcome === 'fail' || result?.outcome === 'error';
-  const hasEvidence = failed && result?.evidencePath != null && runId != null;
+  // Any executed outcome that captured a transcript renders it — passes included
+  // (evidence for passes too). A non-executed stale/orphaned or an older pass
+  // without one has no evidencePath, so no evidence section renders.
+  const hasEvidence = result?.evidencePath != null && runId != null;
 
   // The YAML source is the scenario — load it with the tab.
   useEffect(() => {
@@ -60,28 +64,34 @@ export function GuardScenarioDetail({
     };
   }, [repoId, row.id]);
 
-  const toggleEvidence = useCallback(async () => {
-    if (showEvidence) {
-      setShowEvidence(false);
-      return;
-    }
-    setShowEvidence(true);
-    if (evidence == null && runId) {
-      setBusy('evidence');
-      try {
-        setEvidence(await api.getGuardEvidence(repoId, runId, row.id));
-      } catch (e) {
-        setEvidence(e instanceof Error ? e.message : 'Evidence unavailable.');
-      } finally {
-        setBusy(null);
-      }
-    }
-  }, [showEvidence, evidence, runId, repoId, row.id]);
+  // The evidence transcript — fetched with the tab and shown expanded (the reader
+  // came to read it). The `cancelled` guard closes the async gap so a stale fetch
+  // never writes into the next scenario's pane.
+  useEffect(() => {
+    if (!hasEvidence || runId == null) return;
+    let cancelled = false;
+    setEvidence(null);
+    setEvidenceBusy(true);
+    api
+      .getGuardEvidence(repoId, runId, row.id)
+      .then((text) => {
+        if (!cancelled) setEvidence(text);
+      })
+      .catch((e) => {
+        if (!cancelled) setEvidence(e instanceof Error ? e.message : 'Evidence unavailable.');
+      })
+      .finally(() => {
+        if (!cancelled) setEvidenceBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasEvidence, repoId, runId, row.id]);
 
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-border bg-card px-6 py-4">
+      <div className="flex items-start gap-3 border-b border-border bg-card px-6 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GuardStatusBadge status={guardRowStatus(row)} className="shrink-0" />
@@ -99,14 +109,6 @@ export function GuardScenarioDetail({
           </div>
           <h2 className="mt-1 text-sm font-semibold text-foreground">{row.title}</h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close scenario"
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Body */}
@@ -161,21 +163,13 @@ export function GuardScenarioDetail({
           </div>
         )}
 
-        {/* Evidence (on demand) */}
+        {/* Evidence — the run transcript from disk (pass or fail), always expanded. */}
         {hasEvidence && (
           <div>
-            <button
-              type="button"
-              onClick={() => void toggleEvidence()}
-              className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            >
-              {showEvidence ? 'Hide evidence' : 'View evidence'}
-            </button>
-            {showEvidence && (
-              <pre className={PRE} aria-label="evidence transcript">
-                {busy === 'evidence' ? 'Loading transcript…' : evidence ?? ''}
-              </pre>
-            )}
+            <div className={LABEL}>Evidence</div>
+            <pre className={PRE} aria-label="evidence transcript">
+              {evidenceBusy ? 'Loading transcript…' : evidence ?? ''}
+            </pre>
           </div>
         )}
 

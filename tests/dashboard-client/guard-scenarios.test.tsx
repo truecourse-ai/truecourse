@@ -820,7 +820,7 @@ describe('Guard scenario tabs — permanent Overview tab', () => {
 describe('GuardScenarioDetail — full scenario story', () => {
   beforeEach(() => stubFetch());
 
-  it('renders the failure detail, binding, and on-demand evidence', async () => {
+  it('renders the failure detail, binding, and the evidence transcript expanded on mount', async () => {
     const user = userEvent.setup();
     renderHarness();
     await user.click(await screen.findByText('alpha claim'));
@@ -830,8 +830,62 @@ describe('GuardScenarioDetail — full scenario story', () => {
     const binding = screen.getByText('Binding').parentElement as HTMLElement;
     expect(within(binding).getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.getByText('§ auth/10-7-the-local-developer-loop')).toBeInTheDocument();
-    await user.click(screen.getByText('View evidence'));
+    // No View/Hide evidence toggle — the transcript loads on mount, shown expanded.
+    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
     expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
+  });
+
+  it('renders a passing scenario’s evidence transcript open on mount when the run captured one', async () => {
+    const user = userEvent.setup();
+    // The passing h1 carries an evidencePath (evidence for passes too).
+    const withPassEvidence: GuardLatest = {
+      ...LATEST,
+      scenarios: LATEST.scenarios.map((s) =>
+        s.id === 'h1' ? { ...s, evidencePath: 'guard/evidence/RUN1/h1/transcript.txt' } : s,
+      ),
+    };
+    stubFetch(INVENTORY, withPassEvidence);
+    renderHarness();
+    await user.click(await screen.findByText('hand rolled'));
+    // The transcript loads on mount, shown expanded — no toggle, same as a failure's.
+    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
+    // But no failure detail — a pass has no expected/actual.
+    expect(screen.queryByText('Expected')).not.toBeInTheDocument();
+  });
+
+  it('renders no evidence section for a pass without a captured transcript (older run)', async () => {
+    const user = userEvent.setup();
+    renderHarness(); // the default LATEST's h1 pass has no evidencePath
+    await user.click(await screen.findByText('hand rolled'));
+    await screen.findByRole('heading', { name: 'hand rolled' });
+    expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
+    expect(screen.queryByText('EVIDENCE-TRANSCRIPT-XYZ')).not.toBeInTheDocument();
+  });
+
+  it('the scenario, finding, and held details render no close X of their own', async () => {
+    const user = userEvent.setup();
+    stubFetch(INVENTORY, LATEST, HELD_REPORT);
+    renderHarness();
+    await panelRowAsync('held z one');
+
+    // Scenario detail — its own "Close scenario" X is gone.
+    await user.click(within(inventoryList()).getByText('alpha claim'));
+    await screen.findByRole('heading', { name: 'alpha claim' });
+    expect(screen.queryByLabelText('Close scenario')).not.toBeInTheDocument();
+
+    // Finding detail — its own "Close finding" X is gone.
+    await user.click(within(inventoryList()).getByText('login rate limits'));
+    await screen.findByRole('heading', { name: 'login rate limits' });
+    expect(screen.queryByLabelText('Close finding')).not.toBeInTheDocument();
+
+    // Held detail — its own "Close held scenario" X is gone.
+    await user.click(within(inventoryList()).getByText('held z one'));
+    await screen.findByRole('heading', { name: 'held z one' });
+    expect(screen.queryByLabelText('Close held scenario')).not.toBeInTheDocument();
+
+    // The only close affordances left are the tab strip's per-tab X buttons.
+    expect(screen.getAllByLabelText(/^Close /).length).toBeGreaterThan(0);
   });
 
   it('shows the never-run hint for a scenario without a joined result', async () => {

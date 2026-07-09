@@ -72,14 +72,15 @@ describe('runGuard — end to end', () => {
     expect(boom.failure!.actual).toContain('exit 7')
     expect(boom.evidencePath).toBeTruthy()
 
-    // Passing scenarios carry no failure and no evidence pointer.
+    // Passing scenarios carry no failure but DO carry an evidence pointer — the
+    // run transcript is the proof of what executed, not a bare checkmark.
     const ver = res.latest.scenarios.find((s) => s.id === 'ver')!
     expect(ver.outcome).toBe('pass')
     expect(ver.failure).toBeUndefined()
-    expect(ver.evidencePath).toBeUndefined()
+    expect(ver.evidencePath).toBeTruthy()
   })
 
-  it('writes an evidence transcript (with the expectation diff) only for failures', async () => {
+  it('writes an evidence transcript for every executed outcome — pass and fail alike', async () => {
     const r = repo()
     writeRecipe(r)
     writeScenario(r, 'p.yaml', scenario({ id: 'pass1', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
@@ -90,13 +91,23 @@ describe('runGuard — end to end', () => {
     if (res.status !== 'ok') return
 
     const evDir = evidenceRunDir(r, res.latest.run.runId)
-    expect(fs.readdirSync(evDir).sort()).toEqual(['fail1']) // no dir for the pass
+    // Both the pass and the fail get an evidence bundle now.
+    expect(fs.readdirSync(evDir).sort()).toEqual(['fail1', 'pass1'])
 
+    // The fail bundle carries the expectation diff.
     const diff = fs.readFileSync(path.join(evDir, 'fail1', 'diff.txt'), 'utf-8')
     expect(diff).toContain('exit')
     expect(fs.existsSync(path.join(evDir, 'fail1', 'stdout.raw.txt'))).toBe(true)
     expect(fs.existsSync(path.join(evDir, 'fail1', 'transcript.txt'))).toBe(true)
     expect(fs.existsSync(path.join(evDir, 'fail1', 'files.txt'))).toBe(true)
+
+    // The pass bundle proves what executed: a transcript stamped `pass`, plus the
+    // invocation, sandbox listing, and a diff noting every step met its expectations.
+    const passTranscript = fs.readFileSync(path.join(evDir, 'pass1', 'transcript.txt'), 'utf-8')
+    expect(passTranscript).toContain('outcome:  pass')
+    expect(fs.existsSync(path.join(evDir, 'pass1', 'invocation.json'))).toBe(true)
+    expect(fs.existsSync(path.join(evDir, 'pass1', 'files.txt'))).toBe(true)
+    expect(fs.readFileSync(path.join(evDir, 'pass1', 'diff.txt'), 'utf-8')).toContain('met their expectations')
   })
 
   it('rolls up a section to the worst outcome across its scenarios', async () => {
@@ -247,6 +258,11 @@ describe('runGuard — end to end', () => {
     expect(fs.existsSync(guardRunsDir(r))).toBe(false)
     expect(fs.existsSync(guardHistoryPath(r))).toBe(false)
     expect(readGuardHistory(r)).toEqual({ runs: [] })
+    // A non-persisted (birth-validation) run captures NO pass evidence — its
+    // passing candidates have no committed run to anchor a transcript.
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+    expect(res.latest.scenarios[0].evidencePath).toBeUndefined()
+    expect(fs.existsSync(evidenceRunDir(r, res.latest.run.runId))).toBe(false)
   })
 
   it('materializes setup.git and a step observes the repo state', async () => {

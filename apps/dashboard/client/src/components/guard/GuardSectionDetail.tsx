@@ -1,8 +1,9 @@
 /**
  * The section detail side panel — opened by clicking a statused section. Tells
  * the claim-level story: the section's status + reason, then its scenarios with
- * last outcomes. Failing rows expose their failure detail and an evidence link
- * that fetches the transcript (text/plain, monospace, scrollable); every row can
+ * last outcomes. Failing rows expose their failure detail; every EXECUTED row with
+ * a captured transcript (pass or fail) offers an evidence link that fetches it
+ * (text/plain, monospace, scrollable); every row can
  * reveal its YAML source. Rows are previewable (single-click preview,
  * double-click pin), with inline actions stopping propagation.
  *
@@ -89,8 +90,10 @@ function GuardScenarioRow({
     }
   }, [showYaml, yaml, repoId, scenario.id]);
 
-  const failed = scenario.outcome === 'fail' || scenario.outcome === 'error';
-  const hasEvidence = failed && scenario.evidencePath != null && runId != null;
+  // Any executed outcome that captured a transcript offers it — passes included
+  // (evidence for passes too). A non-executed stale/orphaned or an older pass
+  // without one has no evidencePath, so no evidence affordance renders.
+  const hasEvidence = scenario.evidencePath != null && runId != null;
 
   return (
     <div className="border-b border-border/60">

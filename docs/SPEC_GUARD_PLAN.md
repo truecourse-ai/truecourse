@@ -716,6 +716,74 @@ New model, both surfaces:
 Conflict-relation resolutions keep their immediate re-curate (a resolution wants instant
 confirmation that the conflict cleared).
 
+**Evidence for passes too (user decision 2026-07-08 — long-discussed, now committed).**
+`guard run` captures the per-scenario evidence transcript for EVERY outcome, not only
+failures: a green guard's transcript is the proof of what actually executed — without it a
+pass is just a checkmark. Per-scenario results carry `evidencePath` for all outcomes; the
+run detail renders the transcript open for passes exactly like failures (chrome-diet rule:
+no toggle). The earlier "a pass detail never renders evidence" rule is REVERSED by this
+decision (it existed only because passes had no evidence to show; the state-leak fix it
+came from — reset-on-selection — stays). Disk cost is trivial (small text files, gitignored,
+keyed under evidence/<runId>/); note evidence dirs accumulate per run — if pruning is ever
+needed it prunes with runs/, same lifecycle. Birth-time evidence for PASSING candidates
+stays uncaptured (the run right after supersedes it; findings already carry theirs).
+STATUS: BUILT — `runScenario` writes the same evidence bundle on the `pass` return path
+(transcript stamped `pass`, invocation, focus = last step's streams, files listing, a diff
+noting every step met its expectations); `GuardScenarioResult.evidencePath` is now populated
+for every EXECUTED outcome (pass/fail/error) and stays absent on non-executed stale/orphaned
+(no transcript) and on pre-decision runs — the field was already `.optional()`, so old
+LATEST/run snapshots parse and render unchanged. `GuardDriftDetail` widened `hasEvidence` from
+failed-only to any-result-with-`evidencePath`, so a pass with a transcript renders it open on
+mount exactly like a failure and an older pass without one renders no evidence section. Store
+lifecycle untouched (evidence dirs share the runs/ keying). Birth-time pass evidence stays out
+of scope. Pass evidence renders EVERYWHERE evidence can render: GuardScenarioDetail widened the
+same way (transcript open on mount for any result with `evidencePath`), and GuardSectionDetail's
+scenario rows offer their "View evidence" affordance for any executed outcome with a transcript
+(the coverage side panel keeps its row-toggle idiom — chrome-diet rule 3 scopes render-open to
+the tab-content details, and rule 1 already carves the section panel out).
+
+**Detail-pane chrome diet (user review 2026-07-08).** Four rules from reviewing the
+finding/scenario details:
+1. A detail rendered as TAB CONTENT never renders its own close X — the tab's X is the one
+   close affordance. (Right-pane details that are NOT tabs — e.g. Coverage's section
+   detail — keep theirs.)
+2. Actions live in ONE row: "Dismiss finding" sits next to "View in spec", same outline
+   button idiom, with an icon (Ban-style), never a stray stacked button.
+3. NO View/Hide toggles for evidence or YAML — content renders open by default (evidence
+   fetched on mount, scrollable code blocks bound the height). Applies everywhere:
+   finding detail, held detail, scenario detail, run-failure detail. Toggles are reserved
+   for genuinely heavy or rarely-relevant content, and neither of these qualifies.
+   Principle: fewer buttons; the reader came to READ.
+STATUS: BUILT — all four tab-content details (GuardScenarioDetail, GuardFindingDetail,
+GuardHeldDetail, GuardDriftDetail) drop their own close X (the tab strip owns the close;
+GuardSectionDetail + SpecOverlapDetail keep theirs); GuardFindingDetail's Dismiss/Un-dismiss
+sits in the binding action row next to View in spec with a Ban icon; evidence + YAML render
+open (fetched on mount, no View/Hide toggles) across finding/scenario/run-failure details.
+
+**Coverage gets the shared tab model (user request 2026-07-08).** The Coverage main pane
+adopts the SAME preview/pin tab mechanism as Scenarios and Runs (useGuardTabs idiom +
+GuardTabStrip): sidebar doc rows single-click → PREVIEW tab (italic, replaced by the next
+single-click), double-click → PIN; conflicts open as tabs the same way (label "a ↔ b",
+full-pane SpecOverlapDetail as today, now inside a tab); the strip renders only while at
+least one item tab is open, with the Overview chip first (Overview = today's no-selection
+content: the stage CTAs / select-a-document state). Tab labels are repo-relative paths
+(truncated, full on hover — path-label rule). Section selection (?gsec) stays a
+within-doc right-pane detail, not a tab. URL params keep coverage's existing keys
+(?guard/?gconf) extended for pinned sets consistently with ?gscn/?gdrift. Scope: the
+guard Coverage tab only — the hidden BL Drift Spec tab is discontinued and untouched.
+STATUS: BUILT 2026-07-08 — `useGuardTabs` generalized to accept a `GuardTabsParam`
+codec (read/write/deepLinkTabs) beside the plain `param: string`, so Coverage binds
+TWO params (`?guard` doc, `?gconf` conflict) to one heterogeneous tab set from the
+ONE reducer; thin binding `useGuardCoverageTabs` (mirrors `useGuardScenarioTabs`)
+adds the codec + the within-doc `?gsec` section. RepoPage lifts the reducer (like
+Scenarios) so the sidebar (reused SpecCorpusView) and the main pane share it; the
+whole coverage surface (totals strip, GuardDocCoverage/raw-markdown center, section
+detail) now lives inside the active doc tab's pane, conflicts render the full-pane
+SpecOverlapDetail inside a tab, the Overview chip returns to the stage CTAs. URL
+mapping: the active tab mirrors `?gconf` else `?guard` (a conflict wins a link that
+carries both — its resolution surface is the point), and an inbound `?guard=X&gconf=Y`
+opens BOTH as pinned tabs with the conflict active. `useGuardSelection` retired.
+
 **Doc labels are repo-relative paths, not basenames (user bug report 2026-07-07, ninth
 review pass).** Real corpora hold many same-named docs (six README.md's in this repo's own
 scan) — basename-only labels made doc rows indistinguishable and conflict rows read

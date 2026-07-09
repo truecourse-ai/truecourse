@@ -7,7 +7,7 @@
  *   guard/LATEST.json            materialized current run state (committable)
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
- *   guard/evidence/<runId>/…     per-failure transcripts (gitignored)
+ *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  */
 
 import fs from 'node:fs'

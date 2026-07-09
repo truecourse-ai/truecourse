@@ -5,10 +5,11 @@
  * it. The detail is the limbo story: the binding (doc § section + view-in-spec),
  * WHAT HOLDS IT (the section's birth findings — click-through to their tab — and
  * its authoring errors' messages), and the authored YAML that WILL land once the
- * section settles whole. Read-only.
+ * section settles whole. Read-only. Rendered as tab content, so the tab strip owns
+ * the close.
  */
 
-import { ArrowUpRight, X } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import type { GuardHeldRowData } from '@/lib/guard-list-rows';
 import { GuardHeldBadge } from './GuardHeldBadge';
@@ -20,11 +21,13 @@ const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-
 
 export function GuardHeldDetail({
   row,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for RepoPage's wiring; the tab strip owns the close now (unused, clean up later)
   onClose,
   onOpenSpec,
   onOpenFinding,
 }: {
   row: GuardHeldRowData;
+  /** Unused — the tab strip's X is the only close. Kept for the RepoPage caller. */
   onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a blocking finding's own detail tab by its finding-row key. */
@@ -34,7 +37,7 @@ export function GuardHeldDetail({
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header — title is primary; the section heading rides as small mono meta. */}
-      <div className="flex items-start justify-between gap-3 border-b border-border bg-card px-6 py-4">
+      <div className="flex items-start gap-3 border-b border-border bg-card px-6 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GuardHeldBadge />
@@ -44,14 +47,6 @@ export function GuardHeldDetail({
           </div>
           <h2 className="mt-1 text-sm font-semibold text-foreground">{row.title}</h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close held scenario"
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Body */}

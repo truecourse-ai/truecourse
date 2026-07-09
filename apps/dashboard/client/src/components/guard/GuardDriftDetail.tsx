@@ -1,15 +1,17 @@
 /**
- * The Runs view's RIGHT detail pane for a single selected scenario. Composes the
+ * The Runs view's tab-content detail for a single selected scenario. Composes the
  * claim story: the binding (doc § section + a "view in spec" jump), the failing
- * step's expected/actual, the stale/orphaned binding notes, and — on demand — the
- * evidence transcript (text/plain, monospace, scrollable) and the scenario YAML
- * source. A passing scenario shows its last result (`pass · Nms`) instead of a
- * failure; passes have no evidence. Read-only; drift-vs-bug is the developer's
- * call, never resolved here.
+ * step's expected/actual, the stale/orphaned binding notes, the evidence transcript
+ * (text/plain, monospace, scrollable) and the scenario YAML source — both fetched
+ * with the tab and shown expanded. A passing scenario shows its last result
+ * (`pass · Nms`) in place of a failure, and — when the run captured one — its own
+ * evidence transcript open like a failure's (evidence for passes too). A pass from
+ * an older run without a transcript renders no evidence section at all. Read-only; the
+ * tab strip owns the close, and drift-vs-bug is the developer's call, never resolved here.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, FlaskConical, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, FlaskConical } from 'lucide-react';
 import type { GuardScenarioResult } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -26,20 +28,17 @@ export function GuardDriftDetail({
   repoId,
   scenario,
   runId,
-  onClose,
   onOpenSpec,
 }: {
   repoId: string;
   scenario: GuardScenarioResult;
   runId: string;
-  onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const [evidence, setEvidence] = useState<string | null>(null);
   const [yaml, setYaml] = useState<string | null>(null);
-  const [showEvidence, setShowEvidence] = useState(false);
-  const [showYaml, setShowYaml] = useState(false);
-  const [busy, setBusy] = useState<'evidence' | 'yaml' | null>(null);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [yamlBusy, setYamlBusy] = useState(false);
 
   // The parent keys this component by run+scenario, so a selection change gives a
   // fresh instance (all state above resets). This guard closes the async gap: a
@@ -53,51 +52,47 @@ export function GuardDriftDetail({
     };
   }, []);
 
-  const toggleEvidence = useCallback(async () => {
-    if (showEvidence) {
-      setShowEvidence(false);
-      return;
-    }
-    setShowEvidence(true);
-    if (evidence == null) {
-      setBusy('evidence');
-      try {
-        const text = await api.getGuardEvidence(repoId, runId, scenario.id);
+  // Any executed outcome that captured a transcript renders it — passes included
+  // (evidence for passes too). A non-executed stale/orphaned or an older pass without
+  // one has no evidencePath, so no evidence section renders (no placeholder noise).
+  const hasEvidence = scenario.evidencePath != null;
+
+  // Evidence + YAML render open — fetched with the tab (the reader came to read).
+  useEffect(() => {
+    if (!hasEvidence) return;
+    setEvidenceBusy(true);
+    api
+      .getGuardEvidence(repoId, runId, scenario.id)
+      .then((text) => {
         if (mounted.current) setEvidence(text);
-      } catch (e) {
+      })
+      .catch((e) => {
         if (mounted.current) setEvidence(e instanceof Error ? e.message : 'Evidence unavailable.');
-      } finally {
-        if (mounted.current) setBusy(null);
-      }
-    }
-  }, [showEvidence, evidence, repoId, runId, scenario.id]);
+      })
+      .finally(() => {
+        if (mounted.current) setEvidenceBusy(false);
+      });
+  }, [hasEvidence, repoId, runId, scenario.id]);
 
-  const toggleYaml = useCallback(async () => {
-    if (showYaml) {
-      setShowYaml(false);
-      return;
-    }
-    setShowYaml(true);
-    if (yaml == null) {
-      setBusy('yaml');
-      try {
-        const src = await api.getGuardScenarioSource(repoId, scenario.id);
+  useEffect(() => {
+    setYamlBusy(true);
+    api
+      .getGuardScenarioSource(repoId, scenario.id)
+      .then((src) => {
         if (mounted.current) setYaml(src ? src.content : 'Scenario source not found.');
-      } catch (e) {
+      })
+      .catch((e) => {
         if (mounted.current) setYaml(e instanceof Error ? e.message : 'Source unavailable.');
-      } finally {
-        if (mounted.current) setBusy(null);
-      }
-    }
-  }, [showYaml, yaml, repoId, scenario.id]);
-
-  const failed = scenario.outcome === 'fail' || scenario.outcome === 'error';
-  const hasEvidence = failed && scenario.evidencePath != null;
+      })
+      .finally(() => {
+        if (mounted.current) setYamlBusy(false);
+      });
+  }, [repoId, scenario.id]);
 
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-border bg-card px-6 py-4">
+      <div className="flex items-start gap-3 border-b border-border bg-card px-6 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GuardStatusBadge status={scenario.outcome} />
@@ -106,14 +101,6 @@ export function GuardDriftDetail({
           </div>
           <h2 className="mt-1 text-sm font-semibold text-foreground">{scenario.title}</h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close scenario"
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Body */}
@@ -174,36 +161,23 @@ export function GuardDriftDetail({
           <div className="text-sm leading-relaxed text-muted-foreground">Section text changed since generation (stale binding).</div>
         )}
 
-        {/* Evidence + source */}
-        <div className="flex flex-wrap gap-2">
-          {hasEvidence && (
-            <button
-              type="button"
-              onClick={() => void toggleEvidence()}
-              className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            >
-              {showEvidence ? 'Hide evidence' : 'View evidence'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void toggleYaml()}
-            className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-          >
-            {showYaml ? 'Hide YAML' : 'View YAML source'}
-          </button>
-        </div>
+        {/* Evidence — the run transcript from disk (pass or fail), always expanded. */}
+        {hasEvidence && (
+          <div>
+            <div className={LABEL}>Evidence</div>
+            <pre className={PRE} aria-label="evidence transcript">
+              {evidenceBusy ? 'Loading transcript…' : evidence ?? ''}
+            </pre>
+          </div>
+        )}
 
-        {hasEvidence && showEvidence && (
-          <pre className={PRE} aria-label="evidence transcript">
-            {busy === 'evidence' ? 'Loading transcript…' : evidence ?? ''}
-          </pre>
-        )}
-        {showYaml && (
+        {/* YAML source — always expanded. */}
+        <div>
+          <div className={LABEL}>Scenario source</div>
           <pre className={PRE} aria-label="scenario source">
-            {busy === 'yaml' ? 'Loading source…' : yaml ?? ''}
+            {yamlBusy ? 'Loading source…' : yaml ?? ''}
           </pre>
-        )}
+        </div>
 
         {(scenario.outcome === 'stale' || scenario.outcome === 'orphaned') && !scenario.failure && (
           <EmptyState

@@ -27,6 +27,9 @@ export function useGuardView(): GuardViewState {
         q.set('section', 'guard');
         q.set('tab', 'coverage');
         q.delete('gdrift');
+        // Land on the doc's coverage tab — drop any active conflict tab so it
+        // doesn't win the coverage read and shadow the jumped-to section.
+        q.delete('gconf');
         q.set('guard', doc);
         q.set('gsec', section);
         return q;

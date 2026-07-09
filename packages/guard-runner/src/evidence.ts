@@ -1,8 +1,11 @@
 /**
- * Evidence capture — on every `fail` / `error`, write a self-contained transcript
- * under `.truecourse/guard/evidence/<runId>/<scenarioId>/` so drift-vs-bug is
- * decided by reading evidence, not re-running. Contains the invocation, raw +
- * normalized streams, the expectation diff, and a sandbox file listing.
+ * Evidence capture — on every EXECUTED outcome (`pass` / `fail` / `error`), write a
+ * self-contained transcript under `.truecourse/guard/evidence/<runId>/<scenarioId>/`.
+ * For a fail/error it decides drift-vs-bug by reading, not re-running; for a pass it
+ * is the proof of what actually executed (a green guard is otherwise just a
+ * checkmark). Contains the invocation, raw + normalized streams, the expectation
+ * diff, and a sandbox file listing. A non-executed `stale`/`orphaned` scenario never
+ * reaches here — it has no transcript.
  */
 
 import fs from 'node:fs'
@@ -35,10 +38,10 @@ export interface WriteEvidenceParams {
   scenarioId: string
   title: string
   binds: GuardBinds
-  outcome: 'fail' | 'error'
+  outcome: 'pass' | 'fail' | 'error'
   steps: EvidenceStep[]
-  /** 1-based index of the failing step. */
-  failingStep: number
+  /** 1-based index of the failing step; omitted on a `pass` (nothing failed). */
+  failingStep?: number
   mismatch?: ExpectMismatch
   infraMessage?: string
   sandboxCwd: string
@@ -50,7 +53,12 @@ export function writeEvidence(params: WriteEvidenceParams): string {
   const dir = evidenceScenarioDir(params.repoRoot, params.runId, params.scenarioId)
   fs.mkdirSync(dir, { recursive: true })
 
-  const failing = params.steps.find((s) => s.index === params.failingStep)
+  // The step whose raw streams get their own files: the failing step for a
+  // fail/error, else the last executed step for a pass (its final output).
+  const focus =
+    params.failingStep != null
+      ? params.steps.find((s) => s.index === params.failingStep)
+      : params.steps[params.steps.length - 1]
 
   const invocation = {
     scenarioId: params.scenarioId,
@@ -72,11 +80,11 @@ export function writeEvidence(params: WriteEvidenceParams): string {
   }
   writeFile(dir, 'invocation.json', JSON.stringify(invocation, null, 2))
 
-  if (failing) {
-    writeFile(dir, 'stdout.raw.txt', failing.rawStdout)
-    writeFile(dir, 'stdout.txt', failing.normStdout)
-    writeFile(dir, 'stderr.raw.txt', failing.rawStderr)
-    writeFile(dir, 'stderr.txt', failing.normStderr)
+  if (focus) {
+    writeFile(dir, 'stdout.raw.txt', focus.rawStdout)
+    writeFile(dir, 'stdout.txt', focus.normStdout)
+    writeFile(dir, 'stderr.raw.txt', focus.rawStderr)
+    writeFile(dir, 'stderr.txt', focus.normStderr)
   }
 
   const diffLines: string[] = []
@@ -85,8 +93,10 @@ export function writeEvidence(params: WriteEvidenceParams): string {
     diffLines.push(`expected: ${params.mismatch.expected}`)
     diffLines.push(`actual:   ${params.mismatch.actual}`, '')
     diffLines.push(...params.mismatch.detail)
-  } else if (params.infraMessage) {
+  } else if (params.outcome === 'error' && params.infraMessage) {
     diffLines.push(`step ${params.failingStep} — infrastructure error`, '', params.infraMessage)
+  } else if (params.outcome === 'pass') {
+    diffLines.push(`all ${params.steps.length} step${params.steps.length === 1 ? '' : 's'} met their expectations`)
   }
   writeFile(dir, 'diff.txt', diffLines.join('\n') + '\n')
 

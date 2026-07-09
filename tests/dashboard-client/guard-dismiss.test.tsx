@@ -1,9 +1,11 @@
 /**
  * GuardFindingDetail — judge-on-one-screen (item 19) + dismiss (item 20): the
- * detail renders the failed candidate's authored YAML inline, loads the full
- * evidence transcript on demand (the same viewer the run-failure detail uses), and
- * offers a Dismiss / Un-dismiss action that writes decisions.json. Fetches are
- * stubbed the house way; the component mounts bare (no router needed).
+ * detail renders the failed candidate's authored YAML inline, renders the full
+ * evidence transcript expanded (fetched on mount, the same viewer the run-failure
+ * detail uses — no toggle), and offers a Dismiss / Un-dismiss action that sits in
+ * the binding's action row next to "View in spec" and writes decisions.json. As tab
+ * content it renders no close X of its own (the tab strip owns the close). Fetches
+ * are stubbed the house way; the component mounts bare (no router needed).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -82,16 +84,21 @@ describe('GuardFindingDetail — YAML + evidence (item 19)', () => {
     expect(src.textContent).toContain('--version');
   });
 
-  it('loads the full evidence transcript on demand', async () => {
-    const user = userEvent.setup();
+  it('renders the full evidence transcript expanded on mount — no View/Hide toggle', async () => {
     renderDetail();
-    expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'View evidence' }));
+    // No evidence toggle button — the transcript loads on mount and shows expanded.
+    expect(screen.queryByRole('button', { name: /evidence/i })).not.toBeInTheDocument();
     expect(await screen.findByText('FULL-BIRTH-TRANSCRIPT-XYZ')).toBeInTheDocument();
     // The finding-evidence route was hit with the finding's evidencePath.
     const calledUrl = String((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]);
     expect(calledUrl).toContain('/guard/finding-evidence');
     expect(calledUrl).toContain(encodeURIComponent('.truecourse/guard/evidence/run1/version.1'));
+  });
+
+  it('renders no close X of its own — the tab strip owns the close', () => {
+    renderDetail();
+    expect(screen.queryByLabelText('Close finding')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Close/ })).not.toBeInTheDocument();
   });
 });
 
@@ -105,6 +112,14 @@ describe('GuardFindingDetail — dismiss (item 20)', () => {
       anchor: 'version',
       title: 'the --version flag prints the semver',
     });
+  });
+
+  it('sits in ONE action row next to "View in spec" (same container)', () => {
+    renderDetail();
+    const viewInSpec = screen.getByRole('button', { name: 'View in spec' });
+    const dismiss = screen.getByRole('button', { name: 'Dismiss finding' });
+    // Same parent row — no stray stacked button.
+    expect(dismiss.parentElement).toBe(viewInSpec.parentElement);
   });
 
   it('a dismissed finding shows Un-dismiss + the "takes effect next generate" note, struck through', () => {

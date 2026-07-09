@@ -169,6 +169,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     opts.onScenarioSettled?.(settled, selected.length, result)
   }
 
+  // Pass evidence is part of the persisted run baseline; a non-persisted (birth
+  // validation) run captures none for its passing candidates — the next real run does.
+  const capturePassEvidence = opts.persist !== false
   const executed = await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
     const outcome = await runScenario(scenario, {
       repoRoot,
@@ -176,6 +179,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       resolvedEntry,
       recipeEnv: loaded.recipe.env,
       stepTimeoutMs,
+      capturePassEvidence,
     })
     const result: GuardScenarioResult =
       resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome

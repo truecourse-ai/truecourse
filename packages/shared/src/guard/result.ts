@@ -67,7 +67,12 @@ export const GuardScenarioResultSchema = z
     durationMs: z.number().nonnegative(),
     /** Present on `fail` / `error`. */
     failure: GuardFailureDetailSchema.optional(),
-    /** Repo-relative pointer into `evidence/`; present on `fail` / `error`. */
+    /**
+     * Repo-relative pointer into `evidence/`; present on every EXECUTED outcome —
+     * `pass` (the run transcript proving what ran) as well as `fail` / `error`.
+     * Absent on non-executed `stale` / `orphaned`, and on pre-2026-07-08 runs whose
+     * passes were never given a bundle (optional keeps those parsing + rendering).
+     */
     evidencePath: z.string().optional(),
     /**
      * Present when the bound section moved: the section kept its text but now

@@ -34,7 +34,7 @@ import {
 } from '@/components/spec/SpecCorpusView';
 import type { SpecCorpusResponse } from '@/lib/api';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
-import { useGuardSelection } from '@/hooks/useGuardSelection';
+import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -135,12 +135,13 @@ function LocationProbe() {
   return <span data-testid="search">{loc.search}</span>;
 }
 
-// The exact wiring RepoPage uses for the Guard coverage sidebar.
+// The exact wiring RepoPage uses for the Guard coverage sidebar: the reused
+// SpecCorpusView routed through the shared preview/pin tab reducer.
 function GuardSidebar({ corpus }: { corpus: SpecCorpusState }) {
-  const sel = useGuardSelection();
+  const tabs = useGuardCoverageTabs('r1');
   return (
     <>
-      <SpecCorpusView repoId="r1" corpus={corpus} activeKey={sel.activeKey} onOpen={sel.open} />
+      <SpecCorpusView repoId="r1" corpus={corpus} activeKey={tabs.activeId} onOpen={tabs.open} />
       <LocationProbe />
     </>
   );
@@ -251,10 +252,16 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  // Mirrors RepoPage: the coverage main pane driven by the shared tab reducer.
+  function CoveragePane({ corpus, staleness }: { corpus: SpecCorpusState; staleness: GuardStaleness }) {
+    const tabs = useGuardCoverageTabs('r1');
+    return <GuardCoveragePage repoId="r1" corpus={corpus} staleness={staleness} staleLoaded tabs={tabs} />;
+  }
+
   function renderCoverage(corpus: SpecCorpusState, url: string, staleness: GuardStaleness = ALL_TRUE) {
     return render(
       <MemoryRouter initialEntries={[url]}>
-        <GuardCoveragePage repoId="r1" corpus={corpus} staleness={staleness} staleLoaded />
+        <CoveragePane corpus={corpus} staleness={staleness} />
         <LocationProbe />
       </MemoryRouter>,
     );

@@ -2,7 +2,9 @@
  * Run one scenario end-to-end in its own sandbox: seed → execute steps (stopping
  * at the first failing step) → map to a `GuardScenarioResult`. A spawn failure,
  * timeout, or setup escape is an `error` (infrastructure); an unmet expectation is
- * a `fail` (code-side drift candidate). Evidence is written for both, never for a pass.
+ * a `fail` (code-side drift candidate). Evidence is written for every EXECUTED
+ * outcome — pass included (a green transcript is the proof of what ran) — but not
+ * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
@@ -23,6 +25,14 @@ export interface RunScenarioContext {
   resolvedEntry: string[]
   recipeEnv?: Record<string, string>
   stepTimeoutMs: number
+  /**
+   * Write the evidence transcript for a `pass` too (proof of what executed). A
+   * fail/error always writes its bundle; this only gates the pass. Off for the
+   * generator's birth validation, whose passing candidates leave no committed run
+   * to anchor a transcript — the very next real run captures it (birth-time pass
+   * evidence stays uncaptured, per the plan). Defaults on for a real run.
+   */
+  capturePassEvidence: boolean
 }
 
 /**
@@ -188,7 +198,23 @@ export async function runScenario(
       }
     }
 
-    return { ...base, outcome: 'pass', durationMs: Date.now() - start }
+    // A pass earns the same evidence bundle as a fail/error: the transcript is the
+    // proof of what executed, not a bare checkmark. No failing step to point at.
+    // Skipped for birth validation, whose passing candidates have no run to anchor.
+    const evidencePath = ctx.capturePassEvidence
+      ? writeEvidence({
+          repoRoot: ctx.repoRoot,
+          runId: ctx.runId,
+          scenarioId: scenario.id,
+          title: scenario.title,
+          binds: scenario.binds,
+          outcome: 'pass',
+          steps: records,
+          sandboxCwd: sandbox.cwd,
+          envPins: ENV_PINS,
+        })
+      : undefined
+    return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     sandbox.cleanup()
   }

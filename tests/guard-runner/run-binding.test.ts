@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runGuard, buildDocSectionIndex, type GuardScenario } from '@truecourse/guard-runner'
+import { runGuard, buildDocSectionIndex, evidenceRunDir, type GuardScenario } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario } from './helpers.js'
 
 const repos: string[] = []
@@ -51,6 +51,8 @@ describe('runGuard — binding resolution', () => {
     const s = res.latest.scenarios[0]
     expect(s.outcome).toBe('pass')
     expect(s.remappedTo).toBeUndefined()
+    // An executed pass now carries its own evidence transcript.
+    expect(s.evidencePath).toBeTruthy()
     expect(res.latest.summary).toMatchObject({ total: 1, pass: 1, stale: 0, orphaned: 0 })
   })
 
@@ -67,6 +69,9 @@ describe('runGuard — binding resolution', () => {
     expect(s.outcome).toBe('stale')
     expect(s.durationMs).toBe(0) // not executed
     expect(s.currentFingerprint).toMatch(/^sha256:/)
+    // A non-executed outcome has nothing to transcribe — no evidence pointer.
+    expect(s.evidencePath).toBeUndefined()
+    expect(fs.existsSync(evidenceRunDir(r, res.latest.run.runId))).toBe(false)
     expect(res.latest.summary.stale).toBe(1)
   })
 
@@ -96,6 +101,8 @@ describe('runGuard — binding resolution', () => {
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
     expect(res.latest.scenarios[0].outcome).toBe('orphaned')
+    // An orphaned scenario never runs, so it carries no evidence pointer.
+    expect(res.latest.scenarios[0].evidencePath).toBeUndefined()
     expect(res.latest.summary.orphaned).toBe(1)
   })
 

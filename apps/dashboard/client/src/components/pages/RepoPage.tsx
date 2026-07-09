@@ -87,7 +87,7 @@ import { useGuardReport } from '@/hooks/useGuardReport';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
 import { useGuardRun } from '@/hooks/useGuardRun';
 import { useGuardView } from '@/hooks/useGuardView';
-import { useGuardSelection } from '@/hooks/useGuardSelection';
+import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
@@ -426,10 +426,11 @@ function RepoPageInner() {
   const guardRun = useGuardRun(repoId);
   // The bidirectional jump from a guard drift into the coverage tab.
   const { openSpecSection } = useGuardView();
-  // Guard's OWN spec-surface selection slice (`?guard`/`?gsec`/`?gconf`) — kept
-  // separate from BL Drift's `?spec`/DriftViewContext so the two never bleed. The
-  // coverage sidebar (reused SpecCorpusView) routes through `open`/`activeKey`.
-  const guardSel = useGuardSelection();
+  // Guard's OWN coverage tab set (`?guard` docs + `?gconf` conflicts + the
+  // within-doc `?gsec` section) — the shared preview/pin tab model, kept separate
+  // from BL Drift's `?spec`/DriftViewContext so the two never bleed. The coverage
+  // sidebar (reused SpecCorpusView) and the main pane share this ONE reducer.
+  const guardCoverageTabs = useGuardCoverageTabs(repoId);
   // Scenarios-tab data, hoisted here (like contractsTree/verifyState) so the left
   // panel and the main pane read ONE fetch and the guard reload key refreshes both.
   const guardScenarios = useGuardScenarios(repoId, leftTab === 'scenarios', guardReloadKey);
@@ -1582,8 +1583,8 @@ function RepoPageInner() {
             <SpecCorpusView
               repoId={repoId}
               corpus={specCorpus}
-              activeKey={guardSel.activeKey}
-              onOpen={guardSel.open}
+              activeKey={guardCoverageTabs.activeId}
+              onOpen={guardCoverageTabs.open}
               onDecision={refetchStaleness}
             />
           )}
@@ -2015,6 +2016,7 @@ function RepoPageInner() {
               prNumber={prNumber}
               prRef={refForTabs}
               reloadKey={guardReloadKey}
+              tabs={guardCoverageTabs}
             />
           ) : leftTab === 'scenarios' ? (
             // Guard Scenarios: the shared GuardTabStrip (permanent Overview tab +

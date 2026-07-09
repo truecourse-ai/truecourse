@@ -4,16 +4,17 @@
  * and was NOT committed as a guard, so the developer must judge "generation defect
  * or real drift." To make that call ON ONE SCREEN (plan item 19) the detail shows
  * everything: the binding (doc § section + view-in-spec), the failed step's
- * expected/actual, the authored scenario YAML (the exact commands it ran), and — on
- * demand — the full evidence transcript from disk (the same viewer the run-failure
- * detail uses). A finding the user judges noise is dismissible (item 20): the action
- * writes `decisions.json` and the next generate skips the claim; until then the
- * report snapshot still lists it, so a dismissed finding shows an Un-dismiss +
- * "takes effect next generate" note. Read-only otherwise; drift-vs-defect is theirs.
+ * expected/actual, the authored scenario YAML (the exact commands it ran), and the
+ * full evidence transcript from disk (fetched on mount, the same viewer the
+ * run-failure detail uses). A finding the user judges noise is dismissible (item
+ * 20): the action writes `decisions.json` and the next generate skips the claim;
+ * until then the report snapshot still lists it, so a dismissed finding shows an
+ * Un-dismiss + "takes effect next generate" note. Read-only otherwise; drift-vs-
+ * defect is theirs. Rendered as tab content, so the tab strip owns the close.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, X } from 'lucide-react';
+import { ArrowUpRight, Ban } from 'lucide-react';
 import * as api from '@/lib/api';
 import type { GuardClaimIdentity } from '@/lib/api';
 import { sectionLeaf } from '@/lib/guard-drifts';
@@ -24,11 +25,12 @@ const PRE =
   'mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const BTN =
-  'rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
+  'inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
 
 export function GuardFindingDetail({
   repoId,
   row,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for RepoPage's wiring; the tab strip owns the close now (unused, clean up later)
   onClose,
   onOpenSpec,
   onDismiss,
@@ -36,6 +38,7 @@ export function GuardFindingDetail({
 }: {
   repoId: string;
   row: GuardFindingRowData;
+  /** Unused — the tab strip's X is the only close. Kept for the RepoPage caller. */
   onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
   /** Dismiss this finding's claim (writes decisions.json); parent refetches decisions. */
@@ -45,11 +48,11 @@ export function GuardFindingDetail({
 }) {
   const f = row.finding;
 
-  // Evidence transcript, loaded on demand (mirrors GuardDriftDetail): the parent
-  // keys this component by finding id, so a selection change resets all state; the
-  // mounted ref closes the async gap so a stale fetch never writes the wrong pane.
+  // Evidence transcript — the full birth-validation transcript from disk, fetched
+  // on mount and shown expanded (the reader came to read it). The parent keys this
+  // component by finding id, so a selection change resets all state; the mounted
+  // ref closes the async gap so a stale fetch never writes the wrong pane.
   const [evidence, setEvidence] = useState<string | null>(null);
-  const [showEvidence, setShowEvidence] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const mounted = useRef(true);
@@ -60,24 +63,21 @@ export function GuardFindingDetail({
     };
   }, []);
 
-  const toggleEvidence = useCallback(async () => {
-    if (showEvidence) {
-      setShowEvidence(false);
-      return;
-    }
-    setShowEvidence(true);
-    if (evidence == null && f.evidencePath) {
-      setBusy(true);
-      try {
-        const text = await api.getGuardFindingEvidence(repoId, f.evidencePath);
+  useEffect(() => {
+    if (!f.evidencePath) return;
+    setBusy(true);
+    api
+      .getGuardFindingEvidence(repoId, f.evidencePath)
+      .then((text) => {
         if (mounted.current) setEvidence(text);
-      } catch (e) {
+      })
+      .catch((e) => {
         if (mounted.current) setEvidence(e instanceof Error ? e.message : 'Evidence unavailable.');
-      } finally {
+      })
+      .finally(() => {
         if (mounted.current) setBusy(false);
-      }
-    }
-  }, [showEvidence, evidence, repoId, f.evidencePath]);
+      });
+  }, [repoId, f.evidencePath]);
 
   // The dismissal identity keys on the extracted claim's stable text (`f.claim`),
   // not the scenario title — the same identity generate matches. An old report with
@@ -101,7 +101,7 @@ export function GuardFindingDetail({
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header — title is primary; the section slug rides as small mono meta. */}
-      <div className="flex items-start justify-between gap-3 border-b border-border bg-card px-6 py-4">
+      <div className="flex items-start gap-3 border-b border-border bg-card px-6 py-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <GuardFindingBadge />
@@ -122,49 +122,49 @@ export function GuardFindingDetail({
             {f.title}
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close finding"
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       {/* Body */}
       <div className="flex-1 space-y-4 overflow-auto px-6 py-4">
-        {/* Binding */}
+        {/* Binding + actions — "View in spec" and "Dismiss finding" share one row.
+            A dismissal takes effect on the next generate (the report is a snapshot),
+            so a dismissed finding still lists here with an Un-dismiss + note. */}
         <div>
           <div className={LABEL}>Binding</div>
           <div className="break-all font-mono text-sm text-foreground">{f.doc}</div>
           <div className="break-all text-sm leading-relaxed text-muted-foreground">§ {f.anchor}</div>
-          <div>
-            <button type="button" onClick={() => onOpenSpec(f.doc, f.anchor)} className={`mt-1.5 inline-flex items-center gap-1 ${BTN}`}>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => onOpenSpec(f.doc, f.anchor)} className={BTN}>
               View in spec
               <ArrowUpRight className="h-3 w-3" />
             </button>
-          </div>
-        </div>
-
-        {/* Dismiss / Un-dismiss — inline action; a dismissal takes effect on the next
-            generate (the report is a snapshot), so a dismissed finding still lists here. */}
-        {claimIdentity && (
-          <div>
-            {row.dismissed ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" disabled={dismissing} onClick={() => void runDismiss(onUndismiss)} className={`${BTN} disabled:opacity-50`}>
+            {claimIdentity &&
+              (row.dismissed ? (
+                <button
+                  type="button"
+                  disabled={dismissing}
+                  onClick={() => void runDismiss(onUndismiss)}
+                  className={`${BTN} disabled:opacity-50`}
+                >
+                  <Ban className="h-3 w-3" />
                   {dismissing ? 'Working…' : 'Un-dismiss'}
                 </button>
-                <span className="text-[11px] text-muted-foreground">Dismissed — takes effect next generate.</span>
-              </div>
-            ) : (
-              <button type="button" disabled={dismissing} onClick={() => void runDismiss(onDismiss)} className={`${BTN} disabled:opacity-50`}>
-                {dismissing ? 'Working…' : 'Dismiss finding'}
-              </button>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  disabled={dismissing}
+                  onClick={() => void runDismiss(onDismiss)}
+                  className={`${BTN} disabled:opacity-50`}
+                >
+                  <Ban className="h-3 w-3" />
+                  {dismissing ? 'Working…' : 'Dismiss finding'}
+                </button>
+              ))}
           </div>
-        )}
+          {claimIdentity && row.dismissed && (
+            <div className="mt-1.5 text-[11px] text-muted-foreground">Dismissed — takes effect next generate.</div>
+          )}
+        </div>
 
         {/* Blast radius — resolving this finding releases its section's held work. */}
         {row.heldCount > 0 && (
@@ -193,19 +193,14 @@ export function GuardFindingDetail({
           was not committed as a guard; regenerate once the section (or the engine) is fixed, or dismiss it as noise.
         </p>
 
-        {/* Evidence — the full transcript from disk, on demand (never truncated),
-            the same viewer the run-failure detail embeds. */}
+        {/* Evidence — the full transcript from disk (never truncated), the same
+            viewer the run-failure detail embeds, always expanded. */}
         {f.evidencePath && (
           <div>
             <div className={LABEL}>Evidence</div>
-            <button type="button" onClick={() => void toggleEvidence()} className={BTN}>
-              {showEvidence ? 'Hide evidence' : 'View evidence'}
-            </button>
-            {showEvidence && (
-              <pre className={PRE} aria-label="evidence transcript">
-                {busy ? 'Loading transcript…' : evidence ?? ''}
-              </pre>
-            )}
+            <pre className={PRE} aria-label="evidence transcript">
+              {busy ? 'Loading transcript…' : evidence ?? ''}
+            </pre>
           </div>
         )}
 

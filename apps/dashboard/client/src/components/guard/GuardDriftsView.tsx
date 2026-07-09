@@ -121,7 +121,6 @@ export function GuardDriftsView({
               repoId={repoId}
               scenario={activeScenario}
               runId={run.run.runId}
-              onClose={() => close(activeScenario.id)}
               onOpenSpec={openSpecSection}
             />
           ) : activeId ? (

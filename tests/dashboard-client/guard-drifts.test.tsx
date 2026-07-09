@@ -2,8 +2,10 @@
  * Guard Runs view tests: the selected run's FULL results — severity-first ordering
  * of the non-pass drifts, the collapsible "passed" group (expanded when small,
  * collapsed when large, previewable pass rows), row → detail (failing step's
- * expected/actual for a drift; the `pass · Nms` last result and NO evidence section
- * for a pass), the on-demand evidence transcript fetch, the "view in spec"
+ * expected/actual for a drift; the `pass · Nms` last result for a pass — with its
+ * own evidence transcript when the run captured one, none for an older pass without),
+ * the evidence transcript fetched on mount and shown expanded (no
+ * toggle), the "view in spec"
  * deep-link params, the all-green green-list (never an empty state), and the
  * no-run empty state. Fetches are stubbed the house way (`vi.stubGlobal('fetch', …)`
  * routed by URL); mounted under a MemoryRouter (the view reads/writes `?gdrift=`
@@ -183,7 +185,7 @@ describe('GuardDriftsView — passed group', () => {
     expect(screen.getByRole('button', { name: 'Collapse passed scenarios' })).toBeInTheDocument();
   });
 
-  it('opens a passing scenario in the detail pane — last result, no evidence section', async () => {
+  it('opens a passing scenario WITHOUT evidence (older run) — last result, no evidence section', async () => {
     const user = userEvent.setup();
     stubFetch();
     renderView();
@@ -192,12 +194,46 @@ describe('GuardDriftsView — passed group', () => {
     // unique to the detail pane; the `pass · 4ms` string also appears on the row).
     expect(await screen.findByText('Last result')).toBeInTheDocument();
     expect(screen.getAllByText('pass · 4ms').length).toBeGreaterThanOrEqual(1);
-    // Passes have no evidence transcript — no evidence button.
+    // A pass from a run that captured no transcript (no evidencePath) shows none —
+    // no evidence block, no toggle, no placeholder noise.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
-    // The YAML source is still available, and the binding is shown.
-    expect(screen.getByText('View YAML source')).toBeInTheDocument();
+    expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
+    // The YAML source renders open (no toggle), and the binding is shown.
+    expect(screen.queryByText('View YAML source')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('scenario source')).toHaveTextContent('guard: 1');
     expect(screen.getByText('§ auth/ok')).toBeInTheDocument();
     // No expected/actual failure detail for a pass.
+    expect(screen.queryByText('Expected')).not.toBeInTheDocument();
+  });
+
+  it('opens a passing scenario WITH evidence — renders its transcript open on mount (evidence for passes too)', async () => {
+    const user = userEvent.setup();
+    // A pass whose run captured a transcript carries an evidencePath.
+    const withPassEvidence: GuardLatest = {
+      ...LATEST,
+      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+      scenarios: [
+        {
+          id: 's-pass',
+          title: 'passing claim',
+          binds: binds('auth/ok'),
+          outcome: 'pass',
+          durationMs: 4,
+          evidencePath: 'guard/evidence/run1/s-pass/transcript.txt',
+        },
+      ],
+    };
+    stubFetch({ latest: withPassEvidence });
+    renderView();
+    await user.click(await screen.findByText('passing claim'));
+    // Still the positive last-result block…
+    expect(await screen.findByText('Last result')).toBeInTheDocument();
+    // …plus its own transcript, fetched on mount and shown open like a failure's
+    // (no toggle) — a green guard's proof of what executed.
+    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
+    expect(screen.getByLabelText('evidence transcript')).toBeInTheDocument();
+    // No failure detail, though — a pass has no expected/actual.
     expect(screen.queryByText('Expected')).not.toBeInTheDocument();
   });
 });
@@ -215,12 +251,24 @@ describe('GuardDriftsView — detail', () => {
     expect(screen.getByText('§ authentication/login/rate-limiting')).toBeInTheDocument();
   });
 
-  it('fetches and renders the evidence transcript on demand', async () => {
+  it('renders the evidence transcript expanded on mount', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    await user.click(await screen.findByText('View evidence'));
+    // No View/Hide evidence toggle — the transcript loads on mount, shown expanded.
+    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
     expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
+  });
+
+  it('renders no close X of its own — the tab strip owns the close', async () => {
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByText('login rate limits'));
+    await screen.findByText('exit code 1');
+    // The detail pane renders no own X (its old "Close scenario" affordance)…
+    expect(screen.queryByLabelText('Close scenario')).not.toBeInTheDocument();
+    // …only the tab strip's per-tab close (Close s-fail) remains.
+    expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });
 
   it('carries the doc + section params on the "view in spec" jump', async () => {
@@ -347,30 +395,25 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
     );
   }
 
-  it('drops the evidence pane (and its transcript) when moving from a fail to a pass, and never auto-shows another fail’s evidence', async () => {
+  it('renders each scenario’s OWN evidence on selection and never bleeds a stale transcript across selections', async () => {
     const user = userEvent.setup();
     stubPerScenarioEvidence();
     renderView();
 
-    // Open the failed scenario and reveal its evidence transcript.
+    // Open the failed scenario — its evidence loads on mount, shown expanded.
     await user.click(await screen.findByText('login rate limits'));
-    await user.click(await screen.findByText('View evidence'));
     expect(await screen.findByText('EVIDENCE-FOR-s-fail')).toBeInTheDocument();
 
     // Single-click the passing scenario (preview replaces the tab): a pass has NO
-    // evidence section and the failed transcript must be gone (the reported bug).
+    // evidence section and the failed transcript must be gone (fresh keyed instance).
     await user.click(screen.getByText('passing claim'));
     expect(await screen.findByText('Last result')).toBeInTheDocument();
-    expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
 
-    // Select ANOTHER failing scenario: the evidence toggle is reset (nothing shown
-    // until an explicit open), and only its OWN transcript appears when opened.
+    // Select ANOTHER failing scenario: only its OWN transcript loads on mount, and
+    // the stale s-fail transcript never bleeds through (the mounted-ref race guard).
     await user.click(screen.getByText('infra broke'));
-    expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
-    expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
-    await user.click(await screen.findByText('View evidence'));
     expect(await screen.findByText('EVIDENCE-FOR-s-error')).toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
   });
