@@ -411,6 +411,9 @@ importers:
       '@truecourse/ee-storage':
         specifier: workspace:*
         version: link:../storage
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../../packages/guard-runner
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../../../packages/llm

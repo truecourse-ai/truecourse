@@ -15,6 +15,7 @@ import type { EeDbHandle } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
+import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
@@ -24,6 +25,7 @@ import { setKvCacheStore } from '@truecourse/llm';
 import {
   PgAnalysisStore,
   PgSpecStore,
+  PgGuardStore,
   PgInferredActionStore,
   PgRepoConfigStore,
   PgUiStateStore,
@@ -48,6 +50,8 @@ export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   // server-side and persists here (per-analysis + LATEST/diff + history as jsonb).
   setAnalysisStore(new PgAnalysisStore(db));
   setSpecStore(new PgSpecStore(db));
+  // Guard run store + committable scenario corpus + dismissedClaims decisions.
+  setGuardStore(new PgGuardStore(db));
   // The dismiss/promote overlay for inferred decisions (shared dashboard logic).
   setInferredActionStore(new PgInferredActionStore(db));
   setRepoConfigStore(new PgRepoConfigStore(db));

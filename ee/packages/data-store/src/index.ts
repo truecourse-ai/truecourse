@@ -13,6 +13,7 @@ export { PgRepoConfigStore, PgUiStateStore } from './config-store.js';
 export { PgRegistryStore } from './registry-store.js';
 export { GhReposRegistryStore } from './gh-repos-registry-store.js';
 export { PgSpecStore } from './spec-store.js';
+export { PgGuardStore } from './guard-store.js';
 export { PgInferredActionStore } from './inferred-action-store.js';
 export {
   JobStore,
