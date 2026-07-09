@@ -96,6 +96,10 @@
       "types": "./dist/lib/guard-store.d.ts",
       "import": "./dist/lib/guard-store.js"
     },
+    "./lib/guard-executor": {
+      "types": "./dist/lib/guard-executor.d.ts",
+      "import": "./dist/lib/guard-executor.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"

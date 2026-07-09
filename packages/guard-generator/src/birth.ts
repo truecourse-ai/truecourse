@@ -11,7 +11,7 @@
  * is surfaced as-is, never retried.
  */
 
-import { runGuard } from '@truecourse/guard-runner'
+import type { GuardExecutor, Recipe } from '@truecourse/guard-runner'
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { ExtractedClaim } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
@@ -33,6 +33,17 @@ export interface BirthOutcome {
 }
 
 export interface BirthOptions {
+  /**
+   * The execution seam every candidate runs through (REQUIRED). The OSS default runs
+   * in-process; EE swaps in a hosted executor. Threaded from `generateGuards`, which
+   * resolves it from core's `getGuardExecutor()`.
+   */
+  executor: GuardExecutor
+  /**
+   * The recipe to build + run against (REQUIRED). The generate flow already has the
+   * discovered/loaded recipe, so it's passed IN rather than re-read from disk.
+   */
+  recipe: Recipe
   /** Reuse the prior round's build (the working tree hasn't changed between rounds). */
   skipBuild?: boolean
   branch?: string | null
@@ -51,12 +62,13 @@ export interface BirthOptions {
 export async function birthValidate(
   repoRoot: string,
   candidates: BirthCandidate[],
-  opts: BirthOptions = {},
+  opts: BirthOptions,
 ): Promise<BirthOutcome[]> {
   if (candidates.length === 0) return []
 
-  const res = await runGuard({
-    repoRoot,
+  const res = await opts.executor({
+    checkoutDir: repoRoot,
+    recipe: opts.recipe,
     scenarios: candidates.map((c) => c.scenario),
     persist: false,
     skipBuild: opts.skipBuild,

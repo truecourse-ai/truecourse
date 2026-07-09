@@ -21,6 +21,9 @@ import {
   writeManifest,
   scenariosDir,
   dismissGuardClaim,
+  defaultGuardExecutor,
+  loadRecipe,
+  recipePath,
 } from '@truecourse/guard-runner'
 import {
   GuardManifestSchema,
@@ -972,6 +975,8 @@ describe('birthValidate — progress forwarding', () => {
     const phases: string[] = []
     const settled: number[] = []
     const outcomes = await birthValidate(r, candidates, {
+      executor: defaultGuardExecutor,
+      recipe: loadRecipe(r, recipePath(r))!.recipe,
       skipBuild: false,
       onPhase: (phase) => phases.push(phase),
       onScenarioSettled: (done, total) => {

@@ -34,6 +34,8 @@ import {
   preflightEntry,
   formatEntryPreflightError,
   isSetupDefectResult,
+  defaultGuardExecutor,
+  type GuardExecutor,
   type Recipe,
   type BuildResult,
   type EntryPreflightResult,
@@ -228,6 +230,13 @@ export interface GenerateGuardsOptions {
   repoRoot: string
   transport?: LlmTransport
   models?: GuardGenerateModels
+  /**
+   * The execution seam birth validation runs through. Core passes
+   * `getGuardExecutor()` (OSS in-process default, or the EE hosted executor);
+   * defaults to `defaultGuardExecutor` when omitted so generate stays runnable
+   * standalone.
+   */
+  executor?: GuardExecutor
   concurrency?: number
   /** Claims per authoring call — `TRUECOURSE_GENERATE_BATCH` env, else 4. */
   batchSize?: number
@@ -304,6 +313,10 @@ function authorCacheKey(claim: ExtractedClaim, section: SectionInput, recipeFing
 
 export async function generateGuards(options: GenerateGuardsOptions): Promise<GuardGenerateResult> {
   const { repoRoot } = options
+  // Birth validation runs through the injected execution seam (OSS in-process by
+  // default); the recipe is the discovered/loaded one below, passed IN so the
+  // executor never re-reads recipe.json.
+  const executor = options.executor ?? defaultGuardExecutor
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -746,7 +759,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         return
       } else {
         birthTotal += round1.length
-        const r1 = await birthValidate(repoRoot, round1, { skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        const r1 = await birthValidate(repoRoot, round1, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
         reconcileBirth()
         birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
         const r1ByRef = new Map<string, typeof r1>()
@@ -799,7 +812,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
           if (retryCandidates.length > 0) {
             birthTotal += retryCandidates.length
-            const r2 = await birthValidate(repoRoot, retryCandidates, { skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+            const r2 = await birthValidate(repoRoot, retryCandidates, { executor, recipe, skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
             reconcileBirth()
             birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
             for (const o of r2) {
