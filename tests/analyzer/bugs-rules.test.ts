@@ -8685,11 +8685,24 @@ function foo() {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/no-undef', () => {
-  it('detects undeclared variable reference in JavaScript', () => {
+  it('detects undeclared variable reference in an ES module', () => {
+    const violations = check(`
+export function greet() {
+  return undeclaredVar.toString();
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('detects undeclared variable reference in a CommonJS module', () => {
+    // CommonJS is a closed scope too — only require/module/exports and the known
+    // Node globals are injected — so an unresolved reference genuinely throws.
     const violations = check(`
 function greet() {
   return undeclaredVar.toString();
 }
+module.exports = { greet };
 `, 'javascript');
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
     expect(matches.length).toBeGreaterThanOrEqual(1);
@@ -8698,7 +8711,7 @@ function greet() {
   it('does not flag declared variables', () => {
     const violations = check(`
 const name = 'Alice';
-function greet() {
+export function greet() {
   return name.toString();
 }
 `, 'javascript');
@@ -8708,9 +8721,49 @@ function greet() {
 
   it('does not flag known globals', () => {
     const violations = check(`
-function run() {
+export function run() {
   setTimeout(() => {}, 100);
   console.log('done');
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag standard browser/JS built-ins (arguments, self, getComputedStyle)', () => {
+    const violations = check(`
+export function measure(el) {
+  const args = arguments.length;
+  const w = self.innerWidth;
+  const style = getComputedStyle(el);
+  return args + w + style.width;
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not fire in a classic script (globals may come from other script tags)', () => {
+    // jQuery/vendor/app globals like `$`, `jQuery`, `abp` are injected by other
+    // <script> tags — invisible here, so a "not defined" claim would be unsound.
+    const violations = check(`
+(function ($) {
+  $.fn.abpToast = function () {
+    return jQuery(this).data(abp.appName);
+  };
+})(jQuery);
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not fire on a free identifier in a bare (non-module) script', () => {
+    // Same reference as the module cases above, but with no import/export/require/
+    // module.exports this is a bare browser script — the identifier could be a
+    // runtime global, so the rule stays silent rather than emit an unsound claim.
+    const violations = check(`
+function greet() {
+  return undeclaredVar.toString();
 }
 `, 'javascript');
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');

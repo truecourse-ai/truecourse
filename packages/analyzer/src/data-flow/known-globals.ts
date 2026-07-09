@@ -1,7 +1,12 @@
 export const JS_GLOBALS = new Set([
   // Browser — global namespaces
-  'window', 'document', 'navigator', 'location', 'history', 'localStorage', 'sessionStorage',
+  'window', 'self', 'top', 'parent', 'frames', 'opener',
+  'document', 'navigator', 'location', 'history', 'localStorage', 'sessionStorage',
   'screen', 'performance', 'crypto', 'caches', 'indexedDB', 'matchMedia',
+  // Browser — window methods commonly used unqualified
+  'getComputedStyle', 'getSelection', 'scrollTo', 'scrollBy', 'scroll',
+  'atob', 'btoa', 'structuredClone', 'reportError',
+  'DOMParser', 'XMLSerializer', 'Image', 'Audio', 'Option', 'Notification',
   // Browser — networking / fetch
   'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
   'URL', 'URLSearchParams', 'Headers', 'Request', 'Response',
@@ -42,6 +47,8 @@ export const JS_GLOBALS = new Set([
   'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'NaN', 'Infinity', 'undefined',
   'encodeURI', 'decodeURI', 'encodeURIComponent', 'decodeURIComponent',
   'eval', 'void', 'typeof', 'instanceof', 'delete', 'in',
+  // `arguments` is implicitly bound in every non-arrow function body.
+  'arguments',
   // TypeScript
   'ReadonlyArray', 'Partial', 'Required', 'Record', 'Pick', 'Omit', 'Exclude', 'Extract',
   'ReturnType', 'Parameters', 'ConstructorParameters', 'InstanceType',

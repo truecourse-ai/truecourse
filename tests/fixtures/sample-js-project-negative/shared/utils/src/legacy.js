@@ -17,6 +17,10 @@ function setGlobal() {
 }
 
 // VIOLATION: bugs/deterministic/no-undef
+// This file is a CommonJS module (module.exports below) — its binding set is
+// closed and only well-known Node globals are injected, so an unresolved free
+// identifier genuinely throws. (Contrast a bare browser <script>, where free
+// names may be provided by sibling scripts — no-undef stays silent there.)
 function useUndefined() {
   return undeclaredFunction();
 }

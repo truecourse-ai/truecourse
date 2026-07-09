@@ -36,8 +36,15 @@ export const deadStoreVisitor: CodeRuleVisitor = {
               const nameNode = decl.childForFieldName('name')
               const value = decl.childForFieldName('value')
               if (nameNode?.type === 'identifier') {
-                if (value) markReadsInExpr(value)
-                lastAssign.set(nameNode.text, { assignNode: decl, hasBeenRead: false })
+                if (value) {
+                  markReadsInExpr(value)
+                  lastAssign.set(nameNode.text, { assignNode: decl, hasBeenRead: false })
+                } else {
+                  // A declaration with no initializer (`var x;`, `let x, y;`)
+                  // stores no value, so it cannot be a dead store. Drop any
+                  // prior tracked store so a later assignment isn't blamed on it.
+                  lastAssign.delete(nameNode.text)
+                }
               }
             }
           }

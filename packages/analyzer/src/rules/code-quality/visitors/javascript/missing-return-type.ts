@@ -20,6 +20,11 @@ export const missingReturnTypeVisitor: CodeRuleVisitor = {
     // Skip constructors
     if (name === 'constructor') return null
 
+    // Skip `set` accessors: TypeScript forbids a return type annotation on a
+    // setter, so it can never satisfy this rule. (A `get` accessor can and
+    // should be annotated, so it is intentionally still flagged.)
+    if (node.children.some((c) => c.type === 'set')) return null
+
     // Skip framework route conventions (Next.js route handlers, Remix route
     // module exports, Next.js metadata helpers). The framework dictates the
     // signature, so explicit return types are rarely added in practice.

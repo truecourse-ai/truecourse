@@ -630,9 +630,14 @@ function tracesAnyToExternalSource(
     // unresolved import. Trace through the constructor expression.
     return tracesAnyToExternalSource(checker, node.expression, visited)
   }
-  if (ts.isAsExpression(node)) {
-    // `x as any` is an explicit cast — the any is intentional, not external.
+  if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+    // `x as any` / `<any>x` is an explicit cast — the any is intentional.
     if (node.type.kind === ts.SyntaxKind.AnyKeyword) return false
+    // `x as ExternalType` is `any` only because the target type can't resolve
+    // without node_modules (e.g. `{} as HttpClient`, `v as PagedResultDto<T>`).
+    // That's external noise, not a real unsafe any — don't recurse into the
+    // (possibly well-typed) cast expression.
+    if (typeReferenceIsExternal(checker, node.type)) return true
     return tracesAnyToExternalSource(checker, node.expression, visited)
   }
   if (ts.isNonNullExpression(node) || ts.isParenthesizedExpression(node)) {

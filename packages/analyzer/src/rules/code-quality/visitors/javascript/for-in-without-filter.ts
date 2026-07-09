@@ -29,7 +29,14 @@ export const forInWithoutFilterVisitor: CodeRuleVisitor = {
         if (fn?.type === 'member_expression') {
           const prop = fn.childForFieldName('property')
           if (prop?.text === 'hasOwnProperty' || prop?.text === 'hasOwn') return true
+          // A hoisted alias invoked as `hasOwn.call(obj, key)` / `.apply(...)`:
+          // the object is a local bound to `Object.prototype.hasOwnProperty`.
+          const receiver = fn.childForFieldName('object')
+          if (receiver?.type === 'identifier' && isHoistedHasOwnGuard(node, receiver.text)) return true
         }
+        // A hoisted helper invoked as `hasOwnProp(obj, key)` whose body wraps
+        // hasOwnProperty/hasOwn.
+        if (fn?.type === 'identifier' && isHoistedHasOwnGuard(node, fn.text)) return true
       }
       // `hasOwnProperty` / `hasOwn` accessed as a member anywhere in the body is
       // a filter too — this catches `Object.prototype.hasOwnProperty.call(obj,
@@ -58,6 +65,66 @@ export const forInWithoutFilterVisitor: CodeRuleVisitor = {
     }
     return null
   },
+}
+
+const HAS_OWN_RE = /\b(hasOwnProperty|hasOwn)\b/
+
+/**
+ * True when `name` resolves to a hoisted own-property guard: either a variable
+ * alias bound to `Object.prototype.hasOwnProperty` / `{}.hasOwnProperty` /
+ * `Object.hasOwn` (used as `name.call(obj, key)`), or a helper function whose
+ * body wraps such a check (used as `name(obj, key)`). Legacy/jQuery-style code
+ * routinely hoists the guard out of the loop, so a filter can exist without the
+ * literal `hasOwnProperty` token appearing inside the loop body.
+ */
+function isHoistedHasOwnGuard(node: SyntaxNode, name: string): boolean {
+  let scope: SyntaxNode | null = node.parent
+  while (scope) {
+    if (scopeDefinesHasOwnGuard(scope, name)) return true
+    if (scope.type === 'program') break
+    scope = scope.parent
+  }
+  return false
+}
+
+function scopeDefinesHasOwnGuard(scope: SyntaxNode, name: string): boolean {
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    // `var/let/const name = <expr with hasOwnProperty/hasOwn>`
+    if (n.type === 'variable_declarator') {
+      const declName = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (declName?.type === 'identifier' && declName.text === name && value && HAS_OWN_RE.test(value.text)) {
+        found = true
+        return
+      }
+    }
+    // `function name(...) { ... hasOwnProperty/hasOwn ... }`
+    if (n.type === 'function_declaration') {
+      const fnName = n.childForFieldName('name')
+      if (fnName?.type === 'identifier' && fnName.text === name && HAS_OWN_RE.test(n.text)) {
+        found = true
+        return
+      }
+    }
+    // Don't descend into unrelated nested functions (their inner locals can't
+    // define this name for the loop's scope chain); the loop's own ancestors
+    // are visited via the outer scope walk.
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return found
 }
 
 /**

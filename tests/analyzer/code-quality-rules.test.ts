@@ -890,6 +890,56 @@ describe('code-quality/deterministic/unused-expression', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag a bang-prefixed IIFE', () => {
+    const violations = check(`!function () { init(); }();`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a UMD comma-sequence wrapper', () => {
+    const violations = check(`(root = root || self, root.factory = factory(root));`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a short-circuit call', () => {
+    const violations = check(`window.abp && window.abp.init();`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a ternary used for dispatch', () => {
+    const violations = check(`ready ? run() : defer(run);`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a side-effect-free member access', () => {
+    const violations = check(`function foo() { obj.prop; }`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(1);
+  });
+});
+
+describe('code-quality/deterministic/missing-return-type', () => {
+  it('flags a class method missing a return type', () => {
+    const violations = check(`class C { compute(x: number) { return x + 1; } }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-return-type');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag a set accessor (setters cannot have a return type)', () => {
+    const violations = check(`class C { set name(value: string) { this._name = value; } }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-return-type');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a get accessor missing a return type', () => {
+    const violations = check(`class C { get name() { return this._name; } }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-return-type');
+    expect(matches).toHaveLength(1);
+  });
 });
 
 describe('code-quality/deterministic/redundant-jump', () => {
@@ -1749,6 +1799,34 @@ describe('code-quality/deterministic/dead-store', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dead-store');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag an uninitialized declaration list later assigned', () => {
+    // `var x, y;` stores no value — a later `x = ...` is the first store, not an
+    // overwrite of a dead one.
+    const violations = check(`
+      function foo() {
+        var x, y;
+        x = compute();
+        y = compute2();
+        return x + y;
+      }
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dead-store');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a genuine dead store after an uninitialized declaration', () => {
+    const violations = check(`
+      function foo() {
+        let x;
+        x = 1;
+        x = 2;
+        return x;
+      }
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dead-store');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('code-quality/deterministic/unused-collection', () => {
@@ -1980,6 +2058,24 @@ describe('code-quality/deterministic/commented-out-code', () => {
     const violations = check(`// This is a description of the algorithm`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
     expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag prose that quotes a code call and ends with a terminator', () => {
+    const violations = check(`// Call abp.notify.success(message) to show a toast on completion;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a descriptive sentence referencing a function', () => {
+    const violations = check(`// Returns the rendered width from getComputedStyle(el);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a genuinely commented-out statement that reads as code', () => {
+    const violations = check(`// config.timeout = 5000;\n// setup(config);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
+    expect(matches).toHaveLength(1);
   });
 });
 
@@ -2401,6 +2497,44 @@ describe('code-quality/deterministic/for-in-without-filter', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/for-in-without-filter');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag when a hoisted alias of hasOwnProperty is used as the guard', () => {
+    const violations = check(`
+      var hasOwn = Object.prototype.hasOwnProperty;
+      for (var key in obj) {
+        if (hasOwn.call(obj, key)) {
+          process(key);
+        }
+      }
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/for-in-without-filter');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag when a hoisted helper function wraps the guard', () => {
+    const violations = check(`
+      function hasOwnProp(o, key) {
+        return Object.prototype.hasOwnProperty.call(o, key);
+      }
+      for (var key in obj) {
+        if (!hasOwnProp(obj, key)) continue;
+        process(key);
+      }
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/for-in-without-filter');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags for-in when an unrelated hoisted helper is called', () => {
+    const violations = check(`
+      function transform(o, key) { return o[key] * 2; }
+      for (var key in obj) {
+        results.push(transform(obj, key));
+      }
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/for-in-without-filter');
+    expect(matches).toHaveLength(1);
+  });
 });
 
 describe('code-quality/deterministic/with-statement', () => {
@@ -2581,13 +2715,44 @@ describe('code-quality/deterministic/require-yield', () => {
 });
 
 describe('code-quality/deterministic/class-prototype-assignment', () => {
-  it('detects prototype method assignment', () => {
+  it('detects prototype method assignment on an ES6 class', () => {
+    const violations = check(`
+      class Animal { constructor(name) { this.name = name; } }
+      Animal.prototype.speak = function() { return this.name; };
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects prototype assignment on an exported TypeScript class', () => {
+    // TS class names are `type_identifier`, not `identifier` — the receiver must
+    // still be recognised as a declared class.
+    const violations = check(`
+      export class Service { name = 'service'; }
+      Service.prototype.toString = function() { return this.name; };
+    `, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects prototype assignment on a class expression bound to a name', () => {
+    const violations = check(`
+      const Animal = class { constructor(name) { this.name = name; } };
+      Animal.prototype.speak = function() { return this.name; };
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag ES5 constructor-function prototype assignment', () => {
+    // Assigning to the prototype of a plain constructor function is the correct,
+    // idiomatic ES5 pattern — there is no ES6 class to be inconsistent with.
     const violations = check(`
       function Animal(name) { this.name = name; }
       Animal.prototype.speak = function() { return this.name; };
     `, 'javascript');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag extend-native (handled by separate rule)', () => {
@@ -3229,6 +3394,30 @@ describe('code-quality/deterministic/no-extraneous-class', () => {
         constructor() {}
       }
     `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-extraneous-class');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a decorated Angular module with only static forRoot', () => {
+    const violations = check(`
+      @NgModule({ imports: [] })
+      export class FeatureModule {
+        static forRoot(config: Config): ModuleWithProviders<FeatureModule> {
+          return { ngModule: FeatureModule, providers: [] };
+        }
+      }
+    `, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-extraneous-class');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a decorated (non-exported) static-only class', () => {
+    const violations = check(`
+      @Injectable()
+      class Registry {
+        static create(): Registry { return new Registry(); }
+      }
+    `, 'typescript');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-extraneous-class');
     expect(matches).toHaveLength(0);
   });
@@ -5178,6 +5367,41 @@ describe('code-quality/deterministic/max-nesting-depth', () => {
     const violations = check(`if (a) { if (b) { x(); } }`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/max-nesting-depth');
     expect(matches).toHaveLength(0);
+  });
+
+  it('does not count an else-if chain as cumulative nesting depth', () => {
+    // A flat `if … else if …` chain is a single level, not five.
+    const violations = check(`
+function f(x) {
+  if (x === 1) { a(); }
+  else if (x === 2) { b(); }
+  else if (x === 3) { c(); }
+  else if (x === 4) { d(); }
+  else if (x === 5) { e(); }
+  else { f(); }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/max-nesting-depth');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags real nesting that occurs inside an else-if branch', () => {
+    const violations = check(`
+function f(x) {
+  if (x === 1) { a(); }
+  else if (x === 2) {
+    for (const i of list) {
+      while (cond) {
+        if (deep) {
+          if (deeper) { boom(); }
+        }
+      }
+    }
+  }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/max-nesting-depth');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -7427,6 +7651,43 @@ function foo() {
   return x;
 }
 `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a var redeclared in the block where it is used', () => {
+    // `var` is function-scoped, so redeclaring `m` in a second block is legal.
+    // The use of `m` sits inside its own declaring block — not cross-block.
+    const violations = check(`
+function foo() {
+  if (a) { var m = 1; }
+  if (b) { var m = 2; use(m); }
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags a redeclared var used outside every declaring block', () => {
+    const violations = check(`
+function foo() {
+  if (a) { var m = 1; }
+  if (b) { var m = 2; }
+  use(m);
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag a for-loop counter used within the loop body', () => {
+    const violations = check(`
+function foo() {
+  for (var i = 0; i < 10; i++) {
+    console.log(i);
+  }
+}
+`, 'javascript');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
     expect(matches).toHaveLength(0);
   });

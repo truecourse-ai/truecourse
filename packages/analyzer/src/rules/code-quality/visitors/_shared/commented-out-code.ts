@@ -35,7 +35,15 @@ function looksLikeProse(line: string): boolean {
   const codePunct = (line.match(/[;{}()=<>[\]]/g) ?? []).length
   // A run of ordinary words with almost no code punctuation reads as a sentence,
   // not a statement — even when it ends with `:` or `.`.
-  return words.length >= 4 && codePunct <= 1
+  if (words.length >= 4 && codePunct <= 1) return true
+  // A natural-language sentence that merely *quotes* a code fragment: it opens
+  // with a capitalized word followed by a lowercase word (e.g. "See foo.bar();",
+  // "Call abp.notify.success(text);", "Returns the width of getSize();"). A real
+  // statement starts with a keyword/identifier construct — `return …`, `const …`,
+  // `Foo.bar(…)` — never a `Capitalized lowercase` word pair. This keeps prose
+  // that embeds an example call from being scored as commented-out code.
+  if (words.length >= 4 && /^[A-Z][a-z]+\s+[a-z]/.test(line)) return true
+  return false
 }
 
 /**
