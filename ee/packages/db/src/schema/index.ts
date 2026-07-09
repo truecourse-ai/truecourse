@@ -16,6 +16,7 @@ export * from './integrations.js';
 export * from './jobs.js';
 export * from './traces.js';
 export * from './settings.js';
+export * from './guard.js';
 
 import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions, ghPrs } from './github.js';
 import { llmProviderConfig } from './llm.js';
@@ -30,6 +31,7 @@ import { integrationConnections } from './integrations.js';
 import { jobs, notifications, pendingBaselines } from './jobs.js';
 import { llmTraces } from './traces.js';
 import { workspaceSettings } from './settings.js';
+import { guardRuns, guardResults, guardScenarioSets } from './guard.js';
 
 export const schema = {
   ghInstallations,
@@ -59,4 +61,7 @@ export const schema = {
   pendingBaselines,
   llmTraces,
   workspaceSettings,
+  guardRuns,
+  guardResults,
+  guardScenarioSets,
 };
