@@ -105,13 +105,21 @@ jobs:
           fi
 
           since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+          # Defence-in-depth: a campaign-level tracker ([<SCOPE>fp-campaign-stuck],
+          # [<SCOPE>fp-stale-pr], …) is handled by notify-campaign-alert /
+          # notify-stale-pr and must never appear in this fix-burst rollup. It
+          # only could if a routine mislabels it with a fix label (the
+          # fp-next-fix / drift-fp-next-fix prompts forbid this). Drop any such
+          # title here so a stray label can't double-notify: a genuine fix issue
+          # is titled [<SCOPE>fp-<rule-key>] and never contains these tokens.
           issues_json=$(gh issue list \
             --repo "$REPO" \
             --label "$LABEL" \
             --state open \
             --search "created:>${since}" \
             --json number,title \
-            --limit 200)
+            --limit 200 \
+            | jq '[.[] | select(.title | test("campaign-|stale-pr") | not)]')
 
           count=$(echo "$issues_json" | jq 'length')
           if [ "$count" -eq 0 ]; then

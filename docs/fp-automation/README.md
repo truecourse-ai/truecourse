@@ -467,7 +467,11 @@ and the session has 0 successes):
      the campaign can't self-progress. File/update a single
      `[fp-campaign-stuck] <owner>/<repo>` tracking issue (TP rate +
      checklist of blocked issues, `cc @mushgev`) — this fires the TG
-     alert — then end. **Never dead-end silently.**
+     alert — then end. **Never dead-end silently.** The tracker is
+     labelled `fp-target:<owner>-<repo>` only, **never `fp-fix`**: its
+     alert comes from `notify-campaign-alert` (title-tag driven), and a
+     `fp-fix` label would both double-notify via `notify-fix-burst` and
+     make the fix loop pick the tracker up as a fixable issue.
 5. End. The campaign-close PR merge fires `fp-campaign-close` and
    `fp-discover` in parallel.
 

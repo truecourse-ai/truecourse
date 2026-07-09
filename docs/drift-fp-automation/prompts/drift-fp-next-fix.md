@@ -353,6 +353,14 @@ Enter when the **pickable** queue is empty AND `successes == 0` (includes all-re
      `[<SCOPE>drift-fp-campaign-stuck] <owner>/<repo>` tracking issue with the current state.
      Body carries: current `fp` count + `fp_rate`, the close gate `fp == 0`, a checklist
      of open `<SCOPE>drift-fp-blocked` issues. End with `cc @mushgev`.
+     - **Label the tracker with `drift-fp-target:<owner>-<repo>` ONLY. Do NOT apply the
+       `<SCOPE>drift-fp-fix` label to this tracker.** It is a campaign-level human-signal
+       issue, not a fix-queue item. Its Telegram alert comes from `notify-campaign-alert`,
+       which keys on the `fp-campaign-stuck]` **title** tag, not a label, so no extra label
+       is needed to notify. Applying the fix label would (1) sweep the tracker into the
+       `notify-fix-burst` rollup so the same issue fires a **second** Telegram message,
+       and (2) make it match the per-issue loop's `label:<SCOPE>drift-fp-fix` search so a
+       later run picks it up as a fixable FP issue and then blocks it.
 
      **Notify-on-change protocol** — the Telegram alert (`notify-campaign-alert`) only
      fires on `issues.opened` / `issues.reopened`, not on edits/comments. So:

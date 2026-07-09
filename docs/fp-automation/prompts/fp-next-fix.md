@@ -442,6 +442,21 @@ path in a session that already produced fixes.)
        `<SCOPE>fp-blocked` issue (number + rule_key) that must be resolved by
        a human before automation can proceed. End the body with
        `cc @mushgev`.
+       - **Label the tracker with `fp-target:<owner>-<repo>` ONLY. Do NOT
+         apply the `<SCOPE>fp-fix` label to this tracker.** It is a
+         campaign-level human-signal issue, not an FP-fix queue item. The
+         Telegram alert for it comes from `notify-campaign-alert`, which keys
+         on the `fp-campaign-stuck]` **title** tag, not on a label — so no
+         extra label is needed to notify. The `<SCOPE>fp-fix` label is not
+         just unnecessary, it is actively harmful here:
+         (1) it sweeps the tracker into the `notify-fix-burst` rollup, so the
+         same issue fires a **second** Telegram message ("N new
+         `<SCOPE>fp-fix` issue(s) filed"); and (2) it makes the tracker match
+         step 1's `label:<SCOPE>fp-fix` search, so the next fp-next-fix run
+         would pick it up as a fixable FP issue and then `<SCOPE>fp-blocked`
+         it on the missing YAML. This mirrors the `fp-stale-pr-notify`
+         tracker, which carries its own `<SCOPE>fp-stale-pr` label and never
+         the fix-queue label.
      - If one already exists → add a comment refreshing the `tp_rate`
        and the current blocked list (don't open a duplicate).
      - Then end the session. Opening/commenting the tracking issue is
