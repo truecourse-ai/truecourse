@@ -67,21 +67,21 @@ describe('readGuardEvidenceAt — birth-finding evidence by path', () => {
     fs.writeFileSync(path.join(dir, 'stdout.txt'), 'stdout body\n');
   }
 
-  it('reads a birth-evidence transcript addressed by its evidence dir', () => {
+  it('reads a birth-evidence transcript addressed by its evidence dir', async () => {
     const r = repo();
     seedEvidence(r);
-    expect(readGuardEvidenceAt(r, evDir)).toBe('the full transcript\n');
-    expect(readGuardEvidenceAt(r, evDir, 'stdout.txt')).toBe('stdout body\n');
+    expect(await readGuardEvidenceAt(r, evDir)).toBe('the full transcript\n');
+    expect(await readGuardEvidenceAt(r, evDir, 'stdout.txt')).toBe('stdout body\n');
   });
 
-  it('returns null for a missing file, an unsafe filename, or a traversal outside guard/evidence', () => {
+  it('returns null for a missing file, an unsafe filename, or a traversal outside guard/evidence', async () => {
     const r = repo();
     seedEvidence(r);
-    expect(readGuardEvidenceAt(r, evDir, 'nope.txt')).toBeNull();
-    expect(readGuardEvidenceAt(r, evDir, '../../secret')).toBeNull();
+    expect(await readGuardEvidenceAt(r, evDir, 'nope.txt')).toBeNull();
+    expect(await readGuardEvidenceAt(r, evDir, '../../secret')).toBeNull();
     // A path that escapes the evidence root is refused even when the file exists.
     fs.writeFileSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'), '{}');
-    expect(readGuardEvidenceAt(r, '.truecourse/guard', 'LATEST.json')).toBeNull();
-    expect(readGuardEvidenceAt(r, '.truecourse/guard/evidence/../../..', 'package.json')).toBeNull();
+    expect(await readGuardEvidenceAt(r, '.truecourse/guard', 'LATEST.json')).toBeNull();
+    expect(await readGuardEvidenceAt(r, '.truecourse/guard/evidence/../../..', 'package.json')).toBeNull();
   });
 });

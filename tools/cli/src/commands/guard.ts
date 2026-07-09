@@ -11,7 +11,8 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { readManifest, readGuardLatest, readGuardResult, guardResultPath } from "@truecourse/guard-runner";
+import { guardResultPath } from "@truecourse/guard-runner";
+import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import type { GuardScenarioResult, GuardGenerateReport } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
@@ -265,7 +266,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // The generate persisted its report at the end (usage + generatedAt); read it
   // back so the summary reuses the exact `guard status` composition. Fall back to
   // the in-memory result if the file is somehow absent.
-  const report: GuardGenerateReport = readGuardResult(repoRoot) ?? { ...guard, generatedAt: new Date().toISOString() };
+  const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)));
 
   if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
@@ -382,9 +383,9 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   p.intro("Guard status");
 
   const summary = composeGuardStatus(
-    readManifest(repoRoot),
-    readGuardLatest(repoRoot),
-    readGuardResult(repoRoot),
+    await readManifest(repoRoot),
+    await readGuardLatest(repoRoot),
+    await readGuardResult(repoRoot),
   );
 
   // Coverage — scenarios/manifest.json.
@@ -467,7 +468,7 @@ export interface RunGuardDriftsOptions {
 
 export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  const latest = readGuardLatest(repoRoot);
+  const latest = await readGuardLatest(repoRoot);
   const drifts = orderGuardDrifts(latest?.scenarios);
 
   if (opts.json) {

@@ -173,7 +173,7 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
-    const decisions = dismissGuardClaim(repo.path, {
+    const decisions = await dismissGuardClaim(repo.path, {
       doc: body.doc,
       anchor: body.anchor,
       title: body.title,
@@ -196,7 +196,7 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
       res.status(400).json({ error: 'undismiss requires { doc, anchor, title }.' });
       return;
     }
-    const decisions = undismissGuardClaim(repo.path, { doc: body.doc, anchor: body.anchor, title: body.title });
+    const decisions = await undismissGuardClaim(repo.path, { doc: body.doc, anchor: body.anchor, title: body.title });
     res.json(decisions);
   } catch (e) {
     next(e);

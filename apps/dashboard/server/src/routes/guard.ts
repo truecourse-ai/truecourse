@@ -46,7 +46,11 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     res.json(
-      composeGuardStatus(readManifest(repo.path), readGuardLatest(repo.path), readGuardResult(repo.path)),
+      composeGuardStatus(
+        await readManifest(repo.path),
+        await readGuardLatest(repo.path),
+        await readGuardResult(repo.path),
+      ),
     );
   } catch (e) {
     next(e);
@@ -57,7 +61,7 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
 router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const latest = readGuardLatest(repo.path);
+    const latest = await readGuardLatest(repo.path);
     if (!latest) {
       res.status(404).json({ error: 'No guard run has been recorded yet.' });
       return;
@@ -71,7 +75,7 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
 router.get('/:id/guard/history', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(readGuardHistory(repo.path));
+    res.json(await readGuardHistory(repo.path));
   } catch (e) {
     next(e);
   }
@@ -80,7 +84,7 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
 router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const run = readGuardRun(repo.path, req.params.runId as string);
+    const run = await readGuardRun(repo.path, req.params.runId as string);
     if (!run) {
       res.status(404).json({ error: 'Guard run not found.' });
       return;
@@ -94,7 +98,7 @@ router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: N
 router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const report = readGuardReport(repo.path);
+    const report = await readGuardReport(repo.path);
     if (!report) {
       res.status(404).json({ error: 'No guard generate report yet.' });
       return;
@@ -128,9 +132,9 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
     }
     res.json(
       composeDocCoverage(doc, content, {
-        manifest: readManifest(repo.path),
-        latest: readGuardLatest(repo.path),
-        result: readGuardReport(repo.path),
+        manifest: await readManifest(repo.path),
+        latest: await readGuardLatest(repo.path),
+        result: await readGuardReport(repo.path),
       }),
     );
   } catch (e) {
@@ -144,7 +148,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
 router.get('/:id/guard/scenarios', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(listGuardScenarios(repo.path));
+    res.json(await listGuardScenarios(repo.path));
   } catch (e) {
     next(e);
   }
@@ -158,7 +162,7 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'Missing ?id=<scenario id>.' });
       return;
     }
-    const source = readGuardScenarioSource(repo.path, id);
+    const source = await readGuardScenarioSource(repo.path, id);
     if (!source) {
       res.status(404).json({ error: `Scenario not found: ${id}` });
       return;
@@ -181,7 +185,7 @@ router.get('/:id/guard/evidence', async (req: Request, res: Response, next: Next
       return;
     }
     const file = req.query.file ? String(req.query.file) : undefined;
-    const content = readGuardEvidence(repo.path, runId, scenarioId, file);
+    const content = await readGuardEvidence(repo.path, runId, scenarioId, file);
     if (content == null) {
       res.status(404).json({ error: 'Evidence not found.' });
       return;
@@ -204,7 +208,7 @@ router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, ne
       return;
     }
     const file = req.query.file ? String(req.query.file) : undefined;
-    const content = readGuardEvidenceAt(repo.path, evidencePath, file);
+    const content = await readGuardEvidenceAt(repo.path, evidencePath, file);
     if (content == null) {
       res.status(404).json({ error: 'Evidence not found.' });
       return;
@@ -221,7 +225,7 @@ router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, ne
 router.get('/:id/guard/decisions', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(readGuardDecisions(repo.path));
+    res.json(await readGuardDecisions(repo.path));
   } catch (e) {
     next(e);
   }

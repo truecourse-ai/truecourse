@@ -7,7 +7,7 @@
 export { runGuard, defaultRunConcurrency } from './run.js'
 export type { RunGuardOptions, RunGuardResult } from './run.js'
 
-export { loadScenarios } from './scenario-loader.js'
+export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
 export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from './recipe.js'
@@ -78,6 +78,7 @@ export {
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
+  sanitizeSegment,
   writeGuardLatest,
   readGuardLatest,
   writeGuardRun,

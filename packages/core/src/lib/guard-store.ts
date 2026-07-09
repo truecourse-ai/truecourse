@@ -1,0 +1,428 @@
+/**
+ * Guard store — the pluggable persistence seam for the guard subsystem, the guard
+ * analogue of `verify-store.ts` / `contract-store.ts` / `spec-store.ts`. File-backed
+ * by default (OSS — the `<repo>/.truecourse/guard/` run store plus the committable
+ * `<repo>/.truecourse/scenarios/` corpus, exactly where the guard-runner writers
+ * put them); the enterprise edition injects a Postgres/Blob impl via `setGuardStore`.
+ *
+ * The interface is async; the file impl wraps the synchronous guard-runner free
+ * functions (`@truecourse/guard-runner` `store.ts` / `manifest.ts` / `decisions.ts`
+ * / `scenario-loader.ts`) and adds the thin fs readers guard-runner has no free
+ * function for (a run snapshot read, evidence reads, the scenario-file browser).
+ *
+ * Layout (file impl):
+ *   <repo>/.truecourse/guard/
+ *     LATEST.json / runs/<runId>.json / history.json / result.json
+ *     evidence/<runId>/<scenarioId>/…
+ *   <repo>/.truecourse/scenarios/
+ *     recipe.json / manifest.json / decisions.json / <area>/*.yaml
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  appendGuardHistory as fileAppendGuardHistory,
+  evidenceRelPath,
+  evidenceRunDir,
+  evidenceScenarioDir,
+  guardDir,
+  guardRunPath,
+  loadScenarios as fileLoadScenarios,
+  readGuardDecisions as fileReadGuardDecisions,
+  readGuardHistory as fileReadGuardHistory,
+  readGuardLatest as fileReadGuardLatest,
+  readGuardResult as fileReadGuardResult,
+  readManifest as fileReadManifest,
+  recipePath,
+  scenariosDir,
+  walkScenarioRelFiles,
+  writeGuardDecisions as fileWriteGuardDecisions,
+  writeGuardLatest as fileWriteGuardLatest,
+  writeGuardResult as fileWriteGuardResult,
+  writeGuardRun as fileWriteGuardRun,
+  guardDecisionsPath,
+  type LoadedScenarios,
+} from '@truecourse/guard-runner';
+import {
+  GuardLatestSchema,
+  type GuardDecisions,
+  type GuardGenerateReport,
+  type GuardHistory,
+  type GuardHistoryEntry,
+  type GuardLatest,
+  type GuardManifest,
+} from '@truecourse/shared';
+import type { RepoRef } from './contract-store.js';
+
+// `RepoRef` is declared in contract-store.ts (the canonical home for store scope
+// handles) and re-exported here so guard callers share one definition — the same
+// convention spec-store.ts follows.
+export type { RepoRef } from './contract-store.js';
+
+/** A written run snapshot — the runId it is keyed by plus the stored state. */
+export interface WrittenGuardRun {
+  runId: string;
+  latest: GuardLatest;
+}
+
+/** Result of snapshotting the on-disk scenario corpus (the count is informational). */
+export interface SaveScenariosResult {
+  fileCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Store interface
+// ---------------------------------------------------------------------------
+
+/** Pluggable guard store. File-backed by default; EE injects Postgres/Blob. */
+export interface GuardStore {
+  /**
+   * True when keyed by an on-disk working-tree path (OSS file store); false for
+   * the hosted store, which keys by a stable repo identity. Lets callers choose
+   * the right key (repoRoot vs repoKey) and treat the corpus as read-in-place.
+   */
+  readonly materializesInPlace: boolean;
+
+  // --- Run state ------------------------------------------------------------
+  readGuardLatest(repoPath: string): Promise<GuardLatest | null>;
+  writeGuardLatest(repoPath: string, latest: GuardLatest): Promise<void>;
+  /** Persist a per-run snapshot; returns its runId key + the stored state. */
+  writeGuardRun(repoPath: string, latest: GuardLatest): Promise<WrittenGuardRun>;
+  /** Read + validate a past run snapshot by runId, or `null` (unsafe id / absent). */
+  readGuardRun(repoPath: string, runId: string): Promise<GuardLatest | null>;
+  readGuardHistory(repoPath: string): Promise<GuardHistory>;
+  appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
+  /**
+   * The `guard generate` report. EE: `commitSha` reads that commit's report;
+   * omit for the newest stored one. The file impl always reads the live store.
+   */
+  readGuardResult(repoKey: string, commitSha?: string): Promise<GuardGenerateReport | null>;
+  /** Persist a generate report for `ref` (EE keys by commit; file impl ignores it). */
+  writeGuardResult(ref: RepoRef, report: GuardGenerateReport): Promise<void>;
+
+  // --- Evidence -------------------------------------------------------------
+  /**
+   * Write a map of evidence `{ file → content }` under a run's scenario dir and
+   * return the repo-relative evidence pointer (`evidenceRelPath`). Each file name
+   * must be a plain segment (no separators / `..`).
+   */
+  writeGuardEvidence(
+    repoPath: string,
+    runId: string,
+    scenarioId: string,
+    files: Record<string, string>,
+  ): Promise<string>;
+  /** One evidence file for a run's scenario, or `null` (unsafe segment / absent). */
+  readGuardEvidence(
+    repoPath: string,
+    runId: string,
+    scenarioId: string,
+    file: string,
+  ): Promise<string | null>;
+  /**
+   * One evidence file addressed by its repo-relative evidence DIRECTORY (a birth
+   * finding's `evidencePath`), or `null`. The read is confined to the guard
+   * evidence root — a `../`-laced `evidenceDir` can never escape it.
+   */
+  readGuardEvidenceAt(
+    repoPath: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<string | null>;
+
+  // --- Scenario corpus ------------------------------------------------------
+  // Keyed like the contract corpus: saves are per `RepoRef` (repo + commit; the
+  // EE impl keys rows by it and rejects an empty commit), commit-optional reads
+  // fall back to the newest stored set. The file impl maps `repoKey` to the repo
+  // path and ignores the commit — OSS reads the live working tree, which IS latest.
+  /** Snapshot the on-disk scenario tree at `sourceDir` for `ref` (file impl:
+   *  the tree is already in place, so this reports the count without copying). */
+  saveScenarios(ref: RepoRef, sourceDir: string): Promise<SaveScenariosResult>;
+  /** That commit's committed scenarios, parsed (EE: exact set — no fallback). */
+  loadScenarios(ref: RepoRef): Promise<LoadedScenarios>;
+  readManifest(repoKey: string, commitSha?: string): Promise<GuardManifest | null>;
+  /** Raw `recipe.json` content, or `null` when absent. */
+  readRecipeRaw(repoKey: string, commitSha?: string): Promise<string | null>;
+  /** Repo-relative posix paths of every committed scenario YAML (sorted). */
+  listScenarioFiles(repoKey: string, commitSha?: string): Promise<string[]>;
+  /** One scenario YAML's content by its repo-relative path, or `null`. */
+  readScenarioFile(repoKey: string, relPath: string, commitSha?: string): Promise<string | null>;
+
+  // --- Decisions ------------------------------------------------------------
+  // `scope` (optional) selects a PR-scoped overlay in EE (the `_pr/<n>` sentinel);
+  // omitted → the repo-scoped decisions file. The file store has no overlay
+  // dimension, so a PR scope fails loud (mirrors FileSpecStore).
+  readGuardDecisions(repoPath: string, scope?: string): Promise<GuardDecisions>;
+  writeGuardDecisions(repoPath: string, decisions: GuardDecisions, scope?: string): Promise<void>;
+  deleteGuardDecisions(repoPath: string, scope?: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Run ids, evidence filenames, scenario-dir names — no separators, no `..`. */
+const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/** The PR-overlay sentinel scope (`_pr/<number>`) — enterprise-only. */
+function isPrScope(scope: string | undefined): boolean {
+  return /^_pr\/\d+$/.test(scope ?? '');
+}
+const PR_DECISIONS_FILE_ERROR =
+  '[guard-store] PR-scoped guard decisions require the enterprise store';
+
+/** Recursively collect `*.yaml` / `*.yml` under `dir` (absolute paths, sorted). */
+function collectYamlFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...collectYamlFiles(full));
+    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full);
+  }
+  return out.sort();
+}
+
+// ---------------------------------------------------------------------------
+// File-backed default impl (OSS) — synchronous guard-runner fs under an async
+// surface; reads the live repo tree in place.
+// ---------------------------------------------------------------------------
+
+class FileGuardStore implements GuardStore {
+  readonly materializesInPlace = true;
+
+  async readGuardLatest(repoPath: string): Promise<GuardLatest | null> {
+    return fileReadGuardLatest(repoPath);
+  }
+
+  async writeGuardLatest(repoPath: string, latest: GuardLatest): Promise<void> {
+    fileWriteGuardLatest(repoPath, latest);
+  }
+
+  async writeGuardRun(repoPath: string, latest: GuardLatest): Promise<WrittenGuardRun> {
+    fileWriteGuardRun(repoPath, latest);
+    return { runId: latest.run.runId, latest };
+  }
+
+  async readGuardRun(repoPath: string, runId: string): Promise<GuardLatest | null> {
+    if (!SAFE_SEGMENT.test(runId)) return null;
+    const file = guardRunPath(repoPath, runId);
+    if (!fs.existsSync(file)) return null;
+    try {
+      const parsed = GuardLatestSchema.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async readGuardHistory(repoPath: string): Promise<GuardHistory> {
+    return fileReadGuardHistory(repoPath);
+  }
+
+  async appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void> {
+    fileAppendGuardHistory(repoPath, entry);
+  }
+
+  // The file impl reads the live store — there is no per-commit history, so
+  // `commitSha` is ignored (OSS is latest). Same for the corpus reads below.
+  async readGuardResult(repoKey: string, _commitSha?: string): Promise<GuardGenerateReport | null> {
+    return fileReadGuardResult(repoKey);
+  }
+
+  async writeGuardResult(ref: RepoRef, report: GuardGenerateReport): Promise<void> {
+    fileWriteGuardResult(ref.repoKey, report);
+  }
+
+  async writeGuardEvidence(
+    repoPath: string,
+    runId: string,
+    scenarioId: string,
+    files: Record<string, string>,
+  ): Promise<string> {
+    const dir = evidenceScenarioDir(repoPath, runId, scenarioId);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [file, content] of Object.entries(files)) {
+      if (!SAFE_SEGMENT.test(file)) {
+        throw new Error(`[guard-store] unsafe evidence file name: ${file}`);
+      }
+      fs.writeFileSync(path.join(dir, file), content);
+    }
+    return evidenceRelPath(runId, scenarioId);
+  }
+
+  async readGuardEvidence(
+    repoPath: string,
+    runId: string,
+    scenarioId: string,
+    file: string,
+  ): Promise<string | null> {
+    if (!SAFE_SEGMENT.test(runId) || !SAFE_SEGMENT.test(file)) return null;
+    const full = path.resolve(evidenceScenarioDir(repoPath, runId, scenarioId), file);
+    const runDir = path.resolve(evidenceRunDir(repoPath, runId));
+    if (full !== runDir && !full.startsWith(runDir + path.sep)) return null;
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+    return fs.readFileSync(full, 'utf-8');
+  }
+
+  async readGuardEvidenceAt(
+    repoPath: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<string | null> {
+    if (!SAFE_SEGMENT.test(file)) return null;
+    const evidenceRoot = path.resolve(guardDir(repoPath), 'evidence');
+    const dir = path.resolve(repoPath, evidenceDir);
+    if (dir !== evidenceRoot && !dir.startsWith(evidenceRoot + path.sep)) return null;
+    const full = path.resolve(dir, file);
+    if (!full.startsWith(dir + path.sep)) return null;
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+    return fs.readFileSync(full, 'utf-8');
+  }
+
+  async saveScenarios(ref: RepoRef, _sourceDir: string): Promise<SaveScenariosResult> {
+    // The corpus is already on disk (the guard-runner/generator wrote it in place),
+    // so there is nothing to copy — report the count, matching the contract store.
+    // The commit is ignored: OSS has no per-commit history.
+    return { fileCount: walkScenarioRelFiles(scenariosDir(ref.repoKey)).length };
+  }
+
+  async loadScenarios(ref: RepoRef): Promise<LoadedScenarios> {
+    return fileLoadScenarios(ref.repoKey);
+  }
+
+  async readManifest(repoKey: string, _commitSha?: string): Promise<GuardManifest | null> {
+    return fileReadManifest(repoKey);
+  }
+
+  async readRecipeRaw(repoKey: string, _commitSha?: string): Promise<string | null> {
+    const file = recipePath(repoKey);
+    if (!fs.existsSync(file)) return null;
+    try {
+      return fs.readFileSync(file, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  async listScenarioFiles(repoKey: string, _commitSha?: string): Promise<string[]> {
+    return collectYamlFiles(scenariosDir(repoKey))
+      .map((f) => path.relative(repoKey, f).split(path.sep).join('/'))
+      .sort();
+  }
+
+  async readScenarioFile(repoKey: string, relPath: string, _commitSha?: string): Promise<string | null> {
+    const root = path.resolve(scenariosDir(repoKey));
+    const full = path.resolve(repoKey, relPath);
+    if (full !== root && !full.startsWith(root + path.sep)) return null;
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+    return fs.readFileSync(full, 'utf-8');
+  }
+
+  async readGuardDecisions(repoPath: string, scope?: string): Promise<GuardDecisions> {
+    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
+    return fileReadGuardDecisions(repoPath);
+  }
+
+  async writeGuardDecisions(
+    repoPath: string,
+    decisions: GuardDecisions,
+    scope?: string,
+  ): Promise<void> {
+    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
+    fileWriteGuardDecisions(repoPath, decisions);
+  }
+
+  async deleteGuardDecisions(repoPath: string, scope?: string): Promise<void> {
+    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
+    try {
+      fs.unlinkSync(guardDecisionsPath(repoPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Active store registry + public delegators (same names, now async).
+// ---------------------------------------------------------------------------
+
+let active: GuardStore = new FileGuardStore();
+
+/** The active guard store (file-backed unless EE installed a Postgres/Blob one). */
+export function getGuardStore(): GuardStore {
+  return active;
+}
+/** True when the active guard store keys by an on-disk path (OSS file store). */
+export const guardsMaterializeInPlace = (): boolean => active.materializesInPlace;
+/** Install a guard store (e.g. the enterprise Postgres/Blob impl). */
+export function setGuardStore(store: GuardStore): void {
+  active = store;
+}
+/** Restore the file-backed default (tests). */
+export function resetGuardStore(): void {
+  active = new FileGuardStore();
+}
+
+export const readGuardLatest = (repoPath: string): Promise<GuardLatest | null> =>
+  active.readGuardLatest(repoPath);
+export const writeGuardLatest = (repoPath: string, latest: GuardLatest): Promise<void> =>
+  active.writeGuardLatest(repoPath, latest);
+export const writeGuardRun = (repoPath: string, latest: GuardLatest): Promise<WrittenGuardRun> =>
+  active.writeGuardRun(repoPath, latest);
+export const readGuardRun = (repoPath: string, runId: string): Promise<GuardLatest | null> =>
+  active.readGuardRun(repoPath, runId);
+export const readGuardHistory = (repoPath: string): Promise<GuardHistory> =>
+  active.readGuardHistory(repoPath);
+export const appendGuardHistory = (repoPath: string, entry: GuardHistoryEntry): Promise<void> =>
+  active.appendGuardHistory(repoPath, entry);
+export const readGuardResult = (
+  repoKey: string,
+  commitSha?: string,
+): Promise<GuardGenerateReport | null> => active.readGuardResult(repoKey, commitSha);
+export const writeGuardResult = (ref: RepoRef, report: GuardGenerateReport): Promise<void> =>
+  active.writeGuardResult(ref, report);
+
+export const writeGuardEvidence = (
+  repoPath: string,
+  runId: string,
+  scenarioId: string,
+  files: Record<string, string>,
+): Promise<string> => active.writeGuardEvidence(repoPath, runId, scenarioId, files);
+export const readGuardEvidence = (
+  repoPath: string,
+  runId: string,
+  scenarioId: string,
+  file: string,
+): Promise<string | null> => active.readGuardEvidence(repoPath, runId, scenarioId, file);
+export const readGuardEvidenceAt = (
+  repoPath: string,
+  evidenceDir: string,
+  file: string,
+): Promise<string | null> => active.readGuardEvidenceAt(repoPath, evidenceDir, file);
+
+export const saveScenarios = (ref: RepoRef, sourceDir: string): Promise<SaveScenariosResult> =>
+  active.saveScenarios(ref, sourceDir);
+export const loadScenarios = (ref: RepoRef): Promise<LoadedScenarios> =>
+  active.loadScenarios(ref);
+export const readManifest = (repoKey: string, commitSha?: string): Promise<GuardManifest | null> =>
+  active.readManifest(repoKey, commitSha);
+export const readRecipeRaw = (repoKey: string, commitSha?: string): Promise<string | null> =>
+  active.readRecipeRaw(repoKey, commitSha);
+export const listScenarioFiles = (repoKey: string, commitSha?: string): Promise<string[]> =>
+  active.listScenarioFiles(repoKey, commitSha);
+export const readScenarioFile = (
+  repoKey: string,
+  relPath: string,
+  commitSha?: string,
+): Promise<string | null> => active.readScenarioFile(repoKey, relPath, commitSha);
+
+export const readGuardDecisions = (repoPath: string, scope?: string): Promise<GuardDecisions> =>
+  active.readGuardDecisions(repoPath, scope);
+export const writeGuardDecisions = (
+  repoPath: string,
+  decisions: GuardDecisions,
+  scope?: string,
+): Promise<void> => active.writeGuardDecisions(repoPath, decisions, scope);
+export const deleteGuardDecisions = (repoPath: string, scope?: string): Promise<void> =>
+  active.deleteGuardDecisions(repoPath, scope);

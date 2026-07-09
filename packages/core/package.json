@@ -92,6 +92,10 @@
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
     },
+    "./lib/guard-store": {
+      "types": "./dist/lib/guard-store.d.ts",
+      "import": "./dist/lib/guard-store.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"
