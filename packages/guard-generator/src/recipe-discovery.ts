@@ -20,6 +20,8 @@ import {
   executeStep,
   missingEntryScript,
   formatMissingEntryScript,
+  constructChildEnv,
+  BUILD_PASSTHROUGH,
   type Recipe,
 } from '@truecourse/guard-runner'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
@@ -169,7 +171,7 @@ async function probeEntry(repoRoot: string, entry: string[]): Promise<{ ok: true
       const capture = await executeStep({
         argv: [...resolved, ...args],
         cwd,
-        env: { ...process.env, NO_COLOR: '1' },
+        env: constructChildEnv({ passthrough: BUILD_PASSTHROUGH }),
         timeoutMs: PROBE_TIMEOUT_MS,
       })
       if (!capture.spawnError && !capture.timedOut) return { ok: true }

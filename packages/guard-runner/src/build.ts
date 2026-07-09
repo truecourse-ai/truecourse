@@ -1,11 +1,13 @@
 /**
  * Run the recipe `build` once per run, in the repo root. A build failure is a
  * run-level error (no scenario executes) — it is reported against the recipe, not
- * as drift. The build runs against the real working tree, so it uses the full
- * process env (plus recipe env); it is not sandboxed.
+ * as drift. The build runs against the real working tree, so it is not sandboxed;
+ * but its env is still built from an allowlist (`BUILD_PASSTHROUGH` + recipe env),
+ * never a `...process.env` spread — host secrets never reach the build.
  */
 
 import { spawn } from 'node:child_process'
+import { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js'
 
 export const DEFAULT_BUILD_TIMEOUT_MS = 600_000
 
@@ -27,7 +29,7 @@ export function runBuild(
   return new Promise<BuildResult>((resolve) => {
     const child = spawn(command, {
       cwd: repoRoot,
-      env: { ...process.env, ...env },
+      env: constructChildEnv({ recipeEnv: env, passthrough: BUILD_PASSTHROUGH }),
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
