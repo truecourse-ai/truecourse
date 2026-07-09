@@ -105,13 +105,16 @@ jobs:
           fi
 
           since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
-          # Defence-in-depth: a campaign-level tracker ([<SCOPE>fp-campaign-stuck],
-          # [<SCOPE>fp-stale-pr], …) is handled by notify-campaign-alert /
-          # notify-stale-pr and must never appear in this fix-burst rollup. It
-          # only could if a routine mislabels it with a fix label (the
-          # fp-next-fix / drift-fp-next-fix prompts forbid this). Drop any such
-          # title here so a stray label can't double-notify: a genuine fix issue
-          # is titled [<SCOPE>fp-<rule-key>] and never contains these tokens.
+          # Defence-in-depth: a campaign-level tracker is handled by
+          # notify-campaign-alert / notify-stale-pr and must never appear in
+          # this fix-burst rollup. It only could if a routine mislabels it with
+          # a fix label (the fp-next-fix / drift-fp-next-fix prompts forbid
+          # this). Drop any tracker title here so a stray label can't
+          # double-notify. Match the exact title tags the sibling notifier jobs
+          # key on (anchored on the closing `]`) rather than loose substrings —
+          # a genuine fix issue is titled [<SCOPE>fp-<rule-key>] and some rule
+          # keys legitimately contain "stale" (e.g. .../stale-read-after-write),
+          # so a bare "stale" match would wrongly suppress real rollups.
           issues_json=$(gh issue list \
             --repo "$REPO" \
             --label "$LABEL" \
@@ -119,7 +122,7 @@ jobs:
             --search "created:>${since}" \
             --json number,title \
             --limit 200 \
-            | jq '[.[] | select(.title | test("campaign-|stale-pr") | not)]')
+            | jq '[.[] | select(.title | test("fp-campaign-close]|fp-campaign-stuck]|drift-campaign-broken]|fp-stale-pr]") | not)]')
 
           count=$(echo "$issues_json" | jq 'length')
           if [ "$count" -eq 0 ]; then

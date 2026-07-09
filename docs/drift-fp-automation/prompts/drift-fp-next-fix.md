@@ -94,6 +94,10 @@ Repeat while `successes < 5 AND attempts < 10`. Each iteration is one attempt.
 
 - List open issues with label `<SCOPE>drift-fp-fix`, excluding `<SCOPE>drift-fp-in-progress`,
   `<SCOPE>drift-fp-blocked`, `<SCOPE>drift-fp-skipped`, and any already in `fixed_issues`.
+- **Also exclude any campaign-level tracker** — an issue whose title contains a tracker tag
+  (`[<SCOPE>drift-fp-campaign-stuck]`). Trackers are human-signal issues, not fix-queue items,
+  and should never carry `<SCOPE>drift-fp-fix`; exclude by title here too so a stray mislabel
+  can't make you pick a tracker and needlessly block it.
 - If none (pickable queue empty — **including when all remaining open issues are blocked**):
   - `successes >= 1` → break, go to "Open the batched PR".
   - `successes == 0` → go to the **Queue-empty path** (re-measure the campaign; never end silently).

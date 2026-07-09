@@ -106,6 +106,13 @@ iteration is one "attempt" (success or skip).
 - List open issues on `truecourse-ai/truecourse` with label `<SCOPE>fp-fix`,
   **excluding** any with label `<SCOPE>fp-in-progress`, `<SCOPE>fp-blocked`, or
   `<SCOPE>fp-skipped`.
+- **Also exclude any campaign-level tracker** — an issue whose title
+  contains a tracker tag (`[<SCOPE>fp-campaign-stuck]`,
+  `[<SCOPE>fp-stale-pr]`). These are human-signal issues, not fix-queue
+  items; they should never carry `<SCOPE>fp-fix` (see the Queue-empty path),
+  but exclude them by title here too so a stray mislabel can't make you pick
+  a tracker, parse its (non-existent) YAML, and needlessly `<SCOPE>fp-blocked`
+  it.
 - Also exclude any issue already in `fixed_issues` for this session.
 - If none (the **pickable** queue is empty — note this is also true
   when open issues remain but every one is `<SCOPE>fp-blocked`/`<SCOPE>fp-skipped`):
