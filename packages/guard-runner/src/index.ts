@@ -4,8 +4,11 @@
  * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, defaultRunConcurrency } from './run.js'
-export type { RunGuardOptions, RunGuardResult } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency } from './run.js'
+export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
+
+export { defaultGuardExecutor } from './guard-executor.js'
+export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 
 export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'

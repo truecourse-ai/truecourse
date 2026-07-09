@@ -17,7 +17,7 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
-import { loadRecipe, resolveEntry, RecipeError } from './recipe.js'
+import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, type Recipe, type LoadedRecipe } from './recipe.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, type BuildResult } from './build.js'
 import { preflightEntry, type EntryPreflightResult } from './preflight.js'
@@ -39,6 +39,13 @@ export interface RunGuardOptions {
    * anything to the corpus. Omitted → the committed scenarios are loaded.
    */
   scenarios?: GuardScenario[]
+  /**
+   * Run against this recipe instead of loading `scenarios/recipe.json` from disk.
+   * The executor seam supplies it (a hosted store per-commit; birth validation the
+   * already-loaded recipe), skipping the `no-recipe`/`invalid-recipe` branches.
+   * Omitted → the committed recipe is loaded, exactly as before.
+   */
+  recipe?: Recipe
   branch?: string | null
   commit?: string | null
   stepTimeoutMs?: number
@@ -83,28 +90,74 @@ export type RunGuardResult =
       manifest: GuardManifest | null
     }
 
-export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
-  const { repoRoot } = opts
+/** Recipe + scenario sourcing outcome: an early result, or the inputs to execute. */
+export type GuardRunInputs =
+  | { early: RunGuardResult }
+  | { loaded: LoadedRecipe; selected: GuardScenario[]; loadErrors: ScenarioLoadError[] }
 
-  let loaded
+/** Load the committed recipe, mapping load failures to their early results. */
+function sourceRecipe(repoRoot: string): { early: RunGuardResult } | { loaded: LoadedRecipe } {
+  let loaded: LoadedRecipe | null
   try {
     loaded = loadRecipe(repoRoot, recipePath(repoRoot))
   } catch (e) {
-    if (e instanceof RecipeError) return { status: 'invalid-recipe', message: e.message }
+    if (e instanceof RecipeError) return { early: { status: 'invalid-recipe', message: e.message } }
     throw e
   }
-  if (!loaded) return { status: 'no-recipe' }
+  if (!loaded) return { early: { status: 'no-recipe' } }
+  return { loaded }
+}
+
+/** Apply the optional id restriction, mapping an empty selection to no-scenarios. */
+function selectScenarios(
+  scenarios: GuardScenario[],
+  loadErrors: ScenarioLoadError[],
+  scenarioId?: string,
+): { early: RunGuardResult } | { selected: GuardScenario[] } {
+  const selected = scenarioId ? scenarios.filter((s) => s.id === scenarioId) : scenarios
+  if (selected.length === 0) {
+    return { early: { status: 'no-scenarios', loadErrors, requestedId: scenarioId } }
+  }
+  return { selected }
+}
+
+/**
+ * Source the committed recipe + scenarios exactly as `runGuard` itself would.
+ * External drivers that decide "is there anything to run" locally (the core run
+ * command keeps that decision on its side of the executor seam) call this instead
+ * of re-implementing the load shape, so their early-result semantics can never
+ * drift from the engine's.
+ */
+export function sourceGuardRunInputs(repoRoot: string, scenarioId?: string): GuardRunInputs {
+  const recipe = sourceRecipe(repoRoot)
+  if ('early' in recipe) return recipe
+  const { scenarios, errors: loadErrors } = loadScenarios(repoRoot)
+  const sel = selectScenarios(scenarios, loadErrors, scenarioId)
+  if ('early' in sel) return sel
+  return { loaded: recipe.loaded, selected: sel.selected, loadErrors }
+}
+
+export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
+  const { repoRoot } = opts
+
+  let loaded: LoadedRecipe
+  if (opts.recipe) {
+    // Injected recipe: the fingerprint is still the on-disk discovery-input hash
+    // (identical to what loadRecipe would compute) so the persisted run envelope is
+    // unchanged; only the disk read of recipe.json is skipped.
+    loaded = { recipe: opts.recipe, fingerprint: computeRecipeFingerprint(repoRoot) }
+  } else {
+    const disk = sourceRecipe(repoRoot)
+    if ('early' in disk) return disk.early
+    loaded = disk.loaded
+  }
 
   const { scenarios, errors: loadErrors } = opts.scenarios
     ? { scenarios: opts.scenarios, errors: [] as ScenarioLoadError[] }
     : loadScenarios(repoRoot)
-  const selected = opts.scenarioId
-    ? scenarios.filter((s) => s.id === opts.scenarioId)
-    : scenarios
-
-  if (selected.length === 0) {
-    return { status: 'no-scenarios', loadErrors, requestedId: opts.scenarioId }
-  }
+  const sel = selectScenarios(scenarios, loadErrors, opts.scenarioId)
+  if ('early' in sel) return sel.early
+  const selected = sel.selected
 
   // Check each binding against the live section index before running anything.
   // A section that was edited (stale) or removed (orphaned) is not executed;
