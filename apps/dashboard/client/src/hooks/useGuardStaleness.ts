@@ -19,20 +19,20 @@ const EMPTY: GuardStaleness = {
   hasRun: false,
 };
 
-export function useGuardStaleness(repoId: string | undefined) {
+export function useGuardStaleness(repoId: string | undefined, ref?: string) {
   const [staleness, setStaleness] = useState<GuardStaleness>(EMPTY);
   const [loaded, setLoaded] = useState(false);
 
   const refetch = useCallback(async () => {
     if (!repoId) return;
     try {
-      setStaleness(await api.getGuardStaleness(repoId));
+      setStaleness(await api.getGuardStaleness(repoId, ref));
     } catch {
       // Advisory only — leave the last-known flags in place.
     } finally {
       setLoaded(true);
     }
-  }, [repoId]);
+  }, [repoId, ref]);
 
   useEffect(() => {
     refetch();

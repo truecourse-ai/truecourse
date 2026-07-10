@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { GuardHistoryEntry, GuardLatest } from '@truecourse/shared';
+import type { GuardGatePending, GuardHistoryEntry, GuardLatest } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface GuardRunsState {
@@ -19,13 +19,23 @@ export interface GuardRunsState {
   run: GuardLatest | null;
   /** The displayed run's id, for highlighting the history row. */
   selectedRunId: string | null;
+  /** When viewing a PR head (`ref`) with no run yet, the in-flight gate (queued/
+   *  running) if any — the view shows a "gate hasn't run at this commit" card
+   *  instead of baseline data. Null in the repo view or when nothing is in flight. */
+  pending: GuardGatePending | null;
   selectRun: (runId: string | null) => void;
   loading: boolean;
   error: string | null;
 }
 
-export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloadKey = 0): GuardRunsState {
+export function useGuardRuns(
+  repoId: string | undefined,
+  enabled: boolean,
+  reloadKey = 0,
+  ref?: string,
+): GuardRunsState {
   const [latest, setLatest] = useState<GuardLatest | null>(null);
+  const [pending, setPending] = useState<GuardGatePending | null>(null);
   const [history, setHistory] = useState<GuardHistoryEntry[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [cache, setCache] = useState<Record<string, GuardLatest>>({});
@@ -37,10 +47,18 @@ export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloa
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([api.getGuardLatest(repoId), api.getGuardHistory(repoId)])
-      .then(([l, h]) => {
+    // `ref` (a PR head) scopes the run to that commit; the response carries the
+    // pending gate (if any) so the view never shows baseline data under a PR.
+    // The run HISTORY is repo-level (baseline runs) — under a PR ref it is not
+    // fetched at all, so a baseline run can never be listed or selected there.
+    Promise.all([
+      api.getGuardLatest(repoId, ref),
+      ref ? Promise.resolve({ runs: [] }) : api.getGuardHistory(repoId),
+    ])
+      .then(([{ latest: l, pending: p }, h]) => {
         if (cancelled) return;
         setLatest(l);
+        setPending(p);
         setHistory(h.runs);
       })
       .catch((e) => {
@@ -52,7 +70,7 @@ export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloa
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey]);
+  }, [repoId, enabled, reloadKey, ref]);
 
   const selectRun = useCallback(
     (runId: string | null) => {
@@ -81,6 +99,7 @@ export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloa
     history,
     run,
     selectedRunId: run?.run.runId ?? null,
+    pending,
     selectRun,
     loading,
     error,

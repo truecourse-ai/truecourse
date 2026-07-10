@@ -132,6 +132,62 @@ function renderView(url = '/repos/r?section=guard&tab=guarddrifts') {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe('GuardDriftsView — PR-scoped empty / pending state', () => {
+  function stubEnvelope(body: { latest: GuardLatest | null; pending: unknown }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/latest')) return json(body);
+        if (u.includes('/guard/history')) return json(HISTORY);
+        return json({});
+      }),
+    );
+  }
+  function renderPr(prRef = 'prhead1234567') {
+    return render(
+      <MemoryRouter initialEntries={['/repos/r?section=guard&tab=guarddrifts&pr=7']}>
+        <GuardDriftsView repoId="r" prRef={prRef} />
+      </MemoryRouter>,
+    );
+  }
+
+  it('shows a "gate running" card when a gate is in flight for the head', async () => {
+    stubEnvelope({ latest: null, pending: { status: 'running', jobId: 'job_1' } });
+    renderPr();
+    expect(await screen.findByText('Guard gate running')).toBeInTheDocument();
+  });
+
+  it('shows a "gate queued" card', async () => {
+    stubEnvelope({ latest: null, pending: { status: 'queued', jobId: 'job_1' } });
+    renderPr();
+    expect(await screen.findByText('Guard gate queued')).toBeInTheDocument();
+  });
+
+  it("shows an explicit \"hasn't run at this commit yet\" card (never baseline data)", async () => {
+    stubEnvelope({ latest: null, pending: null });
+    renderPr();
+    expect(await screen.findByText("Guard gate hasn't run at this commit yet")).toBeInTheDocument();
+    // The baseline run's content must NOT leak in under the PR header.
+    expect(screen.queryByText('login rate limits')).toBeNull();
+  });
+
+  it('renders the PR head run normally when one is stored at that commit', async () => {
+    stubEnvelope({ latest: LATEST, pending: null });
+    renderPr();
+    expect(await screen.findByText('login rate limits')).toBeInTheDocument();
+  });
+
+  it('never lists the repo run history under a PR ref (baseline runs not selectable)', async () => {
+    // The history stub still answers with the repo's baseline runs — the PR view
+    // must not fetch/render them: only the head run, no run-picker rows.
+    stubEnvelope({ latest: LATEST, pending: null });
+    renderPr();
+    await screen.findByText('login rate limits');
+    expect(screen.getByText('No earlier runs recorded.')).toBeInTheDocument();
+  });
+});
+
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
 

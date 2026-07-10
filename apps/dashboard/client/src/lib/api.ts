@@ -6,6 +6,7 @@ import type {
   GuardGenerateReport,
   GuardHistory,
   GuardLatest,
+  GuardLatestResponse,
   GuardScenarioInventory,
   GuardScenarioSource,
   GuardStaleness,
@@ -943,17 +944,33 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
 // Guard — spec-section scenario coverage (read-only, diff-free).
 // ---------------------------------------------------------------------------
 
-/** The two amber-dot signals for the Guard tab (generate / run staleness). */
-export function getGuardStaleness(repoId: string): Promise<GuardStaleness> {
-  return fetchApi<GuardStaleness>(`/api/repos/${repoId}/guard/staleness`);
+/** Append `?ref=`/`&ref=` when a PR head is being viewed (EE); a no-op otherwise. */
+function withRef(base: string, ref?: string): string {
+  if (!ref) return base;
+  return `${base}${base.includes('?') ? '&' : '?'}ref=${encodeURIComponent(ref)}`;
 }
 
-/** The last guard run's materialized state; null on 404 (never run). */
-export async function getGuardLatest(repoId: string): Promise<GuardLatest | null> {
+/** The two amber-dot signals for the Guard tab (generate / run staleness). `ref`
+ *  scopes to a PR head (EE). */
+export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardStaleness> {
+  return fetchApi<GuardStaleness>(withRef(`/api/repos/${repoId}/guard/staleness`, ref));
+}
+
+/**
+ * The guard run for the view. No `ref` → the repo baseline (or null when never
+ * run). With `ref` (a PR head, EE) → the run stored at that commit, else an
+ * explicit pending/empty envelope — never the baseline under a PR header. Always
+ * resolves to a `{ latest, pending }` envelope so callers handle both uniformly.
+ */
+export async function getGuardLatest(repoId: string, ref?: string): Promise<GuardLatestResponse> {
   try {
-    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/latest`);
+    const body = await fetchApi<GuardLatest | GuardLatestResponse>(
+      withRef(`/api/repos/${repoId}/guard/latest`, ref),
+    );
+    // With a ref the server returns the envelope; without one, a raw run.
+    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatest, pending: null };
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
+    if (e instanceof ApiError && e.status === 404) return { latest: null, pending: null };
     throw e;
   }
 }
@@ -973,21 +990,21 @@ export async function getGuardRun(repoId: string, runId: string): Promise<GuardL
   }
 }
 
-/** The last `guard generate` report; null on 404 (never generated). */
-export async function getGuardReport(repoId: string): Promise<GuardGenerateReport | null> {
+/** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
+export async function getGuardReport(repoId: string, ref?: string): Promise<GuardGenerateReport | null> {
   try {
-    return await fetchApi<GuardGenerateReport>(`/api/repos/${repoId}/guard/report`);
+    return await fetchApi<GuardGenerateReport>(withRef(`/api/repos/${repoId}/guard/report`, ref));
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
 }
 
-/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). */
-export async function getGuardCoverage(repoId: string, doc: string): Promise<GuardDocCoverage | null> {
+/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` scopes to a PR head (EE). */
+export async function getGuardCoverage(repoId: string, doc: string, ref?: string): Promise<GuardDocCoverage | null> {
   try {
     return await fetchApi<GuardDocCoverage>(
-      `/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`,
+      withRef(`/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -995,16 +1012,16 @@ export async function getGuardCoverage(repoId: string, doc: string): Promise<Gua
   }
 }
 
-/** The committed-scenario inventory + recipe card for the Scenarios tab. */
-export function getGuardScenarios(repoId: string): Promise<GuardScenarioInventory> {
-  return fetchApi<GuardScenarioInventory>(`/api/repos/${repoId}/guard/scenarios`);
+/** The committed-scenario inventory + recipe card for the Scenarios tab. `ref` scopes to a PR head (EE). */
+export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardScenarioInventory> {
+  return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
 }
 
-/** A scenario's raw YAML source; null on 404 (unknown id). */
-export async function getGuardScenarioSource(repoId: string, id: string): Promise<GuardScenarioSource | null> {
+/** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
+export async function getGuardScenarioSource(repoId: string, id: string, ref?: string): Promise<GuardScenarioSource | null> {
   try {
     return await fetchApi<GuardScenarioSource>(
-      `/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`,
+      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -1053,8 +1070,9 @@ export async function getGuardFindingEvidence(
 
 /** The committable guard decisions (dismissed claims) — always 200 (empty until
  *  the user dismisses anything). */
-export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
+export function getGuardDecisions(repoId: string, pr?: number): Promise<GuardDecisions> {
+  const base = `/api/repos/${repoId}/guard/decisions`;
+  return fetchApi<GuardDecisions>(pr !== undefined ? `${base}?pr=${pr}` : base);
 }
 
 /** The identity a dismissal keys on: doc + section anchor + the extracted claim's

@@ -32,14 +32,23 @@ export function GuardDriftsView({
   repoId,
   enabled = true,
   reloadKey = 0,
+  prRef,
 }: {
   repoId: string;
   enabled?: boolean;
   /** Bumped on a guard generate/run completion → refetch the run data. */
   reloadKey?: number;
+  /** The PR head SHA when viewing a pull request (EE) — scopes the run to that
+   *  commit and switches the empty state to the gate-status card. */
+  prRef?: string;
 }) {
   const { openSpecSection } = useGuardView();
-  const { latest, history, run, selectedRunId, selectRun, loading, error } = useGuardRuns(repoId, enabled, reloadKey);
+  const { latest, history, run, selectedRunId, selectRun, pending, loading, error } = useGuardRuns(
+    repoId,
+    enabled,
+    reloadKey,
+    prRef,
+  );
   const { activeId, openTabs, open, close, selectOverview } = useGuardTabs('gdrift', repoId);
 
   const drifts = useMemo(() => orderGuardDrifts(run?.scenarios), [run]);
@@ -69,6 +78,29 @@ export function GuardDriftsView({
     );
   }
   if (!latest || !run) {
+    // PR view: the server never falls back to the baseline for a PR head, so an
+    // absent run means the gate hasn't produced one at this commit. Show the gate's
+    // status (queued/running) or an explicit "hasn't run yet" — never baseline data.
+    if (prRef) {
+      return pending ? (
+        <EmptyState
+          icon={Loader2}
+          title={pending.status === 'running' ? 'Guard gate running' : 'Guard gate queued'}
+          body={
+            <>
+              The guard gate is {pending.status} for this commit — its results will appear here once it
+              finishes.
+            </>
+          }
+        />
+      ) : (
+        <EmptyState
+          icon={PlayCircle}
+          title="Guard gate hasn't run at this commit yet"
+          body="No guard run is stored for this pull request's head. It appears here once the gate completes."
+        />
+      );
+    }
     return (
       <EmptyState
         icon={PlayCircle}

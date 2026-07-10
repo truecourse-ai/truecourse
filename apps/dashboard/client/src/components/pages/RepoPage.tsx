@@ -314,7 +314,7 @@ function RepoPageInner() {
     staleness: guardStaleness,
     loaded: guardStaleLoaded,
     refetch: refetchGuardStaleness,
-  } = useGuardStaleness(repoId);
+  } = useGuardStaleness(repoId, refForTabs);
   // Bumped on a guard-generate / guard-run completion so the page-level report and
   // the child views (coverage / scenarios / runs) refetch — the guard analog of the
   // spec:complete refresh (the views own their own data hooks, so they take this as
@@ -322,7 +322,7 @@ function RepoPageInner() {
   const [guardReloadKey, setGuardReloadKey] = useState(0);
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
-  const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey);
+  const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey, refForTabs);
   // UI-triggered guard actions: Generate (Scenarios tab, estimate-gated) and Run
   // (Drifts tab, deterministic). Held at page level so the in-flight state survives
   // tab switches, exactly like specCorpus / contractsGenerating.
@@ -337,7 +337,7 @@ function RepoPageInner() {
   const guardCoverageTabs = useGuardCoverageTabs(repoId);
   // Scenarios-tab data, hoisted here (like contractsTree/verifyState) so the left
   // panel and the main pane read ONE fetch and the guard reload key refreshes both.
-  const guardScenarios = useGuardScenarios(repoId, leftTab === 'scenarios', guardReloadKey);
+  const guardScenarios = useGuardScenarios(repoId, leftTab === 'scenarios', guardReloadKey, refForTabs);
   // Guard's OWN scenario tab set (`?gscn=`) — the Spec-doc transient/pinned tab
   // model (single-click preview, double-click pin), guard-scoped so nothing
   // bleeds into BL Drift's DriftViewContext tab sets.
@@ -349,6 +349,7 @@ function RepoPageInner() {
     repoId,
     leftTab === 'scenarios',
     guardReloadKey,
+    prNumber ?? undefined,
   );
   const guardDismissedKeys = useMemo(
     () => dismissedKeySet(guardDecisions.dismissedClaims),
@@ -1372,7 +1373,7 @@ function RepoPageInner() {
               </div>
             </div>
           ) : leftTab === 'guarddrifts' ? (
-            <GuardDriftsView repoId={repoId} reloadKey={guardReloadKey} />
+            <GuardDriftsView repoId={repoId} reloadKey={guardReloadKey} prRef={refForTabs} />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
