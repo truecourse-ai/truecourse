@@ -14,7 +14,14 @@
 
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
-import { jobs, notifications, pendingBaselines, type EeDb } from '@truecourse/ee-db';
+import {
+  jobs,
+  notifications,
+  pendingBaselines,
+  pendingGuardBaselines,
+  guardBackfillMarkers,
+  type EeDb,
+} from '@truecourse/ee-db';
 import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
@@ -304,6 +311,112 @@ export class PendingBaselineStore {
   async drain(): Promise<PendingBaselineView[]> {
     const rows = await this.db.delete(pendingBaselines).returning();
     return rows.map(toPendingView);
+  }
+}
+
+/** A deferred guard-baseline enqueue (the full request, minus the added job id). */
+export interface PendingGuardBaselineInput {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  commitSha: string;
+  workspaceOrgId: string;
+}
+
+/** A stored pending guard-baseline row — the request plus when it was last set. */
+export interface PendingGuardBaselineView extends PendingGuardBaselineInput {
+  updatedAt: string;
+}
+
+type PendingGuardBaselineRow = typeof pendingGuardBaselines.$inferSelect;
+
+function toPendingGuardView(r: PendingGuardBaselineRow): PendingGuardBaselineView {
+  return {
+    repoFullName: r.repoFullName,
+    installationId: r.installationId,
+    defaultBranch: r.defaultBranch,
+    commitSha: r.commitSha,
+    workspaceOrgId: r.workspaceOrgId,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * The coalesce-then-rerun buffer behind `enqueueGuardBaseline` — the guard
+ * analogue of {@link PendingBaselineStore}. One row per repo (the PK): when a
+ * baseline run is already in flight, the follow-up refresh is recorded here and
+ * replayed when the running run settles, so a rapid second merge is never lost.
+ * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
+ */
+export class PendingGuardBaselineStore {
+  constructor(private readonly db: EeDb) {}
+
+  /** Record (or replace) the repo's pending follow-up guard baseline — latest wins. */
+  async upsert(input: PendingGuardBaselineInput): Promise<void> {
+    const row = {
+      repoFullName: input.repoFullName,
+      installationId: input.installationId,
+      defaultBranch: input.defaultBranch,
+      commitSha: input.commitSha,
+      workspaceOrgId: input.workspaceOrgId,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.db
+      .insert(pendingGuardBaselines)
+      .values(row)
+      .onConflictDoUpdate({
+        target: pendingGuardBaselines.repoFullName,
+        set: {
+          installationId: row.installationId,
+          defaultBranch: row.defaultBranch,
+          commitSha: row.commitSha,
+          workspaceOrgId: row.workspaceOrgId,
+          updatedAt: row.updatedAt,
+        },
+      });
+  }
+
+  /** Read-and-delete the repo's pending row (atomic), or null if none. */
+  async take(repoFullName: string): Promise<PendingGuardBaselineView | null> {
+    const [row] = await this.db
+      .delete(pendingGuardBaselines)
+      .where(eq(pendingGuardBaselines.repoFullName, repoFullName))
+      .returning();
+    return row ? toPendingGuardView(row) : null;
+  }
+
+  /** Read-and-delete every pending row — boot recovery after a crash. */
+  async drain(): Promise<PendingGuardBaselineView[]> {
+    const rows = await this.db.delete(pendingGuardBaselines).returning();
+    return rows.map(toPendingGuardView);
+  }
+}
+
+/**
+ * The deploy-time guard-backfill marker store (one row per repo the backfill has
+ * processed). `mark` is idempotent (`onConflictDoNothing`); `isMarked` gates the
+ * one-time enqueue so a re-deploy skips an already-backfilled repo entirely — the
+ * durable analogue of a run-once flag that survives restarts.
+ */
+export class GuardBackfillMarkerStore {
+  constructor(private readonly db: EeDb) {}
+
+  /** Whether the repo was already processed by a prior backfill. */
+  async isMarked(repoFullName: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ repoFullName: guardBackfillMarkers.repoFullName })
+      .from(guardBackfillMarkers)
+      .where(eq(guardBackfillMarkers.repoFullName, repoFullName))
+      .limit(1);
+    return !!row;
+  }
+
+  /** Record the repo as backfilled — idempotent (a re-mark is a no-op). */
+  async mark(repoFullName: string): Promise<void> {
+    await this.db
+      .insert(guardBackfillMarkers)
+      .values({ repoFullName, markedAt: new Date().toISOString() })
+      .onConflictDoNothing({ target: guardBackfillMarkers.repoFullName });
   }
 }
 
