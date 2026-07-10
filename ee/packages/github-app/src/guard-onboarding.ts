@@ -183,21 +183,31 @@ export interface GuardOnboardingSeams {
   generate?: GuardGenerateFn;
 }
 
-async function defaultCloneRepo(
-  deps: GuardOnboardingDeps,
-  req: GuardOnboardingRequest,
+/**
+ * Shallow-clone `req.repoFullName`'s default branch into `dir`, then pin the
+ * checkout to `req.commitSha` (fetching it if the branch head has moved). The
+ * plain "clone the default branch at a commit" step shared by the onboarding
+ * generate and the guard-baseline refresh (issue 06) — both persist scenarios /
+ * run results keyed to that exact commit, so the tree must be pinned to it. The
+ * optional `signal` aborts the git children (worker shutdown / cancellation).
+ */
+export async function cloneRepoAtCommit(
+  auth: GithubAuth,
+  req: { repoFullName: string; installationId: number; defaultBranch: string; commitSha: string },
   dir: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const token = await getInstallationToken(deps.auth, req.installationId);
-  const auth = cloneAuthArgs(token);
-  await simpleGit().clone(cloneUrl(req.repoFullName), dir, [
-    ...auth,
+  const token = await getInstallationToken(auth, req.installationId);
+  const authArgs = cloneAuthArgs(token);
+  const cloner = signal ? simpleGit({ abort: signal }) : simpleGit();
+  await cloner.clone(cloneUrl(req.repoFullName), dir, [
+    ...authArgs,
     '--depth',
     '1',
     '--branch',
     req.defaultBranch,
   ]);
-  const git = simpleGit(dir);
+  const git = signal ? simpleGit(dir, { abort: signal }) : simpleGit(dir);
   // Drop the token the clone persisted into .git/config — defence in depth.
   // (Later commands pass auth args per invocation, the gate-runner convention.)
   await stripEmbeddedAuth(git);
@@ -206,9 +216,17 @@ async function defaultCloneRepo(
   // scenarios keyed to `commitSha` must be generated from that tree.
   const head = (await git.revparse(['HEAD'])).trim();
   if (head !== req.commitSha) {
-    await git.raw([...auth, 'fetch', '--depth', '1', 'origin', req.commitSha]);
+    await git.raw([...authArgs, 'fetch', '--depth', '1', 'origin', req.commitSha]);
     await git.raw(['checkout', '-f', 'FETCH_HEAD']);
   }
+}
+
+async function defaultCloneRepo(
+  deps: GuardOnboardingDeps,
+  req: GuardOnboardingRequest,
+  dir: string,
+): Promise<void> {
+  await cloneRepoAtCommit(deps.auth, req, dir);
 }
 
 export function createGuardOnboardingPipeline(

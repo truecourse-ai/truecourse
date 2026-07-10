@@ -437,10 +437,24 @@ export {
   type GuardHeadRegenSeams,
 } from './guard-head-regen.js';
 
+// Guard baseline refresh: the durable `guard.baseline` job's pipeline (issue 06)
+export {
+  createGuardBaselinePipeline,
+  defaultGuardBaselinePipeline,
+  type GuardBaselineRunRequest,
+  type GuardBaselinePipeline,
+  type GuardBaselinePipelineDeps,
+  type GuardBaselinePipelineSeams,
+  type GuardBaselinePhase,
+  type GuardBaselineRunOptions,
+  type GuardBaselineResult,
+} from './guard-baseline-runner.js';
+
 // Guard onboarding: hosted guard-scenario generation (the `repo.guard` job body)
 export {
   materializeStoredCorpus,
   materializeAndGenerateGuard,
+  cloneRepoAtCommit,
   createGuardOnboardingPipeline,
   defaultGuardOnboardingPipeline,
   type GuardGenerateFn,
