@@ -939,6 +939,51 @@ describe('generateGuards — universe + recipe discovery', () => {
     expect(fs.existsSync(path.join(scenariosDir(r), 'recipe.json'))).toBe(true)
     expect(res.written).toHaveLength(1)
   })
+
+  it('verifies a proposal with an install step (install runs before the build) and writes it', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      recipeRunner: async () => ({
+        install: 'touch install-marker',
+        // The verification build only succeeds when the install already ran.
+        build: 'test -f install-marker',
+        entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
+      }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.recipe?.status).toBe('discovered')
+    const written = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'recipe.json'), 'utf-8'))
+    expect(written.install).toBe('touch install-marker')
+    expect(written.build).toBe('test -f install-marker')
+  })
+
+  it('a failing proposal install is verify-failed against the install command; no recipe is written', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      recipeRunner: async () => ({
+        install: 'false',
+        build: 'true',
+        entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
+      }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('recipe-failed')
+    if (res.status === 'recipe-failed') expect(res.reason).toMatch(/^install `false` failed/)
+    expect(fs.existsSync(path.join(scenariosDir(r), 'recipe.json'))).toBe(false)
+  })
 })
 
 // A birth candidate whose scenario binds to the live `version` section and runs
@@ -1192,6 +1237,43 @@ describe('generateGuards — grounded authoring', () => {
 
     // The authoring call still happened, but with no transcripts; birth then errors
     // on the broken build so nothing settles.
+    expect(received).toEqual([])
+    expect(res.written).toEqual([])
+    expect(res.errors.length).toBeGreaterThan(0)
+  })
+
+  it('runs the recipe install before the birth build (the build sees the install marker)', async () => {
+    const r = repo()
+    // The birth build only succeeds when the install already ran → order proven.
+    writeRecipe(r, { install: 'touch marker', build: 'test -f marker' })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.errors).toEqual([])
+  })
+
+  it('authors ungrounded and errors on birth when the recipe install fails (exactly like a failing build)', async () => {
+    const r = repo()
+    writeRecipe(r, { install: 'false', build: 'true' }) // install fails → no probing, birth errors
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let received: ProbeTranscript[] | undefined
+    const gen: GenerateRunner = async (ctx) => {
+      received = ctx.probes
+      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+    }
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
     expect(received).toEqual([])
     expect(res.written).toEqual([])
     expect(res.errors.length).toBeGreaterThan(0)

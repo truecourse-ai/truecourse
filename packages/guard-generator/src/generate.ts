@@ -30,6 +30,7 @@ import {
   readGuardDecisions,
   manifestPath,
   runBuild,
+  runInstall,
   resolveEntry,
   preflightEntry,
   formatEntryPreflightError,
@@ -528,7 +529,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // reuses it (skipBuild). The build phase is announced the first time a section
   // reaches birth; a build failure turns that section's candidates into error
   // outcomes (mirroring the runner's build-failed mapping) so the section unsettles.
-  const buildPromise = runBuild(repoRoot, recipe.build, recipe.env)
+  // The optional recipe install runs first; a failed install IS the build result
+  // (same BuildResult shape, carrying the install command), exactly as in `runGuard`.
+  const buildPromise = (async (): Promise<BuildResult> => {
+    if (recipe.install) {
+      const install = await runInstall(repoRoot, recipe.install, recipe.env)
+      if (!install.ok) return install
+    }
+    return runBuild(repoRoot, recipe.build, recipe.env)
+  })()
   let buildAnnounced = false
   const awaitBuild = async (): Promise<BuildResult> => {
     if (!buildAnnounced) {

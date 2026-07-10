@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -28,7 +29,12 @@ import {
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { buildGuardReport } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
-import type { GuardGenerateResult } from '@truecourse/guard-generator';
+import {
+  generateGuards,
+  type GuardGenerateResult,
+  type ExtractRunner,
+  type GenerateRunner,
+} from '@truecourse/guard-generator';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -246,6 +252,80 @@ describe('guard onboarding pipeline', () => {
 
     await expect(pipeline.run(deps, request)).rejects.toThrow(/No LLM provider is configured/);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  // ------------------------------------------------------------------
+  // Recipe install through the hosted path — the REAL generate over a fresh
+  // checkout (no node_modules), proving the OSS install step needs no EE change.
+  // ------------------------------------------------------------------
+
+  const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
+  const DOC_BODY = '## version\n`--version` prints the version and exits 0.\n';
+
+  const extractVersion: ExtractRunner = async ({ outline }) => ({
+    claims: [
+      {
+        claim: '`--version` prints the version and exits 0',
+        driver: 'cli',
+        sectionAnchor: outline[0].anchor,
+        reason: 'exit code observable',
+      },
+    ],
+    untestable: [],
+  });
+  const authorVersion: GenerateRunner = async ({ claims }) =>
+    claims.map((c) => ({
+      ref: c.ref,
+      scenarios: [
+        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+      ],
+    }));
+
+  /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
+  function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {
+    return async (dir: string) => ({
+      guard: await generateGuards({
+        repoRoot: dir,
+        recipeRunner: async () => proposal,
+        extractRunner: extractVersion,
+        generateRunner: authorVersion,
+      }),
+    });
+  }
+
+  it('a checkout without node_modules whose proposal declares install generates OK (install before build)', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      // A "fresh clone": the doc tree only — nothing installed, nothing built.
+      writeFile(dir, 'README.md', DOC_BODY);
+    });
+    // The verification/birth build only succeeds when the install already ran.
+    const generate = realGenerateProposing({
+      install: 'touch install-marker',
+      build: 'test -f install-marker',
+      entry: ['node', FIXTURE_BIN],
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    const result = await pipeline.run(deps, request);
+
+    expect(result.noCorpus).toBe(false);
+    expect(result.scenariosWritten).toBe(1);
+    // The discovered recipe persisted to the hosted store WITH its install step.
+    expect(await readRecipeRaw(REPO, SHA)).toContain('"install": "touch install-marker"');
+  });
+
+  it('a failing proposal install fails the pipeline with the install reason (the worker notification detail)', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      writeFile(dir, 'README.md', DOC_BODY);
+    });
+    const generate = realGenerateProposing({ install: 'false', build: 'true', entry: ['node', FIXTURE_BIN] });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    await expect(pipeline.run(deps, request)).rejects.toThrow(/install `false` failed/);
+    expect(await readGuardResult(REPO)).toBeNull();
+    expect(await listScenarioFiles(REPO)).toEqual([]);
   });
 
   it('cleans up the clone when generation throws', async () => {

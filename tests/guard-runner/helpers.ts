@@ -78,9 +78,10 @@ export function rmrf(dir: string): void {
 /** Write a recipe.json whose entry invokes the fixture CLI, plus the shared spec doc. */
 export function writeRecipe(
   repo: string,
-  overrides: { build?: string; entry?: string[]; env?: Record<string, string> } = {},
+  overrides: { install?: string; build?: string; entry?: string[]; env?: Record<string, string> } = {},
 ): void {
   const recipe = {
+    ...(overrides.install ? { install: overrides.install } : {}),
     build: overrides.build ?? 'true',
     entry: overrides.entry ?? ['node', FIXTURE_BIN],
     ...(overrides.env ? { env: overrides.env } : {}),

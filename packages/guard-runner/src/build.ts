@@ -1,9 +1,10 @@
 /**
- * Run the recipe `build` once per run, in the repo root. A build failure is a
- * run-level error (no scenario executes) — it is reported against the recipe, not
- * as drift. The build runs against the real working tree, so it is not sandboxed;
- * but its env is still built from an allowlist (`BUILD_PASSTHROUGH` + recipe env),
- * never a `...process.env` spread — host secrets never reach the build.
+ * Run the recipe preparation steps once per run, in the repo root: the optional
+ * `install` (dependency fetch) and the `build`. A failure of either is a run-level
+ * error (no scenario executes) — it is reported against the recipe, not as drift.
+ * Both run against the real working tree, so they are not sandboxed; but their env
+ * is still built from an allowlist (`BUILD_PASSTHROUGH` + recipe env), never a
+ * `...process.env` spread — host secrets never reach the child.
  */
 
 import { spawn } from 'node:child_process'
@@ -11,6 +12,7 @@ import { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js'
 import { armChildKill } from './child-kill.js'
 
 export const DEFAULT_BUILD_TIMEOUT_MS = 600_000
+export const DEFAULT_INSTALL_TIMEOUT_MS = 600_000
 
 export interface BuildResult {
   ok: boolean
@@ -26,6 +28,28 @@ export function runBuild(
   command: string,
   env?: Record<string, string>,
   timeoutMs: number = DEFAULT_BUILD_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<BuildResult> {
+  return runShellStep(repoRoot, command, env, timeoutMs, signal)
+}
+
+/** The recipe `install` step — identical hermetic execution, its own default timeout. */
+export function runInstall(
+  repoRoot: string,
+  command: string,
+  env?: Record<string, string>,
+  timeoutMs: number = DEFAULT_INSTALL_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<BuildResult> {
+  return runShellStep(repoRoot, command, env, timeoutMs, signal)
+}
+
+/** Shared hermetic shell-step runner behind `runBuild` and `runInstall`. */
+function runShellStep(
+  repoRoot: string,
+  command: string,
+  env: Record<string, string> | undefined,
+  timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<BuildResult> {
   // Already-cancelled callers never spawn anything.

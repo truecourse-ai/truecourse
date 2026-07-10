@@ -466,16 +466,22 @@ this schema (CANONICAL — generated from the engine's Zod definition; your repl
 must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
-  { "build": "<shell command run once in the repo root to produce the entrypoint>",
+  { "install": "<optional shell command run once in the repo root, before the build, to fetch dependencies>",
+    "build": "<shell command run once in the repo root to produce the entrypoint>",
     "entry": ["<argv>", "..."] }
 
+- install (optional) fetches dependencies before the build runs — the tree may be
+  a fresh clone with no node_modules (e.g. "npm ci", "pnpm install --frozen-lockfile",
+  "yarn install --immutable"; match the lockfile present). Omit it when the tree
+  needs no dependency fetch to build.
 - build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
   no-op "true" when nothing needs building.
 - entry is the argv that invokes the built program; scenario arguments are
   appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
   the package's declared bin/main and its build script. Paths are repo-relative.
 
-Output exactly one JSON object with \`build\` and \`entry\`. No prose.`
+Output exactly one JSON object with \`build\` and \`entry\` (and \`install\` when
+dependencies must be fetched first). No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
@@ -503,8 +509,8 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
       'Return exactly one JSON object with a non-empty "build" string and a non-empty',
-      '"entry" argv array (and optional "env" object), and nothing else:',
-      '  { "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      '"entry" argv array (and optional "install" and "env"), and nothing else:',
+      '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."] }',
     )
   }
   return lines.join('\n')

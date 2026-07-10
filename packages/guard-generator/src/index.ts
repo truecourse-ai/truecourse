@@ -74,6 +74,7 @@ export {
   FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
+  buildRecipeUserPrompt,
   type AuthorUserContext,
   type AuthorClaim,
   type FidelityUserContext,

@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -20,7 +21,12 @@ import { setGuardStore, resetGuardStore, type RepoRef } from '@truecourse/core/l
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { buildGuardReport } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
-import type { GuardGenerateResult } from '@truecourse/guard-generator';
+import {
+  generateGuards,
+  type GuardGenerateResult,
+  type ExtractRunner,
+  type GenerateRunner,
+} from '@truecourse/guard-generator';
 import { defaultGuardColdGenerate } from '../../ee/packages/github-app/src/guard-gate-runner';
 
 const REPO = 'acme/api';
@@ -190,6 +196,56 @@ describe('defaultGuardColdGenerate', () => {
         'no build recipe',
       );
       expect(await guardStore.readRecipeRaw(REPO, SHA)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a proposal with install cold-generates: the install runs before the verification build', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
+    // A "fresh checkout": the doc tree only — no node_modules, nothing built.
+    writeFile(dir, 'README.md', '## version\n`--version` prints the version and exits 0.\n');
+    const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
+    const extract: ExtractRunner = async ({ outline }) => ({
+      claims: [
+        {
+          claim: '`--version` prints the version and exits 0',
+          driver: 'cli',
+          sectionAnchor: outline[0].anchor,
+          reason: 'exit code observable',
+        },
+      ],
+      untestable: [],
+    });
+    const author: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios: [
+          { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+        ],
+      }));
+    // The REAL generate: the verification/birth build only succeeds after install.
+    const generate = async (d: string) => ({
+      guard: await generateGuards({
+        repoRoot: d,
+        recipeRunner: async () => ({
+          install: 'touch install-marker',
+          build: 'test -f install-marker',
+          entry: ['node', FIXTURE_BIN],
+        }),
+        extractRunner: extract,
+        generateRunner: author,
+      }),
+    });
+    try {
+      const corpus = await defaultGuardColdGenerate(guardStore, ref, dir, generate);
+
+      expect(corpus).not.toBeNull();
+      expect(corpus!.recipe).toMatchObject({ install: 'touch install-marker' });
+      expect(corpus!.scenarios).toHaveLength(1);
+      // The discovered recipe persisted under the ref WITH its install step.
+      expect(await guardStore.readRecipeRaw(REPO, SHA)).toContain('"install": "touch install-marker"');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

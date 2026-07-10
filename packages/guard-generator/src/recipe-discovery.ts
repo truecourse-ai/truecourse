@@ -15,6 +15,7 @@ import {
   loadRecipe,
   resolveEntry,
   runBuild,
+  runInstall,
   computeRecipeFingerprint,
   recipePath,
   executeStep,
@@ -34,7 +35,8 @@ export const RECIPE_CACHE_NAME = 'guard/recipe'
 /** Files whose presence + content inform recipe discovery (mirrors the runner's set). */
 const DISCOVERY_INPUTS = ['package.json', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'turbo.json']
 
-/** How long the engine's verification build and entrypoint probe may take. */
+/** How long the engine's verification install, build, and entrypoint probe may take. */
+const INSTALL_TIMEOUT_MS = 600_000
 const BUILD_TIMEOUT_MS = 600_000
 const PROBE_TIMEOUT_MS = 30_000
 
@@ -78,6 +80,20 @@ export async function discoverRecipe(
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
+  // The optional install step runs BEFORE the verification build, exactly as the
+  // runner will run it — a proposal whose install fails is never written.
+  if (proposal.install) {
+    const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
+    if (!install.ok) {
+      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
+      return {
+        status: 'verify-failed',
+        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
+        proposal,
+      }
+    }
+  }
+
   const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
   if (!build.ok) {
     const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
@@ -105,6 +121,7 @@ export async function discoverRecipe(
   if (!probe.ok) return { status: 'verify-failed', reason: probe.reason, proposal }
 
   const recipe: Recipe = {
+    ...(proposal.install ? { install: proposal.install } : {}),
     build: proposal.build,
     entry: proposal.entry,
     ...(proposal.env ? { env: proposal.env } : {}),

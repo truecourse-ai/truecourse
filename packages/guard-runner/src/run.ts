@@ -19,7 +19,7 @@ import {
 } from '@truecourse/shared'
 import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, type Recipe, type LoadedRecipe } from './recipe.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
-import { runBuild, DEFAULT_BUILD_TIMEOUT_MS, type BuildResult } from './build.js'
+import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
@@ -53,6 +53,8 @@ export interface RunGuardOptions {
   runTimeoutMs?: number
   /** Build wall-clock, replacing the runner's default (10min) only when set. */
   buildTimeoutMs?: number
+  /** Install wall-clock, replacing the runner's default (10min) only when set. */
+  installTimeoutMs?: number
   /** External cancellation; SIGKILLs the build/scenario children → `aborted`. */
   signal?: AbortSignal
   /** Parallel sandbox limit; default `TRUECOURSE_MAX_CONCURRENCY`, else min(cpus, 8). */
@@ -271,6 +273,22 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   try {
     if (buildsOwnEntry) {
       opts.onPhase?.('build')
+      // The optional recipe install runs BEFORE the build, in the repo root, with
+      // the same hermetic env. A failed install is reported exactly like a failed
+      // build — its BuildResult carries the install command.
+      if (loaded.recipe.install) {
+        const install = await runInstall(
+          repoRoot,
+          loaded.recipe.install,
+          loaded.recipe.env,
+          opts.installTimeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS,
+          cancel.signal,
+        )
+        // A cancellation-killed install must never masquerade as a build failure.
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (!install.ok) return { status: 'build-failed', build: install, loadErrors }
+      }
       const build = await runBuild(
         repoRoot,
         loaded.recipe.build,

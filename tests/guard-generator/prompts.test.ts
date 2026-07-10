@@ -8,6 +8,7 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
+  buildRecipeUserPrompt,
   type AuthorUserContext,
   type FidelityUserContext,
   type SectionInput,
@@ -205,5 +206,21 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION —')
     expect(p).toContain('not json')
     expect(p).toContain('"faithful" or "flagged"')
+  })
+
+  it('RECIPE_SYSTEM_PROMPT documents the optional install step with examples', () => {
+    // The descriptive bullet, not just the rendered Zod schema key.
+    expect(RECIPE_SYSTEM_PROMPT).toContain('npm ci')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('pnpm install --frozen-lockfile')
+    expect(RECIPE_SYSTEM_PROMPT).toMatch(/install.*before.*build/is)
+  })
+
+  it('buildRecipeUserPrompt correction text names the optional install field', () => {
+    const prompt = buildRecipeUserPrompt({
+      packageJson: '{}',
+      presentInputs: ['package.json'],
+      correction: { invalidOutput: '(not json)' },
+    })
+    expect(prompt).toContain('"install"')
   })
 })

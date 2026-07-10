@@ -7,12 +7,21 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import type { GuardLatest, GuardOutcome, GuardScenario, GuardScenarioResult } from '@truecourse/shared';
-import type { GuardExecInput, GuardExecReport, GuardExecutor, Recipe } from '@truecourse/guard-runner';
+import {
+  defaultGuardExecutor,
+  buildDocSectionIndex,
+  type GuardExecInput,
+  type GuardExecReport,
+  type GuardExecutor,
+  type Recipe,
+} from '@truecourse/guard-runner';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { createSemaphore } from '../../ee/packages/server/src/jobs/guard-gate-limiter';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
@@ -147,6 +156,36 @@ describe('guard-baseline pipeline — happy refresh', () => {
     expect(latest?.summary).toMatchObject({ pass: 1, fail: 1 });
     // Checkout is removed unconditionally.
     expect(seen.dir && fs.existsSync(seen.dir)).toBe(false);
+  });
+
+  it('the REAL executor runs the recipe install before the build (marker recipe, fresh checkout)', async () => {
+    // The doc lives in the checkout so the scenario's binding resolves as `match`.
+    const DOC = '## intro\nsome observable behavior\n';
+    const section = buildDocSectionIndex('README.md', DOC).sections[0];
+    const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
+    const scen: GuardScenario = {
+      ...scenario('s1'),
+      binds: { doc: 'README.md', section: section.anchor, fingerprint: section.fingerprint },
+      steps: [{ run: ['--version'], expect: { exit: 0 } }],
+    };
+    // The build only succeeds when the install's marker already exists → order proven.
+    const recipe: Recipe = {
+      install: 'touch install-marker',
+      build: 'test -f install-marker',
+      entry: ['node', FIXTURE_BIN],
+    };
+    const clone = async (_deps: unknown, _req: GuardBaselineRunRequest, dir: string) => {
+      fs.writeFileSync(path.join(dir, 'README.md'), DOC);
+    };
+    const pipeline = createGuardBaselinePipeline({
+      clone,
+      loadCorpus: async () => ({ recipe, scenarios: [scen] }),
+    });
+
+    const out = await pipeline.run(makeDeps(defaultGuardExecutor), req());
+
+    expect(out).toEqual({ status: 'ok', scenarioCount: 1 });
+    expect((await guardStore.readGuardLatest(REPO))?.summary).toMatchObject({ pass: 1 });
   });
 
   it('runs the executor under the shared limiter (permit held during the run)', async () => {

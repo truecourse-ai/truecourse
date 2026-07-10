@@ -68,6 +68,24 @@ describe('runGuard — external AbortSignal', () => {
     expect(res).toEqual({ status: 'aborted', phase: 'build' })
   })
 
+  it('aborting during a hanging install kills the install child and reports phase build', async () => {
+    const r = repo()
+    writeRecipe(r, { install: HANGING_BUILD })
+    writeScenario(r, 's.yaml', scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+
+    const ac = new AbortController()
+    const start = Date.now()
+    const res = await runGuard({
+      repoRoot: r,
+      signal: ac.signal,
+      onPhase: (phase) => {
+        if (phase === 'build') setTimeout(() => ac.abort(), 50)
+      },
+    })
+    expect(Date.now() - start).toBeLessThan(5_000)
+    expect(res).toEqual({ status: 'aborted', phase: 'build' })
+  })
+
   it('aborting during the run kills in-flight scenarios and reports phase run', async () => {
     const r = repo()
     writeRecipe(r)

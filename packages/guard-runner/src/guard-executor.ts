@@ -39,6 +39,8 @@ export interface GuardExecInput {
   runTimeoutMs?: number
   /** Build wall-clock, replacing the runner's default only when set. */
   buildTimeoutMs?: number
+  /** Install wall-clock, replacing the runner's default only when set. */
+  installTimeoutMs?: number
   /** External cancellation; aborts the build + scenario children → `aborted`. */
   signal?: AbortSignal
   onPhase?: (phase: 'build' | 'run', total?: number) => void
@@ -69,6 +71,7 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     stepTimeoutMs: input.stepTimeoutMs,
     runTimeoutMs: input.runTimeoutMs,
     buildTimeoutMs: input.buildTimeoutMs,
+    installTimeoutMs: input.installTimeoutMs,
     signal: input.signal,
     onPhase: input.onPhase,
     onScenarioSettled: input.onScenarioSettled,
