@@ -1394,7 +1394,12 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   runs (baseline anchored to PR-head, per-PR overlay — same pattern as spec PR-scoping), an
   additive gate check powered by guard runs (the verify-drift signal stays), hosted execution
   tier (warm per-repo snapshots, credential rotation), spec-section coverage in the EE repo
-  views. STATUS: NOT STARTED (after OSS v1)
+  views. STATUS: IN PROGRESS (branch `sm/spec-guards-ee`, working tree awaiting review;
+  detailed issue tracking lives in the external guard-ee-hosted-gate tracker) — landed so far:
+  Pg guard store behind the GuardStore seam, the GuardExecutor seam, the hosted guard-generate
+  onboarding chain, and the PR guard-gate durable job + diff Check (kill-switch env,
+  concurrency limiter, crash/orphan Check settlement, abort-signal cancellation).
+  Remaining: refresh-on-merge and the hosted execution tier.
 
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
 after that — order between them is a call to make when OSS v1 ships.

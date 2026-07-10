@@ -83,7 +83,11 @@ contracts back to the PR branch), Metadata (read). Subscribe to `pull_request`,
 
 **Env** (see `.env.example`): `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
 `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`; optional `RESEND_API_KEY` +
-`RESEND_FROM` (email) and `DATABASE_URL` (hosted Postgres store).
+`RESEND_FROM` (email), `DATABASE_URL` (hosted Postgres store),
+`TRUECOURSE_GUARD_GATE_DISABLED` (guard-gate kill-switch — truthy disables the
+gate and PRs get a neutral Check with a "gate disabled" note; `0`/`false`/empty
+= enabled), and `TRUECOURSE_GUARD_GATE_CONCURRENCY` (max concurrent guard-gate
+build+run executions per process, default 2).
 
 ## Error tracking (Sentry)
 
