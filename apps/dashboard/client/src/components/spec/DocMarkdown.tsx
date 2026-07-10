@@ -21,7 +21,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 
-const norm = (s: string): string => s.trim().toLowerCase();
+import { headingMatchKey as norm } from '@/lib/heading-match';
 
 // Extend GitHub's sanitize schema so README-style raw HTML renders instead of
 // leaking as source: images (logos/badges), alignment wrappers, and invisible

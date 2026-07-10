@@ -36,7 +36,7 @@ function reasonText(status: GuardSectionCoverageStatus, reason: string | undefin
   return reason ? `${label} — ${reason}` : label;
 }
 
-const norm = (s: string): string => s.trim().toLowerCase();
+import { headingMatchKey as norm } from '@/lib/heading-match';
 
 /** A small amber "conflict" tag that opens the overlap resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {

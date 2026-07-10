@@ -85,7 +85,7 @@ export function splitDocBlocks(content: string): DocBlock[] {
   return blocks;
 }
 
-const norm = (s: string): string => s.trim().toLowerCase();
+import { headingMatchKey as norm } from './heading-match';
 
 // Slugify a heading the GitHub/anchor way — strip inline emphasis/code markers,
 // lowercase, fold non-alphanumeric runs to single hyphens, trim. Mirrors

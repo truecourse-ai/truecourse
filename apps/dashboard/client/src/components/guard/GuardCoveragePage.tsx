@@ -14,6 +14,7 @@
  * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`.
  */
 
+import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, FileText, FlaskConical, GitMerge, Loader2, PlayCircle } from 'lucide-react';
 import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
@@ -179,7 +180,7 @@ export function GuardCoveragePage({
         const key = overlapKey(area.id, ov.docs[0], ov.docs[1]);
         for (const s of ov.sections ?? []) {
           // A preamble pointer (null heading) has no heading row to tag — skip it.
-          if (s.doc === doc && s.heading !== null) map.set(s.heading.trim().toLowerCase(), key);
+          if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), key);
         }
       }
     }

@@ -5,6 +5,7 @@
  * `?spec=<docRef>`.
  */
 
+import { headingMatchKey } from '@/lib/heading-match';
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, AlertCircle, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -62,13 +63,13 @@ export function SpecDocViewer({
 
   // Scroll to a conflicting section: match a rendered heading by text.
   useEffect(() => {
-    const wanted = scrollTo?.heading?.trim().toLowerCase();
+    const wanted = scrollTo?.heading == null ? undefined : headingMatchKey(scrollTo.heading);
     if (!wanted || loading || error) return;
     const root = scrollRef.current;
     if (!root) return;
     const headings = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')];
-    const exact = headings.find((el) => el.textContent?.trim().toLowerCase() === wanted);
-    const fuzzy = headings.find((el) => el.textContent?.trim().toLowerCase().includes(wanted));
+    const exact = headings.find((el) => headingMatchKey(el.textContent ?? '') === wanted);
+    const fuzzy = headings.find((el) => headingMatchKey(el.textContent ?? '').includes(wanted));
     (exact ?? fuzzy)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [scrollTo, content, loading, error]);
 
