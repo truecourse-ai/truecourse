@@ -168,6 +168,23 @@ export async function startCheck(
   }
 }
 
+export type CheckConclusion =
+  | 'success'
+  | 'failure'
+  | 'neutral'
+  | 'action_required'
+  | 'timed_out';
+
+/** One inline annotation on a completed Check. GitHub caps them at 50 per request. */
+export interface CheckAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: 'notice' | 'warning' | 'failure';
+  title?: string;
+  message: string;
+}
+
 /**
  * Post a Check run's result (the conclusion is authoritative). When `checkRunId` is
  * given, UPDATES that in-progress run (from {@link startCheck}) to completed instead
@@ -178,8 +195,8 @@ export async function postCheck(
   { owner, repo }: RepoCoords,
   name: string,
   headSha: string,
-  conclusion: 'success' | 'failure' | 'neutral',
-  output: { title: string; summary: string },
+  conclusion: CheckConclusion,
+  output: { title: string; summary: string; annotations?: CheckAnnotation[] },
   checkRunId?: number | null,
 ): Promise<void> {
   if (checkRunId != null) {
