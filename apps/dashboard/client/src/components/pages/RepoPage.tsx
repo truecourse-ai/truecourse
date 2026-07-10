@@ -9,13 +9,15 @@ import { useVisibleTabsForSection } from '@/navigation/registry';
 import { EeRepoChrome } from '@/ee/EeRepoChrome';
 import { RepoSettings } from '@/ee/RepoSettings';
 
-/** EE Code Quality (analysis) tab bar: Analytics · Violations, then the common
- *  Settings. The analytics/violations tabs are EE-only (gated on `workspace`);
- *  `settings` is repo-wide config (github-gate). The Architecture graph (and
- *  Flows/Files/Databases/History) are not shown in hosted — violations link
- *  straight to the code on GitHub instead. */
-const EE_ANALYSIS_TAB_ORDER = ['analytics', 'violations', 'settings'];
-const EE_ANALYSIS_TAB_LABELS: Record<string, string> = {};
+// EE lens model (curated tab orders + URL-coherence logic) — pure, tested
+// on its own in tests/dashboard-client/ee-lens.test.ts.
+import {
+  EE_ANALYSIS_TAB_ORDER,
+  EE_GUARD_TAB_ORDER,
+  EE_ANALYSIS_TAB_LABELS,
+  eeDefaultTab,
+  resolveEeLens,
+} from '@/ee/ee-lens';
 import {
   NavigationProvider,
   useNavigation,
@@ -178,31 +180,30 @@ function RepoPageInner() {
   // Databases in EE (no `local-filesystem`). Curate order + relabel for EE.
   const analysisVisible = useVisibleTabsForSection('codequality');
   const navigate = useNavigate();
+  // Guard tabs — OSS/ungated, so the visible set IS the curated set; the map
+  // keeps the curated order authoritative should gating ever appear.
+  const guardVisible = useVisibleTabsForSection('guard');
+  const guardTabs = EE_GUARD_TAB_ORDER.map((id) => guardVisible.find((t) => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t));
   const analysisTabs = EE_ANALYSIS_TAB_ORDER
     .map((id) => analysisVisible.find((t) => t.id === id))
     .filter((t): t is NonNullable<typeof t> => Boolean(t))
     // Settings is repo-wide config — hide it while viewing a PR.
     .filter((t) => !(prNumber != null && t.id === 'settings'))
     .map((t) => ({ ...t, label: EE_ANALYSIS_TAB_LABELS[t.id] ?? t.label }));
-  // EE has only the Code Quality lens on the repo page.
-  const eeSectionTabs = analysisTabs;
+  // The tab bar shown for the active EE section.
+  const eeSectionTabs = dashboardSection === 'guard' ? guardTabs : analysisTabs;
   useEffect(() => {
     if (!isEe) return;
-    // Keep EE on the Code Quality lens with a valid curated tab.
+    // Keep EE in a coherent state: one of the lenses — Code Quality (analysis)
+    // or Guard (spec-scenario coverage) — each with its own curated tab set.
+    // Keyed off the EXPLICIT ?section param so the default (no param) lands on
+    // Code Quality. Decision logic lives in `resolveEeLens`.
     const url = new URL(window.location.href);
-    const order = EE_ANALYSIS_TAB_ORDER;
-    const settingsInPr = prNumber != null && leftTab === 'settings';
-    if (
-      url.searchParams.get('section') === 'codequality' &&
-      leftTab &&
-      order.includes(leftTab) &&
-      !settingsInPr
-    )
-      return;
-    url.searchParams.set('section', 'codequality');
-    const t = url.searchParams.get('tab');
-    if (!t || !order.includes(t) || (prNumber != null && t === 'settings'))
-      url.searchParams.set('tab', 'analytics');
+    const target = resolveEeLens({ searchParams: url.searchParams, prNumber, leftTab });
+    if (!target) return;
+    url.searchParams.set('section', target.section);
+    url.searchParams.set('tab', target.tab);
     navigate(url.pathname + url.search, { replace: true });
   }, [isEe, dashboardSection, leftTab, prNumber, navigate]);
 
@@ -919,13 +920,17 @@ function RepoPageInner() {
     <div className="flex h-screen flex-col">
       {isEe ? (
         // EE has no working tree, so the git-only actions stay hidden — each
-        // self-gates on isGitRepo. The repo page shows only the Code Quality lens.
+        // self-gates on isGitRepo. The lens switch flips Code Quality ↔ Guard.
         <EeRepoChrome
           repoName={repo?.name}
           branch={currentBranch}
           tabs={eeSectionTabs}
           activeTab={leftTab}
           onTabChange={(t) => handleLeftTabChange(t)}
+          section={dashboardSection}
+          // Land each lens on its FIRST curated tab (Analytics for Code Quality,
+          // Coverage for Guard), not the OSS registry default.
+          onSectionChange={(next) => setDashboardSection(next, eeDefaultTab(next))}
           prNumber={prNumber}
           prBranch={null}
           prConclusion={activePrRun?.conclusion}
