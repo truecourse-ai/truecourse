@@ -120,6 +120,42 @@ export interface GuardSpecRegenJobPayload extends GuardSpecRegenEnqueueRequest {
   jobId: string;
 }
 
+/** Guard baseline refresh — re-run the committed scenario corpus against the
+ *  default branch and persist the result as the repo's guard baseline, so the
+ *  next PR gate diffs against current main without a lazy base run. Chained after
+ *  a default-branch merge (repo already has scenarios) and after an onboarding /
+ *  backfill generate; enqueued once per repo at boot for the deploy backfill. */
+export const GUARD_BASELINE_TASK = 'guard.baseline';
+
+/** Display title + stepped checklist for the guard-baseline job popup. */
+export const GUARD_BASELINE_TITLE = 'Refreshing guard baseline';
+export const GUARD_BASELINE_STEPS: readonly JobStepDef[] = [
+  { key: 'clone', label: 'Cloning repository' },
+  { key: 'run', label: 'Running scenarios' },
+  { key: 'persist', label: 'Saving baseline' },
+];
+
+/** Single-flight key for a `guard.baseline` job — one refresh per repo at a time. */
+export function guardBaselineJobKey(repoFullName: string): string {
+  return `${GUARD_BASELINE_TASK}:${repoFullName}`;
+}
+
+/** What a caller (merge chain / generate chain / backfill) hands to `enqueueGuardBaseline`. */
+export interface GuardBaselineEnqueueRequest {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  /** Default-branch head to run the baseline against. */
+  commitSha: string;
+  /** The repo's workspace org — scopes the job + its notifications. */
+  workspaceOrgId: string;
+}
+
+/** The worker's `guard.baseline` task payload (the enqueue request plus the job id). */
+export interface GuardBaselineJobPayload extends GuardBaselineEnqueueRequest {
+  jobId: string;
+}
+
 /** What a caller (connect / push webhook) hands to `enqueueBaseline`. */
 export interface BaselineEnqueueRequest {
   repoFullName: string;

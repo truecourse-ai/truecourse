@@ -62,8 +62,13 @@ beforeEach(async () => {
   startWorkerMock.mockResolvedValue({ addJob: addJobMock, stop: async () => {} });
 });
 
+// Track registerJobs handles so afterEach joins the fire-and-forget boot backfill
+// before closing PGlite (an in-flight query racing close() traps the WASM runtime).
+const handles: Array<Awaited<ReturnType<typeof registerJobs>>> = [];
+
 afterEach(async () => {
   setBackgroundTaskRunner(null);
+  await Promise.allSettled(handles.splice(0).map((h) => h.backfillSettled));
   await client.close();
 });
 
@@ -72,6 +77,12 @@ const opts = () => ({
   connectionString: 'postgres://unused',
   masterSecret: 'master-secret-at-least-32-characters!!',
 });
+
+const reg = async () => {
+  const j = await registerJobs(registry, opts());
+  handles.push(j);
+  return j;
+};
 
 const enqueueReq: GuardGateEnqueueRequest = {
   repoFullName: REPO,
@@ -133,7 +144,7 @@ describe('guard.gate — enqueue single-flight (per repo + head SHA)', () => {
 
 describe('registerJobs — enqueueGuardGate', () => {
   it('creates the single-flight job row, enqueues on the runner, and dedupes', async () => {
-    const jobs = await registerJobs(registry, opts());
+    const jobs = await reg();
     expect(jobs.workerStarted).toBe(true);
 
     const jobId = await jobs.enqueueGuardGate(enqueueReq);
@@ -170,7 +181,7 @@ describe('registerJobs — enqueueGuardGate', () => {
 
   it('throws on enqueue when the worker failed to boot', async () => {
     startWorkerMock.mockRejectedValue(new Error('pg down'));
-    const jobs = await registerJobs(registry, opts());
+    const jobs = await reg();
 
     expect(jobs.workerStarted).toBe(false);
     await expect(jobs.enqueueGuardGate(enqueueReq)).rejects.toThrow(

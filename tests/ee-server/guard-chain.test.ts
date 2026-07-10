@@ -6,7 +6,10 @@
  * (logged), never thrown into the baseline's terminal path.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { chainGuardOnboarding } from '../../ee/packages/server/src/jobs/guard-chain';
+import {
+  chainGuardOnboarding,
+  chainGuardBaselineRefresh,
+} from '../../ee/packages/server/src/jobs/guard-chain';
 import type { BaselineJobPayload } from '../../ee/packages/server/src/jobs/constants';
 
 const payload: BaselineJobPayload = {
@@ -76,5 +79,49 @@ describe('chainGuardOnboarding', () => {
       enqueueGuardGenerate: vi.fn(),
     };
     await expect(chainGuardOnboarding(deps, payload, 'succeeded')).resolves.toBeNull();
+  });
+});
+
+describe('chainGuardBaselineRefresh — the complement (fires when guard state EXISTS)', () => {
+  it('a repo with scenarios refreshes its baseline on the settled commit', async () => {
+    const enqueueGuardBaseline = vi.fn().mockResolvedValue('job_b1');
+    const deps = { hasGuardState: vi.fn().mockResolvedValue(true), enqueueGuardBaseline };
+
+    const jobId = await chainGuardBaselineRefresh(deps, payload, 'succeeded');
+
+    expect(jobId).toBe('job_b1');
+    expect(enqueueGuardBaseline).toHaveBeenCalledTimes(1);
+    expect(enqueueGuardBaseline).toHaveBeenCalledWith({
+      repoFullName: 'acme/api',
+      installationId: 42,
+      defaultBranch: 'main',
+      commitSha: 'abc1234567',
+      workspaceOrgId: 'org_A',
+    });
+  });
+
+  it('a repo with NO guard state never refreshes (onboarding covers it instead)', async () => {
+    const enqueueGuardBaseline = vi.fn();
+    const deps = { hasGuardState: vi.fn().mockResolvedValue(false), enqueueGuardBaseline };
+
+    expect(await chainGuardBaselineRefresh(deps, payload, 'succeeded')).toBeNull();
+    expect(enqueueGuardBaseline).not.toHaveBeenCalled();
+  });
+
+  it('a failed settle never refreshes', async () => {
+    const enqueueGuardBaseline = vi.fn();
+    const hasGuardState = vi.fn();
+
+    expect(await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, 'failed')).toBeNull();
+    expect(hasGuardState).not.toHaveBeenCalled();
+    expect(enqueueGuardBaseline).not.toHaveBeenCalled();
+  });
+
+  it('coalesced enqueue → null; read/enqueue failures are swallowed', async () => {
+    const coalesced = { hasGuardState: vi.fn().mockResolvedValue(true), enqueueGuardBaseline: vi.fn().mockResolvedValue(null) };
+    expect(await chainGuardBaselineRefresh(coalesced, payload, 'succeeded')).toBeNull();
+
+    const boom = { hasGuardState: vi.fn().mockRejectedValue(new Error('pg down')), enqueueGuardBaseline: vi.fn() };
+    await expect(chainGuardBaselineRefresh(boom, payload, 'succeeded')).resolves.toBeNull();
   });
 });

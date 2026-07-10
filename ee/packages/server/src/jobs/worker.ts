@@ -32,11 +32,14 @@ import {
   createGuardGatePipeline,
   defaultGuardOnboardingPipeline,
   defaultGuardGatePipeline,
+  defaultGuardBaselinePipeline,
   defaultGuardHeadRegenPipeline,
   postGuardGateErrorCheck,
   type BaselineResult,
   type GuardOnboardingPipeline,
   type GuardGatePipeline,
+  type GuardBaselinePipeline,
+  type GuardBaselineResult,
   type GuardGateRunRequest,
   type GuardGateCorpus,
   type GuardHeadRegenPipeline,
@@ -63,12 +66,17 @@ import {
   GUARD_SPEC_REGEN_TASK,
   GUARD_SPEC_REGEN_TITLE,
   GUARD_SPEC_REGEN_STEPS,
+  GUARD_BASELINE_TASK,
+  GUARD_BASELINE_TITLE,
+  GUARD_BASELINE_STEPS,
   type BaselineJobPayload,
   type GuardGenerateJobPayload,
   type GuardGateJobPayload,
   type GuardSpecRegenJobPayload,
+  type GuardBaselineJobPayload,
 } from './constants.js';
 import { guardGateLimiter } from './guard-gate-limiter.js';
+import type { GuardBaselineSettleOutcome } from './pending-guard-baseline.js';
 
 /**
  * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
@@ -100,6 +108,24 @@ export interface StartWorkerDeps {
    * onboarding (see guard-chain.ts). Wired only onto the baseline definition.
    */
   onBaselineSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
+  /**
+   * Called after a `repo.guard` (generate) job goes terminal. On SUCCESS, a fresh
+   * generate just wrote scenarios — chain a guard-baseline refresh so the first PR
+   * gate diffs against a warm baseline instead of paying a lazy base run (issue 06).
+   * Wired only onto the guard-generate definition.
+   */
+  onGuardGenerateSettled?: (payload: GuardGenerateJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
+  /**
+   * Called after a `guard.baseline` job goes terminal (success OR failure), once
+   * its single-flight key is free — replays any coalesced follow-up refresh for
+   * the repo (see pending-guard-baseline.ts). Receives the run's verdict status
+   * alongside the outcome so the replay can tell a settled commit from a
+   * `no-verdict` one. Wired only onto the guard-baseline definition.
+   */
+  onGuardBaselineSettled?: (
+    payload: GuardBaselineJobPayload,
+    settled: GuardBaselineSettleOutcome,
+  ) => Promise<void>;
 }
 
 function jobTrace(
@@ -219,6 +245,7 @@ function repoBaselineJob(
  */
 export function guardGenerateJob(
   pipeline: GuardOnboardingPipeline,
+  onSettled?: (payload: GuardGenerateJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
 ): JobDefinition<GuardGenerateJobPayload> {
   return {
     type: REPO_GUARD_TASK,
@@ -226,6 +253,7 @@ export function guardGenerateJob(
     steps: REPO_GUARD_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    onSettled: onSettled ? (ctx, outcome) => onSettled(ctx.payload, outcome) : undefined,
     sentry: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
@@ -353,6 +381,105 @@ export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJob
       title: `Guard gate failed — ${p.repoFullName}`,
       body: 'The guard gate produced no verdict. Open Details for the technical reason.',
       data: { repoFullName: p.repoFullName, prNumber: p.prNumber, detail: err.message },
+    }),
+  };
+}
+
+/** Deps the guard-baseline job needs: the pipeline + the settle hook that replays
+ *  the pending guard-baseline buffer. (No db — the body reads the live guard store
+ *  seam and the notification rides the shared harness, not a direct store handle.) */
+export interface GuardBaselineJobDeps {
+  pipeline: GuardBaselinePipeline;
+  onSettled?: (
+    payload: GuardBaselineJobPayload,
+    settled: GuardBaselineSettleOutcome,
+  ) => Promise<void>;
+}
+
+/**
+ * The hosted guard-baseline refresh for one repo: run the committed scenario
+ * corpus against the default branch through the executor seam (under the shared
+ * gate limiter) and persist the result as the repo's guard baseline. The live
+ * seams (guard store, executor) are read per invocation so a seam installed after
+ * boot is honored. Success is silent — the baseline is an internal comparison
+ * point, not a user-facing verdict, so a toast per merge would be noise; failures
+ * still notify (onError, unconditionally). A `no-verdict` (a build/run error left
+ * the previous baseline in place) also notifies — the refresh could not settle, so
+ * the operator must know main is not yet reflected. `onSettled` replays the repo's
+ * coalesced follow-up refresh once the single-flight key frees, keyed on the run's
+ * verdict status (see pending-guard-baseline.ts).
+ */
+export function guardBaselineJob(deps: GuardBaselineJobDeps): JobDefinition<GuardBaselineJobPayload> {
+  return {
+    type: GUARD_BASELINE_TASK,
+    title: GUARD_BASELINE_TITLE,
+    steps: GUARD_BASELINE_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    // The run's result (status) rides the harness's onSettled `result` arg so the
+    // replay can tell a settled commit from a `no-verdict` one; a thrown run gives
+    // no result → status null → the same-commit pending replays.
+    onSettled: deps.onSettled
+      ? (ctx, outcome, result) =>
+          deps.onSettled!(ctx.payload, {
+            outcome,
+            status: (result as { status?: GuardBaselineResult['status'] } | undefined)?.status ?? null,
+          })
+      : undefined,
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      route: 'worker guard.baseline',
+    }),
+    async run(ctx) {
+      const p = ctx.payload;
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      const result = await deps.pipeline.run(
+        {
+          guardStore: getGuardStore(),
+          auth: createGithubAuth(cfg),
+          execute: getGuardExecutor(),
+          limiter: guardGateLimiter,
+        },
+        {
+          repoFullName: p.repoFullName,
+          installationId: p.installationId,
+          workspaceOrgId: p.workspaceOrgId,
+          defaultBranch: p.defaultBranch,
+          commitSha: p.commitSha,
+        },
+        { onPhase: (phase) => ctx.phase(phase), signal: ctx.signal },
+      );
+      const jobResult = {
+        repoFullName: p.repoFullName,
+        commitSha: p.commitSha,
+        status: result.status,
+        scenarioCount: result.scenarioCount,
+      };
+      // `ok`/`no-corpus` are silent (the baseline is an internal comparison point).
+      // `no-verdict` means the run could not settle — a build/run error left the
+      // previous baseline untouched — so notify failure-style (mirrors onError):
+      // the operator must know current main is not yet reflected.
+      if (result.status === 'no-verdict') {
+        return {
+          result: jobResult,
+          notification: {
+            level: 'error',
+            title: `Guard baseline refresh failed — ${p.repoFullName}`,
+            body: 'The guard baseline refresh could not settle — a build or run error produced no verdict. The previous baseline remains in effect.',
+            data: { repoFullName: p.repoFullName, status: 'no-verdict' },
+          },
+        };
+      }
+      return { result: jobResult, notification: null };
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Guard baseline refresh failed — ${p.repoFullName}`,
+      body: 'The guard baseline could not be refreshed. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, detail: err.message },
     }),
   };
 }
@@ -574,6 +701,38 @@ export async function runGuardGate(
   );
 }
 
+/** Deps the exported `runGuardBaseline` test seam needs — the stores + the
+ *  baseline pipeline (faked in tests; `defaultGuardBaselinePipeline` live).
+ *  `onSettled` stands in for the pending-buffer replay; `signal` for graphile's
+ *  per-job `helpers.abortSignal`. */
+export interface RunGuardBaselineDeps {
+  db: EeDb;
+  jobStore: JobStore;
+  notifications: NotificationStore;
+  pipeline: GuardBaselinePipeline;
+  onSettled?: (
+    payload: GuardBaselineJobPayload,
+    settled: GuardBaselineSettleOutcome,
+  ) => Promise<void>;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run the `guard.baseline` body directly (unit-testable without graphile-worker).
+ * A thin wrapper over the harness so tests keep a stable entry point.
+ */
+export async function runGuardBaseline(
+  deps: RunGuardBaselineDeps,
+  payload: GuardBaselineJobPayload,
+): Promise<void> {
+  await executeJob(
+    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    guardBaselineJob({ pipeline: deps.pipeline, onSettled: deps.onSettled }),
+    payload,
+    { signal: deps.signal },
+  );
+}
+
 /** Deps the exported `runGuardSpecRegen` test seam needs — the stores + the
  *  head-regen pipeline (faked in tests) + the injectable re-gate / comment updater. */
 export interface RunGuardSpecRegenDeps {
@@ -619,11 +778,22 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     noHandleSignals: true,
     taskList: {
       [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
-      [REPO_GUARD_TASK]: registerJob(rt, guardGenerateJob(defaultGuardOnboardingPipeline)),
+      [REPO_GUARD_TASK]: registerJob(
+        rt,
+        guardGenerateJob(defaultGuardOnboardingPipeline, deps.onGuardGenerateSettled),
+      ),
       // Factory form: the job body reads the live guard store/executor seams per
       // invocation (github-app / OSS setup may install them after the worker starts).
       [GUARD_GATE_TASK]: registerJob(rt, () =>
         guardGateJob({ db, pipeline: defaultGuardGatePipeline }),
+      ),
+      // Guard baseline refresh — factory form (live seams per invocation). onSettled
+      // replays the repo's coalesced follow-up refresh once the key frees.
+      [GUARD_BASELINE_TASK]: registerJob(rt, () =>
+        guardBaselineJob({
+          pipeline: defaultGuardBaselinePipeline,
+          onSettled: deps.onGuardBaselineSettled,
+        }),
       ),
       // The spec-change checkbox regen: re-scan the head, regenerate scenarios,
       // and re-gate against the PR's own corpus (the default regate seam).

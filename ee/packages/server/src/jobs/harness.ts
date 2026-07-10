@@ -86,10 +86,13 @@ export interface JobDefinition<P extends { jobId: string }> {
    * OR failed) and the notification is posted — so the single-flight key is now
    * free. The repo-baseline uses it to replay a coalesced follow-up push (both
    * outcomes) and to chain the guard onboarding (success only — hence the
-   * `outcome` argument). It must be best-effort and not throw (a throw would mask
-   * the job's own outcome); a failure still rethrows after it runs.
+   * `outcome` argument). `result` is what the run body returned on success
+   * (undefined when it threw), so a settle hook can key off the run's own outcome
+   * detail (e.g. the guard baseline's `no-verdict` status). It must be best-effort
+   * and not throw (a throw would mask the job's own outcome); a failure still
+   * rethrows after it runs.
    */
-  onSettled?(ctx: JobContext<P>, outcome: JobOutcomeStatus): Promise<void>;
+  onSettled?(ctx: JobContext<P>, outcome: JobOutcomeStatus, result?: unknown): Promise<void>;
 }
 
 /** How a job settled — handed to `onSettled` so success-only chains can key off it. */
@@ -150,8 +153,10 @@ export async function executeJob<P extends { jobId: string }>(
   };
 
   let failure: unknown = null;
+  let runResult: unknown = undefined;
   try {
     const outcome = await def.run(ctx);
+    runResult = outcome.result;
     // Terminal job state first (clears the client's activeJobs), then the toast.
     const done = await rt.jobStore.markSucceeded(jobId, outcome.result ?? {});
     if (done) await publishProgress(done);
@@ -167,9 +172,10 @@ export async function executeJob<P extends { jobId: string }>(
 
   // After terminal bookkeeping (row + notification) in BOTH paths, run the
   // optional settled hook — the single-flight key is now free, so e.g. the
-  // baseline replays a coalesced follow-up push. A failure still rethrows after
-  // (maxAttempts:1 ⇒ permanent fail, and graphile records it).
-  await def.onSettled?.(ctx, failure ? 'failed' : 'succeeded');
+  // baseline replays a coalesced follow-up push. It sees the run's own result
+  // (undefined on failure). A failure still rethrows after (maxAttempts:1 ⇒
+  // permanent fail, and graphile records it).
+  await def.onSettled?.(ctx, failure ? 'failed' : 'succeeded', runResult);
   if (failure) throw failure;
 }
 

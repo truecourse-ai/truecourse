@@ -9,15 +9,17 @@
  * Deliberately NOT per-commit job keys: if C2 arrives while C1 runs, C1's result
  * is already obsolete — we want a single follow-up run at C2, not one per commit.
  *
- * Pure orchestration over the stores + an enqueue fn (graphile's `addJob` is
- * injected), so the whole coalescing path is unit-testable without the worker.
+ * The enqueue-or-pend + boot-drain halves delegate to the shared coalesce core
+ * (see pending-coalesce.ts); only `replayPendingBaseline` is baseline-specific
+ * (its same-commit drop keys on `force`, unlike guard-baseline's verdict-based
+ * drop). Pure orchestration over the stores + an injected `addJob`.
  */
 
-import { ActiveJobExistsError } from '@truecourse/ee-data-store';
 import type { JobStore, PendingBaselineStore, PendingBaselineView } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { REPO_BASELINE_TASK, baselineJobKey, type BaselineEnqueueRequest } from './constants.js';
 import type { BaselineJobPayload, EnqueueBaseline } from './constants.js';
+import { enqueueOrPendCoalesced, drainCoalesced } from './pending-coalesce.js';
 
 /** Enqueue the graphile task once the tracked row exists (injected so the
  *  coalescing core is testable without graphile-worker). */
@@ -55,19 +57,12 @@ export async function enqueueOrPendBaseline(
   deps: BaselineEnqueueDeps,
   req: BaselineEnqueueRequest,
 ): Promise<string | null> {
-  const key = baselineJobKey(req.repoFullName);
-  let job;
-  try {
-    job = await deps.jobStore.create({ org: req.workspaceOrgId, type: REPO_BASELINE_TASK, key });
-  } catch (err) {
-    if (err instanceof ActiveJobExistsError) {
-      await deps.pendingBaselines.upsert(req);
-      return null;
-    }
-    throw err;
-  }
-  await deps.addJob(job.id, req, key);
-  return job.id;
+  return enqueueOrPendCoalesced(
+    REPO_BASELINE_TASK,
+    baselineJobKey,
+    { jobStore: deps.jobStore, pending: deps.pendingBaselines, addJob: deps.addJob },
+    req,
+  );
 }
 
 /**
@@ -104,16 +99,5 @@ export async function drainPendingBaselines(
   pendingBaselines: PendingBaselineStore,
   enqueue: EnqueueBaseline,
 ): Promise<number> {
-  let count = 0;
-  for (const row of await pendingBaselines.drain()) {
-    try {
-      await enqueue(toRequest(row));
-      count += 1;
-    } catch (err) {
-      log.warn(
-        `[ee-jobs] boot drain of pending baseline ${row.repoFullName} failed: ${(err as Error).message}`,
-      );
-    }
-  }
-  return count;
+  return drainCoalesced('baseline', pendingBaselines, toRequest, enqueue);
 }

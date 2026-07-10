@@ -20,15 +20,22 @@ import {
   NotificationStore,
   ActiveJobExistsError,
   PendingBaselineStore,
+  PendingGuardBaselineStore,
+  GuardBackfillMarkerStore,
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { readGuardResult } from '@truecourse/core/lib/guard-store';
+import { readGuardResult, readGuardLatest } from '@truecourse/core/lib/guard-store';
 import type { Runner } from 'graphile-worker';
-import { loadGithubAppConfig, installationOctokit } from '@truecourse/ee-github-app';
+import {
+  selectGateStore,
+  selectOperatorRepoEnumeration,
+  loadGithubAppConfig,
+  installationOctokit,
+} from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import type { JobOutcomeStatus } from './harness.js';
-import { chainGuardOnboarding } from './guard-chain.js';
+import { chainGuardOnboarding, chainGuardBaselineRefresh } from './guard-chain.js';
 import { settleOrphanedGuardGates } from './orphans.js';
 import {
   enqueueOrPendBaseline,
@@ -36,18 +43,29 @@ import {
   drainPendingBaselines,
 } from './pending-baseline.js';
 import {
+  enqueueOrPendGuardBaseline,
+  replayPendingGuardBaseline,
+  drainPendingGuardBaselines,
+  type GuardBaselineSettleOutcome,
+} from './pending-guard-baseline.js';
+import { runGuardBackfill } from './guard-backfill.js';
+import {
   REPO_BASELINE_TASK,
   REPO_GUARD_TASK,
   GUARD_GATE_TASK,
   GUARD_SPEC_REGEN_TASK,
+  GUARD_BASELINE_TASK,
   guardJobKey,
   guardGateJobKey,
   guardSpecRegenJobKey,
+  guardBaselineJobKey,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
   type GuardGenerateEnqueueRequest,
   type GuardGateEnqueueRequest,
   type GuardSpecRegenEnqueueRequest,
+  type GuardBaselineEnqueueRequest,
+  type GuardBaselineJobPayload,
 } from './constants.js';
 
 function orgIdOf(req: Request): string | null {
@@ -82,11 +100,25 @@ export interface JobsApi {
    */
   enqueueGuardSpecRegen(req: GuardSpecRegenEnqueueRequest): Promise<string | null>;
   /**
+   * Enqueue a guard-baseline refresh for a repo's default branch (the merge chain,
+   * the post-generate chain, and the deploy backfill). Pending-buffer-aware: when a
+   * refresh is already in flight for the repo, the newer request coalesces onto a
+   * per-repo pending row (latest commit wins) and is replayed when the running run
+   * settles — returns the new job id, or null when coalesced/failed-to-boot.
+   */
+  enqueueGuardBaseline(req: GuardBaselineEnqueueRequest): Promise<string | null>;
+  /**
    * Whether the background worker actually started. False when the background
    * services failed to come up (jobs won't process until a restart) — the
    * `guard` capability gates on this so it is never advertised optimistically.
    */
   workerStarted: boolean;
+  /**
+   * Resolves when the fire-and-forget deploy-time guard backfill settles (best-
+   * effort; already resolved when the worker never started). Boot does NOT await
+   * it — exposed so callers/tests can join the background work deterministically.
+   */
+  backfillSettled: Promise<unknown>;
 }
 
 function createEventsRouter(hub: EventHub): Router {
@@ -188,6 +220,8 @@ export async function registerJobs(
   const jobStore = new JobStore(opts.db);
   const notifications = new NotificationStore(opts.db);
   const pendingBaselines = new PendingBaselineStore(opts.db);
+  const pendingGuardBaselines = new PendingGuardBaselineStore(opts.db);
+  const guardBackfillMarkers = new GuardBackfillMarkerStore(opts.db);
   const hub = new EventHub(opts.connectionString);
 
   // Mount the routers first — pure wiring, no I/O — so the API surface is always
@@ -201,6 +235,11 @@ export async function registerJobs(
   // still comes up; jobs simply don't process until a restart succeeds. enqueueBaseline
   // throws clearly if the worker never started.
   let runner: Runner | null = null;
+  // The fire-and-forget backfill's completion (best-effort). Already-resolved
+  // unless/until the worker starts and kicks it off inside the try below.
+  let backfillSettled: Promise<unknown> = Promise.resolve();
+
+  const gateStore = selectGateStore(opts.db);
 
   // Single-flight repo-baseline enqueue — shared by connect/push (returned below).
   // Closes over the `runner` assigned just below.
@@ -218,6 +257,26 @@ export async function registerJobs(
         pendingBaselines,
         addJob: async (jobId, jreq, jobKey) => {
           await r.addJob(REPO_BASELINE_TASK, { jobId, ...jreq }, { jobKey, maxAttempts: 1 });
+        },
+      },
+      req,
+    );
+  };
+
+  // Pending-buffer-aware guard-baseline enqueue — the merge chain, the
+  // post-generate chain, and the deploy backfill all land here. Coalesces (rather
+  // than drops) a refresh that loses the single-flight race: the dropped request is
+  // recorded as the repo's pending follow-up and replayed when the running run
+  // settles (see pending-guard-baseline.ts). Closes over the `runner` below.
+  const enqueueGuardBaseline = (req: GuardBaselineEnqueueRequest): Promise<string | null> => {
+    if (!runner) throw new Error('the background job worker is not running');
+    const r = runner;
+    return enqueueOrPendGuardBaseline(
+      {
+        jobStore,
+        pendingGuardBaselines,
+        addJob: async (jobId, jreq, jobKey) => {
+          await r.addJob(GUARD_BASELINE_TASK, { jobId, ...jreq }, { jobKey, maxAttempts: 1 });
         },
       },
       req,
@@ -280,20 +339,43 @@ export async function registerJobs(
   // the scan just persisted the corpus, and a repo with stored guard state is
   // already onboarded (refresh-on-merge is issue 06). Wired onto the baseline
   // definition's `onSettled` hook, which runs once the single-flight key is free.
+  // Whether a repo already has hosted guard state (a stored generate report) —
+  // shared by the onboarding chain (fires when absent) and the baseline-refresh
+  // chain (fires when present); they are exact complements.
+  const hasGuardState = async (repoKey: string): Promise<boolean> =>
+    (await readGuardResult(repoKey)) !== null;
+
   const onBaselineSettled = async (
     payload: BaselineJobPayload,
     outcome: JobOutcomeStatus,
   ): Promise<void> => {
     await replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
-    await chainGuardOnboarding(
-      {
-        hasGuardState: async (repoKey) => (await readGuardResult(repoKey)) !== null,
-        enqueueGuardGenerate,
-      },
-      payload,
-      outcome,
-    );
+    // Complementary chains: a repo with NO guard state onboards (generate); a repo
+    // that ALREADY has scenarios refreshes its baseline against current main. The
+    // spec scan just re-materialized the corpus, so the baseline runs the newest.
+    await chainGuardOnboarding({ hasGuardState, enqueueGuardGenerate }, payload, outcome);
+    await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
   };
+
+  // After a guard-generate settles: on success a fresh generate just wrote
+  // scenarios, so warm the baseline (skip the first PR's lazy base run). Reuses the
+  // refresh chain — hasGuardState is now true, so it fires exactly once.
+  const onGuardGenerateSettled = async (
+    payload: GuardGenerateEnqueueRequest & { jobId: string },
+    outcome: JobOutcomeStatus,
+  ): Promise<void> => {
+    await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
+  };
+
+  // After a guard-baseline settles (success OR failure): replay the repo's
+  // coalesced follow-up refresh, if any (latest-commit-wins). The run's verdict
+  // status decides whether a redundant same-commit pending drops or replays — a
+  // `no-verdict`/failed run leaves it to replay so a transient error self-heals.
+  const onGuardBaselineSettled = (
+    payload: GuardBaselineJobPayload,
+    settled: GuardBaselineSettleOutcome,
+  ): Promise<void> =>
+    replayPendingGuardBaseline(pendingGuardBaselines, enqueueGuardBaseline, payload, settled);
 
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
@@ -321,12 +403,41 @@ export async function registerJobs(
       masterSecret: opts.masterSecret,
       jobStore,
       onBaselineSettled,
+      onGuardGenerateSettled,
+      onGuardBaselineSettled,
     });
     // A crash could have left pending follow-up baselines with no running job to
     // replay them. Now that the reaped keys are free and the worker is up, drain
     // them (per-row best-effort — one bad row must not stop the rest).
     const drained = await drainPendingBaselines(pendingBaselines, enqueueBaseline);
     if (drained > 0) log.info(`[ee-jobs] drained ${drained} pending baseline(s) from a prior run`);
+    const drainedGuard = await drainPendingGuardBaselines(pendingGuardBaselines, enqueueGuardBaseline);
+    if (drainedGuard > 0)
+      log.info(`[ee-jobs] drained ${drainedGuard} pending guard-baseline(s) from a prior run`);
+
+    // Deploy-time guard backfill (issue 06): one-time generate + baseline for every
+    // already-connected repo, so existing fleets don't pay generate-plus-double-run
+    // inside their first PR. Fire-and-forget — best-effort, must NEVER block or fail
+    // boot (its own internals never throw; the .catch is belt-and-braces).
+    backfillSettled = runGuardBackfill({
+      listRepos: () => selectOperatorRepoEnumeration(opts.db).listAllRepos(),
+      baselineCommit: async (repo) => (await gateStore.getBaseline(repo))?.commitSha ?? null,
+      hasScenarios: hasGuardState,
+      hasBaseline: async (repoKey) => (await readGuardLatest(repoKey)) !== null,
+      isBackfilled: (repo) => guardBackfillMarkers.isMarked(repo),
+      markBackfilled: (repo) => guardBackfillMarkers.mark(repo),
+      enqueueGuardGenerate,
+      enqueueGuardBaseline,
+    })
+      .then((s) => {
+        if (s.generateEnqueued + s.baselineEnqueued > 0)
+          log.info(
+            `[ee-jobs] guard backfill enqueued ${s.generateEnqueued} generate(s) + ${s.baselineEnqueued} baseline(s)`,
+          );
+      })
+      .catch((err) => log.warn(`[ee-jobs] guard backfill failed: ${(err as Error).message}`));
+    // Deliberately NOT awaited: boot must not block on the backfill (it is exposed
+    // as `backfillSettled` for callers/tests that want to join it).
   } catch (err) {
     log.error(`[ee-jobs] background services failed to start (jobs will not process): ${(err as Error).message}`);
   }
@@ -344,6 +455,8 @@ export async function registerJobs(
     enqueueGuardGenerate,
     enqueueGuardGate,
     enqueueGuardSpecRegen,
+    enqueueGuardBaseline,
     workerStarted: runner !== null,
+    backfillSettled,
   };
 }

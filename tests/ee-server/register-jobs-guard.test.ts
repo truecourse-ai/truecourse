@@ -38,7 +38,12 @@ vi.mock('../../ee/packages/server/src/jobs/events', () => ({
 }));
 
 import { registerJobs } from '../../ee/packages/server/src/jobs/index';
-import { REPO_GUARD_TASK, guardJobKey } from '../../ee/packages/server/src/jobs/constants';
+import {
+  REPO_GUARD_TASK,
+  GUARD_BASELINE_TASK,
+  guardJobKey,
+  guardBaselineJobKey,
+} from '../../ee/packages/server/src/jobs/constants';
 import type { StartWorkerDeps } from '../../ee/packages/server/src/jobs/worker';
 
 const ORG = 'org_A';
@@ -80,8 +85,13 @@ beforeEach(async () => {
   startWorkerMock.mockResolvedValue({ addJob: addJobMock, stop: async () => {} });
 });
 
+// Track every registerJobs handle so afterEach can join the fire-and-forget
+// boot backfill before closing PGlite (an in-flight query racing close() traps).
+const handles: Array<Awaited<ReturnType<typeof registerJobs>>> = [];
+
 afterEach(async () => {
   setBackgroundTaskRunner(null);
+  await Promise.allSettled(handles.splice(0).map((h) => h.backfillSettled));
   resetGuardStore();
   await client.close();
 });
@@ -91,6 +101,13 @@ const opts = () => ({
   connectionString: 'postgres://unused',
   masterSecret: 'master-secret-at-least-32-characters!!',
 });
+
+/** registerJobs + track the handle for the afterEach backfill join. */
+const reg = async () => {
+  const j = await registerJobs(registry, opts());
+  handles.push(j);
+  return j;
+};
 
 const enqueueReq = {
   repoFullName: REPO,
@@ -104,7 +121,7 @@ const baselinePayload = { ...enqueueReq, jobId: 'job_b1' };
 
 describe('registerJobs — enqueueGuardGenerate', () => {
   it('creates the single-flight job row, enqueues on the runner, and dedupes', async () => {
-    const jobs = await registerJobs(registry, opts());
+    const jobs = await reg();
     expect(jobs.workerStarted).toBe(true);
 
     const jobId = await jobs.enqueueGuardGenerate(enqueueReq);
@@ -125,7 +142,7 @@ describe('registerJobs — enqueueGuardGenerate', () => {
 
   it('reports workerStarted=false and throws on enqueue when the worker failed to boot', async () => {
     startWorkerMock.mockRejectedValue(new Error('pg down'));
-    const jobs = await registerJobs(registry, opts());
+    const jobs = await reg();
 
     expect(jobs.workerStarted).toBe(false);
     await expect(jobs.enqueueGuardGenerate(enqueueReq)).rejects.toThrow(
@@ -136,7 +153,7 @@ describe('registerJobs — enqueueGuardGenerate', () => {
 
 describe('registerJobs — baseline→guard onboarding chain', () => {
   async function settledHook(): Promise<NonNullable<StartWorkerDeps['onBaselineSettled']>> {
-    await registerJobs(registry, opts());
+    await reg();
     const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
     expect(deps.onBaselineSettled).toBeDefined();
     return deps.onBaselineSettled!;
@@ -160,11 +177,52 @@ describe('registerJobs — baseline→guard onboarding chain', () => {
     expect(addJobMock).not.toHaveBeenCalled();
   });
 
-  it('a repo with stored guard state (already onboarded) never re-chains', async () => {
+  it('a repo with stored guard state refreshes its baseline instead of onboarding (issue 06)', async () => {
+    // Guard state exists → onboarding is skipped, but the complementary
+    // baseline-refresh chain fires: re-run the committed corpus against current main.
     await writeGuardResult({ repoKey: REPO, commitSha: 'earlier00' }, makeReport());
     const onBaselineSettled = await settledHook();
 
     await onBaselineSettled(baselinePayload, 'succeeded');
+
+    expect(addJobMock).toHaveBeenCalledTimes(1);
+    const [task, payload, opts_] = addJobMock.mock.calls[0]!;
+    expect(task).toBe(GUARD_BASELINE_TASK);
+    expect(payload).toMatchObject(enqueueReq);
+    expect(opts_).toEqual({ jobKey: guardBaselineJobKey(REPO), maxAttempts: 1 });
+  });
+});
+
+describe('registerJobs — generate→baseline chain', () => {
+  async function generateSettledHook(): Promise<NonNullable<StartWorkerDeps['onGuardGenerateSettled']>> {
+    await reg();
+    const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    expect(deps.onGuardGenerateSettled).toBeDefined();
+    return deps.onGuardGenerateSettled!;
+  }
+
+  it('a successful generate (scenarios now stored) chains a guard-baseline refresh', async () => {
+    await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    const onGuardGenerateSettled = await generateSettledHook();
+
+    await onGuardGenerateSettled(baselinePayload, 'succeeded');
+
+    expect(addJobMock).toHaveBeenCalledTimes(1);
+    const [task, payload] = addJobMock.mock.calls[0]!;
+    expect(task).toBe(GUARD_BASELINE_TASK);
+    expect(payload).toMatchObject(enqueueReq);
+  });
+
+  it('a no-corpus generate (no scenarios stored) chains nothing', async () => {
+    // No writeGuardResult → hasGuardState is false → the refresh chain no-ops.
+    const onGuardGenerateSettled = await generateSettledHook();
+    await onGuardGenerateSettled(baselinePayload, 'succeeded');
     expect(addJobMock).not.toHaveBeenCalled();
+  });
+
+  it('passes the guard-baseline settle hook to the worker', async () => {
+    await reg();
+    const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    expect(deps.onGuardBaselineSettled).toBeDefined();
   });
 });
