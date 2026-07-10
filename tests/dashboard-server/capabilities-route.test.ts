@@ -116,6 +116,22 @@ describe('GET /api/capabilities', () => {
     expect(res.status).toBe(200);
   });
 
+  it("never advertises 'guard' when the background job worker failed to start", async () => {
+    setEnterpriseEnv();
+    await loadEnterprise();
+    const app = createApp({ serveStatic: false });
+    const res = await request(app).get('/api/capabilities');
+    expect(res.status).toBe(200);
+    expect(res.body.edition).toBe('enterprise');
+    // The stubbed DB means the worker never starts (background services are
+    // best-effort) — the static capabilities still light up, but `guard` must
+    // NOT: it is advertised only when the job queue is actually processing.
+    expect(res.body.capabilities).toEqual(
+      expect.arrayContaining(['sso', 'workspace', 'jobs', 'knowledge', 'github-gate', 'llm-config']),
+    );
+    expect(res.body.capabilities).not.toContain('guard');
+  });
+
   it('FAILS HARD when enterprise is configured but DATABASE_URL is missing (no community fallback)', async () => {
     setEnterpriseEnv();
     delete process.env.DATABASE_URL; // misconfigured enterprise install

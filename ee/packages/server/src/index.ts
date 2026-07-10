@@ -22,6 +22,7 @@ import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
 import { registerJobs } from './jobs/index.js';
+import { createGuardRouter } from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
 import { initSentry, flushSentry } from './observability/sentry.js';
@@ -131,6 +132,18 @@ const plugin: EePlugin = {
       codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     plugin.capabilities.push('github-gate');
+
+    // Hosted guard-scenario generation. The `repo.guard` job is registered by the
+    // worker and chained onto the first successful baseline; this router is the
+    // manual "Generate" trigger. The router mounts unconditionally (same rule as
+    // the jobs routers — pure wiring), but the capability is advertised ONLY when
+    // the background worker actually started: jobs are best-effort background
+    // services, and a dead queue must not light up guard actions in the UI.
+    registry.registerRouter(
+      '/api/ee/guard',
+      createGuardRouter({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
+    if (jobs.workerStarted) plugin.capabilities.push('guard');
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App
