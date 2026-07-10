@@ -33,6 +33,7 @@ import {
   GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
   EstimateDeclined,
+  OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { dismissGuardClaim, undismissGuardClaim } from '@truecourse/core/commands/guard-read';
 import { formatEntryPreflightError, type RunGuardResult } from '@truecourse/guard-runner';
@@ -102,6 +103,14 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     if (e instanceof EstimateDeclined) {
       emitSpecComplete(repoId, 'guard-generate');
       res.json({ cancelled: true });
+      return;
+    }
+    // Open spec conflicts hard-fail before any spend (same gate the CLI hits) —
+    // before any progress is emitted, so there is no popup lifecycle to clear.
+    // Return the full conflict report as a plain error the client's generate-error
+    // toast surfaces.
+    if (e instanceof OpenConflictsError) {
+      res.status(422).json({ error: e.message });
       return;
     }
     emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });

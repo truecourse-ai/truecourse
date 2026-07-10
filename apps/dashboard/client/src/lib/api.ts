@@ -1013,6 +1013,13 @@ export interface SpecOverlap {
   note: string;
   /** Conflicting sections per doc (markdown headings), when known. */
   sections?: SpecOverlapSection[];
+  /**
+   * Every area this (possibly cross-area-merged) dispute spans. Detection runs
+   * per area, so one disagreement on a pair sharing several areas is flagged in
+   * each and merged to one record; a resolution scoped to any spanned area (or an
+   * unscoped one) clears it everywhere. Empty on older corpora.
+   */
+  areas?: string[];
 }
 
 export interface SpecCorpusDoc {

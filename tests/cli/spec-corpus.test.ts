@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runSpecConflictsList, runSpecConflictsShow } from '../../tools/cli/src/commands/spec-conflicts.js';
 import { runSpecChainsList } from '../../tools/cli/src/commands/spec-chains.js';
 import { runSpecStatus } from '../../tools/cli/src/commands/spec.js';
@@ -118,5 +119,43 @@ describe('spec status (corpus)', () => {
     expect(out).toContain('Areas');
     expect(out).toContain('booking/appointments');
     expect(out).toContain('1 open');
+  });
+
+  it('points a conflict-free corpus at `guard generate`, never `contracts generate`', async () => {
+    writeCorpus([]);
+    const out = await capture(() => runSpecStatus({ cwd: repo }));
+    expect(out).toContain('truecourse guard generate');
+    expect(out).not.toContain('contracts generate');
+  });
+
+  it('points a corpus with open overlaps at `spec conflicts list`', async () => {
+    writeCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
+    const out = await capture(() => runSpecStatus({ cwd: repo }));
+    expect(out).toContain('truecourse spec conflicts list');
+    expect(out).not.toContain('contracts generate');
+  });
+});
+
+// The scan outro (item 26) is emitted from runSpecScan, which requires a live LLM
+// pipeline + git repo to reach — assert its two known branches at the source, and
+// that no user-facing next-step in the scan/spec flow still names `contracts generate`.
+describe('spec scan outro copy (item 26)', () => {
+  const specSrc = fs.readFileSync(
+    fileURLToPath(new URL('../../tools/cli/src/commands/spec.ts', import.meta.url)),
+    'utf-8',
+  );
+
+  it('conflict-free scan points at `truecourse guard generate`', () => {
+    expect(specSrc).toContain('Corpus written to .truecourse/specs/corpus.json. Run `truecourse guard generate`.');
+  });
+
+  it('a scan with open conflicts points at `spec conflicts list`, then `guard generate`', () => {
+    expect(specSrc).toContain('conflict');
+    expect(specSrc).toContain('`truecourse spec conflicts list`');
+    expect(specSrc).toContain('`truecourse guard generate`');
+  });
+
+  it('no user-facing next-step in the scan/spec flow names `contracts generate`', () => {
+    expect(specSrc).not.toContain('contracts generate');
   });
 });

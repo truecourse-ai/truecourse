@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { buildCorpusConflicts } from '@truecourse/shared';
 import * as api from '@/lib/api';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecRelation, SpecDecisionAck } from '@/lib/api';
 
@@ -43,14 +44,6 @@ export function parseSpecKey(key: string): SpecKey {
     return { kind: 'doc', ref: sep >= 0 ? rest.slice(sep + 2) : rest };
   }
   return { kind: 'doc', ref: key };
-}
-
-/** A relation covers an overlap pair when it names both docs (either order), unscoped or scoped to this area. */
-export function coveringRelation(rels: SpecRelation[], a: string, b: string, area: string): SpecRelation | undefined {
-  return rels.find((r) => {
-    const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
-    return samePair && (r.scope === undefined || r.scope === area);
-  });
 }
 
 /** Resolved-badge text for a synthesized conflict — names the relation type + winner. */
@@ -299,7 +292,6 @@ export function SpecCorpusView({
   }
 
   const { corpus: c, userRelations } = data;
-  const effectiveRels = [...c.relations, ...userRelations];
   const manualIncludes = data.manualIncludes ?? [];
   const manualExcludes = data.manualExcludes ?? [];
   // The section rows derive from the decision lists over the unchanged corpus, so
@@ -336,33 +328,19 @@ export function SpecCorpusView({
       return next;
     });
 
-  // Conflicts = the union of two sources, flattened into ONE list (each carries
-  // its area) so docs are never duplicated across area groups:
-  //  (a) OPEN overlaps the corpus flags — including the legacy case where a
-  //      covering relation exists (shown resolved), unchanged.
-  //  (b) SYNTHESIZED resolved entries for user relations the corpus no longer
-  //      flags: the scan drops relation-covered pairs by invariant (and EE
-  //      re-curates on every edit), so a resolved conflict would otherwise vanish.
-  // Deduped by pair (order-insensitive) + area: a relation that covers an open
-  // overlap isn't synthesized again (that overlap already renders it resolved).
-  const openConflicts = c.areas.flatMap((area) =>
-    area.overlaps.map((ov) => ({
-      area: area.id,
-      a: ov.docs[0],
-      b: ov.docs[1],
-      resolved: !!coveringRelation(effectiveRels, ov.docs[0], ov.docs[1], area.id),
-      summary: undefined as string | undefined,
-    })),
-  );
-  const coversOpenConflict = (r: SpecRelation): boolean =>
-    openConflicts.some((o) => {
-      const samePair = (o.a === r.older && o.b === r.newer) || (o.a === r.newer && o.b === r.older);
-      return samePair && (r.scope === undefined || r.scope === o.area);
-    });
-  const resolvedConflicts = userRelations
-    .filter((r) => !coversOpenConflict(r))
-    .map((r) => ({ area: r.scope ?? '', a: r.older, b: r.newer, resolved: true, summary: resolvedSummary(r) }));
-  const conflicts = [...openConflicts, ...resolvedConflicts];
+  // Conflicts = the shared derivation (ONE copy in @truecourse/shared, the same
+  // the guard-generate gate and CLI use): the flagged within-area overlaps (open,
+  // or resolved by a covering relation OR an exclude) PLUS synthesized resolved
+  // entries for user relations the corpus no longer flags (a fresh scan drops
+  // relation-covered pairs). A synthesized entry carries the resolution summary;
+  // an open overlap resolved on its own row shows the plain "resolved" badge.
+  const conflicts = buildCorpusConflicts(c, { relations: userRelations, manualExcludes }).map((cf) => ({
+    area: cf.area,
+    a: cf.a,
+    b: cf.b,
+    resolved: cf.resolved,
+    summary: cf.synthesized && cf.relation ? resolvedSummary(cf.relation) : undefined,
+  }));
   // The tag filter narrows BOTH lists — conflicts by their area (tag).
   const visibleConflicts =
     selectedTags.size === 0 ? conflicts : conflicts.filter((o) => selectedTags.has(fmtArea(o.area)));

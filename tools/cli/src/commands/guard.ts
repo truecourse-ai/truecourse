@@ -19,6 +19,7 @@ import {
   GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
   EstimateDeclined,
+  OpenConflictsError,
 } from "@truecourse/core/commands/guard-in-process";
 import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
@@ -194,6 +195,18 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     if (e instanceof EstimateDeclined) {
       p.cancel("Generate cancelled.");
       process.exit(0);
+    }
+    // Open spec conflicts block generate before any spend — print the FULL list
+    // (area, both repo-relative paths, note) and the resolution pointers, exit 1.
+    if (e instanceof OpenConflictsError) {
+      p.log.error(`${e.conflicts.length} open spec conflict${e.conflicts.length === 1 ? "" : "s"} block guard generate — resolve them first:`);
+      for (const c of e.conflicts) {
+        p.log.message(`  ${c.area}`);
+        p.log.message(`    ${c.a}  ↔  ${c.b}${c.note ? `   · ${c.note}` : ""}`);
+      }
+      p.log.step("Resolve with `truecourse spec conflicts list` (or the dashboard Conflicts group), then re-run `truecourse guard generate`.");
+      p.outro("Aborted — resolve the conflicts first.");
+      process.exit(1);
     }
     // Presentation boundary: any residual unexpected error renders cleanly, never
     // a raw stack trace. The engine keeps its rethrow semantics upstream.

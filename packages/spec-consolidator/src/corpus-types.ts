@@ -264,6 +264,15 @@ export const OverlapSchema = z.object({
   note: z.string().default(''),
   /** The specific conflicting sections per doc (markdown headings), when known. */
   sections: z.array(OverlapSectionSchema).default([]),
+  /**
+   * The area ids this dispute spans. Detection runs per area, so one disagreement
+   * on a doc pair sharing several areas is flagged in each; the cross-area merge
+   * collapses those to this single record and lists every area it spanned here, so
+   * a resolution scoped to any of them clears the dispute everywhere. Empty for
+   * older corpora written before the merge — the read layer recomputes the span
+   * from the per-area placement of the (then-duplicated) records.
+   */
+  areas: z.array(z.string()).default([]),
 });
 export type Overlap = z.infer<typeof OverlapSchema>;
 

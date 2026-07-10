@@ -15,7 +15,8 @@ import * as p from '@clack/prompts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCorpus, readCorpusDecisions } from '@truecourse/spec-consolidator';
-import type { CuratedCorpus, Relation, RelationType } from '@truecourse/spec-consolidator';
+import type { CuratedCorpus, RelationType } from '@truecourse/spec-consolidator';
+import { buildCorpusConflicts } from '@truecourse/shared';
 import { addRelation, curateInProcess } from '@truecourse/core/commands/spec-in-process';
 
 export interface RunSpecConflictsOptions {
@@ -24,20 +25,6 @@ export interface RunSpecConflictsOptions {
 
 const root = (opts: RunSpecConflictsOptions): string => opts.cwd ?? process.cwd();
 const base = (ref: string): string => ref.split('/').pop() ?? ref;
-
-/** Effective relation set = corpus auto-detected ∪ user-authored (decisions). */
-function effectiveRelations(corpus: CuratedCorpus, repoRoot: string): Relation[] {
-  const user = readCorpusDecisions(repoRoot).relations ?? [];
-  return [...corpus.relations, ...user];
-}
-
-/** A relation covers an overlap pair when it names both docs (either order) and is unscoped or scoped to this area. */
-function coveringRelation(rels: Relation[], a: string, b: string, area: string): Relation | undefined {
-  return rels.find((r) => {
-    const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
-    return samePair && (r.scope === undefined || r.scope === area);
-  });
-}
 
 function loadCorpusOrExit(repoRoot: string): CuratedCorpus {
   const corpus = readCorpus(repoRoot);
@@ -51,26 +38,18 @@ function loadCorpusOrExit(repoRoot: string): CuratedCorpus {
 export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): Promise<void> {
   const repoRoot = root(opts);
   const corpus = loadCorpusOrExit(repoRoot);
-  const rels = effectiveRelations(corpus, repoRoot);
+  const conflicts = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot));
+  const open = conflicts.filter((c) => !c.resolved);
+  const resolved = conflicts.length - open.length;
 
-  let open = 0;
-  let resolved = 0;
   p.intro('Overlaps (areas where docs may disagree)');
-  for (const area of corpus.areas) {
-    for (const ov of area.overlaps) {
-      const [a, b] = ov.docs;
-      if (coveringRelation(rels, a, b, area.id)) {
-        resolved++;
-        continue;
-      }
-      open++;
-      p.log.warn(`${area.id}`);
-      p.log.message(`  ${base(a)}  ↔  ${base(b)}${ov.note ? `   · ${ov.note}` : ''}`);
-      p.log.message(`  resolve: truecourse spec conflicts resolve ${area.id} --older ${a} --newer ${b} --precedence`);
-    }
+  for (const c of open) {
+    p.log.warn(`${c.area}`);
+    p.log.message(`  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
+    p.log.message(`  resolve: truecourse spec conflicts resolve ${c.area} --older ${c.a} --newer ${c.b} --precedence`);
   }
-  if (open === 0) p.log.step('No open overlaps.');
-  p.outro(`${open} open · ${resolved} resolved. Inspect with \`spec conflicts show <area>\`.`);
+  if (open.length === 0) p.log.step('No open overlaps.');
+  p.outro(`${open.length} open · ${resolved} resolved. Inspect with \`spec conflicts show <area>\`.`);
 }
 
 /** First ~`max` lines of a doc, preferring the window around the overlap note's terms. */
@@ -102,14 +81,18 @@ export async function runSpecConflictsShow(area: string, opts: RunSpecConflictsO
     p.cancel(`No such area: ${area}. List areas with \`spec status\`.`);
     process.exit(1);
   }
-  const rels = effectiveRelations(corpus, repoRoot);
+  const conflicts = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot));
   p.intro(`Overlaps in ${area}`);
   if (a.overlaps.length === 0) p.log.step('(no overlaps in this area)');
   for (const ov of a.overlaps) {
     const [da, db] = ov.docs;
-    const rel = coveringRelation(rels, da, db, area);
+    const c = conflicts.find(
+      (x) => x.area === area && ((x.a === da && x.b === db) || (x.a === db && x.b === da)),
+    );
     p.log.warn(`${base(da)}  ↔  ${base(db)}${ov.note ? `   · ${ov.note}` : ''}`);
-    p.log.message(rel ? `  resolved → ${rel.type} (${rel.older} ⇒ ${rel.newer})` : '  open');
+    if (c?.relation) p.log.message(`  resolved → ${c.relation.type} (${c.relation.older} ⇒ ${c.relation.newer})`);
+    else if (c?.excludedRef) p.log.message(`  resolved → ${c.excludedRef} excluded`);
+    else p.log.message('  open');
     p.log.message(`  ${da}:`);
     p.log.message(excerpt(repoRoot, da, ov.note));
     p.log.message(`  ${db}:`);
@@ -134,11 +117,21 @@ export async function runSpecConflictsResolve(
     if (!known.has(ref)) return fail(`${ref} is not a doc in area ${area}. Docs: ${a.docRefs.join(', ')}`);
   }
 
+  // Span the dispute across areas: detection runs per area, so one disagreement on
+  // a pair sharing several areas is flagged (and merged) across them. Scope the
+  // relation to the named area only when the dispute is single-area; a cross-area
+  // dispute records an unscoped (doc-pair-wide) relation so this one resolution
+  // clears it everywhere and survives the re-scan.
+  const conflict = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot)).find(
+    (c) => (c.a === opts.older && c.b === opts.newer) || (c.a === opts.newer && c.b === opts.older),
+  );
+  const scope = conflict && conflict.areas.length > 1 ? undefined : area;
+
   await addRelation(repoRoot, {
     type: opts.type,
     older: opts.older,
     newer: opts.newer,
-    scope: area,
+    scope,
     detectedFrom: 'manual',
     note: opts.note,
   });
@@ -148,7 +141,7 @@ export async function runSpecConflictsResolve(
   await curateInProcess(repoRoot, {});
   s.stop('Re-scanned');
 
-  p.outro(`Recorded ${opts.type}: ${opts.older} ⇒ ${opts.newer} (scope ${area}).`);
+  p.outro(`Recorded ${opts.type}: ${opts.older} ⇒ ${opts.newer} (scope ${scope ?? 'all areas'}).`);
 }
 
 function fail(msg: string): never {

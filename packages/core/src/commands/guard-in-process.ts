@@ -19,7 +19,13 @@ import {
   type RecipeRunner,
 } from '@truecourse/guard-generator';
 import { writeGuardResult, runGuard, type RunGuardResult } from '@truecourse/guard-runner';
-import type { GuardGenerateReport, GuardGenerateUsage } from '@truecourse/shared';
+import {
+  openConflicts,
+  type GuardGenerateReport,
+  type GuardGenerateUsage,
+  type CorpusConflict,
+  type RelationLike,
+} from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import {
   agentTransport,
@@ -34,10 +40,58 @@ import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import type { LlmEstimate } from './analyze-core.js';
-import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
+import { EstimateDeclined, stageUsageTag, getCorpus, getDecisions } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
+
+/**
+ * The corpus has unresolved within-area overlaps — thrown by the guard-generate
+ * gate before any LLM/build work. Carries the full open-conflict list (never
+ * truncated) so the CLI can print it and the dashboard can return it; `message`
+ * is the assembled multi-line text both surfaces reuse.
+ */
+export class OpenConflictsError extends Error {
+  constructor(public readonly conflicts: CorpusConflict<RelationLike>[]) {
+    super(formatOpenConflictsMessage(conflicts));
+    this.name = 'OpenConflictsError';
+  }
+}
+
+/** The full, untruncated conflict report: a count, the rationale, every pair
+ *  (area, both repo-relative doc paths, note), and the resolution pointers. */
+export function formatOpenConflictsMessage(conflicts: CorpusConflict<RelationLike>[]): string {
+  const lines: string[] = [
+    `${conflicts.length} open spec conflict${conflicts.length === 1 ? '' : 's'} must be resolved before guard generate.`,
+    'Extracting both sides of an unresolved overlap births a red finding that is really the dispute.',
+    '',
+  ];
+  for (const c of conflicts) {
+    lines.push(`  ${c.area}`);
+    lines.push(`    ${c.a}  ↔  ${c.b}`);
+    if (c.note) lines.push(`    ${c.note}`);
+  }
+  lines.push('');
+  lines.push(
+    'Resolve them with `truecourse spec conflicts list` (or the dashboard Conflicts group), then re-run `truecourse guard generate`.',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * The guard-generate gate: an unresolved within-area overlap means two docs make
+ * contradictory claims, and extracting BOTH births a paid "finding" that is
+ * really the dispute. Read the corpus + decisions and fail before any LLM/build
+ * work (and before the estimate) when any overlap is still open. No corpus at all
+ * is NOT a conflict — the downstream no-docs path reports that.
+ */
+async function assertNoOpenConflicts(repoRoot: string): Promise<void> {
+  const corpus = await getCorpus(repoRoot);
+  if (!corpus) return;
+  const decisions = await getDecisions(repoRoot);
+  const open = openConflicts(corpus, decisions);
+  if (open.length > 0) throw new OpenConflictsError(open);
+}
 
 /** Stable step taxonomy for the guard generate progress UI (CLI + dashboard). */
 export const GUARD_GENERATE_STEPS = [
@@ -119,6 +173,10 @@ export async function guardGenerateInProcess(
   options: GuardGenerateInProcessOptions = {},
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
+
+  // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
+  // spend, then fail. Extracting both sides of an open overlap births noise.
+  await assertNoOpenConflicts(repoRoot);
 
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.

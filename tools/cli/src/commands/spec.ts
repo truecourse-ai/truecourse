@@ -15,7 +15,7 @@
 import * as p from "@clack/prompts";
 import path from "node:path";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
-import type { Relation } from "@truecourse/spec-consolidator";
+import { buildCorpusConflicts } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
@@ -113,7 +113,15 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
       p.log.message(`  … (+${s.openOverlaps.length - 10} more)`);
     }
   }
-  p.outro("Corpus written to .truecourse/specs/corpus.json. Run `truecourse contracts generate`.");
+  // Open conflicts count via the SAME resolved-derivation the gate uses: the fresh
+  // curate already dropped relation-covered pairs and excluded docs, so s.openOverlaps
+  // IS the open set. Point at guard generate — the contracts pipeline is deprecated.
+  const openCount = s.openOverlaps.length;
+  p.outro(
+    openCount === 0
+      ? "Corpus written to .truecourse/specs/corpus.json. Run `truecourse guard generate`."
+      : `Corpus written to .truecourse/specs/corpus.json. ${openCount} conflict${openCount === 1 ? "" : "s"} to resolve (\`truecourse spec conflicts list\`), then \`truecourse guard generate\`.`,
+  );
 }
 
 
@@ -132,21 +140,9 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   }
   const decisions = readCorpusDecisions(root);
   const userRels = decisions.relations ?? [];
-  const allRels: Relation[] = [...corpus.relations, ...userRels];
-  const covered = (a: string, b: string, area: string): boolean =>
-    allRels.some((r) => {
-      const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
-      return samePair && (r.scope === undefined || r.scope === area);
-    });
-
-  let open = 0;
-  let resolved = 0;
-  for (const area of corpus.areas) {
-    for (const ov of area.overlaps) {
-      if (covered(ov.docs[0], ov.docs[1], area.id)) resolved++;
-      else open++;
-    }
-  }
+  const conflicts = buildCorpusConflicts(corpus, decisions);
+  const open = conflicts.filter((c) => !c.resolved).length;
+  const resolved = conflicts.length - open;
 
   const rows: Array<[string, string]> = [
     ["Docs (kept)", String(corpus.docs.length)],
@@ -165,7 +161,7 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
 
   p.outro(
     open === 0
-      ? "No open overlaps — run `truecourse contracts generate`."
+      ? "No open overlaps — run `truecourse guard generate`."
       : "Open overlaps — see `truecourse spec conflicts list`.",
   );
 }

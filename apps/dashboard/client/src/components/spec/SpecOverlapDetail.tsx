@@ -8,10 +8,11 @@
 
 import { useEffect, useState } from 'react';
 import { Loader2, Info, X } from 'lucide-react';
+import { coveringRelation } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
-import type { SpecCorpusResponse, SpecRelation, SpecRelationType } from '@/lib/api';
+import type { SpecCorpusResponse, SpecRelationType } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
 
 /** How the resolved-state summary reads, e.g. "old.md replaced by new.md". */
@@ -47,13 +48,6 @@ const RESOLUTION_HELP = (
 
 /** Shown on resolution actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
-
-function coveringRelation(rels: SpecRelation[], a: string, b: string, area: string): SpecRelation | undefined {
-  return rels.find((r) => {
-    const samePair = (r.older === a && r.newer === b) || (r.older === b && r.newer === a);
-    return samePair && (r.scope === undefined || r.scope === area);
-  });
-}
 
 export function SpecOverlapDetail({
   repoId,
@@ -142,13 +136,28 @@ export function SpecOverlapDetail({
   const prScope = prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined;
   const decisionsDisabled = prNumber != null && !prRef;
 
+  // The dispute's span: detection runs per area, so one disagreement on a pair
+  // sharing several areas is flagged (and merged) across them. A cross-area
+  // dispute records an UNSCOPED (doc-pair-wide) relation so a single action clears
+  // it everywhere and survives a re-scan; a single-area one stays scoped.
+  const spannedAreas = new Set<string>([area]);
+  for (const ar of data.corpus.areas) {
+    for (const o of ar.overlaps) {
+      const samePair = (o.docs[0] === docA && o.docs[1] === docB) || (o.docs[0] === docB && o.docs[1] === docA);
+      if (!samePair) continue;
+      spannedAreas.add(ar.id);
+      for (const spanned of o.areas ?? []) spannedAreas.add(spanned);
+    }
+  }
+  const resolutionScope = spannedAreas.size > 1 ? undefined : area;
+
   const resolve = async (a: (typeof actions)[number]): Promise<void> => {
     setBusy(a.key);
     try {
       const loser = a.winner === docA ? docB : docA;
       const res = await api.postSpecRelation(
         repoId,
-        { type: a.type, older: loser, newer: a.winner, scope: area, detectedFrom: 'manual' },
+        { type: a.type, older: loser, newer: a.winner, scope: resolutionScope, detectedFrom: 'manual' },
         prScope,
       );
       setEditing(false);

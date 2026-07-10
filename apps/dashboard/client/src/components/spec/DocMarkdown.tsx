@@ -8,8 +8,11 @@
  * `highlight` marks the conflicting sections in place: the WHOLE section (its
  * heading + body up to the next heading) gets an amber band, so the user sees
  * exactly where two docs disagree, right on the document. `highlightPreamble`
- * bands the PREAMBLE block (everything before the first heading) the same way,
- * for conflicts whose passage is a badge/tagline above any heading.
+ * bands the doc's LEAD — the disputed opening passage — the same way: content
+ * before the first heading when the doc has such a preamble (a badge/tagline
+ * block), else the opening heading's own section (the H1 line + its body up to
+ * the next heading) for the common README shape that starts with an H1 title.
+ * The heading line stays inside the band since it's part of the disputed lead.
  */
 
 import type { ReactNode } from 'react';
@@ -52,7 +55,10 @@ const COMPONENTS: Components = {
   ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
   ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">{children}</code>,
+  // Relative size so a code span inside a heading scales with the heading
+  // instead of shrinking to body-code size (command-signature headings are
+  // common in real docs).
+  code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground">{children}</code>,
   pre: ({ children }) => (
     <pre className="my-3 overflow-auto rounded border border-border bg-muted/50 p-3 font-mono text-[12px] text-foreground">{children}</pre>
   ),
@@ -120,7 +126,8 @@ export function DocMarkdown({
 }: {
   source: string;
   highlight?: string[];
-  /** Band the preamble block (before the first heading) — for preamble conflicts. */
+  /** Band the doc's lead (content before the first heading, else the opening
+   *  heading's own section) — for null-heading preamble conflicts. */
   highlightPreamble?: boolean;
 }): ReactNode {
   const hl = new Set(highlight.map(norm));
@@ -137,8 +144,12 @@ export function DocMarkdown({
   return (
     <div className="text-[13px] leading-relaxed text-foreground">
       {splitSections(source).map((sec, i) => {
-        // The preamble block is the leading section with no heading.
-        const on = sec.heading === '' ? highlightPreamble : hl.has(norm(sec.heading));
+        // The preamble band = the doc's LEAD (section 0): the true preamble when
+        // the doc has content before its first heading, else the opening heading's
+        // own section (the common README shape that starts with an H1). Heading
+        // pointers band their matching section as usual.
+        const headingMatch = sec.heading !== '' && hl.has(norm(sec.heading));
+        const on = headingMatch || (i === 0 && highlightPreamble);
         return (
           <div
             key={i}

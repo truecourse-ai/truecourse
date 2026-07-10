@@ -408,6 +408,50 @@ describe('DocMarkdown — conflict highlight (amber band)', () => {
     const { container } = render(<DocMarkdown source={SRC} />);
     expect(container.querySelector('.border-amber-500')).toBeNull();
   });
+
+  // The common README shape: an H1 title on line 1 means there is NO content
+  // before the first heading, so a preamble pointer must band the opening
+  // heading's own section (H1 line + intro paragraph up to the next heading).
+  const H1_LEAD = '# taskline\n\nA CLI task tracker. C# is supported.\n\n## Install\n\nRun the installer.';
+
+  it('bands the opening H1 section (title + intro) for a preamble marker when the doc has no pre-heading content', () => {
+    const { container } = render(<DocMarkdown source={H1_LEAD} highlightPreamble />);
+    const band = container.querySelector('.border-amber-500');
+    expect(band).not.toBeNull();
+    // The disputed intro paragraph — the whole point of the fix — is inside the band.
+    expect(band?.textContent).toContain('A CLI task tracker. C# is supported.');
+    // The H1 title line is part of the lead and stays inside the band.
+    expect(band?.textContent).toContain('taskline');
+    // The band stops at the next heading — the Install section is not swept in.
+    expect(band?.textContent).not.toContain('Run the installer.');
+  });
+
+  it('still bands a real preamble block (content before any heading) — original shape unchanged', () => {
+    const { container } = render(<DocMarkdown source={SRC} highlightPreamble />);
+    const band = container.querySelector('.border-amber-500');
+    expect(band?.textContent).toContain('Intro tagline: C# is supported.');
+    expect(band?.textContent).not.toContain('Body under the heading.');
+  });
+
+  it('bands some visible region (no crash) for the empty-lead edge — H1 immediately followed by H2', () => {
+    const { container } = render(
+      <DocMarkdown source={'# Title\n## Install\n\nRun the installer.'} highlightPreamble />,
+    );
+    const band = container.querySelector('.border-amber-500');
+    expect(band).not.toBeNull();
+    // The empty lead falls back to the H1 line itself, never zero highlight.
+    expect(band?.textContent).toContain('Title');
+    expect(band?.textContent).not.toContain('Run the installer.');
+  });
+
+  it('leaves heading-pointer highlights unchanged even when the doc opens with an H1', () => {
+    const { container } = render(<DocMarkdown source={H1_LEAD} highlight={['Install']} />);
+    const band = container.querySelector('.border-amber-500');
+    expect(band).not.toBeNull();
+    expect(band?.textContent).toContain('Run the installer.');
+    // No preamble marker ⇒ the opening H1 lead is not banded.
+    expect(band?.textContent).not.toContain('A CLI task tracker');
+  });
 });
 
 describe('SpecOverlapDetail (right pane)', () => {

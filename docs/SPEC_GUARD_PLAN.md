@@ -491,6 +491,71 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    The dashboard analog already shipped (BL Drift registry-hidden in both editions,
    URL-reachable for EE Pulls deep links).
 
+28. **Cross-area conflict dedup (user go 2026-07-09).** Overlap detection runs per AREA
+   over each area's doc pairs, so a doc pair sharing several areas can get the SAME
+   dispute flagged once per shared area (live: taskline's rm disagreement appeared twice —
+   core/persistence + core/tasks-entity, same pair, same substance, different wording).
+   Investigate and fix at the root, choosing deliberately between:
+   (a) detection keyed by DOC PAIR, not area×pair — the "do these two docs disagree?"
+   question is area-independent (the model reads the docs); areas then reference the
+   pair-level verdicts. Structurally impossible to duplicate AND cheaper (one call per
+   pair). Check whether the detection prompt uses area context; if the prompt must change,
+   that rolls the overlap fingerprint (acceptable — small caches — but say so).
+   (b) assembly-level merge: same unordered pair + shared section pointer on at least one
+   side ⇒ one dispute (two docs CAN have multiple genuine disputes — never merge by pair
+   alone).
+   Prefer (a) if the prompt/area coupling allows. UI/schema: one dispute = one conflict
+   row however many areas share the pair; keep resolutions doc-pair-level (unchanged).
+   Dedup must be deterministic — never note-text similarity.
+   STATUS: BUILT 2026-07-09 — chose fork (b) assembly-level merge (the detection prompt
+   is area-coupled: the SCOPE instruction focuses a small model per area to catch each
+   area's dispute, so pair-keying detection would lose per-area coverage; prompt/fingerprint
+   unchanged). ONE deterministic rule in `@truecourse/shared` (`dedupeCrossAreaOverlaps`:
+   same unordered pair + a shared section pointer on ≥1 side ⇒ one dispute, union-find),
+   applied at assembly (`flagOverlaps`) AND read (`buildCorpusConflicts`, so older
+   duplicate corpora surface once). The merged `Overlap`/`CorpusConflict` records every
+   spanned `areas[]`; a resolution scoped to any (or unscoped) clears it — cross-area
+   disputes record an unscoped relation (CLI + dashboard) so one resolution survives a
+   re-scan. Two genuine disputes (disjoint sections) stay two.
+
+27. **Preamble banding must cover the H1-lead shape (live bug 2026-07-09). STATUS: BUILT.** A null
+   (preamble) overlap pointer bands "content before the first heading" — but most READMEs
+   open with an H1 title on line 1, so that region is EMPTY and the viewer highlights
+   nothing (seen live on the taskline conflict; the truecourse README only worked because
+   its badges sit above any heading). Fix in the viewer (DocMarkdown/SpecDocViewer), no
+   prompt change: the preamble band = the doc's LEAD — content before the first heading
+   when non-empty, else (doc opens with a single H1) the H1 section's own body up to the
+   next heading. General rule, not doc-specific. Observed alongside: the same doc-pair
+   dispute was flagged as TWO conflicts in two areas sharing the pair — cross-area overlap
+   dedup is a separate follow-up, logged here, not built with this item.
+
+25. **Generate FAILS on open conflicts (user decision 2026-07-09).** An unresolved
+   within-area overlap means two docs make contradictory claims; generate extracts BOTH,
+   and the side the code disagrees with births red — a paid "finding" that is really the
+   unresolved dispute. `guard generate` (CLI and dashboard action alike) now HARD-FAILS
+   before any LLM work when the corpus has open conflicts: exit non-zero with the conflict
+   list (paths + note, full messages) and the resolution pointers (`truecourse spec
+   conflicts list` / the dashboard Conflicts group). "Resolved" reuses the SAME derivation
+   the spec surfaces use (a covering relation OR an exclude — hoist that logic into
+   core/shared if it lives only in the dashboard route; never duplicate it). No --force
+   escape hatch: resolving is cheap and the alternative is paying for noise. The estimate
+   gate runs AFTER this check (fail before asking to spend). Related follow-up kept open:
+   extraction honoring precedence/keep-both resolutions at section level.
+   STATUS: BUILT 2026-07-09 — resolved-derivation hoisted to `@truecourse/shared`
+   (`buildCorpusConflicts`/`openConflicts`/`coveringRelation`, the composeGuardStatus
+   precedent), consumed by the gate (`guardGenerateInProcess.assertNoOpenConflicts`,
+   pre-estimate), the CLI (`spec conflicts`/`spec status`), and the client
+   (SpecCorpusView/SpecOverlapDetail) — no second copy; CLI prints the full list + exits 1,
+   the dashboard action returns 422 with the same report.
+26. **Scan outro points at guard, not contracts (user report 2026-07-09).** `spec scan`
+   ends with "Run `truecourse contracts generate`" — a contracts-era fossil (that pipeline
+   is deprecated, item 24). New outro: with open conflicts → "N conflicts to resolve
+   (`truecourse spec conflicts list`), then `truecourse guard generate`"; conflict-free →
+   "Run `truecourse guard generate`". No mention of contracts.
+   STATUS: BUILT 2026-07-09 — scan + `spec status` outros point at `truecourse guard generate`
+   (conflict-free) / count open conflicts via the same derivation and route to `spec conflicts
+   list`; no scan/spec-flow next-step names `contracts generate`.
+
 21. **Stacked non-interactive gates defeat the single retry (findings analysis
    2026-07-08, queued).** `analyze` demands two sequential decisions non-interactively
    (`--llm/--no-llm`, then `--stash/--no-stash`); a scenario fails gate 1, the retry fixes

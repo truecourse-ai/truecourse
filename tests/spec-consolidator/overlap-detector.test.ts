@@ -51,7 +51,7 @@ describe('flagOverlaps', () => {
   it('flags a disagreeing pair', async () => {
     const docs = [doc('a.md'), doc('b.md')];
     const out = await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], docs, { runner: flagAll });
-    expect(out.get('core/auth')).toEqual([{ docs: ['a.md', 'b.md'], note: 'a.md vs b.md', sections: [] }]);
+    expect(out.get('core/auth')).toEqual([{ docs: ['a.md', 'b.md'], note: 'a.md vs b.md', sections: [], areas: ['core/auth'] }]);
   });
 
   it('carries the conflicting sections the runner reports', async () => {
@@ -156,6 +156,34 @@ describe('flagOverlaps', () => {
     expect(out.has('booking/appointments')).toBe(true); // first area keeps it
     expect(out.has('booking/auth')).toBe(false); // duplicate dropped
     expect(out.get('booking/appointments')).toHaveLength(1);
+  });
+
+  it('dedups the taskline shape — a shared pointer on ONE side, different pointers on the other', async () => {
+    // The live bug: README + SPEC's `rm` dispute flagged in two shared areas. The
+    // SPEC side points at the SAME heading in both; the README side differs (a
+    // heading in one area, the preamble/null in the other). A shared pointer on
+    // ONE side is enough — one dispute, one record, spanning both areas.
+    const docs = [doc('README.md'), doc('docs/SPEC.md')];
+    const areas = [
+      area('core/persistence', ['README.md', 'docs/SPEC.md']),
+      area('core/tasks-entity', ['README.md', 'docs/SPEC.md']),
+    ];
+    const runner: OverlapRunner = async ({ areaId, a, b }) => ({
+      overlap: true,
+      note: `rm dispute (${areaId})`,
+      sections: [
+        { doc: a.path, heading: areaId === 'core/persistence' ? 'taskline' : null },
+        { doc: b.path, heading: 'rm <id>' },
+      ],
+    });
+    const out = await flagOverlaps(repo, areas, docs, { runner });
+    // One record, under the representative (fewest-null) area = persistence.
+    expect(out.get('core/persistence')).toHaveLength(1);
+    expect(out.has('core/tasks-entity')).toBe(false);
+    // It records the full span so a resolution scoped to either area clears it.
+    expect(out.get('core/persistence')![0].areas).toEqual(['core/persistence', 'core/tasks-entity']);
+    // The surviving record is the more bandable side (a named README heading, no null).
+    expect(out.get('core/persistence')![0].sections).toContainEqual({ doc: 'README.md', heading: 'taskline' });
   });
 
   it('keeps distinct conflicts between the same pair (different sections)', async () => {
@@ -273,6 +301,7 @@ describe('flagOverlaps — heading-widened cross-area candidates', () => {
         docs: ['docs/platform-prd.md', 'docs/pagination.md'],
         note: 'docs/platform-prd.md vs docs/pagination.md',
         sections: [],
+        areas: ['core/pagination'],
       },
     ]);
     // The umbrella area itself has no matching outside heading → no pair.

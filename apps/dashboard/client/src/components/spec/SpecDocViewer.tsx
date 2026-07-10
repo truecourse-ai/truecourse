@@ -33,7 +33,8 @@ export function SpecDocViewer({
   scrollTo?: { heading: string; nonce: number };
   /** Headings to mark in-place as conflicting (amber band + "conflict" tag). */
   highlight?: string[];
-  /** Band the preamble block (before the first heading) — for preamble conflicts. */
+  /** Band the doc's lead (content before the first heading, else the opening
+   *  heading's own section) — for null-heading preamble conflicts. */
   highlightPreamble?: boolean;
   /** The doc's area tags — shown in full in the header (the list caps them). */
   tags?: string[];
