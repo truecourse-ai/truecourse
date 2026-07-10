@@ -33,9 +33,8 @@ import {
   type GateVerifyRequest,
   type GateVerifyOutput,
 } from './gate-runner.js';
+import { PR_TRIGGER_ACTIONS } from './pr-events.js';
 import { prCodeQualityUrl } from './links.js';
-
-const GATE_ACTIONS = ['opened', 'synchronize', 'reopened'];
 
 export interface GateHandlerDeps {
   store: GateStore;
@@ -60,7 +59,7 @@ export async function handlePullRequestGate(
   deps: GateHandlerDeps,
   payload: PullRequestPayload,
 ): Promise<void> {
-  if (!GATE_ACTIONS.includes(payload.action)) return;
+  if (!PR_TRIGGER_ACTIONS.includes(payload.action)) return;
   if (!payload.installation) return;
   const repoFullName = payload.repository.full_name;
   const link = await deps.store.getRepo(repoFullName);

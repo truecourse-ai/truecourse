@@ -20,6 +20,10 @@ import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
 import { reportGithubError } from './observability.js';
+import { getGuardStore } from '@truecourse/core/lib/guard-store';
+import { getGuardExecutor } from '@truecourse/core/lib/guard-executor';
+import { handlePullRequestGuardGate, type EnqueueGuardGate } from './guard-gate-handler.js';
+import { defaultGuardGatePipeline } from './guard-gate-runner.js';
 
 /**
  * Enqueue an initial/refresh repo scan onto the background job queue. Returns the
@@ -42,6 +46,8 @@ export interface RegisterGithubAppOptions {
   db?: EeDb | null;
   /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
   enqueueBaseline?: EnqueueBaseline;
+  /** Background-queue enqueue for guard-gate runs (PR events). Inline fallback if omitted. */
+  enqueueGuardGate?: EnqueueGuardGate;
   /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
   codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
@@ -78,6 +84,37 @@ export async function registerGithubApp(
     gateInFlight: new Set<string>(),
     codeAnalysisLlm: opts.codeAnalysisLlm,
   };
+
+  // Guard-gate enqueue: prefer the durable background queue (ee-server); fall
+  // back to running the gate pipeline inline fire-and-forget so unit tests need
+  // no queue (mirrors enqueueBaseline's fallback). The inline path shares the
+  // process-global guard store/executor seams; without the jobs layer there is
+  // no shared limiter, so executor calls run unlimited.
+  const enqueueGuardGate: EnqueueGuardGate =
+    opts.enqueueGuardGate ??
+    (async (req) => {
+      void defaultGuardGatePipeline
+        .run(
+          {
+            store,
+            guardStore: getGuardStore(),
+            auth,
+            octokitFor: offerDeps.octokitFor,
+            execute: getGuardExecutor(),
+            limiter: { run: (fn) => fn() },
+          },
+          req,
+        )
+        .catch((err) =>
+          reportGithubError(
+            store,
+            'guard gate failed',
+            { repo: req.repoFullName, pr: req.prNumber },
+            err,
+          ),
+        );
+      return null;
+    });
 
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
@@ -119,8 +156,12 @@ export async function registerGithubApp(
           );
           return;
         }
-        // TODO(spec-guard): guard becomes the second gate check alongside Code
-        // Quality here — the spec→contract→infer PR check was removed.
+        // Guard gate: open the in-progress Check + enqueue the durable job (fast —
+        // no clone here). Independent of the Code Quality gate below.
+        void handlePullRequestGuardGate(
+          { store, octokitFor: offerDeps.octokitFor, enqueueGuardGate },
+          payload,
+        ).catch((err) => reportGithubError(store, 'guard gate enqueue failed', ctx, err));
         void handlePullRequestGate(offerDeps, payload).catch((err) =>
           reportGithubError(store, 'gate failed', ctx, err),
         );
@@ -204,6 +245,56 @@ export {
   handlePullRequestGate,
   type GateHandlerDeps,
 } from './gate-handler.js';
+
+// Guard gate: pure diff/decision + Check output for the PR guard run
+export {
+  diffGuardRuns,
+  decideGuardGate,
+  emptyGuardGateDiff,
+  type GuardGateInput,
+  type GuardGateDiff,
+  type GuardGateConclusion,
+  type GuardGateDecision,
+  type GuardGateOptions,
+} from './guard-gate.js';
+export {
+  GUARD_GATE_CHECK_NAME,
+  GUARD_GATE_MAX_ANNOTATIONS,
+  GUARD_GATE_KILL_SWITCH_ENV,
+  guardGateCheckOutput,
+  guardGateDisabled,
+  guardGateDisabledOutput,
+  capGuardAnnotations,
+  type GuardStaleAnnotation,
+  type GuardGateCheckOutput,
+} from './guard-gate-comment.js';
+
+// Guard gate: the durable `guard.gate` job's pipeline + webhook handler
+export {
+  createGuardGatePipeline,
+  defaultGuardGatePipeline,
+  postGuardGateErrorCheck,
+  InvalidGuardRecipeError,
+  GUARD_GATE_RUN_TIMEOUT_MS,
+  GUARD_GATE_BUILD_TIMEOUT_MS,
+  GUARD_GATE_CLONE_TIMEOUT_MS,
+  cloneAbortSignal,
+  type GuardGateCheckoutRequest,
+  type GuardGateClone,
+  type GuardGateCorpus,
+  type GuardGateLimiter,
+  type GuardGatePipeline,
+  type GuardGatePipelineDeps,
+  type GuardGatePipelineSeams,
+  type GuardGatePhase,
+  type GuardGateRunOptions,
+  type GuardGateRunRequest,
+} from './guard-gate-runner.js';
+export {
+  handlePullRequestGuardGate,
+  type EnqueueGuardGate,
+  type GuardGateHandlerDeps,
+} from './guard-gate-handler.js';
 
 // Guard onboarding: hosted guard-scenario generation (the `repo.guard` job body)
 export {
