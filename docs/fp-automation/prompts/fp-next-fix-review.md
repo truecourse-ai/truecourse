@@ -100,7 +100,8 @@ point at concrete evidence in the diff or CI. Do **not** invent problems;
 a requirement you cannot evaluate is noted as `unverifiable: <reason>`
 rather than a violation. **Do not** append violations for anything about
 the PR's title, body, labels, linked-issue state, or commit trailers —
-those are out of scope (see "Scope: code only" below).
+those are PR structure, not this routine's concern (see the **Code only.**
+bullet under "Hard constraints").
 
 **Derive the fixed rule set from the diff, not the PR body.** The set of
 rules this PR fixes = every `rule_key` that appears in an added/changed
@@ -200,12 +201,21 @@ PR.
 - The full test suite must pass (fp-next-fix step 9 requires a green
   suite before success). Check the PR's CI: all required checks
   completed and passing.
-  - If checks are still **running**, do not merge and do not fail the
-    PR — remove `<SCOPE>fp-reviewing` and end the session; the next
+- **Ignore the `block-human-review` gate — it is not a test.** The
+  `block-human-review` check (`.github/workflows/block-human-review.yml`)
+  is a merge gate, not a CI signal: it is **designed to fail** on any PR
+  carrying `<SCOPE>fp-human-review-needed`, purely to stop the merge. On a
+  **human-review PR it will always be red, and that is expected** — never
+  treat it as a failed check or a violation. Evaluate only the *real* CI
+  checks (tests, build, etc.) below; exclude `block-human-review` from
+  that set on either PR kind.
+  - If the real checks are still **running**, do not merge and do not fail
+    the PR — remove `<SCOPE>fp-reviewing` and end the session; the next
     trigger fire (or a re-open) will pick it up once CI settles. Note
     this as the reason in the session log.
-  - If any required check **failed**, that is a violation (attach the
-    failing check name / a link to its log).
+  - If any real (non-gate) required check **failed**, that is a violation
+    (attach the failing check name / a link to its log). A red
+    `block-human-review` is **not** such a failure.
 
 ## Decision
 
