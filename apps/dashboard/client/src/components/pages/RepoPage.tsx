@@ -53,7 +53,7 @@ import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
 import { GuardHeldDetail } from '@/components/guard/GuardHeldDetail';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
 import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
-import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
+import { GuardSectionActions } from '@/components/guard/GuardSectionActions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { LlmEstimateModal } from '@/components/spec/LlmEstimateModal';
 import { useGuardStaleness } from '@/hooks/useGuardStaleness';
@@ -887,19 +887,25 @@ function RepoPageInner() {
         />
       ) : null
     ) : leftTab === 'scenarios' ? (
-      // Generate lives where its output lives — the Scenarios tab. Opens the
-      // estimate modal first, then triggers; disabled while a run is in flight.
-      <GuardHeaderActions
+      // Generate lives where its output lives — the Scenarios tab. Capability-
+      // gated: OSS (`local-filesystem`) opens the estimate modal then runs
+      // against the working tree; hosted enqueues the `repo.guard` job instead
+      // (`guard` capability) or hides the action when the subsystem is down.
+      <GuardSectionActions
         kind="generate"
         onClick={guardGen.begin}
         busy={guardGen.busy}
         otherBusy={guardRun.running}
         stale={guardStaleness.generateStale}
+        // In EE `repo.name` IS the GitHub fullName (owner/repo) — the same
+        // identity the other EE repo-scoped calls key on.
+        repoFullName={isEe ? repo?.name : undefined}
       />
     ) : leftTab === 'guarddrifts' ? (
       // Run lives on the Drifts tab (it produces the results shown there).
       // Deterministic — no estimate; disabled while a generate is in flight.
-      <GuardHeaderActions
+      // Local-only: hosted has no manual Run (it happens on the job queue).
+      <GuardSectionActions
         kind="run"
         onClick={guardRun.run}
         busy={guardRun.running}
@@ -922,7 +928,13 @@ function RepoPageInner() {
           prNumber={prNumber}
           prBranch={null}
           prConclusion={activePrRun?.conclusion}
-          actions={undefined}
+          // Guard tabs pass through too: their actions self-gate on capabilities
+          // (hosted renders the job-backed Generate, or nothing at all).
+          actions={
+            leftTab === 'coverage' || leftTab === 'scenarios' || leftTab === 'guarddrifts'
+              ? sectionActionsNode
+              : undefined
+          }
         />
       ) : (
         <Header
