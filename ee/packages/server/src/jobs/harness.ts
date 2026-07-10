@@ -50,7 +50,7 @@ export interface JobContext<P> {
   payload: P;
   org: string;
   jobId: string;
-  /** The tracker, for bridging OSS StepTrackers onto a step (specScanBridge). */
+  /** The tracker, for bridging OSS StepTrackers onto a step (stepBridge). */
   tracker: JobStepTracker;
   /** Advance the checklist to `key` (earlier steps auto-complete). */
   phase(key: string, detail?: string): Promise<void>;
@@ -77,12 +77,16 @@ export interface JobDefinition<P extends { jobId: string }> {
   /**
    * Optional side-effect run AFTER the row reaches its terminal state (succeeded
    * OR failed) and the notification is posted — so the single-flight key is now
-   * free. The repo-baseline uses it to replay a coalesced follow-up push. It must
-   * be best-effort and not throw (a throw would mask the job's own outcome); a
-   * failure still rethrows after it runs.
+   * free. The repo-baseline uses it to replay a coalesced follow-up push (both
+   * outcomes) and to chain the guard onboarding (success only — hence the
+   * `outcome` argument). It must be best-effort and not throw (a throw would mask
+   * the job's own outcome); a failure still rethrows after it runs.
    */
-  onSettled?(ctx: JobContext<P>): Promise<void>;
+  onSettled?(ctx: JobContext<P>, outcome: JobOutcomeStatus): Promise<void>;
 }
+
+/** How a job settled — handed to `onSettled` so success-only chains can key off it. */
+export type JobOutcomeStatus = 'succeeded' | 'failed';
 
 /** The stores the envelope needs — the same for every job. */
 export interface JobRuntime {
@@ -156,7 +160,7 @@ export async function executeJob<P extends { jobId: string }>(
   // optional settled hook — the single-flight key is now free, so e.g. the
   // baseline replays a coalesced follow-up push. A failure still rethrows after
   // (maxAttempts:1 ⇒ permanent fail, and graphile records it).
-  await def.onSettled?.(ctx);
+  await def.onSettled?.(ctx, failure ? 'failed' : 'succeeded');
   if (failure) throw failure;
 }
 

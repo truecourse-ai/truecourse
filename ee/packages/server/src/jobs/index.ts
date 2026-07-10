@@ -18,12 +18,16 @@ import type { EeDb } from '@truecourse/ee-db';
 import {
   JobStore,
   NotificationStore,
+  ActiveJobExistsError,
   PendingBaselineStore,
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
+import { readGuardResult } from '@truecourse/core/lib/guard-store';
 import type { Runner } from 'graphile-worker';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
+import type { JobOutcomeStatus } from './harness.js';
+import { chainGuardOnboarding } from './guard-chain.js';
 import {
   enqueueOrPendBaseline,
   replayPendingBaseline,
@@ -31,8 +35,11 @@ import {
 } from './pending-baseline.js';
 import {
   REPO_BASELINE_TASK,
+  REPO_GUARD_TASK,
+  guardJobKey,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
+  type GuardGenerateEnqueueRequest,
 } from './constants.js';
 
 function orgIdOf(req: Request): string | null {
@@ -48,6 +55,18 @@ export interface JobsApi {
    * running for that repo (so a redelivered push / re-connect is a no-op).
    */
   enqueueBaseline(req: BaselineEnqueueRequest): Promise<string | null>;
+  /**
+   * Enqueue a hosted guard-scenario generate for a connected repo (the baseline
+   * onboarding chain + the dashboard's manual Generate). Single-flight per repo:
+   * returns the new job id, or null when a generate is already running.
+   */
+  enqueueGuardGenerate(req: GuardGenerateEnqueueRequest): Promise<string | null>;
+  /**
+   * Whether the background worker actually started. False when the background
+   * services failed to come up (jobs won't process until a restart) — the
+   * `guard` capability gates on this so it is never advertised optimistically.
+   */
+  workerStarted: boolean;
 }
 
 function createEventsRouter(hub: EventHub): Router {
@@ -185,11 +204,53 @@ export async function registerJobs(
     );
   };
 
+  // Single-flight enqueue: one active job per key — a concurrent request is a
+  // no-op (null), so a redelivered webhook / double click / chain race never
+  // queues a duplicate. The `jobId` is stamped into the payload for the harness.
+  const singleFlightEnqueue = async (
+    task: string,
+    org: string,
+    key: string,
+    payload: Record<string, unknown>,
+  ): Promise<string | null> => {
+    if (!runner) throw new Error('the background job worker is not running');
+    let job;
+    try {
+      job = await jobStore.create({ org, type: task, key });
+    } catch (err) {
+      if (err instanceof ActiveJobExistsError) return null;
+      throw err;
+    }
+    await runner.addJob(task, { jobId: job.id, ...payload }, { jobKey: key, maxAttempts: 1 });
+    return job.id;
+  };
+
+  // Single-flight guard-generate enqueue — the baseline onboarding chain and the
+  // dashboard's manual Generate both land here. Keyed per repo.
+  const enqueueGuardGenerate = (req: GuardGenerateEnqueueRequest): Promise<string | null> =>
+    singleFlightEnqueue(REPO_GUARD_TASK, req.workspaceOrgId, guardJobKey(req.repoFullName), {
+      ...req,
+    });
+
   // After a baseline job settles, replay the repo's coalesced follow-up push (if
-  // any). Wired onto the baseline definition's `onSettled` hook, so it runs in
-  // BOTH the success and failure paths once the single-flight key is free.
-  const onBaselineSettled = (payload: BaselineJobPayload): Promise<void> =>
-    replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
+  // any — BOTH outcomes), then — on SUCCESS only — chain the guard onboarding:
+  // the scan just persisted the corpus, and a repo with stored guard state is
+  // already onboarded (refresh-on-merge is issue 06). Wired onto the baseline
+  // definition's `onSettled` hook, which runs once the single-flight key is free.
+  const onBaselineSettled = async (
+    payload: BaselineJobPayload,
+    outcome: JobOutcomeStatus,
+  ): Promise<void> => {
+    await replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
+    await chainGuardOnboarding(
+      {
+        hasGuardState: async (repoKey) => (await readGuardResult(repoKey)) !== null,
+        enqueueGuardGenerate,
+      },
+      payload,
+      outcome,
+    );
+  };
 
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
@@ -223,5 +284,7 @@ export async function registerJobs(
   return {
     jobStore,
     enqueueBaseline,
+    enqueueGuardGenerate,
+    workerStarted: runner !== null,
   };
 }

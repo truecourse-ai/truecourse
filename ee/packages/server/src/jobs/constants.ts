@@ -24,6 +24,40 @@ export function baselineJobKey(repoFullName: string): string {
   return `${REPO_BASELINE_TASK}:${repoFullName}`;
 }
 
+/** Hosted guard-scenario generation for a connected repo — chained onto the
+ *  first successful baseline (onboarding) and triggered manually from the
+ *  dashboard's hosted "Generate" button (`POST /api/ee/guard/generate`). */
+export const REPO_GUARD_TASK = 'repo.guard';
+
+/** Display title + stepped checklist for the guard-generate job popup. The
+ *  `generate` step carries the OSS GUARD_GENERATE_STEPS sub-phases as detail. */
+export const REPO_GUARD_TITLE = 'Generating guard scenarios';
+export const REPO_GUARD_STEPS: readonly JobStepDef[] = [
+  { key: 'clone', label: 'Cloning repository' },
+  { key: 'generate', label: 'Generating scenarios' },
+];
+
+/** Single-flight key for a `repo.guard` job — one generate per repo at a time. */
+export function guardJobKey(repoFullName: string): string {
+  return `${REPO_GUARD_TASK}:${repoFullName}`;
+}
+
+/** What a caller (baseline chain / guard route) hands to `enqueueGuardGenerate`. */
+export interface GuardGenerateEnqueueRequest {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  /** Default-branch head — the generated scenarios persist under it. */
+  commitSha: string;
+  /** The repo's workspace org — scopes the job + its notifications. */
+  workspaceOrgId: string;
+}
+
+/** The worker's `repo.guard` task payload (the enqueue request plus the job id). */
+export interface GuardGenerateJobPayload extends GuardGenerateEnqueueRequest {
+  jobId: string;
+}
+
 /** What a caller (connect / push webhook) hands to `enqueueBaseline`. */
 export interface BaselineEnqueueRequest {
   repoFullName: string;

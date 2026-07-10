@@ -211,6 +211,9 @@ describe('executeJob — onSettled hook', () => {
 
     expect(settled).toHaveBeenCalledTimes(1);
     expect(statusAtSettle).toBe('succeeded'); // terminal bookkeeping already done
+    // The hook is told HOW the job settled, so success-only chains (e.g. the
+    // guard onboarding after a baseline) can key off it.
+    expect(settled).toHaveBeenCalledWith(expect.anything(), 'succeeded');
   });
 
   it('fires on failure, and the original error still rethrows', async () => {
@@ -235,6 +238,7 @@ describe('executeJob — onSettled hook', () => {
 
     expect(settled).toHaveBeenCalledTimes(1);
     expect(statusAtSettle).toBe('failed');
+    expect(settled).toHaveBeenCalledWith(expect.anything(), 'failed');
   });
 
   it('is optional — a definition without onSettled still completes', async () => {

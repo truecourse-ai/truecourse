@@ -26,18 +26,25 @@ import {
   createGithubAuth,
   installationOctokit,
   selectGateStore,
+  defaultGuardOnboardingPipeline,
   type BaselineResult,
+  type GuardOnboardingPipeline,
 } from '@truecourse/ee-github-app';
 import type { NotificationLevel } from '@truecourse/shared';
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
+import { GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { JobStepTracker } from './steps.js';
-import { executeJob, type JobDefinition, type JobRuntime } from './harness.js';
+import { executeJob, type JobDefinition, type JobOutcomeStatus, type JobRuntime } from './harness.js';
 import {
   REPO_BASELINE_TASK,
   REPO_BASELINE_TITLE,
   REPO_BASELINE_STEPS,
+  REPO_GUARD_TASK,
+  REPO_GUARD_TITLE,
+  REPO_GUARD_STEPS,
   type BaselineJobPayload,
+  type GuardGenerateJobPayload,
 } from './constants.js';
 
 /**
@@ -47,7 +54,7 @@ import {
  * to mirror — CURATE_STEPS (spec scan) by default. Returns a StepTracker to hand
  * to the callee.
  */
-function specScanBridge(
+function stepBridge(
   eeTracker: JobStepTracker,
   stepKey: string,
   stepDefs: ReadonlyArray<{ key: string; label: string }> = CURATE_STEPS,
@@ -66,9 +73,10 @@ export interface StartWorkerDeps {
   /**
    * Called after a `repo.baseline` job goes terminal (success OR failure), once
    * its single-flight key is free — replays any coalesced follow-up push for the
-   * repo (see pending-baseline.ts). Wired only onto the baseline definition.
+   * repo (see pending-baseline.ts) and, on SUCCESS only, chains the guard
+   * onboarding (see guard-chain.ts). Wired only onto the baseline definition.
    */
-  onBaselineSettled?: (payload: BaselineJobPayload) => Promise<void>;
+  onBaselineSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
 }
 
 function jobTrace(
@@ -117,7 +125,7 @@ function baselineNotice(
  *  Code Quality analyze pass — all via runBaseline. */
 function repoBaselineJob(
   db: EeDb,
-  onSettled?: (payload: BaselineJobPayload) => Promise<void>,
+  onSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
 ): JobDefinition<BaselineJobPayload> {
   return {
     type: REPO_BASELINE_TASK,
@@ -125,7 +133,7 @@ function repoBaselineJob(
     steps: REPO_BASELINE_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
-    onSettled: onSettled ? (ctx) => onSettled(ctx.payload) : undefined,
+    onSettled: onSettled ? (ctx, outcome) => onSettled(ctx.payload, outcome) : undefined,
     sentry: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
@@ -149,7 +157,7 @@ function repoBaselineJob(
           auth,
           octokitFor: (id) => installationOctokit(cfg, id),
           onPhase: (phase) => ctx.phase(phase),
-          specTracker: specScanBridge(ctx.tracker, 'spec'),
+          specTracker: stepBridge(ctx.tracker, 'spec'),
         },
         req,
       );
@@ -178,6 +186,76 @@ function repoBaselineJob(
 }
 
 /**
+ * Hosted guard-scenario generation for a connected repo: clone the default
+ * branch, materialize the Pg-stored curated corpus into the checkout, run the
+ * in-process guard generate (LLM via the process-global EE transport;
+ * birth-validation via the guard executor seam), and persist the scenario corpus
+ * + report to the Pg guard store under the commit. A repo with no curated corpus
+ * is a clean success with distinct wording — scenarios generate once the spec is
+ * scanned (the onboarding chain re-fires after the next successful baseline).
+ */
+export function guardGenerateJob(
+  pipeline: GuardOnboardingPipeline,
+): JobDefinition<GuardGenerateJobPayload> {
+  return {
+    type: REPO_GUARD_TASK,
+    title: REPO_GUARD_TITLE,
+    steps: REPO_GUARD_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      route: 'worker repo.guard',
+    }),
+    async run(ctx) {
+      const { repoFullName, installationId, defaultBranch, commitSha } = ctx.payload;
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      const auth = createGithubAuth(cfg);
+
+      const result = await pipeline.run(
+        { auth },
+        { repoFullName, installationId, defaultBranch, commitSha },
+        {
+          onPhase: (phase) => ctx.phase(phase),
+          generateTracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
+        },
+      );
+
+      if (result.noCorpus) {
+        return {
+          result: { repoFullName, scenariosWritten: 0, noCorpus: true },
+          notification: {
+            level: 'success',
+            title: 'Guard scenarios — waiting for spec',
+            body: `${repoFullName} — no spec corpus yet; guard scenarios will generate once the spec is scanned.`,
+            data: { repoFullName, noCorpus: true },
+          },
+        };
+      }
+      const n = result.scenariosWritten;
+      return {
+        result: { repoFullName, scenariosWritten: n, noCorpus: false },
+        notification: {
+          level: 'success',
+          title: 'Guard scenarios generated',
+          body: `${repoFullName} — ${n} guard scenario${n === 1 ? '' : 's'} generated.`,
+          data: { repoFullName, scenariosWritten: n },
+        },
+      };
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Guard generation failed — ${p.repoFullName}`,
+      body: 'The guard scenarios couldn’t be generated. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, detail: err.message },
+    }),
+  };
+}
+
+/**
  * Wrap a job definition as a graphile task: resolve the payload → ambient trace
  * context (org / job / repo) the EE transport tags LLM traces with, then run the
  * shared lifecycle. A definition factory (vs a plain definition) is resolved
@@ -195,6 +273,30 @@ function registerJob<P extends { jobId: string }>(
   };
 }
 
+/** Deps the exported `runGuardGenerate` test seam needs — the stores + the
+ *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live). */
+export interface RunGuardGenerateDeps {
+  db: EeDb;
+  jobStore: JobStore;
+  notifications: NotificationStore;
+  pipeline: GuardOnboardingPipeline;
+}
+
+/**
+ * Run the `repo.guard` body directly (unit-testable without graphile-worker). A
+ * thin wrapper over the harness so tests keep a stable entry point.
+ */
+export async function runGuardGenerate(
+  deps: RunGuardGenerateDeps,
+  payload: GuardGenerateJobPayload,
+): Promise<void> {
+  await executeJob(
+    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    guardGenerateJob(deps.pipeline),
+    payload,
+  );
+}
+
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   const { db, jobStore } = deps;
   const notifications = new NotificationStore(db);
@@ -207,6 +309,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     noHandleSignals: true,
     taskList: {
       [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
+      [REPO_GUARD_TASK]: registerJob(rt, guardGenerateJob(defaultGuardOnboardingPipeline)),
     },
   });
   log.info('[ee-jobs] worker runner started');
