@@ -17,7 +17,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
+import { log } from '@truecourse/core/lib/logger';
 import {
   dismissedClaimKey,
   type GuardDecisions,
@@ -351,6 +353,36 @@ async function foldDismissals(
   return dismissed;
 }
 
+/**
+ * Record the settled verdict as a `GateRunRecord` — the row `GateStore.listRuns`
+ * serves, which the dashboard's `useRepoGateRuns` → `refForTabs` mechanism reads
+ * to map a PR number to its head SHA (the whole PR-scoping feed). Best-effort:
+ * a persistence failure is logged, never allowed to fail the gate (the Check is
+ * already authoritative). The internal 'error' conclusion is mapped to 'failure'
+ * — the same mapping the Check rendering uses (the record type has no 'error').
+ */
+async function recordGuardGateRun(
+  store: GateStore,
+  payload: GuardGateRunRequest,
+  decision: GuardGateDecision,
+): Promise<void> {
+  try {
+    await store.recordRun({
+      id: randomUUID(),
+      repoFullName: payload.repoFullName,
+      prNumber: payload.prNumber,
+      headSha: payload.headSha,
+      baseSha: payload.baseSha,
+      conclusion: decision.conclusion === 'error' ? 'failure' : decision.conclusion,
+      addedCount: decision.diff.newlyFailing.length,
+      resolvedCount: decision.diff.resolved.length,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    log.warn(`[github-app] guard gate recordRun failed: ${(err as Error).message}`);
+  }
+}
+
 /** Wrap a stored run as the `ok` report shape `decideGuardGate` consumes. */
 function storedRunReport(latest: GuardLatest): GuardExecReport {
   return { status: 'ok', latest, latestPath: '', loadErrors: [], manifest: null };
@@ -483,6 +515,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         const decision = decideGuardGate(storedRunReport(stored), base, { blocking, dismissed });
         await opts.onPhase?.('verdict');
         await post(render(decision), guardGateCheckOutput(decision));
+        await recordGuardGateRun(deps.store, payload, decision);
         return decision;
       }
 
@@ -609,6 +642,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
           output.annotations = capGuardAnnotations(buildStaleAnnotations(tmp, decision.diff.stale));
         }
         await post(render(decision), output);
+        await recordGuardGateRun(deps.store, payload, decision);
 
         // Persist the head run (non-baseline row keyed by headSha — decision 5:
         // redelivery dedupe) + its failure transcripts, before the checkout goes.

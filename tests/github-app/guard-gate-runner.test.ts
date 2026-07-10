@@ -992,6 +992,98 @@ describe('guard-gate pipeline — force re-gate (spec-change checkbox)', () => {
   });
 });
 
+describe('guard-gate pipeline — records a GateRunRecord (the refForTabs feed)', () => {
+  it('records the settled verdict as a gate run (PR↔headSha mapping for the dashboard)', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps } = makeDeps(async (input) =>
+      okReport(latestOf([result('s1', 'fail')], input.commit ?? '')),
+    );
+
+    await pipeline.run(deps, payload());
+
+    const runs = await gateStore.listRuns(REPO);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      repoFullName: REPO,
+      prNumber: 7,
+      headSha: HEAD_SHA,
+      baseSha: BASE_SHA,
+      conclusion: 'failure',
+      addedCount: 1,
+      resolvedCount: 0,
+    });
+  });
+
+  it("maps the internal 'error' conclusion to a 'failure' run record", async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps } = makeDeps(async () => ({
+      status: 'run-timed-out',
+      elapsedMs: 900_001,
+      settled: 0,
+      total: 1,
+    }));
+
+    await pipeline.run(deps, payload());
+
+    const runs = await gateStore.listRuns(REPO);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.conclusion).toBe('failure');
+  });
+
+  it('records the redelivery fast-path verdict too', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    await guardStore.writeGuardRun(REPO, latestOf([result('s1', 'fail')], HEAD_SHA));
+    const pipeline = createGuardGatePipeline({
+      clone: async () => ({ baseSha: BASE_SHA, headSha: HEAD_SHA }),
+      loadCorpus: corpus([scenario('s1')]),
+      checkout: async () => {},
+    });
+    const { deps } = makeDeps(neverExecute);
+
+    await pipeline.run(deps, payload());
+
+    const runs = await gateStore.listRuns(REPO);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ headSha: HEAD_SHA, conclusion: 'failure' });
+  });
+
+  it('a recordRun failure never fails the gate (best-effort)', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps, calls } = makeDeps(async (input) =>
+      okReport(latestOf([result('s1', 'pass')], input.commit ?? '')),
+    );
+    deps.store.recordRun = async () => {
+      throw new Error('db down');
+    };
+
+    const decision = await pipeline.run(deps, payload());
+
+    expect(decision.conclusion).toBe('success');
+    expect(calls.check[0].conclusion).toBe('success');
+  });
+
+  it('does not record on the kill-switch neutral (guard globally disabled)', async () => {
+    process.env[KILL_SWITCH] = '1';
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps } = makeDeps(neverExecute);
+
+    await pipeline.run(deps, payload());
+
+    expect(await gateStore.listRuns(REPO)).toHaveLength(0);
+  });
+});
+
 describe('guard-gate pipeline — executor concurrency limiter', () => {
   it('caps concurrent executor runs at the shared permit count', async () => {
     await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
