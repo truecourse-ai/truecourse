@@ -1,6 +1,9 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import * as fs from 'fs';
-import { CreateRepoSchema } from '@truecourse/shared';
+import * as path from 'path';
+import * as os from 'os';
+import { CreateRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
+import { getCapabilities } from '../ee-loader.js';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
@@ -64,6 +67,84 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
         lastAnalyzed: e.lastAnalyzed ?? null,
       })),
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/repos/browse?path=<abs> — list subdirectories for the directory picker.
+// LOCAL-ONLY: gated on the 'local-filesystem' capability (present in OSS, absent
+// in hosted EE where there is no per-user disk). MUST be declared before GET '/:id'
+// so 'browse' is not captured as a project id.
+router.get('/browse', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Capability gate — hidden entirely (404) when local-filesystem is off.
+    if (!getCapabilities().includes('local-filesystem')) {
+      throw createAppError('Not found', 404);
+    }
+
+    const parsed = BrowseDirQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw createAppError('Invalid query: path must be a string', 400);
+    }
+
+    const raw = parsed.data.path;
+    // Reject a relative path BEFORE resolving (realpath would resolve it against
+    // the server cwd, silently browsing somewhere the caller didn't ask for).
+    if (raw && raw.length > 0 && !path.isAbsolute(raw)) {
+      throw createAppError('Path must be absolute', 400);
+    }
+    const target = raw && raw.length > 0 ? raw : os.homedir();
+
+    // Resolve symlinks; map fs errors to 4xx, never let them surface as a 500.
+    let resolved: string;
+    try {
+      resolved = fs.realpathSync(target);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ELOOP' || code === 'ENOTDIR') {
+        throw createAppError(`Path does not exist: ${target}`, 404);
+      }
+      if (code === 'EACCES' || code === 'EPERM') {
+        throw createAppError(`Permission denied: ${target}`, 403);
+      }
+      throw err; // unexpected — let the error handler 500 it
+    }
+
+    const stat = fs.statSync(resolved);
+    if (!stat.isDirectory()) {
+      throw createAppError(`Path is not a directory: ${target}`, 400);
+    }
+
+    let dirents: fs.Dirent[];
+    try {
+      dirents = fs.readdirSync(resolved, { withFileTypes: true });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EACCES' || code === 'EPERM') {
+        throw createAppError(`Permission denied: ${resolved}`, 403);
+      }
+      throw err;
+    }
+
+    const entries = dirents
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .map((d) => {
+        const childPath = path.join(resolved, d.name);
+        let isRepo = false;
+        try {
+          isRepo = fs.statSync(path.join(childPath, '.git')).isDirectory();
+        } catch {
+          isRepo = false; // no .git, or unreadable
+        }
+        return { name: d.name, path: childPath, isRepo };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const parentPath = path.dirname(resolved);
+    const parent = parentPath === resolved ? null : parentPath;
+
+    res.json({ path: resolved, parent, entries });
   } catch (error) {
     next(error);
   }

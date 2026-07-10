@@ -1,4 +1,4 @@
-import type { CapabilitiesResponse } from '@truecourse/shared';
+import type { BrowseDirResponse, CapabilitiesResponse } from '@truecourse/shared';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -172,6 +172,16 @@ export function addRepo(path: string): Promise<RepoResponse> {
 
 export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * List subdirectories of `path` (defaults to the server user's home dir) for the
+ * directory picker. Local-only — the server 404s this when the local-filesystem
+ * capability is off, so callers must gate the UI on `useCapability('local-filesystem')`.
+ */
+export function browseDir(path?: string): Promise<BrowseDirResponse> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  return fetchApi<BrowseDirResponse>(`/api/repos/browse${qs}`);
 }
 
 export function analyzeRepo(
