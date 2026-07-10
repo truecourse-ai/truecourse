@@ -8,8 +8,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
-import { PgSpecStore, PgAnalysisStore } from '../../ee/packages/data-store/src/index';
+import { PgSpecStore, PgAnalysisStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
+import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import {
   setAnalysisStore,
   resetAnalysisStore,
@@ -23,6 +24,11 @@ import {
   addRelation,
   addManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
+import {
+  getGuardDecisions,
+  dismissGuardClaim,
+} from '@truecourse/core/commands/guard-read';
+import type { GuardDismissedClaim } from '@truecourse/shared';
 import { handlePullRequestClosed } from '../../ee/packages/github-app/src/index';
 import type { PullRequestPayload } from '../../ee/packages/github-app/src/webhook';
 
@@ -49,37 +55,57 @@ beforeEach(async () => {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db as unknown as EeDb));
+  setGuardStore(new PgGuardStore(db as unknown as EeDb));
   setAnalysisStore(new PgAnalysisStore(db as unknown as EeDb));
 });
 
 afterEach(async () => {
   resetSpecStore();
+  resetGuardStore();
   resetAnalysisStore();
   await client.close();
 });
 
+const guardClaim = (title: string): GuardDismissedClaim => ({
+  doc: 'README.md',
+  anchor: 'intro',
+  title,
+  dismissedAt: '2026-07-09T00:00:00.000Z',
+});
+
 describe('handlePullRequestClosed', () => {
-  it('merged: promotes the overlay onto the repo row and drops it', async () => {
+  it('merged: promotes the spec + guard overlays onto the repo row and drops them', async () => {
     await addRelation(REPO, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 7 });
-    // Repo row is still empty before merge.
+    await dismissGuardClaim(REPO, guardClaim('pr-dismissal'), { pr: 7 });
+    // Repo rows are still empty before merge.
     expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getGuardDecisions(REPO)).dismissedClaims).toEqual([]);
 
     await handlePullRequestClosed(closedPayload(7, true));
 
-    // Repo row now carries the promoted relation; the overlay is gone.
+    // Spec repo row now carries the promoted relation; the overlay is gone.
     expect((await getDecisions(REPO)).relations).toHaveLength(1);
     expect((await getDecisions(REPO, { pr: 7 })).relations).toHaveLength(1);
+    // Guard repo row now carries the promoted dismissal; the overlay is gone, so a
+    // subsequent PR inherits it via the repo row.
+    expect((await getGuardDecisions(REPO)).dismissedClaims.map((c) => c.title)).toEqual(['pr-dismissal']);
+    expect((await getGuardDecisions(REPO, { pr: 8 })).dismissedClaims.map((c) => c.title)).toEqual(['pr-dismissal']);
   });
 
-  it('unmerged: discards the overlay and leaves the repo row untouched', async () => {
+  it('unmerged: discards the spec + guard overlays and leaves the repo rows untouched', async () => {
     await addManualInclude(REPO, 'repo.md'); // repo-scope
     await addManualInclude(REPO, 'pr.md', { pr: 7 }); // overlay
+    await dismissGuardClaim(REPO, guardClaim('repo-dismissal')); // repo-scope
+    await dismissGuardClaim(REPO, guardClaim('pr-dismissal'), { pr: 7 }); // overlay
 
     await handlePullRequestClosed(closedPayload(7, false));
 
-    // Overlay gone → effective == repo row (the PR's include did not promote).
+    // Spec overlay gone → effective == repo row (the PR's include did not promote).
     expect((await getDecisions(REPO, { pr: 7 })).manualIncludes).toEqual(['repo.md']);
     expect((await getDecisions(REPO)).manualIncludes).toEqual(['repo.md']);
+    // Guard overlay gone → effective == repo row; the PR's dismissal did not promote.
+    expect((await getGuardDecisions(REPO, { pr: 7 })).dismissedClaims.map((c) => c.title)).toEqual(['repo-dismissal']);
+    expect((await getGuardDecisions(REPO)).dismissedClaims.map((c) => c.title)).toEqual(['repo-dismissal']);
   });
 
   it('merged with no overlay is a no-op (never throws)', async () => {
