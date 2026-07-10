@@ -45,6 +45,14 @@ export const jobs = pgTable(
     progressCurrent: integer('progress_current').notNull().default(0),
     progressTotal: integer('progress_total').notNull().default(0),
     progressMessage: text('progress_message'),
+    /**
+     * The enqueue request the job was created with (no `jobId` — that's the row
+     * id). Persisted so boot recovery can settle side effects a crashed run left
+     * dangling — e.g. complete a reaped `guard.gate`'s in-progress PR Check,
+     * which needs the payload's installation/checkRun ids. Null for jobs whose
+     * creators don't pass one (nothing to settle).
+     */
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
     /** Type-specific success payload, e.g. `{ synced: 4 }`. */
     result: jsonb('result').$type<unknown>(),
     error: text('error'),

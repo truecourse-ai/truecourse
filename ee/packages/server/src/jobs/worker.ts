@@ -27,9 +27,15 @@ import {
   installationOctokit,
   selectGateStore,
   defaultGuardOnboardingPipeline,
+  defaultGuardGatePipeline,
+  postGuardGateErrorCheck,
   type BaselineResult,
   type GuardOnboardingPipeline,
+  type GuardGatePipeline,
+  type OctokitClient,
 } from '@truecourse/ee-github-app';
+import { getGuardStore } from '@truecourse/core/lib/guard-store';
+import { getGuardExecutor } from '@truecourse/core/lib/guard-executor';
 import type { NotificationLevel } from '@truecourse/shared';
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process';
@@ -43,9 +49,14 @@ import {
   REPO_GUARD_TASK,
   REPO_GUARD_TITLE,
   REPO_GUARD_STEPS,
+  GUARD_GATE_TASK,
+  GUARD_GATE_TITLE,
+  GUARD_GATE_STEPS,
   type BaselineJobPayload,
   type GuardGenerateJobPayload,
+  type GuardGateJobPayload,
 } from './constants.js';
+import { guardGateLimiter } from './guard-gate-limiter.js';
 
 /**
  * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
@@ -255,21 +266,104 @@ export function guardGenerateJob(
   };
 }
 
+/** Deps the guard-gate job definition needs: the shared db (gate store) + the
+ *  pipeline. `octokitFor` is injectable so tests fake the crash-path Check post;
+ *  the default builds an installation client from the app config per invocation. */
+export interface GuardGateJobDeps {
+  db: EeDb;
+  pipeline: GuardGatePipeline;
+  octokitFor?: (installationId: number) => OctokitClient;
+}
+
+/**
+ * The hosted guard gate for one PR head: run the committed scenario corpus
+ * against the checkout through the executor seam (under the process-wide
+ * limiter) and complete the drift Check opened at webhook time with the
+ * diff-vs-base verdict. The live seams (guard store, executor) are read per
+ * invocation so a seam installed after boot is honored. Success is silent —
+ * the verdict lives on the PR's Check, and a toast per push would be noise;
+ * failures still notify (onError, unconditionally).
+ */
+export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJobPayload> {
+  return {
+    type: GUARD_GATE_TASK,
+    title: GUARD_GATE_TITLE,
+    steps: GUARD_GATE_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.headSha }),
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      pr: p.prNumber,
+      route: 'worker guard.gate',
+    }),
+    async run(ctx) {
+      const p = ctx.payload;
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      const octokitFor = deps.octokitFor ?? ((id: number) => installationOctokit(cfg, id));
+      try {
+        const decision = await deps.pipeline.run(
+          {
+            store: selectGateStore(deps.db),
+            guardStore: getGuardStore(),
+            auth: createGithubAuth(cfg),
+            octokitFor,
+            execute: getGuardExecutor(),
+            limiter: guardGateLimiter,
+          },
+          p,
+          // ctx.signal = graphile's abortSignal — the pipeline threads it into
+          // the executor + git children so a worker shutdown aborts the run.
+          { onPhase: (phase) => ctx.phase(phase), signal: ctx.signal },
+        );
+        return {
+          result: {
+            repoFullName: p.repoFullName,
+            prNumber: p.prNumber,
+            headSha: p.headSha,
+            conclusion: decision.conclusion,
+          },
+          notification: null,
+        };
+      } catch (err) {
+        // A crashed gate must never strand the in-progress Check opened at
+        // webhook time: settle it as an error-styled FAILURE (a broken gate
+        // blocks, never passes silently) before failing the job. Best-effort —
+        // the job's own failure (and its notification) is the primary signal.
+        await postGuardGateErrorCheck(octokitFor(p.installationId), p).catch(() => undefined);
+        throw err;
+      }
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Guard gate failed — ${p.repoFullName}`,
+      body: 'The guard gate produced no verdict. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, prNumber: p.prNumber, detail: err.message },
+    }),
+  };
+}
+
 /**
  * Wrap a job definition as a graphile task: resolve the payload → ambient trace
  * context (org / job / repo) the EE transport tags LLM traces with, then run the
  * shared lifecycle. A definition factory (vs a plain definition) is resolved
- * per-invocation.
+ * per-invocation. Graphile's per-job `helpers.abortSignal` (fires when the
+ * worker shuts down) rides into the body as `ctx.signal` so long work is
+ * cancellable.
  */
 function registerJob<P extends { jobId: string }>(
   rt: JobRuntime,
   defOrFactory: JobDefinition<P> | ((payload: P) => JobDefinition<P>),
 ): Task {
-  return (rawPayload) => {
+  return (rawPayload, helpers) => {
     const payload = rawPayload as P;
     const def = typeof defOrFactory === 'function' ? defOrFactory(payload) : defOrFactory;
     const trace = jobTrace(def.org(payload), payload.jobId, def.traceMeta?.(payload));
-    return runWithTrace(trace, () => executeJob(rt, def, payload));
+    return runWithTrace(trace, () =>
+      executeJob(rt, def, payload, { signal: helpers.abortSignal }),
+    );
   };
 }
 
@@ -297,6 +391,35 @@ export async function runGuardGenerate(
   );
 }
 
+/** Deps the exported `runGuardGate` test seam needs — the stores + the gate
+ *  pipeline (faked in tests; `defaultGuardGatePipeline` live). `octokitFor`
+ *  fakes the crash-path error-Check post; `signal` stands in for graphile's
+ *  per-job `helpers.abortSignal`. */
+export interface RunGuardGateDeps {
+  db: EeDb;
+  jobStore: JobStore;
+  notifications: NotificationStore;
+  pipeline: GuardGatePipeline;
+  octokitFor?: (installationId: number) => OctokitClient;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run the `guard.gate` body directly (unit-testable without graphile-worker). A
+ * thin wrapper over the harness so tests keep a stable entry point.
+ */
+export async function runGuardGate(
+  deps: RunGuardGateDeps,
+  payload: GuardGateJobPayload,
+): Promise<void> {
+  await executeJob(
+    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    guardGateJob({ db: deps.db, pipeline: deps.pipeline, octokitFor: deps.octokitFor }),
+    payload,
+    { signal: deps.signal },
+  );
+}
+
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   const { db, jobStore } = deps;
   const notifications = new NotificationStore(db);
@@ -310,6 +433,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     taskList: {
       [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
       [REPO_GUARD_TASK]: registerJob(rt, guardGenerateJob(defaultGuardOnboardingPipeline)),
+      // Factory form: the job body reads the live guard store/executor seams per
+      // invocation (github-app / OSS setup may install them after the worker starts).
+      [GUARD_GATE_TASK]: registerJob(rt, () =>
+        guardGateJob({ db, pipeline: defaultGuardGatePipeline }),
+      ),
     },
   });
   log.info('[ee-jobs] worker runner started');

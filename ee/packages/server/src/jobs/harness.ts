@@ -56,6 +56,13 @@ export interface JobContext<P> {
   phase(key: string, detail?: string): Promise<void>;
   /** Update the active step's inline detail (e.g. a `3/12` counter). */
   detail(key: string, detail: string): Promise<void>;
+  /**
+   * Cancellation for the body's long-running work (graphile's per-job
+   * `helpers.abortSignal` — fires when the worker is shutting down and the
+   * graceful-shutdown grace expires). Bodies that spawn children or run
+   * pipelines thread it down so a stop doesn't leave work running headless.
+   */
+  signal?: AbortSignal;
 }
 
 /** Everything a job type declares — nothing else lives per task body. */
@@ -104,6 +111,7 @@ export async function executeJob<P extends { jobId: string }>(
   rt: JobRuntime,
   def: JobDefinition<P>,
   payload: P,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
   const { jobId } = payload;
   const org = def.org(payload);
@@ -138,6 +146,7 @@ export async function executeJob<P extends { jobId: string }>(
     tracker,
     phase: (key, detail) => tracker.advance(key, detail),
     detail: (key, detail) => tracker.detail(key, detail),
+    signal: opts.signal,
   };
 
   let failure: unknown = null;

@@ -20,6 +20,7 @@ export {
   NotificationStore,
   ActiveJobExistsError,
   PendingBaselineStore,
+  type OrphanedJob,
   type PendingBaselineInput,
   type PendingBaselineView,
 } from './jobs-store.js';

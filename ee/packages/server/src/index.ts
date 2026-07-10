@@ -129,6 +129,7 @@ const plugin: EePlugin = {
       appUrl: cfg.appUrl,
       db: eeDb,
       enqueueBaseline: jobs.enqueueBaseline,
+      enqueueGuardGate: jobs.enqueueGuardGate,
       codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     plugin.capabilities.push('github-gate');

@@ -29,6 +29,19 @@ export class ActiveJobExistsError extends Error {
 
 type JobRow = typeof jobs.$inferSelect;
 
+/**
+ * A reaped in-flight job, as returned by {@link JobStore.failOrphaned}: enough
+ * for boot recovery to settle side effects the dead run left dangling (e.g.
+ * complete a `guard.gate`'s stranded PR Check from the stored `payload`).
+ */
+export interface OrphanedJob {
+  id: string;
+  workspaceOrgId: string;
+  type: string;
+  key: string | null;
+  payload: Record<string, unknown> | null;
+}
+
 function toJobView(r: JobRow): JobView {
   return {
     id: r.id,
@@ -51,15 +64,22 @@ export class JobStore {
   /**
    * Create a `queued` job. Throws `ActiveJobExistsError` (carrying the existing
    * active job) when `key` is already held by a `queued|running` job — the
-   * partial unique index is the race-proof single-flight guard.
+   * partial unique index is the race-proof single-flight guard. `payload` is the
+   * enqueue request (persisted for boot recovery — see {@link OrphanedJob}).
    */
-  async create(input: { org: string; type: string; key?: string | null }): Promise<JobView> {
+  async create(input: {
+    org: string;
+    type: string;
+    key?: string | null;
+    payload?: Record<string, unknown> | null;
+  }): Promise<JobView> {
     const now = new Date().toISOString();
     const row = {
       id: randomUUID(),
       workspaceOrgId: input.org,
       type: input.type,
       key: input.key ?? null,
+      payload: input.payload ?? null,
       status: 'queued' as const,
       progressCurrent: 0,
       progressTotal: 0,
@@ -176,16 +196,22 @@ export class JobStore {
   /**
    * Boot recovery: the in-process worker means a restart abandons any in-flight
    * job. Mark every `queued|running` row `failed` so the unique key is freed and
-   * a stale "Syncing…" button clears. Returns the number reaped.
+   * a stale "Syncing…" button clears. Returns the reaped jobs (id, type, stored
+   * payload) so the caller can settle what the dead runs left dangling.
    */
-  async failOrphaned(): Promise<number> {
+  async failOrphaned(): Promise<OrphanedJob[]> {
     const now = new Date().toISOString();
-    const rows = await this.db
+    return this.db
       .update(jobs)
       .set({ status: 'failed', error: 'interrupted by server restart', finishedAt: now })
       .where(inArray(jobs.status, ['queued', 'running']))
-      .returning({ id: jobs.id });
-    return rows.length;
+      .returning({
+        id: jobs.id,
+        workspaceOrgId: jobs.workspaceOrgId,
+        type: jobs.type,
+        key: jobs.key,
+        payload: jobs.payload,
+      });
   }
 }
 

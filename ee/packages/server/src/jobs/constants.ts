@@ -3,6 +3,8 @@
  * reference them without pulling in graphile-worker (only the worker does).
  */
 
+import type { GuardGateRunRequest } from '@truecourse/ee-github-app';
+
 /** A single phase in a job's stepped-progress checklist (popup). */
 export interface JobStepDef {
   key: string;
@@ -55,6 +57,37 @@ export interface GuardGenerateEnqueueRequest {
 
 /** The worker's `repo.guard` task payload (the enqueue request plus the job id). */
 export interface GuardGenerateJobPayload extends GuardGenerateEnqueueRequest {
+  jobId: string;
+}
+
+/** Hosted guard gate for a pull request — runs the committed scenario corpus
+ *  against the PR head and posts the diff verdict as a GitHub Check. */
+export const GUARD_GATE_TASK = 'guard.gate';
+
+/** Display title + stepped checklist for the guard-gate job popup. Step keys
+ *  are the gate pipeline's phase literals (github-app), advanced over onPhase. */
+export const GUARD_GATE_TITLE = 'Guarding pull request';
+export const GUARD_GATE_STEPS: readonly JobStepDef[] = [
+  { key: 'clone', label: 'Cloning repository' },
+  { key: 'base', label: 'Establishing baseline' },
+  { key: 'run', label: 'Running scenarios' },
+  { key: 'verdict', label: 'Posting Check' },
+];
+
+/** Single-flight key for a `guard.gate` job — per repo AND head SHA: two PRs
+ *  (or two pushes) gate concurrently, but a redelivered webhook for the same
+ *  head is a no-op. */
+export function guardGateJobKey(repoFullName: string, headSha: string): string {
+  return `${GUARD_GATE_TASK}:${repoFullName}#${headSha}`;
+}
+
+/** What the pull-request webhook hands to `enqueueGuardGate` — exactly the
+ *  github-app pipeline's run request (one authoritative shape, not a hand-synced
+ *  copy). The type-only import keeps this module runtime-dependency-free. */
+export type GuardGateEnqueueRequest = GuardGateRunRequest;
+
+/** The worker's `guard.gate` task payload (the enqueue request plus the job id). */
+export interface GuardGateJobPayload extends GuardGateEnqueueRequest {
   jobId: string;
 }
 
