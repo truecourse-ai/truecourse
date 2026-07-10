@@ -1,3 +1,4 @@
+import os from 'node:os'
 import { initParsers } from '../packages/analyzer/src/parser'
 
 // Never emit usage telemetry from the test suite — analyze and the
@@ -5,6 +6,15 @@ import { initParsers } from '../packages/analyzer/src/parser'
 // want tests hitting PostHog. (`spec-telemetry.test.ts` mocks trackEvent
 // directly to assert it's called.)
 process.env.TRUECOURSE_TELEMETRY = '0'
+
+// Make git hermetic: hide the developer's global/system git config from every
+// git invocation in the suite (tests and the code under test alike). Otherwise
+// host settings leak in — e.g. `commit.gpgsign=true` makes commits in temp
+// fixture repos die with "user.signingkey needs to be configured". This mirrors
+// CI, which has no global config. Tests that commit must set user.name/email
+// per-repo (or via GIT_AUTHOR_*/GIT_COMMITTER_* env), as CI already requires.
+process.env.GIT_CONFIG_GLOBAL = os.devNull
+process.env.GIT_CONFIG_NOSYSTEM = '1'
 
 // Load tree-sitter WASM grammars once before any test runs.
 // initParsers() is idempotent (returns cached promise), so repeated imports
