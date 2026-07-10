@@ -90,6 +90,8 @@ export interface GuardStore {
   writeGuardRun(repoPath: string, latest: GuardLatest): Promise<WrittenGuardRun>;
   /** Read + validate a past run snapshot by runId, or `null` (unsafe id / absent). */
   readGuardRun(repoPath: string, runId: string): Promise<GuardLatest | null>;
+  /** Stored run for an exact commit (base-run reuse + webhook-redelivery dedupe), or null. */
+  readGuardRunForCommit(repoPath: string, commitSha: string): Promise<GuardLatest | null>;
   readGuardHistory(repoPath: string): Promise<GuardHistory>;
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
   /**
@@ -214,6 +216,13 @@ class FileGuardStore implements GuardStore {
     } catch {
       return null;
     }
+  }
+
+  // The file store keeps one materialized snapshot (LATEST) — the exact-commit
+  // read is a match against its envelope, not a scan of runs/ or history.
+  async readGuardRunForCommit(repoPath: string, commitSha: string): Promise<GuardLatest | null> {
+    const latest = fileReadGuardLatest(repoPath);
+    return latest && latest.run.commit === commitSha ? latest : null;
   }
 
   async readGuardHistory(repoPath: string): Promise<GuardHistory> {
@@ -372,6 +381,10 @@ export const writeGuardRun = (repoPath: string, latest: GuardLatest): Promise<Wr
   active.writeGuardRun(repoPath, latest);
 export const readGuardRun = (repoPath: string, runId: string): Promise<GuardLatest | null> =>
   active.readGuardRun(repoPath, runId);
+export const readGuardRunForCommit = (
+  repoPath: string,
+  commitSha: string,
+): Promise<GuardLatest | null> => active.readGuardRunForCommit(repoPath, commitSha);
 export const readGuardHistory = (repoPath: string): Promise<GuardHistory> =>
   active.readGuardHistory(repoPath);
 export const appendGuardHistory = (repoPath: string, entry: GuardHistoryEntry): Promise<void> =>

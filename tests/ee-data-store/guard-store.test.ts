@@ -183,6 +183,22 @@ describe('PgGuardStore — run state (pglite)', () => {
     expect(await store.readGuardRun(REPO, '../etc/passwd')).toBeNull();
   });
 
+  it('readGuardRunForCommit returns the stored run for an exact commit (baseline or PR-head)', async () => {
+    const base = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1', branch: 'main' });
+    await store.writeGuardLatest(REPO, base);
+    const prHead = makeLatest({ runId: 'r2', ranAt: '2026-07-05T00:00:00.000Z', commit: 'pr-head', branch: 'feature' });
+    await store.writeGuardRun(REPO, prHead);
+    expect(await store.readGuardRunForCommit(REPO, 'c1')).toEqual(base);
+    expect(await store.readGuardRunForCommit(REPO, 'pr-head')).toEqual(prHead);
+  });
+
+  it('readGuardRunForCommit returns null for an unknown commit or another repo', async () => {
+    const prHead = makeLatest({ runId: 'r2', ranAt: '2026-07-05T00:00:00.000Z', commit: 'pr-head' });
+    await store.writeGuardRun(REPO, prHead);
+    expect(await store.readGuardRunForCommit(REPO, 'nope')).toBeNull();
+    expect(await store.readGuardRunForCommit('other/repo', 'pr-head')).toBeNull();
+  });
+
   it('a run with no commit keys distinctly by runId (no PK collision)', async () => {
     const a = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: null });
     const b = makeLatest({ runId: 'r2', ranAt: '2026-07-02T00:00:00.000Z', commit: null });

@@ -141,6 +141,16 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
+  /** The `(repoKey, commitSha)` row's snapshot (PK lookup) — baseline or PR-head. */
+  async readGuardRunForCommit(repoKey: string, commitSha: string): Promise<GuardLatest | null> {
+    const rows = await this.db
+      .select({ snapshot: guardRuns.snapshot })
+      .from(guardRuns)
+      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.commitSha, commitSha)))
+      .limit(1);
+    return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
+  }
+
   /** The run trend: every baseline run for the repo, oldest-first. */
   async readGuardHistory(repoKey: string): Promise<GuardHistory> {
     const rows = await this.db

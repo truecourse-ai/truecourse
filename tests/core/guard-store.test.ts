@@ -16,6 +16,7 @@ import {
   writeGuardLatest,
   writeGuardRun,
   readGuardRun,
+  readGuardRunForCommit,
   readGuardHistory,
   appendGuardHistory,
   readGuardResult,
@@ -175,6 +176,22 @@ describe('FileGuardStore — run state', () => {
     expect(await readGuardRun(r, 'nope')).toBeNull();
     expect(await readGuardRun(r, '../../etc/passwd')).toBeNull();
     expect(await readGuardRun(r, 'a/b')).toBeNull();
+  });
+
+  it('readGuardRunForCommit returns LATEST when its envelope commit matches', async () => {
+    const r = repo();
+    const latest = makeLatest('2026-01-05T00-00-00Z_dddddddd'); // run.commit = 'abc123'
+    await writeGuardLatest(r, latest);
+    expect(await readGuardRunForCommit(r, 'abc123')).toEqual(latest);
+  });
+
+  it('readGuardRunForCommit returns null on a commit mismatch or missing LATEST', async () => {
+    const r = repo();
+    // No LATEST at all → null (never a match).
+    expect(await readGuardRunForCommit(r, 'abc123')).toBeNull();
+    const latest = makeLatest('2026-01-05T00-00-00Z_eeeeeeee'); // run.commit = 'abc123'
+    await writeGuardLatest(r, latest);
+    expect(await readGuardRunForCommit(r, 'other-sha')).toBeNull();
   });
 
   it('appends history across two runs, preserving order', async () => {
