@@ -63,25 +63,62 @@ import {
   readGuardLatest as readGuardLatestStore,
   readGuardResult as readGuardResultStore,
   readGuardRun as readGuardRunStore,
+  readGuardRunForCommit as readGuardRunForCommitStore,
   readManifest as readManifestStore,
   readRecipeRaw,
   readScenarioFile,
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
-import { repoRef } from '../lib/repo-ref.js'
+import { readRepoDoc } from '../lib/repo-doc-reader.js'
+import { loadSpec } from '../lib/spec-store.js'
+import { readVerifyState } from './spec-in-process.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
 // the store directly), mirroring how verify routes read through spec-in-process.
 // These pass-through delegators are the file store in OSS, Postgres in EE.
 export {
   readGuardLatest,
+  readGuardRunForCommit,
   readGuardHistory,
   readGuardResult,
   readManifest,
   readGuardDecisions,
   writeGuardDecisions,
 } from '../lib/guard-store.js'
+
+// ---------------------------------------------------------------------------
+// Commit resolution (EE) — the guard analogue of the BL-Drift diff base.
+// ---------------------------------------------------------------------------
+
+/** The verify baseline commit — the default-branch anchor guard reads fall back
+ *  to when no explicit ref is given (EE). Mirrors `./diff-base` `baselineCommit`;
+ *  the verify store is the only one with an `isBaseline` anchor a PR-head scan
+ *  can't pollute. `undefined` when no baseline exists yet. */
+async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
+  return (await readVerifyState(repoKey))?.commitHash ?? undefined
+}
+
+/**
+ * The resolved read scope for a guard view:
+ *  - `live`   — OSS (the in-place file store): the working tree, commit-free.
+ *  - `commit` — hosted: the explicit `ref` (a PR head) or, absent one, the
+ *    default-branch baseline commit.
+ *  - `empty`  — hosted with NOTHING resolvable (no ref, no baseline yet). Reads
+ *    MUST come back absent, never the store's newest-set fallback: the newest
+ *    stored set can be a PR's regenerated corpus, which must not leak into the
+ *    repo-level view (the approved no-"newest by createdAt" decision).
+ */
+type GuardReadScope =
+  | { kind: 'live'; commit?: undefined }
+  | { kind: 'commit'; commit: string }
+  | { kind: 'empty'; commit?: undefined }
+
+async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardReadScope> {
+  if (guardsMaterializeInPlace()) return { kind: 'live' }
+  const commit = ref ?? (await guardBaselineCommit(repoKey))
+  return commit ? { kind: 'commit', commit } : { kind: 'empty' }
+}
 
 // ---------------------------------------------------------------------------
 // Per-section coverage join (pure).
@@ -306,16 +343,21 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
  * client-side from the run store — this list is run-independent so a fresh clone
  * shows its committed guards before any local run.
  */
-export async function listGuardScenarios(repoRoot: string): Promise<GuardScenarioInventory> {
-  // Corpus loads are RepoRef-keyed (the contract-store convention): OSS derives
-  // the commit from HEAD; the file store ignores it and reads the live tree.
-  const { scenarios } = await getGuardStore().loadScenarios(await repoRef(repoRoot))
-  const manifest = await readManifestStore(repoRoot)
+export async function listGuardScenarios(repoKey: string, ref?: string): Promise<GuardScenarioInventory> {
+  // Corpus loads are RepoRef-keyed (the contract-store convention): the file store
+  // ignores the commit and reads the live tree; EE reads the requested ref (a PR
+  // head) or the baseline set — never the newest, which a PR regen would pollute.
+  // An unresolvable hosted scope (no ref, no baseline) is EMPTY for the same reason.
+  const scope = await resolveGuardScope(repoKey, ref)
+  if (scope.kind === 'empty') return { recipe: null, scenarios: [] }
+  const commit = scope.commit
+  const { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })
+  const manifest = await readManifestStore(repoKey, commit)
   const manifestIds = new Set<string>()
   for (const sec of manifest?.sections ?? []) for (const id of sec.scenarioIds) manifestIds.add(id)
 
-  const headingByDocAnchor = headingTextIndex(repoRoot, scenarios.map((s) => s.binds.doc))
-  const fileById = await scenarioFilesById(repoRoot)
+  const headingByDocAnchor = await headingTextIndex(repoKey, scenarios.map((s) => s.binds.doc), commit)
+  const fileById = await scenarioFilesById(repoKey, commit)
   const items: GuardScenarioListItem[] = scenarios
     .map((s) => {
       const headingText = headingByDocAnchor.get(`${s.binds.doc}\0${s.binds.section}`)
@@ -333,7 +375,7 @@ export async function listGuardScenarios(repoRoot: string): Promise<GuardScenari
       (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id),
     )
 
-  return { recipe: await readGuardRecipeCard(repoRoot), scenarios: items }
+  return { recipe: await readGuardRecipeCard(repoKey, commit), scenarios: items }
 }
 
 /**
@@ -342,17 +384,19 @@ export async function listGuardScenarios(repoRoot: string): Promise<GuardScenari
  * are engine identifiers, not UI copy. A doc that no longer exists, escapes the
  * repo, or lost the section contributes nothing (the row carries no headingText).
  */
-function headingTextIndex(repoRoot: string, docs: readonly string[]): Map<string, string> {
+async function headingTextIndex(
+  repoKey: string,
+  docs: readonly string[],
+  commit?: string,
+): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   for (const doc of new Set(docs)) {
     // Confine to the repo tree — no traversal (mirrors the coverage route's guard).
     if (path.isAbsolute(doc) || doc.split(/[\\/]/).includes('..')) continue
-    let content: string
-    try {
-      content = fs.readFileSync(path.join(repoRoot, doc), 'utf-8')
-    } catch {
-      continue
-    }
+    // Read through the `readRepoDoc` seam (FS in OSS, GitHub in EE) at `commit` —
+    // never `fs` directly, so a hosted repo joins headings with no working tree.
+    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
+    if (content == null) continue
     for (const sec of buildDocSectionIndex(doc, content).sections) {
       map.set(`${doc}\0${sec.anchor}`, sec.headingText)
     }
@@ -370,17 +414,20 @@ function headingTextIndex(repoRoot: string, docs: readonly string[]): Map<string
  * UI copy. `result.json` on disk carries no `headingText`; the enrichment is
  * read-side only. A doc/section that is gone contributes no key (tolerant).
  */
-export async function readGuardReport(repoRoot: string): Promise<GuardGenerateReport | null> {
-  const report = await readGuardResultStore(repoRoot)
+export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
+  const scope = await resolveGuardScope(repoKey, ref)
+  if (scope.kind === 'empty') return null
+  const commit = scope.commit
+  const report = await readGuardResultStore(repoKey, commit)
   if (!report) return report
   const held = report.heldSections ?? []
   // A held section is unsettled by definition, so — like a finding — no committed
   // scenario donates its heading client-side; join it server-side the same way.
   if (report.birthFindings.length === 0 && held.length === 0) return report
-  const headingByDocAnchor = headingTextIndex(repoRoot, [
+  const headingByDocAnchor = await headingTextIndex(repoKey, [
     ...report.birthFindings.map((f) => f.doc),
     ...held.map((h) => h.doc),
-  ])
+  ], commit)
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {
@@ -400,13 +447,17 @@ export async function readGuardReport(repoRoot: string): Promise<GuardGenerateRe
 
 /**
  * The preparation-recipe card, or `null` when no (valid) `recipe.json` exists.
- * `stale` compares the current discovery-input fingerprint to the last run's
- * recorded `recipeFingerprint` (the only stored baseline) — `null` when no run.
- * An invalid `recipe.json` reads as absent (the card is informational). The recipe
- * content comes from the store; the fingerprint hashes the live working tree.
+ * OSS: `stale` compares the current discovery-input fingerprint (a working-tree
+ * hash) to the last run's recorded `recipeFingerprint` — `null` when no run.
+ * Hosted: there is NO working tree to fingerprint, so the comparison is
+ * unknowable — `stale` is always `null` (never a false "recipe changed"
+ * warning), and the informational fingerprint is the resolved ref's run-recorded
+ * one (empty when that ref never ran). The recipe content itself always comes
+ * from the store at the resolved commit. An invalid `recipe.json` reads as
+ * absent (the card is informational).
  */
-export async function readGuardRecipeCard(repoRoot: string): Promise<GuardRecipeCard | null> {
-  const raw = await readRecipeRaw(repoRoot)
+export async function readGuardRecipeCard(repoKey: string, commit?: string): Promise<GuardRecipeCard | null> {
+  const raw = await readRecipeRaw(repoKey, commit)
   if (raw == null) return null
   let parsed: unknown
   try {
@@ -417,22 +468,25 @@ export async function readGuardRecipeCard(repoRoot: string): Promise<GuardRecipe
   const result = RecipeSchema.safeParse(parsed)
   if (!result.success) return null
   const recipe = result.data
-  const fingerprint = computeRecipeFingerprint(repoRoot)
-  const latest = await readGuardLatestStore(repoRoot)
+  const card = { build: recipe.build, entry: recipe.entry.slice(), env: recipe.env ?? null }
+  if (!guardsMaterializeInPlace()) {
+    const run = await readGuardRunForView(repoKey, commit)
+    return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }
+  }
+  const fingerprint = computeRecipeFingerprint(repoKey)
+  const latest = await readGuardLatestStore(repoKey)
   return {
-    build: recipe.build,
-    entry: recipe.entry.slice(),
-    env: recipe.env ?? null,
+    ...card,
     fingerprint,
     stale: latest ? fingerprint !== latest.run.recipeFingerprint : null,
   }
 }
 
 /** Map each committed scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
-async function scenarioFilesById(repoRoot: string): Promise<Map<string, string>> {
+async function scenarioFilesById(repoKey: string, commit?: string): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  for (const rel of await listScenarioFiles(repoRoot)) {
-    const content = await readScenarioFile(repoRoot, rel)
+  for (const rel of await listScenarioFiles(repoKey, commit)) {
+    const content = await readScenarioFile(repoKey, rel, commit)
     if (content == null) continue
     let parsed: unknown
     try {
@@ -455,13 +509,27 @@ export function readGuardRun(repoRoot: string, runId: string): Promise<GuardLate
   return readGuardRunStore(repoRoot, runId)
 }
 
+/**
+ * The run a (possibly PR-scoped) guard view paints from: with `ref` (a PR head),
+ * the run stored at exactly THAT commit — never the baseline (a PR view must not
+ * show baseline data); without one, the repo baseline. The shared read behind
+ * the `/status`, `/latest`, and `/coverage` routes and the hosted recipe card.
+ */
+export function readGuardRunForView(repoKey: string, ref?: string): Promise<GuardLatest | null> {
+  return ref ? readGuardRunForCommitStore(repoKey, ref) : readGuardLatestStore(repoKey)
+}
+
 /** Find a committed scenario by id and return its raw YAML source, or `null`. */
 export async function readGuardScenarioSource(
-  repoRoot: string,
+  repoKey: string,
   id: string,
+  ref?: string,
 ): Promise<GuardScenarioSource | null> {
-  for (const rel of await listScenarioFiles(repoRoot)) {
-    const raw = await readScenarioFile(repoRoot, rel)
+  const scope = await resolveGuardScope(repoKey, ref)
+  if (scope.kind === 'empty') return null
+  const commit = scope.commit
+  for (const rel of await listScenarioFiles(repoKey, commit)) {
+    const raw = await readScenarioFile(repoKey, rel, commit)
     if (raw == null) continue
     let parsed: unknown
     try {
@@ -614,12 +682,72 @@ export async function discardGuardDecisionsOverlay(repoRoot: string, pr: number)
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the guard staleness signals from store mtimes (the guard analogue of
- * the verify staleness probe). `generateStale`: the spec corpus is newer than the
- * last generate. `runStale`: the scenarios are newer than the last run. File-store
- * specific (mtime-based); the working-tree layout is the OSS source of truth.
+ * Compute the guard staleness signals (the two amber dots). OSS reads store mtimes
+ * off the working tree (unchanged); EE composes the same shape from store reads at
+ * the same ref (a PR head, or the baseline) — no filesystem, no mtimes. `generateStale`:
+ * spec corpus present but never generated. `runStale`: scenarios present but never
+ * run, OR the generate is newer than the run (regenerated scenarios not yet re-run).
  */
-export function computeGuardStaleness(repoRoot: string): GuardStaleness {
+export async function computeGuardStaleness(repoKey: string, ref?: string): Promise<GuardStaleness> {
+  const scope = await resolveGuardScope(repoKey, ref)
+  if (scope.kind === 'live') return fileGuardStaleness(repoKey)
+  // Hosted with nothing resolvable: nothing is established — all-false, never
+  // a probe against the store's newest set.
+  if (scope.kind === 'empty') return EMPTY_STALENESS
+  return storeGuardStaleness(repoKey, scope.commit, ref !== undefined)
+}
+
+const EMPTY_STALENESS: GuardStaleness = {
+  generateStale: false,
+  runStale: false,
+  hasCorpus: false,
+  hasScenarios: false,
+  hasGenerated: false,
+  hasRun: false,
+}
+
+/**
+ * Hosted (Pg store) staleness — composed from store reads at the resolved commit
+ * (the PR head, else the baseline). Presence + a generate-vs-run timestamp
+ * compare; no working tree, no mtimes. With an explicit ref (`refPinned`), the
+ * run presence is decided by THAT commit's row alone — no baseline-run fallback
+ * (a never-run PR head must report hasRun:false, agreeing with `/latest?ref=`);
+ * the repo-level view (baseline commit) may still fall back to the baseline row
+ * (a guard run recorded at a different commit than the verify baseline).
+ */
+async function storeGuardStaleness(
+  repoKey: string,
+  commit: string,
+  refPinned: boolean,
+): Promise<GuardStaleness> {
+  const [result, manifest, corpus, runAtCommit, baseline, scenarioFiles] = await Promise.all([
+    readGuardResultStore(repoKey, commit),
+    readManifestStore(repoKey, commit),
+    loadSpec(({ repoKey, commitSha: commit }), 'corpus'),
+    readGuardRunForCommitStore(repoKey, commit),
+    refPinned ? Promise.resolve(null) : readGuardLatestStore(repoKey),
+    listScenarioFiles(repoKey, commit),
+  ])
+  const run = runAtCommit ?? baseline
+  const hasCorpus = corpus != null
+  const hasScenarios = (manifest?.sections?.length ?? 0) > 0 || scenarioFiles.length > 0
+  const hasGenerated = result != null
+  const hasRun = run != null
+  const generatedAt = result?.generatedAt ?? null
+  const ranAt = run?.run.ranAt ?? null
+  return {
+    generateStale: hasCorpus && !hasGenerated,
+    runStale:
+      hasScenarios && (!hasRun || (generatedAt != null && ranAt != null && generatedAt > ranAt)),
+    hasCorpus,
+    hasScenarios,
+    hasGenerated,
+    hasRun,
+  }
+}
+
+/** OSS (file store) staleness — store mtimes off the working tree (unchanged). */
+function fileGuardStaleness(repoRoot: string): GuardStaleness {
   const corpusMtime = mtimeIfExists(corpusFilePath(repoRoot))
   const generatedMtime = mtimeIfExists(guardResultPath(repoRoot))
   const runMtime = mtimeIfExists(guardLatestPath(repoRoot))

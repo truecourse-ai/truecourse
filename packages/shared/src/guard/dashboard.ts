@@ -11,7 +11,7 @@
  * dots, scenario detail).
  */
 
-import type { GuardOutcome, GuardFailureDetail } from './result.js'
+import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
 
@@ -118,6 +118,30 @@ export interface GuardStaleness {
   hasScenarios: boolean
   hasGenerated: boolean
   hasRun: boolean
+}
+
+/**
+ * An in-flight hosted guard gate for a PR head — surfaced by the PR-scoped
+ * `/guard/latest?ref=` when no run is stored at that commit yet, so the view can
+ * say "queued/running" instead of showing baseline data under a PR header. EE-only
+ * (an active `guard.gate` job); OSS always resolves this to null.
+ */
+export interface GuardGatePending {
+  /** The job's lifecycle: enqueued (`queued`) or executing (`running`). */
+  status: 'queued' | 'running'
+  /** The background job id, so the view can subscribe to its progress popup. */
+  jobId: string
+}
+
+/**
+ * The PR-scoped `/guard/latest?ref=<headSha>` response. `latest` is the run stored
+ * at that exact commit (never the baseline — a PR must not show baseline data);
+ * `null` with `pending` set means the gate is still running for this head, `null`
+ * with `pending` null means no run and no in-flight gate (a plain empty state).
+ */
+export interface GuardLatestResponse {
+  latest: GuardLatest | null
+  pending: GuardGatePending | null
 }
 
 /** A scenario's raw YAML source, for the detail view. */
