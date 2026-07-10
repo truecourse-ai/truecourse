@@ -36,7 +36,7 @@ import {
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { dismissGuardClaim, undismissGuardClaim } from '@truecourse/core/commands/guard-read';
-import { formatEntryPreflightError, type RunGuardResult } from '@truecourse/guard-runner';
+import { runFailureMessage } from '@truecourse/guard-runner';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -202,25 +202,5 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     next(e);
   }
 });
-
-/** A human-readable reason for each non-ok guard run status. */
-function runFailureMessage(result: Exclude<RunGuardResult, { status: 'ok' }>): string {
-  switch (result.status) {
-    case 'no-recipe':
-      return 'No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint, then run again.';
-    case 'invalid-recipe':
-      return `recipe.json is invalid: ${result.message}`;
-    case 'no-scenarios':
-      return 'No scenarios found under .truecourse/scenarios/. Generate scenarios first.';
-    case 'build-failed':
-      return `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}. No scenarios ran.`;
-    case 'entry-preflight-failed':
-      return formatEntryPreflightError({
-        entry: result.preflight.entry,
-        buildCommand: result.buildCommand,
-        stderr: result.preflight.stderr,
-      });
-  }
-}
 
 export default router;

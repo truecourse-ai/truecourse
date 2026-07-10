@@ -35,8 +35,12 @@ export interface GuardExecInput {
   concurrency?: number
   /** Per-step wall-clock timeout for a scenario's commands. */
   stepTimeoutMs?: number
-  // TODO(guard-ee issue 04): runTimeoutMs (overall run wall-clock, ~15min) and
-  // AbortSignal cancellation land with the durable-job work — deliberately absent here.
+  /** Overall run wall-clock; exceeding it aborts in-flight scenarios → `run-timed-out`. */
+  runTimeoutMs?: number
+  /** Build wall-clock, replacing the runner's default only when set. */
+  buildTimeoutMs?: number
+  /** External cancellation; aborts the build + scenario children → `aborted`. */
+  signal?: AbortSignal
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
 }
@@ -63,6 +67,9 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     skipBuild: input.skipBuild,
     concurrency: input.concurrency,
     stepTimeoutMs: input.stepTimeoutMs,
+    runTimeoutMs: input.runTimeoutMs,
+    buildTimeoutMs: input.buildTimeoutMs,
+    signal: input.signal,
     onPhase: input.onPhase,
     onScenarioSettled: input.onScenarioSettled,
   })

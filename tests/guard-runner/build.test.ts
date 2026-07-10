@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import { runBuild } from '@truecourse/guard-runner'
 import { PLANTED_SECRETS, withPlantedSecrets } from './helpers'
 
@@ -26,5 +28,41 @@ describe('runBuild — minimal-env child construction', () => {
       // Colour forced off for clean captured logs.
       expect(childEnv.NO_COLOR).toBe('1')
     })
+  })
+})
+
+describe('runBuild — abort signal', () => {
+  it('an external abort SIGKILLs a hanging build child (not reported as a timeout)', async () => {
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 50)
+    const start = Date.now()
+    const result = await runBuild(
+      os.tmpdir(),
+      'node -e "setInterval(() => {}, 1000)"',
+      undefined,
+      60_000,
+      ac.signal,
+    )
+    // The abort — not the 60s timer — ended the build, well before the timeout.
+    expect(Date.now() - start).toBeLessThan(5_000)
+    expect(result.ok).toBe(false)
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode).toBe(null)
+  })
+
+  it('a pre-aborted signal short-circuits without running the command', async () => {
+    const marker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tc-build-abort-')), 'ran.txt')
+    const ac = new AbortController()
+    ac.abort()
+    const result = await runBuild(
+      os.tmpdir(),
+      `node -e "require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')"`,
+      undefined,
+      60_000,
+      ac.signal,
+    )
+    expect(result.ok).toBe(false)
+    expect(result.timedOut).toBe(false)
+    expect(fs.existsSync(marker)).toBe(false)
   })
 })

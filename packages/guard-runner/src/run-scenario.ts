@@ -26,6 +26,12 @@ export interface RunScenarioContext {
   recipeEnv?: Record<string, string>
   stepTimeoutMs: number
   /**
+   * Run-level cancellation (external abort or the overall run wall-clock). An
+   * in-flight step child is SIGKILLed and the scenario settles as an `error`
+   * WITHOUT writing evidence — the run discards these results anyway.
+   */
+  signal?: AbortSignal
+  /**
    * Write the evidence transcript for a `pass` too (proof of what executed). A
    * fail/error always writes its bundle; this only gates the pass. Off for the
    * generator's birth validation, whose passing candidates leave no committed run
@@ -116,14 +122,18 @@ export async function runScenario(
 
       let lastCapture: StepCapture | null = null
       for (let iteration = 1; iteration <= repeat; iteration++) {
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
         const capture = await executeStep({
           argv,
           cwd: sandbox.cwd,
           env: sandbox.env,
           stdin: step.stdin,
           timeoutMs: ctx.stepTimeoutMs,
+          signal: ctx.signal,
         })
         lastCapture = capture
+        // A capture ended by cancellation is not a verdict — settle without evidence.
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
         // Infrastructure problem — never a scenario fail.
         if (capture.spawnError || capture.timedOut) {
@@ -217,6 +227,20 @@ export async function runScenario(
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     sandbox.cleanup()
+  }
+}
+
+/** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
+function abortedResult(
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  step: number,
+  start: number,
+): GuardScenarioResult {
+  return {
+    ...base,
+    outcome: 'error',
+    durationMs: Date.now() - start,
+    failure: { step, expected: 'the step to run', actual: 'run aborted' },
   }
 }
 

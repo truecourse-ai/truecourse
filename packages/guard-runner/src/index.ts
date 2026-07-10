@@ -4,7 +4,7 @@
  * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, sourceGuardRunInputs, defaultRunConcurrency } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, runFailureMessage } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 export { defaultGuardExecutor } from './guard-executor.js'

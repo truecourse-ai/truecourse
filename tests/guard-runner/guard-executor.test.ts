@@ -70,4 +70,60 @@ describe('defaultGuardExecutor', () => {
     // persist:false → nothing written to the store.
     expect(fs.existsSync(guardLatestPath(r))).toBe(false)
   })
+
+  it('forwards runTimeoutMs — a hanging scenario surfaces as run-timed-out', async () => {
+    const r = repo()
+    writeRecipe(r)
+    const sc = scenario({
+      id: 'hang',
+      binds: specBinds('cli/boom'),
+      steps: [{ run: ['hang'], expect: { exit: 0 } }],
+    })
+    const start = Date.now()
+    const report = await defaultGuardExecutor({
+      checkoutDir: r,
+      recipe: recipeOf(r),
+      scenarios: [sc],
+      persist: false,
+      skipBuild: true,
+      runTimeoutMs: 500,
+    })
+    expect(Date.now() - start).toBeLessThan(5_000)
+    expect(report.status).toBe('run-timed-out')
+    if (report.status !== 'run-timed-out') return
+    expect(report.total).toBe(1)
+    expect(report.settled).toBe(0)
+  })
+
+  it('forwards the abort signal — a pre-aborted input reports aborted at the build phase', async () => {
+    const r = repo()
+    writeRecipe(r)
+    const ac = new AbortController()
+    ac.abort()
+    const report = await defaultGuardExecutor({
+      checkoutDir: r,
+      recipe: recipeOf(r),
+      scenarios: [scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] })],
+      persist: false,
+      signal: ac.signal,
+    })
+    expect(report).toEqual({ status: 'aborted', phase: 'build' })
+  })
+
+  it('forwards buildTimeoutMs — a hanging recipe build fails fast as timed out', async () => {
+    const r = repo()
+    writeRecipe(r, { build: 'node -e "setInterval(() => {}, 1000)"' })
+    const start = Date.now()
+    const report = await defaultGuardExecutor({
+      checkoutDir: r,
+      recipe: recipeOf(r),
+      scenarios: [scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] })],
+      persist: false,
+      buildTimeoutMs: 200,
+    })
+    expect(Date.now() - start).toBeLessThan(5_000)
+    expect(report.status).toBe('build-failed')
+    if (report.status !== 'build-failed') return
+    expect(report.build.timedOut).toBe(true)
+  })
 })

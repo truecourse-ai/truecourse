@@ -6,6 +6,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { armChildKill } from './child-kill.js'
 
 export const DEFAULT_STEP_TIMEOUT_MS = 30_000
 
@@ -27,12 +28,26 @@ export interface ExecuteStepOptions {
   env: NodeJS.ProcessEnv
   stdin?: string
   timeoutMs?: number
+  /** Run-level cancellation: SIGKILLs the child, same path as the step timer. */
+  signal?: AbortSignal
 }
 
 export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   const [command, ...args] = opts.argv
   const start = Date.now()
+
+  // Already-cancelled callers never spawn anything (same rule as runBuild).
+  if (opts.signal?.aborted) {
+    return Promise.resolve({
+      exitCode: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      durationMs: 0,
+    })
+  }
 
   return new Promise<StepCapture>((resolve) => {
     const child = spawn(command, args, {
@@ -43,18 +58,14 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
 
     let stdout = ''
     let stderr = ''
-    let timedOut = false
     let settled = false
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, timeoutMs)
+    const kill = armChildKill(child, timeoutMs, opts.signal)
 
     const finish = (capture: StepCapture): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      kill.disarm()
       resolve(capture)
     }
 
@@ -71,7 +82,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
         signal: null,
         stdout,
         stderr,
-        timedOut,
+        timedOut: kill.timedOut,
         spawnError: err.message,
         durationMs: Date.now() - start,
       })
@@ -83,7 +94,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
         signal,
         stdout,
         stderr,
-        timedOut,
+        timedOut: kill.timedOut,
         durationMs: Date.now() - start,
       })
     })

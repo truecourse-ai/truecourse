@@ -11,7 +11,7 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { guardResultPath } from "@truecourse/guard-runner";
+import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import type { GuardScenarioResult, GuardGenerateReport } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
@@ -76,20 +76,16 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
 
   switch (result.status) {
     case "no-recipe":
-      p.log.error("No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint.");
-      p.outro("Aborted.");
-      process.exit(1);
-      return;
     case "invalid-recipe":
-      p.log.error(`recipe.json is invalid: ${result.message}`);
+      p.log.error(runFailureMessage(result));
       p.outro("Aborted.");
       process.exit(1);
       return;
     case "no-scenarios": {
       if (result.requestedId) {
-        p.log.error(`No scenario with id "${result.requestedId}".`);
+        p.log.error(runFailureMessage(result));
       } else {
-        p.log.info("No scenarios found under .truecourse/scenarios/.");
+        p.log.info(runFailureMessage(result));
       }
       printLoadErrors(result.loadErrors);
       p.outro("Nothing ran.");
@@ -97,7 +93,7 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
       return;
     }
     case "build-failed": {
-      p.log.error(`Build failed (\`${result.build.command}\`)${result.build.timedOut ? " — timed out" : ""}.`);
+      p.log.error(runFailureMessage(result));
       const tail = result.build.output.trimEnd().split("\n").slice(-15);
       for (const line of tail) console.log(`  ${line}`);
       printLoadErrors(result.loadErrors);
@@ -108,14 +104,18 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     case "entry-preflight-failed": {
       // The build succeeded but the entry can't start — ONE loud error with the FULL
       // (untruncated) startup stderr, never N identical scenario failures.
-      p.log.error(`The recipe entry \`${result.preflight.entry}\` failed to start — every scenario would fail identically.`);
-      for (const line of result.preflight.stderr.trimEnd().split("\n")) console.log(`  ${line}`);
-      p.log.step(`Rebuild it with \`${result.buildCommand}\` (its build output is likely stale or incomplete), then re-run \`truecourse guard run\`.`);
+      p.log.error(runFailureMessage(result));
       printLoadErrors(result.loadErrors);
       p.outro("Aborted — the entry could not start; no scenarios ran.");
       process.exit(1);
       return;
     }
+    case "run-timed-out":
+    case "aborted":
+      p.log.error(runFailureMessage(result));
+      p.outro("Aborted.");
+      process.exit(1);
+      return;
     case "ok":
       break;
   }

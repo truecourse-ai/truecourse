@@ -11,7 +11,7 @@
  * is surfaced as-is, never retried.
  */
 
-import type { GuardExecutor, Recipe } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type Recipe } from '@truecourse/guard-runner'
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { ExtractedClaim } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
@@ -79,12 +79,7 @@ export async function birthValidate(
   })
 
   if (res.status !== 'ok') {
-    const message =
-      res.status === 'build-failed'
-        ? `build failed (\`${res.build.command}\`)${res.build.timedOut ? ' — timed out' : ''}`
-        : res.status === 'invalid-recipe'
-          ? res.message
-          : 'no runnable recipe'
+    const message = runFailureMessage(res)
     return candidates.map((candidate) => ({
       candidate,
       result: {

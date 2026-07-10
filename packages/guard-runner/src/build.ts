@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process'
 import { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js'
+import { armChildKill } from './child-kill.js'
 
 export const DEFAULT_BUILD_TIMEOUT_MS = 600_000
 
@@ -25,7 +26,12 @@ export function runBuild(
   command: string,
   env?: Record<string, string>,
   timeoutMs: number = DEFAULT_BUILD_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<BuildResult> {
+  // Already-cancelled callers never spawn anything.
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, command, exitCode: null, timedOut: false, output: '' })
+  }
   return new Promise<BuildResult>((resolve) => {
     const child = spawn(command, {
       cwd: repoRoot,
@@ -35,19 +41,15 @@ export function runBuild(
     })
 
     let output = ''
-    let timedOut = false
     let settled = false
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, timeoutMs)
+    const kill = armChildKill(child, timeoutMs, signal)
 
     const finish = (exitCode: number | null): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
-      resolve({ ok: exitCode === 0 && !timedOut, command, exitCode, timedOut, output })
+      kill.disarm()
+      resolve({ ok: exitCode === 0 && !kill.timedOut, command, exitCode, timedOut: kill.timedOut, output })
     }
 
     child.stdout.on('data', (c: Buffer) => (output += c.toString('utf-8')))
