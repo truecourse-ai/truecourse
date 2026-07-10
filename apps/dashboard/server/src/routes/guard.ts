@@ -24,7 +24,7 @@ import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { composeGuardStatus } from '@truecourse/shared';
 import {
   readManifest,
-  readGuardLatest,
+  readGuardRunForView,
   readGuardHistory,
   readGuardResult,
   readGuardReport,
@@ -32,24 +32,34 @@ import {
   readGuardScenarioSource,
   readGuardEvidence,
   readGuardEvidenceAt,
-  readGuardDecisions,
+  getGuardDecisions,
   computeGuardStaleness,
   composeDocCoverage,
   listGuardScenarios,
 } from '@truecourse/core/commands/guard-read';
+import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
+import { refOf } from './route-params.js';
 
 const router: Router = Router();
+
+/** Optional `?pr=<number>` — selects a PR's guard decisions overlay (EE). */
+function prOf(req: Request): number | undefined {
+  const raw = typeof req.query.pr === 'string' ? req.query.pr.trim() : '';
+  return /^\d+$/.test(raw) ? Number(raw) : undefined;
+}
 
 // The composed status overview — always 200 (each piece is null until its command
 // has run), so the tab renders empty-state CTAs rather than erroring.
 router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
+    const ref = refOf(req);
+    // PR view: paint status from the run stored at the PR head, never the baseline.
     res.json(
       composeGuardStatus(
-        await readManifest(repo.path),
-        await readGuardLatest(repo.path),
-        await readGuardResult(repo.path),
+        await readManifest(repo.path, ref),
+        await readGuardRunForView(repo.path, ref),
+        await readGuardResult(repo.path, ref),
       ),
     );
   } catch (e) {
@@ -57,16 +67,30 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
   }
 });
 
-// The last run's materialized state. 404 until a run exists (empty-state CTA).
+// The last run's materialized state. No ref → the repo baseline (404 until a run
+// exists, the empty-state CTA). With `ref` (a PR head) → the run stored at THAT
+// commit; when none is stored the response is an explicit pending/empty envelope
+// (`{ latest: null, pending }`) — never the baseline under a PR header.
 router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const latest = await readGuardLatest(repo.path);
-    if (!latest) {
-      res.status(404).json({ error: 'No guard run has been recorded yet.' });
+    const ref = refOf(req);
+    const latest = await readGuardRunForView(repo.path, ref);
+    if (!ref) {
+      if (!latest) {
+        res.status(404).json({ error: 'No guard run has been recorded yet.' });
+        return;
+      }
+      res.json(latest);
       return;
     }
-    res.json(latest);
+    if (latest) {
+      res.json({ latest, pending: null });
+      return;
+    }
+    // No run at this commit — surface an in-flight gate (EE) or a plain empty state.
+    const pending = (await getGuardGatePendingLookup()?.(repo.path, ref)) ?? null;
+    res.json({ latest: null, pending });
   } catch (e) {
     next(e);
   }
@@ -98,7 +122,7 @@ router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: N
 router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const report = await readGuardReport(repo.path);
+    const report = await readGuardReport(repo.path, refOf(req));
     if (!report) {
       res.status(404).json({ error: 'No guard generate report yet.' });
       return;
@@ -124,17 +148,18 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'doc escapes the repository.' });
       return;
     }
-    const commit = req.query.ref ? String(req.query.ref) : undefined;
+    const commit = refOf(req);
     const content = await readRepoDoc(repo.path, doc, commit ? { commit } : undefined);
     if (content == null) {
       res.status(404).json({ error: `Doc not found: ${doc}` });
       return;
     }
+    // PR view: the run comes from the PR head's stored run, never the baseline.
     res.json(
       composeDocCoverage(doc, content, {
-        manifest: await readManifest(repo.path),
-        latest: await readGuardLatest(repo.path),
-        result: await readGuardReport(repo.path),
+        manifest: await readManifest(repo.path, commit),
+        latest: await readGuardRunForView(repo.path, commit),
+        result: await readGuardReport(repo.path, commit),
       }),
     );
   } catch (e) {
@@ -148,7 +173,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
 router.get('/:id/guard/scenarios', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(await listGuardScenarios(repo.path));
+    res.json(await listGuardScenarios(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }
@@ -162,7 +187,7 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'Missing ?id=<scenario id>.' });
       return;
     }
-    const source = await readGuardScenarioSource(repo.path, id);
+    const source = await readGuardScenarioSource(repo.path, id, refOf(req));
     if (!source) {
       res.status(404).json({ error: `Scenario not found: ${id}` });
       return;
@@ -225,7 +250,10 @@ router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, ne
 router.get('/:id/guard/decisions', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(await readGuardDecisions(repo.path));
+    const pr = prOf(req);
+    // With `pr` (EE) the PR overlay is merged over the repo row; OSS has no overlay
+    // dimension, so the driver ignores it there (the file store rejects a PR scope).
+    res.json(await getGuardDecisions(repo.path, pr !== undefined ? { pr } : undefined));
   } catch (e) {
     next(e);
   }
@@ -234,7 +262,7 @@ router.get('/:id/guard/decisions', async (req: Request, res: Response, next: Nex
 router.get('/:id/guard/staleness', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(computeGuardStaleness(repo.path));
+    res.json(await computeGuardStaleness(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }

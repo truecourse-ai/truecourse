@@ -16,6 +16,8 @@ import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
+import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
+import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
@@ -153,6 +155,28 @@ const plugin: EePlugin = {
     setRepoDocReader((repoKey, docPath, opts) =>
       readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath, opts),
     );
+
+    // The PR-scoped guard tab labels its empty state "queued/running" when a gate
+    // is still in flight for the head. Resolve the repo's workspace, then look up
+    // the single-flight `guard.gate` job for `(repo, headSha)`. Best-effort — any
+    // failure resolves to no pending gate (a plain empty state).
+    setGuardGatePendingLookup(async (repoKey, headSha) => {
+      try {
+        const link = await gateStore.getRepo(repoKey);
+        if (!link?.workspaceOrgId) return null;
+        const job = await jobs.jobStore.getActiveByKey(
+          link.workspaceOrgId,
+          guardGateJobKey(repoKey, headSha),
+        );
+        if (!job) return null;
+        return { status: job.status === 'running' ? 'running' : 'queued', jobId: job.id };
+      } catch (err) {
+        log.warn(
+          `[ee-server] guard gate pending lookup failed for ${repoKey}@${headSha}: ${(err as Error).message}`,
+        );
+        return null;
+      }
+    });
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on
     // a CLI binary) + the Models settings API. Reuses the validated masterSecret.
