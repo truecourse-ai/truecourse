@@ -234,7 +234,10 @@ Sections are the binding unit. Anchors must survive spec edits without lying.
 
 - **Recipe** (`.truecourse/scenarios/recipe.json`, committed, human-reviewed at first generate):
   how to produce a runnable entrypoint from the working tree — e.g.
-  `{ build: "pnpm build", entry: ["node", "dist/index.js"] }`. Discovered once (LLM-assisted),
+  `{ install: "pnpm install --frozen-lockfile", build: "pnpm build", entry: ["node", "dist/index.js"] }`.
+  `install` is optional: one shell command run once in the repo root BEFORE every build to fetch
+  dependencies — required wherever the tree is a fresh checkout with no `node_modules` (the hosted
+  gate/baseline shallow-clones), omitted when the tree needs none. Discovered once (LLM-assisted),
   reviewed once, then mechanical. `run:` argv in scenarios is appended to `entry`. Full
   lifecycle — what preparation covers, storage, reuse, and when it refreshes — in
   "Preparation (the recipe layer)" below.
@@ -273,7 +276,9 @@ the lifecycle below is driver-generic.
   files that informed discovery (`package.json` scripts/bin, the lockfile, build config). It is
   committable and human-reviewed on purpose — the manifest convention: a clone inherits the
   approved preparation, and generate/run never re-discover what a teammate already reviewed.
-- **How it's reused.** Build runs once per `guard run`; every sandbox gets the same built
+- **How it's reused.** The optional `install` and the build each run once per `guard run`
+  (install first, then build, both in the repo root under the same hermetic
+  `BUILD_PASSTHROUGH`-allowlisted env); every sandbox gets the same built
   entrypoint read-only. Scenarios never repeat preparation — they carry only per-scenario deltas
   (declarative `setup.files`/`env`). If per-scenario seeding grows repetitive within an area,
   that becomes a recipe-level shared `fixtures` extension (v1.1) — never scenario copy-paste.
@@ -284,8 +289,10 @@ the lifecycle below is driver-generic.
   never drift, and never a silent automatic re-discovery. `guard recipe` shows the current
   recipe + staleness; `guard recipe --refresh` re-runs discovery explicitly.
 - **What the LLM does and doesn't do here.** Discovery is proposal-only: the model returns
-  candidate build/entry JSON through the transport; the ENGINE runs the verification build and
-  the entrypoint probe deterministically, and the user reviews before anything is committed.
+  candidate install/build/entry JSON through the transport; the ENGINE runs the verification
+  install + build and the entrypoint probe deterministically, and the user reviews before
+  anything is committed. A proposal whose install fails is `verify-failed`
+  (``install `cmd` failed: …``) and never written.
 
 ## Speed program (URGENT — from the 2026-07-07 dogfood runs)
 
@@ -1402,7 +1409,10 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   refresh-on-merge + deploy backfill (issue 06): the `guard.baseline` durable job (its own
   pending-buffer coalescing, shared gate limiter), the merge and post-generate refresh chains
   (complement of onboarding), and the one-time deploy backfill (operator-scoped repo
-  enumeration + a run-once marker, generate-vs-baseline routing per repo).
+  enumeration + a run-once marker, generate-vs-baseline routing per repo), and the EE Guard
+  lens (issue 07): the guard section as a third EE repo-console lens (Coverage / Scenarios /
+  Runs, always visible — actions still capability-self-gated), the pure `ee-lens` coherence
+  module + `EeSectionSwitch` guard segment, and a per-PR guard deep link in the Pulls feed.
   Remaining: the hosted execution tier.
 
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
