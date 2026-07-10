@@ -204,3 +204,16 @@ export {
   handlePullRequestGate,
   type GateHandlerDeps,
 } from './gate-handler.js';
+
+// Guard onboarding: hosted guard-scenario generation (the `repo.guard` job body)
+export {
+  materializeStoredCorpus,
+  createGuardOnboardingPipeline,
+  defaultGuardOnboardingPipeline,
+  type GuardOnboardingRequest,
+  type GuardOnboardingResult,
+  type GuardOnboardingDeps,
+  type GuardOnboardingProgress,
+  type GuardOnboardingPipeline,
+  type GuardOnboardingSeams,
+} from './guard-onboarding.js';
