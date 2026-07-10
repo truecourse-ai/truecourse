@@ -694,6 +694,32 @@ there's almost nothing to configure:
    its own cadence. The `notify-stale-pr` job in
    `notify-routine-activity.yml` forwards the tracker issue to Telegram.
 
+## Deterministic merge gate: `block-human-review`
+
+`fp-next-fix-review` is instructed **not** to merge a PR carrying
+`<SCOPE>fp-human-review-needed` — but that's a prompt-level guarantee. The
+`.github/workflows/block-human-review.yml` workflow makes it deterministic:
+it runs on every PR (and on every label add/remove) and **fails** while a
+`*fp-human-review-needed` label is present (the substring match covers both
+the default and `cs-` scoped labels). A failing **required** check disables
+the merge button **and** makes the REST merge API return `405`, so neither a
+human nor the review routine can merge a flagged PR until the label is
+removed.
+
+The workflow alone doesn't block anything — it must be wired in as a
+required status check:
+
+1. Merge the workflow to `main`, then let it run once on any PR so GitHub
+   registers the `block-human-review` check name.
+2. **Settings → Branches → branch protection for `main`** (or a **Ruleset**):
+   enable **Require status checks to pass before merging** and add
+   **`block-human-review`**.
+3. Enable **Do not allow bypassing the above settings** — otherwise an admin
+   (or a routine running as one) can bypass the gate.
+
+Removing the `<SCOPE>fp-human-review-needed` label re-runs the check (on the
+`unlabeled` event), it goes green, and the human merge unlocks.
+
 ## Acceptance criteria
 
 An **fp-fix PR** is mergeable when:
