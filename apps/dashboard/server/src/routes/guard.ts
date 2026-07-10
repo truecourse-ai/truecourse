@@ -38,15 +38,9 @@ import {
   listGuardScenarios,
 } from '@truecourse/core/commands/guard-read';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
-import { refOf } from './route-params.js';
+import { prOf, refOf } from './route-params.js';
 
 const router: Router = Router();
-
-/** Optional `?pr=<number>` — selects a PR's guard decisions overlay (EE). */
-function prOf(req: Request): number | undefined {
-  const raw = typeof req.query.pr === 'string' ? req.query.pr.trim() : '';
-  return /^\d+$/.test(raw) ? Number(raw) : undefined;
-}
 
 // The composed status overview — always 200 (each piece is null until its command
 // has run), so the tab renders empty-state CTAs rather than erroring.

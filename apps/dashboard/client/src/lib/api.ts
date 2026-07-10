@@ -1,6 +1,7 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  GuardClaimIdentity,
   GuardDecisions,
   GuardDocCoverage,
   GuardGenerateReport,
@@ -1068,36 +1069,45 @@ export async function getGuardFindingEvidence(
   return res.text();
 }
 
+/** EE PR scope for the guard decisions routes: `?pr=<n>` (no ref — decisions are
+ *  keyed by PR alone). Empty outside a PR view, so OSS URLs are unchanged. */
+function guardPrQuery(pr?: number): string {
+  return pr !== undefined ? `?pr=${pr}` : '';
+}
+
 /** The committable guard decisions (dismissed claims) — always 200 (empty until
  *  the user dismisses anything). */
 export function getGuardDecisions(repoId: string, pr?: number): Promise<GuardDecisions> {
-  const base = `/api/repos/${repoId}/guard/decisions`;
-  return fetchApi<GuardDecisions>(pr !== undefined ? `${base}?pr=${pr}` : base);
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions${guardPrQuery(pr)}`);
 }
 
 /** The identity a dismissal keys on: doc + section anchor + the extracted claim's
- *  stable text (a finding's `claim`). */
-export interface GuardClaimIdentity {
-  doc: string;
-  anchor: string;
-  title: string;
-}
+ *  stable text (a finding's `claim`). Re-exported for the guard components. */
+export type { GuardClaimIdentity };
 
 /** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
- *  updated decisions so the caller re-derives dismissed state without a GET. */
+ *  updated decisions so the caller re-derives dismissed state without a GET. With
+ *  `pr` the write targets that PR's overlay and the response is the merged effective
+ *  view (EE) — mirrors {@link getGuardDecisions}. */
 export function dismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity & { note?: string },
+  pr?: number,
 ): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss`, {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });
 }
 
-/** Reverse a dismissal by its identity; returns the updated decisions. */
-export function undismissGuardClaim(repoId: string, claim: GuardClaimIdentity): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
+/** Reverse a dismissal by its identity; returns the updated decisions. With `pr`
+ *  the write targets that PR's overlay and the response is the merged effective view. */
+export function undismissGuardClaim(
+  repoId: string,
+  claim: GuardClaimIdentity,
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });

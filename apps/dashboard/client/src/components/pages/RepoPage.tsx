@@ -1319,11 +1319,11 @@ function RepoPageInner() {
                         onClose={() => guardScenarioTabs.close(activeFinding.id)}
                         onOpenSpec={openSpecSection}
                         onDismiss={async (claim) => {
-                          await api.dismissGuardClaim(repoId, claim);
+                          await api.dismissGuardClaim(repoId, claim, prNumber ?? undefined);
                           refetchGuardDecisions();
                         }}
                         onUndismiss={async (claim) => {
-                          await api.undismissGuardClaim(repoId, claim);
+                          await api.undismissGuardClaim(repoId, claim, prNumber ?? undefined);
                           refetchGuardDecisions();
                         }}
                       />

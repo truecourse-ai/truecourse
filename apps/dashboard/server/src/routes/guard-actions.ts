@@ -35,15 +35,34 @@ import {
   EstimateDeclined,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
-import { dismissGuardClaim, undismissGuardClaim } from '@truecourse/core/commands/guard-read';
+import {
+  dismissGuardClaim,
+  undismissGuardClaim,
+  getGuardDecisions,
+} from '@truecourse/core/commands/guard-read';
 import { runFailureMessage } from '@truecourse/guard-runner';
+import type { GuardDecisions } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
   emitSpecProgress,
 } from '../socket/handlers.js';
+import { parsePr } from './route-params.js';
 
 const router: Router = Router();
+
+// Shared write tail for the two decisions mutations: run the overlay-aware write,
+// then respond with the write result (repo scope) or the merged effective view
+// (PR scope — the same shape `GET /guard/decisions?pr=` returns).
+async function mutateGuardDecisions(
+  repoPath: string,
+  pr: number | undefined,
+  res: Response,
+  mutate: (opts?: { pr?: number }) => Promise<GuardDecisions>,
+): Promise<void> {
+  const written = await mutate(pr !== undefined ? { pr } : undefined);
+  res.json(pr !== undefined ? await getGuardDecisions(repoPath, { pr }) : written);
+}
 
 // A guard generate/run is in flight for this repo id. Both actions share the set:
 // they mutate the same store, so they must never overlap (and the client disables
@@ -164,40 +183,55 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
 // is the extracted claim's stable text (the finding's `claim`). Idempotent; returns
 // the updated decisions file so the client re-derives dismissed state without a
 // second GET. The next `guard generate` skips the claim and settles it as a
-// `dismissed` gap — this write does NOT touch the current report snapshot.
+// `dismissed` gap — this write does NOT touch the current report snapshot. With
+// `?pr=N` the write targets the PR overlay (EE) and the response is the MERGED
+// effective view (repo ∪ overlay) — the same shape `GET /guard/decisions?pr=` returns.
 router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string; note?: string };
-    if (!body.doc || !body.anchor || !body.title) {
+    const { doc, anchor, title, note } = body;
+    if (!doc || !anchor || !title) {
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
-    const decisions = await dismissGuardClaim(repo.path, {
-      doc: body.doc,
-      anchor: body.anchor,
-      title: body.title,
-      dismissedAt: new Date().toISOString(),
-      ...(body.note ? { note: body.note } : {}),
-    });
-    res.json(decisions);
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      dismissGuardClaim(
+        repo.path,
+        { doc, anchor, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
+        opts,
+      ),
+    );
   } catch (e) {
     next(e);
   }
 });
 
 // POST — reverse a dismissal by its identity `{ doc, anchor, title }`. No-op when
-// absent; returns the updated decisions file.
+// absent; returns the updated decisions file. With `?pr=N` the write targets the PR
+// overlay (EE) and the response is the MERGED effective view (see /dismiss).
 router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string };
-    if (!body.doc || !body.anchor || !body.title) {
+    const { doc, anchor, title } = body;
+    if (!doc || !anchor || !title) {
       res.status(400).json({ error: 'undismiss requires { doc, anchor, title }.' });
       return;
     }
-    const decisions = await undismissGuardClaim(repo.path, { doc: body.doc, anchor: body.anchor, title: body.title });
-    res.json(decisions);
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
+    );
   } catch (e) {
     next(e);
   }

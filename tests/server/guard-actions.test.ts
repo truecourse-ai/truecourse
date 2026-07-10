@@ -36,6 +36,11 @@ vi.mock('@truecourse/core/commands/guard-in-process', async (importOriginal) => 
   };
 });
 
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import {
@@ -44,6 +49,7 @@ import {
   guardRunInProcess,
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
+import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 const DOC = 'docs/cli.md';
@@ -176,5 +182,89 @@ describe('Guard action routes', () => {
     const res = await request(app).post(url('run')).expect(200);
     expect(res.body.status).toBe('no-recipe');
     expect(res.body.message).toMatch(/recipe/i);
+  });
+});
+
+// --- Dismiss / undismiss: PR overlay (hosted store) -------------------------
+//
+// `?pr=N` threads the PR overlay through to the write and the response is the MERGED
+// effective view; no `pr` behaves exactly as the OSS file-store path. Needs the
+// enterprise store installed (a PR scope is enterprise-only), so this block swaps in
+// a PgGuardStore rather than the OSS fixture's file store.
+describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let client: PGlite;
+
+  const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+  const repoClaim = { doc: 'docs/cli.md', anchor: 'a', title: 'repo claim' };
+  const prClaim = { doc: 'docs/cli.md', anchor: 'b', title: 'pr claim' };
+  const titles = (claims: Array<{ title: string }>) => claims.map((c) => c.title).sort();
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    app = createApp({ serveStatic: false });
+    client = new PGlite();
+    const db = drizzle(client, { schema }) as unknown as EeDb;
+    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    setGuardStore(new PgGuardStore(db));
+  });
+  afterEach(async () => {
+    resetGuardStore();
+    await client.close();
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('POST /guard/dismiss?pr=N writes the overlay and returns the merged effective view', async () => {
+    // A repo-scoped dismissal already exists (no pr).
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200);
+
+    // Dismiss a different claim from the PR view.
+    const res = await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+    // The response is the MERGED view: repo-level claim + the newly dismissed PR claim.
+    expect(titles(res.body.dismissedClaims)).toEqual(['pr claim', 'repo claim']);
+  });
+
+  it('POST /guard/dismiss?pr=N does not touch the repo row', async () => {
+    await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+    // The repo scope (no pr) never saw the PR dismissal.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedClaims).toEqual([]);
+  });
+
+  it('POST /guard/dismiss without pr behaves as before (writes + returns the repo row)', async () => {
+    const res = await request(app).post(url('dismiss')).send(repoClaim).expect(200);
+    expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+    // The repo decisions read back the same single claim.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  it('POST /guard/undismiss?pr=N removes only from the overlay (repo dismissal survives in the merged view)', async () => {
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
+    await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200); // overlay
+    const res = await request(app).post(url('undismiss?pr=7')).send(prClaim).expect(200);
+    // The PR claim is gone from the overlay; the repo claim still shows (merged view).
+    expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  // A present-but-invalid `?pr=` must 400, never silently fall back to the repo
+  // scope: the repo row is the committable decisions file, and a PR-scoped judgment
+  // landing there would promote it for everyone (mirrors the spec routes' strict parse).
+  it.each(['abc', '0', '-1', '7.5'])(
+    'POST /guard/dismiss?pr=%s is a 400 and writes nothing',
+    async (bad) => {
+      const res = await request(app).post(url(`dismiss?pr=${bad}`)).send(prClaim).expect(400);
+      expect(res.body.error).toMatch(/positive integer/);
+      const repo = await request(app).get(url('decisions')).expect(200);
+      expect(repo.body.dismissedClaims).toEqual([]);
+    },
+  );
+
+  it('POST /guard/undismiss?pr=abc is a 400 and removes nothing', async () => {
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
+    await request(app).post(url('undismiss?pr=abc')).send(repoClaim).expect(400);
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
   });
 });
