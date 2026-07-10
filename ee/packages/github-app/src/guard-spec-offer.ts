@@ -1,0 +1,187 @@
+/**
+ * The spec-change guard checkbox: a PR that edits spec documents gets a checkbox
+ * offer to regenerate the PR head's guard scenarios server-side.
+ *
+ * - On `pull_request` (opened/synchronize/reopened): if the PR changed any spec
+ *   docs (honoring the repo's `spec.include` scope), post/refresh a passive
+ *   checkbox comment. It never auto-runs — the auto guard gate already runs the
+ *   baseline corpus; this is the opt-in "regenerate for my new specs" action.
+ * - On `issue_comment.edited`: if a writer ticked our checkbox, enqueue the
+ *   durable `guard.spec-regen` job (clone head → generate → persist under the head
+ *   → re-gate) and mark the comment running; the job settles it to done/error.
+ */
+
+import { log } from '@truecourse/core/lib/logger';
+import type { GateStore } from './store/types.js';
+import type { PullRequestPayload, IssueCommentPayload } from './webhook.js';
+import {
+  splitRepo,
+  listPrFiles,
+  getFileContent,
+  findComment,
+  createComment,
+  updateComment,
+  getPullRequest,
+  getActorPermission,
+  type OctokitClient,
+} from './octokit.js';
+import { detectSpecDocChanges, specScopeFromConfigJson } from './spec-detect.js';
+import { PR_TRIGGER_ACTIONS, WRITE_PERMISSIONS } from './pr-events.js';
+import {
+  GUARD_SPEC_MARKER,
+  renderGuardSpecComment,
+  isGuardSpecComment,
+  isGuardSpecCheckboxChecked,
+} from './guard-spec-comment.js';
+
+/** What the checkbox tick hands to the durable regen+re-gate job. */
+export interface GuardSpecRegenRequest {
+  repoFullName: string;
+  installationId: number;
+  /** The repo's workspace org — scopes the job + its notifications. */
+  workspaceOrgId: string;
+  prNumber: number;
+  /** The repo default branch (the guard baseline is only valid for this base). */
+  defaultBranch: string;
+  /** The PR's base branch + head commit (the re-gate clones the base, diffs vs it). */
+  baseBranch: string;
+  baseSha: string;
+  /** The PR head to regenerate scenarios for (fetched via the pull ref). */
+  headRef: string;
+  headSha: string;
+  /** Head lives in a different repo — the regen fetches the base's pull ref. */
+  isFork: boolean;
+  /** The checkbox comment the job updates to done/error when it settles. */
+  commentId: number;
+}
+
+/**
+ * Enqueue a guard spec-regen run onto the background job queue. Returns the job
+ * id, or null when a regen is already running for that head. Supplied by
+ * ee-server; the registration fallback runs it inline so unit tests need no queue.
+ */
+export type EnqueueGuardSpecRegen = (req: GuardSpecRegenRequest) => Promise<string | null>;
+
+export interface GuardSpecOfferDeps {
+  store: GateStore;
+  octokitFor: (installationId: number) => OctokitClient;
+  enqueueGuardSpecRegen: EnqueueGuardSpecRegen;
+  /** Offer-path collapse, keyed `${repo}#${pr}#guard-spec` (concurrent deliveries). */
+  offerInFlight?: Set<string>;
+  /** Checkbox-path collapse, keyed by comment id (concurrent edits). */
+  inFlight?: Set<number>;
+}
+
+/**
+ * pull_request opened/synchronize/reopened → if the PR changed spec docs, post or
+ * refresh the checkbox OFFER (passive: it does not run anything until ticked).
+ */
+export async function handlePullRequestGuardSpecOffer(
+  deps: GuardSpecOfferDeps,
+  payload: PullRequestPayload,
+): Promise<void> {
+  if (!PR_TRIGGER_ACTIONS.includes(payload.action)) return;
+  if (!payload.installation) return;
+  const repoFullName = payload.repository.full_name;
+  const link = await deps.store.getRepo(repoFullName);
+  if (!link || !link.enabled) return;
+
+  const flightKey = `${repoFullName}#${payload.number}#guard-spec`;
+  if (deps.offerInFlight?.has(flightKey)) return;
+  deps.offerInFlight?.add(flightKey);
+  try {
+    const coords = splitRepo(repoFullName);
+    const octokit = deps.octokitFor(payload.installation.id);
+    const baseBranch = payload.pull_request.base.ref || link.defaultBranch;
+
+    // Honor the repo's `spec.include` scope (committed on the base branch) so a PR
+    // touching only out-of-scope markdown isn't treated as a spec change. A
+    // missing/unreadable config → scan everything (detection runs before any clone).
+    const scope = specScopeFromConfigJson(
+      await getFileContent(octokit, coords, '.truecourse/config.json', baseBranch),
+    );
+    const changed = detectSpecDocChanges(await listPrFiles(octokit, coords, payload.number), scope);
+    if (changed.length === 0) return;
+
+    // Re-arm the offer for the current head (unticked) on each spec-changing event.
+    const body = renderGuardSpecComment('offered', { specDocs: changed });
+    const existing = await findComment(octokit, coords, payload.number, GUARD_SPEC_MARKER);
+    if (existing) await updateComment(octokit, coords, existing.id, body);
+    else await createComment(octokit, coords, payload.number, body);
+  } finally {
+    deps.offerInFlight?.delete(flightKey);
+  }
+}
+
+/**
+ * issue_comment.edited → if a writer ticked our checkbox, enqueue the durable
+ * regen+re-gate job for the PR head and mark the comment running. The job (which
+ * carries the comment id) settles it to done/error.
+ */
+export async function handleCommentEditedGuardSpec(
+  deps: GuardSpecOfferDeps,
+  payload: IssueCommentPayload,
+): Promise<void> {
+  if (payload.action !== 'edited') return;
+  if (!payload.issue.pull_request) return;
+  if (!payload.installation) return;
+  if (payload.comment.user?.type !== 'Bot') return;
+  if (!isGuardSpecComment(payload.comment.body)) return;
+  if (!isGuardSpecCheckboxChecked(payload.comment.body)) return;
+
+  const repoFullName = payload.repository.full_name;
+  const link = await deps.store.getRepo(repoFullName);
+  if (!link || !link.enabled) return;
+
+  const coords = splitRepo(repoFullName);
+  const octokit = deps.octokitFor(payload.installation.id);
+  const commentId = payload.comment.id;
+  const prNumber = payload.issue.number;
+  const installationId = payload.installation.id;
+
+  // Only a repo writer may trigger server-side LLM work (mirrors the infer checkbox).
+  const perm = await getActorPermission(octokit, coords, payload.sender?.login ?? '');
+  if (!WRITE_PERMISSIONS.includes(perm)) {
+    log.warn(
+      `[github-app] ignoring guard spec-regen trigger from non-writer ${payload.sender?.login ?? '?'} on ${repoFullName}`,
+    );
+    return;
+  }
+
+  if (deps.inFlight?.has(commentId)) return;
+  deps.inFlight?.add(commentId);
+  try {
+    // Resolve the live head (the comment may be older than the latest push) —
+    // scenarios regenerate for the CURRENT head. Fork PRs are fetched via the
+    // base repo's pull ref (read-only), so they are offered + regenerated too.
+    const pr = await getPullRequest(octokit, coords, prNumber);
+    const isFork = !!pr.headRepoFullName && pr.headRepoFullName !== repoFullName;
+
+    await updateComment(octokit, coords, commentId, renderGuardSpecComment('running'));
+    await deps.enqueueGuardSpecRegen({
+      repoFullName,
+      installationId,
+      workspaceOrgId: link.workspaceOrgId,
+      prNumber,
+      defaultBranch: link.defaultBranch,
+      baseBranch: pr.baseRef || link.defaultBranch,
+      baseSha: pr.baseSha,
+      headRef: pr.headRef,
+      headSha: pr.headSha,
+      isFork,
+      commentId,
+    });
+  } catch (err) {
+    log.error(
+      `[github-app] guard spec-regen enqueue failed for ${repoFullName} PR#${prNumber}: ${(err as Error).message}`,
+    );
+    await updateComment(
+      octokit,
+      coords,
+      commentId,
+      renderGuardSpecComment('error', { error: (err as Error).message }),
+    );
+  } finally {
+    deps.inFlight?.delete(commentId);
+  }
+}

@@ -328,11 +328,15 @@ export async function getPullRequest(
   headSha: string;
   /** Head repo full name; differs from the base on a fork PR. */
   headRepoFullName: string | null;
+  baseRef: string;
+  baseSha: string;
 }> {
   const res = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
   return {
     headRef: res.data.head.ref,
     headSha: res.data.head.sha,
     headRepoFullName: res.data.head.repo?.full_name ?? null,
+    baseRef: res.data.base?.ref ?? '',
+    baseSha: res.data.base?.sha ?? '',
   };
 }

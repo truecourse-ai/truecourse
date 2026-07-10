@@ -3,7 +3,7 @@
  * reference them without pulling in graphile-worker (only the worker does).
  */
 
-import type { GuardGateRunRequest } from '@truecourse/ee-github-app';
+import type { GuardGateRunRequest, GuardSpecRegenRequest } from '@truecourse/ee-github-app';
 
 /** A single phase in a job's stepped-progress checklist (popup). */
 export interface JobStepDef {
@@ -88,6 +88,35 @@ export type GuardGateEnqueueRequest = GuardGateRunRequest;
 
 /** The worker's `guard.gate` task payload (the enqueue request plus the job id). */
 export interface GuardGateJobPayload extends GuardGateEnqueueRequest {
+  jobId: string;
+}
+
+/** Spec-change checkbox regen: a writer ticked the "regenerate scenarios for this
+ *  PR head" box — clone the head, re-scan its spec docs, generate scenarios, persist
+ *  them under the head, and re-gate the PR against the PR's own regenerated corpus. */
+export const GUARD_SPEC_REGEN_TASK = 'guard.spec-regen';
+
+/** Display title + stepped checklist for the spec-regen job popup. */
+export const GUARD_SPEC_REGEN_TITLE = 'Regenerating guard scenarios';
+export const GUARD_SPEC_REGEN_STEPS: readonly JobStepDef[] = [
+  { key: 'clone', label: 'Cloning repository' },
+  { key: 'scan', label: 'Scanning spec documents' },
+  { key: 'generate', label: 'Generating scenarios' },
+  { key: 'gate', label: 'Re-gating pull request' },
+];
+
+/** Single-flight key for a `guard.spec-regen` job — per repo + head SHA (mirrors
+ *  the gate: two heads regenerate concurrently, a duplicate for one head no-ops). */
+export function guardSpecRegenJobKey(repoFullName: string, headSha: string): string {
+  return `${GUARD_SPEC_REGEN_TASK}:${repoFullName}#${headSha}`;
+}
+
+/** What the checkbox tick hands to `enqueueGuardSpecRegen` — the github-app request
+ *  shape (one authoritative type; a type-only import keeps this module runtime-free). */
+export type GuardSpecRegenEnqueueRequest = GuardSpecRegenRequest;
+
+/** The worker's `guard.spec-regen` task payload (the enqueue request plus the job id). */
+export interface GuardSpecRegenJobPayload extends GuardSpecRegenEnqueueRequest {
   jobId: string;
 }
 

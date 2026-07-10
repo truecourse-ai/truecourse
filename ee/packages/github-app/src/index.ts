@@ -15,7 +15,15 @@ import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
 import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
-import { installationOctokit } from './octokit.js';
+import { installationOctokit, splitRepo, updateComment } from './octokit.js';
+import {
+  handlePullRequestGuardSpecOffer,
+  handleCommentEditedGuardSpec,
+  type EnqueueGuardSpecRegen,
+} from './guard-spec-offer.js';
+import { renderGuardSpecComment } from './guard-spec-comment.js';
+import { defaultGuardHeadRegenPipeline } from './guard-head-regen.js';
+import { createGuardGatePipeline } from './guard-gate-runner.js';
 import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
@@ -48,6 +56,8 @@ export interface RegisterGithubAppOptions {
   enqueueBaseline?: EnqueueBaseline;
   /** Background-queue enqueue for guard-gate runs (PR events). Inline fallback if omitted. */
   enqueueGuardGate?: EnqueueGuardGate;
+  /** Background-queue enqueue for spec-change guard regens (checkbox tick). Inline fallback if omitted. */
+  enqueueGuardSpecRegen?: EnqueueGuardSpecRegen;
   /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
   codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
@@ -116,6 +126,91 @@ export async function registerGithubApp(
       return null;
     });
 
+  // Guard spec-regen enqueue: prefer the durable queue (ee-server); fall back to
+  // running the regen + re-gate inline fire-and-forget so unit tests need no queue
+  // (mirrors enqueueGuardGate). The inline path settles the checkbox comment and
+  // re-gates against the PR's freshly regenerated corpus.
+  const enqueueGuardSpecRegen: EnqueueGuardSpecRegen =
+    opts.enqueueGuardSpecRegen ??
+    (async (req) => {
+      const octokit = offerDeps.octokitFor(req.installationId);
+      const coords = splitRepo(req.repoFullName);
+      void (async () => {
+        const regen = await defaultGuardHeadRegenPipeline.run(
+          { auth },
+          {
+            repoFullName: req.repoFullName,
+            installationId: req.installationId,
+            prNumber: req.prNumber,
+            baseBranch: req.baseBranch,
+            headSha: req.headSha,
+          },
+        );
+        if (regen.noCorpus || !regen.corpus) {
+          await updateComment(octokit, coords, req.commentId, renderGuardSpecComment('nochange'));
+          return;
+        }
+        const corpus = regen.corpus;
+        await createGuardGatePipeline({ loadCorpus: async () => corpus }).run(
+          {
+            store,
+            guardStore: getGuardStore(),
+            auth,
+            octokitFor: offerDeps.octokitFor,
+            execute: getGuardExecutor(),
+            limiter: { run: (fn) => fn() },
+          },
+          {
+            repoFullName: req.repoFullName,
+            installationId: req.installationId,
+            workspaceOrgId: req.workspaceOrgId,
+            prNumber: req.prNumber,
+            defaultBranch: req.defaultBranch,
+            baseBranch: req.baseBranch,
+            baseSha: req.baseSha,
+            headSha: req.headSha,
+            headRef: req.headRef,
+            isFork: req.isFork,
+            checkRunId: null,
+          },
+          { force: true },
+        );
+        await updateComment(
+          octokit,
+          coords,
+          req.commentId,
+          renderGuardSpecComment('done', {
+            scenariosWritten: regen.scenariosWritten,
+            commitSha: req.headSha,
+          }),
+        );
+      })().catch(async (err) => {
+        await updateComment(
+          octokit,
+          coords,
+          req.commentId,
+          renderGuardSpecComment('error', { error: (err as Error).message }),
+        ).catch(() => undefined);
+        reportGithubError(
+          store,
+          'guard spec-regen failed',
+          { repo: req.repoFullName, pr: req.prNumber },
+          err,
+        );
+      });
+      return null;
+    });
+
+  // The spec-change guard checkbox shares the in-flight sets with the gate/offer
+  // flows (distinct key namespaces) and enqueues onto the guard spec-regen queue.
+  const specOfferDeps = {
+    store,
+    octokitFor: offerDeps.octokitFor,
+    enqueueGuardSpecRegen,
+    offerInFlight: offerDeps.offerInFlight,
+    inFlight: offerDeps.inFlight,
+  };
+
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
     '/api/ee/github',
@@ -162,8 +257,23 @@ export async function registerGithubApp(
           { store, octokitFor: offerDeps.octokitFor, enqueueGuardGate },
           payload,
         ).catch((err) => reportGithubError(store, 'guard gate enqueue failed', ctx, err));
-        void handlePullRequestGate(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'gate failed', ctx, err),
+        // Run the Code Quality gate, then offer the guard spec-change checkbox. A
+        // spec-changing PR gets a passive checkbox to regenerate its head's guard
+        // scenarios; the auto guard gate above keeps running the baseline corpus.
+        void (async () => {
+          await handlePullRequestGate(offerDeps, payload).catch((err) =>
+            reportGithubError(store, 'gate failed', ctx, err),
+          );
+          await handlePullRequestGuardSpecOffer(specOfferDeps, payload).catch((err) =>
+            reportGithubError(store, 'guard spec offer failed', ctx, err),
+          );
+        })();
+      },
+      // On comment edit: the matching handler (by marker) runs its checkbox flow.
+      onCommentEdited: (payload) => {
+        const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
+        void handleCommentEditedGuardSpec(specOfferDeps, payload).catch((err) =>
+          reportGithubError(store, 'comment-edited guard spec failed', ctx, err),
         );
       },
     }),
@@ -214,6 +324,7 @@ export {
   installationOctokit,
   splitRepo,
   findComment,
+  updateComment,
   listPrsForCommit,
   getFileContent,
   type OctokitClient,
@@ -274,6 +385,8 @@ export {
   createGuardGatePipeline,
   defaultGuardGatePipeline,
   postGuardGateErrorCheck,
+  defaultGuardColdGenerate,
+  defaultLoadCorpus,
   InvalidGuardRecipeError,
   GUARD_GATE_RUN_TIMEOUT_MS,
   GUARD_GATE_BUILD_TIMEOUT_MS,
@@ -296,11 +409,42 @@ export {
   type GuardGateHandlerDeps,
 } from './guard-gate-handler.js';
 
+// Guard spec-change checkbox: offer regeneration of the PR head's scenarios
+export {
+  GUARD_SPEC_MARKER,
+  GUARD_SPEC_CHECKBOX_LABEL,
+  renderGuardSpecComment,
+  isGuardSpecComment,
+  isGuardSpecCheckboxChecked,
+  type GuardSpecCommentStatus,
+  type GuardSpecCommentData,
+} from './guard-spec-comment.js';
+export {
+  handlePullRequestGuardSpecOffer,
+  handleCommentEditedGuardSpec,
+  type GuardSpecOfferDeps,
+  type GuardSpecRegenRequest,
+  type EnqueueGuardSpecRegen,
+} from './guard-spec-offer.js';
+export {
+  createGuardHeadRegenPipeline,
+  defaultGuardHeadRegenPipeline,
+  type GuardHeadRegenRequest,
+  type GuardHeadRegenResult,
+  type GuardHeadRegenDeps,
+  type GuardHeadRegenProgress,
+  type GuardHeadRegenPipeline,
+  type GuardHeadRegenSeams,
+} from './guard-head-regen.js';
+
 // Guard onboarding: hosted guard-scenario generation (the `repo.guard` job body)
 export {
   materializeStoredCorpus,
+  materializeAndGenerateGuard,
   createGuardOnboardingPipeline,
   defaultGuardOnboardingPipeline,
+  type GuardGenerateFn,
+  type GuardGeneratedCorpus,
   type GuardOnboardingRequest,
   type GuardOnboardingResult,
   type GuardOnboardingDeps,

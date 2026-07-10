@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
-import { loadSpec } from '@truecourse/core/lib/spec-store';
+import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
 import {
   saveScenarios,
   writeGuardResult,
@@ -32,10 +32,11 @@ import {
   type GuardGenerateInProcessResult,
 } from '@truecourse/core/commands/guard-in-process';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
 import { corpusFilePath } from '@truecourse/spec-consolidator';
 import { scenariosDir, readGuardResult as readCloneGuardResult } from '@truecourse/guard-runner';
-import { hasGuardUniverse } from '@truecourse/guard-generator';
+import { hasGuardUniverse, type GuardGenerateResult } from '@truecourse/guard-generator';
 import {
   getInstallationToken,
   cloneUrl,
@@ -86,15 +87,88 @@ export interface GuardOnboardingPipeline {
  * Write the Pg-stored curated corpus for `ref` into
  * `<checkout>/.truecourse/specs/corpus.json` — exactly where the guard
  * generator's section plan reads its doc universe (`corpusFilePath`). Returns
- * false when no corpus is stored for the ref (the caller decides the no-op).
+ * false when no corpus is stored for the repo at all (the caller decides the
+ * no-op). The exact-commit read is preferred, but the spec corpus is keyed by
+ * the SCAN-TIME default-branch commit — the gate's cold path arrives with the
+ * PR's base tip, which may have advanced past it inside the onboarding window —
+ * so a miss falls back to the repo's LATEST stored corpus rather than treating
+ * a scanned repo as unspecced.
  */
 export async function materializeStoredCorpus(ref: RepoRef, checkoutDir: string): Promise<boolean> {
-  const corpus = await loadSpec(ref, 'corpus');
+  const corpus =
+    (await loadSpec(ref, 'corpus')) ?? (await loadLatestSpec(ref.repoKey, 'corpus'));
   if (corpus == null) return false;
   const file = corpusFilePath(checkoutDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(corpus, null, 2) + '\n');
   return true;
+}
+
+/** The in-process guard generate over a checkout — the injectable LLM step. */
+export type GuardGenerateFn = (
+  checkoutDir: string,
+  tracker?: StepTracker,
+) => Promise<GuardGenerateInProcessResult>;
+
+/** A successful materialize + generate: the ok generator result plus the report
+ *  to persist (the clone's file report when present — it carries usage totals). */
+export interface GuardGeneratedCorpus {
+  guard: GuardGenerateResult;
+  report: GuardGenerateReport;
+}
+
+/**
+ * Materialize the stored (or committed) curated corpus into `checkoutDir` and run
+ * the in-process guard generate over it — the shared core of BOTH the onboarding
+ * job and the gate's cold-generate path (persistence stays with each caller, which
+ * key their stores differently). Returns `null` when there is no curated corpus /
+ * no doc universe / no docs (a clean no-op → the caller's neutral); THROWS on a
+ * generation failure or a missing LLM provider (never collapses to a no-op — the
+ * gate turns that into its error Check). Does not clone and does not persist.
+ */
+export async function materializeAndGenerateGuard(
+  ref: RepoRef,
+  checkoutDir: string,
+  generate: GuardGenerateFn,
+  opts: {
+    onGenerateStart?: () => void | Promise<void>;
+    tracker?: StepTracker;
+    /**
+     * Skip materializing the Pg-stored corpus — the caller already put a fresh
+     * `corpus.json` in the checkout (the spec-change regen curates the head's own
+     * specs, which must NOT be overwritten by the stale stored corpus). Still
+     * no-ops when the checkout has no doc universe.
+     */
+    skipMaterialize?: boolean;
+  } = {},
+): Promise<GuardGeneratedCorpus | null> {
+  // The corpus is generation's only doc authority. Prefer the one stored for this
+  // ref; a repo that COMMITS its corpus (it is committable) already carries one in
+  // the clone. Neither, and no in-tree doc universe → clean no-op.
+  if (!opts.skipMaterialize) {
+    const materialized = await materializeStoredCorpus(ref, checkoutDir);
+    if (!materialized && !hasGuardUniverse(checkoutDir)) return null;
+  } else if (!hasGuardUniverse(checkoutDir)) {
+    return null;
+  }
+
+  // Fail loudly BEFORE any LLM work when no provider is configured — EE must never
+  // fall back to the `claude` CLI (same rule as spec-scan / onboarding).
+  if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
+
+  await opts.onGenerateStart?.();
+  const { guard } = await generate(checkoutDir, opts.tracker);
+
+  // An empty doc universe generates nothing — same user story as no corpus.
+  if (guard.status === 'no-docs') return null;
+  if (guard.status !== 'ok') {
+    throw new Error(guard.reason ?? `guard generation failed (${guard.status})`);
+  }
+  // Prefer the clone's file report (it carries the usage totals the in-process
+  // driver stamped) over rebuilding from the result.
+  const report =
+    readCloneGuardResult(checkoutDir) ?? buildGuardReport(guard, new Date().toISOString());
+  return { guard, report };
 }
 
 /** The injectable heavy steps (network + LLM); production uses the defaults. */
@@ -106,10 +180,7 @@ export interface GuardOnboardingSeams {
     dir: string,
   ) => Promise<void>;
   /** The in-process guard generate over the checkout. */
-  generate?: (
-    checkoutDir: string,
-    tracker?: StepTracker,
-  ) => Promise<GuardGenerateInProcessResult>;
+  generate?: GuardGenerateFn;
 }
 
 async function defaultCloneRepo(
@@ -159,41 +230,23 @@ export function createGuardOnboardingPipeline(
         await progress.onPhase?.('clone');
         await cloneRepo(deps, req, tmp);
 
-        // The corpus is generation's only doc authority. Prefer the one the
-        // baseline stored for this commit; a repo that COMMITS its corpus (it is
-        // committable) already carries one in the clone. Neither → clean no-op.
-        const materialized = await materializeStoredCorpus(ref, tmp);
-        if (!materialized && !hasGuardUniverse(tmp)) {
+        const generated = await materializeAndGenerateGuard(ref, tmp, generate, {
+          onGenerateStart: () => progress.onPhase?.('generate'),
+          tracker: progress.generateTracker,
+        });
+        // No curated corpus / no docs → clean no-op: scenarios arrive once the
+        // spec is scanned (the onboarding chain re-fires after the next baseline).
+        if (!generated) {
           return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true };
         }
 
-        // Fail loudly BEFORE any LLM work when no provider is configured — EE
-        // must never fall back to the `claude` CLI (same rule as spec-scan).
-        if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-
-        await progress.onPhase?.('generate');
-        const { guard } = await generate(tmp, progress.generateTracker);
-
-        // A corpus with an empty doc universe generates nothing — same user story
-        // as no corpus: scenarios arrive once real spec docs are scanned.
-        if (guard.status === 'no-docs') {
-          return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true };
-        }
-        if (guard.status !== 'ok') {
-          throw new Error(guard.reason ?? `guard generation failed (${guard.status})`);
-        }
-
-        // Persist the scenario tree the generate wrote into the clone, then the
-        // report — preferring the clone's file report (it carries the usage
-        // totals the in-process driver stamped) over rebuilding from the result.
+        // Persist the scenario tree the generate wrote into the clone, then the report.
         const { fileCount } = await saveScenarios(ref, scenariosDir(tmp));
-        const report =
-          readCloneGuardResult(tmp) ?? buildGuardReport(guard, new Date().toISOString());
-        await writeGuardResult(ref, report);
+        await writeGuardResult(ref, generated.report);
 
         return {
           savedFileCount: fileCount,
-          scenariosWritten: guard.written.length,
+          scenariosWritten: generated.guard.written.length,
           noCorpus: false,
         };
       } finally {

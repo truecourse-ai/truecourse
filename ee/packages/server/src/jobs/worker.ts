@@ -26,12 +26,20 @@ import {
   createGithubAuth,
   installationOctokit,
   selectGateStore,
+  splitRepo,
+  updateComment,
+  renderGuardSpecComment,
+  createGuardGatePipeline,
   defaultGuardOnboardingPipeline,
   defaultGuardGatePipeline,
+  defaultGuardHeadRegenPipeline,
   postGuardGateErrorCheck,
   type BaselineResult,
   type GuardOnboardingPipeline,
   type GuardGatePipeline,
+  type GuardGateRunRequest,
+  type GuardGateCorpus,
+  type GuardHeadRegenPipeline,
   type OctokitClient,
 } from '@truecourse/ee-github-app';
 import { getGuardStore } from '@truecourse/core/lib/guard-store';
@@ -52,9 +60,13 @@ import {
   GUARD_GATE_TASK,
   GUARD_GATE_TITLE,
   GUARD_GATE_STEPS,
+  GUARD_SPEC_REGEN_TASK,
+  GUARD_SPEC_REGEN_TITLE,
+  GUARD_SPEC_REGEN_STEPS,
   type BaselineJobPayload,
   type GuardGenerateJobPayload,
   type GuardGateJobPayload,
+  type GuardSpecRegenJobPayload,
 } from './constants.js';
 import { guardGateLimiter } from './guard-gate-limiter.js';
 
@@ -345,6 +357,148 @@ export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJob
   };
 }
 
+/** Deps the guard spec-regen job needs: the shared db + the head-regen pipeline.
+ *  `regate` (default = the gate pipeline run inline with the PR's regenerated
+ *  corpus injected + `force`) and `octokitFor` (the checkbox-comment updater) are
+ *  injectable so tests drive the body without a network or the executor. */
+export interface GuardSpecRegenJobDeps {
+  db: EeDb;
+  headRegenPipeline: GuardHeadRegenPipeline;
+  regate?: (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => Promise<void>;
+  octokitFor?: (installationId: number) => OctokitClient;
+}
+
+/**
+ * The spec-change checkbox regen for one PR head: re-scan the head's spec docs,
+ * regenerate scenarios, persist them under the head, then re-gate the PR against
+ * the PR's OWN regenerated corpus (the auto gate keeps using the baseline corpus —
+ * the two are independent). The checkbox comment (opened "running" by the webhook
+ * handler) settles to done / nochange / error. A no-doc-universe head is a clean
+ * no-op (nochange, no re-gate).
+ */
+export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<GuardSpecRegenJobPayload> {
+  const regate =
+    deps.regate ??
+    (async (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => {
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      // The PR's regenerated corpus is injected via loadCorpus; `force` skips the
+      // redelivery fast path so a head an earlier auto-gate already ran is re-run.
+      await createGuardGatePipeline({ loadCorpus: async () => corpus }).run(
+        {
+          store: selectGateStore(deps.db),
+          guardStore: getGuardStore(),
+          auth: createGithubAuth(cfg),
+          octokitFor: (id) => installationOctokit(cfg, id),
+          execute: getGuardExecutor(),
+          limiter: guardGateLimiter,
+        },
+        gateReq,
+        { force: true, signal },
+      );
+    });
+
+  return {
+    type: GUARD_SPEC_REGEN_TASK,
+    title: GUARD_SPEC_REGEN_TITLE,
+    steps: GUARD_SPEC_REGEN_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.headSha }),
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      pr: p.prNumber,
+      route: 'worker guard.spec-regen',
+    }),
+    async run(ctx) {
+      const p = ctx.payload;
+      const cfg = loadGithubAppConfig();
+      if (!cfg) throw new Error('the GitHub App is not configured');
+      const octokitFor = deps.octokitFor ?? ((id: number) => installationOctokit(cfg, id));
+      const octokit = octokitFor(p.installationId);
+      const coords = splitRepo(p.repoFullName);
+      try {
+        const regen = await deps.headRegenPipeline.run(
+          { auth: createGithubAuth(cfg) },
+          {
+            repoFullName: p.repoFullName,
+            installationId: p.installationId,
+            prNumber: p.prNumber,
+            baseBranch: p.baseBranch,
+            headSha: p.headSha,
+          },
+          {
+            onPhase: (phase) => ctx.phase(phase),
+            scanTracker: stepBridge(ctx.tracker, 'scan', CURATE_STEPS),
+            generateTracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
+          },
+        );
+
+        // No doc universe after the head scan → nothing to regenerate or re-gate.
+        if (regen.noCorpus || !regen.corpus) {
+          await updateComment(octokit, coords, p.commentId, renderGuardSpecComment('nochange')).catch(
+            () => undefined,
+          );
+          return {
+            result: { repoFullName: p.repoFullName, prNumber: p.prNumber, noCorpus: true },
+            notification: null,
+          };
+        }
+
+        await ctx.phase('gate');
+        const gateReq: GuardGateRunRequest = {
+          repoFullName: p.repoFullName,
+          installationId: p.installationId,
+          workspaceOrgId: p.workspaceOrgId,
+          prNumber: p.prNumber,
+          defaultBranch: p.defaultBranch,
+          baseBranch: p.baseBranch,
+          baseSha: p.baseSha,
+          headSha: p.headSha,
+          headRef: p.headRef,
+          isFork: p.isFork,
+          checkRunId: null, // no in-progress Check for a comment-triggered re-gate
+        };
+        await regate(regen.corpus, gateReq, ctx.signal);
+
+        const n = regen.scenariosWritten;
+        await updateComment(
+          octokit,
+          coords,
+          p.commentId,
+          renderGuardSpecComment('done', { scenariosWritten: n, commitSha: p.headSha }),
+        ).catch(() => undefined);
+        return {
+          result: { repoFullName: p.repoFullName, prNumber: p.prNumber, scenariosWritten: n },
+          notification: {
+            level: 'success',
+            title: 'Guard scenarios regenerated',
+            body: `${p.repoFullName} — ${n} guard scenario${n === 1 ? '' : 's'} regenerated for PR #${p.prNumber} and re-gated.`,
+            data: { repoFullName: p.repoFullName, prNumber: p.prNumber, scenariosWritten: n },
+          },
+        };
+      } catch (err) {
+        // Settle the checkbox comment as an error before the job fails (the writer
+        // ticked the box — they must see it failed, with a retry). Best-effort.
+        await updateComment(
+          octokit,
+          coords,
+          p.commentId,
+          renderGuardSpecComment('error', { error: (err as Error).message }),
+        ).catch(() => undefined);
+        throw err;
+      }
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Guard regeneration failed — ${p.repoFullName}`,
+      body: 'The guard scenarios couldn’t be regenerated. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, prNumber: p.prNumber, detail: err.message },
+    }),
+  };
+}
+
 /**
  * Wrap a job definition as a graphile task: resolve the payload → ambient trace
  * context (org / job / repo) the EE transport tags LLM traces with, then run the
@@ -420,6 +574,39 @@ export async function runGuardGate(
   );
 }
 
+/** Deps the exported `runGuardSpecRegen` test seam needs — the stores + the
+ *  head-regen pipeline (faked in tests) + the injectable re-gate / comment updater. */
+export interface RunGuardSpecRegenDeps {
+  db: EeDb;
+  jobStore: JobStore;
+  notifications: NotificationStore;
+  headRegenPipeline: GuardHeadRegenPipeline;
+  regate?: (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => Promise<void>;
+  octokitFor?: (installationId: number) => OctokitClient;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run the `guard.spec-regen` body directly (unit-testable without graphile-worker).
+ * A thin wrapper over the harness so tests keep a stable entry point.
+ */
+export async function runGuardSpecRegen(
+  deps: RunGuardSpecRegenDeps,
+  payload: GuardSpecRegenJobPayload,
+): Promise<void> {
+  await executeJob(
+    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    guardSpecRegenJob({
+      db: deps.db,
+      headRegenPipeline: deps.headRegenPipeline,
+      regate: deps.regate,
+      octokitFor: deps.octokitFor,
+    }),
+    payload,
+    { signal: deps.signal },
+  );
+}
+
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   const { db, jobStore } = deps;
   const notifications = new NotificationStore(db);
@@ -437,6 +624,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       // invocation (github-app / OSS setup may install them after the worker starts).
       [GUARD_GATE_TASK]: registerJob(rt, () =>
         guardGateJob({ db, pipeline: defaultGuardGatePipeline }),
+      ),
+      // The spec-change checkbox regen: re-scan the head, regenerate scenarios,
+      // and re-gate against the PR's own corpus (the default regate seam).
+      [GUARD_SPEC_REGEN_TASK]: registerJob(rt, () =>
+        guardSpecRegenJob({ db, headRegenPipeline: defaultGuardHeadRegenPipeline }),
       ),
     },
   });

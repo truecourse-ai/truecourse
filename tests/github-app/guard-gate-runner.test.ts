@@ -32,9 +32,11 @@ import { createSemaphore } from '../../ee/packages/server/src/jobs/guard-gate-li
 import { selectGateStore } from '../../ee/packages/github-app/src/store/index';
 import type { GateStore } from '../../ee/packages/github-app/src/store/types';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
+import type { RepoRef } from '@truecourse/core/lib/guard-store';
 import {
   createGuardGatePipeline,
   cloneAbortSignal,
+  InvalidGuardRecipeError,
   GUARD_GATE_RUN_TIMEOUT_MS,
   GUARD_GATE_BUILD_TIMEOUT_MS,
   GUARD_GATE_CLONE_TIMEOUT_MS,
@@ -825,6 +827,168 @@ describe('guard-gate clone-phase timeout', () => {
     expect(signal.aborted).toBe(false);
     controller.abort();
     expect(signal.aborted).toBe(true);
+  });
+});
+
+describe('guard-gate pipeline — cold-generate on a scenario miss', () => {
+  it('generates on the base checkout when nothing is stored, runs it in the same pass, and gates', async () => {
+    // No stored corpus anywhere → loadCorpus misses → the cold path fires.
+    const coldCalls: Array<{ ref: RepoRef; dir: string }> = [];
+    const { clone, seen } = fakeClone();
+    const { checkout, switched } = fakeCheckout();
+    const execCalls: GuardExecInput[] = [];
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: async () => null,
+      coldGenerate: async (ref, dir) => {
+        coldCalls.push({ ref, dir });
+        return { recipe: RECIPE, scenarios: [scenario('s1')] };
+      },
+      checkout,
+    });
+    const { deps, calls } = makeDeps(async (input) => {
+      execCalls.push(input);
+      const outcome = input.commit === BASE_SHA ? 'pass' : 'fail';
+      return okReport(latestOf([result('s1', outcome)], input.commit ?? ''));
+    });
+
+    const decision = await pipeline.run(deps, payload());
+
+    // Cold-generated on the base commit, in the gate's own checkout (AC1).
+    expect(coldCalls).toHaveLength(1);
+    expect(coldCalls[0].ref).toEqual({ repoKey: REPO, commitSha: BASE_SHA });
+    expect(coldCalls[0].dir).toBe(seen.dir);
+    // The freshly generated corpus ran base then head in the SAME pass.
+    expect(execCalls.map((c) => c.commit)).toEqual([BASE_SHA, HEAD_SHA]);
+    expect(switched).toEqual([{ dir: seen.dir, sha: HEAD_SHA }]);
+    expect(decision.conclusion).toBe('failure');
+    expect(calls.check[0].conclusion).toBe('failure');
+  });
+
+  it('does NOT cold-generate on the warm path (a stored corpus short-circuits it) (AC4)', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    let cold = 0;
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: corpus([scenario('s1')]),
+      coldGenerate: async () => {
+        cold++;
+        return null;
+      },
+      checkout,
+    });
+    const { deps } = makeDeps(async (input) =>
+      okReport(latestOf([result('s1', 'pass')], input.commit ?? '')),
+    );
+
+    await pipeline.run(deps, payload());
+
+    expect(cold).toBe(0);
+  });
+
+  it('a cold-generate that finds no spec docs (null) stays neutral no-scenarios (AC2)', async () => {
+    const { clone } = fakeClone();
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: async () => null,
+      coldGenerate: async () => null,
+      checkout: async () => {},
+    });
+    const { deps, calls } = makeDeps(neverExecute);
+
+    const decision = await pipeline.run(deps, payload());
+
+    expect(decision.conclusion).toBe('neutral');
+    expect(decision.neutralReason).toBe('no-scenarios');
+    expect(calls.check[0].conclusion).toBe('neutral');
+  });
+
+  it('a cold-generate failure propagates (→ the job error Check) and removes the checkout (AC2)', async () => {
+    const { clone, seen } = fakeClone();
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: async () => null,
+      coldGenerate: async () => {
+        throw new Error('LLM upstream 500');
+      },
+      checkout: async () => {},
+    });
+    const { deps } = makeDeps(neverExecute);
+
+    await expect(pipeline.run(deps, payload())).rejects.toThrow('LLM upstream 500');
+    expect(fs.existsSync(seen.dir!)).toBe(false);
+  });
+
+  it('does not cold-generate when the stored recipe is unparseable (invalid-recipe stays an error)', async () => {
+    let cold = 0;
+    const { clone } = fakeClone();
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: async () => {
+        throw new InvalidGuardRecipeError('bad recipe');
+      },
+      coldGenerate: async () => {
+        cold++;
+        return null;
+      },
+      checkout: async () => {},
+    });
+    const { deps, calls } = makeDeps(neverExecute);
+
+    const decision = await pipeline.run(deps, payload());
+
+    expect(cold).toBe(0);
+    expect(decision.conclusion).toBe('error');
+    expect(decision.errorReason).toBe('infra');
+    expect(calls.check[0].output.title).toBe('Gate error — gate infrastructure failed (no verdict)');
+  });
+});
+
+describe('guard-gate pipeline — force re-gate (spec-change checkbox)', () => {
+  it('runs the injected corpus for BOTH base and head, ignoring the stored baseline, and never moves it', async () => {
+    // A stored baseline exists (computed from the ORIGINAL corpus) — a force
+    // re-gate must NOT diff against it (different corpus → mismatched ids).
+    await guardStore.writeGuardLatest(REPO, latestOf([result('old', 'pass')], BASE_SHA));
+    const execCalls: GuardExecInput[] = [];
+    const execute: GuardExecutor = async (input) => {
+      execCalls.push(input);
+      // The PR's regenerated scenario passes on base, fails on head.
+      const outcome = input.commit === BASE_SHA ? 'pass' : 'fail';
+      return okReport(latestOf([result('s1', outcome)], input.commit ?? ''));
+    };
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps, calls } = makeDeps(execute);
+
+    const decision = await pipeline.run(deps, payload(), { force: true });
+
+    // Base + head both executed with the injected (regenerated) corpus.
+    expect(execCalls.map((c) => c.commit)).toEqual([BASE_SHA, HEAD_SHA]);
+    // Apples-to-apples: s1 passes on base, fails on head → newly failing.
+    expect(decision.conclusion).toBe('failure');
+    expect(calls.check[0].output.title).toBe('1 newly failing guard scenario');
+    // The repo baseline is untouched (still the original 'old' scenario).
+    expect((await guardStore.readGuardLatest(REPO))?.scenarios[0]?.id).toBe('old');
+  });
+
+  it('bypasses the redelivery fast path — re-executes even with a stored run for the head', async () => {
+    await guardStore.writeGuardRun(REPO, latestOf([result('s1', 'pass')], HEAD_SHA));
+    const execCalls: GuardExecInput[] = [];
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps } = makeDeps(async (input) => {
+      execCalls.push(input);
+      return okReport(latestOf([result('s1', 'pass')], input.commit ?? ''));
+    });
+
+    await pipeline.run(deps, payload(), { force: true });
+
+    // The stored head run did NOT short-circuit — the head was re-executed.
+    expect(execCalls.some((c) => c.commit === HEAD_SHA)).toBe(true);
   });
 });
 

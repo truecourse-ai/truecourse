@@ -39,12 +39,15 @@ import {
   REPO_BASELINE_TASK,
   REPO_GUARD_TASK,
   GUARD_GATE_TASK,
+  GUARD_SPEC_REGEN_TASK,
   guardJobKey,
   guardGateJobKey,
+  guardSpecRegenJobKey,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
   type GuardGenerateEnqueueRequest,
   type GuardGateEnqueueRequest,
+  type GuardSpecRegenEnqueueRequest,
 } from './constants.js';
 
 function orgIdOf(req: Request): string | null {
@@ -72,6 +75,12 @@ export interface JobsApi {
    * already running for that head (so a redelivered webhook is a no-op).
    */
   enqueueGuardGate(req: GuardGateEnqueueRequest): Promise<string | null>;
+  /**
+   * Enqueue a spec-change guard regen for a PR head (the checkbox tick). Single-
+   * flight per repo + head SHA: returns the new job id, or null when a regen is
+   * already running for that head.
+   */
+  enqueueGuardSpecRegen(req: GuardSpecRegenEnqueueRequest): Promise<string | null>;
   /**
    * Whether the background worker actually started. False when the background
    * services failed to come up (jobs won't process until a restart) — the
@@ -256,6 +265,16 @@ export async function registerJobs(
       { ...req },
     );
 
+  // Single-flight guard spec-regen enqueue — the checkbox tick lands here. Keyed
+  // per repo + head SHA: a duplicate tick for the same head is a no-op.
+  const enqueueGuardSpecRegen = (req: GuardSpecRegenEnqueueRequest): Promise<string | null> =>
+    singleFlightEnqueue(
+      GUARD_SPEC_REGEN_TASK,
+      req.workspaceOrgId,
+      guardSpecRegenJobKey(req.repoFullName, req.headSha),
+      { ...req },
+    );
+
   // After a baseline job settles, replay the repo's coalesced follow-up push (if
   // any — BOTH outcomes), then — on SUCCESS only — chain the guard onboarding:
   // the scan just persisted the corpus, and a repo with stored guard state is
@@ -324,6 +343,7 @@ export async function registerJobs(
     enqueueBaseline,
     enqueueGuardGenerate,
     enqueueGuardGate,
+    enqueueGuardSpecRegen,
     workerStarted: runner !== null,
   };
 }

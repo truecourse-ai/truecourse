@@ -21,6 +21,7 @@ import { simpleGit } from 'simple-git';
 import {
   dismissedClaimKey,
   type GuardDecisions,
+  type GuardGenerateReport,
   type GuardLatest,
   type GuardScenario,
   type GuardScenarioResult,
@@ -30,11 +31,14 @@ import {
   RecipeSchema,
   buildDocSectionIndex,
   loadScenarios as loadScenarioTree,
+  scenariosDir,
   type DocSectionIndex,
   type GuardExecReport,
   type GuardExecutor,
   type Recipe,
 } from '@truecourse/guard-runner';
+import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
+import { materializeAndGenerateGuard, type GuardGenerateFn } from './guard-onboarding.js';
 import type { GateStore } from './store/types.js';
 import {
   getInstallationToken,
@@ -126,6 +130,18 @@ export interface GuardGatePipelineSeams {
   /** Materialize `sha`'s tree in the checkout (default `git checkout -f`,
    *  under the clone-phase wall-clock folded with `signal`). */
   checkout?: (dir: string, sha: string, signal?: AbortSignal) => Promise<void>;
+  /**
+   * Cold path: when {@link loadCorpus} misses (no scenarios stored ANYWHERE for
+   * the repo — the first PR arrived before onboarding generation finished),
+   * generate scenarios on THIS checkout (the base tree), persist them under `ref`
+   * (the base commit — onboarding-that-lost-the-race), and return the freshly
+   * parsed corpus to run in the same pass. `null` → a genuine absence of spec
+   * docs (stays neutral). A generation failure THROWS — it must surface as the
+   * gate's error Check, never collapse to neutral. The default materializes the
+   * Pg-stored corpus and runs the in-process generate. Never called on the warm
+   * path (a stored corpus short-circuits it), so warm repos never re-generate.
+   */
+  coldGenerate?: (ref: RepoRef, dir: string, signal?: AbortSignal) => Promise<GuardGateCorpus | null>;
 }
 
 export interface GuardGatePipelineDeps {
@@ -163,6 +179,13 @@ export type GuardGatePhase = 'clone' | 'base' | 'run' | 'verdict';
 export interface GuardGateRunOptions {
   onPhase?: (p: GuardGatePhase) => void | Promise<void>;
   signal?: AbortSignal;
+  /**
+   * Skip the redelivery fast path (decide-from-stored-run) and re-execute the
+   * head. Set by the spec-change regen re-gate: the writer deliberately wants the
+   * PR's freshly-regenerated scenarios run, even though a prior gate already
+   * stored a run for this head. Mirrors the drift gate's `force` re-verify.
+   */
+  force?: boolean;
 }
 
 export interface GuardGatePipeline {
@@ -227,7 +250,7 @@ const defaultCheckout = async (dir: string, sha: string, signal?: AbortSignal): 
  * scenarios (refresh-on-merge is issue 06), and the gate must keep running the
  * last committed corpus rather than silently going neutral.
  */
-async function defaultLoadCorpus(
+export async function defaultLoadCorpus(
   guardStore: GuardStore,
   ref: RepoRef,
 ): Promise<GuardGateCorpus | null> {
@@ -270,6 +293,44 @@ async function loadLatestScenarios(
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+/**
+ * Persist a freshly generated scenario corpus + report under `ref` (via the
+ * given guard store, so tests key their PGlite store not the process-global
+ * one), then read the corpus back THROUGH the store so the same parse +
+ * recipe-validation path (and InvalidGuardRecipeError contract) applies.
+ * Shared by the gate's cold-generate and the spec-change head-regen.
+ */
+export async function persistGeneratedGuardCorpus(
+  guardStore: GuardStore,
+  ref: RepoRef,
+  checkoutDir: string,
+  report: GuardGenerateReport,
+): Promise<GuardGateCorpus | null> {
+  await guardStore.saveScenarios(ref, scenariosDir(checkoutDir));
+  await guardStore.writeGuardResult(ref, report);
+  return defaultLoadCorpus(guardStore, ref);
+}
+
+/**
+ * Default cold-generate: materialize the Pg-stored curated corpus into the gate
+ * checkout, run the in-process guard generate over it, persist the resulting
+ * scenario corpus + report under `ref`, and return the freshly parsed corpus.
+ * `null` → no curated corpus / no docs (neutral); a generation failure
+ * PROPAGATES (never neutral). Mirrors the onboarding job's body minus the
+ * clone the gate already did — the two share {@link materializeAndGenerateGuard}.
+ */
+export async function defaultGuardColdGenerate(
+  guardStore: GuardStore,
+  ref: RepoRef,
+  dir: string,
+  generate: GuardGenerateFn = (checkoutDir, tracker) =>
+    guardGenerateInProcess(checkoutDir, { tracker }),
+): Promise<GuardGateCorpus | null> {
+  const generated = await materializeAndGenerateGuard(ref, dir, generate);
+  if (!generated) return null;
+  return persistGeneratedGuardCorpus(guardStore, ref, dir, generated.report);
 }
 
 /** Fold the repo dismissals + the PR overlay (hosted store only — the file store
@@ -412,8 +473,11 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
       // Redelivery fast path: this head was already gated and its run persisted
       // (decision 5) — decide from the stored results, no clone, no run. The base
       // comes from the store only (no checkout exists for a lazy base run), and
-      // stale annotations are skipped for the same reason.
-      const stored = await deps.guardStore.readGuardRunForCommit(repoKey, payload.headSha);
+      // stale annotations are skipped for the same reason. `force` (a spec-regen
+      // re-gate) bypasses it to re-run the head with regenerated scenarios.
+      const stored = opts.force
+        ? null
+        : await deps.guardStore.readGuardRunForCommit(repoKey, payload.headSha);
       if (stored) {
         const base = await resolveStoredBase(deps.guardStore, payload);
         const decision = decideGuardGate(storedRunReport(stored), base, { blocking, dismissed });
@@ -457,12 +521,35 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
           invalidRecipe = err;
         }
 
+        // Cold path (first-contact correctness): nothing is stored ANYWHERE for
+        // this repo (the first PR arrived before onboarding generation finished),
+        // and the recipe wasn't merely unparseable. Generate on THIS checkout (the
+        // base tree), persist under the base commit, and run it in the same pass —
+        // onboarding-that-lost-the-race. `null` → genuine absence of spec docs
+        // (falls through to the neutral no-scenarios below). A generation THROW
+        // propagates to the job's error Check (never neutral). Warm repos never
+        // reach here — a stored corpus makes `corpus` non-null above.
+        if (corpus === null && !invalidRecipe) {
+          const coldRef: RepoRef = { repoKey, commitSha: baseSha };
+          corpus = seams.coldGenerate
+            ? await seams.coldGenerate(coldRef, tmp, opts.signal)
+            : await defaultGuardColdGenerate(deps.guardStore, coldRef, tmp);
+        }
+
         // Base results: stored baseline / exact-commit row, else a lazy base run
         // on this checkout (the tree is still at the base). The lazy run persists
         // as the repo baseline ONLY when the PR targets the default branch and
         // none is stored (decision 4); non-default bases stay ephemeral.
+        //
+        // `force` (a spec-regen re-gate against the PR's OWN regenerated corpus)
+        // IGNORES the stored baseline: that baseline was computed from a DIFFERENT
+        // corpus, so its scenario ids don't line up with the regenerated set and
+        // every regenerated scenario would diff as pre-existing (never newly
+        // failing). Instead it lazy-runs the base with the regenerated corpus so
+        // base and head compare apples-to-apples — but EPHEMERALLY: an ad-hoc PR
+        // corpus must never move the repo's real baseline.
         await opts.onPhase?.('base');
-        let base = await resolveStoredBase(deps.guardStore, payload);
+        let base = opts.force ? null : await resolveStoredBase(deps.guardStore, payload);
         if (base === null && corpus !== null && corpus.scenarios.length > 0) {
           const { recipe, scenarios } = corpus;
           const baseReport = await deps.limiter.run(() =>
@@ -480,7 +567,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
           );
           if (baseReport.status === 'ok') {
             base = baseReport.latest.scenarios;
-            if (payload.baseBranch === payload.defaultBranch) {
+            if (!opts.force && payload.baseBranch === payload.defaultBranch) {
               await deps.guardStore.writeGuardLatest(repoKey, baseReport.latest);
             }
           }
