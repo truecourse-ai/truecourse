@@ -1397,9 +1397,13 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   views. STATUS: IN PROGRESS (branch `sm/spec-guards-ee`, working tree awaiting review;
   detailed issue tracking lives in the external guard-ee-hosted-gate tracker) — landed so far:
   Pg guard store behind the GuardStore seam, the GuardExecutor seam, the hosted guard-generate
-  onboarding chain, and the PR guard-gate durable job + diff Check (kill-switch env,
-  concurrency limiter, crash/orphan Check settlement, abort-signal cancellation).
-  Remaining: refresh-on-merge and the hosted execution tier.
+  onboarding chain, the PR guard-gate durable job + diff Check (kill-switch env,
+  concurrency limiter, crash/orphan Check settlement, abort-signal cancellation), and
+  refresh-on-merge + deploy backfill (issue 06): the `guard.baseline` durable job (its own
+  pending-buffer coalescing, shared gate limiter), the merge and post-generate refresh chains
+  (complement of onboarding), and the one-time deploy backfill (operator-scoped repo
+  enumeration + a run-once marker, generate-vs-baseline routing per repo).
+  Remaining: the hosted execution tier.
 
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
 after that — order between them is a call to make when OSS v1 ships.
