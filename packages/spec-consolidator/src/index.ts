@@ -90,6 +90,9 @@ export type {
   OverlapDetectorOptions,
 } from './overlap-detector.js';
 
+export { verifyOverlapSections } from './pointer-verifier.js';
+export type { VerifyPointersInput } from './pointer-verifier.js';
+
 export { curate, readCorpusDecisions } from './curate.js';
 export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
 

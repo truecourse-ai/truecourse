@@ -491,6 +491,39 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    The dashboard analog already shipped (BL Drift registry-hidden in both editions,
    URL-reachable for EE Pulls deep links).
 
+30. **Close the pointer action space in the overlap prompt (root cause of item 29's
+   mis-anchor; user go 2026-07-10).** The overlap prompt asks Haiku (spec.overlap default)
+   to NAME the heading holding each side's claim — free recall over an open set; taskline's
+   intro paragraph reads storage-flavored, so "Storage" was the classic
+   plausible-association error (same disease as guard's tool-call bug: unclosed action
+   space invites invention; per the standing rule, fix the prompt for the small model,
+   never upgrade the model). Fix, riding ONE overlap-fingerprint roll: (1) the prompt
+   enumerates each doc's actual headings + "the lead" as a closed choice set — pointer
+   naming becomes selection; (2) each pointer carries a short VERBATIM quote of the
+   disputed sentence (upgrades item 29's verification from token-overlap to exact
+   location); (3) the null/lead rule aligns with item 27's lead definition. Queued behind
+   item 29 (same file). Cache cost: overlap stage re-detects once per pair on next scan —
+   small, accepted.
+   STATUS: BUILT 2026-07-10 — overlap user prompt enumerates each doc's headings + a lead option as a CLOSED set (selection, not recall); each side pointer carries an optional verbatim `quote` (persisted to `corpus.json` `OverlapSectionSchema`, optional so old corpora parse); `verifyOverlapSections` (pointer-verifier.ts) locates the quote by normalized substring FIRST (exact hit anchors with certainty, keep-bias on ties), falling back to the item-29 idf token path when no quote/no hit; system prompt + examples rolled the overlap PROMPT_FINGERPRINT (one re-detect per pair, accepted); no other stage changed.
+
+29. **Overlap pointer verification — re-anchor deterministically (user go 2026-07-10).**
+   Overlap section pointers are model-chosen and UNVALIDATED: a re-detection anchored the
+   README side of taskline's rm dispute at "Storage" while the disputed sentence lives in
+   the intro paragraph (the previous roll had it right as a preamble pointer). Worse, the
+   dedup representative rule prefers NAMED pointers over null ones ("most bandable"), so
+   when duplicates disagree we systematically keep the wrong-but-named anchor. Fix at
+   assembly (`flagOverlaps`, same stage as dedup — covers fresh AND cached verdicts, no
+   LLM, no prompt roll): score every section of the pointed doc (including the LEAD as a
+   null-heading candidate) by content-token overlap with the overlap note; keep the
+   model's pointer when its section carries signal; RE-ANCHOR only when the pointed
+   section shares ~none of the note's distinctive tokens while another section (or the
+   lead) clearly does; no better candidate → keep the pointer (least surprise).
+   Deterministic — a pure function of note + doc contents; constants principled and
+   documented, never tuned to taskline. Verified pointers also make the dedup
+   representative choice trustworthy. Committed old corpora correct themselves on the
+   next rescan (cache-warm, assembly-only).
+   STATUS: BUILT 2026-07-10 — `verifyOverlapSections` (spec-consolidator `pointer-verifier.ts`) scores each pointed doc's sections (lead = null-heading candidate, item-27 def) by idf-weighted token overlap with the note; re-anchors only when the pointed section is below the meaningful floor AND ≤¼ of the best; runs in `flagOverlaps` before the item-28 dedup so wrong-named duplicates converge on the verified anchor; no LLM / no prompt roll (fresh + cached verdicts).
+
 28. **Cross-area conflict dedup (user go 2026-07-09).** Overlap detection runs per AREA
    over each area's doc pairs, so a doc pair sharing several areas can get the SAME
    dispute flagged once per shared area (live: taskline's rm disagreement appeared twice —

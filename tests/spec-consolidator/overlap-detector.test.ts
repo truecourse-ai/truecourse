@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { flagOverlaps } from '../../packages/spec-consolidator/src/index.js';
+import { flagOverlaps, buildOverlapUserPrompt } from '../../packages/spec-consolidator/src/index.js';
 import type { Area, DocCandidate, OverlapRunner, Relation } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
@@ -248,6 +248,67 @@ describe('flagOverlaps', () => {
   it('ignores single-doc areas (no pairs)', async () => {
     const out = await flagOverlaps(repo, [area('core/auth', ['a.md'])], [doc('a.md')], { runner: flagAll });
     expect(out.size).toBe(0);
+  });
+});
+
+// The item-30 closed choice set: the user prompt enumerates each doc's actual
+// section headings (a closed list) with a lead option first, so the small model
+// SELECTS a pointer instead of recalling one; each side also copies a verbatim
+// quote. The prompt/schema roll invalidates the overlap cache once (accepted).
+describe('buildOverlapUserPrompt — closed choice set (item 30)', () => {
+  it('lists each doc\'s section options with a lead option first', () => {
+    const a = doc('a.md', '# App A\n\nintro line\n\n## Auth\ndetails\n\n## Errors\nmore\n');
+    const b = doc('b.md', '# App B\n\n## Storage\nstuff\n');
+    const prompt = buildOverlapUserPrompt('core/auth', a, b);
+    expect(prompt).toContain('SECTION OPTIONS');
+    // A lead option appears for each side and maps to a null heading.
+    expect(prompt.match(/use heading: null/g)?.length).toBe(2);
+    // Doc A's real headings are enumerated as the closed set.
+    expect(prompt).toContain('- App A');
+    expect(prompt).toContain('- Auth');
+    expect(prompt).toContain('- Errors');
+    // Doc B's heading too, under its own list.
+    expect(prompt).toContain('- Storage');
+  });
+});
+
+describe('flagOverlaps — verbatim quote flow (item 30)', () => {
+  const DOC_A =
+    '# App A\n\n## Auth\nLogin requires a Bearer JWT in the Authorization header.\n\n## Errors\nErrors use a standard envelope.\n';
+  const DOC_B = '# App B\n\n## Storage\nState lives in a JSON file on disk.\n';
+
+  it('the default LLM runner carries each side\'s verbatim quote into the corpus', async () => {
+    const docs = [doc('a.md', DOC_A), doc('b.md', DOC_B)];
+    const transport = async (): Promise<string> =>
+      JSON.stringify({
+        overlap: true,
+        note: 'a.md and b.md disagree on where auth state is kept',
+        sections: [
+          { side: 'A', heading: 'Auth', quote: 'Login requires a Bearer JWT' },
+          { side: 'B', heading: 'Storage', quote: 'State lives in a JSON file' },
+        ],
+      });
+    const out = await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], docs, { transport });
+    const sections = out.get('core/auth')?.[0].sections;
+    // Both quotes are located in their pointed sections → pointers kept, quotes persisted.
+    expect(sections).toContainEqual({ doc: 'a.md', heading: 'Auth', quote: 'Login requires a Bearer JWT' });
+    expect(sections).toContainEqual({ doc: 'b.md', heading: 'Storage', quote: 'State lives in a JSON file' });
+  });
+
+  it('reads back an old cached verdict WITHOUT quotes (optional schema) and flows it through', async () => {
+    const docs = [doc('a.md'), doc('b.md')];
+    const areas = [area('core/auth', ['a.md', 'b.md'])];
+    let calls = 0;
+    // First run writes the pre-item-30 shape (no quote field) to the cache.
+    const runner: OverlapRunner = async ({ a, b }) => {
+      calls++;
+      return { overlap: true, note: `${a.path} vs ${b.path}`, sections: [{ doc: a.path, heading: 'Legacy' }] };
+    };
+    await flagOverlaps(repo, areas, docs, { runner });
+    // Second run hits the cache; OverlapVerdictSchema parses the quote-less entry.
+    const second = await flagOverlaps(repo, areas, docs, { runner });
+    expect(calls).toBe(1); // cache hit, not re-run
+    expect(second.get('core/auth')?.[0].sections).toEqual([{ doc: 'a.md', heading: 'Legacy' }]);
   });
 });
 

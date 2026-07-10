@@ -35,3 +35,33 @@ describe('OVERLAP_DETECTOR_SYSTEM_PROMPT preamble pointer', () => {
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/before its first|above its first|ABOVE its first/i)
   })
 })
+
+describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote (item 30)', () => {
+  it('turns heading naming into SELECTION from a closed list (not free recall)', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/CLOSED list/)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/SELECT from the list/i)
+    // Explicitly forbids inventing a heading outside the list.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/never emit a heading that is not/i)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/one of that doc's listed section headings/)
+  })
+
+  it('offers the lead as an explicit option mapping to a null heading', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/LEAD/)
+    // Item-27 lead definition: pre-heading content, or the opening title block.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/opening title block/i)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toContain('"heading": null')
+  })
+
+  it('requires a short verbatim quote of the disputed sentence per side', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/quote/)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/verbatim/i)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/25 words/)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/do not paraphrase/i)
+  })
+
+  it('shows a worked example carrying both heading and quote (the exact JSON shape)', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/"heading":\s*"User model",\s*"quote":/)
+    // The preamble example is UPDATED to the null-heading + quote shape, not duplicated.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/"heading":\s*null,\s*"quote":/)
+  })
+})

@@ -254,6 +254,16 @@ export const OverlapSectionSchema = z.object({
    * bands as the pre-first-heading block.
    */
   heading: z.string().nullable(),
+  /**
+   * A short verbatim excerpt (≤ ~25 words) of the disputed sentence, copied from
+   * the doc — the model's evidence for the heading it picked. Persisted (optional,
+   * so older corpora without it still parse) for verification transparency and so
+   * the viewer can later highlight the exact disputed sentence, not just band the
+   * section. Consumed at assembly by `verifyOverlapSections` to anchor the pointer
+   * by exact location; NOT part of the cross-area dedup identity (that stays
+   * doc + heading).
+   */
+  quote: z.string().optional(),
 });
 export type OverlapSection = z.infer<typeof OverlapSectionSchema>;
 
