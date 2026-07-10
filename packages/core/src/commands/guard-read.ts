@@ -36,6 +36,7 @@ import {
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
+  type GuardClaimIdentity,
   type GuardDismissedClaim,
   type GuardDocCoverage,
   type GuardLatest,
@@ -581,29 +582,44 @@ export function readGuardEvidenceAt(
 
 /**
  * Add a dismissal (idempotent on doc+anchor+title identity — a re-dismiss refreshes
- * `dismissedAt`/`note` in place, never duplicates), returning the updated file.
+ * `dismissedAt`/`note` in place, never duplicates), returning the updated file. With
+ * `opts.pr` the write targets the PR overlay scope ONLY (enterprise-only — the OSS
+ * file store rejects it): inherited repo dismissals are never read into or copied
+ * onto the overlay, so the merged view is the caller's job (see {@link getGuardDecisions}).
  */
 export async function dismissGuardClaim(
   repoRoot: string,
   claim: GuardDismissedClaim,
+  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const decisions = await readGuardDecisionsStore(repoRoot)
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const key = dismissedClaimKey(claim.doc, claim.anchor, claim.title)
   const dismissedClaims = decisions.dismissedClaims.filter(
     (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
   )
   dismissedClaims.push(claim)
   const next: GuardDecisions = { ...decisions, dismissedClaims }
-  await writeGuardDecisionsStore(repoRoot, next)
+  await writeGuardDecisionsStore(repoRoot, next, scope)
   return next
 }
 
-/** Remove a dismissal by identity (no-op when absent), returning the updated file. */
+/**
+ * Remove a dismissal by identity (no-op when absent), returning the updated file.
+ * With `opts.pr` the read+write target the PR overlay scope ONLY (enterprise-only —
+ * the OSS file store rejects it), never the merged view. Un-dismissing a claim that
+ * was dismissed at the repo scope is therefore a no-op on the overlay: the merged
+ * view still shows it dismissed. Accepted v1 behavior.
+ */
 export async function undismissGuardClaim(
   repoRoot: string,
-  identity: { doc: string; anchor: string; title: string },
+  identity: GuardClaimIdentity,
+  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const decisions = await readGuardDecisionsStore(repoRoot)
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const key = dismissedClaimKey(identity.doc, identity.anchor, identity.title)
   const next: GuardDecisions = {
     ...decisions,
@@ -611,7 +627,7 @@ export async function undismissGuardClaim(
       (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
     ),
   }
-  await writeGuardDecisionsStore(repoRoot, next)
+  await writeGuardDecisionsStore(repoRoot, next, scope)
   return next
 }
 
