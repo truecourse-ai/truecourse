@@ -144,6 +144,57 @@ describe('GET /api/repos/browse', () => {
     expect(res.body.error).toBeTruthy();
   });
 
+  // Origin gate: the global CORS config reflects any origin with credentials and
+  // community mode has no auth, so without this gate any website open in the
+  // user's browser could read arbitrary directory listings cross-origin.
+  describe('origin gate', () => {
+    it('403 for a non-loopback cross-site Origin', async () => {
+      const root = makeTmpRoot();
+
+      const res = await request(app)
+        .get('/api/repos/browse')
+        .set('Origin', 'https://evil.example')
+        .query({ path: root });
+
+      expect(res.status).toBe(403);
+      expect(typeof res.body.error).toBe('string');
+    });
+
+    it('200 for a localhost Origin on any port (dev client on :3000)', async () => {
+      const root = makeTmpRoot();
+
+      const res = await request(app)
+        .get('/api/repos/browse')
+        .set('Origin', 'http://localhost:3000')
+        .query({ path: root });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('200 for a 127.0.0.1 Origin on any port', async () => {
+      const root = makeTmpRoot();
+
+      const res = await request(app)
+        .get('/api/repos/browse')
+        .set('Origin', 'http://127.0.0.1:5173')
+        .query({ path: root });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('403 for a malformed Origin', async () => {
+      const root = makeTmpRoot();
+
+      const res = await request(app)
+        .get('/api/repos/browse')
+        .set('Origin', 'not-a-url')
+        .query({ path: root });
+
+      expect(res.status).toBe(403);
+      expect(typeof res.body.error).toBe('string');
+    });
+  });
+
   it('404 when the local-filesystem capability is absent', async () => {
     mockCaps = [];
     const root = makeTmpRoot();
