@@ -25,6 +25,7 @@ import {
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
 import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT } from './prompts.js'
+import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -44,6 +45,15 @@ export interface SectionInput {
   fullText: string
   /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
   areaTags: string[]
+  /**
+   * Content key over this section's stale-suppressed quotes (item 31): the losing
+   * side of a side-verdict resolution whose disputed sentence lives in this
+   * section. Folded into {@link generationInputsHash} so a newly-suppressed (or
+   * un-suppressed) section re-detects as WORK and re-extracts freshly. Empty (`''`)
+   * when nothing is suppressed here — the section's inputs hash is then byte-
+   * identical to before item 31, so unaffected sections keep their manifest entry.
+   */
+  suppressionFingerprint: string
 }
 
 export interface GuardWorkPlan {
@@ -59,6 +69,10 @@ export interface GuardWorkPlan {
   recipeFingerprint: string
   /** True when `recipe.json` is absent (discovery will run). */
   recipeMissing: boolean
+  /** Losing doc → its stale-suppressed quotes (item 31); the extraction stage
+   *  injects these so a resolved dispute's loser yields no claims. Empty when no
+   *  side verdict currently suppresses anything. */
+  suppressionIndex: Map<string, string[]>
 }
 
 // A tolerant local view of the corpus — just the kept docs' refs + area tags. We
@@ -88,26 +102,29 @@ export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
 
 /**
  * The generation-inputs hash stamped per section: it moves when the section text
- * changes, the recipe inputs change, the scenario format version bumps, or EITHER
- * LLM stage's prompt changes (extraction or authoring). A section is WORK exactly
- * when this differs from (or is absent in) the committed manifest — so an
- * unchanged section is skipped, and a prompt edit re-runs the whole pipeline.
+ * changes, the recipe inputs change, the scenario format version bumps, EITHER
+ * LLM stage's prompt changes (extraction or authoring), or a section-scoped
+ * conflict verdict starts/stops suppressing a claim in the section (item 31 —
+ * `suppressionFingerprint`, appended ONLY when non-empty so an unaffected section's
+ * hash is byte-identical to before). A section is WORK exactly when this differs
+ * from (or is absent in) the committed manifest — so an unchanged section is
+ * skipped, a prompt edit re-runs the whole pipeline, and a resolved dispute's
+ * losing section re-extracts with its stale claim suppressed.
  */
-export function generationInputsHash(fingerprint: string, recipeFingerprint: string): string {
-  return (
-    'sha256:' +
-    createHash('sha256')
-      .update(
-        [
-          fingerprint,
-          recipeFingerprint,
-          String(GUARD_FORMAT_VERSION),
-          EXTRACT_PROMPT_FINGERPRINT,
-          GENERATE_PROMPT_FINGERPRINT,
-        ].join('\0'),
-      )
-      .digest('hex')
-  )
+export function generationInputsHash(
+  fingerprint: string,
+  recipeFingerprint: string,
+  suppressionFingerprint = '',
+): string {
+  const parts = [
+    fingerprint,
+    recipeFingerprint,
+    String(GUARD_FORMAT_VERSION),
+    EXTRACT_PROMPT_FINGERPRINT,
+    GENERATE_PROMPT_FINGERPRINT,
+  ]
+  if (suppressionFingerprint) parts.push(suppressionFingerprint)
+  return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
 /** Whether a corpus exists — the corpus is generation's only doc authority. */
@@ -127,12 +144,18 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const hasUniverse = hasGuardUniverse(repoRoot)
   const { indexes } = indexRepoDocs(repoRoot, [])
   const areaTags = readCorpusAreaTags(repoRoot)
+  // Section-scoped conflict verdicts (item 31): losing doc → stale quotes. A
+  // section carrying a suppressed quote gets a non-empty suppressionFingerprint,
+  // which re-keys ONLY that section (unaffected sections stay byte-identical).
+  const suppressionIndex = readSuppressionIndex(repoRoot)
 
   const sections: SectionInput[] = []
   for (const [doc, index] of indexes) {
     const texts = extractSectionTexts(doc, fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'))
+    const docQuotes = suppressionIndex.get(doc) ?? []
     for (const s of index.sections) {
       const t = texts.get(s.anchor)
+      const fullText = t?.fullText ?? ''
       sections.push({
         doc,
         anchor: s.anchor,
@@ -140,8 +163,9 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
         headingText: s.headingText,
         level: s.level,
         ownText: t?.ownText ?? '',
-        fullText: t?.fullText ?? '',
+        fullText,
         areaTags: areaTags.get(doc) ?? [],
+        suppressionFingerprint: suppressionKey(suppressedQuotesIn(fullText, docQuotes)),
       })
     }
   }
@@ -156,13 +180,13 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    const inputsHash = generationInputsHash(s.fingerprint, recipeFp)
+    const inputsHash = generationInputsHash(s.fingerprint, recipeFp, s.suppressionFingerprint)
     if (!prior || prior.generationInputsHash !== inputsHash) work.push(s)
   }
 
   const orphaned = (manifest?.sections ?? []).filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
 
-  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing }
+  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex }
 }
 
 /** One work document fed to extraction: its full text plus ALL its sections. */
@@ -173,6 +197,13 @@ export interface GuardDoc {
   content: string
   /** Every section of the doc, in document order — the outline + snapping set. */
   sections: SectionInput[]
+  /**
+   * This doc's stale-suppressed quotes (item 31), when it is the losing side of a
+   * side verdict. Extraction injects a "resolved stale — extract no claim asserting
+   * this" block for the quotes present in each view, so the loser's disputed claim
+   * is never authored. Empty ⇒ extraction is byte-identical to before item 31.
+   */
+  suppressedQuotes: string[]
 }
 
 /**
@@ -195,5 +226,6 @@ export function collectWorkDocs(repoRoot: string, plan: GuardWorkPlan): GuardDoc
     doc,
     content: fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
     sections,
+    suppressedQuotes: plan.suppressionIndex.get(doc) ?? [],
   }))
 }

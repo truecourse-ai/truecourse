@@ -260,14 +260,14 @@ specCmd
     await runSpecStatus();
   });
 
-// -- Conflicts (within-area overlaps → relations) ---------------------------
+// -- Conflicts (within-area overlaps → section-scoped verdicts) --------------
 const conflictsCmd = specCmd
   .command("conflicts")
   .description("Inspect and resolve flagged within-area doc overlaps (agent-friendly)");
 
 conflictsCmd
   .command("list")
-  .description("List flagged overlaps still awaiting a relation")
+  .description("List flagged overlaps still awaiting a verdict")
   .action(async () => {
     await runSpecConflictsList();
   });
@@ -280,27 +280,17 @@ conflictsCmd
   });
 
 conflictsCmd
-  .command("resolve <area>")
-  .description("Resolve an overlap by recording a doc→doc relation")
-  .requiredOption("--older <path>", "Repo-relative path of the older / superseded doc")
-  .requiredOption("--newer <path>", "Repo-relative path of the newer / authoritative doc")
-  .option("--replace", "`newer` fully supersedes `older` (excluded from generate)")
-  .option("--precedence", "Both feed generate; `newer` wins where they overlap")
-  .option("--keep-both", "Both are current peers (combine)")
+  .command("resolve <n|area>")
+  .description("Resolve a flagged overlap: pick a side (--right) or dismiss it (--dismiss)")
+  .option("--right <path>", "Pick a side: this doc is right; the other side's disputed claim is suppressed at generate")
+  .option("--dismiss", "Not a real conflict — dismiss the detector false-positive")
   .option("--note <text>", "Optional rationale")
-  .action(async (area, opts) => {
-    const type = opts.replace
-      ? "replace"
-      : opts.precedence
-        ? "precedence"
-        : opts.keepBoth
-          ? "keep-both"
-          : undefined;
-    if (!type) {
-      console.error("Pass one of --replace | --precedence | --keep-both");
-      process.exit(1);
-    }
-    await runSpecConflictsResolve(area, { older: opts.older, newer: opts.newer, type, note: opts.note });
+  .action(async (target, opts) => {
+    await runSpecConflictsResolve(target, {
+      right: opts.right,
+      dismiss: opts.dismiss,
+      note: opts.note,
+    });
   });
 
 // -- Chains (doc→doc relations) ---------------------------------------------

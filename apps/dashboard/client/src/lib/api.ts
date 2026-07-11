@@ -974,8 +974,10 @@ export function postContractsGenerate(
 export type SpecStalenessResponse = {
   contractsStale: boolean;
   verifyStale: boolean;
-  /** Recorded include/exclude/relation decisions are newer than the corpus — a Scan applies them. */
+  /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
+  /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
+  docsChanged: boolean;
   hasCorpus: boolean;
   hasGenerated: boolean;
   hasVerified: boolean;
@@ -986,9 +988,10 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
 }
 
 // ---------------------------------------------------------------------------
-// Corpus path (spec-scan redesign) — the curated doc corpus + doc→doc relations
-// that replace claims/conflicts. Areas group docs; an overlap is two same-area
-// docs that may disagree, resolved by recording a relation.
+// Corpus path (spec-scan redesign) — the curated doc corpus. Areas group docs;
+// an overlap is two same-area docs that may disagree, resolved by a
+// section-scoped verdict (pick-a-side / dismissal) or a force-exclude. Doc→doc
+// relations are lifecycle/precedence metadata and never resolve a conflict.
 // ---------------------------------------------------------------------------
 
 export type SpecRelationType = 'replace' | 'precedence' | 'keep-both';
@@ -1006,6 +1009,23 @@ export interface SpecOverlapSection {
   doc: string;
   /** Heading of the conflicting section, or null when it lives in the doc's preamble. */
   heading: string | null;
+  /** The verbatim disputed sentence, when the detector captured one — carried into a
+   *  pick-a-side verdict so the loser's claim is suppressed at guard generate. */
+  quote?: string;
+}
+
+/** A section-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or dismissal.
+ *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
+export interface SpecConflictResolution {
+  docA: string;
+  anchorA: string | null;
+  quoteA?: string;
+  docB: string;
+  anchorB: string | null;
+  quoteB?: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  resolvedAt?: string;
+  note?: string;
 }
 
 export interface SpecOverlap {
@@ -1061,6 +1081,8 @@ export interface SpecCorpusResponse {
   manualIncludes?: string[];
   /** Doc refs the user force-excluded (dropped from the corpus). */
   manualExcludes?: string[];
+  /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
+  conflictResolutions?: SpecConflictResolution[];
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
   /**
@@ -1085,6 +1107,15 @@ export interface SpecScanCancelled {
 export interface SpecDecisionAck {
   manualIncludes: string[];
   manualExcludes: string[];
+}
+
+/**
+ * OSS conflict-verdict ack: the persisted verdicts only (no corpus — a verdict
+ * doesn't re-curate). The client re-derives resolved/dismissed state from these.
+ * PR scope (EE) returns the full re-curated `SpecCorpusResponse` instead.
+ */
+export interface SpecConflictAck {
+  conflictResolutions: SpecConflictResolution[];
 }
 
 /**
@@ -1325,12 +1356,9 @@ export function triggerGuardRun(repoId: string): Promise<GuardRunTriggerResult> 
   return fetchApi<GuardRunTriggerResult>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
 }
 
-// Include/exclude mutations re-curate server-side and return the fresh corpus
-// (with recomputed overlaps) — no separate scan call.
-
-// The optional `scope` on every mutation is the EE PR view (`?pr=&ref=`); in PR
-// scope the server re-curates the PR head and returns the fresh corpus (relations
-// routes included). Repo scope is unchanged — no query, relations return `{relations}`.
+// The optional `scope` on every spec decision mutation is the EE PR view
+// (`?pr=&ref=`); in PR scope the server re-curates the PR head and returns the
+// fresh corpus. Repo scope is unchanged — no query.
 type SpecMutationScope = { pr?: number; ref?: string };
 
 // OSS records the decision and returns a `SpecDecisionAck` (no re-curate); PR scope
@@ -1369,28 +1397,37 @@ export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutat
 }
 
 /**
- * Record a user doc→doc relation (resolves an overlap). Repo scope returns
- * `{relations}`; PR scope returns the full re-curated corpus.
+ * Record a section-scoped conflict verdict (pick-a-side / dismissal). OSS returns
+ * a `SpecConflictAck` (no re-curate); PR scope (EE) returns the full re-curated corpus.
  */
-export function postSpecRelation(
+export function postSpecConflictResolution(
   repoId: string,
-  payload: SpecRelation,
+  payload: {
+    docA: string;
+    anchorA: string | null;
+    quoteA?: string;
+    docB: string;
+    anchorB: string | null;
+    quoteB?: string;
+    verdict: 'a' | 'b' | 'dismissed';
+    note?: string;
+  },
   scope?: SpecMutationScope,
-): Promise<{ relations: SpecRelation[] } | SpecCorpusResponse> {
-  return fetchApi<{ relations: SpecRelation[] } | SpecCorpusResponse>(
-    `/api/repos/${repoId}/spec/relations${prScopeQuery(scope)}`,
+): Promise<SpecConflictAck | SpecCorpusResponse> {
+  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
     { method: 'POST', body: JSON.stringify(payload) },
   );
 }
 
-/** Remove a user relation. Repo scope returns `{relations}`; PR scope the full corpus. */
-export function deleteSpecRelation(
+/** Remove a conflict verdict by dispute identity. Repo scope returns the ack; PR the corpus. */
+export function deleteSpecConflictResolution(
   repoId: string,
-  payload: { older: string; newer: string; scope?: string },
+  payload: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
   scope?: SpecMutationScope,
-): Promise<{ relations: SpecRelation[] } | SpecCorpusResponse> {
-  return fetchApi<{ relations: SpecRelation[] } | SpecCorpusResponse>(
-    `/api/repos/${repoId}/spec/relations${prScopeQuery(scope)}`,
+): Promise<SpecConflictAck | SpecCorpusResponse> {
+  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
     { method: 'DELETE', body: JSON.stringify(payload) },
   );
 }

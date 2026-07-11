@@ -23,6 +23,7 @@ import {
 } from './schemas.js'
 import { EXTRACT_PROMPT_FINGERPRINT, type ExtractUserContext, type OutlineEntry } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
+import { suppressedQuotesIn, suppressionKey } from './suppression.js'
 import type { ExtractRunner } from './runners.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 
@@ -59,9 +60,24 @@ interface ExtractView {
   view?: { index: number; total: number }
 }
 
-/** Cache key: extract prompt fingerprint + the view's content hash. */
-function viewCacheKey(viewText: string): string {
-  return createHash('sha256').update(`${EXTRACT_PROMPT_FINGERPRINT}::${sha(viewText)}`).digest('hex')
+/**
+ * Cache key: extract prompt fingerprint + the view's content hash, PLUS the view's
+ * stale-suppressed quotes (item 31) when any. The suppression component is
+ * appended ONLY when non-empty, so a view with nothing suppressed keys exactly as
+ * before item 31 (unaffected views keep their cache); a view that gains a
+ * suppressed quote re-keys and re-extracts freshly with the "resolved stale" block
+ * in its input. The base prompt (system prompt) never changes — suppression rides
+ * the per-view input, not the fingerprint.
+ */
+function viewCacheKey(viewText: string, suppressed: readonly string[] = []): string {
+  const base = `${EXTRACT_PROMPT_FINGERPRINT}::${sha(viewText)}`
+  const suppression = suppressionKey(suppressed)
+  return createHash('sha256').update(suppression ? `${base}::${suppression}` : base).digest('hex')
+}
+
+/** The subset of a doc's suppressed quotes that fall inside one view's text. */
+function suppressedForView(doc: GuardDoc, viewText: string): string[] {
+  return suppressedQuotesIn(viewText, doc.suppressedQuotes)
 }
 
 function sha(text: string): string {
@@ -123,7 +139,7 @@ export function countExtractViews(doc: GuardDoc): number {
 /** Whether every view of a doc is already cached (no LLM needed) — estimate use. */
 export async function docExtractionCached(repoRoot: string, doc: GuardDoc): Promise<boolean> {
   for (const v of planViews(doc)) {
-    if (!(await getCacheEntry(repoRoot, EXTRACT_CACHE_NAME, viewCacheKey(v.text)))) return false
+    if (!(await getCacheEntry(repoRoot, EXTRACT_CACHE_NAME, viewCacheKey(v.text, suppressedForView(doc, v.text))))) return false
   }
   return true
 }
@@ -132,7 +148,7 @@ export async function docExtractionCached(repoRoot: string, doc: GuardDoc): Prom
 export async function countUncachedExtractViews(repoRoot: string, doc: GuardDoc): Promise<number> {
   let n = 0
   for (const v of planViews(doc)) {
-    if (!(await getCacheEntry(repoRoot, EXTRACT_CACHE_NAME, viewCacheKey(v.text)))) n++
+    if (!(await getCacheEntry(repoRoot, EXTRACT_CACHE_NAME, viewCacheKey(v.text, suppressedForView(doc, v.text))))) n++
   }
   return n
 }
@@ -164,7 +180,7 @@ export async function extractDocClaims(
 
   const attempts = await Promise.all(
     views.map((v) =>
-      run(() => extractView(repoRoot, doc.doc, outline, v, runner)).then((got) => {
+      run(() => extractView(repoRoot, doc.doc, outline, v, suppressedForView(doc, v.text), runner)).then((got) => {
         onView?.()
         return got
       }),
@@ -189,21 +205,30 @@ export async function extractDocClaims(
 
 type ViewAttempt = { data: DocExtraction } | { error: string }
 
-/** A single view: cached result, else the LLM with one corrective re-ask. */
+/** A single view: cached result, else the LLM with one corrective re-ask. The
+ *  view's stale-suppressed quotes (item 31) both re-key its cache and enter its
+ *  input as a "resolved stale — extract no claim asserting this" block. */
 async function extractView(
   repoRoot: string,
   docPath: string,
   outline: OutlineEntry[],
   view: ExtractView,
+  suppressed: string[],
   runner: ExtractRunner,
 ): Promise<ViewAttempt> {
-  const cacheKey = viewCacheKey(view.text)
+  const cacheKey = viewCacheKey(view.text, suppressed)
   const cached = await getCacheEntry(repoRoot, EXTRACT_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = DocExtractionSchema.safeParse(cached)
     if (parsed.success) return { data: parsed.data }
   }
-  const ctx: ExtractUserContext = { doc: docPath, outline, viewText: view.text, view: view.view }
+  const ctx: ExtractUserContext = {
+    doc: docPath,
+    outline,
+    viewText: view.text,
+    view: view.view,
+    ...(suppressed.length > 0 ? { suppressed } : {}),
+  }
   const attempt = await callExtractWithReask(ctx, runner)
   if ('data' in attempt) await setCacheEntry(repoRoot, EXTRACT_CACHE_NAME, cacheKey, attempt.data)
   return attempt

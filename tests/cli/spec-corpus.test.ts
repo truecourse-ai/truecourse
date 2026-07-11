@@ -1,8 +1,8 @@
 /**
- * The corpus-path `spec` CLI surface (Phase 4): the read-only commands resolve
- * flagged within-area overlaps into doc→doc relations. Seeds corpus.json +
- * decisions.json directly (no LLM, no re-scan) and asserts the open-vs-resolved
- * accounting + relation listing.
+ * The corpus-path `spec` CLI surface: conflicts list/show, chains list, and
+ * status. Seeds corpus.json + decisions.json directly (no LLM, no re-scan) and
+ * asserts the open-vs-resolved accounting (verdict/exclude only — a doc→doc
+ * relation never resolves a conflict) + relation listing.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
@@ -78,14 +78,14 @@ describe('spec conflicts list (corpus)', () => {
     expect(out).toContain('0 resolved');
   });
 
-  it('counts an overlap covered by a scoped relation as resolved', async () => {
+  it('counts an overlap covered by a scoped relation as still OPEN — relations never resolve', async () => {
     writeCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h cancellation' }]);
     writeDecisions([
       { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
     ]);
     const out = await capture(() => runSpecConflictsList({ cwd: repo }));
-    expect(out).toContain('0 open');
-    expect(out).toContain('1 resolved');
+    expect(out).toContain('1 open');
+    expect(out).toContain('0 resolved');
   });
 });
 

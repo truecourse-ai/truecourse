@@ -4,7 +4,7 @@
  *
  *   discover → relevance keep/drop → tag each DOC with its AREAS →
  *   group docs by area → detect doc→doc RELATIONS (filename + one LLM pass) →
- *   flag within-area OVERLAPS (skipping pairs a relation already resolves) →
+ *   flag within-area OVERLAPS (relations never skip a pair) →
  *   assemble + persist a CuratedCorpus (corpus.json).
  *
  * Stages: discovery, the relevance filter, the deterministic filename
@@ -76,8 +76,9 @@ export interface CurateStats {
   docsKept: number;
   areaCount: number;
   overlapFlags: number;
+  /** Effective relations (auto ∪ user) — doc lifecycle/precedence, never conflict resolution. */
   resolvedRelations: number;
-  /** Overlaps still awaiting a relation — carries refs; passages derived at display. */
+  /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
   skippedDocs: Array<{ path: string; reason: string }>;
   /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
@@ -182,11 +183,10 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   });
   const relations = effectiveRelations(autoRelations, decisions.relations ?? []);
 
-  // ---- Flag within-area overlaps (skip relation-resolved pairs) -------
+  // ---- Flag within-area overlaps (relations never skip a pair) --------
   const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, docs, {
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
-    relations,
     vocab,
     transport: opts.transport,
     model: models.overlap,
@@ -247,6 +247,7 @@ const EMPTY_DECISIONS: DecisionsFile = {
   manualExcludes: [],
   relations: [],
   manualAreas: [],
+  conflictResolutions: [],
 };
 
 export function readCorpusDecisions(repoRoot: string): DecisionsFile {

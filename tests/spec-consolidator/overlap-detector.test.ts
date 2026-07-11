@@ -1,7 +1,7 @@
 /**
- * Overlap flagging examines unresolved within-area doc pairs and surfaces the
- * disagreements for the user. Pairs already covered by a relation (global or
- * area-scoped) are skipped; the per-area pair count is capped (reported, never
+ * Overlap flagging examines within-area doc pairs and surfaces the disagreements
+ * for the user. Doc→doc relations never skip a pair (they are lifecycle metadata,
+ * not conflict resolution); the per-area pair count is capped (reported, never
  * silently dropped); and verdicts cache per pair.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { flagOverlaps, buildOverlapUserPrompt } from '../../packages/spec-consolidator/src/index.js';
-import type { Area, DocCandidate, OverlapRunner, Relation } from '../../packages/spec-consolidator/src/index.js';
+import type { Area, DocCandidate, OverlapRunner } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
@@ -113,29 +113,19 @@ describe('flagOverlaps', () => {
     expect(out.size).toBe(0);
   });
 
-  it('skips a pair a global relation already resolves', async () => {
+  it('a relation-covered pair is STILL examined and flagged — relations never skip a pair', async () => {
+    // The docs textually disagree; a replace relation is lifecycle metadata and
+    // must not hide the disagreement from detection.
     let calls = 0;
     const runner: OverlapRunner = async (i) => {
       calls++;
       return flagAll(i);
     };
-    const relations: Relation[] = [{ type: 'replace', older: 'a.md', newer: 'b.md', detectedFrom: 'filename' }];
     const out = await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], [doc('a.md'), doc('b.md')], {
       runner,
-      relations,
     });
-    expect(calls).toBe(0);
-    expect(out.size).toBe(0);
-  });
-
-  it('honors relation scope — a scoped relation only resolves its own area', async () => {
-    const relations: Relation[] = [
-      { type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'core/auth' },
-    ];
-    const areas = [area('core/auth', ['a.md', 'b.md']), area('core/users-entity', ['a.md', 'b.md'])];
-    const out = await flagOverlaps(repo, areas, [doc('a.md'), doc('b.md')], { runner: flagAll, relations });
-    expect(out.has('core/auth')).toBe(false); // resolved here
-    expect(out.has('core/users-entity')).toBe(true); // still flagged elsewhere
+    expect(calls).toBe(1);
+    expect(out.get('core/auth')).toHaveLength(1);
   });
 
   it('dedups the same disagreement flagged across shared areas', async () => {
@@ -383,7 +373,7 @@ describe('flagOverlaps — heading-widened cross-area candidates', () => {
     expect(seen).toEqual(['docs/auth-adr.md vs docs/platform-prd.md']);
   });
 
-  it('skips a widened pair a relation already resolves', async () => {
+  it('examines a widened pair even when a relation covers it — relations never skip', async () => {
     const prd = doc('docs/platform-prd.md', BROAD_PRD);
     const note = doc('docs/pagination.md', PAGINATION_NOTE);
     let calls = 0;
@@ -391,15 +381,11 @@ describe('flagOverlaps — heading-widened cross-area candidates', () => {
       calls++;
       return flagAll(i);
     };
-    const relations: Relation[] = [
-      { type: 'keep-both', older: 'docs/pagination.md', newer: 'docs/platform-prd.md', detectedFrom: 'manual' },
-    ];
     const out = await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [prd, note], {
       runner,
-      relations,
     });
-    expect(calls).toBe(0);
-    expect(out.size).toBe(0);
+    expect(calls).toBe(1);
+    expect(out.get('core/pagination')).toHaveLength(1);
   });
 
   it('counts widened pairs against the per-area cap', async () => {

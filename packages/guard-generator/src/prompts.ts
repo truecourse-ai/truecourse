@@ -143,6 +143,13 @@ export interface ExtractUserContext {
   viewText: string
   /** 1-based view position + count, present only when the doc was chunked. */
   view?: { index: number; total: number }
+  /**
+   * Verbatim sentences a conflict resolution judged STALE (item 31) — the losing
+   * side of a "the other doc is right" verdict. No claim asserting what they say
+   * may be extracted. Rides the per-view INPUT (not the system prompt), so only
+   * views containing a suppressed sentence change their cache key.
+   */
+  suppressed?: string[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -162,6 +169,15 @@ export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
     ctx.viewText,
     '"""',
   ]
+  if (ctx.suppressed && ctx.suppressed.length > 0) {
+    lines.push(
+      '',
+      'RESOLVED — STALE, DO NOT EXTRACT. A conflict resolution judged the following',
+      'sentence(s) in this document stale (another document is authoritative here).',
+      'Extract NO claim that asserts what any of them says — treat them as if absent:',
+    )
+    for (const q of ctx.suppressed) lines.push(`- "${q}"`)
+  }
   if (ctx.correction) {
     lines.push(
       '',

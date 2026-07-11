@@ -18,6 +18,7 @@ const EMPTY_DECISIONS: DecisionsFile = {
   manualExcludes: [],
   relations: [],
   manualAreas: [],
+  conflictResolutions: [],
 };
 
 export function decisionsPath(repoRoot: string): string {

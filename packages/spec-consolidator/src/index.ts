@@ -13,6 +13,7 @@ export type {
   Relation,
   RelationType,
   ManualArea,
+  ConflictResolution,
   DecisionsFile,
 } from './types.js';
 
@@ -22,6 +23,7 @@ export {
   RelationSchema,
   RelationTypeSchema,
   ManualAreaSchema,
+  ConflictResolutionSchema,
   DecisionsFileSchema,
 } from './types.js';
 

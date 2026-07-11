@@ -563,7 +563,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       anchor: section.anchor,
       fingerprint: section.fingerprint,
       scenarioIds: scenarioIds.slice().sort(),
-      generationInputsHash: generationInputsHash(section.fingerprint, recipeFingerprint),
+      generationInputsHash: generationInputsHash(section.fingerprint, recipeFingerprint, section.suppressionFingerprint),
       ...(classification ? { classification } : {}),
     })
     settledKeys.add(k)

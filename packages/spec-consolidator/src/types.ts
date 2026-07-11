@@ -91,6 +91,48 @@ export const RelationSchema = z.object({
 export type Relation = z.infer<typeof RelationSchema>;
 
 /**
+ * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
+ * disagreement between two specific sections (plan item 31), as opposed to a
+ * doc-level {@link RelationSchema} (which now lives in the chains world). Keyed by
+ * the *dispute identity*: the unordered doc pair plus each side's section anchor
+ * and (when the detector captured one) its verbatim disputed-sentence quote. This
+ * identity re-matches the same dispute across a rescan even though the corpus's
+ * `overlaps[]` are regenerated each scan.
+ *
+ * The verdict is a claim-level call, never a document-wide one:
+ *   - "a"         docA's section is right; docB's disputed claim is stale and is
+ *                 SUPPRESSED at extraction (its verbatim sentence yields no claims).
+ *   - "b"         docB's section is right; docA's disputed claim is suppressed.
+ *   - "dismissed" a detector false-positive — not a real conflict. Resolves the
+ *                 gate (visible, reversible) but suppresses NOTHING.
+ *
+ * `anchorA`/`anchorB` are the conflicting section's heading text (or `null` for a
+ * doc's preamble/lead), mirroring {@link OverlapSectionSchema.heading}; `quoteA`/
+ * `quoteB` are the verbatim disputed sentence when the detector supplied one.
+ */
+export const ConflictResolutionSchema = z.object({
+  /** Repo-relative path / DocRef of the first doc in the dispute. */
+  docA: z.string(),
+  /** docA's conflicting section heading, or `null` for its preamble/lead. */
+  anchorA: z.string().nullable(),
+  /** docA's verbatim disputed sentence, when the detector captured one. */
+  quoteA: z.string().optional(),
+  /** Repo-relative path / DocRef of the second doc in the dispute. */
+  docB: z.string(),
+  /** docB's conflicting section heading, or `null` for its preamble/lead. */
+  anchorB: z.string().nullable(),
+  /** docB's verbatim disputed sentence, when the detector captured one. */
+  quoteB: z.string().optional(),
+  /** Which side wins, or `dismissed` (not a real conflict). */
+  verdict: z.enum(['a', 'b', 'dismissed']),
+  /** ISO timestamp the resolution was recorded. */
+  resolvedAt: z.string(),
+  /** Optional human-readable rationale. */
+  note: z.string().optional(),
+});
+export type ConflictResolution = z.infer<typeof ConflictResolutionSchema>;
+
+/**
  * A user override of a doc's auto-assigned area tags. Lets the user
  * re-home a mis-tagged doc without re-running the classifier.
  */
@@ -110,6 +152,7 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
+ *   - `conflictResolutions[]` section-scoped conflict verdicts (item 31)
  */
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
@@ -130,5 +173,11 @@ export const DecisionsFileSchema = z.object({
   relations: z.array(RelationSchema).default([]),
   /** User overrides of a doc's auto-assigned area tags. */
   manualAreas: z.array(ManualAreaSchema).default([]),
+  /**
+   * SECTION-scoped conflict verdicts (plan item 31) — pick-a-side / dismissal on
+   * one flagged disagreement, keyed by dispute identity. Optional with a `[]`
+   * default so a decisions.json written before item 31 still parses.
+   */
+  conflictResolutions: z.array(ConflictResolutionSchema).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;

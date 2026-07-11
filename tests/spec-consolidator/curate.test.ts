@@ -114,18 +114,18 @@ describe('curate', () => {
       { type: 'replace', older: 'docs/users-v1.md', newer: 'docs/users-v2.md', detectedFrom: 'filename' },
     ]);
 
-    // Overlap flagged on the unresolved pairs only — the (v1,v2) pair is skipped
-    // because the replace relation resolves it.
+    // Every within-area pair is examined — the replace relation does NOT skip the
+    // (v1,v2) pair: relations are lifecycle metadata, never conflict resolution.
     const overlapPairs = usersArea.overlaps.map((o) => o.docs);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
-    expect(overlapPairs).not.toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    expect(overlapPairs).toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
 
     // Stats.
     expect(result.stats.docsScanned).toBe(4);
     expect(result.stats.docsKept).toBe(3);
     expect(result.stats.areaCount).toBe(2);
-    expect(result.stats.overlapFlags).toBe(2);
+    expect(result.stats.overlapFlags).toBe(3);
     expect(result.stats.resolvedRelations).toBe(1);
   });
 
@@ -165,8 +165,10 @@ describe('curate', () => {
     expect(eff?.type).toBe('precedence');
     expect(eff?.detectedFrom).toBe('manual');
 
-    // That pair is resolved → no overlap flagged for it (and it's the only pair now).
-    expect(usersArea.overlaps).toHaveLength(0);
+    // The relation does NOT skip the pair — the disagreement is still flagged
+    // (relations are lifecycle metadata, never conflict resolution).
+    expect(usersArea.overlaps).toHaveLength(1);
+    expect(usersArea.overlaps[0].docs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
 
   it('force-excludes a doc via manualExcludes — dropped from the corpus + its overlaps', async () => {
@@ -174,12 +176,14 @@ describe('curate', () => {
     const result = await run({ decisions });
 
     // auth.md is gone entirely: not a kept doc, its core/auth area vanishes, and
-    // the two overlaps it drove are gone (v1/v2 stays resolved by the replace).
+    // the two overlaps it drove are gone. The (v1,v2) pair stays flagged — the
+    // filename replace relation never resolves the disagreement.
     expect(result.corpus.docs.map((d) => d.ref)).not.toContain('docs/auth.md');
     expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/users-entity']);
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
-    expect(usersArea.overlaps).toHaveLength(0);
+    expect(usersArea.overlaps).toHaveLength(1);
+    expect(usersArea.overlaps[0].docs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
     expect(result.stats.docsKept).toBe(2);
   });
 

@@ -404,6 +404,7 @@ function RepoPageInner() {
     contractsStale,
     verifyStale,
     decisionsPending,
+    docsChanged,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
   const {
@@ -1294,7 +1295,8 @@ function RepoPageInner() {
         <SpecScanButton
           hasCorpus={specCorpus.data != null}
           scanning={specCorpus.scanning}
-          stale={decisionsPending}
+          decisionsPending={decisionsPending}
+          docsChanged={docsChanged}
           onClick={() => void specCorpus.scan()}
         />
       ) : null
@@ -1847,6 +1849,8 @@ function RepoPageInner() {
                       if (res) specCorpus.apply(res);
                       else void specCorpus.refetch();
                     }}
+                    onConflictChange={(list) => specCorpus.applyConflictResolutions(list)}
+                    onDecision={refetchStaleness}
                   />
                 ) : (
                   <SpecPanePlaceholder />
@@ -2017,6 +2021,7 @@ function RepoPageInner() {
               prRef={refForTabs}
               reloadKey={guardReloadKey}
               tabs={guardCoverageTabs}
+              onDecision={refetchStaleness}
             />
           ) : leftTab === 'scenarios' ? (
             // Guard Scenarios: the shared GuardTabStrip (permanent Overview tab +

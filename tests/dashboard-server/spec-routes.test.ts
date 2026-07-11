@@ -433,3 +433,178 @@ describe('POST /contracts/generate (corpus-only)', () => {
     expect(res.body.il.skipped).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Doc-content staleness (docsChanged, plan item 31d) — the "fix the doc itself"
+// resolution path: an external edit bumps the kept doc's mtime past the corpus
+// `generatedAt` and lights the Rescan dot. (There is no in-app doc editor.)
+// ---------------------------------------------------------------------------
+
+describe('spec docs-content staleness (item 31)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+
+  const specsDir = () => path.join(fixture.repoPath, '.truecourse', 'specs');
+  const DOC = 'docs/spec.md';
+  const DOC_BODY = '## rm\nrm archives the task.\n\n## keep\nkeep does nothing.\n';
+
+  // Seed a one-doc corpus whose `generatedAt` is AFTER the doc's (back-dated) mtime,
+  // so the docs-content signal starts clean and only flips when the doc is edited.
+  const seed = (generatedAt = '2026-06-01T00:00:00Z'): void => {
+    fs.mkdirSync(specsDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(specsDir(), 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt,
+        docs: [{ ref: DOC, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/persistence'] }],
+        areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], overlaps: [] }],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+    fs.mkdirSync(path.join(fixture.repoPath, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(fixture.repoPath, DOC), DOC_BODY);
+    const old = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(path.join(fixture.repoPath, DOC), old, old);
+  };
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    gitInit(fixture.repoPath);
+    app = createApp({ serveStatic: false });
+  });
+  afterEach(async () => {
+    setBackgroundTaskRunner(null);
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('staleness docsChanged is false with a fresh corpus, true after a kept doc is edited on disk', async () => {
+    seed();
+    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(before.body.docsChanged).toBe(false);
+    expect(before.body.decisionsPending).toBe(false);
+
+    // Edit the doc in the working tree (user's own editor) — mtime bumps to now.
+    fs.writeFileSync(
+      path.join(fixture.repoPath, DOC),
+      DOC_BODY.replace('rm archives the task.', 'rm permanently deletes the task.'),
+    );
+
+    const after = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(after.body.docsChanged).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Section-scoped conflict verdicts (item 31b) — POST/DELETE /spec/conflict-resolution
+// ---------------------------------------------------------------------------
+
+describe('conflict-resolution routes (item 31b)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+
+  const seedCorpus = (): void => {
+    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
+    fs.mkdirSync(specs, { recursive: true });
+    fs.writeFileSync(
+      path.join(specs, 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [
+          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
+          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] },
+        ],
+        areas: [
+          {
+            id: 'booking/appointments',
+            product: 'booking',
+            concern: 'appointments',
+            docRefs: ['docs/v1.md', 'docs/v2.md'],
+            overlaps: [
+              {
+                docs: ['docs/v1.md', 'docs/v2.md'],
+                note: '24h vs 48h',
+                sections: [
+                  { doc: 'docs/v1.md', heading: 'Cancellation' },
+                  { doc: 'docs/v2.md', heading: 'Cancellation policy' },
+                ],
+              },
+            ],
+          },
+        ],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+  };
+
+  const verdict = {
+    docA: 'docs/v1.md',
+    anchorA: 'Cancellation',
+    docB: 'docs/v2.md',
+    anchorB: 'Cancellation policy',
+    verdict: 'a' as const,
+  };
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    gitInit(fixture.repoPath);
+    vi.mocked(curateInProcess).mockClear();
+    app = createApp({ serveStatic: false });
+  });
+  afterEach(async () => {
+    setBackgroundTaskRunner(null);
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('POST records a verdict without re-curating (OSS ack), and GET /spec/corpus exposes it', async () => {
+    seedCorpus();
+    const res = await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(verdict)
+      .expect(200);
+    // OSS ack: the persisted verdicts only (no corpus), and no re-curate.
+    expect(res.body.conflictResolutions).toHaveLength(1);
+    expect(res.body.conflictResolutions[0]).toMatchObject({ docA: 'docs/v1.md', verdict: 'a' });
+    expect(res.body.conflictResolutions[0].resolvedAt).toBeTruthy();
+    expect(res.body.corpus).toBeUndefined();
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+
+    // The corpus payload now carries the verdict so the client re-derives resolution.
+    const corpus = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
+    expect(corpus.body.conflictResolutions).toHaveLength(1);
+  });
+
+  it('DELETE removes the verdict by dispute identity (OSS ack)', async () => {
+    seedCorpus();
+    await request(app).post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`).send(verdict).expect(200);
+    const del = await request(app)
+      .delete(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send({ docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy' })
+      .expect(200);
+    expect(del.body.conflictResolutions).toEqual([]);
+  });
+
+  it('recording a verdict lights the decisionsPending staleness signal', async () => {
+    seedCorpus();
+    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(before.body.decisionsPending).toBe(false);
+    await request(app).post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`).send(verdict).expect(200);
+    const after = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(after.body.decisionsPending).toBe(true);
+  });
+
+  it('400s on a missing/equal doc pair or a bad verdict', async () => {
+    seedCorpus();
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send({ docA: 'docs/v1.md', anchorA: null, docB: 'docs/v1.md', anchorB: null, verdict: 'a' })
+      .expect(400);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send({ docA: 'docs/v1.md', anchorA: null, docB: 'docs/v2.md', anchorB: null, verdict: 'bogus' })
+      .expect(400);
+  });
+});

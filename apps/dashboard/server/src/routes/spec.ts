@@ -16,6 +16,7 @@ import path from 'node:path';
 import {
   corpusFilePath,
   decisionsPath,
+  type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
   type Relation,
@@ -33,6 +34,7 @@ import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
+  addConflictResolution,
   addManualExclude,
   addManualInclude,
   addRelation,
@@ -45,6 +47,7 @@ import {
   getDecisions,
   recuratePrCorpus,
   recurateStoredCorpus,
+  removeConflictResolution,
   removeManualExclude,
   removeManualInclude,
   removeRelation,
@@ -71,6 +74,9 @@ interface SpecCorpusPayload {
   userRelations: Relation[];
   manualIncludes: string[];
   manualExcludes: string[];
+  /** Section-scoped conflict verdicts (item 31) — the client re-derives resolved/
+   *  dismissed/orphaned conflict state from these via the shared derivation. */
+  conflictResolutions: ConflictResolution[];
   /** The commit whose corpus was returned (EE), when different from what was asked. */
   corpusCommit?: string;
 }
@@ -113,6 +119,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
+    conflictResolutions: decisions.conflictResolutions ?? [],
     corpusCommit,
   };
 }
@@ -130,6 +137,7 @@ function prCorpusPayload(
     userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
+    conflictResolutions: decisions.conflictResolutions ?? [],
     corpusCommit: corpus ? ref : undefined,
   }));
 }
@@ -247,8 +255,8 @@ async function enqueueContractsRefresh(repoKey: string): Promise<void> {
 // OSS "resolve conflicts, then click Generate" flow: contracts regenerate the moment
 // the spec becomes unambiguous, and never while conflicts remain (then it's just the
 // cheap re-curate). Regeneration triggers off ANY decision that clears the last
-// conflict — a relation OR an exclude — since either can be the one that resolves it.
-// OSS regenerates via the manual Generate step, so this is a no-op there.
+// conflict — a verdict/dismissal OR an exclude — since either can be the one that
+// resolves it. OSS regenerates via the manual Generate step, so this is a no-op there.
 async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
   if (contractsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
@@ -516,6 +524,114 @@ router.delete(
 );
 
 // ---------------------------------------------------------------------------
+// Section-scoped conflict verdicts (item 31) — pick-a-side / dismissal.
+//
+// A verdict resolves ONE flagged disagreement without re-curating: the corpus is
+// unchanged (the overlap stays flagged), and the shared resolved-derivation reads
+// the verdict live, so a single later Scan applies any batch (mirrors the OSS
+// include/exclude ack). OSS returns the persisted `conflictResolutions` (no
+// corpus); EE repo scope re-curates and returns the full corpus (its decisions
+// flow); a PR-scoped edit writes the PR overlay + re-curates the PR head.
+// ---------------------------------------------------------------------------
+
+const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
+
+async function mutateConflictResolution(
+  repoPath: string,
+  res: Response,
+  mutate: () => Promise<DecisionsFile>,
+): Promise<void> {
+  if (!contractsMaterializeInPlace()) {
+    // EE repo scope: re-curate is how EE decisions flow; return the full corpus
+    // (folding the recorded verdict), same as an include/exclude edit.
+    await mutate();
+    await recurateAndRegenIfResolved(repoPath);
+    res.json(await corpusPayload(repoPath));
+    return;
+  }
+  // OSS: instant decision-write, NO re-curate — ack the persisted verdicts.
+  const decisions = await mutate();
+  res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
+}
+
+async function applyConflictResolution(
+  req: Request,
+  res: Response,
+  repoPath: string,
+  mutate: (opts?: { pr?: number }) => Promise<DecisionsFile>,
+): Promise<void> {
+  const parsed = parsePrScope(req);
+  if ('error' in parsed) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  if (parsed.scope) {
+    await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
+    return;
+  }
+  await mutateConflictResolution(repoPath, res, () => mutate());
+}
+
+router.post(
+  '/:id/spec/conflict-resolution',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as Partial<ConflictResolution>;
+      if (!body.docA || !body.docB || body.docA === body.docB) {
+        res.status(400).json({ error: 'docA and docB are required and must differ.' });
+        return;
+      }
+      if (!body.verdict || !CONFLICT_VERDICTS.includes(body.verdict)) {
+        res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
+        return;
+      }
+      const resolution: ConflictResolution = {
+        docA: body.docA,
+        anchorA: body.anchorA ?? null,
+        quoteA: body.quoteA,
+        docB: body.docB,
+        anchorB: body.anchorB ?? null,
+        quoteB: body.quoteB,
+        verdict: body.verdict,
+        resolvedAt: new Date().toISOString(),
+        note: body.note,
+      };
+      await applyConflictResolution(req, res, repo.path, (opts) =>
+        addConflictResolution(repo.path, resolution, opts),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/spec/conflict-resolution',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { docA?: string; anchorA?: string | null; docB?: string; anchorB?: string | null };
+      if (!body.docA || !body.docB) {
+        res.status(400).json({ error: 'docA and docB are required.' });
+        return;
+      }
+      const input = {
+        docA: body.docA,
+        anchorA: body.anchorA ?? null,
+        docB: body.docB,
+        anchorB: body.anchorB ?? null,
+      };
+      await applyConflictResolution(req, res, repo.path, (opts) =>
+        removeConflictResolution(repo.path, input, opts),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/staleness
 //
 // Cheap mtime probe powering the amber dots on Generate / Verify.
@@ -526,10 +642,14 @@ router.delete(
 //   verifyStale     last generate marker is newer than verifier/LATEST.json
 //                   (or LATEST.json is missing → never verified against
 //                   current contracts).
-//   decisionsPending recorded include/exclude/relation decisions are newer than
-//                   the curated corpus — a Scan would materialize them (the
-//                   decisions half of the scan-staleness signal; docs-content
-//                   staleness stays a logged follow-up).
+//   decisionsPending recorded include/exclude/relation/conflict decisions are
+//                   newer than the curated corpus — a Scan would materialize them.
+//   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
+//                   `generatedAt` — a doc was edited on disk since the last
+//                   scan (the "fix the doc itself" resolution path). This is
+//                   the docs-content half of the scan-staleness signal:
+//                   staleness = decisionsPending OR docsChanged. Tolerant —
+//                   any missing/unreadable file → false.
 // ---------------------------------------------------------------------------
 
 router.get(
@@ -553,6 +673,8 @@ router.get(
           verifyStale: false,
           // EE re-curates on every decision, so decisions never outrun the corpus.
           decisionsPending: false,
+          // EE has no live tree — docs can't drift out from under the stored corpus.
+          docsChanged: false,
           hasCorpus: corpus !== null,
           hasGenerated: contractFiles.length > 0,
           hasVerified: verify !== null,
@@ -577,6 +699,7 @@ router.get(
         contractsStale,
         verifyStale,
         decisionsPending: hasPendingDecisions(repo.path),
+        docsChanged: hasChangedDocs(repo.path),
         hasCorpus: corpusMtime !== null,
         hasGenerated: generatedMtime !== null,
         hasVerified: verifiedMtime !== null,
@@ -608,6 +731,31 @@ function hasPendingDecisions(repoPath: string): boolean {
     const generatedAt = Date.parse(corpus.generatedAt ?? '');
     if (Number.isNaN(generatedAt)) return false;
     return decisionsMtime > generatedAt;
+  } catch {
+    return false;
+  }
+}
+
+// The docs-content half of the scan-staleness signal (closes the long-logged
+// follow-up): true when any corpus KEPT doc's on-disk mtime is newer than the
+// corpus's own `generatedAt` (the curate timestamp) — a spec doc changed since the
+// last scan, whether edited via the dashboard's doc-section route or outside it, so
+// a Scan would pick up new content. Only the corpus's own docs are checked (it
+// holds exactly the kept set). Tolerant — any missing/unreadable file → false.
+function hasChangedDocs(repoPath: string): boolean {
+  try {
+    const corpus = JSON.parse(fs.readFileSync(corpusFilePath(repoPath), 'utf8')) as {
+      generatedAt?: string;
+      docs?: { ref?: string }[];
+    };
+    const generatedAt = Date.parse(corpus.generatedAt ?? '');
+    if (Number.isNaN(generatedAt)) return false;
+    for (const doc of corpus.docs ?? []) {
+      if (!doc.ref) continue;
+      const docMtime = mtimeIfExists(path.join(repoPath, doc.ref));
+      if (docMtime !== null && docMtime > generatedAt) return true;
+    }
+    return false;
   } catch {
     return false;
   }

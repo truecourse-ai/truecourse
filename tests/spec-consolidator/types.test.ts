@@ -5,6 +5,7 @@ import {
   RelationSchema,
   RelationTypeSchema,
   ManualAreaSchema,
+  ConflictResolutionSchema,
   DecisionsFileSchema,
 } from '../../packages/spec-consolidator/src/index.js';
 
@@ -72,25 +73,79 @@ describe('ManualAreaSchema (per-doc area override)', () => {
   });
 });
 
+describe('ConflictResolutionSchema (section-scoped verdicts, item 31)', () => {
+  it('round-trips a pick-a-side verdict with anchors + quotes', () => {
+    const r = {
+      docA: 'README.md',
+      anchorA: 'taskline',
+      quoteA: 'rm permanently deletes the task.',
+      docB: 'docs/SPEC.md',
+      anchorB: 'rm <id>',
+      quoteB: 'rm archives the task.',
+      verdict: 'a' as const,
+      resolvedAt: '2026-07-10T00:00:00Z',
+      note: 'README is authoritative',
+    };
+    expect(ConflictResolutionSchema.parse(r)).toEqual(r);
+  });
+
+  it('allows null anchors (preamble/lead) and omitted quotes', () => {
+    const parsed = ConflictResolutionSchema.parse({
+      docA: 'README.md',
+      anchorA: null,
+      docB: 'docs/SPEC.md',
+      anchorB: null,
+      verdict: 'dismissed',
+      resolvedAt: '',
+    });
+    expect(parsed.anchorA).toBeNull();
+    expect(parsed.quoteA).toBeUndefined();
+  });
+
+  it('rejects an unknown verdict', () => {
+    expect(() =>
+      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, docB: 'b', anchorB: null, verdict: 'maybe', resolvedAt: '' }),
+    ).toThrow();
+  });
+});
+
 describe('DecisionsFileSchema (corpus curation intent)', () => {
   it('defaults the optional arrays when absent', () => {
     const parsed = DecisionsFileSchema.parse({ version: 1 });
     expect(parsed.manualIncludes).toEqual([]);
     expect(parsed.relations).toEqual([]);
     expect(parsed.manualAreas).toEqual([]);
+    expect(parsed.conflictResolutions).toEqual([]);
   });
 
-  it('round-trips relations + manualAreas + manualIncludes', () => {
+  it('parses an OLD decisions file (no conflictResolutions field) — defaults to []', () => {
+    const old = {
+      version: 1 as const,
+      manualIncludes: ['docs/keep.md'],
+      manualExcludes: [],
+      relations: [{ type: 'keep-both' as const, older: 'a.md', newer: 'b.md' }],
+      manualAreas: [],
+    };
+    const parsed = DecisionsFileSchema.parse(old);
+    expect(parsed.conflictResolutions).toEqual([]);
+  });
+
+  it('round-trips relations + manualAreas + manualIncludes + conflictResolutions', () => {
     const file = {
       version: 1 as const,
       manualIncludes: ['docs/keep.md'],
       relations: [{ type: 'keep-both' as const, older: 'a.md', newer: 'b.md' }],
       manualAreas: [{ doc: 'a.md', areas: ['core/auth'] }],
+      conflictResolutions: [
+        { docA: 'a.md', anchorA: 'x', docB: 'b.md', anchorB: 'y', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
+      ],
     };
     const parsed = DecisionsFileSchema.parse(file);
     expect(parsed.relations).toHaveLength(1);
     expect(parsed.manualAreas).toHaveLength(1);
     expect(parsed.manualIncludes).toEqual(['docs/keep.md']);
+    expect(parsed.conflictResolutions).toHaveLength(1);
+    expect(parsed.conflictResolutions[0].verdict).toBe('b');
   });
 
   it('rejects the wrong version literal — bumping is intentional', () => {

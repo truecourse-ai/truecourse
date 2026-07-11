@@ -26,6 +26,7 @@ import {
   type CurateModels,
   type CurateOptions,
   type CurateResult,
+  type ConflictResolution,
   type DecisionsFile,
   type DocCandidate,
   type Relation,
@@ -48,6 +49,7 @@ import {
   type ValidationIssue,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
+import { openConflicts } from '@truecourse/shared';
 import {
   agentTransport,
   getDefaultTransport,
@@ -1772,6 +1774,7 @@ const EMPTY_DECISIONS: DecisionsFile = {
   manualExcludes: [],
   relations: [],
   manualAreas: [],
+  conflictResolutions: [],
 };
 /** Sentinel commit for the per-repo "current" decisions document in EE. */
 const DECISIONS_REF = '_repo';
@@ -1863,7 +1866,15 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
     ...(overlay.manualAreas ?? []),
   ];
 
-  return { version: 1, manualIncludes, manualExcludes, relations, manualAreas };
+  // Conflict verdicts: the overlay wins per dispute identity (same unordered pair
+  // + same section anchors), other base verdicts survive.
+  const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(conflictResolutionKey));
+  const conflictResolutions = [
+    ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(conflictResolutionKey(r))),
+    ...(overlay.conflictResolutions ?? []),
+  ];
+
+  return { version: 1, manualIncludes, manualExcludes, relations, manualAreas, conflictResolutions };
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -1974,7 +1985,9 @@ export async function recurateStoredCorpus(
   // never `latestSpecCommit`, which a PR-head scan can leave pointing at a PR.
   const commitSha = await baselineSpecCommit(repoKey);
   if (commitSha) await saveSpec({ repoKey, commitSha }, 'corpus', result.corpus);
-  return { corpus: result.corpus, openConflicts: result.stats.overlapFlags };
+  // Open = the SAME shared derivation the gate uses (verdicts/dismissals/excludes
+  // resolve; a flagged-but-verdicted dispute must not block regeneration).
+  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
 }
 
 /**
@@ -2020,7 +2033,7 @@ export async function recuratePrCorpus(
     skipCorpusWrite: true,
   });
   await saveSpec({ repoKey, commitSha: prHeadSha }, 'corpus', result.corpus);
-  return { corpus: result.corpus, openConflicts: result.stats.overlapFlags };
+  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
 }
 
 // ---------------------------------------------------------------------------
@@ -2041,6 +2054,20 @@ export async function recuratePrCorpus(
 const relationKey = (r: { older: string; newer: string; scope?: string }): string =>
   `${[r.older, r.newer].sort().join(' ')} ${r.scope ?? ''}`;
 
+/**
+ * Dispute-identity key for a section-scoped conflict verdict (item 31): the
+ * unordered doc pair plus each side's section anchor, oriented by doc so the same
+ * dispute keys identically regardless of which doc was recorded as A. One verdict
+ * per dispute — re-recording replaces it.
+ */
+const conflictResolutionKey = (r: ConflictResolution): string => {
+  const sides = [
+    `${r.docA}#${r.anchorA ?? ''}`,
+    `${r.docB}#${r.anchorB ?? ''}`,
+  ].sort();
+  return sides.join('   ');
+};
+
 function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
   if (input.older === input.newer) {
     throw new Error('addRelation: older and newer must be different docs');
@@ -2054,6 +2081,7 @@ function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFi
     manualExcludes: existing.manualExcludes ?? [],
     relations: [...dedup, relation],
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
   };
 }
 
@@ -2074,6 +2102,7 @@ function applyRemoveRelation(
     manualExcludes: existing.manualExcludes ?? [],
     relations: (existing.relations ?? []).filter((r) => !matches(r)),
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
   };
 }
 
@@ -2090,6 +2119,7 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
     manualExcludes: excludes.filter((p) => p !== docPath),
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
   };
 }
 
@@ -2100,6 +2130,7 @@ function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): Dec
     manualExcludes: existing.manualExcludes ?? [],
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
   };
 }
 
@@ -2113,6 +2144,7 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
     manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
   };
 }
 
@@ -2123,14 +2155,51 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
     manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
     relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: existing.conflictResolutions ?? [],
+  };
+}
+
+// Section-scoped conflict verdicts (item 31). One verdict per dispute identity —
+// recording a verdict for a dispute already resolved replaces it (a side verdict
+// overwrites a prior dismissal and vice versa).
+
+function applyAddConflictResolution(existing: DecisionsFile, input: ConflictResolution): DecisionsFile {
+  if (input.docA === input.docB) {
+    throw new Error('addConflictResolution: docA and docB must be different docs');
+  }
+  const key = conflictResolutionKey(input);
+  const dedup = (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key);
+  return {
+    version: 1,
+    manualIncludes: existing.manualIncludes ?? [],
+    manualExcludes: existing.manualExcludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: [...dedup, input],
+  };
+}
+
+function applyRemoveConflictResolution(
+  existing: DecisionsFile,
+  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+): DecisionsFile {
+  const key = conflictResolutionKey({ ...input, verdict: 'dismissed', resolvedAt: '' });
+  return {
+    version: 1,
+    manualIncludes: existing.manualIncludes ?? [],
+    manualExcludes: existing.manualExcludes ?? [],
+    relations: existing.relations ?? [],
+    manualAreas: existing.manualAreas ?? [],
+    conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key),
   };
 }
 
 /**
- * Add (or replace) a user-authored doc→doc relation — the corpus-path verb that
- * resolves a flagged overlap (replace / precedence / keep-both). When a relation
- * for the same (older, newer, scope) already exists it's replaced. Self-pairs are
- * rejected. Re-run `spec scan` (curate) to apply.
+ * Add (or replace) a user-authored doc→doc relation (replace / precedence /
+ * keep-both) — the doc-lifecycle/precedence tool (`spec chains`). A relation
+ * never resolves a conflict; that takes a verdict, a dismissal, or an exclude.
+ * When a relation for the same (older, newer, scope) already exists it's
+ * replaced. Self-pairs are rejected. Re-run `spec scan` (curate) to apply.
  */
 export async function addRelation(
   repoRoot: string,
@@ -2207,6 +2276,38 @@ export async function removeManualExclude(
   opts?: { pr?: number },
 ): Promise<DecisionsFile> {
   const next = applyRemoveManualExclude(await loadDecisions(repoRoot, opts), docPath);
+  await storeDecisions(repoRoot, next, opts);
+  return next;
+}
+
+/**
+ * Record a SECTION-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or
+ * dismissal — for one flagged dispute. Replaces any prior verdict for the same
+ * dispute identity. Unlike a doc-relation resolve, this does NOT re-curate: the
+ * corpus is unchanged (the overlap stays flagged), and the shared resolved-
+ * derivation reads the verdict live, so a single later scan applies any batch.
+ * Self-pairs are rejected.
+ */
+export async function addConflictResolution(
+  repoRoot: string,
+  input: ConflictResolution,
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  const next = applyAddConflictResolution(await loadDecisions(repoRoot, opts), input);
+  await storeDecisions(repoRoot, next, opts);
+  return next;
+}
+
+/**
+ * Remove a conflict verdict by dispute identity (unordered doc pair + section
+ * anchors). Idempotent.
+ */
+export async function removeConflictResolution(
+  repoRoot: string,
+  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  opts?: { pr?: number },
+): Promise<DecisionsFile> {
+  const next = applyRemoveConflictResolution(await loadDecisions(repoRoot, opts), input);
   await storeDecisions(repoRoot, next, opts);
   return next;
 }

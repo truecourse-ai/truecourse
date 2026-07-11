@@ -54,6 +54,7 @@ export function GuardCoveragePage({
   prRef,
   reloadKey = 0,
   tabs,
+  onDecision,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
@@ -67,6 +68,8 @@ export function GuardCoveragePage({
   reloadKey?: number;
   /** The doc/conflict tab set (shared with the sidebar) + the within-doc section. */
   tabs: GuardCoverageTabsState;
+  /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
+  onDecision?: () => void;
 }) {
   const { activeId, openTabs, open, close, selectOverview, section, selectSection } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
@@ -205,6 +208,8 @@ export function GuardCoveragePage({
             if (res) corpus.apply(res);
             else void corpus.refetch();
           }}
+          onConflictChange={(list) => corpus.applyConflictResolutions(list)}
+          onDecision={onDecision}
           onClose={() => close(activeConflict!)}
         />
       );

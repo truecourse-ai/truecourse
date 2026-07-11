@@ -2,22 +2,33 @@
  * `truecourse spec conflicts <sub>` — corpus overlap surface (agent-friendly).
  *
  * In the curated-corpus model a "conflict" is a flagged within-area OVERLAP —
- * two docs in the same area that may disagree. The user resolves it by recording
- * a doc→doc RELATION (replace / precedence / keep-both).
+ * two docs whose specific sections may disagree. It resolves with a
+ * SECTION-scoped verdict on the disagreement itself (plan item 31):
+ *   - pick a side  (`--right <docPath>`) — the other side's disputed claim is
+ *                  suppressed at guard generate; the winner stands.
+ *   - dismiss      (`--dismiss`)          — a detector false-positive; resolves
+ *                  the gate, suppresses nothing.
+ * Doc-LEVEL relations (replace / precedence / keep-both) are a different tool —
+ * document lifecycle/precedence, owned by `spec chains` — and never resolve a
+ * conflict.
  *
- *   list                         flagged overlaps still awaiting a relation
+ *   list                         flagged overlaps + their resolved/dismissed state
  *   show <area>                  the overlapping docs' prose excerpts for one area
- *   resolve <area> --older P --newer P --replace|--precedence|--keep-both [--note]
- *                                record the relation for the pair, then re-scan
+ *   resolve <n|area> --right P   pick a side (loser's claim suppressed at generate)
+ *   resolve <n|area> --dismiss   mark not-a-real-conflict
  */
 
 import * as p from '@clack/prompts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCorpus, readCorpusDecisions } from '@truecourse/spec-consolidator';
-import type { CuratedCorpus, RelationType } from '@truecourse/spec-consolidator';
-import { buildCorpusConflicts } from '@truecourse/shared';
-import { addRelation, curateInProcess } from '@truecourse/core/commands/spec-in-process';
+import type { CuratedCorpus, ConflictResolution } from '@truecourse/spec-consolidator';
+import {
+  buildCorpusConflicts,
+  orphanedConflictResolutions,
+  type CorpusConflict,
+} from '@truecourse/shared';
+import { addConflictResolution } from '@truecourse/core/commands/spec-in-process';
 
 export interface RunSpecConflictsOptions {
   cwd?: string;
@@ -35,21 +46,47 @@ function loadCorpusOrExit(repoRoot: string): CuratedCorpus {
   return corpus;
 }
 
+/** How a conflict is resolved, for the list/show rendering. */
+function resolvedLabel(c: CorpusConflict): string {
+  if (c.resolution) {
+    if (c.resolution.verdict === 'dismissed') return 'dismissed (not a real conflict)';
+    const winner = c.resolution.verdict === 'a' ? c.resolution.docA : c.resolution.docB;
+    return `${base(winner)} is right (loser’s claim suppressed at generate)`;
+  }
+  if (c.excludedRef) return `${base(c.excludedRef)} excluded`;
+  return 'resolved';
+}
+
 export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): Promise<void> {
   const repoRoot = root(opts);
   const corpus = loadCorpusOrExit(repoRoot);
-  const conflicts = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot));
+  const decisions = readCorpusDecisions(repoRoot);
+  const conflicts = buildCorpusConflicts(corpus, decisions);
   const open = conflicts.filter((c) => !c.resolved);
-  const resolved = conflicts.length - open.length;
+  const orphaned = orphanedConflictResolutions(corpus, decisions);
 
-  p.intro('Overlaps (areas where docs may disagree)');
-  for (const c of open) {
-    p.log.warn(`${c.area}`);
-    p.log.message(`  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
-    p.log.message(`  resolve: truecourse spec conflicts resolve ${c.area} --older ${c.a} --newer ${c.b} --precedence`);
+  p.intro('Overlaps (where two docs’ sections may disagree)');
+  // Number every conflict so `resolve <n>` addresses it directly.
+  conflicts.forEach((c, i) => {
+    const n = i + 1;
+    if (c.resolved) {
+      p.log.step(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}  — resolved: ${resolvedLabel(c)}`);
+    } else {
+      p.log.warn(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
+      p.log.message(`   pick a side: truecourse spec conflicts resolve ${n} --right ${c.a}   (or --right ${c.b}, or --dismiss)`);
+    }
+  });
+  if (conflicts.length === 0) p.log.step('No overlaps flagged.');
+
+  if (orphaned.length > 0) {
+    p.log.warn(
+      `${orphaned.length} orphaned resolution${orphaned.length === 1 ? '' : 's'} — recorded but no longer match a flagged conflict (the docs changed):`,
+    );
+    for (const o of orphaned) p.log.message(`   ${base(o.docA)}  ↔  ${base(o.docB)}  (${o.verdict})`);
   }
-  if (open.length === 0) p.log.step('No open overlaps.');
-  p.outro(`${open.length} open · ${resolved} resolved. Inspect with \`spec conflicts show <area>\`.`);
+  p.outro(
+    `${open.length} open · ${conflicts.length - open.length} resolved${orphaned.length ? ` · ${orphaned.length} orphaned` : ''}. Inspect with \`spec conflicts show <area>\`.`,
+  );
 }
 
 /** First ~`max` lines of a doc, preferring the window around the overlap note's terms. */
@@ -87,61 +124,107 @@ export async function runSpecConflictsShow(area: string, opts: RunSpecConflictsO
   for (const ov of a.overlaps) {
     const [da, db] = ov.docs;
     const c = conflicts.find(
-      (x) => x.area === area && ((x.a === da && x.b === db) || (x.a === db && x.b === da)),
+      (x) => (x.areas.includes(area) || x.area === area) && ((x.a === da && x.b === db) || (x.a === db && x.b === da)),
     );
     p.log.warn(`${base(da)}  ↔  ${base(db)}${ov.note ? `   · ${ov.note}` : ''}`);
-    if (c?.relation) p.log.message(`  resolved → ${c.relation.type} (${c.relation.older} ⇒ ${c.relation.newer})`);
-    else if (c?.excludedRef) p.log.message(`  resolved → ${c.excludedRef} excluded`);
-    else p.log.message('  open');
+    p.log.message(c && c.resolved ? `  resolved → ${resolvedLabel(c)}` : '  open');
     p.log.message(`  ${da}:`);
     p.log.message(excerpt(repoRoot, da, ov.note));
     p.log.message(`  ${db}:`);
     p.log.message(excerpt(repoRoot, db, ov.note));
   }
-  p.outro('resolve with `spec conflicts resolve <area> --older P --newer P --replace|--precedence|--keep-both`.');
+  p.outro('resolve with `spec conflicts resolve <n|area> --right <docPath>` (pick a side) or `--dismiss`.');
+}
+
+export interface RunSpecConflictsResolveOptions extends RunSpecConflictsOptions {
+  /** Side verdict — the winning doc path (loser's disputed claim is suppressed). */
+  right?: string;
+  /** Dismiss the conflict as a detector false-positive. */
+  dismiss?: boolean;
+  /** Optional rationale, persisted on the verdict. */
+  note?: string;
+}
+
+/** Identify the target conflict for a section-scoped verdict from `<n|area>`. */
+function pickConflict(
+  target: string,
+  conflicts: CorpusConflict[],
+  right: string | undefined,
+): CorpusConflict | { error: string } {
+  if (/^\d+$/.test(target)) {
+    const idx = Number(target) - 1;
+    if (idx < 0 || idx >= conflicts.length) {
+      return { error: `No conflict #${target}. Run \`spec conflicts list\` (${conflicts.length} listed).` };
+    }
+    return conflicts[idx];
+  }
+  // Area form: the conflicts flagged in this area, narrowed by --right when given.
+  let inArea = conflicts.filter((c) => c.areas.includes(target) || c.area === target);
+  if (inArea.length === 0) return { error: `No conflicts in area ${target}. List them with \`spec conflicts list\`.` };
+  if (right) inArea = inArea.filter((c) => c.a === right || c.b === right);
+  if (inArea.length === 0) return { error: `No conflict in ${target} involves ${right}.` };
+  if (inArea.length > 1) {
+    return { error: `Area ${target} has ${inArea.length} conflicts — address one by its number (\`spec conflicts list\`).` };
+  }
+  return inArea[0];
+}
+
+/** Build the persisted resolution from a conflict + verdict. */
+function buildResolution(
+  c: CorpusConflict,
+  verdict: 'a' | 'b' | 'dismissed',
+  note?: string,
+): ConflictResolution {
+  const secOf = (doc: string) => (c.sections ?? []).find((s) => s.doc === doc);
+  return {
+    docA: c.a,
+    anchorA: secOf(c.a)?.heading ?? null,
+    quoteA: secOf(c.a)?.quote,
+    docB: c.b,
+    anchorB: secOf(c.b)?.heading ?? null,
+    quoteB: secOf(c.b)?.quote,
+    verdict,
+    resolvedAt: new Date().toISOString(),
+    note,
+  };
 }
 
 export async function runSpecConflictsResolve(
-  area: string,
-  opts: RunSpecConflictsOptions & { older: string; newer: string; type: RelationType; note?: string },
+  target: string,
+  opts: RunSpecConflictsResolveOptions,
 ): Promise<void> {
   const repoRoot = root(opts);
-  if (!opts.older || !opts.newer) return fail('resolve needs --older <path> and --newer <path>');
-  if (opts.older === opts.newer) return fail('--older and --newer must be different docs');
-
   const corpus = loadCorpusOrExit(repoRoot);
-  const a = corpus.areas.find((x) => x.id === area);
-  if (!a) return fail(`No such area: ${area}.`);
-  const known = new Set(a.docRefs);
-  for (const ref of [opts.older, opts.newer]) {
-    if (!known.has(ref)) return fail(`${ref} is not a doc in area ${area}. Docs: ${a.docRefs.join(', ')}`);
+  const decisions = readCorpusDecisions(repoRoot);
+
+  if (!opts.right && !opts.dismiss) {
+    return fail('Pass --right <docPath> (pick a side) or --dismiss. Doc-level relations live in `spec chains add` and never resolve a conflict.');
+  }
+  if (opts.right && opts.dismiss) return fail('Pass either --right <docPath> or --dismiss, not both.');
+  const conflicts = buildCorpusConflicts(corpus, decisions);
+  const picked = pickConflict(target, conflicts, opts.right);
+  if ('error' in picked) return fail(picked.error);
+
+  let verdict: 'a' | 'b' | 'dismissed';
+  if (opts.dismiss) {
+    verdict = 'dismissed';
+  } else {
+    if (opts.right !== picked.a && opts.right !== picked.b) {
+      return fail(`--right must be one of the disputing docs: ${picked.a} or ${picked.b}.`);
+    }
+    verdict = opts.right === picked.a ? 'a' : 'b';
   }
 
-  // Span the dispute across areas: detection runs per area, so one disagreement on
-  // a pair sharing several areas is flagged (and merged) across them. Scope the
-  // relation to the named area only when the dispute is single-area; a cross-area
-  // dispute records an unscoped (doc-pair-wide) relation so this one resolution
-  // clears it everywhere and survives the re-scan.
-  const conflict = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot)).find(
-    (c) => (c.a === opts.older && c.b === opts.newer) || (c.a === opts.newer && c.b === opts.older),
-  );
-  const scope = conflict && conflict.areas.length > 1 ? undefined : area;
-
-  await addRelation(repoRoot, {
-    type: opts.type,
-    older: opts.older,
-    newer: opts.newer,
-    scope,
-    detectedFrom: 'manual',
-    note: opts.note,
-  });
-
-  const s = p.spinner();
-  s.start('Re-scanning to apply the relation');
-  await curateInProcess(repoRoot, {});
-  s.stop('Re-scanned');
-
-  p.outro(`Recorded ${opts.type}: ${opts.older} ⇒ ${opts.newer} (scope ${scope ?? 'all areas'}).`);
+  await addConflictResolution(repoRoot, buildResolution(picked, verdict, opts.note));
+  // No re-scan: the corpus is unchanged and the resolved-derivation reads the
+  // verdict live; a single later `spec scan` applies any batch (the skips model).
+  if (verdict === 'dismissed') {
+    p.outro(`Dismissed: ${base(picked.a)} ↔ ${base(picked.b)} is not a real conflict.`);
+  } else {
+    const winner = verdict === 'a' ? picked.a : picked.b;
+    const loser = verdict === 'a' ? picked.b : picked.a;
+    p.outro(`Recorded: ${base(winner)} is right. ${base(loser)}’s disputed claim is suppressed at \`truecourse guard generate\`.`);
+  }
 }
 
 function fail(msg: string): never {

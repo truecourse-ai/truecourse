@@ -24,7 +24,6 @@ import {
   type GuardGenerateReport,
   type GuardGenerateUsage,
   type CorpusConflict,
-  type RelationLike,
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import {
@@ -52,7 +51,7 @@ export { EstimateDeclined } from './spec-in-process.js';
  * is the assembled multi-line text both surfaces reuse.
  */
 export class OpenConflictsError extends Error {
-  constructor(public readonly conflicts: CorpusConflict<RelationLike>[]) {
+  constructor(public readonly conflicts: CorpusConflict[]) {
     super(formatOpenConflictsMessage(conflicts));
     this.name = 'OpenConflictsError';
   }
@@ -60,7 +59,7 @@ export class OpenConflictsError extends Error {
 
 /** The full, untruncated conflict report: a count, the rationale, every pair
  *  (area, both repo-relative doc paths, note), and the resolution pointers. */
-export function formatOpenConflictsMessage(conflicts: CorpusConflict<RelationLike>[]): string {
+export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string {
   const lines: string[] = [
     `${conflicts.length} open spec conflict${conflicts.length === 1 ? '' : 's'} must be resolved before guard generate.`,
     'Extracting both sides of an unresolved overlap births a red finding that is really the dispute.',

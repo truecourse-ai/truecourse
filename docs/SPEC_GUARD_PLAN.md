@@ -490,6 +490,107 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    never discover them. Outright removal deliberately deferred until the EE gate migrates.
    The dashboard analog already shipped (BL Drift registry-hidden in both editions,
    URL-reachable for EE Pulls deep links).
+   **SCOPE REVISED 2026-07-10 (user decision): contracts are KEPT, verify surface
+   retires.** The contracts pipeline stays for ONE purpose — the code↔spec relationship
+   map (`contracts generate` produces the spec-side artifacts; the verifier's MATCHING
+   ENGINE locates them in code) — and `infer` stays (undocumented-code detection; it is
+   built on the same engine). What retires at 0.8 is the VERIFY SURFACE only: drift
+   verdicts, `verify`/`drifts` commands, the BL Drift reporting UI. The
+   `contract-verifier` package survives as the engine under the map and infer. Confirmed
+   2026-07-10: contracts generate consumes the NEW corpus (readCorpusForGenerate over
+   specs/corpus.json; the old claims mechanism is fully gone), so all guard-era corpus
+   changes are additive for it. Follow-up when contracts get touched next: contracts
+   generate should gain the same open-conflicts gate guard generate has (item 25); today
+   it generates from a conflicted corpus without complaint.
+
+
+31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
+   2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
+   (one disagreement between two specific sections): "Use X only" amputates a whole good
+   document for one lying sentence, "Prefer X" is a document-wide precedence for a
+   sentence-sized dispute, and neither suppresses the losing claim at extraction today.
+   Doc-level exclusion already exists (skip); doc-level replace/precedence MOVES OUT of
+   the conflict flow to the relations/chains world (CLI `spec chains add`; conflict detail
+   drops those buttons). The conflict flow becomes verdicts on the DISAGREEMENT:
+   a. **Pick a side** — "README is right" / "SPEC is right" (labels use the real doc
+      paths). Persisted in decisions.json as `conflictResolutions[]` keyed by dispute
+      identity (doc pair + section anchors + normalized quotes) so it survives rescans
+      and matches the re-detected dispute; orphaned honestly when docs change enough that
+      the quote disappears. Effect on generation: the LOSER'S DISPUTED CLAIM is
+      suppressed — claim-level, via the verbatim quote (a section can hold one lie and
+      three truths; never drop the whole section). Preferred mechanism: inject the
+      resolution as context into that section's extraction ("this sentence is resolved
+      stale — do not extract claims asserting it"), which re-keys only affected sections'
+      extract cache. The conflict gate counts these as resolved (extend the shared
+      overlap-resolution derivation).
+   b. **Not a real conflict** — dismissal of a detector false-positive; persisted,
+      visible, reversible (finding-dismissal analog).
+   c. **Fix the doc (edit-in-place)** — the merge-editor analog, OSS-only phase 1 (EE has
+      no live tree): the disputed section flips to a raw-markdown textarea; Save POSTs
+      `{doc, anchor, newText}` to a new route that re-locates the section BY ANCHOR in
+      the current file (never stale line numbers; anchor gone → clear error), splices,
+      atomic-writes. The edit lands in the working tree (git diff is the user's normal
+      flow). NO auto-rescan — same batching model as skips: save marks scan staleness;
+      ONE Rescan (estimate-gated as usual) applies any number of edits/verdicts.
+      Later sugar (not phase 1): sentence-level quick-fix prefilled with the quote;
+      LLM-suggested reconciliation patch shown as an approvable diff.
+   d. **Scan staleness, docs-content half (closes the old follow-up)**: staleness =
+      decisionsPending OR any kept doc's mtime newer than corpus generatedAt (tolerant on
+      missing files) — feeds the existing Rescan dot; also catches edits made outside the
+      dashboard.
+   Phases: 31a engine/schema (resolutions store + derivation + gate + extraction
+   suppression + staleness half) → 31b dashboard (verdict buttons, dismissal, editor,
+   relation-buttons removal). CLI parity: `spec conflicts resolve` gains the side-verdict
+   form; existing doc-relation resolve moves under chains.
+   STATUS (31a): BUILT — `conflictResolutions[]` in decisions.json
+   (`ConflictResolutionSchema`, optional so old files parse); dispute identity =
+   unordered doc pair + (normalized quotes when both sides carry one, else section
+   anchors) with orphan honesty (`orphanedConflictResolutions`); shared derivation
+   (`buildCorpusConflicts` carries the matched `resolution`+verdict, `suppressedClaims`);
+   the item-25 gate picks it up via `openConflicts` (tested); extraction suppression
+   injects a "resolved stale" block into the losing section's view input + folds a
+   `suppressionFingerprint` into the view extract-cache key AND `generationInputsHash`
+   (both only when non-empty, so unaffected sections/views keep their caches) — a
+   newly-suppressed section re-detects as work and re-extracts with the loser's claim
+   dropped; `normalizeQuote` hoisted to `@truecourse/shared` (one copy, reused by the
+   pointer-verifier); CLI `spec conflicts resolve <n|area> --right/--dismiss` (doc-
+   relation flags kept, help points at `spec chains`), `list`/`spec status` render
+   section-resolved/dismissed/orphaned; staleness gains `docsChanged` (kept-doc mtime >
+   corpus generatedAt — closes the scan-staleness follow-up); OSS `POST
+   /spec/doc/section` re-locates by anchor + splices (heading preserved unless the new
+   text carries one), atomic-write, path-confined, EE → 501.
+   **REVISED 2026-07-10 (user decision): edit-in-place REMOVED — overkill.** Live testing
+   exposed span-mismatch complexity (hierarchical vs flat section spans; a save could have
+   replaced a whole README) for marginal value: the user's editor is one cmd-tab away.
+   The conflict detail instead shows ONE short hint that fixing the doc itself and
+   rescanning is the other resolution path. STRIP: the pencil/textarea flow, GET
+   /spec/doc/sections, POST /spec/doc/section, core repo-doc-editor + their tests. KEEP:
+   verdicts/dismissals/undo, orphan housekeeping, and the docsChanged staleness dot —
+   which is exactly what makes external-editor fixes work (edit → dot lights → one
+   Rescan).
+   **REVISED 2026-07-10 (user decision): NO legacy relation-resolution support — dead
+   code.** Pre-release, no old decisions files exist to honor. Doc-level relations STOP
+   counting as conflict resolutions everywhere: the derivation resolves a conflict ONLY
+   via a verdict, a dismissal, or a covering exclude; the conflict view drops the legacy
+   resolved-rendering + Revoke; the synthesized resolved entries for user relations go;
+   `spec conflicts resolve` drops the doc-relation flags entirely (relations live in
+   `spec chains`, which STAYS — doc lifecycle/precedence is unchanged, it just never
+   marks a conflict resolved). A replaced doc's textual disagreement stays an open
+   conflict until verdicted/dismissed/fixed — honest: the docs still disagree.
+   **EE mapping (discussed 2026-07-10, for the EE migration):** verdicts/dismissals are
+   pure decision DATA — they port through EE's existing decisions store + per-PR overlay
+   (promote on merge) with no extra engine work; the shared overlap-resolution derivation
+   already carries them, and identity is content-keyed (quotes/anchors) so it is stable
+   across EE's per-commit corpus reads. Edit-in-place CANNOT port as-is (EE repo is
+   read-only by design; commit-back was removed) — the editor capability-gates OFF in EE;
+   the EE-native evolution is "propose fix as a commit/PR" via the GitHub App, a
+   deliberate future decision because it requires contents:write scope. Rescan semantics:
+   verdicts need no re-curate in either edition (overlay, read live); set-changing
+   decisions re-curate immediately in EE (server-side, org budget) vs batched behind
+   Rescan in OSS (user-paid); doc edits re-scan on the next commit webhook in EE vs the
+   docsChanged staleness dot in OSS.
+   STATUS (31b): BUILT — SpecOverlapDetail action row is the three verdicts (`<docA> is right` / `<docB> is right` / `Not a real conflict`) writing POST/DELETE `/spec/conflict-resolution` (OSS instant ack, no re-curate; EE PR keeps the recurate flow) and rendering resolved/dismissed-in-place with Undo; per the REVISED notes there is NO in-app editor — a one-line muted hint ("Or fix the doc itself and rescan — the Rescan button lights up when a doc changes.") points at the external-edit path, which the `docsChanged` staleness dot picks up — and NO relation-resolution anywhere: the shared derivation resolves ONLY via verdict/dismissal/exclude (`coveringRelation*`, the synthesized resolved rows, and the scan-time relation-skip in `flagOverlaps` are deleted; `recurateStoredCorpus`/`recuratePrCorpus` and the scan outro count open conflicts via the derivation), the conflict view has no relation rendering/Revoke, and `spec conflicts resolve` takes only `--right`/`--dismiss` (relations stay untouched in `spec chains`); the corpus payload carries `conflictResolutions` so the sidebar shows verdict/dismissed badges and a collapsed orphaned-verdict housekeeping line (remove); the Rescan dot lights on `docsChanged` OR `decisionsPending`; inverted tests pin relation-present ⇒ conflict still open across shared/gate/CLI/client, gate green.
+
 
 30. **Close the pointer action space in the overlap prompt (root cause of item 29's
    mis-anchor; user go 2026-07-10).** The overlap prompt asks Haiku (spec.overlap default)

@@ -32,6 +32,13 @@ export {
 } from './section-plan.js'
 
 export {
+  readSuppressedClaims,
+  readSuppressionIndex,
+  suppressedQuotesIn,
+  suppressionKey,
+} from './suppression.js'
+
+export {
   extractDocClaims,
   docExtractionCached,
   countExtractViews,

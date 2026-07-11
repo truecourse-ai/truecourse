@@ -22,6 +22,7 @@
  * verified one and the representative choice is trustworthy.
  */
 
+import { normalizeQuote } from '@truecourse/shared';
 import type { OverlapSection } from './corpus-types.js';
 
 // ---------------------------------------------------------------------------
@@ -165,32 +166,18 @@ function headingKey(h: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize text for verbatim-quote matching: strip markdown/code MARKERS (the
- * backtick, `*`, `_`, `~` characters — keeping the words), collapse every run of
- * whitespace to a single space, lowercase, and trim. This is whitespace + markdown
- * normalization only — no tokenizing, stemming, or stopword removal — so a quote
- * the model copied verbatim still matches across a line-wrapped or backtick-styled
- * source sentence, while remaining an essentially exact match.
- */
-function normalizeForQuote(text: string): string {
-  return text
-    .replace(/[`*_~]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
  * Indices of the sections whose normalized text CONTAINS the normalized quote —
  * the exact locations of the disputed sentence. Empty when the quote is blank
  * after normalization or found nowhere (caller then falls back to token scoring).
+ * Normalization is the shared {@link normalizeQuote} (one copy — the same key the
+ * conflict-resolution dispute identity matches through).
  */
 function locateQuote(sections: DocSection[], quote: string): number[] {
-  const needle = normalizeForQuote(quote);
+  const needle = normalizeQuote(quote);
   if (!needle) return [];
   const hits: number[] = [];
   for (let i = 0; i < sections.length; i++) {
-    if (normalizeForQuote(sections[i].text).includes(needle)) hits.push(i);
+    if (normalizeQuote(sections[i].text).includes(needle)) hits.push(i);
   }
   return hits;
 }

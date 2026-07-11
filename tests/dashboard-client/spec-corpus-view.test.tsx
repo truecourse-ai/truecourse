@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, renderHook, act } from '@testing-library/react';
+import { useState, type ComponentProps } from 'react';
+import { render, screen, waitFor, renderHook, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
 import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/SpecScanButton';
@@ -61,6 +62,7 @@ const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
   refetch: vi.fn(),
   apply: vi.fn(),
   applyDecisions: vi.fn(),
+  applyConflictResolutions: vi.fn(),
   ...over,
 });
 
@@ -153,35 +155,9 @@ describe('SpecCorpusView (left nav)', () => {
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
   });
 
-  // A corpus the scan re-curated so the (now relation-covered) overlap was dropped,
-  // yet the user relation persists in decisions. The resolved conflict must stay
-  // visible instead of vanishing.
-  const noOverlapResp: SpecCorpusResponse = {
-    corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
-    userRelations: [
-      { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
-    ],
-  };
-
-  it('synthesizes a resolved conflict for a user relation the corpus no longer flags', () => {
-    render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.getByText('Conflicts')).toBeInTheDocument();
-    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    // The badge names the relation type + winner (v2.md is newer).
-    expect(screen.getByText('resolved — precedence: docs/v2.md wins')).toBeInTheDocument();
-  });
-
-  it('opens a synthesized resolved entry with its overlap key (no open overlap needed)', async () => {
-    const onOpen = vi.fn();
-    const user = userEvent.setup();
-    render(<SpecCorpusView corpus={state({ data: noOverlapResp })} activeKey={null} onOpen={onOpen} />);
-    await user.click(screen.getByText('docs/v1.md ↔ docs/v2.md'));
-    expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
-  });
-
-  it('does not double-render a pair that has both an open overlap and a covering relation', () => {
-    // RESP already carries an OPEN overlap for (v1,v2); a covering user relation
-    // must NOT add a second synthesized row — one row, legacy "resolved" badge.
+  it('a covering user relation leaves the conflict row OPEN — relations never resolve', () => {
+    // RESP carries an OPEN overlap for (v1,v2); a covering user relation must not
+    // resolve it (relations are lifecycle metadata) nor add a second row.
     const covered: SpecCorpusResponse = {
       ...RESP,
       userRelations: [
@@ -190,8 +166,20 @@ describe('SpecCorpusView (left nav)', () => {
     };
     render(<SpecCorpusView corpus={state({ data: covered })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getAllByText('docs/v1.md ↔ docs/v2.md')).toHaveLength(1);
-    expect(screen.getByText('resolved')).toBeInTheDocument();
+    expect(screen.queryByText('resolved')).not.toBeInTheDocument();
     expect(screen.queryByText(/resolved — /)).not.toBeInTheDocument();
+  });
+
+  it('does NOT fabricate a conflict row from a user relation with no flagged overlap', () => {
+    const noOverlap: SpecCorpusResponse = {
+      corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
+      userRelations: [
+        { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
+      ],
+    };
+    render(<SpecCorpusView corpus={state({ data: noOverlap })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.queryByText('Conflicts')).not.toBeInTheDocument();
+    expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
   });
 });
 
@@ -290,6 +278,8 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
   it('include a skipped doc then undo returns it to Not included (mirror case)', async () => {
     const user = userEvent.setup();
     render(<Harness />);
+    // The Not-included section starts collapsed — expand it to reach the row.
+    await user.click(await screen.findByText('Not included'));
     await screen.findByText('docs/notes.md'); // the relevance-dropped doc
     await user.click(screen.getByRole('button', { name: 'include' }));
 
@@ -302,9 +292,10 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
     await waitFor(() => expect(screen.getByRole('button', { name: 'remove' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'remove' }));
 
-    // Back in Not included, no pending residue, still no refetch.
+    // Back in Not included (freshly remounted → collapsed again), no pending
+    // residue, still no refetch.
     await waitFor(() => expect(screen.queryByText('Force-included')).not.toBeInTheDocument());
-    expect(screen.getByText('Not included')).toBeInTheDocument();
+    await user.click(screen.getByText('Not included'));
     expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
     expect(screen.queryByText('pending rescan')).not.toBeInTheDocument();
     expect(corpusReads()).toBe(1);
@@ -320,27 +311,178 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
   });
 });
 
-describe('SpecScanButton — decisions staleness dot', () => {
-  it('carries the amber dot when decisions are pending', () => {
-    render(<SpecScanButton hasCorpus scanning={false} stale onClick={() => {}} />);
-    expect(screen.getByRole('button', { name: /rescan/i })).toBeInTheDocument();
-    expect(screen.getByLabelText('pending decisions')).toBeInTheDocument();
+// Default collapse states, decided ONCE when the corpus data first becomes
+// available (sections mount only after the async load): "Not included" starts
+// collapsed; "Conflicts" starts collapsed only when nothing is open (the shared
+// derivation's classification). A section CONTAINING the active selection starts
+// expanded regardless — a deep link never lands on a hidden row. Manual toggles
+// always win afterwards.
+describe('SpecCorpusView — section default collapse states', () => {
+  const WITH_SKIPPED: SpecCorpusResponse = {
+    ...RESP,
+    corpus: { ...RESP.corpus, skippedDocs: [{ ref: 'docs/notes.md', reason: 'low relevance' }] },
+  };
+  // Every flagged conflict verdict-resolved at load.
+  const ALL_RESOLVED: SpecCorpusResponse = {
+    ...RESP,
+    conflictResolutions: [
+      { docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy', verdict: 'a' },
+    ],
+  };
+
+  it('"Not included" starts collapsed; expanding reveals the rows', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state({ data: WITH_SKIPPED })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getByText('Not included')).toBeInTheDocument();
+    expect(screen.queryByText('docs/notes.md')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Not included'));
+    expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
   });
 
-  it('shows no dot when nothing is pending', () => {
-    render(<SpecScanButton hasCorpus scanning={false} stale={false} onClick={() => {}} />);
-    expect(screen.queryByLabelText('pending decisions')).not.toBeInTheDocument();
+  it('"Conflicts" starts collapsed when every conflict is resolved at load', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state({ data: ALL_RESOLVED })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getByText('Conflicts')).toBeInTheDocument();
+    expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
+    // The manual toggle still works — expanding shows the resolved row.
+    await user.click(screen.getByText('Conflicts'));
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+  });
+
+  it('"Conflicts" starts OPEN when an open conflict exists at load', () => {
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+  });
+
+  it('deep link to a skipped doc → "Not included" starts EXPANDED with the row highlighted', () => {
+    render(
+      <SpecCorpusView repoId="r1" corpus={state({ data: WITH_SKIPPED })} activeKey="docs/notes.md" onOpen={vi.fn()} />,
+    );
+    // The active row is visible without any manual expand…
+    const row = screen.getByTitle(/docs\/notes\.md/);
+    expect(row).toBeInTheDocument();
+    // …and carries the active highlight (the same match the containment check uses).
+    expect(row.className).toContain('bg-primary/10');
+  });
+
+  it('deep link to a resolved conflict → "Conflicts" starts EXPANDED despite the all-resolved default', () => {
+    render(
+      <SpecCorpusView
+        repoId="r1"
+        corpus={state({ data: ALL_RESOLVED })}
+        activeKey={overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md')}
+        onOpen={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+  });
+
+  it('a manual expand of "Not included" survives a data refetch', async () => {
+    // Holds the corpus data in state, mirroring useSpecCorpus: a refetch replaces
+    // the data object while SpecCorpusView stays mounted — the section's manual
+    // toggle must survive (initialize-once, never re-forced).
+    function RefetchHarness() {
+      const [data, setData] = useState<SpecCorpusResponse>(WITH_SKIPPED);
+      return (
+        <>
+          <button type="button" onClick={() => setData({ ...WITH_SKIPPED, corpus: { ...WITH_SKIPPED.corpus } })}>
+            simulate-refetch
+          </button>
+          <SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<RefetchHarness />);
+    await user.click(screen.getByText('Not included')); // manual expand
+    expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'simulate-refetch' }));
+    // New data object, same mounted section — still expanded.
+    expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
+  });
+});
+
+describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
+  const verdict = (v: 'a' | 'b' | 'dismissed') => ({
+    docA: 'docs/v1.md',
+    anchorA: 'Cancellation',
+    docB: 'docs/v2.md',
+    anchorB: 'Cancellation policy',
+    verdict: v,
+  });
+
+  it('a pick-a-side verdict shows the "resolved — <winner> is right" badge on the conflict row', async () => {
+    const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [verdict('a')] };
+    render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
+    // All conflicts resolved → the section starts collapsed; expand to see the badge.
+    await userEvent.setup().click(screen.getByText('Conflicts'));
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+  });
+
+  it('a dismissal shows the "dismissed" badge on the conflict row', async () => {
+    const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [verdict('dismissed')] };
+    render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
+    await userEvent.setup().click(screen.getByText('Conflicts'));
+    expect(screen.getByText('dismissed')).toBeInTheDocument();
+  });
+
+  it('surfaces an orphaned verdict (no matching conflict) with a remove action that DELETEs', async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, opts?: RequestInit) => {
+        calls.push({ url: String(url), method: opts?.method, body: opts?.body ? String(opts.body) : undefined });
+        return json({ conflictResolutions: [] });
+      }),
+    );
+    const orphan = { docA: 'docs/gone.md', anchorA: 'X', docB: 'docs/moved.md', anchorB: 'Y', verdict: 'a' as const };
+    const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [orphan] };
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} onDecision={vi.fn()} />);
+    // The quiet housekeeping line (collapsed by default) — expand it.
+    await user.click(screen.getByText(/no longer match a conflict/));
+    expect(screen.getByText('docs/gone.md ↔ docs/moved.md')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'remove' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('/spec/conflict-resolution') && c.method === 'DELETE')).toBe(true),
+    );
+    const del = calls.find((c) => c.method === 'DELETE');
+    expect(JSON.parse(del!.body!)).toMatchObject({ docA: 'docs/gone.md', docB: 'docs/moved.md' });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('SpecScanButton — staleness dot (decisions OR doc edits)', () => {
+  it('carries the amber dot when decisions are pending', () => {
+    render(<SpecScanButton hasCorpus scanning={false} decisionsPending docsChanged={false} onClick={() => {}} />);
+    expect(screen.getByRole('button', { name: /rescan/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('rescan pending')).toBeInTheDocument();
+  });
+
+  it('carries the dot when a kept doc changed since the last scan (docsChanged)', () => {
+    render(<SpecScanButton hasCorpus scanning={false} decisionsPending={false} docsChanged onClick={() => {}} />);
+    expect(screen.getByLabelText('rescan pending')).toBeInTheDocument();
+  });
+
+  it('shows no dot when nothing is pending or changed', () => {
+    render(<SpecScanButton hasCorpus scanning={false} decisionsPending={false} docsChanged={false} onClick={() => {}} />);
+    expect(screen.queryByLabelText('rescan pending')).not.toBeInTheDocument();
   });
 
   it('hides the dot while scanning', () => {
-    render(<SpecScanButton hasCorpus scanning stale onClick={() => {}} />);
-    expect(screen.queryByLabelText('pending decisions')).not.toBeInTheDocument();
+    render(<SpecScanButton hasCorpus scanning decisionsPending docsChanged onClick={() => {}} />);
+    expect(screen.queryByLabelText('rescan pending')).not.toBeInTheDocument();
   });
 
   it('reads "Scan" with no corpus, "Rescan" with one', () => {
-    const { rerender } = render(<SpecScanButton hasCorpus={false} scanning={false} stale={false} onClick={() => {}} />);
+    const { rerender } = render(
+      <SpecScanButton hasCorpus={false} scanning={false} decisionsPending={false} docsChanged={false} onClick={() => {}} />,
+    );
     expect(screen.getByRole('button', { name: /^scan/i })).toBeInTheDocument();
-    rerender(<SpecScanButton hasCorpus scanning={false} stale={false} onClick={() => {}} />);
+    rerender(<SpecScanButton hasCorpus scanning={false} decisionsPending={false} docsChanged={false} onClick={() => {}} />);
     expect(screen.getByRole('button', { name: /rescan/i })).toBeInTheDocument();
   });
 });
@@ -454,97 +596,136 @@ describe('DocMarkdown — conflict highlight (amber band)', () => {
   });
 });
 
-describe('SpecOverlapDetail (right pane)', () => {
-  let lastPost: { type: string; older: string; newer: string } | null;
-  let lastDelete: { older: string; newer: string } | null;
+describe('SpecOverlapDetail (right pane) — section verdicts', () => {
+  let lastPost: Record<string, unknown> | null;
+  let lastDelete: Record<string, unknown> | null;
   beforeEach(() => {
     lastPost = null;
     lastDelete = null;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, opts?: RequestInit) => {
-        if (String(url).includes('/spec/relations') && opts?.method === 'POST') {
+        const u = String(url);
+        if (u.includes('/spec/conflict-resolution') && opts?.method === 'POST') {
           lastPost = JSON.parse(String(opts.body));
-          return json({ relations: [lastPost] });
+          return json({ conflictResolutions: [{ ...lastPost, resolvedAt: '2026-07-10T00:00:00Z' }] });
         }
-        if (String(url).includes('/spec/relations') && opts?.method === 'DELETE') {
+        if (u.includes('/spec/conflict-resolution') && opts?.method === 'DELETE') {
           lastDelete = JSON.parse(String(opts.body));
-          return json({ relations: [] });
+          return json({ conflictResolutions: [] });
         }
+        // The doc columns' markdown fetch.
         return json({ ref: 'docs/x.md', content: 'body' });
       }),
     );
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  const RESOLVED: SpecCorpusResponse = {
-    ...RESP,
-    userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
-  };
-
-  const renderDetail = (onResolved = vi.fn()) =>
+  const renderDetail = (props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) =>
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} onResolved={onResolved} />,
+      <SpecOverlapDetail
+        repoId="r1"
+        area="booking/appointments"
+        docA="docs/v1.md"
+        docB="docs/v2.md"
+        data={RESP}
+        onResolved={vi.fn()}
+        {...props}
+      />,
     );
 
-  it('"Prefer newer" records precedence with the newer doc winning', async () => {
-    const onResolved = vi.fn();
-    const user = userEvent.setup();
-    renderDetail(onResolved); // v2.md is newer (later lastTouched)
-    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument(); // plain-text note
-    await user.click(screen.getByRole('button', { name: 'Prefer newer' }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(lastPost).toMatchObject({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md' });
+  it('renders the three verdicts — "<docA> is right" / "<docB> is right" / dismiss — and NO relation buttons', () => {
+    renderDetail();
+    expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'docs/v2.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
+    // The old doc-relation buttons are gone from this view.
+    expect(screen.queryByRole('button', { name: 'Prefer newer' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use newer only' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Keep both' })).not.toBeInTheDocument();
+    // No in-app editor — a one-line hint points at the fix-the-doc-and-rescan path.
+    expect(screen.getByText(/Or fix the doc itself and rescan/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Edit section')).not.toBeInTheDocument();
   });
 
-  it('"Use older only" lets the OLDER doc win (one click, no toggle)', async () => {
+  it('a pick-a-side verdict POSTs the resolution and renders resolved-in-place with Undo', async () => {
+    const onConflictChange = vi.fn();
+    const onDecision = vi.fn();
+    const user = userEvent.setup();
+    renderDetail({ onConflictChange, onDecision });
+    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument(); // plain-text note
+    await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
+    // POST carries the pair + section anchors + verdict 'a' (docA wins).
+    await waitFor(() => expect(lastPost).not.toBeNull());
+    expect(lastPost).toMatchObject({
+      docA: 'docs/v1.md',
+      anchorA: 'Cancellation',
+      docB: 'docs/v2.md',
+      anchorB: 'Cancellation policy',
+      verdict: 'a',
+    });
+    // Resolved-in-place (optimistic) with the winner + an Undo; the verdict buttons are gone.
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText(/Resolved —/)).toBeInTheDocument();
+    expect(within(banner).getAllByText('docs/v1.md').length).toBeGreaterThan(0); // docA won (verdict 'a')
+    expect(within(banner).queryByText('docs/v2.md')).toBeNull();
+    expect(within(banner).getByRole('button', { name: /Undo/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'docs/v2.md is right' })).not.toBeInTheDocument();
+    // The parent is synced (verdict list) and the Rescan dot is signalled.
+    expect(onConflictChange).toHaveBeenCalledWith([expect.objectContaining({ verdict: 'a' })]);
+    expect(onDecision).toHaveBeenCalled();
+  });
+
+  it('a dismissal POSTs verdict "dismissed" and renders "Dismissed — not a real conflict"', async () => {
     const user = userEvent.setup();
     renderDetail();
-    await user.click(screen.getByRole('button', { name: 'Use older only' }));
+    await user.click(screen.getByRole('button', { name: 'Not a real conflict' }));
     await waitFor(() => expect(lastPost).not.toBeNull());
-    expect(lastPost).toMatchObject({ type: 'replace', older: 'docs/v2.md', newer: 'docs/v1.md' });
+    expect(lastPost).toMatchObject({ verdict: 'dismissed' });
+    expect(screen.getByText('Dismissed — not a real conflict')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Undo/ })).toBeInTheDocument();
   });
 
-  it('a resolved conflict is actionable — Revoke removes the user relation', async () => {
-    const onResolved = vi.fn();
+  it('Undo DELETEs the verdict and restores the action buttons', async () => {
     const user = userEvent.setup();
-    render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESOLVED} onResolved={onResolved} />,
-    );
-    expect(screen.getByText(/Resolved →/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Revoke' }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(lastDelete).toMatchObject({ older: 'docs/v1.md', newer: 'docs/v2.md' });
+    renderDetail();
+    await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
+    await screen.findByRole('button', { name: /Undo/ });
+    await user.click(screen.getByRole('button', { name: /Undo/ }));
+    await waitFor(() => expect(lastDelete).not.toBeNull());
+    expect(lastDelete).toMatchObject({ docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md' });
+    // The verdict buttons are back.
+    expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeInTheDocument();
   });
 
-  it('a resolved conflict is actionable — Change re-opens the buttons', async () => {
-    const user = userEvent.setup();
-    render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESOLVED} onResolved={vi.fn()} />,
-    );
-    expect(screen.queryByRole('button', { name: 'Prefer newer' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Change' }));
-    expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeInTheDocument();
+  it('renders resolved-in-place from data (derived, no click) when a verdict already covers the pair', () => {
+    const resolved: SpecCorpusResponse = {
+      ...RESP,
+      conflictResolutions: [
+        { docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy', verdict: 'b' },
+      ],
+    };
+    renderDetail({ data: resolved });
+    // verdict 'b' → docB wins.
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText(/Resolved —/)).toBeInTheDocument();
+    expect(within(banner).getAllByText('docs/v2.md').length).toBeGreaterThan(0); // docB won (verdict 'b')
+    expect(within(banner).queryByText('docs/v1.md')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'docs/v1.md is right' })).not.toBeInTheDocument();
   });
 
-  // A synthesized pair: the corpus flags no overlap for it (re-curated away), but
-  // the user relation persists — the detail still shows the resolution and Revoke
-  // deletes it (the server re-curate then re-flags the conflict).
-  const NO_OVERLAP_RESOLVED: SpecCorpusResponse = {
-    corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
-    userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
-  };
-
-  it('a synthesized resolved pair (no open overlap) still shows the resolution + revokes', async () => {
-    const onResolved = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={NO_OVERLAP_RESOLVED} onResolved={onResolved} />,
-    );
-    expect(screen.getByText(/Resolved →/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Revoke' }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(lastDelete).toMatchObject({ older: 'docs/v1.md', newer: 'docs/v2.md' });
+  it('a covering doc-relation does NOT resolve — the verdict buttons still render', () => {
+    // Relations are lifecycle metadata; the disagreement stays open until
+    // verdicted/dismissed (or a doc is excluded / fixed).
+    const covered: SpecCorpusResponse = {
+      ...RESP,
+      userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
+    };
+    renderDetail({ data: covered });
+    expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
+    expect(screen.queryByText(/Resolved →/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
   });
 });
 
@@ -669,7 +850,7 @@ describe('SpecCorpusView (PR-scoped decisions)', () => {
   });
 });
 
-describe('SpecOverlapDetail (PR-scoped resolution)', () => {
+describe('SpecOverlapDetail (PR-scoped verdict)', () => {
   let calls: { url: string; method?: string }[];
   beforeEach(() => {
     calls = [];
@@ -678,9 +859,9 @@ describe('SpecOverlapDetail (PR-scoped resolution)', () => {
       vi.fn(async (url: string, opts?: RequestInit) => {
         const u = String(url);
         calls.push({ url: u, method: opts?.method });
-        if (u.includes('/spec/relations') && opts?.method === 'POST') {
-          // PR scope re-curates + returns the full corpus; repo scope returns { relations }.
-          return u.includes('pr=') ? json({ ...RESP, corpusCommit: 'head-1' }) : json({ relations: [] });
+        if (u.includes('/spec/conflict-resolution') && opts?.method === 'POST') {
+          // PR scope re-curates + returns the full corpus; repo scope returns the ack.
+          return u.includes('pr=') ? json({ ...RESP, corpusCommit: 'head-1' }) : json({ conflictResolutions: [] });
         }
         return json({ ref: 'docs/x.md', content: 'body' });
       }),
@@ -688,55 +869,47 @@ describe('SpecOverlapDetail (PR-scoped resolution)', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('scopes the resolution to pr+ref and applies the returned corpus', async () => {
+  it('scopes the verdict to pr+ref and applies the returned corpus', async () => {
     const onResolved = vi.fn();
     const user = userEvent.setup();
     render(
       <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
     );
-    await user.click(screen.getByRole('button', { name: 'Prefer newer' }));
+    await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url).toContain('?pr=4&ref=head-1');
-    // Full corpus returned → onResolved receives it (apply path, no stale refetch).
+    expect(calls.find((c) => c.url.includes('/spec/conflict-resolution') && c.method === 'POST')?.url).toContain('?pr=4&ref=head-1');
+    // Full corpus returned → onResolved receives it (apply path).
     expect(onResolved.mock.calls[0][0]).toMatchObject({ corpus: expect.anything() });
   });
 
-  it('repo view: no pr+ref, onResolved called with no corpus (refetch path)', async () => {
+  it('repo view: no pr+ref, the ack routes through onConflictChange (not onResolved corpus)', async () => {
     const onResolved = vi.fn();
+    const onConflictChange = vi.fn();
     const user = userEvent.setup();
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} onResolved={onResolved} />,
+      <SpecOverlapDetail
+        repoId="r1"
+        area="booking/appointments"
+        docA="docs/v1.md"
+        docB="docs/v2.md"
+        data={RESP}
+        onResolved={onResolved}
+        onConflictChange={onConflictChange}
+      />,
     );
-    await user.click(screen.getByRole('button', { name: 'Prefer newer' }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    const url = calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url ?? '';
+    await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
+    await waitFor(() => expect(onConflictChange).toHaveBeenCalled());
+    const url = calls.find((c) => c.url.includes('/spec/conflict-resolution') && c.method === 'POST')?.url ?? '';
     expect(url).not.toContain('pr=');
-    expect(onResolved.mock.calls[0][0]).toBeUndefined();
+    expect(onResolved).not.toHaveBeenCalled();
   });
 
-  it('disables resolution actions (with a hint) before the PR gate runs', () => {
+  it('disables the verdict actions (with a hint) before the PR gate runs', () => {
     render(
       <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
     );
-    expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Use newer only' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeDisabled();
     expect(screen.getAllByText('Available after the PR gate runs.').length).toBeGreaterThan(0);
-  });
-
-  it('carries pr+ref when re-resolving a synthesized pair (no open overlap)', async () => {
-    const onResolved = vi.fn();
-    const user = userEvent.setup();
-    // No open overlap for the pair, but a user relation covers it (synthesized).
-    const noOverlap: SpecCorpusResponse = {
-      corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
-      userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
-    };
-    render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={noOverlap} prNumber={4} prRef="head-1" onResolved={onResolved} />,
-    );
-    await user.click(screen.getByRole('button', { name: 'Change' })); // reveal the action buttons
-    await user.click(screen.getByRole('button', { name: 'Use newer only' }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(calls.find((c) => c.url.includes('/spec/relations') && c.method === 'POST')?.url).toContain('?pr=4&ref=head-1');
   });
 });

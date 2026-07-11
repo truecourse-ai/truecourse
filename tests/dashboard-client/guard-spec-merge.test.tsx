@@ -90,6 +90,8 @@ function corpusState(over: Partial<SpecCorpusState> = {}): SpecCorpusState {
     scan: vi.fn(),
     refetch: vi.fn(),
     apply: vi.fn(),
+    applyDecisions: vi.fn(),
+    applyConflictResolutions: vi.fn(),
     ...over,
   };
 }
@@ -150,7 +152,7 @@ function GuardSidebar({ corpus }: { corpus: SpecCorpusState }) {
 // -----------------------------------------------------------------------------
 
 describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
-  it('renders docs + tags + conflicts + skipped docs in the guard context', () => {
+  it('renders docs + tags + conflicts + skipped docs in the guard context', async () => {
     render(
       <MemoryRouter initialEntries={['/repos/r?section=guard&tab=coverage']}>
         <GuardSidebar corpus={corpusState()} />
@@ -164,8 +166,10 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
     // Conflicts.
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
     expect(screen.getByText('docs/SPEC.md ↔ docs/OTHER.md')).toBeInTheDocument();
-    // Skipped ("Not included") docs.
+    // Skipped ("Not included") docs — the section starts collapsed; expand to see rows.
     expect(screen.getByText('Not included')).toBeInTheDocument();
+    expect(screen.queryByText('docs/DROPPED.md')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByText('Not included'));
     expect(screen.getByText('docs/DROPPED.md')).toBeInTheDocument();
   });
 
@@ -231,6 +235,7 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
         <GuardSidebar corpus={corpusState()} />
       </MemoryRouter>,
     );
+    await user.click(screen.getByText('Not included')); // expand the collapsed section
     await user.click(screen.getByRole('button', { name: 'include' }));
     await waitFor(() => expect(calls.some((u) => u.includes('/spec/includes'))).toBe(true));
     vi.unstubAllGlobals();
@@ -238,11 +243,17 @@ describe('Guard coverage sidebar (reused SpecCorpusView)', () => {
 });
 
 describe('Guard coverage — conflict resolution in the detail pane', () => {
+  let lastConflictPost: Record<string, unknown> | null;
   beforeEach(() => {
+    lastConflictPost = null;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL, opts?: RequestInit) => {
         const u = String(url);
+        if (u.includes('/spec/conflict-resolution')) {
+          if (opts?.method === 'POST') lastConflictPost = JSON.parse(String(opts.body));
+          return json({ conflictResolutions: [] });
+        }
         if (u.includes('/spec/relations')) return json({ relations: [] });
         if (u.includes('/guard/coverage')) return json(COVERAGE);
         if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
@@ -267,32 +278,34 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
     );
   }
 
-  it('a ?gconf deep link opens the five-option overlap detail', async () => {
+  it('a ?gconf deep link opens the three verdicts (no relation buttons)', async () => {
     renderCoverage(corpusState(), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
-    for (const label of ['Use newer only', 'Use older only', 'Prefer newer', 'Prefer older', 'Keep both']) {
-      expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'docs/SPEC.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'docs/OTHER.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
+    for (const label of ['Use newer only', 'Prefer newer', 'Keep both']) {
+      expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
     }
     expect(screen.getByText('they disagree on rate limits')).toBeInTheDocument();
   });
 
-  it('resolving a conflict refreshes the corpus (optimistic re-curate path)', async () => {
-    const refetch = vi.fn();
-    const corpus = corpusState({ refetch });
+  it('a verdict records the resolution (optimistic ack → corpus updated in place)', async () => {
+    const applyConflictResolutions = vi.fn();
+    const corpus = corpusState({ applyConflictResolutions });
     const user = userEvent.setup();
     renderCoverage(corpus, `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
-    await user.click(await screen.findByRole('button', { name: 'Prefer newer' }));
-    // Repo scope returns { relations } (no corpus) → the page refetches the corpus.
-    await waitFor(() => expect(refetch).toHaveBeenCalled());
+    await user.click(await screen.findByRole('button', { name: 'docs/SPEC.md is right' }));
+    // OSS ack → the page updates the verdict list in place (no re-curate/refetch).
+    await waitFor(() => expect(applyConflictResolutions).toHaveBeenCalled());
+    expect(lastConflictPost).toMatchObject({ docA: 'docs/SPEC.md', docB: 'docs/OTHER.md', verdict: 'a' });
   });
 
-  it('a resolved conflict is change/revoke-able from the guard detail pane', async () => {
-    const user = userEvent.setup();
+  it('a covering doc-relation does NOT resolve — the verdict actions still render', async () => {
     renderCoverage(corpusState({ data: RESOLVED_RESP }), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
-    expect(await screen.findByText(/Resolved →/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument();
-    // Change re-opens the five options.
-    await user.click(screen.getByRole('button', { name: 'Change' }));
-    expect(screen.getByRole('button', { name: 'Prefer newer' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'docs/SPEC.md is right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
+    expect(screen.queryByText(/Resolved →/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
   });
 
   it('closing the overlap detail clears ?gconf', async () => {

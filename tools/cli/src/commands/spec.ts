@@ -15,7 +15,7 @@
 import * as p from "@clack/prompts";
 import path from "node:path";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
-import { buildCorpusConflicts } from "@truecourse/shared";
+import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
@@ -103,20 +103,21 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
     for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);
   }
-  if (s.openOverlaps.length > 0) {
+  // Open conflicts via the SAME resolved-derivation the gate uses (a flagged
+  // overlap already verdicted/dismissed/excluded is not open). Point at guard
+  // generate — the contracts pipeline is deprecated.
+  const open = openConflicts(curate.corpus, curate.decisions);
+  if (open.length > 0) {
     p.log.message("");
-    p.log.message("Open overlaps (areas where two docs may disagree — resolve with a relation):");
-    for (const o of s.openOverlaps.slice(0, 10)) {
+    p.log.message("Open overlaps (two docs may disagree — pick a side or dismiss with `spec conflicts resolve`):");
+    for (const o of open.slice(0, 10)) {
       p.log.message(`  • ${o.area}:  ${o.a}  ↔  ${o.b}`);
     }
-    if (s.openOverlaps.length > 10) {
-      p.log.message(`  … (+${s.openOverlaps.length - 10} more)`);
+    if (open.length > 10) {
+      p.log.message(`  … (+${open.length - 10} more)`);
     }
   }
-  // Open conflicts count via the SAME resolved-derivation the gate uses: the fresh
-  // curate already dropped relation-covered pairs and excluded docs, so s.openOverlaps
-  // IS the open set. Point at guard generate — the contracts pipeline is deprecated.
-  const openCount = s.openOverlaps.length;
+  const openCount = open.length;
   p.outro(
     openCount === 0
       ? "Corpus written to .truecourse/specs/corpus.json. Run `truecourse guard generate`."
@@ -157,6 +158,17 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   for (const area of corpus.areas) {
     const ov = area.overlaps.length ? ` · ${area.overlaps.length} overlap${area.overlaps.length === 1 ? "" : "s"}` : "";
     p.log.message(`  ${area.id.padEnd(30)} ${area.docRefs.length} doc${area.docRefs.length === 1 ? "" : "s"}${ov}`);
+  }
+
+  // Orphan honesty: a recorded section-scoped verdict that no longer matches a
+  // flagged conflict (the docs changed) is surfaced, never silently honored.
+  const orphaned = orphanedConflictResolutions(corpus, decisions);
+  if (orphaned.length > 0) {
+    p.log.message("");
+    p.log.warn(
+      `${orphaned.length} orphaned conflict resolution${orphaned.length === 1 ? "" : "s"} (no longer match a flagged dispute — review with \`spec conflicts list\`):`,
+    );
+    for (const o of orphaned.slice(0, 10)) p.log.message(`  • ${o.docA}  ↔  ${o.docB}  (${o.verdict})`);
   }
 
   p.outro(
