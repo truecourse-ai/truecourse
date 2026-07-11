@@ -301,6 +301,7 @@ truecourse spec docs unexclude <path>             # Remove a force-exclude overr
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
+truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```

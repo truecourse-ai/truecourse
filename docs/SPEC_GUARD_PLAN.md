@@ -506,6 +506,19 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    it generates from a conflicted corpus without complaint.
 
 
+34. **CLI progress renderer duplicates lines when a status line wraps (live 2026-07-10).**
+   The step renderer redraws by cursor-up-per-logical-line; a detail line longer than the
+   terminal width wraps to 2+ visual rows, the clear count is short, and every update
+   pushes a duplicated stale line upward (screenshot: ~25 copies of "Indexing sections").
+   Fix in the renderer: clamp each live status line to the terminal width (ellipsis) so
+   one logical line = one visual row (recompute on resize; final/closing lines may print
+   full). Never applies to error output.
+   STATUS: BUILT — `tools/cli/src/lib/stdout-step-renderer.ts` now clamps every redrawn
+   checklist line to `terminalWidth()` (recomputed each paint for resize; ANSI-aware
+   `clampToWidth`/`visibleLength` measure visible cols and keep styling). Gated on
+   `process.stderr.isTTY`, so piped/non-TTY output is byte-identical to before. Shared by
+   guard/spec/contracts/spec-conflicts renderers. Tests: `tests/cli/stdout-step-renderer.test.ts`.
+
 32. **Assertions come from the doc, never the transcript (live failure 2026-07-10; the
    guard-prompt fingerprint batch with 6b + 23).** Grounding transcripts let the model see
    real outputs, and it authored AROUND doc-vs-code disagreements: taskline's two seeded

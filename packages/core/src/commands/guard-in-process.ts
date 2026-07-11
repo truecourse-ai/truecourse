@@ -24,6 +24,7 @@ import {
   openConflicts,
   type GuardGenerateReport,
   type GuardGenerateUsage,
+  type GuardScenarioResult,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
@@ -214,6 +215,10 @@ export async function guardGenerateInProcess(
   // authoring call — a sweep that can take minutes on a cold run. It rides the
   // author step's detail so the phase never looks idle: "grounding probes X/Y ·
   // authoring Z/W claims". The probe total grows as later sections enter grounding.
+  // The extract step's planned view denominator — the generator announces it
+  // via onExtractViewProgress(0, total) before the first view resolves; kept so
+  // the completed line can report both units (docs read AND views called).
+  let extractViewsTotal = 0;
   let authorDone = 0;
   let authorTotal = 0;
   let authorFinished = false;
@@ -278,18 +283,25 @@ export async function guardGenerateInProcess(
         sectionsTotal = work;
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
         cur = STEPS.indexOf('extract');
-        tracker?.start('extract', `0 views`);
+        // No detail yet — the generator's initial onExtractViewProgress(0, total)
+        // supplies the "0/N views" counter as soon as the view plan is known.
+        tracker?.start('extract');
       },
       onExtractViewProgress: (done, total) => {
         // The live extraction counter: views are the call unit (a chunked doc is
-        // many parallel calls); docs alone can sit at 0/1 for minutes.
+        // many parallel calls); docs alone can sit at 0/1 for minutes. The
+        // denominator is planned upfront, so it's visible from the first tick.
+        extractViewsTotal = total;
         advanceTo('extract');
-        tracker?.detail('extract', withUsage('extract', `${done}/${total} view${total === 1 ? '' : 's'}`));
+        tracker?.detail('extract', withUsage('extract', `views ${done}/${total}`));
       },
       onExtractProgress: (done, total) => {
         advanceTo('extract');
         if (done >= total) {
-          tracker?.done('extract', withUsage('extract', `${total} doc${total === 1 ? '' : 's'}`));
+          // Completed line keeps both units visible end to end: docs read AND views called.
+          const docs = `${total} doc${total === 1 ? '' : 's'}`;
+          const views = `${extractViewsTotal} view${extractViewsTotal === 1 ? '' : 's'}`;
+          tracker?.done('extract', withUsage('extract', `${docs} · ${views}`));
         }
       },
       onAuthorProgress: (done, total) => {
@@ -431,6 +443,8 @@ export interface GuardRunInProcessOptions {
   tracker?: StepTracker;
   /** Restrict the run to a single scenario id (`--scenario`). */
   scenario?: string;
+  /** Fires with each scenario's result as it settles — the CLI streams non-pass lines from it. */
+  onScenarioResult?: (result: GuardScenarioResult) => void;
 }
 
 /**
@@ -459,7 +473,10 @@ export async function guardRunInProcess(
         tracker?.start('run', `0/${total} scenarios`);
       }
     },
-    onScenarioSettled: (done, total) => tracker?.detail('run', `${done}/${total} scenarios`),
+    onScenarioSettled: (done, total, scenarioResult) => {
+      tracker?.detail('run', `${done}/${total} scenarios`);
+      options.onScenarioResult?.(scenarioResult);
+    },
   });
   if (result.status === 'ok') {
     const n = result.latest.summary.total;

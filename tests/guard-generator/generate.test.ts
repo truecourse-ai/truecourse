@@ -1012,7 +1012,7 @@ describe('generateGuards — live progress', () => {
     expect(phases).toContain('run')
   })
 
-  it('fires onExtractViewProgress once per extraction view across docs', async () => {
+  it('fires onExtractViewProgress with the planned total upfront, then once per view', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }])
@@ -1027,9 +1027,10 @@ describe('generateGuards — live progress', () => {
       onExtractViewProgress: (done, total) => views.push([done, total]),
     })
 
-    // Two small docs → one view each; the counter ticks per VIEW with the
+    // Two small docs → one view each. The planned denominator is announced up
+    // front (0/2 before any call), then the counter ticks per VIEW with the
     // cross-doc total (the live unit — docs alone can sit at 0 for minutes).
-    expect(views).toEqual([[1, 2], [2, 2]])
+    expect(views).toEqual([[0, 2], [1, 2], [2, 2]])
   })
 
   it('fires onRetryProgress with a per-section-accumulating failed-claim total', async () => {

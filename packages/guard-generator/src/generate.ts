@@ -239,7 +239,9 @@ export interface GenerateGuardsOptions {
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   onExtractProgress?: (done: number, total: number) => void
-  /** Per-VIEW extraction progress (a chunked doc is many view calls) — the live counter. */
+  /** Per-VIEW extraction progress (a chunked doc is many view calls) — the live
+   *  counter. Fires `(0, total)` as soon as the view plan is known (views are
+   *  planned per doc upfront), then once per completed view. */
   onExtractViewProgress?: (done: number, total: number) => void
   onAuthorProgress?: (done: number, total: number) => void
   /** Grounding probe progress — captured vs planned probes across all authoring
@@ -410,6 +412,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let extractDone = 0
   const viewTotal = workDocs.reduce((n, d) => n + countExtractViews(d), 0)
   let viewDone = 0
+  // Announce the planned denominator before the first (possibly slow) view
+  // resolves so the live counter is never a bare count without context.
+  options.onExtractViewProgress?.(0, viewTotal)
   const extracted = await Promise.all(
     workDocs.map(async (doc) => {
       const result = await extractDocClaims(repoRoot, doc, extractRunner, limit, () =>

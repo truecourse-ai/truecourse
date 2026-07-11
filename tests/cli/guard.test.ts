@@ -20,7 +20,7 @@ import {
   type GuardOutcome,
   type GuardGenerateReport,
 } from '@truecourse/shared'
-import { runGuardStatus, runGuardDrifts, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
+import { runGuardRun, runGuardStatus, runGuardDrifts, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
   rmrf,
@@ -34,6 +34,13 @@ import {
   PASSING_STEPS,
   FAILING_STEPS,
 } from '../guard-generator/helpers.js'
+import {
+  writeRecipe as writeRunRecipe,
+  writeScenario as writeRunScenario,
+  scenario as scenarioDef,
+  specBinds,
+} from '../guard-runner/helpers.js'
+import { execSync } from 'node:child_process'
 import { recordStageUsage } from '@truecourse/shared/llm'
 import type { GenerateRunner, FidelityRunner } from '@truecourse/guard-generator'
 
@@ -179,6 +186,174 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
 
     expect(details.some((d) => d.includes('grounding'))).toBe(false)
     expect(details.some((d) => /\d+\/\d+ claim/.test(d))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Extract step units: live "views X/Y" (planned denominator from the first
+// tick), completed "N doc(s) · M view(s)" — the same units end to end.
+// ---------------------------------------------------------------------------
+
+describe('guardGenerateInProcess — extract step units', () => {
+  /** Collect every distinct extract detail, split by live vs completed. */
+  function trackExtractDetails(): { tracker: StepTracker; live: string[]; done: string[] } {
+    const live: string[] = []
+    const done: string[] = []
+    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
+      const step = payload.steps?.find((s) => s.key === 'extract')
+      if (!step?.detail) return
+      const bucket = step.status === 'done' ? done : live
+      if (bucket[bucket.length - 1] !== step.detail) bucket.push(step.detail)
+    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
+    return { tracker, live, done }
+  }
+
+  it('live counter shows "views X/Y" with the planned denominator from the start; completion reports docs AND views', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const { tracker, live, done } = trackExtractDetails()
+    await guardGenerateInProcess(r, {
+      tracker,
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
+    })
+
+    // Every live tick carries the denominator — never a bare count.
+    expect(live.length).toBeGreaterThan(0)
+    for (const d of live) expect(d).toMatch(/^views \d+\/\d+/)
+    // The planned total is visible before the first view resolves (0/N).
+    expect(live[0]).toMatch(/^views 0\/\d+/)
+    // Completed line keeps both units: one doc read, one extraction view called.
+    expect(done).toHaveLength(1)
+    expect(done[0]).toMatch(/^1 doc · 1 view\b/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// `guard run` output: passes stay in the live counter, non-pass results stream
+// inline as they settle, the close is a counts summary (+ drift pointers on
+// non-green runs); `--verbose` restores the full per-scenario listing.
+// ---------------------------------------------------------------------------
+
+describe('runGuardRun — output shape', () => {
+  function gitInit(r: string): void {
+    execSync('git init -q -b main', { cwd: r })
+  }
+
+  /** Run `guard run` capturing stdout (clack) + stderr (renderer) and the exit code. */
+  async function captureRun(
+    r: string,
+    opts: { verbose?: boolean } = {},
+  ): Promise<{ out: string; err: string; exitCode: number | null }> {
+    let exitCode: number | null = null
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    const capture = (chunks: string[]) =>
+      ((chunk: unknown, ...rest: unknown[]) => {
+        chunks.push(typeof chunk === 'string' ? chunk : String(chunk))
+        const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined
+        cb?.()
+        return true
+      }) as never
+    const outChunks: string[] = []
+    const errChunks: string[] = []
+    const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(capture(outChunks))
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(capture(errChunks))
+    try {
+      await runGuardRun({ cwd: r, verbose: opts.verbose })
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e
+    } finally {
+      outSpy.mockRestore()
+      errSpy.mockRestore()
+      exitSpy.mockRestore()
+    }
+    return { out: outChunks.join(''), err: errChunks.join(''), exitCode }
+  }
+
+  it('default: no per-pass lines; non-pass results stream inline; drift close = counts + pointers', async () => {
+    const r = repo()
+    gitInit(r)
+    writeRunRecipe(r)
+    writeRunScenario(
+      r,
+      'cli/ver.yaml',
+      scenarioDef({ id: 'ver', title: 'prints the version', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/boom.yaml',
+      scenarioDef({ id: 'boom.fail', title: 'boom exits clean', binds: specBinds('cli/boom'), steps: [{ run: ['boom'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/stale.yaml',
+      scenarioDef({
+        id: 'stale1',
+        title: 'edited section',
+        binds: { ...specBinds('cli/whoami'), fingerprint: 'sha256:bogus' },
+        steps: [{ run: ['whoami'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const { out, err, exitCode } = await captureRun(r)
+
+    // Passing scenarios never print a ✓ line — they live in the counter + counts.
+    expect(out).not.toContain('✓ ver')
+    expect(err).not.toContain('✓ ver')
+    // Non-pass results streamed inline (renderer log), a full line each with icon.
+    expect(err).toMatch(/✗ boom\.fail — boom exits clean {2}\(\d+ms\)/)
+    expect(err).toContain('~ stale1 — edited section  — section edited since binding')
+    // The close: counts per outcome + pointers; the expected/actual dump is gone.
+    expect(out).toContain('1 passed · 1 failed · 1 stale')
+    expect(out).toContain('truecourse guard drifts')
+    expect(out).not.toContain('expected:')
+    expect(exitCode).toBe(1)
+  })
+
+  it('green run: terse close — counts + outro, no scenario listing, no drift pointers', async () => {
+    const r = repo()
+    gitInit(r)
+    writeRunRecipe(r)
+    writeRunScenario(
+      r,
+      'cli/ver.yaml',
+      scenarioDef({ id: 'ver', title: 'prints the version', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    writeRunScenario(
+      r,
+      'cli/who.yaml',
+      scenarioDef({ id: 'who', title: 'whoami works', binds: specBinds('cli/whoami'), steps: [{ run: ['whoami'], expect: { exit: 0 } }] }),
+    )
+
+    const { out, err, exitCode } = await captureRun(r)
+
+    expect(out).toContain('2 passed')
+    expect(out).toContain('All sections guarded.')
+    expect(out).not.toMatch(/✓ (ver|who) —/)
+    expect(err).not.toMatch(/✓ (ver|who) —/)
+    expect(out).not.toContain('truecourse guard drifts')
+    expect(exitCode).toBeNull()
+  })
+
+  it('--verbose restores the per-scenario ✓ listing', async () => {
+    const r = repo()
+    gitInit(r)
+    writeRunRecipe(r)
+    writeRunScenario(
+      r,
+      'cli/ver.yaml',
+      scenarioDef({ id: 'ver', title: 'prints the version', binds: specBinds('cli/version'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+
+    const { out } = await captureRun(r, { verbose: true })
+    expect(out).toMatch(/✓ ver — prints the version {2}\(\d+ms\)/)
   })
 })
 

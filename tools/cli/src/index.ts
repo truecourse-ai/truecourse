@@ -447,8 +447,9 @@ guardCmd
   .command("run")
   .description("Build via the recipe and run the committed scenarios")
   .option("--scenario <id>", "Run only the scenario with this id")
+  .option("--verbose", "List every scenario result (one ✓ line per pass)")
   .action(async (options) => {
-    await runGuardRun({ scenario: options.scenario });
+    await runGuardRun({ scenario: options.scenario, verbose: !!options.verbose });
   });
 
 guardCmd

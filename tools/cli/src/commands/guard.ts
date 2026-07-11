@@ -1,8 +1,9 @@
 /**
  * `truecourse guard run` — build the entrypoint via the recipe, run the committed
- * scenarios in parallel sandboxes, print per-scenario results, and write
- * `.truecourse/guard/LATEST.json`. Deterministic and LLM-free: no `claude`
- * preflight, no cost estimate. Unlike `verify`, it exits non-zero on any
+ * scenarios in parallel sandboxes, stream non-pass results as they settle, and
+ * write `.truecourse/guard/LATEST.json`. Passes stay in the live counter and the
+ * closing counts (`--verbose` lists every scenario). Deterministic and LLM-free:
+ * no `claude` preflight, no cost estimate. Unlike `verify`, it exits non-zero on any
  * non-pass outcome — fail, error, stale, or orphaned — so it works as a CI drift
  * gate: code drift (fail), infra trouble (error), and spec-side drift
  * (stale/orphaned) all break the build.
@@ -32,6 +33,8 @@ export interface RunGuardRunOptions {
   cwd?: string;
   /** Restrict the run to a single scenario id (`--scenario`). */
   scenario?: string;
+  /** List every scenario (one ✓ line per pass) after the run (`--verbose`). */
+  verbose?: boolean;
 }
 
 const MARK: Record<GuardScenarioResult["outcome"], string> = {
@@ -42,6 +45,15 @@ const MARK: Record<GuardScenarioResult["outcome"], string> = {
   orphaned: "○",
 };
 
+/** One line per scenario result: severity icon, id, title, reason/duration. */
+function scenarioLine(s: GuardScenarioResult): string {
+  const suffix =
+    s.outcome === "stale" || s.outcome === "orphaned"
+      ? `  — ${BINDING_REASON[s.outcome]}`
+      : `  (${Math.round(s.durationMs)}ms)`;
+  return `${MARK[s.outcome]} ${s.id} — ${s.title}${suffix}`;
+}
+
 export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Guard");
@@ -49,7 +61,16 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
 
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, GUARD_RUN_STEPS.map((s) => ({ ...s })));
-  const result = await guardRunInProcess(repoRoot, { scenario: opts.scenario, tracker });
+  const result = await guardRunInProcess(repoRoot, {
+    scenario: opts.scenario,
+    tracker,
+    // Non-pass results surface the moment they settle — a full line each,
+    // printed above the live counter so they are never buried under pass
+    // output. Passes ride the counter only (`--verbose` lists them at the end).
+    onScenarioResult: (s) => {
+      if (s.outcome !== "pass") renderer.log(scenarioLine(s));
+    },
+  });
   renderer.dispose();
 
   switch (result.status) {
@@ -100,26 +121,10 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
 
   const { latest, loadErrors, manifest } = result;
 
-  for (const s of latest.scenarios) {
-    const suffix =
-      s.outcome === "stale" || s.outcome === "orphaned"
-        ? `  — ${BINDING_REASON[s.outcome]}`
-        : `  (${Math.round(s.durationMs)}ms)`;
-    p.log.message(`${MARK[s.outcome]} ${s.id} — ${s.title}${suffix}`);
-  }
-
-  const failing = latest.scenarios.filter((s) => s.outcome === "fail" || s.outcome === "error");
-  if (failing.length > 0) {
-    p.log.message("");
-    for (const s of failing) {
-      p.log.message(`${MARK[s.outcome]} ${s.id}`);
-      if (s.failure) {
-        p.log.message(`    step ${s.failure.step}`);
-        p.log.message(`    expected: ${s.failure.expected}`);
-        p.log.message(`    actual:   ${s.failure.actual}`);
-      }
-      if (s.evidencePath) p.log.message(`    evidence: ${s.evidencePath}`);
-    }
+  // `--verbose` restores the full per-scenario listing (one ✓ line per pass);
+  // by default passes stay in the live counter and only the summary tells the story.
+  if (opts.verbose) {
+    for (const s of latest.scenarios) p.log.message(scenarioLine(s));
   }
 
   printLoadErrors(loadErrors);
@@ -136,6 +141,14 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
   const bad = fail > 0 || error > 0 || stale > 0 || orphaned > 0 || loadErrors.length > 0;
   if (bad) {
     p.log.error(parts.join(" · "));
+    // Pointers — the failure detail (step/expected/actual/evidence) lives in
+    // the drift surfaces, mirroring the generate close.
+    p.log.info(
+      [
+        "`truecourse guard drifts`  — inspect failures (expected/actual/evidence)",
+        "`truecourse guard status`  — coverage",
+      ].join("\n"),
+    );
     p.outro("Guard found drift.");
     process.exit(1);
   }
