@@ -133,6 +133,18 @@ export const GuardBirthFindingSchema = z
   .object({
     doc: z.string(),
     anchor: z.string(),
+    /**
+     * What kind of finding this is:
+     *  - `birth` (default when absent) — a scenario that failed birth validation
+     *    twice (a generation defect or real existing drift).
+     *  - `fidelity` — a scenario that PASSED birth but the fidelity reviewer judged
+     *    it weak/vacuous/miscast: it does not truly verify what its section claims
+     *    (item 33). `actual` carries the reviewer's one-sentence stated mismatch;
+     *    `step`/`expected` are placeholders (no birth step ran).
+     * Optional so older `result.json` files (and internal birth findings, which
+     * leave it unset) keep parsing.
+     */
+    kind: z.enum(['birth', 'fidelity']).optional(),
     /** The scenario title — the claim it was asserting. */
     title: z.string(),
     step: z.number().int().positive(),

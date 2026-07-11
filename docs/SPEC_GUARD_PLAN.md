@@ -337,7 +337,9 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    caught before any step) is now detected by `isSetupDefectResult` (runner) and routed through
    the SAME one evidence-retry as a birth `fail` in `settleCliSection`, with the provider message
    as evidence; retry counter/`guard.retry` stage + the retry cache participate identically. The
-   prompt-loudness half stays queued (would re-key the authoring cache).
+   prompt-loudness half is now BUILT — the "# World-state capabilities" block carries a LOUD
+   SEEDING RULE (every `git.commits[].files`/`staged` path must be seeded via `setup.files` or an
+   earlier commit) with a wrong/right example; shipped in the item-32 fingerprint batch.
 7. **Pin the resolved entrypoint interpreter** (correctness, found by a live false-red): a
    scenario legitimately overrode `PATH` via `setup.env` to inject a fake `claude` stub — and
    the override also swapped which `node` ran the CLI (an ancient host node resolved first and
@@ -503,6 +505,61 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    generate should gain the same open-conflicts gate guard generate has (item 25); today
    it generates from a conflicted corpus without complaint.
 
+
+32. **Assertions come from the doc, never the transcript (live failure 2026-07-10; the
+   guard-prompt fingerprint batch with 6b + 23).** Grounding transcripts let the model see
+   real outputs, and it authored AROUND doc-vs-code disagreements: taskline's two seeded
+   drifts (done message, CSV header) were extracted verbatim, then authored as
+   effect-only scenarios that never assert the disputed output — 61/61 green, zero
+   findings, drift undetected. Root-cause prompt rule in the AUTHORING and RETRY prompts
+   (crisp for the model tier): probes/transcripts are for commands and setup ONLY;
+   assertions state what the DOC claims, verbatim where the doc quotes output; a scenario
+   failing birth because doc and code disagree is a CORRECT outcome (it becomes a
+   finding), never something to avoid. No string-matching enforcement (rejected as a
+   workaround; placeholders like `t<N>` break it) — the systematic audit is the fidelity
+   review (item 33). This batch also carries: 6b's prompt half (seeding constraint LOUD:
+   every `git.commits[].files`/`staged` path must appear in `setup.files`) and item 23
+   (LLM-dependent commands classify as `blocked-on: llm-provider`, never authored).
+   One roll of the extract + generate fingerprints together; stores re-author once.
+   STATUS: BUILT — authoring + retry prompts now rule assertions come from the claim (verbatim, placeholders adapted), a doc-vs-code disagreement failing birth is the correct outcome, + a compact worked example; GENERATE fingerprint rolled to 9f3aed7f855e0053.
+
+33. **Fidelity review v1 (was "v1.5"; user go 2026-07-10).** After birth, every GREEN
+   scenario gets one adversarial model pass: given the scenario YAML and its section's
+   text, does this test actually verify what the section claims — or is it weak, vacuous,
+   or testing something else? Flagged scenarios become FINDINGS (kind: fidelity; same
+   lifecycle as birth findings — section unsettles, scenario not persisted, evidence =
+   the reviewer's stated mismatch), honest ones persist as today. Cached per
+   scenario-content + section-content (cheap re-runs); cheap model tier; its own new
+   prompt fingerprint (no existing cache affected). Runs inside generate after birth,
+   progress on the birth/validate step's detail. Success criterion on taskline: flags
+   nothing among the honest scenarios (no false alarms), while item 32 makes the two
+   seeded drifts fail birth outright.
+   STATUS: BUILT — new stage `guard.fidelity` (StageId + STAGE_DEFAULTS `sonnet`: a
+   focused comprehension JUDGEMENT like `guard.extract`, cheaper than the opus
+   authoring tier; haiku under-reasons nuanced faithfulness, the weakness that moved
+   `spec.areaTag` off it). Own `FIDELITY_SYSTEM_PROMPT` + `FIDELITY_PROMPT_FINGERPRINT`
+   (a14f96711c37aafb) folded into `generationInputsHash` so a prompt edit re-reviews
+   every settled section. Review runs INSIDE `settleCliSection` after both birth
+   rounds, over `persistedHere` (round-1 passes AND retry survivors), BEFORE persist:
+   faithful → stays in the persist set; flagged → a FINDING (`kind: 'fidelity'`,
+   evidence = the reviewer's mismatch in `actual`, yaml+claim inline like a birth
+   finding) pushed to `localFindings` so the section unsettles and faithful siblings
+   drop to `heldSections`; a review that can't complete (re-ask once, then error) is a
+   `localError` that unsettles + re-attempts. Cache `guard/fidelity` keyed on scenario
+   BEHAVIOR (title/steps/setup/normalize — not the churny engine id/binds) + section
+   fingerprint + claim + prompt fingerprint, so re-runs hit. Usage ticks under
+   `guard.fidelity` (GUARD_USAGE_STAGES + `validate` step stages + `config llm show`
+   label); progress rides the validate line's detail as `· fidelity N`. Estimate adds
+   a `guardFidelity` stage (one review per planned cli claim, honest not-cache-aware).
+   The optional `kind` on `GuardBirthFindingSchema` is back-compat (absent = birth;
+   dashboard/CLI tolerate it). Reviewer is transport-gated: production
+   (`guardGenerateInProcess`) always supplies a transport so the review always runs; a
+   caller with neither transport nor `fidelityRunner` (pre-feature unit tests) skips
+   it. Tests: prompt content + pinned fingerprint; flow (faithful persists / flagged →
+   finding with kind+evidence, section unsettled, held sibling / retry survivor
+   reviewed / cache hit no second call / review error unsettles / no-reviewer persists
+   / report round-trip); usage totalled under `guard.fidelity` + `· fidelity N` on the
+   validate detail. Full gate green (1268 tests).
 
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
@@ -709,6 +766,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    sections `blocked-on: llm-provider`; the classifier missed this one. Tighten the
    extraction/classification prompt (rides the next fingerprint batch with 6b's
    prompt-loudness half).
+   STATUS: BUILT — EXTRACT_SYSTEM_PROMPT gained a "commands that need an LLM provider are not
+   cli-testable" rule (any provider-auth-dependent command classifies blocked-on the
+   llm-provider capability, not emitted as a cli claim); EXTRACT fingerprint rolled to
+   2f26bbf187a8a087.
 
 19. **Findings must be judgeable on one screen (user decision 2026-07-08).** A finding asks
    "generation defect or real drift — your call" while withholding the material for the

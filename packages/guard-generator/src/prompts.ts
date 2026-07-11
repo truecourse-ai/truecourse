@@ -20,7 +20,12 @@
 
 import { createHash } from 'node:crypto'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
-import { DocExtractionSchema, RecipeProposalSchema, RawGeneratedScenarioSchema } from './schemas.js'
+import {
+  DocExtractionSchema,
+  RecipeProposalSchema,
+  RawGeneratedScenarioSchema,
+  FidelityReviewSchema,
+} from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
 
@@ -31,6 +36,8 @@ const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedScenarioSchema.strip())
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+/** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
+const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 
 function fingerprint(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16)
@@ -104,6 +111,17 @@ A claim that overreaches the prose is worse than a missing one. When a section i
 background, rationale, definitions, naming, design history, a pure cross-
 reference, or needs a capability no driver has, record an untestable note instead
 of forcing a weak claim.
+
+# Sandbox limits — commands that need an LLM provider are not cli-testable
+Guard runs each command in a sealed sandbox with NO credentials and NO network. A
+command whose documented behavior requires an authenticated LLM provider or an
+external AI CLI (it calls out to a model to do its work — an infer / generate /
+AI-backed command) therefore CANNOT run there: its real behavior is unreachable, and a
+cli claim for it would only be authored to die in the sandbox for lack of provider
+auth. Do NOT extract such a command's behavior as a cli claim — classify it blocked-on
+the llm-provider capability instead: record an untestable note for the section whose
+reason states it needs an authenticated LLM provider (llm-provider). Judge this by the
+DOCUMENTED behavior, never a fixed command list — any provider-auth-dependent command.
 
 # Sections and anchors
 The OUTLINE below lists every section with its exact ANCHOR. Each claim MUST carry
@@ -207,10 +225,29 @@ You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` mar
 invalid output — your response can ONLY be the JSON array described below. You never
 need to inspect code: when a claim names a command, its REAL BEHAVIOR transcript
 (captured in an empty sandbox) is provided below, and birth validation supplies the
-program's actual output on retry. Ground every assertion about output in those
-transcripts when present, rather than guessing; a claim about behavior in a
-NON-empty world (existing files or git state) still needs a \`setup\` block — the
-transcripts show only the empty-world baseline.
+program's actual output on retry. Use those transcripts to get the COMMANDS, ARGUMENTS,
+and SETUP right — never to decide WHAT to assert (see the next rule); a claim about
+behavior in a NON-empty world (existing files or git state) still needs a \`setup\`
+block — the transcripts show only the empty-world baseline.
+
+# Assertions come from the claim, never the transcript
+Transcripts (the REAL BEHAVIOR probes, and the actual output birth supplies on retry)
+exist ONLY to get commands, arguments, and setup right. Every ASSERTION must state what
+the CLAIM — read against its section's text — says: copied VERBATIM where the claim
+quotes exact output, adapting only placeholders (e.g. \`t<N>\`, \`<file>\`) to the
+concrete values your scenario creates. If a transcript shows the tool behaving
+DIFFERENTLY from the claim, you MUST STILL assert the CLAIM'S version. The scenario then
+fails birth — and that is the CORRECT, desired outcome: the doc-vs-code disagreement
+surfaces as a finding. Never weaken, generalize, or swap a claimed assertion for a
+softer, effect-only check (asserting that a list changed instead of the exact message
+the claim quotes) to make a scenario pass — a green test that proves less than the claim
+is the worst outcome.
+Worked example — claim: "\`done <id>\` prints \`Completed t<N> ✓\`". The probe transcript
+shows the command instead printing \`Marked t1 as done\`. You STILL author the assertion
+from the claim: stdout \`contains "Completed t1 ✓"\` (the claim's output X, \`t<N>\`→\`t1\`),
+NOT \`Marked t1 as done\` (the transcript's Y) and NOT an effect-only check of the done
+list. The scenario fails birth against the real output — correct: the disagreement is
+now a finding, not a passing test.
 
 # Faithfulness — the prime directive
 Assert only what the claim, read against its section's text, states. A scenario
@@ -237,6 +274,12 @@ with (its commits, its staged working-index, its branch); the engine materialize
 it deterministically with pinned author/committer + dates and hooks off, so its
 mere presence means a repo exists in the sandbox cwd. Declare only WHAT the world
 looks like — the schema below carries the fields.
+SEEDING RULE (do not skip): every path you reference in \`setup.git.commits[].files\`
+or \`setup.git.staged\` MUST also be seeded — it must appear in \`setup.files\`, or be
+created by an EARLIER commit in the same \`setup.git\`. A path that appears ONLY under
+\`git\` is never materialized and the WHOLE test fails to build.
+  Wrong: \`git: { commits: [{ files: ["a.txt"] }] }\` with no \`a.txt\` in \`setup.files\`.
+  Right: \`files: { "a.txt": "…" }\` AND \`git: { commits: [{ files: ["a.txt"] }] }\`.
 The sandbox is otherwise bare: no network egress, no credentials (env is
 allowlisted — the host's API keys never reach the program), no shell. When a claim
 needs world-state NO setup block can express — a running service, a database,
@@ -377,10 +420,14 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     if (c.retry) {
       lines.push(
         'RETRY — a scenario you authored for this claim FAILED birth validation (it did',
-        'not pass against the current, correct code). Either you asserted the wrong',
-        'behavior, or the claim is not actually CLI-observable. Fix the assertion to',
-        'match the code, or return an empty scenarios array for this ref if it is not',
-        'CLI-assertable:',
+        'not pass against the current code). Use the evidence below to fix COMMANDS,',
+        'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id.',
+        'But the ASSERTION still states what the CLAIM says: if the evidence shows a',
+        'genuine DOC-vs-CODE disagreement on the asserted VALUE (the code really prints',
+        "something other than what the claim quotes), KEEP the claim's assertion — the",
+        'retry then fails again and the claim correctly becomes a finding. Do NOT change a',
+        'claimed assertion to match the code. Return an empty scenarios array only if the',
+        'claim is genuinely not CLI-observable:',
         `  scenario: ${c.retry.scenarioTitle}`,
         `  failing step: ${c.retry.step}`,
         `  expected: ${c.retry.expected}`,
@@ -458,6 +505,102 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       'Return exactly one JSON object with a non-empty "build" string and a non-empty',
       '"entry" argv array (and optional "env" object), and nothing else:',
       '  { "build": "<shell command>", "entry": ["<argv>", "..."] }',
+    )
+  }
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Fidelity review
+// ---------------------------------------------------------------------------
+
+export const FIDELITY_SYSTEM_PROMPT = `\
+You are a strict reviewer. You are given ONE test scenario that already PASSES
+against the current code, the SPEC SECTION it is bound to, and the CLAIM it was
+authored from. Your ONE job: decide whether this scenario actually VERIFIES what
+the section/claim asserts. You return JSON only — no prose.
+
+${OUTPUT_ONLY_GUARDRAIL}
+
+# The question
+A green test is worthless if it passes for the wrong reason. Read the scenario's
+steps and assertions against what the CLAIM (in its section's own words) says the
+program does, then judge it as exactly one of:
+- faithful — the scenario's assertions would FAIL if the claimed behavior were
+  broken. It checks the specific observable the claim names (the exact stdout the
+  claim quotes, the exact exit code, the exact file content), not a loose proxy.
+- flagged — the scenario does NOT truly verify the claim. It is one of:
+  - weak: it asserts LESS than the claim. The claim quotes exact output \`X\` but the
+    scenario only checks that something changed, that the command exited 0, or that
+    an unrelated substring appears — the disputed value \`X\` is never asserted.
+  - vacuous: the assertion would still pass even if the claimed behavior were
+    entirely broken or removed (e.g. asserts a prompt/help line, an unconditional
+    banner, or exit 0 on a command that exits 0 regardless).
+  - miscast: it tests a DIFFERENT behavior than the claim — a different command,
+    flag, or observable than the one the claim is about.
+
+# The bar
+Assume the claim is the contract. Ask: "if a developer broke exactly the behavior
+this claim describes, would THIS scenario turn red?" If yes → faithful. If it could
+stay green while the claimed behavior is broken → flagged. When the claim quotes an
+exact message or value, a scenario that does not assert that exact message/value is
+flagged (weak), no matter how much else it checks.
+
+# Output schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition; your reply must
+validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
+${FIDELITY_JSON_SCHEMA}
+Concretely:
+  { "verdict": "faithful" }
+  { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>" }
+On "flagged" the "mismatch" is REQUIRED — one sentence stating the gap between what
+the claim asserts and what the scenario actually checks. Omit it when faithful.`
+
+export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
+
+export interface FidelityUserContext {
+  /** Repo-relative doc path the claim comes from — orientation only. */
+  doc: string
+  /** The bound section's heading, for context. */
+  sectionHeading: string
+  /** The section's own text — what the claim is read against. */
+  sectionText: string
+  /** The extracted claim the scenario was authored from. */
+  claim: string
+  /** The committed YAML of the green scenario under review. */
+  scenarioYaml: string
+  /** On a re-ask after invalid output, the prior output quoted back. */
+  correction?: OutputCorrection
+}
+
+export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
+  const lines = [
+    `Document: ${ctx.doc}`,
+    `Section: ${ctx.sectionHeading}`,
+    '',
+    'SECTION TEXT (what the claim is read against):',
+    '"""',
+    ctx.sectionText,
+    '"""',
+    '',
+    `CLAIM the scenario was authored from:`,
+    ctx.claim,
+    '',
+    'SCENARIO UNDER REVIEW (passes against current code):',
+    '"""',
+    ctx.scenarioYaml,
+    '"""',
+    '',
+    'Return exactly one JSON object: { "verdict": "faithful" } or',
+    '{ "verdict": "flagged", "mismatch": "<one sentence>" }.',
+  ]
+  if (ctx.correction) {
+    lines.push(
+      '',
+      'CORRECTION — your previous response was NOT valid. You returned:',
+      ctx.correction.invalidOutput,
+      'Return exactly ONE JSON object with a "verdict" of "faithful" or "flagged"',
+      '(a one-sentence "mismatch" when flagged), and NOTHING else.',
     )
   }
   return lines.join('\n')

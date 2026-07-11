@@ -127,3 +127,21 @@ export type AuthoredClaim = z.infer<typeof AuthoredClaimSchema>
 
 /** A batch's authored output — one entry per input claim ref. */
 export const AuthoredBatchSchema = z.array(AuthoredClaimSchema)
+
+// ---------------------------------------------------------------------------
+// Fidelity review (one call per green scenario, after birth passes)
+// ---------------------------------------------------------------------------
+
+/**
+ * The fidelity reviewer's verdict on ONE green scenario read against its section
+ * and claim: `faithful` (the scenario genuinely verifies what the section/claim
+ * asserts) or `flagged` (it is weak, vacuous, or miscast). A flagged verdict MUST
+ * carry a one-sentence `mismatch` — the stated reason recorded as the finding's
+ * evidence. The object schema is NOT strict: an extra key from a smaller model is
+ * dropped, not a validation failure.
+ */
+export const FidelityReviewSchema = z.object({
+  verdict: z.enum(['faithful', 'flagged']),
+  mismatch: z.string().optional(),
+})
+export type FidelityReview = z.infer<typeof FidelityReviewSchema>

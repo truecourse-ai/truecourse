@@ -7,6 +7,7 @@ import type {
   RawGeneratedScenario,
   GenerateRunner,
   ExtractRunner,
+  FidelityRunner,
 } from '@truecourse/guard-generator'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
@@ -124,6 +125,29 @@ export function authorBy(byAnchor: Record<string, RawGeneratedScenario[]>, onCal
   return async ({ claims }) => {
     onCall?.()
     return claims.map((c) => ({ ref: c.ref, scenarios: byAnchor[c.section.anchor] ?? [] }))
+  }
+}
+
+/** A fidelity reviewer that judges every green scenario faithful (persist as today). */
+export function faithfulReviewer(onCall?: () => void): FidelityRunner {
+  return async () => {
+    onCall?.()
+    return { verdict: 'faithful' }
+  }
+}
+
+/**
+ * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`
+ * (its value is the mismatch), judging everything else faithful. Reads the scenario
+ * title out of the YAML it is handed. `onCall` fires once per review.
+ */
+export function reviewBy(flagged: Record<string, string>, onCall?: () => void): FidelityRunner {
+  return async ({ scenarioYaml }) => {
+    onCall?.()
+    for (const [title, mismatch] of Object.entries(flagged)) {
+      if (scenarioYaml.includes(`title: ${title}`)) return { verdict: 'flagged', mismatch }
+    }
+    return { verdict: 'faithful' }
   }
 }
 

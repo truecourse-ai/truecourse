@@ -20,14 +20,18 @@ import {
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
+  FIDELITY_SYSTEM_PROMPT,
+  buildFidelityUserPrompt,
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
+  type FidelityUserContext,
 } from './prompts.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
+export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -71,6 +75,24 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       fallbackModel: opts.fallbackModel,
       system: GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx) => {
+    const raw = await transport({
+      id: `guard.fidelity:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.fidelity',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: FIDELITY_SYSTEM_PROMPT,
+      user: buildFidelityUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,
     })

@@ -4,12 +4,55 @@ import {
   EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
+  FIDELITY_SYSTEM_PROMPT,
+  FIDELITY_PROMPT_FINGERPRINT,
+  buildAuthorUserPrompt,
+  buildFidelityUserPrompt,
+  type AuthorUserContext,
+  type FidelityUserContext,
+  type SectionInput,
 } from '@truecourse/guard-generator'
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
   createHash('sha256').update(text).digest('hex').slice(0, 16)
+
+const SECTION: SectionInput = {
+  doc: 'docs/cli.md',
+  anchor: 'done',
+  fingerprint: 'sha256:x',
+  headingText: 'done',
+  level: 2,
+  ownText: '`done <id>` prints `Completed t<N> ✓`.',
+  fullText: '',
+  areaTags: [],
+}
+
+/** A retry authoring prompt for one claim carrying birth-failure evidence. */
+function retryPrompt(): string {
+  const ctx: AuthorUserContext = {
+    doc: 'docs/cli.md',
+    docContext: '## done\n`done <id>` prints `Completed t<N> ✓`.',
+    areaTags: [],
+    recipeEntry: ['node', 'cli.js'],
+    recipeBuild: 'true',
+    claims: [
+      {
+        ref: 'c0',
+        claim: '`done <id>` prints `Completed t<N> ✓`',
+        section: SECTION,
+        retry: {
+          scenarioTitle: 'done marks the task complete',
+          step: 1,
+          expected: 'stdout contains "Completed t1 ✓"',
+          actual: 'Marked t1 as done',
+        },
+      },
+    ],
+  }
+  return buildAuthorUserPrompt(ctx)
+}
 
 describe('guard-generator prompts', () => {
   it('GENERATE_SYSTEM_PROMPT carries the world-state capabilities block', () => {
@@ -45,9 +88,122 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
   })
 
-  it('EXTRACT_PROMPT_FINGERPRINT moved once for the guardrail — now pinned again', () => {
-    // Pinned literal: adding OUTPUT_ONLY_GUARDRAIL moved this from 811fa5b607321c96
-    // (the one-time budgeted guard re-extract). It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('d2fdc2266c5a8408')
+  it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
+    // Pinned literal: item-23's llm-provider classification rule moved this from
+    // d2fdc2266c5a8408 (the OUTPUT_ONLY_GUARDRAIL roll). It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('2f26bbf187a8a087')
+  })
+
+  // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
+  it('EXTRACT_SYSTEM_PROMPT classifies LLM-provider-dependent commands as blocked-on', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('commands that need an LLM provider are not cli-testable')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('authenticated LLM provider')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('external AI CLI')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('llm-provider')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('Do NOT extract such a command')
+    // General, not a fixed command list.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('any provider-auth-dependent command')
+  })
+
+  // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).
+  it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Assertions come from the claim, never the transcript')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('you MUST STILL assert the CLAIM')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('fails birth')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('surfaces as a finding')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('effect-only check')
+    // The old "ground every assertion in the transcript" instruction is gone.
+    expect(GENERATE_SYSTEM_PROMPT).not.toContain('Ground every assertion about output in those transcripts')
+  })
+
+  it('GENERATE_SYSTEM_PROMPT carries the compact worked example (claim X vs transcript Y)', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Worked example')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Completed t1 ✓')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Marked t1 as done')
+  })
+
+  // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
+  it('the RETRY authoring prompt keeps the claim assertion on a doc-vs-code disagreement', () => {
+    const p = retryPrompt()
+    expect(p).toContain('RETRY —')
+    expect(p).toContain('fix COMMANDS')
+    expect(p).toContain('DOC-vs-CODE disagreement on the asserted VALUE')
+    expect(p).toContain("KEEP the claim's assertion")
+    expect(p).toContain('correctly becomes a finding')
+    expect(p).toContain('Do NOT change a')
+  })
+
+  it('a non-retry authoring prompt carries no RETRY block', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('RETRY —')
+  })
+
+  // Item 6b — the seeding constraint, LOUD, in the capabilities block.
+  it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git.commits[].files')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git.staged')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('MUST also be seeded')
+    // The one-line wrong/right example.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Wrong:')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Right:')
+  })
+
+  // Item 33 — fidelity review: does a green scenario actually verify its claim?
+  it('FIDELITY_SYSTEM_PROMPT frames the faithful/flagged verdict over the three failure modes', () => {
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('faithful')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('flagged')
+    // The three ways a green test can be worthless.
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('weak')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('vacuous')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('miscast')
+    // The bar: would this test turn red if the claimed behavior were broken?
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('would THIS scenario turn red')
+    // A flagged verdict must state the mismatch (the finding evidence).
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('"mismatch"')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
+  })
+
+  it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a14f96711c37aafb')
+  })
+
+  it('buildFidelityUserPrompt carries the section text, the claim, and the scenario YAML', () => {
+    const ctx: FidelityUserContext = {
+      doc: 'docs/cli.md',
+      sectionHeading: 'done',
+      sectionText: '`done <id>` prints `Completed t<N> ✓`.',
+      claim: '`done <id>` prints `Completed t<N> ✓`',
+      scenarioYaml: 'title: done marks complete\nsteps:\n  - run: [done, t1]\n',
+    }
+    const p = buildFidelityUserPrompt(ctx)
+    expect(p).toContain('Section: done')
+    expect(p).toContain('SECTION TEXT')
+    expect(p).toContain('Completed t<N> ✓')
+    expect(p).toContain('CLAIM the scenario was authored from')
+    expect(p).toContain('SCENARIO UNDER REVIEW')
+    expect(p).toContain('title: done marks complete')
+    expect(p).not.toContain('CORRECTION —')
+  })
+
+  it('buildFidelityUserPrompt appends a CORRECTION block on a re-ask', () => {
+    const p = buildFidelityUserPrompt({
+      doc: 'docs/cli.md',
+      sectionHeading: 'done',
+      sectionText: 'x',
+      claim: 'x',
+      scenarioYaml: 'title: y',
+      correction: { invalidOutput: 'not json' },
+    })
+    expect(p).toContain('CORRECTION —')
+    expect(p).toContain('not json')
+    expect(p).toContain('"faithful" or "flagged"')
   })
 })

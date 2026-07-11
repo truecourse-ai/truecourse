@@ -61,13 +61,16 @@ import {
 } from './section-plan.js'
 import {
   GENERATE_PROMPT_FINGERPRINT,
+  FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorDocContext,
   type AuthorClaim,
   type AuthorUserContext,
+  type FidelityUserContext,
 } from './prompts.js'
 import {
   AuthoredBatchSchema,
   RawGeneratedScenarioSchema,
+  FidelityReviewSchema,
   type AuthoredClaim,
   type ExtractedClaim,
   type RawGeneratedScenario,
@@ -78,9 +81,11 @@ import {
   spawnExtractRunner,
   spawnGenerateRunner,
   spawnRecipeRunner,
+  spawnFidelityRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
+  type FidelityRunner,
 } from './runners.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { deriveProbes, captureProbes, type ProbeTranscript } from './ground.js'
@@ -98,6 +103,7 @@ import {
 } from './serialize.js'
 
 export const GENERATE_CACHE_NAME = 'guard/generate'
+export const FIDELITY_CACHE_NAME = 'guard/fidelity'
 
 /** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
 const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
@@ -123,6 +129,13 @@ export interface GeneratedScenarioInfo {
 export interface GuardBirthFinding {
   doc: string
   anchor: string
+  /**
+   * `fidelity` for a scenario that passed birth but the fidelity reviewer judged
+   * does not truly verify its claim (item 33); `birth` (or absent) for a scenario
+   * that failed birth validation twice. A fidelity finding carries the reviewer's
+   * stated mismatch in `actual`.
+   */
+  kind?: 'birth' | 'fidelity'
   /** The scenario title — the claim it was asserting. */
   title: string
   step: number
@@ -205,6 +218,8 @@ export interface GuardGenerateModels {
   generate?: string
   /** Evidence-retry re-authoring (stage `guard.retry`); defaults to `generate`. */
   retry?: string
+  /** Fidelity review (stage `guard.fidelity`) — a cheap-tier adversarial pass. */
+  fidelity?: string
   recipe?: string
   fallback?: string
 }
@@ -220,6 +235,7 @@ export interface GenerateGuardsOptions {
   extractRunner?: ExtractRunner
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
+  fidelityRunner?: FidelityRunner
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   onExtractProgress?: (done: number, total: number) => void
@@ -235,6 +251,9 @@ export interface GenerateGuardsOptions {
   onBirthProgress?: (done: number, total: number) => void
   /** Retry-authoring progress: `total` = failed claims being re-authored, bumped as each settles. */
   onRetryProgress?: (done: number, total: number) => void
+  /** Fidelity-review progress: `reviewed` = green scenarios reviewed so far, `planned`
+   *  = green scenarios queued for review (grows as later sections reach persist). */
+  onFidelityProgress?: (reviewed: number, planned: number) => void
   /** Per-section settle progress: `total` = the run's work-section count, fixed at
    *  indexing. Unsettled sections (extraction/authoring/birth failures) never tick,
    *  so `settled` may honestly end below `total`. */
@@ -344,6 +363,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
     })
+  // The fidelity reviewer (item 33) audits each green scenario before it persists.
+  // It needs an LLM: production (`guardGenerateInProcess`) always supplies a
+  // transport, so the review always runs there. A caller supplying NEITHER a
+  // transport NOR a `fidelityRunner` (only the pre-feature unit tests) has no model
+  // access, so the audit is skipped and green scenarios persist unreviewed.
+  const fidelityRunner: FidelityRunner | undefined =
+    options.fidelityRunner ??
+    (options.transport
+      ? spawnFidelityRunner({
+          transport: options.transport,
+          model: options.models?.fidelity,
+          fallbackModel: options.models?.fallback,
+        })
+      : undefined)
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -592,6 +625,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Retry-authoring progress accumulates across sections as each settles.
   let retryTotal = 0
   let retryDone = 0
+  // Fidelity-review progress accumulates across sections: `planned` grows as each
+  // section's green candidates reach review; `reviewed` ticks per completed review.
+  let fidelityPlanned = 0
+  let fidelityReviewed = 0
 
   // Per-section state: the cli claims to author, and the raw scenarios they land.
   const taskByRef = new Map(authTasks.map((t) => [t.ref, t]))
@@ -664,7 +701,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     const localErrors: GuardGenerateError[] = []
     const localFindings: GuardBirthFinding[] = []
-    const persistedHere: BirthCandidate[] = []
+    let persistedHere: BirthCandidate[] = []
 
     // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
     const round1: BirthCandidate[] = []
@@ -768,6 +805,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
         }
       }
+    }
+
+    // Fidelity review (item 33): every green candidate — a round-1 pass OR a retry
+    // survivor — is audited BEFORE it may persist. A flagged candidate becomes a
+    // fidelity FINDING (its section then unsettles like any birth finding, and the
+    // faithful siblings drop to `heldSections` below); a review that can't complete
+    // is a local error (re-attempted next run — faithful reviews are cached). Only
+    // faithful candidates stay in the persist set. Skipped when no reviewer is
+    // configured (a caller with no transport + no `fidelityRunner`).
+    if (fidelityRunner && persistedHere.length > 0) {
+      fidelityPlanned += persistedHere.length
+      options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
+      const faithful: BirthCandidate[] = []
+      for (const c of persistedHere) {
+        const review = await reviewFidelity(repoRoot, c, fidelityRunner)
+        options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+        if ('error' in review) {
+          localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
+        } else if (review.verdict === 'flagged') {
+          localFindings.push(fidelityFinding(c, review.mismatch))
+        } else {
+          faithful.push(c)
+        }
+      }
+      persistedHere = faithful
     }
 
     errors.push(...localErrors)
@@ -1126,6 +1188,133 @@ function errorFrom(o: { candidate: BirthCandidate; result: { failure?: { actual:
     doc: o.candidate.section.doc,
     anchor: o.candidate.section.anchor,
     message: `birth validation error for "${o.candidate.scenario.title}": ${o.result.failure?.actual ?? 'unknown'}`,
+  }
+}
+
+// --- Fidelity review (item 33) -----------------------------------------------
+
+/** The reviewer's decision on one green candidate: persist, flag as a finding, or
+ *  (a review that couldn't complete) surface as an error that unsettles the section. */
+type FidelityResult =
+  | { verdict: 'faithful' }
+  | { verdict: 'flagged'; mismatch: string }
+  | { error: string }
+
+/**
+ * Review ONE green candidate for fidelity, cached per scenario-content +
+ * section-content (+ the claim + the fidelity prompt) so a re-run is a hit and no
+ * second call fires for an unchanged scenario+section. A cache HIT never calls the
+ * runner; a validated verdict (faithful or flagged) is cached, an error is not.
+ */
+async function reviewFidelity(
+  repoRoot: string,
+  candidate: BirthCandidate,
+  runner: FidelityRunner,
+): Promise<FidelityResult> {
+  const scenarioYaml = serializeScenarioYaml(candidate.scenario)
+  const section = candidate.section
+  const claimText = candidate.claim.claim
+  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), section, claimText)
+
+  const cached = await getCacheEntry(repoRoot, FIDELITY_CACHE_NAME, cacheKey)
+  if (cached) {
+    const parsed = FidelityReviewSchema.safeParse(cached)
+    if (parsed.success) return normalizeFidelity(parsed.data)
+  }
+
+  const ctx: FidelityUserContext = {
+    doc: section.doc,
+    sectionHeading: section.headingText,
+    sectionText: section.fullText || section.ownText,
+    claim: claimText,
+    scenarioYaml,
+  }
+  const attempt = await callFidelityWithReask(ctx, runner)
+  if ('error' in attempt) return { error: attempt.error }
+  await setCacheEntry(repoRoot, FIDELITY_CACHE_NAME, cacheKey, attempt.review)
+  return normalizeFidelity(attempt.review)
+}
+
+/** A flagged verdict always yields a non-empty mismatch (the finding's evidence). */
+function normalizeFidelity(r: { verdict: 'faithful' | 'flagged'; mismatch?: string }): FidelityResult {
+  if (r.verdict === 'flagged') {
+    return { verdict: 'flagged', mismatch: r.mismatch?.trim() || 'the scenario does not verify what the claim asserts' }
+  }
+  return { verdict: 'faithful' }
+}
+
+/** A scenario's BEHAVIORAL identity — the fields the reviewer judges, excluding the
+ *  engine-assigned `id`/`binds`/`guard` bookkeeping (which churns on re-allocation
+ *  without changing what the scenario verifies), so the cache is stable across id
+ *  reassignment. */
+function scenarioBehavior(scenario: GuardScenario): string {
+  return JSON.stringify({
+    title: scenario.title,
+    driver: scenario.driver,
+    setup: scenario.setup ?? null,
+    steps: scenario.steps,
+    normalize: scenario.normalize ?? [],
+  })
+}
+
+/** Per-scenario fidelity cache key: it moves with the scenario BEHAVIOR, the section
+ *  content, the claim, the format, or the fidelity prompt — nothing machine-specific. */
+function fidelityCacheKey(scenarioBehaviorKey: string, section: SectionInput, claim: string): string {
+  return createHash('sha256')
+    .update(
+      [
+        FIDELITY_PROMPT_FINGERPRINT,
+        String(GUARD_FORMAT_VERSION),
+        section.fingerprint,
+        claim.replace(/\s+/g, ' ').trim(),
+        scenarioBehaviorKey,
+      ].join('::'),
+    )
+    .digest('hex')
+}
+
+type FidelityAttempt = { review: { verdict: 'faithful' | 'flagged'; mismatch?: string } } | { error: string }
+
+/**
+ * Call the fidelity runner and validate its verdict; on a schema failure re-ask
+ * ONCE with the invalid output quoted back, then validate again. A thrown call is
+ * not re-asked. Returns `{ error }` on a still-invalid or thrown call.
+ */
+async function callFidelityWithReask(ctx: FidelityUserContext, runner: FidelityRunner): Promise<FidelityAttempt> {
+  let raw: unknown
+  try {
+    raw = await runner(ctx)
+  } catch (e) {
+    return { error: `call failed: ${(e as Error).message}` }
+  }
+  const parsed = FidelityReviewSchema.safeParse(raw)
+  if (parsed.success) return { review: parsed.data }
+
+  let reRaw: unknown
+  try {
+    reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
+  } catch (e) {
+    return { error: `re-ask failed: ${(e as Error).message}` }
+  }
+  const reParsed = FidelityReviewSchema.safeParse(reRaw)
+  if (reParsed.success) return { review: reParsed.data }
+  return { error: `output invalid after re-ask: ${flattenZodError(reParsed.error)}` }
+}
+
+/** A fidelity finding: a green scenario the reviewer judged unfaithful. Same shape
+ *  as a birth finding (yaml + claim inline) with `kind: 'fidelity'`; the reviewer's
+ *  mismatch is the evidence (`actual`), and there is no birth step/evidence file. */
+function fidelityFinding(candidate: BirthCandidate, mismatch: string): GuardBirthFinding {
+  return {
+    doc: candidate.section.doc,
+    anchor: candidate.section.anchor,
+    kind: 'fidelity',
+    title: candidate.scenario.title,
+    step: 1,
+    expected: 'a scenario that verifies what the claim asserts',
+    actual: mismatch,
+    yaml: serializeScenarioYaml(candidate.scenario),
+    claim: candidate.claim.claim,
   }
 }
 

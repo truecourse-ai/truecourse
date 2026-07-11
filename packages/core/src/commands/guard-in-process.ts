@@ -17,6 +17,7 @@ import {
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
+  type FidelityRunner,
 } from '@truecourse/guard-generator';
 import { writeGuardResult, runGuard, type RunGuardResult } from '@truecourse/guard-runner';
 import {
@@ -106,14 +107,15 @@ export const GUARD_GENERATE_STEPS = [
  * discovery rides `index` (the section-indexing window), extraction rides
  * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
  * EXECUTION is deterministic sandbox work, but the one evidence-retry per
- * birth-failed claim is a full re-author (stage `guard.retry`) — its spend rides
- * the `validate` line, where the retry happens.
+ * birth-failed claim is a full re-author (stage `guard.retry`) AND every green
+ * candidate's fidelity review (stage `guard.fidelity`) both happen in the settle
+ * flow — their spend rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
   author: ['guard.generate'],
-  validate: ['guard.retry'],
+  validate: ['guard.retry', 'guard.fidelity'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -131,6 +133,7 @@ export interface GuardGenerateInProcessOptions {
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
+  fidelityRunner?: FidelityRunner;
 }
 
 /**
@@ -148,6 +151,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     extract: resolveModel('guard.extract', undefined, repoRoot),
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
+    fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -236,6 +240,10 @@ export async function guardGenerateInProcess(
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
+  // Fidelity review (item 33) runs per green candidate in the settle flow — its
+  // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
+  let fidelitySeen = false;
+  let fidelityReviewed = 0;
   // Author and validate overlap under the per-section pipeline: birth for an early
   // section can begin while later sections are still authoring. renderValidate
   // therefore starts validate WITHOUT completing author (advanceTo('author') only
@@ -250,6 +258,7 @@ export async function guardGenerateInProcess(
     }
     const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
+    if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -262,6 +271,7 @@ export async function guardGenerateInProcess(
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
+      fidelityRunner: options.fidelityRunner,
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
@@ -320,6 +330,12 @@ export async function guardGenerateInProcess(
         retryTotal = total;
         renderValidate();
       },
+      onFidelityProgress: (reviewed) => {
+        fidelitySeen = true;
+        fidelityReviewed = reviewed;
+        // Reviews happen in the settle flow — only render a LIVE validate line.
+        if (validateStarted) renderValidate();
+      },
       onSectionSettled: (settled, total) => {
         sectionsDone = settled;
         sectionsTotal = total;
@@ -364,7 +380,7 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry'] as const;
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`

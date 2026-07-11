@@ -11,6 +11,7 @@ export {
   generateGuards,
   defaultGenerateBatch,
   GENERATE_CACHE_NAME,
+  FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
   type GuardGenerateResult,
   type GuardGenerateModels,
@@ -69,18 +70,24 @@ export {
   EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
+  FIDELITY_SYSTEM_PROMPT,
+  FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorUserPrompt,
+  buildFidelityUserPrompt,
   type AuthorUserContext,
   type AuthorClaim,
+  type FidelityUserContext,
 } from './prompts.js'
 
 export {
   spawnExtractRunner,
   spawnGenerateRunner,
   spawnRecipeRunner,
+  spawnFidelityRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
+  type FidelityRunner,
 } from './runners.js'
 
 export {
@@ -92,6 +99,7 @@ export {
   RawGeneratedScenarioSchema,
   AuthoredClaimSchema,
   AuthoredBatchSchema,
+  FidelityReviewSchema,
   CLAIM_DRIVERS,
   type TestabilityVerdict,
   type RecipeProposal,
@@ -100,4 +108,5 @@ export {
   type DocExtraction,
   type RawGeneratedScenario,
   type AuthoredClaim,
+  type FidelityReview,
 } from './schemas.js'

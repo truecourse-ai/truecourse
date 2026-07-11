@@ -45,6 +45,7 @@ export type StageId =
   | 'guard.extract'
   | 'guard.generate'
   | 'guard.retry'
+  | 'guard.fidelity'
   | 'guard.recipe'
   | 'rules.violationGen';
 
@@ -79,6 +80,14 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // The one evidence-retry per birth-failed claim — the same authoring task, so
   // the same tier; a distinct stage so retry spend is attributed to the birth line.
   'guard.retry': 'opus',
+  // Fidelity review: does a green scenario actually verify its claim, or is it
+  // weak/vacuous/miscast? A focused comprehension JUDGEMENT over one scenario + one
+  // section + one claim — the same family as `guard.extract` (read text, judge),
+  // NOT generation, so far cheaper than the opus authoring tier. Sonnet, not haiku:
+  // the success bar is zero false alarms on honest scenarios, and haiku under-
+  // reasons nuanced faithfulness comparisons (the same weakness that moved
+  // `spec.areaTag` off haiku).
+  'guard.fidelity': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',

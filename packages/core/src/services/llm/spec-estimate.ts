@@ -54,6 +54,7 @@ import {
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
+  FIDELITY_SYSTEM_PROMPT,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
@@ -88,6 +89,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardRecipe: 'Discovering recipe',
   guardExtract: 'Extracting claims',
   guardAuthor: 'Authoring scenarios',
+  guardFidelity: 'Reviewing fidelity',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -326,6 +328,8 @@ const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sectio
 const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
+const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
+const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
 // Grounded authoring injects real empty-sandbox probe transcripts into each batch
 // prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
 // representative block: a handful of probes, each a short command's output.
@@ -340,7 +344,11 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * Extraction is EXACT in call count — one call per uncached document view across
  * the work documents (read straight from the per-view extract cache). Authoring is
  * a heuristic on the changed sections (claims aren't known until extraction runs),
- * surfaced as a range: batches of ~0.8–1.5 cli claims per changed section.
+ * surfaced as a range: batches of ~0.8–1.5 cli claims per changed section. Fidelity
+ * review (one call per green scenario, item 33) is NOT cache-aware — scenario
+ * content isn't known until authoring + birth run — so it counts one review per
+ * planned cli claim (the same range as authoring), honestly over-counting a claim
+ * that authors several scenarios or none.
  */
 export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
@@ -398,6 +406,18 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
         docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
       ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
+    },
+    {
+      stage: 'guardFidelity',
+      model: resolveModel('guard.fidelity', undefined, repoRoot),
+      // One review per green scenario ≈ per authored cli claim (same range as
+      // authoring). Not cache-aware — scenario content is unknown pre-run.
+      calls: claimsPoint,
+      minCalls: 0,
+      maxCalls: claimsMax,
+      // A review carries the system prompt + the section's own text + one scenario YAML.
+      avgInputTokens: tokensFromChars(FIDELITY_SYSTEM_PROMPT.length, avgOwnChars + GUARD_SCENARIO_YAML_CHARS),
+      avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
     },
   ];
 

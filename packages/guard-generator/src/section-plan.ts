@@ -24,7 +24,7 @@ import {
   readManifest,
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
-import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT } from './prompts.js'
+import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
@@ -102,13 +102,14 @@ export function readCorpusAreaTags(repoRoot: string): Map<string, string[]> {
 
 /**
  * The generation-inputs hash stamped per section: it moves when the section text
- * changes, the recipe inputs change, the scenario format version bumps, EITHER
- * LLM stage's prompt changes (extraction or authoring), or a section-scoped
- * conflict verdict starts/stops suppressing a claim in the section (item 31 —
- * `suppressionFingerprint`, appended ONLY when non-empty so an unaffected section's
- * hash is byte-identical to before). A section is WORK exactly when this differs
- * from (or is absent in) the committed manifest — so an unchanged section is
- * skipped, a prompt edit re-runs the whole pipeline, and a resolved dispute's
+ * changes, the recipe inputs change, the scenario format version bumps, ANY
+ * LLM stage's prompt changes (extraction, authoring, or fidelity review), or a
+ * section-scoped conflict verdict starts/stops suppressing a claim in the section
+ * (item 31 — `suppressionFingerprint`, appended ONLY when non-empty so an
+ * unaffected section's hash is byte-identical to before). A section is WORK exactly
+ * when this differs from (or is absent in) the committed manifest — so an unchanged
+ * section is skipped, a prompt edit re-runs the whole pipeline (a fidelity-prompt
+ * edit re-reviews every settled section's scenarios), and a resolved dispute's
  * losing section re-extracts with its stale claim suppressed.
  */
 export function generationInputsHash(
@@ -122,6 +123,7 @@ export function generationInputsHash(
     String(GUARD_FORMAT_VERSION),
     EXTRACT_PROMPT_FINGERPRINT,
     GENERATE_PROMPT_FINGERPRINT,
+    FIDELITY_PROMPT_FINGERPRINT,
   ]
   if (suppressionFingerprint) parts.push(suppressionFingerprint)
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')

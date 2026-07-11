@@ -36,6 +36,7 @@ const STAGE_LABEL: Record<StageId, string> = {
   "guard.extract": "Guard  · claim extract",
   "guard.generate": "Guard  · scenario gen",
   "guard.retry": "Guard  · scenario retry",
+  "guard.fidelity": "Guard  · fidelity review",
   "guard.recipe": "Guard  · recipe discover",
   "rules.violationGen": "Rules  · violation gen",
 };

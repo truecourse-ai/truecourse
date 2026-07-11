@@ -30,11 +30,12 @@ import {
   extractBy,
   authorBy,
   raw,
+  faithfulReviewer,
   PASSING_STEPS,
   FAILING_STEPS,
 } from '../guard-generator/helpers.js'
 import { recordStageUsage } from '@truecourse/shared/llm'
-import type { GenerateRunner } from '@truecourse/guard-generator'
+import type { GenerateRunner, FidelityRunner } from '@truecourse/guard-generator'
 
 const repos: string[] = []
 function repo(): string {
@@ -69,6 +70,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     const { guard } = await guardGenerateInProcess(r, {
       extractRunner: extractBy({ background: { untestable: 'design history' } }),
       generateRunner: authorBy({ version: [raw('relkit --version exits 0', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
     })
 
     expect(guard.status).toBe('ok')
@@ -95,6 +97,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     const runners = {
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
     }
     await guardGenerateInProcess(r, runners)
     fs.rmSync(guardResultPath(r)) // prove the second run rewrites it
@@ -148,6 +151,7 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
         background: { untestable: 'design history' },
       }),
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
     })
 
     // The grounding counter rode the author step's detail line at least once.
@@ -163,6 +167,7 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
     const runners = {
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
     }
     await guardGenerateInProcess(r, runners) // warm the authoring cache
 
@@ -203,6 +208,7 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
       tracker,
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: faithfulReviewer(),
     })
 
     // Every live line leads with the fixed work-section denominator (2 for DOC).
@@ -238,6 +244,7 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
       tracker,
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: runner,
+      fidelityRunner: faithfulReviewer(),
     })
     expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
 
@@ -248,6 +255,35 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     // result.json totals include the retry spend under the new stage.
     const report = readGuardResult(r)!
     expect(report.usage).toEqual({ calls: 2, inputTokens: 200, outputTokens: 100, costUsd: 0.75 })
+  })
+
+  it('shows the fidelity counter on the birth line and totals fidelity spend under guard.fidelity', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // The reviewer records usage the way the transport would — under guard.fidelity.
+    const reviewer: FidelityRunner = async () => {
+      recordStageUsage('guard.fidelity', { model: 'fidelity-model', inputTokens: 80, outputTokens: 10, costUsd: 0.1 })
+      return { verdict: 'faithful' }
+    }
+
+    const { tracker, details } = trackValidateDetails()
+    const { guard } = await guardGenerateInProcess(r, {
+      tracker,
+      extractRunner: extractBy({ background: { untestable: 'history' } }),
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+      fidelityRunner: reviewer,
+    })
+    expect(guard.written.map((w) => w.anchor)).toEqual(['version'])
+
+    // The fidelity counter rides the SAME validate (birth) line.
+    expect(details.some((d) => /^sections \d+\/2 · .*fidelity 1/.test(d))).toBe(true)
+
+    // result.json totals include the fidelity-review spend under the new stage.
+    const report = readGuardResult(r)!
+    expect(report.usage).toEqual({ calls: 1, inputTokens: 80, outputTokens: 10, costUsd: 0.1 })
   })
 })
 
