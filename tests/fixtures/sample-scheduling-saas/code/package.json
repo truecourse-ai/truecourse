@@ -1,0 +1,22 @@
+{
+  "name": "sample-scheduling-saas-code",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Slate implementation — two Postgres-backed Express apps (booking app + ops console) sharing one Prisma schema.",
+  "scripts": {
+    "prisma:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "express": "^4.22.1",
+    "pg": "^8.11.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "prisma": "^5.10.0",
+    "typescript": "^5.7.0"
+  }
+}
