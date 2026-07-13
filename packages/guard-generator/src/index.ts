@@ -10,6 +10,7 @@
 export {
   generateGuards,
   defaultGenerateBatch,
+  retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
@@ -52,8 +53,10 @@ export {
 export { discoverRecipe, RECIPE_CACHE_NAME, type RecipeDiscoveryResult } from './recipe-discovery.js'
 
 export {
-  deriveProbes,
+  deriveStaticProbes,
+  deriveExpansionProbes,
   captureProbes,
+  groundProbes,
   defaultProbeExecutor,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
@@ -62,6 +65,8 @@ export {
   type ProbeTranscript,
   type ProbeExecutor,
   type CaptureProbesOptions,
+  type GroundProbesOptions,
+  type StaticProbes,
 } from './ground.js'
 
 export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'

@@ -46,6 +46,8 @@ import {
   composeBlockedOnReason,
   dismissedClaimKey,
   isRunnableDriver,
+  type GuardBirthFinding,
+  type OutputExcerpts,
   type GuardCoverageGap,
   type GuardDismissedClaim,
   type GuardEntryPreflight,
@@ -91,7 +93,7 @@ import {
   type FidelityRunner,
 } from './runners.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
-import { deriveProbes, captureProbes, type ProbeTranscript } from './ground.js'
+import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import { birthValidate, type BirthCandidate } from './birth.js'
@@ -126,31 +128,11 @@ export interface GeneratedScenarioInfo {
 
 /**
  * A candidate that failed birth validation twice — either a generation defect or
- * REAL existing drift. Surfaced for the user to resolve (fix code / edit spec);
- * never persisted, never an exit failure.
+ * REAL existing drift. The single definition lives in `@truecourse/shared`
+ * (`GuardBirthFindingSchema`); re-exported here so the generator's public API is
+ * unchanged. It carries the failing run's raw `stdout`/`stderr` excerpts (Fix 1).
  */
-export interface GuardBirthFinding {
-  doc: string
-  anchor: string
-  /**
-   * `fidelity` for a scenario that passed birth but the fidelity reviewer judged
-   * does not truly verify its claim (item 33); `birth` (or absent) for a scenario
-   * that failed birth validation twice. A fidelity finding carries the reviewer's
-   * stated mismatch in `actual`.
-   */
-  kind?: 'birth' | 'fidelity'
-  /** The scenario title — the claim it was asserting. */
-  title: string
-  step: number
-  expected: string
-  actual: string
-  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
-  evidencePath?: string
-  /** The failed candidate's authored YAML, serialized inline at finding creation. */
-  yaml?: string
-  /** The extracted claim's stable text — the identity a dismissal keys on. */
-  claim?: string
-}
+export type { GuardBirthFinding } from '@truecourse/shared'
 
 export interface GuardGenerateError {
   doc: string
@@ -561,19 +543,22 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let groundPlanned = 0
   let groundCaptured = 0
   const groundClaims = async (claimTexts: string[]): Promise<ProbeTranscript[]> => {
-    const probes = deriveProbes(claimTexts, recipe.entry)
     const build = await buildPromise
-    if (!build.ok || probes.length === 0) return []
-    groundPlanned += probes.length
-    options.onGroundProgress?.(groundCaptured, groundPlanned)
+    if (!build.ok) return []
     resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
-    return captureProbes({
+    // Two-phase grounding (static probes → help-surface expansion). The planned
+    // total grows per phase; captured ticks per resolved transcript.
+    return groundProbes({
       repoRoot,
-      probes,
+      claimTexts,
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
       recipeFingerprint,
       recipeEnv: recipe.env,
+      onProbesPlanned: (n) => {
+        groundPlanned += n
+        options.onGroundProgress?.(groundCaptured, groundPlanned)
+      },
       onProbeCaptured: () => options.onGroundProgress?.(++groundCaptured, groundPlanned),
     })
   }
@@ -1186,7 +1171,19 @@ function safeBuild(
   }
 }
 
-function toFinding(o: { candidate: BirthCandidate; result: { failure?: { step: number; expected: string; actual: string }; evidencePath?: string } }): GuardBirthFinding {
+/** The DEFINED excerpt fields of a failure/finding, for spreading — an absent
+ *  stream stays absent (never an explicit `undefined` key in the JSON). */
+function excerptsOf(src: OutputExcerpts | undefined): OutputExcerpts {
+  return {
+    ...(src?.stdout !== undefined ? { stdout: src.stdout } : {}),
+    ...(src?.stderr !== undefined ? { stderr: src.stderr } : {}),
+  }
+}
+
+function toFinding(o: {
+  candidate: BirthCandidate
+  result: { failure?: { step: number; expected: string; actual: string } & OutputExcerpts; evidencePath?: string }
+}): GuardBirthFinding {
   const f = o.result.failure
   return {
     doc: o.candidate.section.doc,
@@ -1196,6 +1193,9 @@ function toFinding(o: { candidate: BirthCandidate; result: { failure?: { step: n
     expected: f?.expected ?? '',
     actual: f?.actual ?? '',
     ...(o.result.evidencePath ? { evidencePath: o.result.evidencePath } : {}),
+    // Fix 1: the failing run's RAW program output rides on the finding so the retry
+    // prompt (and the dashboards) see the usage error the program printed.
+    ...excerptsOf(f),
     // Judge-on-one-screen (item 19): the failed candidate's exact YAML rides inline
     // so the finding detail shows the commands it ran; `claim` is the dismissal
     // identity (item 20) so the detail's Dismiss action can key on it.
@@ -1375,6 +1375,8 @@ async function authorRetry(
       step: entry.evidence.step,
       expected: entry.evidence.expected,
       actual: entry.evidence.actual,
+      // The failing run's raw program output — the evidence the retry prompt renders.
+      ...excerptsOf(entry.evidence),
     },
   }
   const attempt = await callAuthorWithReask(buildAuthorCtxFor(gd, [claim], recipe, probes), runner)
@@ -1389,15 +1391,27 @@ async function authorRetry(
   return scenarios
 }
 
-/** Per-retry cache key: the round-1 key plus the birth evidence that drove the re-ask. */
-function retryCacheKey(
+/** Per-retry cache key: the round-1 key plus the birth evidence that drove the re-ask.
+ *  The evidence hash folds the raw program-output excerpts (Fix 1) so a pre-change
+ *  cached retry (keyed on title/step/expected/actual alone) can never shadow a
+ *  re-ask that now carries the failing run's stdout/stderr. */
+export function retryCacheKey(
   claim: ExtractedClaim,
   section: SectionInput,
   recipeFingerprint: string,
   evidence: GuardBirthFinding,
 ): string {
   const evidenceHash = createHash('sha256')
-    .update([evidence.title, String(evidence.step), evidence.expected, evidence.actual].join('|'))
+    .update(
+      [
+        evidence.title,
+        String(evidence.step),
+        evidence.expected,
+        evidence.actual,
+        evidence.stdout ?? '',
+        evidence.stderr ?? '',
+      ].join('|'),
+    )
     .digest('hex')
   return createHash('sha256')
     .update(

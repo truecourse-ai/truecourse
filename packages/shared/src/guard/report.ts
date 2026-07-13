@@ -15,6 +15,7 @@ import {
   isAwaitingDriver,
   type GuardAwaitingDriverId,
 } from './drivers.js'
+import { OutputExcerptsSchema } from './excerpts.js'
 
 /** One written scenario in the report (a generated `.yaml` and its binding). */
 export const GuardWrittenScenarioSchema = z
@@ -152,6 +153,14 @@ export const GuardBirthFindingSchema = z
     actual: z.string(),
     /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
     evidencePath: z.string().optional(),
+    /**
+     * The failing step's RAW program output (see `OutputExcerptsSchema`), copied
+     * off the birth-run mismatch (`GuardFailureDetailSchema`). The retry prompt
+     * renders them so the model sees the usage error the program printed. A
+     * `fidelity` finding has no program run, so these stay absent. Optional so
+     * older reports parse.
+     */
+    ...OutputExcerptsSchema.shape,
     /**
      * The failed candidate's authored YAML, serialized inline AT FINDING CREATION
      * (same serialize-at-creation as heldSections' readyScenarios). The finding

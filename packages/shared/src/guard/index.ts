@@ -1,4 +1,5 @@
 export * from './drivers.js'
+export * from './excerpts.js'
 export * from './scenario.js'
 export * from './result.js'
 export * from './report.js'

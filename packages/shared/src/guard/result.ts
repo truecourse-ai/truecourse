@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod'
+import { OutputExcerptsSchema } from './excerpts.js'
 import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
 
 /**
@@ -54,6 +55,14 @@ export const GuardFailureDetailSchema = z
     step: z.number().int().positive(),
     expected: z.string(),
     actual: z.string(),
+    /**
+     * The failing step's RAW program output (see {@link OutputExcerptsSchema}),
+     * attached on EVERY expect-mismatch so the retry/finding sees the usage error
+     * the program actually printed. Optional so pre-change snapshots keep parsing,
+     * and infra failures (spawn/timeout — no real capture) simply carry neither.
+     * NO format-version bump.
+     */
+    ...OutputExcerptsSchema.shape,
   })
   .strict()
 export type GuardFailureDetail = z.infer<typeof GuardFailureDetailSchema>

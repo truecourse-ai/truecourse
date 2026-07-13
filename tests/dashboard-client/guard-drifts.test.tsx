@@ -327,6 +327,34 @@ describe('GuardDriftsView — detail', () => {
     expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });
 
+  // Fix 1 (PR 1) — a drift detail shows the failing run's raw program output.
+  it('renders the Program output section with stdout/stderr beneath expected/actual', async () => {
+    const user = userEvent.setup();
+    const withOutput: GuardLatest = {
+      ...LATEST,
+      scenarios: LATEST.scenarios.map((s) =>
+        s.id === 's-fail'
+          ? { ...s, failure: { ...s.failure!, stdout: 'drift-stdout-line', stderr: 'usage: login --token <t>' } }
+          : s,
+      ),
+    };
+    stubFetch({ latest: withOutput });
+    renderView();
+    await user.click(await screen.findByText('login rate limits'));
+    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(screen.getByText('Program output')).toBeInTheDocument();
+    expect(screen.getByText('drift-stdout-line')).toBeInTheDocument();
+    expect(screen.getByText('usage: login --token <t>')).toBeInTheDocument();
+  });
+
+  it('omits the Program output section when the failure carries no excerpts', async () => {
+    const user = userEvent.setup();
+    renderView(); // default s-fail failure has no stdout/stderr
+    await user.click(await screen.findByText('login rate limits'));
+    await screen.findByText('exit code 1');
+    expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+  });
+
   it('carries the doc + section params on the "view in spec" jump', async () => {
     const user = userEvent.setup();
     renderView();

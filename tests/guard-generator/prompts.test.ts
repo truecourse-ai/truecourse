@@ -134,6 +134,52 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('Do NOT change a')
   })
 
+  // Fix 1 (PR 1) — the RETRY prompt renders the failing run's raw program output
+  // as the evidence its doc-first language already refers to.
+  it('the RETRY prompt renders program stdout/stderr blocks after expected/actual', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## add',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [
+        {
+          ref: 'c0',
+          claim: '`add` records an expense',
+          section: SECTION,
+          retry: {
+            scenarioTitle: 'add records an expense',
+            step: 1,
+            expected: 'exit 3',
+            actual: 'exit 2',
+            stdout: 'usage: expense add --amount <n> --note <s>',
+            stderr: 'error: missing required flag --amount',
+          },
+        },
+      ],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    // The excerpts follow the expected/actual lines.
+    expect(p).toContain('expected: exit 3')
+    expect(p).toContain('actual:   exit 2')
+    expect(p).toContain('program stdout:')
+    expect(p).toContain('usage: expense add --amount <n>')
+    expect(p).toContain('program stderr:')
+    expect(p).toContain('error: missing required flag --amount')
+    expect(p.indexOf('actual:')).toBeLessThan(p.indexOf('program stdout:'))
+    // The doc-first rules are untouched.
+    expect(p).toContain("Do NOT change a")
+    expect(p).toContain('fix COMMANDS')
+  })
+
+  it('the RETRY prompt omits an absent program-output stream', () => {
+    // The default retryPrompt() carries no excerpts → neither block renders.
+    const p = retryPrompt()
+    expect(p).not.toContain('program stdout:')
+    expect(p).not.toContain('program stderr:')
+  })
+
   it('a non-retry authoring prompt carries no RETRY block', () => {
     const ctx: AuthorUserContext = {
       doc: 'docs/cli.md',

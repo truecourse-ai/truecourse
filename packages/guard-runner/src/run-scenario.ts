@@ -7,7 +7,7 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
+import type { GuardScenario, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -18,6 +18,26 @@ import { writeEvidence, type EvidenceStep } from './evidence.js'
 // Evidence records the exact determinism pins the sandbox applied — one source,
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
+
+/**
+ * Per-stream cap on the RAW output excerpts attached to a mismatch `failure`.
+ * Mirrors the probe-transcript convention (`PROBE_OUTPUT_LIMIT` in the guard
+ * generator's `ground.ts`) so the retry/finding evidence stays a manageable size.
+ */
+export const FAILURE_OUTPUT_LIMIT = 1200
+
+/**
+ * The RAW (un-normalized) stdout/stderr excerpts to ride next to a mismatch — each
+ * head-truncated to {@link FAILURE_OUTPUT_LIMIT}, each stream omitted when it was
+ * empty (no empty-string noise). Spread onto the `failure` at the mismatch site so
+ * the birth-retry and the finding see the usage error the program actually printed.
+ */
+function outputExcerpts(capture: StepCapture): OutputExcerpts {
+  const out: OutputExcerpts = {}
+  if (capture.stdout) out.stdout = capture.stdout.slice(0, FAILURE_OUTPUT_LIMIT)
+  if (capture.stderr) out.stderr = capture.stderr.slice(0, FAILURE_OUTPUT_LIMIT)
+  return out
+}
 
 export interface RunScenarioContext {
   repoRoot: string
@@ -197,6 +217,9 @@ export async function runScenario(
               step: stepIndex,
               expected: mismatch.expected,
               actual: mismatch.actual,
+              // The RAW child output that produced this mismatch (NOT the normalized
+              // text matched against) — head-truncated, empty streams omitted.
+              ...outputExcerpts(capture),
             },
             evidencePath,
           }

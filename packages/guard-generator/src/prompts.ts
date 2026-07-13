@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   DocExtractionSchema,
@@ -312,8 +313,14 @@ every \`ref\` you were given exactly once. No prose — only the JSON array.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
-/** A birth-validation failure attached to a claim on a retry so the model can fix it. */
-export interface BirthRetryContext {
+/**
+ * A birth-validation failure attached to a claim on a retry so the model can fix
+ * it. Extends the shared excerpt pair: the failing run's RAW program output is the
+ * evidence the retry's doc-first language refers to — the usage error the program
+ * printed reveals the correct flags/subcommand. Absent when the stream was empty
+ * (or an infra failure produced no capture).
+ */
+export interface BirthRetryContext extends OutputExcerpts {
   scenarioTitle: string
   step: number
   expected: string
@@ -381,6 +388,14 @@ export interface AuthorUserContext {
   correction?: OutputCorrection
 }
 
+/** Indent every line of a program-output excerpt so it reads as one nested block. */
+function indentBlock(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n')
+}
+
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   const lines: string[] = [
     `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
@@ -433,6 +448,10 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         `  expected: ${c.retry.expected}`,
         `  actual:   ${c.retry.actual}`,
       )
+      // The failing run's raw program output — the evidence the rules above point
+      // at (a usage error reveals the real flags). Each stream omitted when absent.
+      if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
+      if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
     }
   }
   if (ctx.correction) {

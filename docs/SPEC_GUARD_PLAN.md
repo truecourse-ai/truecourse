@@ -588,6 +588,35 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    / report round-trip); usage totalled under `guard.fidelity` + `· fidelity N` on the
    validate detail. Full gate green (1268 tests).
 
+35. **Birth-retry blindness + help-surface probes (findings analysis 2026-07-13, PR 1 of
+   2).** Diagnosed on a real expense CLI: the generator authored positional args
+   (`add 0.00 test food`) for a tool that takes named flags, so birth failed twice with
+   only "expected exit 3 / actual exit 2" as feedback — the retry never saw the program's
+   usage error, and probe grounding could never reveal a subcommand's flag signature. Two
+   root-cause fixes:
+   - **Failure output excerpts.** On EVERY expect-mismatch, `runScenario` attaches the
+     failing step's RAW (un-normalized) stdout/stderr, head-truncated to 1200 chars per
+     stream (empty streams omitted), to the returned `failure`. New optional
+     `stdout`/`stderr` on `GuardFailureDetailSchema` + `GuardBirthFindingSchema` (optional
+     ⇒ old snapshots parse, NO format-version bump; a `fidelity` finding has no run so they
+     stay absent). `toFinding` copies them; the RETRY authoring prompt renders them as
+     indented `program stdout:`/`program stderr:` blocks after `expected:`/`actual:` (the
+     evidence its doc-first language already refers to — that language is unchanged); the
+     retry cache key folds them so a pre-change cached retry can't shadow the richer re-ask.
+     The dashboards (OSS Scenario/Drift/Finding details + the EE Guard lens, which reuses
+     them) render a "Program output" section beneath EXPECTED/ACTUAL when present. The local
+     `GuardBirthFinding` interface was deleted in favour of the shared type.
+   - **Help-surface probes.** `MAX_PROBES_PER_BATCH` 6 → 10; probe derivation split into
+     pure `deriveStaticProbes` + `deriveExpansionProbes` (unit-testable, no subprocess),
+     composed by a two-phase `groundProbes(exec)`. Always probe a bare `--help`; SALVAGE a
+     subcommand prefix from a value-carrying fragment (`` `add 12.50 lunch` `` → `add --help`,
+     `` `config set currency EUR` `` → `config set --help`); then EXPAND by scanning the
+     bare/`--help` transcripts for subcommand tokens that also appear in the claim texts and
+     probing `<token> --help` into leftover slots. Priority under the cap: bare → `--help` →
+     subcommand `--help`s → exact fragments. Cache keys unchanged `(recipeFingerprint, argv)`;
+     the retry path re-grounds through the same two phases. `GENERATE_SYSTEM_PROMPT`
+     unchanged. STATUS: BUILT (PR 1). PR 2 (EE evidence persistence) is a separate change.
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

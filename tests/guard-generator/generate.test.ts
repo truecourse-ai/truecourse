@@ -5,6 +5,7 @@ import {
   generateGuards,
   birthValidate,
   spawnGenerateRunner,
+  retryCacheKey,
   type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
@@ -14,6 +15,7 @@ import {
   type AuthorUserContext,
   type AuthorClaim,
 } from '@truecourse/guard-generator'
+import type { GuardBirthFinding } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
@@ -434,6 +436,88 @@ describe('generateGuards — birth validation', () => {
     // Nothing written to disk, and NOT recorded as settled → re-attempted next run.
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+  })
+})
+
+describe('generateGuards — failure output excerpts (Fix 1)', () => {
+  it('a birth finding carries the failing run raw stderr; the empty stdout is omitted', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // FAILING_STEPS runs `boom` → exit 7, stderr "fatal: intentional failure".
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
+    })
+    const finding = res.birthFindings[0]
+    expect(finding.stderr).toContain('fatal: intentional failure')
+    expect(finding.stdout).toBeUndefined()
+  })
+
+  it('threads the failing run output into the retry evidence the model sees', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let retryStderr: string | undefined
+    let retryStdout: unknown = 'SENTINEL'
+    const runner: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => {
+        if (c.retry) {
+          retryStderr = c.retry.stderr
+          retryStdout = c.retry.stdout
+          return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] }
+        }
+        return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
+      })
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(retryStderr).toContain('fatal: intentional failure')
+    // boom writes nothing to stdout → the retry evidence omits it.
+    expect(retryStdout).toBeUndefined()
+  })
+})
+
+describe('retryCacheKey — excerpt sensitivity (Fix 1)', () => {
+  const claim: ExtractedClaim = {
+    claim: 'add records an expense',
+    driver: 'cli',
+    sectionAnchor: 'add',
+    reason: 'exit code is observable',
+  }
+  const section: SectionInput = {
+    doc: 'docs/cli.md',
+    anchor: 'add',
+    fingerprint: 'sha256:s',
+    headingText: 'add',
+    level: 2,
+    ownText: '',
+    fullText: '',
+    areaTags: [],
+  }
+  const base: GuardBirthFinding = { doc: 'docs/cli.md', anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
+
+  it('moves when the evidence excerpts differ', () => {
+    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage B' })
+    expect(a).not.toBe(b)
+  })
+
+  it('is stable for identical evidence', () => {
+    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    expect(a).toBe(b)
+  })
+
+  it('a pre-change entry (no excerpts) never collides with one carrying excerpts', () => {
+    const without = retryCacheKey(claim, section, 'fp', base)
+    const withExcerpt = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage' })
+    expect(without).not.toBe(withExcerpt)
   })
 })
 
@@ -1297,10 +1381,14 @@ describe('generateGuards — grounded authoring', () => {
     })
 
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-    // One probe (`--version`): planned announced (0/1) before capture, captured after (1/1).
+    // Phase 1 is the `--help` surface alone (0/1, 1/1); the exact `--version`
+    // fragment runs in phase 2 (1/2, 2/2). No expansion probes (the fixture's
+    // help surface names no subcommand the claim also mentions).
     expect(ground).toEqual([
       [0, 1],
       [1, 1],
+      [1, 2],
+      [2, 2],
     ])
   })
 

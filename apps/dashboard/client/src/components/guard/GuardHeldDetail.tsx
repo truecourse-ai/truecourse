@@ -14,9 +14,8 @@ import { sectionLeaf } from '@/lib/guard-drifts';
 import type { GuardHeldRowData } from '@/lib/guard-list-rows';
 import { GuardHeldBadge } from './GuardHeldBadge';
 import { GuardFindingBadge } from './GuardFindingBadge';
+import { PRE } from './detail-styles';
 
-const PRE =
-  'mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
 export function GuardHeldDetail({
