@@ -68,7 +68,7 @@ describe('infer comment rendering', () => {
 describe('gate vs infer markers do not collide', () => {
   it('each predicate only matches its own comment', () => {
     const gate = renderGateComment(
-      { conclusion: 'success', added: [], resolved: [], belowThreshold: [] } as any,
+      { conclusion: 'success', added: [], belowThreshold: [], total: 0 } as any,
       {},
     );
     const infer = renderInferComment('offered');

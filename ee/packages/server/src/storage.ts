@@ -1,9 +1,9 @@
 /**
  * Install the hosted-edition storage adapters. This is where the open-core
  * seams (file/git by default in OSS) are swapped for the Postgres + Blob impls
- * so the whole pipeline — analyses, drift, per-repo config, ui-state, the
- * project registry, contracts, specs, and the LLM-stage caches — reads and
- * writes server-side instead of the customer's `.truecourse/` tree.
+ * so the whole pipeline — analyses, per-repo config, ui-state, the project
+ * registry, contracts, specs, and the LLM-stage caches — reads and writes
+ * server-side instead of the customer's `.truecourse/` tree.
  *
  * Called once at boot when `DATABASE_URL` is set (the shared `ee-db`). The blob
  * backend is selected from `BLOB_STORE` (azure | s3 | postgres | fs).
@@ -14,7 +14,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { EeDbHandle } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
-import { setVerifyStore } from '@truecourse/core/lib/verify-store';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setContractStore } from '@truecourse/core/lib/contract-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
@@ -28,7 +27,6 @@ import { setKvCacheStore } from '@truecourse/llm';
 import { eq } from 'drizzle-orm';
 import { ghRepos } from '@truecourse/ee-db';
 import {
-  PgVerifyStore,
   PgAnalysisStore,
   PgContractStore,
   PgSpecStore,
@@ -51,9 +49,8 @@ export interface EeStoreHandles {
 /** Swap every core/llm storage seam for its Postgres/Blob hosted impl. */
 export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   // All hosted content lives in Postgres — bulky bodies (contracts, spec
-  // artifacts, verify snapshots, trace payloads) are content-addressed in the
-  // `content` table; metadata + manifests are their own rows. No blob store.
-  setVerifyStore(new PgVerifyStore(db));
+  // artifacts, trace payloads) are content-addressed in the `content` table;
+  // metadata + manifests are their own rows. No blob store.
   // Analyze ("Code Quality") snapshots — the EE baseline runs the OSS analyze pass
   // server-side and persists here (per-analysis + LATEST/diff + history as jsonb).
   setAnalysisStore(new PgAnalysisStore(db));
@@ -73,7 +70,7 @@ export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   // clones; the dedicated pool keeps held locks from starving the store pool).
   setAnalyzeLock(new PgAnalyzeLock(lockPool));
 
-  // Resolve a drift's workspace-KB source doc (e.g. `knowledge/confluence/<id>.md`)
+  // Resolve a workspace-KB source doc (e.g. `knowledge/confluence/<id>.md`)
   // to its real external link: repo → its workspace org (gh_repos) → the synced
   // doc rows (knowledge_documents). The dashboard then links the "Source" out to
   // the Confluence/Jira page instead of a 404-ing repo path. Repo docs don't match

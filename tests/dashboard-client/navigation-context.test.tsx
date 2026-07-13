@@ -32,7 +32,7 @@ function Probe() {
       <span data-testid="section">{section}</span>
       <span data-testid="tab">{leftTab}</span>
       <span data-testid="search">{loc.search}</span>
-      <button onClick={() => setSection('verification')}>to-drift</button>
+      <button onClick={() => setSection('guard')}>to-guard</button>
       <button onClick={() => setSection('codequality')}>to-analysis</button>
       <button onClick={() => setLeftTab('files')}>tab-files</button>
       <button onClick={() => setLeftTab('home')}>tab-home</button>
@@ -55,12 +55,6 @@ describe('NavigationContext — initial state from URL', () => {
     renderAt('/repos/abc');
     expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
-  });
-
-  it('reads ?section=verification and defaults its tab to verify', () => {
-    renderAt('/repos/abc?section=verification');
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
   });
 
   it('reads an explicit ?tab', () => {
@@ -86,10 +80,10 @@ describe('NavigationContext — initial state from URL', () => {
   });
 
   it('snaps an out-of-section tab back to the section default', () => {
-    // `files` belongs to analysis, not drift → expect the drift default.
-    renderAt('/repos/abc?section=verification&tab=files');
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
+    // `files` belongs to analysis, not guard → expect the guard default.
+    renderAt('/repos/abc?section=guard&tab=files');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 });
 
@@ -166,27 +160,27 @@ describe('NavigationContext — guard section routing', () => {
 });
 
 describe('NavigationContext — setters write the URL', () => {
-  it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=verify', async () => {
+  it('setSection(guard) switches section, resets tab, sets ?section=guard&tab=coverage', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc');
-    await user.click(screen.getByText('to-drift'));
+    await user.click(screen.getByText('to-guard'));
 
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('verify');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).toContain('section=verification');
-    expect(search).toContain('tab=verify');
+    expect(search).toContain('section=guard');
+    expect(search).toContain('tab=coverage');
   });
 
-  it('setSection(codequality) clears ?section and lands on home (no ?tab)', async () => {
+  it('setSection(codequality) clears the guard ?section and lands on home (no ?tab)', async () => {
     const user = userEvent.setup();
-    renderAt('/repos/abc?section=verification');
+    renderAt('/repos/abc?section=guard');
     await user.click(screen.getByText('to-analysis'));
 
     expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).not.toContain('section=verification');
+    expect(search).not.toContain('section=guard');
     expect(search).not.toContain('tab=');
   });
 

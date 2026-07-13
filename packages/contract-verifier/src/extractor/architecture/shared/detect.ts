@@ -14,7 +14,7 @@
  */
 
 import path from 'node:path';
-import { minimatch } from '../../../comparator/minimatch.js';
+import { minimatch } from '../../shared/minimatch.js';
 import type { ArchitectureCategory } from '../../../types/index.js';
 import type {
   CodebaseScan,

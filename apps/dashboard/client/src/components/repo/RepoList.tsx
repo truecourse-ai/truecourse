@@ -13,7 +13,6 @@ const EVENT_VERBS: Record<LatestEventKind, string> = {
   analyzed: 'Analyzed',
   scanned: 'Scanned',
   generated: 'Generated',
-  verified: 'Verified',
   guarded: 'Guarded',
   'scenarios-generated': 'Scenarios generated',
 };

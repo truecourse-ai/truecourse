@@ -5,7 +5,7 @@
  *
  *   contract_sets — `{relPath: sha}` map (many files per set), keyed by
  *                   (repo_key, commit_sha, kind).
- *   spec_sets     — one immutable artifact body per row (corpus / verifyState /
+ *   spec_sets     — one immutable artifact body per row (corpus /
  *                   inferredDecisions), keyed by (repo_key, commit_sha, artifact) → content_sha.
  *
  * The mutable resolution ledger (decisions) is NOT here — it's per-repo, not
@@ -50,7 +50,7 @@ export const specSets = pgTable(
   {
     repoKey: text('repo_key').notNull(),
     commitSha: text('commit_sha').notNull(),
-    artifact: text('artifact').notNull(), // 'corpus' | 'decisions' | 'verifyState' | 'inferredDecisions'
+    artifact: text('artifact').notNull(), // 'corpus' | 'decisions' | 'inferredDecisions'
     /** sha into `content` (scope = repo_key) — the immutable artifact body. */
     contentSha: text('content_sha').notNull(),
     createdAt: ts('created_at').notNull(),

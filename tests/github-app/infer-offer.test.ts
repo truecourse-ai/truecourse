@@ -107,9 +107,8 @@ const botComment = (id: number, body: string) => ({ id, body, user: { type: 'Bot
 
 /** A capturing fake notifier; pushes happen synchronously at call time. */
 function makeNotifier() {
-  const calls = { infer: [] as any[], gate: [] as any[] };
+  const calls = { infer: [] as any[] };
   const notifier: any = {
-    sendGateFailure: async (to: string[], email: any) => { calls.gate.push({ to, email }); },
     sendInferResult: async (to: string[], email: any) => { calls.infer.push({ to, email }); },
   };
   return { notifier, calls };
@@ -373,7 +372,6 @@ describe('handleCommentEditedInfer', () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'basesha',
-      drifts: null,
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     // The baseline's inferred set lives in the spec store (at the baseline commit).
@@ -410,7 +408,6 @@ describe('handleCommentEditedInfer', () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'basesha',
-      drifts: null,
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     seedSpecStore({ 'acme/api@basesha:inferredDecisions': [{ kind: 'Operation', identity: 'GET /x' }] });

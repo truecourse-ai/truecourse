@@ -26,7 +26,6 @@ describe('runBaseline — force skip-bypass', () => {
     const baseline: BaselineRecord = {
       repoFullName: 'o/r',
       commitSha: 'C',
-      drifts: [], // non-null ⇒ a real (verified) baseline ⇒ hasContracts true
       capturedAt: '2026-01-01T00:00:00.000Z',
     };
     let cloneReached = false;
@@ -38,14 +37,13 @@ describe('runBaseline — force skip-bypass', () => {
     );
 
     expect(cloneReached).toBe(false); // returned before any clone
-    expect(result).toEqual({ openConflicts: 0, hasContracts: true });
+    expect(result.openConflicts).toBe(0);
   });
 
   it('force re-runs even when the same commit is already baselined (bypasses the skip)', async () => {
     const neutral: BaselineRecord = {
       repoFullName: 'o/r',
       commitSha: 'C',
-      drifts: null, // the neutral baseline connect saved when conflicts blocked contracts
       capturedAt: '2026-01-01T00:00:00.000Z',
     };
     const sentinel = new Error('CLONE_PHASE_REACHED');

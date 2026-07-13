@@ -67,12 +67,6 @@ describe('PgSpecStore — workspace scope (pglite)', () => {
     expect(await store.loadWorkspaceSpec({ workspaceOrgId: ORG_A }, 'claims')).toEqual({ who: 'A' });
     expect(await store.loadWorkspaceSpec({ workspaceOrgId: ORG_B }, 'claims')).toEqual({ who: 'B' });
   });
-
-  it('rejects verifyState (a per-commit repo artifact with no workspace analogue)', async () => {
-    await expect(
-      store.saveWorkspaceSpec({ workspaceOrgId: ORG_A }, 'verifyState', {}),
-    ).rejects.toThrow(/verifyState is repo-scoped only/);
-  });
 });
 
 describe('FileSpecStore — workspace scope is enterprise-only (OSS unaffected)', () => {

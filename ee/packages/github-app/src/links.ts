@@ -26,20 +26,18 @@ export async function contractsDashboardUrl(
   return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=verification&tab=contracts`;
 }
 
-/** Deep link to a repo's PR view, scoped to a lens (Code Quality / Verification). */
-export async function prSectionUrl(
+/** Deep link to a repo's PR Code Quality analytics view. */
+export async function prCodeQualityUrl(
   appUrl: string | undefined,
   repoFullName: string,
   prNumber: number,
-  section: 'codequality' | 'verification',
 ): Promise<string | undefined> {
   if (!appUrl) return undefined;
   const slug = await repoSlug(repoFullName);
   if (!slug) return undefined;
-  // Land directly on each lens's analytics tab so the PR opens on the overview
-  // rather than the section default (which would flash before redirecting).
-  const tab = section === 'codequality' ? 'analytics' : 'driftanalytics';
-  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=${section}&tab=${tab}`;
+  // Land directly on the Code Quality analytics tab so the PR opens on the
+  // overview rather than the section default (which would flash before redirecting).
+  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=codequality&tab=analytics`;
 }
 
 /** Link to a repo's dashboard page (drift/overview). */

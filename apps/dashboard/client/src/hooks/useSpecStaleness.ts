@@ -1,5 +1,5 @@
 /**
- * Tracks whether Generate / Verify have unfinished work to do.
+ * Tracks whether Generate has unfinished work to do.
  * Parent (RepoPage) calls `refetch()` after every `spec:complete`
  * socket event and every decision change so the indicators stay in
  * sync without polling.
@@ -10,7 +10,6 @@ import * as api from '@/lib/api';
 
 export function useSpecStaleness(repoId: string | undefined) {
   const [contractsStale, setContractsStale] = useState(false);
-  const [verifyStale, setVerifyStale] = useState(false);
   const [decisionsPending, setDecisionsPending] = useState(false);
   const [docsChanged, setDocsChanged] = useState(false);
 
@@ -19,7 +18,6 @@ export function useSpecStaleness(repoId: string | undefined) {
     try {
       const r = await api.getSpecStaleness(repoId);
       setContractsStale(r.contractsStale);
-      setVerifyStale(r.verifyStale);
       setDecisionsPending(r.decisionsPending);
       setDocsChanged(r.docsChanged);
     } catch {
@@ -32,5 +30,5 @@ export function useSpecStaleness(repoId: string | undefined) {
     refetch();
   }, [refetch]);
 
-  return { contractsStale, verifyStale, decisionsPending, docsChanged, refetch };
+  return { contractsStale, decisionsPending, docsChanged, refetch };
 }

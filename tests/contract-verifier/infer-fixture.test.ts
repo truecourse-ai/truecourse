@@ -12,7 +12,6 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { infer, renderDecision } from '../../packages/contract-verifier/src/infer/index.js';
-import { verify } from '../../packages/contract-verifier/src/verify.js';
 
 function readTcTree(dir: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -66,12 +65,6 @@ for (const fixture of FIXTURES) {
         expect(d.codeLoc.path.length).toBeGreaterThan(0);
         expect(['high', 'medium', 'low']).toContain(d.confidence);
       }
-    });
-
-    it('verify ignores _inferred by default but can opt in', async () => {
-      const base = await verify({ contractsDir, codeDir });
-      const withInferred = await verify({ contractsDir, codeDir, includeInferred: true });
-      expect(withInferred.artifactCount).toBeGreaterThan(base.artifactCount);
     });
   });
 }

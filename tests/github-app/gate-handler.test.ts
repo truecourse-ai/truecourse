@@ -5,12 +5,6 @@ import path from 'node:path';
 import {
   FileGateStore,
   handlePullRequestGate,
-  reverifyOpenPrs,
-  reverifyOnePr,
-  setPrReverifier,
-  getPrReverifier,
-  setPrRegater,
-  getPrRegater,
   GATE_MARKER,
   renderGateComment,
   type GateHandlerDeps,
@@ -19,59 +13,41 @@ import {
 let dir: string;
 let store: FileGateStore;
 
-async function link(blocking = true) {
+async function link(over: Record<string, unknown> = {}) {
   await store.linkRepo({
     repoFullName: 'acme/api',
     installationId: 5,
     workspaceOrgId: 'org_A',
     defaultBranch: 'main',
-    blocking,
+    blocking: true,
     enabled: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
   });
 }
 
 beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-handler-'));
   store = new FileGateStore(dir);
-  await link(true);
+  await link();
 });
 
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
-  setPrReverifier(null); // isolate the module-global seams between tests
-  setPrRegater(null);
 });
 
-function drift(obligationKey: string, over: Record<string, unknown> = {}): any {
-  return {
-    id: `id-${obligationKey}`,
-    artifactRef: { type: 'Operation', identity: 'GET /a' },
-    obligationKey,
-    severity: 'high',
-    filePath: 'src/a.ts',
-    lineStart: 10,
-    lineEnd: 12,
-    message: `drift ${obligationKey}`,
-    ...over,
-  };
+function violation(severity: string, over: Record<string, unknown> = {}): any {
+  return { id: `v-${severity}`, ruleKey: 'r', severity, title: `${severity} issue`, filePath: 'src/a.ts', ...over };
 }
 
-function makeOctokit(opts: {
-  comments?: { id: number; body: string; user?: { type: string } }[];
-  reviewError?: number; // status code to throw from createReviewComment
-  openPrs?: any[]; // pulls.list payload (reverifyOpenPrs)
-} = {}) {
+function makeOctokit(opts: { comments?: { id: number; body: string; user?: { type: string } }[] } = {}) {
   const calls = {
     check: [] as any[], // completed Check results (the authoritative verdict)
     checkStart: [] as any[], // in-progress Checks opened at the start
     create: [] as any[],
     update: [] as any[],
-    review: [] as any[],
   };
-  // Model the create(in_progress) → update(completed) lifecycle: a started check is
-  // recorded by id, and its completion (via update) carries the original head_sha/name.
   const checkRuns = new Map<number, any>();
   let nextCheckId = 1000;
   const octokit: any = {
@@ -103,19 +79,6 @@ function makeOctokit(opts: {
         calls.update.push(p);
       },
     },
-    pulls: {
-      listFiles: async () => ({ data: [] }), // no PR files → specChanged=false
-      list: async () => ({ data: opts.openPrs ?? [] }),
-      listReviewComments: async () => ({ data: [] }),
-      createReviewComment: async (p: any) => {
-        calls.review.push(p);
-        if (opts.reviewError) {
-          const e: any = new Error('rejected');
-          e.status = opts.reviewError;
-          throw e;
-        }
-      },
-    },
   };
   return { octokit, calls };
 }
@@ -134,31 +97,27 @@ function prPayload(over: Record<string, unknown> = {}) {
   } as any;
 }
 
-function depsWith(octokit: any, output: any): GateHandlerDeps {
+function depsWith(octokit: any, codeQualityAdded: any): GateHandlerDeps {
   return {
     store,
     octokitFor: () => octokit,
-    runVerify: async () => ({ baseSha: 'basesha', headSha: 'headsha', ...output }),
+    runVerify: async () => ({ baseSha: 'basesha', headSha: 'headsha', codeQualityAdded }),
   } as unknown as GateHandlerDeps;
 }
 
-describe('handlePullRequestGate', () => {
-  it('fails the Check, comments, and posts inline comments on new drift', async () => {
+describe('handlePullRequestGate (Code Quality)', () => {
+  it('fails the Check and comments on new violations at/above the threshold', async () => {
     const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [drift('a')], headDrifts: [drift('a'), drift('b')] });
+    const deps = depsWith(octokit, [violation('high')]);
 
     await handlePullRequestGate(deps, prPayload());
 
-    // Two Checks now: drift (posted first) + Code Quality (neutral here — the test
-    // runner provides no analysis, so codeQualityAdded is absent → no-baseline).
-    expect(calls.check).toHaveLength(2);
+    expect(calls.check).toHaveLength(1);
     expect(calls.check[0].status).toBe('completed');
     expect(calls.check[0].conclusion).toBe('failure');
     expect(calls.check[0].head_sha).toBe('headsha');
     expect(calls.create).toHaveLength(1);
     expect(calls.create[0].body).toContain(GATE_MARKER);
-    expect(calls.review).toHaveLength(1);
-    expect(calls.review[0].path).toBe('src/a.ts');
 
     const runs = await store.listRuns('acme/api');
     expect(runs).toHaveLength(1);
@@ -166,71 +125,54 @@ describe('handlePullRequestGate', () => {
     expect(runs[0].addedCount).toBe(1);
   });
 
-  it('opens both Checks as in-progress before completing them', async () => {
+  it('opens the Check as in-progress before completing it', async () => {
     const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
+    const deps = depsWith(octokit, []);
 
     await handlePullRequestGate(deps, prPayload());
 
-    // Two Checks (drift + Code Quality) start as in-progress at the head sha so the
-    // PR shows them running, then transition to completed.
-    expect(calls.checkStart).toHaveLength(2);
-    expect(calls.checkStart.every((c: any) => c.status === 'in_progress')).toBe(true);
-    expect(calls.checkStart.every((c: any) => c.head_sha === 'headsha')).toBe(true);
-    expect(calls.check).toHaveLength(2);
-    expect(calls.check.every((c: any) => c.status === 'completed')).toBe(true);
+    expect(calls.checkStart).toHaveLength(1);
+    expect(calls.checkStart[0].status).toBe('in_progress');
+    expect(calls.checkStart[0].head_sha).toBe('headsha');
+    expect(calls.check).toHaveLength(1);
+    expect(calls.check[0].status).toBe('completed');
   });
 
-  it('reports the gate phases in order through onPhase when one is provided', async () => {
-    const { octokit } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
-    const phases: string[] = [];
-    await handlePullRequestGate(deps, prPayload(), { onPhase: (p) => { phases.push(p); } });
-    expect(phases).toEqual(['spec', 'contracts', 'verify', 'verdict']);
-  });
-
-  it('never requires onPhase — the webhook path passes none and completes normally', async () => {
+  it('passes when the PR introduces no new violations', async () => {
     const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
-    await handlePullRequestGate(deps, prPayload()); // no opts at all
-    expect(calls.check).toHaveLength(2); // both Checks completed
-  });
-
-  it('passes and posts no inline comments when there is no new drift', async () => {
-    const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [drift('a')], headDrifts: [drift('a')] });
+    const deps = depsWith(octokit, []);
     await handlePullRequestGate(deps, prPayload());
     expect(calls.check[0].conclusion).toBe('success');
-    expect(calls.review).toHaveLength(0);
-  });
-
-  it('is neutral when the head has no contracts', async () => {
-    const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: null });
-    await handlePullRequestGate(deps, prPayload());
-    expect(calls.check[0].conclusion).toBe('neutral');
-  });
-
-  it('is neutral (no-baseline) when the base has no contracts', async () => {
-    const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: null, headDrifts: [drift('b')] });
-    await handlePullRequestGate(deps, prPayload());
-    expect(calls.check[0].conclusion).toBe('neutral');
-  });
-
-  it('completes the Check even when an inline comment is rejected (422)', async () => {
-    const { octokit, calls } = makeOctokit({ reviewError: 422 });
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
-    await handlePullRequestGate(deps, prPayload());
-    expect(calls.check[0].conclusion).toBe('failure');
     expect(calls.create).toHaveLength(1);
+  });
+
+  it('is neutral (no-baseline) when there is no baseline analysis to diff against', async () => {
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, null);
+    await handlePullRequestGate(deps, prPayload());
+    expect(calls.check[0].conclusion).toBe('neutral');
+  });
+
+  it('passes when all new violations are below the threshold', async () => {
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, [violation('low')]);
+    await handlePullRequestGate(deps, prPayload());
+    expect(calls.check[0].conclusion).toBe('success');
+  });
+
+  it('advisory mode (codeQualityBlocking off) marks new violations neutral, not failure', async () => {
+    await link({ codeQualityBlocking: false });
+    const { octokit, calls } = makeOctokit();
+    const deps = depsWith(octokit, [violation('high')]);
+    await handlePullRequestGate(deps, prPayload());
+    expect(calls.check[0].conclusion).toBe('neutral');
   });
 
   it('refreshes an existing gate comment', async () => {
     const { octokit, calls } = makeOctokit({
-      comments: [{ id: 88, body: renderGateComment({ conclusion: 'success', added: [], resolved: [], belowThreshold: [] }), user: { type: 'Bot' } }],
+      comments: [{ id: 88, body: renderGateComment({ conclusion: 'success', added: [], belowThreshold: [], total: 0 }), user: { type: 'Bot' } }],
     });
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
+    const deps = depsWith(octokit, [violation('high')]);
     await handlePullRequestGate(deps, prPayload());
     expect(calls.create).toHaveLength(0);
     expect(calls.update).toHaveLength(1);
@@ -243,234 +185,19 @@ describe('handlePullRequestGate', () => {
       conclusion: 'success', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
     });
     const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
+    const deps = depsWith(octokit, [violation('high')]);
     await handlePullRequestGate(deps, prPayload());
     expect(calls.check).toHaveLength(0);
   });
 
-  it('force re-gates a head sha that was already gated (post-resolution re-verify)', async () => {
-    await store.recordRun({
-      id: 'r0', repoFullName: 'acme/api', prNumber: 7, headSha: 'headsha', baseSha: 'b',
-      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
-    await handlePullRequestGate(deps, prPayload(), { force: true });
-    // The prior run no longer blocks: the head re-gates against fresh contracts.
-    // Two Checks now (drift + Code Quality); the drift Check is posted first.
-    expect(calls.check).toHaveLength(2);
-    expect(calls.check[0].conclusion).toBe('failure');
-    const runs = await store.listRuns('acme/api');
-    expect(runs).toHaveLength(2);
-  });
-
   it('ignores non-gate actions and unconnected repos', async () => {
     const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [] });
+    const deps = depsWith(octokit, []);
     await handlePullRequestGate(deps, prPayload({ action: 'closed' }));
     await handlePullRequestGate(
       deps,
       prPayload({ repository: { full_name: 'stranger/repo', default_branch: 'main' } }),
     );
     expect(calls.check).toHaveLength(0);
-  });
-
-  it('advisory mode marks new drift neutral, not failure', async () => {
-    await link(false);
-    const { octokit, calls } = makeOctokit();
-    const deps = depsWith(octokit, { baseDrifts: [], headDrifts: [drift('b')] });
-    await handlePullRequestGate(deps, prPayload());
-    expect(calls.check[0].conclusion).toBe('neutral');
-  });
-
-  it('emails the notify list on a blocking failure', async () => {
-    const r = (await store.getRepo('acme/api'))!;
-    await store.linkRepo({ ...r, notifyEmails: ['a@x.com'] });
-    const { octokit } = makeOctokit();
-    const sent: any[] = [];
-    const deps = {
-      store,
-      octokitFor: () => octokit,
-      runVerify: async () => ({ baseSha: 'b', headSha: 'headsha', baseDrifts: [], headDrifts: [drift('b')] }),
-      notifier: { sendGateFailure: async (to: string[], e: any) => { sent.push({ to, e }); } },
-    } as unknown as GateHandlerDeps;
-    await handlePullRequestGate(deps, prPayload());
-    expect(sent).toHaveLength(1);
-    expect(sent[0].to).toEqual(['a@x.com']);
-    expect(sent[0].e.prUrl).toContain('acme/api/pull/7');
-  });
-
-  it('does not email on a passing gate', async () => {
-    const r = (await store.getRepo('acme/api'))!;
-    await store.linkRepo({ ...r, notifyEmails: ['a@x.com'] });
-    const { octokit } = makeOctokit();
-    let sentCount = 0;
-    const deps = {
-      store,
-      octokitFor: () => octokit,
-      runVerify: async () => ({ baseSha: 'b', headSha: 'headsha', baseDrifts: [drift('a')], headDrifts: [drift('a')] }),
-      notifier: { sendGateFailure: async () => { sentCount++; } },
-    } as unknown as GateHandlerDeps;
-    await handlePullRequestGate(deps, prPayload());
-    expect(sentCount).toBe(0);
-  });
-
-  it('FAILS (blocking) and emails for resolution when the head spec has unresolved conflicts', async () => {
-    const r = (await store.getRepo('acme/api'))!;
-    await store.linkRepo({ ...r, notifyEmails: ['a@x.com'] });
-    const { octokit, calls } = makeOctokit();
-    const conflicts: any[] = [];
-    const failures: any[] = [];
-    const deps = {
-      store,
-      octokitFor: () => octokit,
-      // Drift IS present and the head's scan auto-defaulted 2 conflicts → on a
-      // BLOCKING repo the Check fails (unresolved conflicts block the PR), but the
-      // failure is "resolve the spec", not the drift list.
-      runVerify: async () => ({
-        baseSha: 'b',
-        headSha: 'headsha',
-        baseDrifts: [],
-        headDrifts: [drift('b')],
-        headConflicts: 2,
-      }),
-      notifier: {
-        sendGateFailure: async (to: string[], e: any) => { failures.push({ to, e }); },
-        sendConflictsNeedResolution: async (to: string[], e: any) => { conflicts.push({ to, e }); },
-      },
-    } as unknown as GateHandlerDeps;
-
-    await handlePullRequestGate(deps, prPayload());
-
-    // Blocking Check failure — the PR must resolve its conflicts before merge.
-    expect(calls.check[0].conclusion).toBe('failure');
-    // No inline drift comments on an untrustworthy (conflicted) spec.
-    expect(calls.review).toHaveLength(0);
-    // Summary comment explains the spec needs resolution (not a drift list).
-    expect(calls.create[0].body).toMatch(/unresolved (spec )?conflict/i);
-    // Emailed the conflict notice, NOT the generic failure notice.
-    expect(failures).toHaveLength(0);
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].to).toEqual(['a@x.com']);
-    expect(conflicts[0].e.openConflicts).toBe(2);
-
-    const runs = await store.listRuns('acme/api');
-    expect(runs[0].conclusion).toBe('failure');
-  });
-});
-
-describe('reverifyOpenPrs', () => {
-  // Echo each PR's head sha back from the verify stub so we can tell the re-gated
-  // PRs apart (the default depsWith hard-codes one head sha).
-  function echoDeps(octokit: any): GateHandlerDeps {
-    return {
-      store,
-      octokitFor: () => octokit,
-      runVerify: async (_d: any, req: any) => ({
-        baseSha: `base-${req.prNumber}`,
-        headSha: `h${req.prNumber}`,
-        baseDrifts: [],
-        headDrifts: [],
-      }),
-    } as unknown as GateHandlerDeps;
-  }
-
-  function openPr(number: number) {
-    return {
-      number,
-      head: { sha: `h${number}`, ref: `f${number}`, repo: { full_name: 'acme/api', fork: false } },
-      base: { sha: `b${number}`, ref: 'main' },
-    };
-  }
-
-  it('re-gates every open PR against current contracts, incl. ones already gated', async () => {
-    // PR 7 was already gated (neutral on conflicts); without `force` it would skip.
-    await store.recordRun({
-      id: 'r7', repoFullName: 'acme/api', prNumber: 7, headSha: 'h7', baseSha: 'b7',
-      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7), openPr(8)] });
-    await reverifyOpenPrs(echoDeps(octokit), 'acme/api');
-
-    // Two Checks per PR now (drift + Code Quality).
-    expect(calls.check.map((c: any) => c.head_sha).sort()).toEqual(['h7', 'h7', 'h8', 'h8']);
-    const prNums = (await store.listRuns('acme/api')).map((r) => r.prNumber).sort();
-    expect(prNums).toEqual([7, 7, 8]); // PR 7's original neutral run + both re-verifies
-  });
-
-  it('no-ops for an unconnected/unknown repo', async () => {
-    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7)] });
-    await reverifyOpenPrs(echoDeps(octokit), 'stranger/repo');
-    expect(calls.check).toHaveLength(0);
-  });
-
-  it('no-ops when there are no open PRs', async () => {
-    const { octokit, calls } = makeOctokit({ openPrs: [] });
-    await reverifyOpenPrs(echoDeps(octokit), 'acme/api');
-    expect(calls.check).toHaveLength(0);
-  });
-
-  it('the PR-reverifier seam round-trips and defaults to null', async () => {
-    expect(getPrReverifier()).toBeNull();
-    const seen: string[] = [];
-    setPrReverifier(async (repo) => { seen.push(repo); });
-    await getPrReverifier()!('acme/api');
-    expect(seen).toEqual(['acme/api']);
-  });
-});
-
-describe('reverifyOnePr', () => {
-  function echoDeps(octokit: any): GateHandlerDeps {
-    return {
-      store,
-      octokitFor: () => octokit,
-      runVerify: async (_d: any, req: any) => ({
-        baseSha: `base-${req.prNumber}`,
-        headSha: `h${req.prNumber}`,
-        baseDrifts: [],
-        headDrifts: [],
-      }),
-    } as unknown as GateHandlerDeps;
-  }
-  function openPr(number: number) {
-    return {
-      number,
-      head: { sha: `h${number}`, ref: `f${number}`, repo: { full_name: 'acme/api', fork: false } },
-      base: { sha: `b${number}`, ref: 'main' },
-    };
-  }
-
-  it('force re-gates ONLY the targeted PR, leaving the others untouched', async () => {
-    // PR 7 was already gated; the targeted re-gate must still run (force).
-    await store.recordRun({
-      id: 'r7', repoFullName: 'acme/api', prNumber: 7, headSha: 'h7', baseSha: 'b7',
-      conclusion: 'neutral', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7), openPr(8)] });
-    await reverifyOnePr(echoDeps(octokit), 'acme/api', 7);
-    // Only PR 7's two Checks (drift + Code Quality) — PR 8 is never touched.
-    expect(calls.check.map((c: any) => c.head_sha)).toEqual(['h7', 'h7']);
-    const prNums = (await store.listRuns('acme/api')).map((r) => r.prNumber).sort();
-    expect(prNums).toEqual([7, 7]); // the original run + the one re-gate
-  });
-
-  it('no-ops when the PR is no longer open (already merged/closed)', async () => {
-    const { octokit, calls } = makeOctokit({ openPrs: [openPr(8)] });
-    await reverifyOnePr(echoDeps(octokit), 'acme/api', 7);
-    expect(calls.check).toHaveLength(0);
-  });
-
-  it('no-ops for an unconnected repo', async () => {
-    const { octokit, calls } = makeOctokit({ openPrs: [openPr(7)] });
-    await reverifyOnePr(echoDeps(octokit), 'stranger/repo', 7);
-    expect(calls.check).toHaveLength(0);
-  });
-
-  it('the PR-regater seam round-trips and defaults to null', async () => {
-    expect(getPrRegater()).toBeNull();
-    const seen: Array<[string, number]> = [];
-    setPrRegater(async (repo, pr) => { seen.push([repo, pr]); });
-    await getPrRegater()!('acme/api', 7);
-    expect(seen).toEqual([['acme/api', 7]]);
   });
 });

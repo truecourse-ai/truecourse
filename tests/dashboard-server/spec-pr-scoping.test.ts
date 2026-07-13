@@ -5,8 +5,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
-import { PgSpecStore, PgVerifyStore } from '../../ee/packages/data-store/src/index';
-import type { VerifyLatest } from '@truecourse/core/types/verify-snapshot';
+import { PgSpecStore } from '../../ee/packages/data-store/src/index';
+import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -30,7 +30,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { recuratePrCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
-import { setVerifyStore, resetVerifyStore } from '@truecourse/core/lib/verify-store';
+import { resetAnalysisStore, writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setBackgroundTaskRunner, type BackgroundTask } from '@truecourse/core/lib/background-tasks';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
@@ -41,24 +41,23 @@ async function makeDb(client: PGlite): Promise<EeDb> {
   return db as unknown as EeDb;
 }
 
-const baselineLatest = (commit: string): VerifyLatest =>
+// A minimal LATEST analysis stamped at `commit` — the baseline the corpus reader
+// anchors on. `baselineCommit` reads `analysis.commitHash` from the analyze store.
+const baselineLatest = (commit: string): LatestSnapshot =>
   ({
-    head: commit,
-    run: {
-      id: `run-${commit}`,
-      verifiedAt: '2026-01-01T00:00:00.000Z',
+    head: `${commit}.json`,
+    analysis: {
+      id: `an-${commit}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
       branch: 'main',
       commitHash: commit,
-      contractsDir: 'reference',
-      codeDir: 'src',
+      architecture: 'monolith',
+      metadata: null,
+      status: 'completed',
     },
-    artifactCount: 0,
-    extractedOperationCount: 0,
-    drifts: [],
-    resolverErrors: [],
-    unresolvedRefs: [],
-    summary: { total: 0, bySeverity: {} },
-  }) as unknown as VerifyLatest;
+    graph: { nodes: [], edges: [] },
+    violations: [],
+  }) as unknown as LatestSnapshot;
 
 const corpusWithArea = (areaId: string) => ({
   version: 3,
@@ -70,7 +69,8 @@ const corpusWithArea = (areaId: string) => ({
 });
 
 // ---------------------------------------------------------------------------
-// Corpus route — commit-scoped reads (EE: Postgres spec + verify stores).
+// Corpus route — commit-scoped reads (EE: Postgres spec store; the baseline
+// commit is read from the core analyze store's LATEST).
 // ---------------------------------------------------------------------------
 
 describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
@@ -85,17 +85,16 @@ describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
     const db = await makeDb(client);
     spec = new PgSpecStore(db);
     setSpecStore(spec);
-    const verify = new PgVerifyStore(db);
-    setVerifyStore(verify);
-    // baseline anchored at base1 (verify isBaseline snapshot)
-    await verify.writeVerifyLatest(fixture.repoPath, baselineLatest('base1'));
+    // Baseline anchored at base1 (the analyze LATEST the corpus reader anchors
+    // on). Seeded via the core file analyze store.
+    await writeLatest(fixture.repoPath, baselineLatest('base1'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'head1' }, 'corpus', corpusWithArea('head/area'));
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
     resetSpecStore();
-    resetVerifyStore();
+    resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);
   });
@@ -135,12 +134,12 @@ describe('GET /spec/corpus?ref — 404 when neither ref nor baseline has a corpu
     client = new PGlite();
     const db = await makeDb(client);
     setSpecStore(new PgSpecStore(db));
-    setVerifyStore(new PgVerifyStore(db)); // no baseline snapshot written
+    // No baseline analysis written → baselineCommit resolves to null.
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
     resetSpecStore();
-    resetVerifyStore();
+    resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);
   });

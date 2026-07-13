@@ -7,29 +7,40 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
-import { PgContractStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
-import { verifyInProcess } from '../../packages/core/src/commands/spec-in-process.js';
+import { PgContractStore } from '../../ee/packages/data-store/src/index';
 import {
   setContractStore,
   resetContractStore,
   saveContracts,
   saveWorkspaceContracts,
+  hasContracts,
+  listContractFiles,
+  readContractFile,
+  listWorkspaceContractFiles,
+  readWorkspaceContractFile,
   type RepoRef,
 } from '../../packages/core/src/lib/contract-store.js';
-import { setSpecStore, resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
 
 /**
- * The enterprise EFFECTIVE-contracts merge at the gate's verify seam: a repo is
- * verified against `workspace ∪ repo` (repo wins by `${kind}:${identity}`). Real
- * Postgres (pglite) + fs blob store; code dir is empty so a `shipped` operation
- * with no route produces an `implementation.missing` drift.
+ * The enterprise data store serves the TWO contract layers a repo's EFFECTIVE
+ * contracts merge from — the workspace layer (shared across the org) and the
+ * repo layer (its own `.tc`). The resolver's `workspace ∪ repo` merge (repo wins
+ * by `${kind}:${identity}`) is a contract-verifier concern; here we assert the
+ * store faithfully persists + serves both layers, which is what the merge (and
+ * the dashboard's provenance display) reads. Real Postgres (pglite) + fs blobs.
  */
 
 const ORG = 'org_A';
 const ref: RepoRef = { repoKey: 'acme/api', commitSha: 'sha1' };
 
-// A workspace operation contract with no code-side route → a "missing" drift.
+// A workspace operation contract; the repo redefines the SAME operation identity
+// (POST /api/widgets) as out-of-scope in a differently named file — the collision
+// the resolver's "repo wins" merge resolves, from these two stored layers.
 const WS_WIDGETS = 'operation POST "/api/widgets" {\n  origin "ws.md" "Widgets" 1..2\n  tags []\n}\n';
+const WS_REL = 'widgets/operations/post-api-widgets.tc';
+const REPO_WIDGETS =
+  'operation POST "/api/widgets" {\n  origin "repo.md" "Widgets" 1..2\n  status out-of-scope\n  tags []\n}\n';
+const REPO_REL = 'custom/widgets.tc';
 
 async function makeDb(client: PGlite): Promise<EeDb> {
   const db = drizzle(client, { schema });
@@ -41,84 +52,45 @@ function tmpDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-describe('effective contracts at verify (workspace ∪ repo, repo wins)', () => {
+describe('effective-contract layers (workspace + repo) served by the EE store', () => {
   let client: PGlite;
   let blobDir: string;
-  let codeDir: string;
 
   beforeEach(async () => {
     client = new PGlite();
     blobDir = tmpDir('tc-eff-blob-');
-    codeDir = tmpDir('tc-eff-code-');
-    // An empty (route-less) code tree — a touch file so the walker has something.
-    fs.writeFileSync(path.join(codeDir, 'index.ts'), 'export const x = 1;\n');
-    const db = await makeDb(client);
-    setContractStore(new PgContractStore(db, new FsBlobStore(blobDir)));
-    // verifyInProcess persists the per-commit `verifyState` via the spec store;
-    // install the Postgres one so it lands in the DB (not an `acme/api/.truecourse`
-    // tree relative to cwd) — the gate always runs with the EE stores installed.
-    setSpecStore(new PgSpecStore(db));
+    setContractStore(new PgContractStore(await makeDb(client), new FsBlobStore(blobDir)));
   });
   afterEach(async () => {
     resetContractStore();
-    resetSpecStore();
     await client.close();
     fs.rmSync(blobDir, { recursive: true, force: true });
-    fs.rmSync(codeDir, { recursive: true, force: true });
   });
 
-  function missingWidgets(drifts: Array<{ artifactRef?: { identity?: string } | null; obligationKey?: string }>) {
-    return drifts.find(
-      (d) => d.artifactRef?.identity === 'POST /api/widgets' && d.obligationKey === 'implementation.missing',
-    );
-  }
+  it('a repo with NO contracts of its own still inherits the workspace layer (cross-repo ripple source)', async () => {
+    await saveWorkspaceContracts({ workspaceOrgId: ORG }, 'contracts', { [WS_REL]: WS_WIDGETS });
 
-  it('a repo with NO contracts of its own still drifts against the workspace (cross-repo ripple)', async () => {
-    await saveWorkspaceContracts({ workspaceOrgId: ORG }, 'contracts', {
-      'widgets/operations/post-api-widgets.tc': WS_WIDGETS,
-    });
-    // No saveContracts(ref, …) — the repo has no contracts of its own.
-    const { verify } = await verifyInProcess(codeDir, {
-      skipStash: true,
-      codeDir,
-      ref,
-      workspaceOrgId: ORG,
-    });
-    expect(missingWidgets(verify.drifts)).toBeTruthy(); // the workspace contract is enforced
+    // The repo layer is empty…
+    expect(await hasContracts(ref, 'contracts')).toBe(false);
+    // …but the workspace layer is available for the effective merge to pull from.
+    expect(await listWorkspaceContractFiles({ workspaceOrgId: ORG }, 'contracts')).toContain(WS_REL);
+    expect(await readWorkspaceContractFile({ workspaceOrgId: ORG }, 'contracts', WS_REL)).toBe(WS_WIDGETS);
   });
 
-  it('a repo contract OVERRIDES the workspace one on a key collision (repo wins)', async () => {
-    await saveWorkspaceContracts({ workspaceOrgId: ORG }, 'contracts', {
-      'widgets/operations/post-api-widgets.tc': WS_WIDGETS,
-    });
-    // The repo redefines the SAME operation as out-of-scope (in a differently
-    // named file) → repo wins → the "missing" drift is suppressed.
+  it('serves BOTH layers for a key collision — the inputs the resolver merges (repo wins)', async () => {
+    await saveWorkspaceContracts({ workspaceOrgId: ORG }, 'contracts', { [WS_REL]: WS_WIDGETS });
+
     const repoSrc = tmpDir('tc-eff-reposrc-');
     fs.mkdirSync(path.join(repoSrc, 'custom'), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoSrc, 'custom', 'widgets.tc'),
-      'operation POST "/api/widgets" {\n  origin "repo.md" "Widgets" 1..2\n  status out-of-scope\n  tags []\n}\n',
-    );
+    fs.writeFileSync(path.join(repoSrc, REPO_REL), REPO_WIDGETS);
     await saveContracts(ref, 'contracts', repoSrc);
     fs.rmSync(repoSrc, { recursive: true, force: true });
 
-    const { verify } = await verifyInProcess(codeDir, {
-      skipStash: true,
-      codeDir,
-      ref,
-      workspaceOrgId: ORG,
-    });
-    expect(missingWidgets(verify.drifts)).toBeFalsy(); // repo's out-of-scope wins → no drift
-  });
-
-  it('without a workspace org, a repo with no contracts is repo-only (no merge → errors)', async () => {
-    await saveWorkspaceContracts({ workspaceOrgId: ORG }, 'contracts', {
-      'widgets/operations/post-api-widgets.tc': WS_WIDGETS,
-    });
-    // No workspaceOrgId passed → the workspace layer is NOT consulted; with no
-    // repo contracts either, verification has nothing to run against.
-    await expect(
-      verifyInProcess(codeDir, { skipStash: true, codeDir, ref }),
-    ).rejects.toThrow(/Contracts directory not found/);
+    // Repo layer present + serving its own (out-of-scope) definition…
+    expect(await hasContracts(ref, 'contracts')).toBe(true);
+    expect(await listContractFiles(ref.repoKey, 'contracts', ref.commitSha)).toContain(REPO_REL);
+    expect(await readContractFile(ref.repoKey, 'contracts', REPO_REL, ref.commitSha)).toContain('out-of-scope');
+    // …and the workspace layer still present, so the merge sees both for the key.
+    expect(await readWorkspaceContractFile({ workspaceOrgId: ORG }, 'contracts', WS_REL)).toBe(WS_WIDGETS);
   });
 });

@@ -38,38 +38,35 @@ import {
 const STUB_ICON = SECTIONS[0].icon;
 
 describe('navigation registry — pure lookups', () => {
-  it('ships OSS analysis, drift, and guard sections', () => {
+  it('ships OSS analysis and guard sections (BL Drift retired)', () => {
     const ids = SECTIONS.map((s) => s.id);
     expect(ids).toContain('codequality');
-    expect(ids).toContain('verification');
     expect(ids).toContain('guard');
-    // Guard is registered as the third module, after BL Drift.
-    expect(ids.indexOf('guard')).toBe(ids.indexOf('verification') + 1);
+    // The BL-Drift `verification` section is retired in favor of Guard.
+    expect(ids).not.toContain('verification');
+    // Guard is registered right after Code Analysis.
+    expect(ids.indexOf('guard')).toBe(ids.indexOf('codequality') + 1);
   });
 
   it('getSection returns descriptor or undefined', () => {
     expect(getSection('codequality')?.label).toBe('Code Analysis');
-    expect(getSection('verification')?.label).toBe('BL Drift');
     expect(getSection('guard')?.label).toBe('Guard');
+    expect(getSection('verification')).toBeUndefined();
     expect(getSection('nope')).toBeUndefined();
   });
 
-  it('tabsForSection returns section tabs (or empty)', () => {
-    const tabs = tabsForSection('verification').map((t) => t.id);
-    // `pulls` + `settings` are EE-only (capability-gated; the raw lookup is
-    // unfiltered, so they appear here — visibility filtering happens elsewhere).
-    // Guard is no longer a drift tab — it is its own top-level section.
-    expect(tabs).toEqual([
-      'verify',
-      'pulls',
-      'spec',
-      'contracts',
-      'driftanalytics',
-      'inferred',
-      'runs',
-      'settings',
-    ]);
+  it('the code-analysis section carries the relocated github-gate settings tab', () => {
+    // `settings` (repo-wide gate config) moved out of the retired BL-Drift section
+    // into Code Analysis, where the EE Code Quality bar sources it.
+    const tabs = tabsForSection('codequality').map((t) => t.id);
+    expect(tabs).toContain('settings');
+    expect(getTab('settings')?.requiredCapability).toBe('github-gate');
     expect(tabsForSection('nope')).toEqual([]);
+    // The retired BL-Drift tabs are gone from every section.
+    const allIds = SECTIONS.flatMap((s) => s.tabs.map((t) => t.id));
+    for (const gone of ['spec', 'contracts', 'inferred', 'driftanalytics', 'pulls']) {
+      expect(allIds).not.toContain(gone);
+    }
   });
 
   it('the guard section carries coverage / scenarios / drifts tabs (Generate folded into Scenarios; Coverage absorbed the Spec tab)', () => {
@@ -80,11 +77,11 @@ describe('navigation registry — pure lookups', () => {
     ]);
   });
 
-  it('the guard Runs tab shares BL Drift Runs\' icon (not the Drifts-leftover TriangleAlert)', () => {
+  it('the guard Runs tab uses the ClipboardList run idiom (not the Drifts-leftover TriangleAlert)', () => {
     // Icons are compared by reference so this file needn't import lucide-react.
-    // guarddrifts must match the BL Drift `runs` tab (ClipboardList, the run
-    // idiom) and must NOT be the `violations` tab's TriangleAlert.
-    expect(getTab('guarddrifts')?.icon).toBe(getTab('runs')?.icon);
+    // guarddrifts uses ClipboardList (the run idiom, shared with the Analyses
+    // tab) and must NOT be the `violations` tab's TriangleAlert.
+    expect(getTab('guarddrifts')?.icon).toBe(getTab('analyses')?.icon);
     expect(getTab('guarddrifts')?.icon).not.toBe(getTab('violations')?.icon);
   });
 
@@ -101,23 +98,22 @@ describe('navigation registry — pure lookups', () => {
 
   it('defaultTabForSection returns the registered default', () => {
     expect(defaultTabForSection('codequality')).toBe('home');
-    expect(defaultTabForSection('verification')).toBe('verify');
     expect(defaultTabForSection('guard')).toBe('coverage');
     expect(defaultTabForSection('nope')).toBe('');
   });
 
   it('allTabIds covers every registered tab across sections', () => {
     const ids = allTabIds();
-    for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses']) {
+    for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses', 'settings']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['pulls', 'spec', 'contracts', 'verify', 'runs', 'inferred']) {
+    for (const t of ['coverage', 'scenarios', 'guarddrifts']) {
       expect(ids.has(t)).toBe(true);
     }
   });
 
   it('getTab finds tabs irrespective of section', () => {
-    expect(getTab('spec')?.label).toBe('Spec');
+    expect(getTab('coverage')?.label).toBe('Coverage');
     expect(getTab('flows')?.label).toBe('Flows');
     expect(getTab('nope')).toBeUndefined();
   });
@@ -175,8 +171,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     // Guard is OSS (ungated) so it shows alongside analysis; the
-    // capability-gated `governance` section stays hidden, and `verification`
-    // (BL Drift) is registry-hidden — discontinued in favor of Guard.
+    // capability-gated `governance` section stays hidden.
     expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,guard$/);
   });
 
@@ -191,23 +186,6 @@ describe('navigation registry — capability gating', () => {
     );
     expect(screen.getByTestId('sections')).toHaveTextContent(
       /^codequality,guard,governance$/,
-    );
-  });
-
-  it('a hidden section is never listed, in any edition, but keeps resolving its tabs for URL-driven rendering', () => {
-    // BL Drift is hidden (discontinued in favor of Guard) yet must stay
-    // registered: the EE Pulls feed deep-links into ?section=verification.
-    expect(getSection('verification')?.hidden).toBe(true);
-    render(
-      <AppProvider initial={{ edition: 'community', capabilities: [] }}>
-        <VisibleSectionsProbe />
-        <VisibleTabsProbe section="verification" />
-      </AppProvider>,
-    );
-    expect(screen.getByTestId('sections')).not.toHaveTextContent('verification');
-    // Tabs still resolve (EE-gated pulls/driftanalytics/settings drop in OSS).
-    expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^verify,spec,contracts,inferred,runs$/,
     );
   });
 
@@ -262,15 +240,16 @@ describe('navigation registry — capability gating', () => {
     unmount();
 
     // Hosted EE omits `local-filesystem` (Flows/Files/Databases vanish) but has
-    // `workspace` → the EE-only Code Quality tabs (analytics/violations) appear.
-    // RepoPage curates which of these the bar shows via EE_ANALYSIS_TAB_ORDER.
+    // `workspace` → the EE-only Code Quality tabs (analytics/violations) appear,
+    // plus the `github-gate` Settings tab. RepoPage curates which of these the bar
+    // shows via EE_ANALYSIS_TAB_ORDER.
     render(
       <AppProvider initial={{ edition: 'enterprise', capabilities: ['sso', 'workspace', 'github-gate'] }}>
         <VisibleTabsProbe section="codequality" />
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^home,graphs,analyses,analytics,violations$/,
+      /^home,graphs,analyses,analytics,violations,settings$/,
     );
   });
 });

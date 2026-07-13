@@ -67,9 +67,9 @@ import {
 } from '../helpers/test-db';
 
 /**
- * Spec route tests assert the HTTP shape of the corpus routes + the
- * corpus-only contracts/generate route. The curate/generate engine has its own
- * suite under tests/spec-consolidator/ and tests/contract-extractor/.
+ * Spec route tests assert the HTTP shape of the corpus routes. The
+ * curate/generate engine has its own suite under tests/spec-consolidator/ and
+ * tests/contract-extractor/.
  */
 
 describe('GET /api/repos/:id/spec/decisions', () => {
@@ -400,37 +400,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       .expect(200);
     expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
     expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
-  });
-});
-
-describe('POST /contracts/generate (corpus-only)', () => {
-  let app: Express;
-  let fixture: TestFixture;
-
-  beforeEach(async () => {
-    fixture = await setupTestFixture();
-    gitInit(fixture.repoPath);
-    app = createApp({ serveStatic: false });
-  });
-  afterEach(async () => {
-    await teardownTestFixture(fixture.project.slug);
-  });
-
-  it('generates from corpus.json (empty corpus → 0 written, not skipped)', async () => {
-    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], relations: [] }),
-    );
-    const res = await request(app).post(`/api/repos/${fixture.project.slug}/contracts/generate`).expect(200);
-    expect(res.body.il).toMatchObject({ written: 0 });
-    expect(res.body.il.skipped).toBeUndefined();
-  });
-
-  it('skips with "no corpus" when there is no corpus.json', async () => {
-    const res = await request(app).post(`/api/repos/${fixture.project.slug}/contracts/generate`).expect(200);
-    expect(res.body.il.skipped).toBeTruthy();
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * Navigation registry — the single source of truth for which
- * top-level sections (Code Analysis, BL Drift, …) and which left-rail
- * tabs (Files, Flows, Spec, …) the dashboard renders.
+ * top-level sections (Code Analysis, Guard, …) and which left-rail
+ * tabs (Files, Flows, Coverage, …) the dashboard renders.
  *
  * Why a registry rather than hard-coded arrays in <SectionSwitcher>
  * and <LeftSidebar>:
@@ -17,7 +17,7 @@
  *     the AppProvider's capability set so the gate lives in one place
  *     instead of being scattered across components.
  *   - Section/tab ids are plain `string`. The OSS ids ('codequality',
- *     'verification', 'home', 'spec', …) remain available as constants for
+ *     'guard', 'home', 'coverage', …) remain available as constants for
  *     ergonomic narrowing, but the type itself is open so contributed
  *     ids type-check without touching this file.
  */
@@ -29,15 +29,11 @@ import {
   FolderTree,
   Database,
   ClipboardList,
-  BookOpen,
   FileCode2,
   FlaskConical,
-  ShieldCheck,
-  GitPullRequest,
   Settings,
   BarChart3,
   TriangleAlert,
-  Lightbulb,
   ListChecks,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
@@ -81,12 +77,6 @@ export interface SectionDescriptor {
   tabs: TabDescriptor[];
   /** Gate the entire section on this capability. Omit for OSS sections. */
   requiredCapability?: Capability;
-  /**
-   * Hidden sections stay registered — their tabs resolve and explicit
-   * `?section=` URLs still render them — but they are omitted from the
-   * section switcher in every edition.
-   */
-  hidden?: boolean;
 }
 
 /**
@@ -117,47 +107,9 @@ export const SECTIONS: SectionDescriptor[] = [
       // them via `EE_ANALYSIS_TAB_ORDER`.
       { id: 'analytics', label: 'Analytics', icon: BarChart3, noPanel: true, requiredCapability: 'workspace' },
       { id: 'violations', label: 'Violations', icon: TriangleAlert, noPanel: true, requiredCapability: 'workspace' },
-    ],
-  },
-  {
-    id: 'verification',
-    label: 'BL Drift',
-    description: 'Spec consolidation, contracts, verification',
-    icon: ShieldCheck,
-    // The contracts → verify pipeline is discontinued in favor of Guard.
-    // Hidden from the switcher (OSS and EE) but still URL-reachable —
-    // the EE Pulls feed deep-links into it — until the code is removed.
-    hidden: true,
-    defaultTab: 'verify',
-    tabs: [
-      { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
-      // EE-only: the PR gate's runs for this repo. OSS filters it out.
-      {
-        id: 'pulls',
-        label: 'Pull requests',
-        icon: GitPullRequest,
-        noPanel: true,
-        requiredCapability: 'github-gate',
-      },
-      { id: 'spec', label: 'Spec', icon: BookOpen },
-      { id: 'contracts', label: 'Contracts', icon: FileCode2 },
-      // EE-only: the drift analytics (charts/hotspots/trend) as a standalone tab.
-      // In OSS the same `VerifyStatsColumn` stays as the Verify view's left aside.
-      {
-        // `driftanalytics` (not `analytics`) avoids colliding with the legacy
-        // `?tab=analytics → home` URL alias in NavigationContext.
-        id: 'driftanalytics',
-        label: 'Analytics',
-        icon: BarChart3,
-        noPanel: true,
-        requiredCapability: 'github-gate',
-      },
-      // Reverse-engineered undocumented decisions (OSS + EE). Sidebar list +
-      // main-pane detail tabs, like Contracts; Promote / Dismiss in the detail.
-      { id: 'inferred', label: 'Inferred', icon: Lightbulb },
-      { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
       // EE-only: per-repo gate settings (notify emails, blocking, notification
-      // toggles). Rendered as a tab in the EE repo console; OSS filters it out.
+      // toggles). Rendered as a tab in the EE Code Quality bar (via
+      // `EE_ANALYSIS_TAB_ORDER`); OSS filters it out (github-gate capability).
       {
         id: 'settings',
         label: 'Settings',
@@ -246,7 +198,7 @@ export function useVisibleSections(): SectionDescriptor[] {
   return useMemo(
     () =>
       SECTIONS.filter(
-        (s) => !s.hidden && isEnabled(s.requiredCapability, capabilities),
+        (s) => isEnabled(s.requiredCapability, capabilities),
       ).map(
         (s) => ({
           ...s,

@@ -21,7 +21,6 @@ import {
   ghBaselines,
   ghRuns,
   ghPrs,
-  verifySnapshots,
 } from '@truecourse/ee-db';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
@@ -228,9 +227,7 @@ export class PostgresGateStore implements GateStore {
   // --- baseline ---
 
   async saveBaseline(rec: BaselineRecord): Promise<void> {
-    // gh_baselines is just the pointer to the baseline commit; the drifts live in
-    // that commit's verify_snapshots row (written by the non-transient baseline
-    // verify, which marks it is_baseline). So we persist only the pointer here.
+    // gh_baselines is just the pointer to the last-scanned baseline commit.
     await this.db
       .insert(ghBaselines)
       .values({
@@ -254,21 +251,9 @@ export class PostgresGateStore implements GateStore {
       .where(eq(ghBaselines.repoFullName, repoFullName))
       .limit(1);
     if (!row) return null;
-    // Drifts come from the baseline commit's verify snapshot (the single home).
-    const [snap] = await this.db
-      .select({ snapshot: verifySnapshots.snapshot })
-      .from(verifySnapshots)
-      .where(
-        and(eq(verifySnapshots.repoKey, repoFullName), eq(verifySnapshots.commitSha, row.commitSha)),
-      )
-      .limit(1);
-    const drifts = snap
-      ? ((snap.snapshot as { drifts?: BaselineRecord['drifts'] }).drifts ?? null)
-      : null;
     return {
       repoFullName: row.repoFullName,
       commitSha: row.commitSha,
-      drifts,
       capturedAt: toIso(row.capturedAt),
     };
   }

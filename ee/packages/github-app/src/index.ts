@@ -20,13 +20,7 @@ import {
   handlePullRequestInferOffer,
   handleCommentEditedInfer,
 } from './infer-offer.js';
-import {
-  handlePullRequestGate,
-  reverifyOpenPrs,
-  reverifyOnePr,
-  setPrReverifier,
-  setPrRegater,
-} from './gate-handler.js';
+import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
 import { createEmailNotifier } from './email.js';
@@ -98,16 +92,6 @@ export async function registerGithubApp(
     codeAnalysisLlm: opts.codeAnalysisLlm,
   };
 
-  // Let the EE jobs layer re-verify open PRs after the repo.contracts job
-  // regenerates contracts (post-conflict-resolution), without reaching into the
-  // gate's deps. The seam is null until set here, so SSO-only deploys no-op.
-  setPrReverifier((repoFullName) => reverifyOpenPrs(offerDeps, repoFullName));
-  // Targeted variant: re-gate exactly one PR after a PR-scoped decision cleared its
-  // last conflict (the `pr.regate` background task). Null until set → SSO-only no-op.
-  setPrRegater((repoFullName, prNumber, onPhase) =>
-    reverifyOnePr(offerDeps, repoFullName, prNumber, onPhase),
-  );
-
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
     '/api/ee/github',
@@ -131,8 +115,8 @@ export async function registerGithubApp(
           trigger,
         ).catch((err) => reportGithubError(store, 'baseline failed', { repo }, err));
       },
-      // On PR open/sync: run the drift gate (Phase 4) — it scans the head's specs
-      // automatically when the PR changes them — and offer an infer run (Phase 3).
+      // On PR open/sync: run the Code Quality gate (analyze the head vs the
+      // baseline) and offer an infer run.
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
         // Track the PR's open/closed/merged state for the dashboard feed first —
@@ -149,12 +133,9 @@ export async function registerGithubApp(
           );
           return;
         }
-        // Run the gate FIRST, then infer — never concurrently. The gate generates
-        // the head's contracts (the cold path, when the PR changed a spec); infer
-        // subtracts those contracts to decide what's still undocumented. Racing them
-        // means infer reads before the contracts exist and re-offers decisions the PR
-        // just documented. A gate failure still lets infer run — it falls back to the
-        // baseline contracts (see InferInProcessOptions.contractsRef).
+        // Run the gate FIRST, then infer — never concurrently. Infer reads the
+        // repo's contracts (baseline) to decide what's still undocumented; keeping
+        // them sequential avoids interleaving two clones/analyses for one PR.
         void (async () => {
           await handlePullRequestGate(offerDeps, payload).catch((err) =>
             reportGithubError(store, 'gate failed', ctx, err),
@@ -244,53 +225,35 @@ export {
   type InferOfferDeps,
 } from './infer-offer.js';
 
-// Phase 4: drift gate
+// Code Quality gate
 export {
-  decideGate,
   decideCodeQuality,
   type GateConclusion,
-  type GateDecision,
-  type GateOptions,
   type GateSeverity,
   type CodeQualityDecision,
   type CodeQualityOptions,
 } from './gate.js';
 export {
   GATE_MARKER,
-  GATE_CHECK_NAME,
   CODE_QUALITY_CHECK_NAME,
   isGateComment,
   renderGateComment,
-  gateCheckOutput,
   cqCheckOutput,
-  inlineDriftBody,
-  type DriftEnrichmentMap,
 } from './gate-comment.js';
 export {
   runGateVerify,
-  driftsForCommit,
-  type VerifyFn,
+  type GateVerifyDeps,
+  type GateVerifyRequest,
   type GateVerifyOutput,
-  type CommitDrifts,
 } from './gate-runner.js';
 export {
   handlePullRequestGate,
-  reverifyOpenPrs,
-  reverifyOnePr,
-  setPrReverifier,
-  getPrReverifier,
-  setPrRegater,
-  getPrRegater,
   type GateHandlerDeps,
-  type GatePhase,
-  type PrRegater,
 } from './gate-handler.js';
 
-// Phase 5: email notifications
+// Email notifications
 export {
   createEmailNotifier,
   type EmailNotifier,
-  type GateFailureEmail,
-  type ConflictsEmail,
   type ResendLike,
 } from './email.js';

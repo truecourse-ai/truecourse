@@ -1,14 +1,13 @@
 /**
- * Hosted (Postgres) implementations of core's spec/contract/verify store seams.
- * The enterprise server installs these via `setVerifyStore` / `setContractStore`
- * / `setSpecStore` so the whole pipeline reads and writes server-side instead of
- * the customer's `.truecourse/` tree. All content lives in Postgres — bulky
- * bodies are content-addressed in the `content` table; no blob store. Wired in
+ * Hosted (Postgres) implementations of core's spec/contract store seams.
+ * The enterprise server installs these via `setContractStore` / `setSpecStore`
+ * so the whole pipeline reads and writes server-side instead of the customer's
+ * `.truecourse/` tree. All content lives in Postgres — bulky bodies are
+ * content-addressed in the `content` table; no blob store. Wired in
  * `@truecourse/ee-server`.
  */
 
 export { ContentStore, contentScope } from './content-store.js';
-export { PgVerifyStore } from './verify-store.js';
 export { PgAnalysisStore } from './analysis-store.js';
 export { PgRepoConfigStore, PgUiStateStore } from './config-store.js';
 export { PgRegistryStore } from './registry-store.js';

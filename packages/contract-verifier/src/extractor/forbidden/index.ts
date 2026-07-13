@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
-import { minimatch } from '../../comparator/minimatch.js';
+import { minimatch } from '../shared/minimatch.js';
 import { eachParsedSource, type ParsedSource } from '../source-walker.js';
 import { collectDependencies } from '../manifests.js';
 import { csStringText } from '../shared/cs-nodes.js';

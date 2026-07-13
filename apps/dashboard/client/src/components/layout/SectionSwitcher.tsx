@@ -13,7 +13,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import {
-  getSection,
   useVisibleSections,
   type DashboardSection,
 } from '@/navigation/registry';
@@ -37,12 +36,10 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  // A hidden section reached by explicit URL still labels the button —
-  // the menu just doesn't offer it. For anything else not in the visible
-  // list (e.g. a license was just revoked), fall back to the first
-  // visible section to avoid a dropdown stuck on an unregistered id.
-  const hiddenCurrent = getSection(value)?.hidden ? getSection(value) : undefined;
-  const current = sections.find((s) => s.id === value) ?? hiddenCurrent ?? sections[0];
+  // For a `value` not in the visible list (e.g. a license was just revoked),
+  // fall back to the first visible section to avoid a dropdown stuck on an
+  // unregistered id.
+  const current = sections.find((s) => s.id === value) ?? sections[0];
   if (!current) return null;
   const CurrentIcon = current.icon;
 

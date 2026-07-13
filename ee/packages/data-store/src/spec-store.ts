@@ -5,8 +5,7 @@
  *     → content-addressed in `content`, with a `spec_sets` manifest row pointing
  *       in by sha (deduped: an unchanged artifact across commits is stored once);
  *   - decisions → the per-scope `decisions` ledger (mutable, always-latest, NOT
- *     per-commit — the core's `_repo` sentinel commit is ignored here);
- *   - verifyState → `verify_snapshots` (per-commit verify state is not a spec).
+ *     per-commit — the core's `_repo` sentinel commit is ignored here).
  */
 
 import { and, desc, eq } from 'drizzle-orm';
@@ -14,7 +13,6 @@ import {
   specSets,
   workspaceSpecSets,
   decisions,
-  verifySnapshots,
   type EeDb,
 } from '@truecourse/ee-db';
 import type {
@@ -24,7 +22,6 @@ import type {
   SpecStore,
 } from '@truecourse/core/lib/spec-store';
 import { ContentStore, contentScope } from './content-store.js';
-import { writeSnapshot, readSnapshot } from './snapshots.js';
 
 function requireCommit(ref: RepoRef): string {
   if (!ref.commitSha) {
@@ -53,10 +50,6 @@ export class PgSpecStore implements SpecStore {
   }
 
   async saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> {
-    if (artifact === 'verifyState') {
-      await writeSnapshot(this.db, ref.repoKey, requireCommit(ref), json as { drifts?: [] });
-      return;
-    }
     if (artifact === 'decisions') {
       await this.saveDecisions(decisionsScope(ref), json);
       return;
@@ -74,9 +67,6 @@ export class PgSpecStore implements SpecStore {
   }
 
   async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> {
-    if (artifact === 'verifyState') {
-      return readSnapshot<T>(this.db, ref.repoKey, requireCommit(ref));
-    }
     if (artifact === 'decisions') {
       return this.loadDecisions<T>(decisionsScope(ref));
     }
@@ -108,15 +98,6 @@ export class PgSpecStore implements SpecStore {
     if (artifact === 'decisions') {
       return this.loadDecisions<T>(repoKey);
     }
-    if (artifact === 'verifyState') {
-      const rows = await this.db
-        .select({ snapshot: verifySnapshots.snapshot })
-        .from(verifySnapshots)
-        .where(eq(verifySnapshots.repoKey, repoKey))
-        .orderBy(desc(verifySnapshots.verifiedAt))
-        .limit(1);
-      return rows[0] ? (rows[0].snapshot as T) : null;
-    }
     const rows = await this.db
       .select({ contentSha: specSets.contentSha })
       .from(specSets)
@@ -142,9 +123,6 @@ export class PgSpecStore implements SpecStore {
   // --- Workspace scope (always-latest, keyed by org, no commit) -------------
 
   async saveWorkspaceSpec(ref: WorkspaceRef, artifact: SpecArtifact, json: unknown): Promise<void> {
-    if (artifact === 'verifyState') {
-      throw new Error('[ee-data-store] verifyState is repo-scoped only');
-    }
     if (artifact === 'decisions') {
       await this.saveDecisions(`ws:${ref.workspaceOrgId}`, json);
       return;

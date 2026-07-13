@@ -290,7 +290,7 @@ class FileContractStore implements ContractStore {
 }
 
 // ---------------------------------------------------------------------------
-// Active store registry + delegators (mirrors verify-store.ts).
+// Active store registry + delegators (mirrors spec-store.ts).
 // ---------------------------------------------------------------------------
 
 let active: ContractStore = new FileContractStore();

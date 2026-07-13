@@ -159,8 +159,8 @@ export default function PullRequestsPage() {
               return (
                 <li key={`${r.repoFullName}#${r.id}`}>
                   {r.slug ? (
-                    // Internal: open this PR on the Verification Analytics tab.
-                    <Link to={`/repos/${r.slug}?section=verification&tab=driftanalytics&pr=${r.prNumber}`} className={rowClass}>
+                    // Internal: open this PR on the Code Quality Analytics tab.
+                    <Link to={`/repos/${r.slug}?section=codequality&tab=analytics&pr=${r.prNumber}`} className={rowClass}>
                       {body}
                     </Link>
                   ) : (

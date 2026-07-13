@@ -57,21 +57,6 @@ describe('SectionSwitcher (harness smoke test)', () => {
     expect(onChange).toHaveBeenCalledExactlyOnceWith('guard');
   });
 
-  it('labels the button with a hidden section reached by URL without offering it in the menu', async () => {
-    // Explicit ?section=verification deep links (EE Pulls feed, old
-    // bookmarks) still render BL Drift — the button must say where the
-    // user is, while the menu keeps the section unlisted.
-    const user = userEvent.setup();
-    render(<SectionSwitcher value="verification" onChange={() => {}} />);
-
-    await user.click(screen.getByRole('button', { name: /BL Drift/i }));
-
-    expect(
-      screen.queryByRole('menuitemradio', { name: /BL Drift/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('menuitemradio', { name: /Guard/i })).toBeInTheDocument();
-  });
-
   it('does not invoke onChange when the current section is re-picked', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDbHandle } from '@truecourse/ee-db';
 import { installEeStores, sweepStaleTempDirs } from '../../ee/packages/server/src/storage';
-import { getVerifyStore, resetVerifyStore } from '@truecourse/core/lib/verify-store';
 import { getContractStore, resetContractStore } from '@truecourse/core/lib/contract-store';
 import { getSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { getRepoConfigStore, resetRepoConfigStore } from '@truecourse/core/config/project-config';
@@ -16,7 +15,6 @@ import { getRegistryStore, resetRegistryStore } from '@truecourse/core/config/re
 import { getAnalyzeLock, resetAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
 import { getKvCacheStore, resetKvCacheStore } from '@truecourse/llm';
 import {
-  PgVerifyStore,
   PgContractStore,
   PgSpecStore,
   PgRepoConfigStore,
@@ -33,7 +31,6 @@ const stubLockPool = {
 } as unknown as EeDbHandle['lockPool'];
 
 function resetAll() {
-  resetVerifyStore();
   resetContractStore();
   resetSpecStore();
   resetRepoConfigStore();
@@ -63,7 +60,6 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
   });
 
   it('installs every hosted store + the advisory-lock seam', () => {
-    expect(getVerifyStore()).toBeInstanceOf(PgVerifyStore);
     expect(getContractStore()).toBeInstanceOf(PgContractStore);
     expect(getSpecStore()).toBeInstanceOf(PgSpecStore);
     expect(getRepoConfigStore()).toBeInstanceOf(PgRepoConfigStore);
@@ -83,7 +79,6 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
 
   it('resetAll restores the OSS file-backed defaults', () => {
     resetAll();
-    expect(getVerifyStore()).not.toBeInstanceOf(PgVerifyStore);
     expect(getKvCacheStore()).not.toBeInstanceOf(PgKvCacheStore);
     expect(getAnalyzeLock()).not.toBeInstanceOf(PgAnalyzeLock);
   });

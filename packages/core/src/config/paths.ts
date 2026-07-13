@@ -4,12 +4,11 @@ import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
 // Committable (NOT ignored): `config.json`, `LATEST.json`, `specs/corpus.json`,
-// `specs/decisions.json`, `verifier/LATEST.json` — and the `contracts/` `.tc`
-// tree, which is git-tracked ON PURPOSE: the OSS Contracts BL-Drift view diffs
-// working-tree `.tc` against HEAD (`/contracts/diff`), so committing your
-// contracts is how PRs review spec changes. `LATEST.json` travels so fresh clones
-// inherit a baseline; commit it (and the other LATEST-convention files) only
-// after merging to main, to avoid PR conflicts on generated JSON.
+// `specs/decisions.json` — and the `contracts/` `.tc` tree, which is git-tracked
+// ON PURPOSE so the generated spec→code map travels with the repo. `LATEST.json`
+// travels so fresh clones inherit a baseline; commit it (and the other
+// LATEST-convention files) only after merging to main, to avoid PR conflicts on
+// generated JSON.
 //
 // Ignored below: the analyze store snapshots, the `.cache/` re-run caches,
 // `contracts/result.json` — the last-generate run result (transient run output
@@ -17,7 +16,7 @@ const TRUECOURSE_DIR = '.truecourse';
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
 // report), `guard/evidence/` transcripts, and `guard/history.json` (covered by
 // the unanchored `history.json` rule). `guard/LATEST.json` stays committable,
-// same LATEST convention as the analyze/verify baselines.
+// same LATEST convention as the analyze baseline.
 const GITIGNORE_CONTENTS = [
   'analyses/',
   'history.json',

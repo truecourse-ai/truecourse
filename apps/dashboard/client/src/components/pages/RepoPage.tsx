@@ -1,24 +1,19 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText, FileCode2, FlaskConical, FlaskConicalOff, PauseCircle, Network, Lightbulb } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FlaskConical, FlaskConicalOff, PauseCircle, Network } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
 import { useVisibleTabsForSection } from '@/navigation/registry';
 import { EeRepoChrome } from '@/ee/EeRepoChrome';
 import { RepoSettings } from '@/ee/RepoSettings';
-import { InferredPanel, InferredDecisionDetail } from '@/ee/InferredPanel';
-import { useInferredDecisions, inferredKey } from '@/hooks/useInferredDecisions';
-import type { InferredDecisionView } from '@truecourse/shared';
 
-/** EE repo tab bar: BL-Drift only, curated order. Analytics leads + is default. */
-const EE_REPO_TAB_ORDER = ['driftanalytics', 'verify', 'spec', 'contracts', 'inferred', 'settings'];
 /** EE Code Quality (analysis) tab bar: Analytics · Violations, then the common
  *  Settings. The analytics/violations tabs are EE-only (gated on `workspace`);
- *  `settings` is sourced from the drift section (section-neutral, repo-wide
- *  config). The Architecture graph (and Flows/Files/Databases/History) are not
- *  shown in hosted — violations link straight to the code on GitHub instead. */
+ *  `settings` is repo-wide config (github-gate). The Architecture graph (and
+ *  Flows/Files/Databases/History) are not shown in hosted — violations link
+ *  straight to the code on GitHub instead. */
 const EE_ANALYSIS_TAB_ORDER = ['analytics', 'violations', 'settings'];
 const EE_ANALYSIS_TAB_LABELS: Record<string, string> = {};
 import {
@@ -34,30 +29,11 @@ import {
   useOpenTabs,
 } from '@/contexts/OpenTabsContext';
 import {
-  DriftViewProvider,
-  useDriftView,
-} from '@/contexts/DriftViewContext';
-import {
   ViewModeProvider,
   useViewMode,
 } from '@/contexts/ViewModeContext';
-import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
-import { ContractsPanel } from '@/components/drift/ContractsPanel';
-import { ContractsFile } from '@/components/drift/ContractsFile';
-import { VerifyPanel, type DriftFilterTarget } from '@/components/drift/VerifyPanel';
-import { VerifyStatsColumn, type DriftFilters } from '@/components/drift/VerifyStatsColumn';
-import { VerifyRunsPanel } from '@/components/drift/VerifyRunsPanel';
-import { PullRequestsView } from '@/components/drift/PullRequestsView';
-import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
-import { DiffModeToggle } from '@/components/layout/DiffModeToggle';
-import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
-import { useVerifyState } from '@/hooks/useVerifyState';
-import { useContractsGenerate } from '@/hooks/useContractsGenerate';
 import { useSpecStaleness } from '@/hooks/useSpecStaleness';
-import { ContractsHeaderActions } from '@/components/drift/ContractsHeaderActions';
-import { InferHeaderActions } from '@/components/drift/InferHeaderActions';
-import { ContractsGenerateResultToaster } from '@/components/drift/ContractsGenerateResultToaster';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
@@ -67,10 +43,8 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
-import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
+import { SpecCorpusView, useSpecCorpus } from '@/components/spec/SpecCorpusView';
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
-import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
-import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
@@ -93,9 +67,7 @@ import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import { buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
-import { GenerateResultDetail } from '@/components/drift/GenerateResultDetail';
 import { useGraph } from '@/hooks/useGraph';
-import { useContractsTree } from '@/hooks/useContractsTree';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -107,30 +79,21 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
-import type { RepoResponse, DriftSeverity, VerifyState } from '@/lib/api';
-import { toast } from 'sonner';
-import type { Node, Edge } from '@xyflow/react';
+import type { RepoResponse } from '@/lib/api';
+import type { Node } from '@xyflow/react';
 
 // Outer shell: mounts the navigation context (top-level section +
 // active left tab, kept in sync with the URL) so the page body and
 // every panel read/write it through `useNavigation()` instead of
 // having it prop-drilled out of one giant component.
-/** An inferred key is `${kind} ${identity}`; the tab label uses the identity part. */
-function identityFromInferredKey(key: string): string {
-  const sp = key.indexOf(' ');
-  return sp === -1 ? key : key.slice(sp + 1);
-}
-
 export default function RepoPage() {
   return (
     <NavigationProvider>
       <GraphViewProvider>
         <OpenTabsProvider>
-          <DriftViewProvider>
-            <ViewModeProvider>
-              <RepoPageInner />
-            </ViewModeProvider>
-          </DriftViewProvider>
+          <ViewModeProvider>
+            <RepoPageInner />
+          </ViewModeProvider>
         </OpenTabsProvider>
       </GraphViewProvider>
     </NavigationProvider>
@@ -196,81 +159,50 @@ function RepoPageInner() {
     handleLeftTabChange,
   } = useOpenTabs();
 
-  // Spec / contracts / verify-drift view state lives in
-  // DriftViewContext; bound to the same local names used below.
-  const {
-    activeSpecPath,
-    openSpecTabs,
-    handleOpenSpec,
-    handleCloseSpec,
-    activeContractsPath,
-    setActiveContractsPath,
-    openContractsFiles,
-    handleOpenContracts,
-    handleCloseContracts,
-    activeDriftId,
-    setActiveDriftId,
-    openDriftTabs,
-    handleOpenDrift,
-    handleCloseDrift,
-    reconcileDriftTabs,
-  } = useDriftView();
-
   const currentBranch = repo?.defaultBranch;
 
-  // Enterprise shows ONLY BL Drift on the repo page (no Code Analysis), as a
-  // curated horizontal tab bar. Analytics leads and is the default. `pulls` +
-  // `runs` are dropped here: PRs live in the header ref selector + the cross-repo
-  // sidebar feed, and "Runs" is an OSS-local concept (no local runs in EE).
+  // Enterprise shows ONLY Code Quality on the repo page (no left rail), as a
+  // curated horizontal tab bar. Analytics leads and is the default.
   const isEe = useEdition() === 'enterprise';
-  // PR view (EE): `?pr=N` re-scopes the page to a pull request — the spec/
-  // contracts tabs key to its head SHA, the verify tab shows the gate's stored PR
-  // diff. Resolved from the repo's gate runs (latest run per PR).
+  // PR view (EE): `?pr=N` re-scopes the page to a pull request — the code
+  // quality view shows the gate's stored PR violation diff. Resolved from the
+  // repo's gate runs (latest run per PR).
   const [searchParams] = useSearchParams();
   const prParam = searchParams.get('pr');
   const prNumber = isEe && prParam && /^\d+$/.test(prParam) ? Number(prParam) : null;
   const gateRuns = useRepoGateRuns(isEe ? repo?.name : undefined);
   const activePrRun = prNumber != null ? gateRuns.find((r) => r.prNumber === prNumber) ?? null : null;
-  // Re-keys the spec/contracts/verify tabs to the PR head (undefined → default branch).
+  // Re-keys the PR-scoped views to the PR head (undefined → default branch).
   const refForTabs = prNumber != null ? activePrRun?.headSha : undefined;
-  const driftTabs = useVisibleTabsForSection('verification');
   // Code Quality (analysis) tabs — capability gating already drops Flows/Files/
   // Databases in EE (no `local-filesystem`). Curate order + relabel for EE.
   const analysisVisible = useVisibleTabsForSection('codequality');
   const navigate = useNavigate();
-  const eeTabs = EE_REPO_TAB_ORDER.map((id) => driftTabs.find((t) => t.id === id))
-    .filter((t): t is NonNullable<typeof t> => Boolean(t))
-    // Settings is repo-wide config, not PR-scoped — hide it while viewing a PR.
-    .filter((t) => !(prNumber != null && t.id === 'settings'));
   const analysisTabs = EE_ANALYSIS_TAB_ORDER
-    // `settings` is section-neutral — it lives in the drift section, so source its
-    // descriptor from there to show it in the Code Quality bar too.
-    .map((id) => analysisVisible.find((t) => t.id === id) ?? driftTabs.find((t) => t.id === id))
+    .map((id) => analysisVisible.find((t) => t.id === id))
     .filter((t): t is NonNullable<typeof t> => Boolean(t))
-    // Settings is repo-wide config — hide it while viewing a PR (same as drift).
+    // Settings is repo-wide config — hide it while viewing a PR.
     .filter((t) => !(prNumber != null && t.id === 'settings'))
     .map((t) => ({ ...t, label: EE_ANALYSIS_TAB_LABELS[t.id] ?? t.label }));
-  // The tab bar shown for the active EE section.
-  const eeSectionTabs = dashboardSection === 'codequality' ? analysisTabs : eeTabs;
+  // EE has only the Code Quality lens on the repo page.
+  const eeSectionTabs = analysisTabs;
   useEffect(() => {
     if (!isEe) return;
-    // Keep EE in a coherent state: either Code Quality (analysis) or Verification
-    // (drift), each with its own curated tab set. Keyed off the EXPLICIT
-    // ?section param so the default (no param) lands on Code Quality —
-    // Verification is registry-hidden (discontinued in favor of Guard) and only
-    // renders via explicit deep links (the Pulls feed's ?section=verification).
+    // Keep EE on the Code Quality lens with a valid curated tab.
     const url = new URL(window.location.href);
-    const isVerification = url.searchParams.get('section') === 'verification';
-    const order = isVerification ? EE_REPO_TAB_ORDER : EE_ANALYSIS_TAB_ORDER;
-    // Settings is common to both lenses but repo-wide — hidden while viewing a PR.
+    const order = EE_ANALYSIS_TAB_ORDER;
     const settingsInPr = prNumber != null && leftTab === 'settings';
-    const sectionExplicit = isVerification || url.searchParams.get('section') === 'codequality';
-    if (sectionExplicit && leftTab && order.includes(leftTab) && !settingsInPr) return;
-    if (!isVerification) url.searchParams.set('section', 'codequality');
+    if (
+      url.searchParams.get('section') === 'codequality' &&
+      leftTab &&
+      order.includes(leftTab) &&
+      !settingsInPr
+    )
+      return;
+    url.searchParams.set('section', 'codequality');
     const t = url.searchParams.get('tab');
-    const defaultTab = isVerification ? 'driftanalytics' : 'analytics';
     if (!t || !order.includes(t) || (prNumber != null && t === 'settings'))
-      url.searchParams.set('tab', defaultTab);
+      url.searchParams.set('tab', 'analytics');
     navigate(url.pathname + url.search, { replace: true });
   }, [isEe, dashboardSection, leftTab, prNumber, navigate]);
 
@@ -373,36 +305,7 @@ function RepoPageInner() {
     useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
-  // BL Drift trees — same pattern as useGraph/useFlows. Hoisted here
-  // so the data survives tab switches and so spec:complete socket
-  // events (fired after a successful Apply) can refetch both via the
-  // listeners below.
   const {
-    tree: contractsTree,
-    isLoading: contractsLoading,
-    error: contractsError,
-    refetch: refetchContracts,
-  } = useContractsTree(repoId, refForTabs);
-  const {
-    state: verifyState,
-    diff: verifyDiff,
-    history: verifyHistory,
-    isLoading: verifyLoading,
-    isRunning: verifyRunning,
-    isDiffing: verifyDiffing,
-    error: verifyError,
-    refetch: refetchVerify,
-    run: runVerify,
-    runDiff: runVerifyDiff,
-  } = useVerifyState(repoId, refForTabs, prNumber ?? undefined);
-  const {
-    generating: contractsGenerating,
-    result: contractsGenerateResult,
-    run: runContractsGenerate,
-  } = useContractsGenerate(repoId);
-  const {
-    contractsStale,
-    verifyStale,
     decisionsPending,
     docsChanged,
     refetch: refetchStaleness,
@@ -422,7 +325,7 @@ function RepoPageInner() {
   const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey);
   // UI-triggered guard actions: Generate (Scenarios tab, estimate-gated) and Run
   // (Drifts tab, deterministic). Held at page level so the in-flight state survives
-  // tab switches, exactly like specCorpus / contractsGenerating / verifyRunning.
+  // tab switches, exactly like specCorpus / contractsGenerating.
   const guardGen = useGuardGenerate(repoId);
   const guardRun = useGuardRun(repoId);
   // The bidirectional jump from a guard drift into the coverage tab.
@@ -477,17 +380,11 @@ function RepoPageInner() {
   // A ref holds the latest refetchers so the effect depends ONLY on `leftTab` —
   // it fires on a tab change, never on a refetcher's identity (so no refetch loop).
   // Cheap reads only; we deliberately don't trigger a re-scan here.
-  const tabRefetchersRef = useRef({ refetchVerify, refetchContracts, refetchStaleness, refetchGuardStaleness });
-  tabRefetchersRef.current = { refetchVerify, refetchContracts, refetchStaleness, refetchGuardStaleness };
+  const tabRefetchersRef = useRef({ refetchStaleness, refetchGuardStaleness });
+  tabRefetchersRef.current = { refetchStaleness, refetchGuardStaleness };
   useEffect(() => {
     const r = tabRefetchersRef.current;
-    if (leftTab === 'verify') {
-      void r.refetchVerify();
-      void r.refetchStaleness();
-    } else if (leftTab === 'contracts') {
-      void r.refetchContracts();
-      void r.refetchStaleness();
-    } else if (
+    if (
       leftTab === 'coverage' ||
       leftTab === 'scenarios' ||
       leftTab === 'guarddrifts'
@@ -495,107 +392,16 @@ function RepoPageInner() {
       void r.refetchGuardStaleness();
     }
   }, [leftTab]);
-  // Verify Normal / Git Diff view mode shares analyze's `isDiffMode`
-  // (URL `?view=diff`) so the toggle persists across reloads exactly like
-  // analyze. Toggling only switches the view — the diff is computed by the
-  // run button (below) while in diff mode, not on toggle.
-  // Analytics-driven drift filters (set by clicking the left charts, applied to
-  // the center list). Each toggles off when its active value is re-clicked,
-  // mirroring analyze's severity/category/path filters.
-  const [driftFilters, setDriftFilters] = useState<DriftFilters>({
-    severity: null,
-    kind: null,
-    file: null,
-  });
-  const toggleDriftSeverity = useCallback(
-    (s: string) =>
-      setDriftFilters((f) => ({ ...f, severity: f.severity === s ? null : (s as DriftSeverity) })),
-    [],
-  );
-  const toggleDriftKind = useCallback(
-    (k: string) => setDriftFilters((f) => ({ ...f, kind: f.kind === k ? null : k })),
-    [],
-  );
-  const toggleDriftFile = useCallback(
-    (file: string) => setDriftFilters((f) => ({ ...f, file: f.file === file ? null : file })),
-    [],
-  );
-  const clearDriftFilter = useCallback(
-    (target: DriftFilterTarget) => setDriftFilters((f) => ({ ...f, [target]: null })),
-    [],
-  );
-  // Resizable analytics aside for the verify view, mirroring analyze's
-  // HomePanel aside (charts on the left, list + detail to the right).
-  const [verifyPanelWidth, setVerifyPanelWidth] = useState(560);
-  const verifyDragging = useRef(false);
-  const handleVerifyResizeDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      verifyDragging.current = true;
-      const startX = e.clientX;
-      const startW = verifyPanelWidth;
-      const onMove = (ev: MouseEvent) => {
-        if (!verifyDragging.current) return;
-        const delta = ev.clientX - startX;
-        setVerifyPanelWidth(Math.min(800, Math.max(320, startW + delta)));
-      };
-      const onUp = () => {
-        verifyDragging.current = false;
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    },
-    [verifyPanelWidth],
-  );
-  // Past-run viewing, mirroring analyze's selectedAnalysisId. When set, the
-  // verify view shows that run's snapshot read-only (diff disabled).
-  const [selectedVerifyRunId, setSelectedVerifyRunId] = useState<string | null>(null);
-  const [verifyRunState, setVerifyRunState] = useState<VerifyState | null>(null);
-  useEffect(() => {
-    if (!selectedVerifyRunId || !repoId) {
-      setVerifyRunState(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .getVerifyRun(repoId, selectedVerifyRunId)
-      .then((s) => {
-        if (!cancelled) setVerifyRunState(s);
-      })
-      .catch(() => {
-        if (!cancelled) setVerifyRunState(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedVerifyRunId, repoId]);
-  const isViewingVerifyRun = !!selectedVerifyRunId;
-  // What the verify columns actually render: a selected past run, else LATEST.
-  const effectiveVerifyState = isViewingVerifyRun ? verifyRunState : verifyState;
-  // Diff is latest-only; a past run is always shown in normal mode.
-  // A PR view IS a diff (the gate's stored added-vs-resolved) — force diff mode.
-  const effectiveVerifyDiffMode = prNumber != null || (isDiffMode && !isViewingVerifyRun);
-  // GitHub blob deep-link for a drift's file/line, used by the drift detail's
-  // "Where in the code" link in the EE / PR context (the local code viewer isn't
-  // reachable there). `repo?.name` is the GitHub owner/repo slug for connected
-  // EE repos; the commit is the PR head SHA in PR mode, else the commit the shown
-  // drifts were observed at — the baseline commit for the base view, the
-  // snapshot's commit for a past run (both carried on the verify state), or the
-  // diffed commit. Returns null (→ in-app onOpenFile fallback) for local/OSS repos
-  // with no GitHub remote or when no commit is known.
-  const verifyCommitSha =
-    refForTabs ??
-    effectiveVerifyState?.commitHash ??
-    verifyDiff?.commitHash ??
-    null;
+  // GitHub blob deep-link for a violation's file/line — used by `openFile` in the
+  // EE / PR context (the local code viewer isn't reachable there). `repo?.name` is
+  // the GitHub owner/repo slug for connected EE repos; the commit is the PR head
+  // SHA in PR mode, else the default branch. Returns null (→ in-app onOpenFile
+  // fallback) for local/OSS repos with no GitHub remote or when no commit is known.
   const githubFileUrl = useCallback(
     (path: string, lineStart?: number | null, lineEnd?: number | null): string | null => {
       const repoFullName = isEe ? repo?.name : undefined;
-      // Verify supplies the exact commit; Code Quality (analyze) has no verify ref,
-      // so fall back to the default branch (the baseline is analyzed on it).
-      const ref = verifyCommitSha ?? (isEe ? repo?.defaultBranch : undefined);
+      // The PR head SHA in PR mode; else the default branch (baseline is analyzed on it).
+      const ref = refForTabs ?? (isEe ? repo?.defaultBranch : undefined);
       if (!repoFullName || !ref || !path) return null;
       // Only a repo-relative path forms a valid blob URL. Pre-fix snapshots stored
       // an absolute clone path (/tmp/tc-gate-verify-…); fall back rather than emit a
@@ -618,7 +424,7 @@ function RepoPageInner() {
       }
       return url;
     },
-    [isEe, repo?.name, repo?.defaultBranch, verifyCommitSha],
+    [isEe, repo?.name, repo?.defaultBranch, refForTabs],
   );
 
   // EE has no local files, so opening a violation's file routes to GitHub (the
@@ -634,51 +440,6 @@ function RepoPageInner() {
     },
     [isEe, githubFileUrl, handleOpenFile],
   );
-  // Newest-first run list for the dropdown (history is appended oldest-first).
-  const verifyRunItems = useMemo(
-    () =>
-      [...verifyHistory.runs].reverse().map((r) => {
-        const d = new Date(r.verifiedAt);
-        return {
-          id: r.id,
-          label: Number.isNaN(d.getTime())
-            ? r.verifiedAt
-            : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        };
-      }),
-    [verifyHistory],
-  );
-  const selectedVerifyRunLabel = isViewingVerifyRun
-    ? verifyRunItems.find((r) => r.id === selectedVerifyRunId)?.label ?? null
-    : null;
-  // Runs page: open a run in the Verify tab; delete a run from history.
-  const handleViewVerifyRun = useCallback(
-    (runId: string | null) => {
-      setSelectedVerifyRunId(runId);
-      setLeftTab('verify');
-    },
-    [setLeftTab],
-  );
-  const handleDeleteVerifyRun = useCallback(
-    async (runId: string) => {
-      await api.deleteVerifyRun(repoId, runId);
-      setSelectedVerifyRunId((cur) => (cur === runId ? null : cur));
-      await refetchVerify();
-    },
-    [repoId, refetchVerify],
-  );
-  // When the underlying verify run changes (re-run / fresh load), drop
-  // any open drift tabs whose ids no longer exist so we never show a
-  // stale tab pointing at nothing, and clear filters / past-run selection.
-  // Diff mode is intentionally NOT reset here — it's URL-derived (`isDiffMode`),
-  // so the post-diff refetch no longer kicks the user back to Normal.
-  useEffect(() => {
-    reconcileDriftTabs(
-      verifyState ? new Set(verifyState.drifts.map((d) => d.id)) : null,
-    );
-    setDriftFilters({ severity: null, kind: null, file: null });
-    setSelectedVerifyRunId(null);
-  }, [verifyState, reconcileDriftTabs]);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -741,48 +502,32 @@ function RepoPageInner() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
-  // Refresh BL Drift trees after a successful Scan / Generate / Verify. The
-  // server emits `spec:complete` with one of three kinds — we fan out to the
-  // relevant hook's refetch so each tree stays in sync without polling.
-  // Generate writes contracts (refetchContracts), Verify writes the drift state
-  // (refetchVerify). (The corpus Scan updates its view directly via the GET.)
+  // Refresh guard/spec staleness after a Scan / guard-generate / guard-run. The
+  // server emits `spec:complete` with a kind — the corpus Scan updates its view
+  // directly via the GET, but can flip staleness dots.
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'generate' | 'verify' | 'guard-generate' | 'guard-run' }
+        | { kind?: 'scan' | 'guard-generate' | 'guard-run' }
         | undefined;
-      if (payload?.kind === 'generate') {
-        refetchContracts();
-      } else if (payload?.kind === 'verify') {
-        refetchVerify();
-      }
-      // Every lifecycle event can flip a staleness dot — a scan rewrites the
-      // corpus (contractsStale on), a generate clears it, a verify clears
-      // verifyStale.
-      if (
-        payload?.kind === 'scan' ||
-        payload?.kind === 'generate' ||
-        payload?.kind === 'verify'
-      ) {
-        refetchStaleness();
-      }
-      // A spec scan rewrites the corpus, which can flip the Guard generate-stale
-      // dot (specs changed since the last guard generate) — refresh it so the
-      // Coverage tab's staleness stays in sync with the corpus the sidebar shows.
+      // A scan rewrites the corpus — refresh the spec staleness dot.
       if (payload?.kind === 'scan') {
+        refetchStaleness();
+        // A scan can also flip the Guard generate-stale dot (specs changed since
+        // the last guard generate) — keep the Coverage tab's staleness in sync.
         refetchGuardStaleness();
       }
       // A guard generate wrote scenarios + a report; a guard run wrote a new run.
       // Both flip guard staleness and must refresh the guard read surfaces —
       // refetch the page-level staleness/report and bump the reload key so the
-      // child views (coverage / scenarios / runs / trend) re-fetch their data.
+      // child views (coverage / scenarios / runs) re-fetch their data.
       if (payload?.kind === 'guard-generate' || payload?.kind === 'guard-run') {
         refetchGuardStaleness();
         setGuardReloadKey((k) => k + 1);
       }
     });
     return unsub;
-  }, [onEvent, refetchContracts, refetchVerify, refetchStaleness, refetchGuardStaleness]);
+  }, [onEvent, refetchStaleness, refetchGuardStaleness]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -796,133 +541,6 @@ function RepoPageInner() {
 
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
-
-  // Inferred-decisions tab: the data set + main-pane open tabs (transient preview
-  // / pinned), mirroring the Contracts open-tabs model. Tabs are held here (the
-  // shared parent of the sidebar list and the main-pane detail), keyed by the
-  // decision's `${kind} ${identity}`.
-  const inferred = useInferredDecisions(
-    repoId,
-    leftTab === 'inferred',
-    prNumber != null ? refForTabs : undefined,
-    !isEe && isDiffMode,
-  );
-
-  // Run inference from the dashboard (OSS): reverse-engineer undocumented
-  // decisions into _inferred/. The spec progress popup shows it; refetch on done.
-  const [isInferring, setIsInferring] = useState(false);
-  const runInfer = useCallback(async () => {
-    if (!repoId) return;
-    setIsInferring(true);
-    try {
-      await api.runInferContracts(repoId);
-    } catch (e) {
-      toast.error('Infer failed', { description: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setIsInferring(false);
-      inferred.refetch();
-    }
-  }, [repoId, inferred.refetch]);
-  useEffect(() => {
-    const unsub = onEvent('spec:complete', (data) => {
-      if ((data as { kind?: string })?.kind === 'infer') inferred.refetch();
-    });
-    return unsub;
-  }, [onEvent, inferred.refetch]);
-  // The open inferred decision lives in `?inferred=<key>` so it survives a refresh
-  // and is deep-linkable — same as the spec (`?spec=`) and contract (`?contract=`)
-  // tabs. `key` is `${kind} ${identity}`; the identity (for the tab label) is the
-  // part after the leading kind word.
-  const inferredFromUrl = searchParams.get('inferred') || null;
-  const [openInferredTabs, setOpenInferredTabs] = useState<
-    Array<{ key: string; identity: string; pinned: boolean }>
-  >(() =>
-    inferredFromUrl
-      ? [{ key: inferredFromUrl, identity: identityFromInferredKey(inferredFromUrl), pinned: true }]
-      : [],
-  );
-  const [activeInferredKey, setActiveInferredKeyState] = useState<string | null>(inferredFromUrl);
-
-  const setActiveInferredKey = useCallback(
-    (key: string | null) => {
-      setActiveInferredKeyState(key);
-      const url = new URL(window.location.href);
-      if (key) url.searchParams.set('inferred', key);
-      else url.searchParams.delete('inferred');
-      navigate(url.pathname + url.search);
-    },
-    [navigate],
-  );
-
-  // Reset the open tabs when switching repos — but keep an initial deep-link on mount.
-  const inferredRepoRef = useRef(repoId);
-  useEffect(() => {
-    if (inferredRepoRef.current === repoId) return;
-    inferredRepoRef.current = repoId;
-    setOpenInferredTabs([]);
-    setActiveInferredKey(null);
-  }, [repoId, setActiveInferredKey]);
-
-  // Follow back/forward (and the setter's own navigate) URL → state.
-  useEffect(() => {
-    const fromUrl = searchParams.get('inferred') || null;
-    setActiveInferredKeyState((cur) => (cur === fromUrl ? cur : fromUrl));
-    if (fromUrl) {
-      setOpenInferredTabs((prev) =>
-        prev.some((t) => t.key === fromUrl)
-          ? prev
-          : [...prev, { key: fromUrl, identity: identityFromInferredKey(fromUrl), pinned: true }],
-      );
-    }
-  }, [searchParams]);
-
-  const handleOpenInferred = (d: InferredDecisionView, pinned: boolean) => {
-    const key = inferredKey(d);
-    setOpenInferredTabs((prev) => {
-      const existing = prev.find((t) => t.key === key);
-      if (existing) return prev.map((t) => (t.key === key ? { ...t, pinned: pinned || t.pinned } : t));
-      if (pinned) return [...prev, { key, identity: d.identity, pinned: true }];
-      const hasUnpinned = prev.find((t) => !t.pinned);
-      if (hasUnpinned) return prev.map((t) => (!t.pinned ? { key, identity: d.identity, pinned: false } : t));
-      return [...prev, { key, identity: d.identity, pinned: false }];
-    });
-    setActiveInferredKey(key);
-  };
-
-  const handleCloseInferred = (key: string) => {
-    setOpenInferredTabs((prev) => prev.filter((t) => t.key !== key));
-    if (activeInferredKey === key) {
-      const remaining = openInferredTabs.filter((t) => t.key !== key);
-      setActiveInferredKey(remaining.length > 0 ? remaining[remaining.length - 1].key : null);
-    }
-  };
-
-  const handleInferredAct = async (d: InferredDecisionView, action: 'dismiss' | 'promote') => {
-    if (await inferred.act(d, action)) handleCloseInferred(inferredKey(d));
-  };
-
-  // Contracts diff: EE PR view (head-at-headSha vs baseline, GET by ref) or OSS
-  // Git-Diff (working tree vs the committed baseline, POST run).
-  const [contractsDiff, setContractsDiff] = useState<api.ContractsDiff | null>(null);
-  useEffect(() => {
-    const ee = prNumber != null && !!refForTabs;
-    const oss = !isEe && isDiffMode;
-    if (!ee && !oss) {
-      setContractsDiff(null);
-      return;
-    }
-    let cancelled = false;
-    if (leftTab === 'contracts') {
-      (ee ? api.getContractsDiff(repoId, refForTabs!) : api.postContractsDiff(repoId))
-        .then((d) => !cancelled && setContractsDiff(d))
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [repoId, prNumber, refForTabs, leftTab, isEe, isDiffMode]);
-
-  const blDriftDiffMode = prNumber != null || (!isEe && isDiffMode);
 
   const handleAnalyze = async () => {
     if (isDiffMode) {
@@ -1240,30 +858,6 @@ function RepoPageInner() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
-  // The Spec surface is the BL-Drift `spec` tab. The Guard Coverage tab reuses the
-  // same corpus components (SpecCorpusView sidebar + SpecOverlapDetail) but under
-  // its own selection slice, so it is deliberately NOT part of `isSpecTab`.
-  const isSpecTab = leftTab === 'spec';
-  // Corpus Spec tab: a selected doc / overlap opens in the right pane (`?spec=`).
-  const showingSpec = activeSpecPath !== null && isSpecTab;
-  const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
-  // Generate result (validation issues + gaps): prefer the live run, else the
-  // persisted last-generate summary. Detail opens in the Contracts right pane.
-  const genIl = contractsGenerateResult && 'il' in contractsGenerateResult ? contractsGenerateResult.il : null;
-  const resultIssues =
-    (genIl && 'validationIssues' in genIl ? genIl.validationIssues : null) ??
-    contractsTree?.lastGenerate?.validationIssues ??
-    [];
-  const resultGaps =
-    (genIl && 'gaps' in genIl ? genIl.gaps : null) ?? contractsTree?.lastGenerate?.gaps ?? [];
-  // Result keys (issue/gap) share the contracts tab set with `.tc` paths.
-  const isResultKey = (p: string): boolean => p.startsWith('issue::') || p.startsWith('gap::');
-  const resultTabLabel = (key: string): string => {
-    const idx = Number(key.slice(key.indexOf('::') + 2));
-    if (key.startsWith('issue::')) return resultIssues[idx]?.artifactKey ?? 'issue';
-    const g = resultGaps[idx];
-    return g ? `${g.kind}:${g.identity}` : 'gap';
-  };
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
@@ -1272,25 +866,17 @@ function RepoPageInner() {
     syncFlowNames(flowList);
   }, [flowList, syncFlowNames]);
 
-  // Per-tab header actions (Spec Apply, Contracts Generate, Verify Run) — shared
-  // by both the OSS Header and the EE repo chrome.
-  // OSS-only Git-Diff toggle for the BL-Drift tabs (EE uses the PR `?pr=` view).
-  const blDriftDiffToggle = (verb: string, plural: string) =>
-    !isEe && repo?.isGitRepo !== false ? (
-      <DiffModeToggle diffMode={isDiffMode} onToggle={setIsDiffMode} subject={{ verb, plural }} />
-    ) : null;
+  // Corpus-path state — owns the corpus fetch + Scan so the header (not the
+  // panel) drives it. Read by the Guard Coverage doc picker.
+  const specCorpus = useSpecCorpus(repoId, leftTab === 'coverage', refForTabs, prNumber ?? undefined);
 
-  // Corpus-path Spec tab state — owns the corpus fetch + Scan so the header (not
-  // the panel) drives it, consistent with the other tabs.
-  // Shared by the Spec tab and the Guard coverage doc picker (both read the corpus docs).
-  const specCorpus = useSpecCorpus(repoId, isSpecTab || leftTab === 'coverage', refForTabs, prNumber ?? undefined);
-
+  // Per-tab header actions — shared by both the OSS Header and the EE repo chrome.
   const sectionActionsNode =
-    isSpecTab || leftTab === 'coverage' ? (
-      // The Spec tab and the Guard Coverage tab share the curated corpus: the
-      // header owns Scan/Rescan, which curates the docs into areas, detects
-      // relations, and flags overlaps. Hidden in EE — hosted repos have no working
-      // tree and re-scan automatically on merge / when a PR is opened.
+    leftTab === 'coverage' ? (
+      // The Guard Coverage tab owns the curated corpus: the header owns
+      // Scan/Rescan, which curates the docs into areas, detects relations, and
+      // flags overlaps. Hidden in EE — hosted repos have no working tree and
+      // re-scan automatically on merge / when a PR is opened.
       !isEe && repo?.isGitRepo !== false ? (
         <SpecScanButton
           hasCorpus={specCorpus.data != null}
@@ -1300,34 +886,6 @@ function RepoPageInner() {
           onClick={() => void specCorpus.scan()}
         />
       ) : null
-    ) : leftTab === 'contracts' ? (
-      <div className="flex items-center gap-2">
-        {blDriftDiffToggle('generates', 'contract changes')}
-        <ContractsHeaderActions
-          isGenerating={contractsGenerating}
-          onGenerate={runContractsGenerate}
-          stale={contractsStale}
-          isGitRepo={repo?.isGitRepo !== false}
-        />
-      </div>
-    ) : leftTab === 'inferred' ? (
-      <div className="flex items-center gap-2">
-        {blDriftDiffToggle('infers', 'undocumented decisions')}
-        <InferHeaderActions isRunning={isInferring} onRun={runInfer} isGitRepo={repo?.isGitRepo !== false} />
-      </div>
-    ) : leftTab === 'verify' ? (
-      <VerifyHeaderActions
-        isRunning={isDiffMode ? verifyDiffing : verifyRunning}
-        onRun={isDiffMode ? runVerifyDiff : runVerify}
-        stale={verifyStale}
-        diffMode={isDiffMode}
-        onToggleDiff={setIsDiffMode}
-        isGitRepo={repo?.isGitRepo !== false}
-        runItems={verifyRunItems}
-        selectedRunId={selectedVerifyRunId}
-        onSelectRun={setSelectedVerifyRunId}
-        viewingHistory={isViewingVerifyRun}
-      />
     ) : leftTab === 'scenarios' ? (
       // Generate lives where its output lives — the Scenarios tab. Opens the
       // estimate modal first, then triggers; disabled while a run is in flight.
@@ -1353,30 +911,18 @@ function RepoPageInner() {
   return (
     <div className="flex h-screen flex-col">
       {isEe ? (
-        // EE has no working tree, so the git-only actions (Scan / Generate /
-        // Verify Run) stay hidden — each self-gates on isGitRepo/supportsRescan.
-        // But "Accept all defaults" resolves conflicts server-side (no tree), so
-        // we surface the Spec tab's actions, which for hosted renders just that
-        // button (the Scan button self-hides).
+        // EE has no working tree, so the git-only actions stay hidden — each
+        // self-gates on isGitRepo. The repo page shows only the Code Quality lens.
         <EeRepoChrome
           repoName={repo?.name}
           branch={currentBranch}
           tabs={eeSectionTabs}
           activeTab={leftTab}
           onTabChange={(t) => handleLeftTabChange(t)}
-          section={dashboardSection}
-          // Land each lens on its FIRST curated tab (Analytics), not the OSS
-          // registry default — which would open Spec when switching to Verification.
-          onSectionChange={(next) =>
-            setDashboardSection(
-              next,
-              next === 'codequality' ? EE_ANALYSIS_TAB_ORDER[0] : EE_REPO_TAB_ORDER[0],
-            )
-          }
           prNumber={prNumber}
-          prBranch={verifyDiff?.branch ?? null}
+          prBranch={null}
           prConclusion={activePrRun?.conclusion}
-          actions={isSpecTab ? sectionActionsNode : undefined}
+          actions={undefined}
         />
       ) : (
         <Header
@@ -1435,19 +981,6 @@ function RepoPageInner() {
           <span>Showing working tree state (uncommitted changes)</span>
         </div>
       )}
-      {leftTab === 'verify' && isViewingVerifyRun && (
-        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
-          <span>
-            Viewing verify run{selectedVerifyRunLabel ? ` from ${selectedVerifyRunLabel}` : ''} — not the latest
-          </span>
-          <button
-            className="underline hover:text-amber-400 transition-colors"
-            onClick={() => setSelectedVerifyRunId(null)}
-          >
-            Return to latest
-          </button>
-        </div>
-      )}
       {repoError && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-1.5 text-xs text-destructive">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -1459,14 +992,9 @@ function RepoPageInner() {
       {!isEe && !repoError && repo?.isGitRepo === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span>This directory is not a git repository — analyze, spec scan, contract generation, and verify are unavailable (TrueCourse needs git for commit-anchored baselines, diff, and history).</span>
+          <span>This directory is not a git repository — analyze and spec scan are unavailable (TrueCourse needs git for commit-anchored baselines, diff, and history).</span>
         </div>
       )}
-
-      {/* Generate result surfaces as a toast (sonner's <Toaster />
-          lives at the app root). Render-less side effect — listens
-          for new results and emits toasts, no layout impact. */}
-      <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
       {leftTab === 'settings' && prNumber == null ? (
         <RepoSettings repoFullName={repo?.name} />
@@ -1546,42 +1074,11 @@ function RepoPageInner() {
               }}
             />
           )}
-          {isSpecTab && (
-            // The curated corpus Spec surface: an area-grouped prose nav (areas →
-            // docs + overlaps); selecting opens the right pane (?spec=). Scan
-            // lives in the header. Shared by the BL-Drift Spec tab and Guard Spec.
-            <SpecCorpusView repoId={repoId} corpus={specCorpus} activeKey={activeSpecPath} onOpen={handleOpenSpec} onDecision={refetchStaleness} prNumber={prNumber} prRef={refForTabs} />
-          )}
-          {leftTab === 'contracts' && (
-            <ContractsPanel
-              tree={contractsTree}
-              isLoading={contractsLoading}
-              error={contractsError}
-              activePath={activeContractsPath}
-              validationIssues={resultIssues}
-              gaps={resultGaps}
-              onOpen={handleOpenContracts}
-              hosted={isEe}
-              prDiff={blDriftDiffMode ? contractsDiff : null}
-            />
-          )}
-          {leftTab === 'inferred' && (
-            <InferredPanel
-              decisions={inferred.decisions}
-              dismissed={inferred.dismissed}
-              error={inferred.error}
-              activeKey={activeInferredKey}
-              onOpen={handleOpenInferred}
-              onRestore={inferred.restore}
-              diffMode={inferred.diffMode}
-            />
-          )}
           {leftTab === 'coverage' && (
-            // Guard Coverage reuses the BL-Drift corpus sidebar (docs + area-tag
-            // filter + open/resolved conflicts + skipped/force-in/excluded docs),
-            // but routes selection through Guard's own params: a doc opens the
-            // coverage surface (`?guard`), a conflict opens the resolution detail
-            // (`?gconf`). No shared state with BL Drift's `?spec` view.
+            // Guard Coverage's corpus sidebar (docs + area-tag filter +
+            // open/resolved conflicts + skipped/force-in/excluded docs): a doc
+            // opens the coverage surface (`?guard`), a conflict opens the
+            // resolution detail (`?gconf`).
             <SpecCorpusView
               repoId={repoId}
               corpus={specCorpus}
@@ -1606,13 +1103,10 @@ function RepoPageInner() {
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec/Contracts/Verify).
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases).
               Scenarios/Runs render their own GuardTabStrip (permanent Overview tab), not this shared bar. */}
-          {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
-            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
-          (isSpecTab && openSpecTabs.length > 0) ||
-          (leftTab === 'contracts' && openContractsFiles.length > 0) ||
-          (leftTab === 'inferred' && openInferredTabs.length > 0) ? (
+          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1704,105 +1198,6 @@ function RepoPageInner() {
                   </div>
                 );
               })}
-              {/* Corpus Spec tabs (docs + overlaps) */}
-              {isSpecTab && openSpecTabs.map((f) => {
-                const k = parseSpecKey(f.path);
-                const label =
-                  k.kind === 'overlap'
-                    ? `${k.a.split('/').pop()} ↔ ${k.b.split('/').pop()}`
-                    : k.ref.split('/').pop() || k.ref;
-                const isActive = activeSpecPath === f.path;
-                return (
-                  <div
-                    key={f.path}
-                    onClick={() => handleOpenSpec(f.path, f.pinned)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={f.path}
-                  >
-                    <FileText className="h-3 w-3 shrink-0" />
-                    <span className={f.pinned ? 'font-medium' : 'italic'}>{label}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseSpec(f.path);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-              {/* Contracts tabs (`.tc` files + generate-result issue/gap details) */}
-              {leftTab === 'contracts' && openContractsFiles.map((f) => {
-                const fileName = isResultKey(f.path)
-                  ? resultTabLabel(f.path)
-                  : f.path.split('/').pop() || f.path;
-                const isActive = activeContractsPath === f.path;
-                return (
-                  <div
-                    key={f.path}
-                    onClick={() => setActiveContractsPath(f.path)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={f.path}
-                  >
-                    <FileCode2 className="h-3 w-3 shrink-0" />
-                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseContracts(f.path);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-              {/* Inferred decision tabs */}
-              {leftTab === 'inferred' && openInferredTabs.map((t) => {
-                const isActive = activeInferredKey === t.key;
-                return (
-                  <div
-                    key={t.key}
-                    onClick={() => setActiveInferredKey(t.key)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={t.key}
-                  >
-                    <Lightbulb className="h-3 w-3 shrink-0" />
-                    <span className={t.pinned ? 'font-medium' : 'italic'}>{t.identity}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseInferred(t.key);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-              {/* Verify drifts use the 3-column view (no tab bar). */}
             </div>
           ) : null}
 
@@ -1832,185 +1227,6 @@ function RepoPageInner() {
               violations={violations}
               isTab
             />
-          ) : showingSpec && activeSpecPath ? (
-            (() => {
-              const k = parseSpecKey(activeSpecPath);
-              if (k.kind === 'overlap') {
-                return specCorpus.data ? (
-                  <SpecOverlapDetail
-                    repoId={repoId}
-                    area={k.area}
-                    docA={k.a}
-                    docB={k.b}
-                    data={specCorpus.data}
-                    prNumber={prNumber}
-                    prRef={refForTabs}
-                    onResolved={(res) => {
-                      if (res) specCorpus.apply(res);
-                      else void specCorpus.refetch();
-                    }}
-                    onConflictChange={(list) => specCorpus.applyConflictResolutions(list)}
-                    onDecision={refetchStaleness}
-                  />
-                ) : (
-                  <SpecPanePlaceholder />
-                );
-              }
-              // Show the doc's full area-tag set in the detail header (concern
-              // names; product prefix only when there are multiple products).
-              const doc = specCorpus.data?.corpus.docs.find((d) => d.ref === k.ref);
-              const multiProduct = new Set((specCorpus.data?.corpus.areas ?? []).map((a) => a.product)).size > 1;
-              const docTags = doc?.areaTags.map((id) => (multiProduct ? id : id.split('/').pop() ?? id));
-              // A dropped doc (not in the kept set) still previews — show why it was excluded.
-              const skipped = specCorpus.data?.corpus.skippedDocs?.find((s) => s.ref === k.ref);
-              return (
-                <SpecDocViewer
-                  repoId={repoId}
-                  docRef={k.ref}
-                  commit={refForTabs}
-                  tags={docTags}
-                  notIncludedReason={skipped?.reason}
-                />
-              );
-            })()
-          ) : isSpecTab ? (
-            <SpecPanePlaceholder />
-          ) : showingContractsFile && activeContractsPath ? (
-            isResultKey(activeContractsPath) ? (
-              <GenerateResultDetail itemKey={activeContractsPath} issues={resultIssues} gaps={resultGaps} />
-            ) : (
-              <ContractsFile repoId={repoId} filePath={activeContractsPath} />
-            )
-          ) : leftTab === 'contracts' ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <p>Select a contract file from the list to view it.</p>
-            </div>
-          ) : leftTab === 'verify' ? (
-            (() => {
-              // Verify view, mirroring analyze's HomePanel layout: a resizable
-              // analytics aside on the LEFT, then the drift list, then the
-              // selected drift's detail. `effectiveVerifyState` is a past run
-              // when one is selected, else LATEST.
-              const activeDrift =
-                (effectiveVerifyDiffMode
-                  ? [...(verifyDiff?.added ?? []), ...(verifyDiff?.resolved ?? [])]
-                  : effectiveVerifyState?.drifts ?? []
-                ).find((d) => d.id === activeDriftId) ?? null;
-              return (
-                <div className="flex h-full w-full overflow-hidden">
-                  {/* EE promotes the analytics aside to its own "Analytics" tab,
-                      so the Drift view there is just the list + detail. */}
-                  {!isEe && (
-                  <aside
-                    style={{ width: verifyPanelWidth }}
-                    className="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-card"
-                  >
-                    <VerifyStatsColumn
-                      state={effectiveVerifyState}
-                      diff={verifyDiff}
-                      history={verifyHistory}
-                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
-                      isDiffing={verifyDiffing}
-                      filters={driftFilters}
-                      onToggleSeverity={toggleDriftSeverity}
-                      onToggleKind={toggleDriftKind}
-                      onToggleFile={toggleDriftFile}
-                    />
-                    <div
-                      className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
-                      onMouseDown={handleVerifyResizeDown}
-                    />
-                  </aside>
-                  )}
-                  <div className="w-[380px] shrink-0 overflow-hidden border-r border-border">
-                    <VerifyPanel
-                      state={effectiveVerifyState}
-                      diff={verifyDiff}
-                      mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
-                      isLoading={verifyLoading}
-                      isDiffing={verifyDiffing}
-                      error={verifyError}
-                      activeDriftId={activeDriftId}
-                      filters={driftFilters}
-                      onClearFilter={clearDriftFilter}
-                      onOpenDrift={handleOpenDrift}
-                      onSetSeverity={isEe ? toggleDriftSeverity : undefined}
-                      hosted={isEe}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1 overflow-hidden">
-                    {activeDrift ? (
-                      <VerifyDriftDetail
-                        drift={activeDrift}
-                        repoId={repoId}
-                        onClose={() => handleCloseDrift(activeDrift.id)}
-                        githubFileUrl={githubFileUrl}
-                        onOpenFile={(filePath, line) => {
-                          // Cross-section navigation: switch to Code Analysis
-                          // and open the file viewer at the right line.
-                          setDashboardSection('codequality');
-                          handleOpenFile(filePath, true, line);
-                        }}
-                      />
-                    ) : (
-                      <VerifyEmptyState />
-                    )}
-                  </div>
-                </div>
-              );
-            })()
-          ) : leftTab === 'driftanalytics' ? (
-            // EE-only standalone analytics tab — the same drift charts/stats the
-            // OSS Verify view shows in its left aside, here full-width. Display-
-            // only (interactive=false): the drift list lives on the Verify tab, so
-            // clicking a chart can't filter it — Verify has its own severity filter.
-            <div className="h-full w-full overflow-auto">
-              <VerifyStatsColumn
-                state={effectiveVerifyState}
-                diff={verifyDiff}
-                history={verifyHistory}
-                mode={effectiveVerifyDiffMode ? 'diff' : 'current'}
-                isDiffing={verifyDiffing}
-                filters={driftFilters}
-                onToggleSeverity={toggleDriftSeverity}
-                onToggleKind={toggleDriftKind}
-                onToggleFile={toggleDriftFile}
-                interactive={false}
-                wide
-              />
-            </div>
-          ) : leftTab === 'runs' ? (
-            <VerifyRunsPanel
-              history={verifyHistory}
-              selectedRunId={selectedVerifyRunId}
-              onViewRun={handleViewVerifyRun}
-              onDeleteRun={handleDeleteVerifyRun}
-              hosted={isEe}
-            />
-          ) : leftTab === 'pulls' ? (
-            <PullRequestsView repoFullName={repo?.name} />
-          ) : leftTab === 'inferred' ? (
-            (() => {
-              const active = activeInferredKey
-                ? (inferred.decisions ?? []).find((d) => inferredKey(d) === activeInferredKey) ?? null
-                : null;
-              return active ? (
-                <InferredDecisionDetail
-                  d={active}
-                  busy={inferred.busyKey === activeInferredKey}
-                  onAct={handleInferredAct}
-                  readOnly={inferred.diffMode}
-                />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center px-8 text-center text-sm text-muted-foreground">
-                  <p className="max-w-sm">
-                    Undocumented decisions TrueCourse reverse-engineered from this repo's code. Select
-                    one from the list to review its inferred contract, then promote it to the spec or
-                    dismiss it.
-                  </p>
-                </div>
-              );
-            })()
           ) : leftTab === 'coverage' ? (
             <GuardCoveragePage
               repoId={repoId}

@@ -8,7 +8,6 @@ import {
   type LatestEventKind,
 } from '../../packages/core/src/commands/repo-events';
 import { clearLatestCache } from '../../packages/core/src/lib/analysis-store';
-import { clearVerifyLatestCache } from '../../packages/core/src/lib/verify-store';
 import type { GuardGenerateReport, GuardLatest } from '../../packages/shared/src/index';
 
 // Distinct timestamps, oldest → newest, so "newest wins" is unambiguous.
@@ -16,7 +15,6 @@ const AT: Record<LatestEventKind, string> = {
   analyzed: '2026-07-01T00:00:00.000Z',
   scanned: '2026-07-02T00:00:00.000Z',
   generated: '2026-07-03T00:00:00.000Z',
-  verified: '2026-07-04T00:00:00.000Z',
   'scenarios-generated': '2026-07-05T00:00:00.000Z',
   guarded: '2026-07-06T00:00:00.000Z', // newest of all
 };
@@ -25,7 +23,6 @@ const ALL_KINDS: LatestEventKind[] = [
   'analyzed',
   'scanned',
   'generated',
-  'verified',
   'scenarios-generated',
   'guarded',
 ];
@@ -75,8 +72,6 @@ function seedSource(repo: string, kind: LatestEventKind, at: string): void {
       return seed(repo, 'specs/corpus.json', { version: 3, generatedAt: at });
     case 'generated':
       return seed(repo, 'contracts/result.json', { generatedAt: at });
-    case 'verified':
-      return seed(repo, 'verifier/LATEST.json', { run: { verifiedAt: at } });
     case 'guarded':
       return seed(repo, 'guard/LATEST.json', guardLatest(at));
     case 'scenarios-generated':
@@ -89,7 +84,7 @@ describe('pickLatestEvent (newest-wins, pure)', () => {
     const event = pickLatestEvent([
       { kind: 'analyzed', at: AT.analyzed },
       { kind: 'guarded', at: AT.guarded },
-      { kind: 'verified', at: AT.verified },
+      { kind: 'scanned', at: AT.scanned },
     ]);
     expect(event).toEqual({ kind: 'guarded', at: AT.guarded });
   });
@@ -97,7 +92,7 @@ describe('pickLatestEvent (newest-wins, pure)', () => {
   it('ignores candidates with a missing or unparseable timestamp', () => {
     const event = pickLatestEvent([
       { kind: 'guarded', at: null },
-      { kind: 'verified', at: '' },
+      { kind: 'generated', at: '' },
       { kind: 'scanned', at: 'not-a-date' },
       { kind: 'analyzed', at: AT.analyzed },
     ]);
@@ -122,10 +117,10 @@ describe('pickLatestEvent (newest-wins, pure)', () => {
   it('breaks exact ties by candidate order (first wins)', () => {
     const same = '2026-07-07T12:00:00.000Z';
     const event = pickLatestEvent([
-      { kind: 'verified', at: same },
+      { kind: 'scanned', at: same },
       { kind: 'guarded', at: same },
     ]);
-    expect(event).toEqual({ kind: 'verified', at: same });
+    expect(event).toEqual({ kind: 'scanned', at: same });
   });
 });
 
@@ -134,7 +129,6 @@ describe('resolveLatestEvent (per-repo store composition)', () => {
 
   beforeEach(() => {
     clearLatestCache();
-    clearVerifyLatestCache();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-repo-events-'));
     fs.mkdirSync(path.join(repo, '.truecourse'), { recursive: true });
   });
@@ -157,14 +151,13 @@ describe('resolveLatestEvent (per-repo store composition)', () => {
   it('returns the newest among the present subset', async () => {
     seedSource(repo, 'analyzed', AT.analyzed);
     seedSource(repo, 'scanned', AT.scanned);
-    seedSource(repo, 'verified', AT.verified);
-    await expect(resolveLatestEvent(repo, null)).resolves.toEqual({ kind: 'verified', at: AT.verified });
+    seedSource(repo, 'generated', AT.generated);
+    await expect(resolveLatestEvent(repo, null)).resolves.toEqual({ kind: 'generated', at: AT.generated });
   });
 
   it('skips a corrupt file and still resolves from the readable sources', async () => {
     // A garbage guard LATEST (newest kind) must not win, nor throw.
     seedRaw(repo, 'guard/LATEST.json', '{ not json');
-    seedRaw(repo, 'verifier/LATEST.json', 'also broken');
     seedSource(repo, 'scanned', AT.scanned);
     await expect(resolveLatestEvent(repo, null)).resolves.toEqual({ kind: 'scanned', at: AT.scanned });
   });

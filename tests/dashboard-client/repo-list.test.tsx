@@ -39,7 +39,6 @@ const VERBS: Array<[LatestEventKind, string]> = [
   ['analyzed', 'Analyzed'],
   ['scanned', 'Scanned'],
   ['generated', 'Generated'],
-  ['verified', 'Verified'],
   ['guarded', 'Guarded'],
   ['scenarios-generated', 'Scenarios generated'],
 ];

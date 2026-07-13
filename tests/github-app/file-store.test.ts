@@ -82,7 +82,6 @@ describe('FileGateStore', () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'abc',
-      drifts: [],
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     await store.recordRun({
@@ -134,11 +133,10 @@ describe('FileGateStore', () => {
     expect(rec?.accountLogin).toBe('acct-1-renamed');
   });
 
-  it('round-trips baselines including a neutral (null-drift) baseline', async () => {
+  it('round-trips the baseline pointer', async () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'abc123',
-      drifts: [],
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     expect((await store.getBaseline('acme/api'))?.commitSha).toBe('abc123');
@@ -146,10 +144,9 @@ describe('FileGateStore', () => {
     await store.saveBaseline({
       repoFullName: 'acme/web',
       commitSha: 'def456',
-      drifts: null,
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
-    expect((await store.getBaseline('acme/web'))?.drifts).toBeNull();
+    expect((await store.getBaseline('acme/web'))?.commitSha).toBe('def456');
     expect(await store.getBaseline('nope/none')).toBeNull();
   });
 

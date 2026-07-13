@@ -1,21 +1,21 @@
 /**
- * Baseline capture: clone a repo's default branch and run a full verify,
- * saving the result as the per-repo baseline the PR gate diffs against.
- * Refreshed whenever the default branch advances (merge).
+ * Baseline capture: clone a repo's default branch, curate its spec + generate
+ * contracts (into the server-side store, keyed by `(owner/repo, commit)`), run the
+ * Code Quality analyze pass, and infer undocumented decisions — establishing the
+ * per-repo baseline the PR gate compares against. Refreshed whenever the default
+ * branch advances (merge).
  *
- * Contracts come from the server-side store keyed by `(owner/repo, commit)`. On
- * a miss the default head's contracts are generated on the clone and persisted
- * under the commit, then verified. A repo with no spec docs yields a "neutral"
- * baseline (`drifts: null`). A generation/verify FAILURE is NOT saved as neutral
- * — it propagates (the caller logs it) so the prior baseline is left intact and
- * the gate self-heals, rather than silently going non-blocking.
+ * On a contract-store miss the default head's contracts are generated on the clone
+ * and persisted under the commit. A repo with no spec docs simply generates no
+ * contracts. A generation FAILURE propagates (the caller logs it) so the prior
+ * baseline is left intact and the gate self-heals.
  */
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
-import { verifyInProcess, promoteDecisionsOverlay } from '@truecourse/core/commands/spec-in-process';
+import { promoteDecisionsOverlay } from '@truecourse/core/commands/spec-in-process';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { readLatest } from '@truecourse/core/lib/analysis-store';
 import type { StepTracker } from '@truecourse/core/progress';
@@ -25,7 +25,7 @@ import {
   type RepoRef,
 } from '@truecourse/core/lib/contract-store';
 import { log } from '@truecourse/core/lib/logger';
-import type { GateStore, GateDrift } from './store/types.js';
+import type { GateStore } from './store/types.js';
 import {
   getInstallationToken,
   cloneUrl,
@@ -51,13 +51,11 @@ export interface BaselineDeps {
   /** Infer pipeline for the baseline inferred-decisions set (injected in tests). */
   inferPipeline?: InferPipeline;
   /** Phase callback for the stepped progress popup (EE jobs). */
-  onPhase?: (phase: 'clone' | 'spec' | 'contracts' | 'drift' | 'analyze') => void | Promise<void>;
+  onPhase?: (phase: 'clone' | 'spec' | 'contracts' | 'analyze') => void | Promise<void>;
   /** Spec-scan tracker — driven through CURATE_STEPS for the popup's "Extracting spec" detail. */
   specTracker?: StepTracker;
   /** Contract-generation tracker — driven through CORPUS_GENERATE_STEPS for the "Generating contracts" detail (per-area counts). */
   generateTracker?: StepTracker;
-  /** Drift-verify tracker — driven through VERIFY_STEPS for the "Computing drift baseline" detail (drift counts). */
-  driftTracker?: StepTracker;
 }
 
 export interface BaselineRequest {
@@ -152,8 +150,21 @@ export async function runBaseline(
     log.info(
       `[github-app] baseline for ${req.repoFullName}@${req.commitSha.slice(0, 7)} already current — skipping`,
     );
-    // A null baseline means "no contracts" (neutral); an array means contracts existed.
-    return { openConflicts: 0, hasContracts: existing.drifts !== null };
+    // Best-effort: report whether this already-scanned commit has contracts (own
+    // repo or inherited workspace), for the caller's notification wording. Any
+    // store hiccup degrades to "no contracts" rather than failing the skip.
+    let hasContractsForCommit = false;
+    try {
+      const ref: RepoRef = { repoKey: req.repoFullName, commitSha: req.commitSha };
+      const link = await deps.store.getRepo(req.repoFullName);
+      const wsHas = link?.workspaceOrgId
+        ? (await listWorkspaceContractFiles({ workspaceOrgId: link.workspaceOrgId }, 'contracts')).length > 0
+        : false;
+      hasContractsForCommit = (await hasContracts(ref, 'contracts')) || wsHas;
+    } catch {
+      /* best-effort */
+    }
+    return { openConflicts: 0, hasContracts: hasContractsForCommit };
   }
 
   const scanPipeline = deps.scanPipeline ?? defaultSpecScanPipeline;
@@ -207,22 +218,14 @@ export async function runBaseline(
         );
       }
     }
-    // The baseline must use the SAME effective contracts (workspace ∪ repo) as
-    // the PR-head verify, or base-vs-head diffs are computed against different
-    // corpora. Verify when the repo has its own contracts OR inherits workspace
-    // contracts; a genuinely spec-less repo stays a neutral (null) baseline.
+    // Whether the baseline has contracts to check against (own repo or inherited
+    // workspace) — reported so the caller can word the completion notification.
     const link = await deps.store.getRepo(req.repoFullName);
     const workspaceOrgId = link?.workspaceOrgId ?? null;
     const repoHas = await hasContracts(ref, 'contracts');
     const wsHas = workspaceOrgId
       ? (await listWorkspaceContractFiles({ workspaceOrgId }, 'contracts')).length > 0
       : false;
-    let drifts: GateDrift[] | null = null;
-    if (repoHas || wsHas) {
-      await deps.onPhase?.('drift');
-      const { verify } = await verifyInProcess(tmp, { skipStash: true, ref, workspaceOrgId, tracker: deps.driftTracker });
-      drifts = verify.drifts;
-    }
 
     // Code Quality: run the OSS analyze pass on the same clone, persisted under the
     // repo identity by the EE PgAnalysisStore (codeDir = clone; project.path = the
@@ -272,12 +275,11 @@ export async function runBaseline(
     await deps.store.saveBaseline({
       repoFullName: req.repoFullName,
       commitSha: req.commitSha,
-      drifts,
       capturedAt: new Date().toISOString(),
     });
     log.info(
       `[github-app] baseline saved for ${req.repoFullName}@${req.commitSha.slice(0, 7)} (${
-        drifts ? `${drifts.length} drifts` : 'neutral'
+        repoHas || wsHas ? 'contracts' : 'no contracts'
       })`,
     );
     return { openConflicts, hasContracts: repoHas || wsHas };

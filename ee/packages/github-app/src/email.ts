@@ -1,21 +1,12 @@
 /**
  * Email notifications via Resend (resend.com), sent to the per-repo notify
- * addresses. Three triggers: the drift gate fails, a PR adds spec documents
- * worth re-scanning, and inference captures new contracts from a PR's code.
- * WorkOS provides auth, not transactional email, so delivery goes through Resend.
+ * addresses when inference captures new contracts from a PR's code. WorkOS
+ * provides auth, not transactional email, so delivery goes through Resend.
  */
 
 import { Resend } from 'resend';
 import { log } from '@truecourse/core/lib/logger';
-import type { GateDrift } from './store/types.js';
 import type { DecisionSummary } from './infer-comment.js';
-
-export interface GateFailureEmail {
-  repoFullName: string;
-  prNumber: number;
-  prUrl: string;
-  added: GateDrift[];
-}
 
 export interface InferResultEmail {
   repoFullName: string;
@@ -26,20 +17,8 @@ export interface InferResultEmail {
   commitSha?: string;
 }
 
-export interface ConflictsEmail {
-  repoFullName: string;
-  prNumber: number;
-  prUrl: string;
-  /** Unresolved spec conflicts the scan auto-defaulted. */
-  openConflicts: number;
-  /** Deep link to resolve the conflicts in the dashboard, when available. */
-  dashboardUrl?: string;
-}
-
 export interface EmailNotifier {
-  sendGateFailure(to: string[], email: GateFailureEmail): Promise<void>;
   sendInferResult(to: string[], email: InferResultEmail): Promise<void>;
-  sendConflictsNeedResolution(to: string[], email: ConflictsEmail): Promise<void>;
 }
 
 /** The slice of the Resend client we use — injectable for tests. */
@@ -98,37 +77,6 @@ export function createEmailNotifier(
   }
 
   return {
-    async sendGateFailure(to, email) {
-      const n = email.added.length;
-      const subject = `TrueCourse: ${n} new contract drift${plural(n)} on ${email.repoFullName} #${email.prNumber}`;
-      const items = email.added
-        .slice(0, 20)
-        .map(
-          (d) =>
-            `<li><strong>${escapeHtml(d.severity)}</strong> ${escapeHtml(d.message)} — <code>${escapeHtml(d.filePath)}:${d.lineStart}</code></li>`,
-        )
-        .join('');
-      const more = n > 20 ? `<p>…and ${n - 20} more — see the pull request.</p>` : '';
-      const html =
-        `<p>The TrueCourse drift gate failed on ${prLink(email)} ` +
-        `with ${n} new contract drift${plural(n)}:</p><ul>${items}</ul>${more}`;
-      await sendEach(to, subject, html);
-    },
-
-    async sendConflictsNeedResolution(to, email) {
-      const n = email.openConflicts;
-      const subject = `TrueCourse: ${n} spec conflict${plural(n)} need${n === 1 ? 's' : ''} resolution on ${email.repoFullName} #${email.prNumber}`;
-      const resolve = email.dashboardUrl
-        ? `<a href="${escapeHtml(email.dashboardUrl)}">resolve them in the dashboard</a>`
-        : `resolve them in the dashboard`;
-      const html =
-        `<p>The TrueCourse drift gate on ${prLink(email)} is paused: this PR's spec ` +
-        `has ${n} unresolved conflict${plural(n)}. The contracts were generated with an ` +
-        `auto-chosen default, so the gate can't reliably check drift yet.</p>` +
-        `<p>Please ${resolve}; the gate re-runs on the next push to the PR.</p>`;
-      await sendEach(to, subject, html);
-    },
-
     async sendInferResult(to, email) {
       const n = email.decisions.length;
       const sha = email.commitSha ? ` (<code>${escapeHtml(email.commitSha.slice(0, 7))}</code>)` : '';

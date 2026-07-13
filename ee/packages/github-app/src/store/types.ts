@@ -6,11 +6,7 @@
  * when DATABASE_URL is set). Callers depend only on this interface.
  */
 
-import type { VerifyState } from '@truecourse/core/commands/spec-in-process';
 import type { GithubNotificationPrefs } from '@truecourse/shared';
-
-/** A single contract drift (re-typed from core's verify output). */
-export type GateDrift = VerifyState['drifts'][number];
 
 /** A GitHub App installation — an account that installed the App. */
 export interface InstallationRecord {
@@ -49,12 +45,13 @@ export interface RepoLinkRecord {
   updatedAt: string;
 }
 
-/** The saved baseline for a repo's default branch (refreshed on merge). */
+/**
+ * The saved baseline pointer for a repo's default branch (refreshed on merge).
+ * Records which commit was last scanned — the anchor for idempotency + re-scan.
+ */
 export interface BaselineRecord {
   repoFullName: string;
   commitSha: string;
-  /** null when the repo had no contracts to verify (neutral baseline). */
-  drifts: GateDrift[] | null;
   capturedAt: string;
 }
 

@@ -151,13 +151,11 @@ export interface WorkspaceRepoSummary {
   name: string
   lastAnalyzed: string | null
   violations: number
-  drift: number
 }
 
 export interface WorkspaceStats {
   repoCount: number
   violationCount: number
-  driftCount: number
   /** Repos never analyzed or not analyzed within the freshness window. */
   staleCount: number
   severity: SeverityCounts

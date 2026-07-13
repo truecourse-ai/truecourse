@@ -93,7 +93,7 @@ describe('connect overview reads the baseline corpus', () => {
   it('reflects the baseline commit and ignores a newer PR-head scan', async () => {
     await connectRepo();
     await store.saveBaseline({
-      repoFullName: REPO, commitSha: 'base1', drifts: [], capturedAt: '2026-01-02T00:00:00.000Z',
+      repoFullName: REPO, commitSha: 'base1', capturedAt: '2026-01-02T00:00:00.000Z',
     });
     // Baseline corpus: 1 flagged overlap. Contracts stored at the baseline commit.
     await saveSpec({ repoKey: REPO, commitSha: 'base1' }, 'corpus', {

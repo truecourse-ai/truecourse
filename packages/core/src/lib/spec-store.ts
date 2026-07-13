@@ -17,18 +17,13 @@ export type { RepoRef, WorkspaceRef } from './contract-store.js';
 
 /**
  * Per-(repo, commit) JSON artifacts. `corpus`/`decisions` are the curated spec
- * (areas + relations + overlaps, and the user's curation intent); `verifyState`
- * is the verifier's drift snapshot for that commit — persisted by the gate so the
- * dashboard's ref switcher can show a PR's drift (the verify-store's LATEST is
- * per-repo, not per-commit). Written only in EE (the gate passes a `ref`); OSS
- * never stores it.
+ * (areas + relations + overlaps, and the user's curation intent).
  */
 export type SpecArtifact =
   // The curated doc corpus (areas + relations + overlaps). File impl reads/writes
   // `specs/corpus.json`.
   | 'corpus'
   | 'decisions'
-  | 'verifyState'
   // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
   // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
   // (file) and EE (Postgres).

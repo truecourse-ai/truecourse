@@ -6,7 +6,6 @@
 export * from './github.js';
 export * from './llm.js';
 export * from './content.js';
-export * from './verify.js';
 export * from './analyses.js';
 export * from './decisions.js';
 export * from './config.js';
@@ -21,7 +20,6 @@ export * from './settings.js';
 import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions, ghPrs } from './github.js';
 import { llmProviderConfig } from './llm.js';
 import { content } from './content.js';
-import { verifySnapshots } from './verify.js';
 import { analyses, analysisCurrent, analysisHistory } from './analyses.js';
 import { decisions } from './decisions.js';
 import { repoConfig, repoUiState, registry } from './config.js';
@@ -42,7 +40,6 @@ export const schema = {
   ghPrs,
   llmProviderConfig,
   content,
-  verifySnapshots,
   analyses,
   analysisCurrent,
   analysisHistory,

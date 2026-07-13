@@ -1,6 +1,6 @@
 /**
  * Enterprise LLM provider wiring. Installs an AI-SDK transport (so hosted
- * scan/infer/verify/analyze run against Anthropic/OpenAI/Bedrock/Copilot rather
+ * scan/infer/analyze run against Anthropic/OpenAI/Bedrock/Copilot rather
  * than a `claude` binary) and exposes the Models settings API. The active
  * provider comes ONLY from the encrypted Postgres config (set via the Models
  * page) — there is no CLI/.env provider fallback in EE. Until a provider is set,

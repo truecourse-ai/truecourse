@@ -193,8 +193,6 @@ TrueCourse builds a curated spec corpus from your docs, then **guards** it: an L
 
 > **Prerequisite:** the spec scan and guard generator shell out to the Claude Code CLI (`claude -p`). Install Claude Code and sign in once before running `spec scan` or `guard generate`. `guard run` needs neither — it's deterministic.
 
-> **Discontinued: contract generation & verify.** Guard replaces the earlier contracts pipeline (`contracts generate` / `contracts list` / `contracts validate`, `truecourse verify`, `truecourse drifts`, `truecourse infer`, and the dashboard's BL Drift section). Those commands still exist in this release but are **no longer maintained** and will be removed; the BL Drift section is already hidden from the dashboard. Use Guard instead: it verifies what the code *does* (by executing scenarios) rather than what it *says* (static contract matching), and its coverage isn't capped by a contract-kind taxonomy.
-
 ## Quick Start
 
 ```bash
@@ -306,10 +304,6 @@ truecourse guard status                           # Compact summary: section cov
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
 ```
 
-### Discontinued: contracts & verify
-
-The static contract pipeline that predates Guard still ships in this release but is **discontinued and unmaintained** — it will be removed in a future release. `truecourse contracts generate|list|validate` (corpus → `.tc` artifacts), `truecourse verify` / `truecourse drifts` (per-kind static comparators), and `truecourse infer` (reverse-engineered `.tc` from code) all keep working against the same spec corpus for now, but new work — including new artifact-kind coverage — happens only in Guard.
-
 ---
 
 # Dashboard (web UI)
@@ -327,8 +321,6 @@ truecourse dashboard uninstall        # Remove the background service
 
 - **Code Analysis** — architecture graph, violations list, severity/category analytics, code hotspots, trend over time; toggle rules and silence noisy ones inline.
 - **Guard** — Coverage shows each spec doc's sections with their scenario coverage and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Scenarios lists the committed scenario corpus with the recipe and last-generate summary; Runs shows each run's drifts with per-failure evidence.
-
-(The BL Drift section — the discontinued contracts/verify workflow — is hidden from the section switcher; existing deep links into it still render.)
 
 ---
 
@@ -388,7 +380,7 @@ truecourse spec scan      --llm-transport agent --io ./io
 truecourse guard generate --llm-transport agent --io ./io
 ```
 
-Accepted by: `analyze`, `spec scan`, `guard generate` (and the discontinued `contracts generate`). (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
+Accepted by: `analyze`, `spec scan`, `guard generate`. (On `analyze`, `--llm` / `--no-llm` is a *separate* flag — it decides **whether** LLM rules run; `--llm-transport` decides **how** to reach the model.) Both modes send identical prompts and parse identical schema-validated JSON — only the delivery differs.
 
 ## Configuration
 
@@ -428,8 +420,6 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
 
-(The discontinued contract pipeline's stages — `TRUECOURSE_MODEL_CONTRACT_ENUMERATE`, `TRUECOURSE_MODEL_CONTRACT_EXTRACT`, `TRUECOURSE_MODEL_CONTRACT_REPAIR` — still resolve the same way.)
-
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis
@@ -451,7 +441,7 @@ Patterns are anchored to the file's location, so `src/generated/` matches the to
 
 ## Telemetry
 
-TrueCourse collects anonymous usage data to improve the product — one event per command (`analyze`, `spec_scan`, `contracts_generate`, `verify`, `infer`), each carrying only coarse, bucketed counts (file/artifact/drift/decision *ranges*, duration range), the surface (CLI vs dashboard), OS, and tool version. No source code, file paths, identities, or violation/drift details are collected. It is automatically disabled in CI environments.
+TrueCourse collects anonymous usage data to improve the product — one event per command (`analyze`, `spec_scan`), each carrying only coarse, bucketed counts (file/finding *ranges*, duration range), the surface (CLI vs dashboard), OS, and tool version. No source code, file paths, identities, or violation details are collected. It is automatically disabled in CI environments.
 
 ```bash
 truecourse telemetry status           # Check telemetry status

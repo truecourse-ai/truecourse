@@ -84,14 +84,6 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
-    "./lib/verify-store": {
-      "types": "./dist/lib/verify-store.d.ts",
-      "import": "./dist/lib/verify-store.js"
-    },
-    "./lib/drift-enrichment": {
-      "types": "./dist/lib/drift-enrichment.d.ts",
-      "import": "./dist/lib/drift-enrichment.js"
-    },
     "./lib/contract-store": {
       "types": "./dist/lib/contract-store.d.ts",
       "import": "./dist/lib/contract-store.js"
@@ -191,10 +183,6 @@
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",
       "import": "./dist/types/snapshot.js"
-    },
-    "./types/verify-snapshot": {
-      "types": "./dist/types/verify-snapshot.d.ts",
-      "import": "./dist/types/verify-snapshot.js"
     }
   },
   "scripts": {

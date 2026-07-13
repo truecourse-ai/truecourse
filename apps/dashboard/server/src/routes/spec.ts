@@ -29,7 +29,6 @@ import {
   specsMaterializeInPlace,
 } from '@truecourse/core/lib/spec-store';
 import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
-import { readVerifyLatest } from '@truecourse/core/lib/verify-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
@@ -51,7 +50,6 @@ import {
   removeManualExclude,
   removeManualInclude,
   removeRelation,
-  verifyLatestPath,
 } from '@truecourse/core/commands/spec-in-process';
 import { baselineCommit } from './diff-base.js';
 import {
@@ -634,14 +632,11 @@ router.delete(
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/staleness
 //
-// Cheap mtime probe powering the amber dots on Generate / Verify.
+// Cheap mtime probe powering the amber dots on Generate.
 //
 //   contractsStale  corpus.json is newer than the last generate marker
 //                   (or the marker is missing → never generated against
 //                   the current corpus)
-//   verifyStale     last generate marker is newer than verifier/LATEST.json
-//                   (or LATEST.json is missing → never verified against
-//                   current contracts).
 //   decisionsPending recorded include/exclude/relation/conflict decisions are
 //                   newer than the curated corpus — a Scan would materialize them.
 //   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
@@ -659,50 +654,39 @@ router.get(
       const repo = await resolveProjectForRequest(req.params.id as string);
 
       // EE (stored sets, not the live tree): there are no local marker files to
-      // stat, and the gate produces spec → contracts → verify TOGETHER per
-      // commit, so the latest stored sets are always in sync. Report existence
-      // from the stores; nothing is stale.
+      // stat, and the gate produces spec → contracts TOGETHER per commit, so the
+      // latest stored sets are always in sync. Report existence from the stores;
+      // nothing is stale.
       if (!contractsMaterializeInPlace()) {
-        const [corpus, contractFiles, verify] = await Promise.all([
+        const [corpus, contractFiles] = await Promise.all([
           loadLatestSpec<unknown>(repo.path, 'corpus'),
           listContractFiles(repo.path, 'contracts'),
-          readVerifyLatest(repo.path),
         ]);
         res.json({
           contractsStale: false,
-          verifyStale: false,
           // EE re-curates on every decision, so decisions never outrun the corpus.
           decisionsPending: false,
           // EE has no live tree — docs can't drift out from under the stored corpus.
           docsChanged: false,
           hasCorpus: corpus !== null,
           hasGenerated: contractFiles.length > 0,
-          hasVerified: verify !== null,
         });
         return;
       }
 
       // OSS. Contracts staleness is content-based via the generate manifest, so a
       // no-op scan that rewrites corpus.json doesn't falsely flag it (mtimes lie).
-      // Verify staleness stays an mtime probe (its own write stamps).
       const corpusMtime = mtimeIfExists(corpusFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
-      // Verifier store's LATEST.json is the verify marker (its own write stamp).
-      const verifiedMtime = mtimeIfExists(verifyLatestPath(repo.path));
 
       const contractsStale = isCorpusStale(repo.path);
-      const verifyStale =
-        generatedMtime !== null &&
-        (verifiedMtime === null || generatedMtime > verifiedMtime);
 
       res.json({
         contractsStale,
-        verifyStale,
         decisionsPending: hasPendingDecisions(repo.path),
         docsChanged: hasChangedDocs(repo.path),
         hasCorpus: corpusMtime !== null,
         hasGenerated: generatedMtime !== null,
-        hasVerified: verifiedMtime !== null,
       });
     } catch (e) {
       next(e);

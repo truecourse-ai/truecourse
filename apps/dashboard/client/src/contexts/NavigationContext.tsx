@@ -1,5 +1,5 @@
 /**
- * Top-level navigation state: which section (Code Analysis / BL Drift /
+ * Top-level navigation state: which section (Code Analysis / Guard /
  * …) and which left-rail tab are active, kept in sync with the URL.
  *
  * Lifted out of RepoPage so the page body, the header's
@@ -34,7 +34,7 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'spec', 'contract', 'drift', 'guard', 'gsec', 'gconf', 'gdrift', 'gscn', 'gview'];
+const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'guard', 'gsec', 'gconf', 'gdrift', 'gscn', 'gview'];
 
 /** Map the retired `?gview` sub-view onto the Guard section's tabs. */
 function guardTabForGview(gview: string | null): LeftTab {
@@ -64,20 +64,17 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   if (tabParam === 'guardspec') return 'coverage';
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
-  if (searchParams?.get('spec')) return 'spec';
-  if (searchParams?.get('contract')) return 'contracts';
   // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
   // the Guard coverage tab.
   if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
   // A Guard scenario deep-link (`?gscn=<id>`) implies the Scenarios tab.
   if (searchParams?.get('gscn')) return 'scenarios';
-  if (searchParams?.get('drift')) return 'verify';
   return null;
 }
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
   const explicit = searchParams?.get('section');
-  if (explicit === 'verification' || explicit === 'guard' || explicit === 'codequality') {
+  if (explicit === 'guard' || explicit === 'codequality') {
     return explicit;
   }
   // No explicit section: infer it from whichever tab the URL implies.
@@ -98,8 +95,7 @@ export interface NavigationContextValue {
   leftTab: LeftTab | null;
   /**
    * Switch sections. Lands on `tab` when given, else the section's registry
-   * default. (EE passes its lens's first curated tab — the OSS default would
-   * open Spec for Verification instead of its Analytics tab.)
+   * default. (EE passes its lens's first curated tab.)
    */
   setSection: (next: DashboardSection, tab?: LeftTab) => void;
   /** Set (or clear, with null → home) the active left tab. */
@@ -127,15 +123,11 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       const nextTab = tab ?? defaultTabForSection(next);
       setLeftTabState(nextTab);
       const url = new URL(window.location.href);
-      // Write the section explicitly (both values). EE's repo view defaults to
-      // Verification (drift) and must be able to tell "user picked Code Quality"
-      // (?section=codequality) apart from "no choice yet" (no param) — clearing the
-      // param for analysis would conflate them. The initial no-param load still
-      // resolves to the OSS default (analysis); EE redirects it to drift.
+      // Write the section explicitly so a reload restores the chosen lens.
       url.searchParams.set('section', next);
       for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
-      // Diff mode (?view=diff) is shared by analyze + verify but is
-      // section-specific in meaning, so don't carry it across sections.
+      // Diff mode (?view=diff) is section-specific in meaning, so don't carry
+      // it across sections.
       url.searchParams.delete('view');
       if (nextTab !== 'home') url.searchParams.set('tab', nextTab);
       navigate(url.pathname + url.search);

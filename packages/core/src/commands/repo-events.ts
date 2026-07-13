@@ -13,7 +13,6 @@
 import { readGuardLatest, readGuardResult } from '@truecourse/guard-runner';
 import { readLatest } from '../lib/analysis-store.js';
 import { loadLatestSpec } from '../lib/spec-store.js';
-import { readVerifyLatest } from '../lib/verify-store.js';
 import { readGeneratedSummary } from './spec-in-process.js';
 
 /**
@@ -25,7 +24,6 @@ export type LatestEventKind =
   | 'analyzed'
   | 'scanned'
   | 'generated'
-  | 'verified'
   | 'guarded'
   | 'scenarios-generated';
 
@@ -91,7 +89,6 @@ export async function resolveLatestEvent(
       at: await safe(async () => (await loadLatestSpec<{ generatedAt?: string }>(repoPath, 'corpus'))?.generatedAt),
     },
     { kind: 'generated', at: safeSync(() => readGeneratedSummary(repoPath)?.generatedAt) },
-    { kind: 'verified', at: await safe(async () => (await readVerifyLatest(repoPath))?.run.verifiedAt) },
     { kind: 'guarded', at: safeSync(() => readGuardLatest(repoPath)?.run.ranAt) },
     { kind: 'scenarios-generated', at: safeSync(() => readGuardResult(repoPath)?.generatedAt) },
   ];

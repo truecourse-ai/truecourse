@@ -60,7 +60,6 @@ export type LatestEventKind =
   | 'analyzed'
   | 'scanned'
   | 'generated'
-  | 'verified'
   | 'guarded'
   | 'scenarios-generated';
 
@@ -709,22 +708,11 @@ export type IlCoverageGap = {
   reason?: string;
 };
 
-export type ContractsGenerateResponse = {
-  il:
-    | {
-        written: number;
-        gaps: IlCoverageGap[];
-        validationIssues: IlValidationIssue[];
-        mergeDiagnostics: unknown[];
-        /** True when the corpus was unchanged and generation was a 0-LLM no-op. */
-        noChanges?: boolean;
-      }
-    | { error: string }
-    | { skipped: string };
-};
-
 // ---------------------------------------------------------------------------
-// Contracts (Module 2)
+// Contracts (Module 2) — types only. The `.tc` corpus browser is reused by the
+// enterprise Workspace Knowledge page (`ee/packages/client`), which reads its
+// own `/api/ee/knowledge/contracts/*` routes; the OSS repo Contracts tab and
+// its `/api/repos/:id/contracts/*` routes are retired.
 // ---------------------------------------------------------------------------
 
 export type ContractsTree = {
@@ -757,230 +745,14 @@ export type ContractsFile = {
   content: string;
 };
 
-export function getContractsTree(repoId: string, ref?: string): Promise<ContractsTree> {
-  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree${q}`);
-}
-
-export type ContractsDiff = { added: string[]; removed: string[]; modified: string[] };
-
-export function getContractsDiff(repoId: string, ref: string): Promise<ContractsDiff> {
-  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff?ref=${encodeURIComponent(ref)}`);
-}
-
-/** OSS Git-Diff: run the working-tree-vs-committed contracts diff. */
-export function postContractsDiff(repoId: string): Promise<ContractsDiff> {
-  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff`, { method: 'POST' });
-}
-
-export function getContractsFile(
-  repoId: string,
-  filePath: string,
-  ref?: string,
-): Promise<ContractsFile> {
-  const params = new URLSearchParams({ path: filePath });
-  if (ref) params.set('ref', ref);
-  return fetchApi<ContractsFile>(`/api/repos/${repoId}/contracts/file?${params.toString()}`);
-}
-
-// ---------------------------------------------------------------------------
-// Verify (Module 3 — code vs contracts drift detection)
-// ---------------------------------------------------------------------------
-
-export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
-
-export type ContractDrift = {
-  id: string;
-  artifactRef?: { type: string; identity: string } | null;
-  obligationKey: string;
-  severity: DriftSeverity;
-  message: string;
-  filePath?: string | null;
-  lineStart?: number | null;
-  lineEnd?: number | null;
-  specSide?: unknown;
-  codeSide?: unknown;
-  /** Spec-side origin of the requirement this drift came from (source doc +
-   *  section + line range). Absent on old snapshots predating the field.
-   *  `sourceUrl`/`sourceLabel` are attached by the server when the source is a
-   *  synced workspace-KB doc (external link + title), e.g. a Confluence page. */
-  specOrigin?: {
-    source: string;
-    section: string;
-    lines: [number, number];
-    sourceUrl?: string | null;
-    sourceLabel?: string | null;
-  } | null;
-};
-
-export type VerifyState = {
-  verifiedAt: string;
-  contractsDir: string;
-  codeDir: string;
-  artifactCount: number;
-  extractedOperationCount: number;
-  drifts: ContractDrift[];
-  resolverErrors: string[];
-  unresolvedRefs: string[];
-  /**
-   * Commit the drifts were observed at (baseline commit for the latest state,
-   * the snapshot's commit for a past run / PR head). Lets EE deep-link drift
-   * sites to the GitHub blob at the right sha even in the non-PR base view.
-   */
-  commitHash?: string | null;
-};
-
-/**
- * Persisted verify state. Returns null on 404 (no run yet); other
- * errors propagate.
- */
-export async function getVerifyState(
-  repoId: string,
-  ref?: string,
-): Promise<VerifyState | null> {
-  try {
-    const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state${q}`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-export function postVerifyRun(repoId: string): Promise<VerifyState> {
-  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/run`, {
-    method: 'POST',
-  });
-}
-
-export type ChangedFile = { path: string; status: 'new' | 'modified' | 'deleted' };
-
-export type VerifyDiff = {
-  id: string;
-  baseRunId: string;
-  verifiedAt: string;
-  branch: string | null;
-  commitHash: string | null;
-  added: ContractDrift[];
-  resolved: ContractDrift[];
-  unchangedCount: number;
-  changedFiles: ChangedFile[];
-  summary: { added: number; resolved: number; unchanged: number };
-};
-
-/**
- * Read the verify diff. Null on 404 (none computed yet).
- * `ref` (EE) → that commit's snapshot diffed against the repo's baseline (derived
- * server-side); omitted → the OSS working-tree diff.
- */
-export async function getVerifyDiff(
-  repoId: string,
-  opts?: { ref?: string },
-): Promise<VerifyDiff | null> {
-  try {
-    const q = opts?.ref ? `?ref=${encodeURIComponent(opts.ref)}` : '';
-    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff${q}`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-/** Compute + persist a fresh verify diff against the committed baseline. */
-export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
-  return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
-    method: 'POST',
-  });
-}
-
-/** Human-readable prose for one drift — never replaces the structured original. */
-export type EnrichedDrift = {
-  /** One plain sentence: what the spec REQUIRES. */
-  specReadable: string;
-  /** One plain sentence: what the code ACTUALLY DOES. */
-  codeReadable: string;
-  /** One sentence combining both ("Spec requires X, but the code does Y."). */
-  summary: string;
-};
-
-/**
- * On-demand, cached LLM enrichment of one drift into readable prose. Returns
- * `null` when no LLM transport is configured (204) or the call failed — the
- * caller then keeps the structured rendering. Repo-agnostic + content-addressed
- * server-side, so a drift the gate already enriched is a cache hit.
- *
- * Send the drift's content fields verbatim (the same string `specSide`/`codeSide`
- * the snapshot stored) so the server derives the same content key as the gate.
- */
-export async function postDriftEnrich(
-  repoId: string,
-  drift: Pick<
-    ContractDrift,
-    'artifactRef' | 'obligationKey' | 'message' | 'severity' | 'specSide' | 'codeSide' | 'specOrigin'
-  >,
-): Promise<EnrichedDrift | null> {
-  // 204 → fetchApi returns undefined; normalize to null for "no enrichment".
-  return (
-    (await fetchApi<EnrichedDrift | undefined>(
-      `/api/repos/${repoId}/verify/drift/enrich`,
-      { method: 'POST', body: JSON.stringify(drift) },
-    )) ?? null
-  );
-}
-
-export type VerifyHistoryEntry = {
-  id: string;
-  filename: string;
-  verifiedAt: string;
-  branch: string | null;
-  commitHash: string | null;
-  artifactCount: number;
-  driftCount: number;
-  bySeverity: Record<DriftSeverity, number>;
-};
-export type VerifyHistory = { runs: VerifyHistoryEntry[] };
-
-/** Per-run drift summaries for the trend chart. Empty when no runs yet. */
-export async function getVerifyHistory(repoId: string): Promise<VerifyHistory> {
-  try {
-    return await fetchApi<VerifyHistory>(`/api/repos/${repoId}/verify/history`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return { runs: [] };
-    throw e;
-  }
-}
-
-/** State for a specific past verify run (for the runs dropdown). */
-export function getVerifyRun(repoId: string, runId: string): Promise<VerifyState> {
-  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/runs/${runId}`);
-}
-
-/** Delete a past verify run (snapshot + history entry). */
-export function deleteVerifyRun(repoId: string, runId: string): Promise<{ deleted: boolean }> {
-  return fetchApi<{ deleted: boolean }>(`/api/repos/${repoId}/verify/runs/${runId}`, {
-    method: 'DELETE',
-  });
-}
-
-export function postContractsGenerate(
-  repoId: string,
-): Promise<ContractsGenerateResponse> {
-  return fetchApi<ContractsGenerateResponse>(
-    `/api/repos/${repoId}/contracts/generate`,
-    { method: 'POST' },
-  );
-}
-
 export type SpecStalenessResponse = {
   contractsStale: boolean;
-  verifyStale: boolean;
   /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
   /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
   docsChanged: boolean;
   hasCorpus: boolean;
   hasGenerated: boolean;
-  hasVerified: boolean;
 };
 
 export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
@@ -1305,13 +1077,6 @@ export function undismissGuardClaim(repoId: string, claim: GuardClaimIdentity): 
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
     method: 'POST',
     body: JSON.stringify(claim),
-  });
-}
-
-/** Run inference — reverse-engineer undocumented decisions from code into `_inferred/`. */
-export function runInferContracts(repoId: string): Promise<{ decisions: number; written: number }> {
-  return fetchApi<{ decisions: number; written: number }>(`/api/repos/${repoId}/inferred/run`, {
-    method: 'POST',
   });
 }
 

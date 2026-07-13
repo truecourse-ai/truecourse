@@ -86,44 +86,23 @@ function debugLog(msg: string): void {
   }
 }
 import {
-  verify,
   infer,
   writeInferred,
   renderDecision,
   parserOhm,
   resolver,
-  type ContractDrift,
-  type VerifyResult,
   type InferResult,
 } from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createHash, randomUUID } from 'node:crypto';
-import { getGit, isGitRepo } from '../lib/git.js';
-import {
-  writeVerifyRun,
-  writeVerifyLatest,
-  readVerifyLatest,
-  readVerifyRun,
-  readVerifyHistory as readVerifyHistoryStore,
-  appendVerifyHistory,
-  deleteVerifyDiff,
-  writeVerifyDiff,
-  verifyMaterializeInPlace,
-} from '../lib/verify-store.js';
-export { readVerifyDiff, readVerifyLatest, verifyLatestPath, readVerifyHistory, deleteVerifyRun } from '../lib/verify-store.js';
-export type { VerifyDiff, VerifyLatest, VerifyHistory } from '../types/verify-snapshot.js';
-import { repoRef } from '../lib/repo-ref.js';
+import { createHash } from 'node:crypto';
 import {
   saveContracts,
   loadContracts,
   saveWorkspaceContracts,
-  loadWorkspaceContracts,
-  contractsMaterializeInPlace,
   type RepoRef,
   type WorkspaceRef,
-  type MaterializedDir,
 } from '../lib/contract-store.js';
 import {
   saveSpec,
@@ -131,7 +110,6 @@ import {
   deleteSpec,
   loadLatestSpec,
   saveWorkspaceSpec,
-  loadWorkspaceSpec,
   specsMaterializeInPlace,
 } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
@@ -143,13 +121,7 @@ import {
   type InferDiff,
 } from '../lib/inferred-decisions.js';
 import { listInferredActions } from '../lib/inferred-action-store.js';
-import {
-  diffDrifts,
-  summarizeDrifts,
-  type VerifyRunSnapshot,
-  type VerifyLatest,
-  type VerifyDiff,
-} from '../types/verify-snapshot.js';
+import { readLatest } from '../lib/analysis-store.js';
 import type { StepTracker } from '../progress.js';
 import {
   trackEvent,
@@ -175,12 +147,6 @@ export const CORPUS_GENERATE_STEPS = [
   { key: 'reconcile', label: 'Reconciling targets' },
   { key: 'generate', label: 'Generating contracts' },
   { key: 'repair', label: 'Repairing contracts' },
-] as const;
-
-export const VERIFY_STEPS = [
-  { key: 'load', label: 'Loading contracts' },
-  { key: 'extract-code', label: 'Scanning code for operations' },
-  { key: 'compare', label: 'Comparing code against contracts' },
 ] as const;
 
 export const INFER_STEPS = [
@@ -295,44 +261,6 @@ export function isCorpusStale(repoRoot: string): boolean {
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
-
-export interface VerifyInProcessResult {
-  /** Verifier output — full drift list + counts. */
-  verify: VerifyResult;
-  /** State persisted to disk for the dashboard to consume on next mount. */
-  state: VerifyState;
-}
-
-export interface VerifyDiffInProcessResult {
-  /** Verifier output for the current working tree. */
-  verify: VerifyResult;
-  /** The computed + persisted diff against the committed LATEST baseline. */
-  diff: VerifyDiff;
-}
-
-/**
- * What we persist to
- * `.truecourse/.cache/verifier/verify-state.json`. The dashboard
- * Verify tab reads this on mount; the CLI's `truecourse verify`
- * writes it on every run. One shape, two surfaces.
- */
-export interface VerifyState {
-  verifiedAt: string;
-  contractsDir: string;
-  codeDir: string;
-  artifactCount: number;
-  extractedOperationCount: number;
-  drifts: ContractDrift[];
-  resolverErrors: string[];
-  unresolvedRefs: string[];
-  /**
-   * Commit the drifts were observed at — the baseline commit for the latest
-   * state, the snapshot's commit for a past run. Lets EE deep-link drift sites
-   * to the GitHub blob at the right sha even in the (non-PR) base view. Null
-   * when verify ran outside a git repo.
-   */
-  commitHash?: string | null;
-}
 
 export interface InferInProcessResult {
   /** Inference output — the undocumented decisions found in code. */
@@ -1064,502 +992,6 @@ function readContractTree(root: string): Record<string, string> {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// verify — compare code against generated IL contracts
-// ---------------------------------------------------------------------------
-
-// Pre-store location, kept only so a verify run can delete it. The verifier
-// store (`verifier/LATEST.json`) is the single source of truth — there is no
-// read fallback to this path.
-const LEGACY_VERIFY_STATE_REL = path.join('.truecourse', '.cache', 'verifier', 'verify-state.json');
-
-function legacyVerifyStatePath(repoRoot: string): string {
-  return path.join(repoRoot, LEGACY_VERIFY_STATE_REL);
-}
-
-/**
- * Current verify state, read from the verifier store's `LATEST.json` only.
- * Returns null when no run has been recorded — callers show a "Run verify"
- * CTA. (No fallback to the legacy `verify-state.json`.)
- */
-export async function readVerifyState(repoRoot: string): Promise<VerifyState | null> {
-  const latest = await readVerifyLatest(repoRoot);
-  if (!latest) return null;
-  return {
-    verifiedAt: latest.run.verifiedAt,
-    contractsDir: latest.run.contractsDir,
-    codeDir: latest.run.codeDir,
-    artifactCount: latest.artifactCount,
-    extractedOperationCount: latest.extractedOperationCount,
-    drifts: latest.drifts,
-    resolverErrors: latest.resolverErrors,
-    unresolvedRefs: latest.unresolvedRefs,
-    commitHash: latest.run.commitHash,
-  };
-}
-
-/**
- * State for a specific past verify run, looked up by run id via the history
- * index. Same `VerifyState` shape as `readVerifyState` so the dashboard's
- * "view a past run" path reuses the live view unchanged. Null if the run
- * (or its snapshot file) is gone.
- */
-export async function readVerifyRunState(
-  repoRoot: string,
-  runId: string,
-): Promise<VerifyState | null> {
-  const entry = (await readVerifyHistoryStore(repoRoot)).runs.find((r) => r.id === runId);
-  if (!entry) return null;
-  const snap = await readVerifyRun(repoRoot, entry.filename);
-  if (!snap) return null;
-  return {
-    verifiedAt: snap.verifiedAt,
-    contractsDir: snap.contractsDir,
-    codeDir: snap.codeDir,
-    artifactCount: snap.artifactCount,
-    extractedOperationCount: snap.extractedOperationCount,
-    drifts: snap.drifts,
-    resolverErrors: snap.resolverErrors,
-    unresolvedRefs: snap.unresolvedRefs,
-    commitHash: snap.commitHash,
-  };
-}
-
-export interface VerifyInProcessOptions {
-  tracker?: StepTracker;
-  /**
-   * Where to find the IL contracts. Defaults to
-   * `<repoRoot>/.truecourse/contracts`.
-   */
-  contractsDir?: string;
-  /**
-   * Where the implementation code lives. Defaults to the repo root
-   * itself. For our fixture layout (`<repoRoot>/code/`), pass that
-   * explicitly.
-   */
-  codeDir?: string;
-  /**
-   * Analyze the working tree as-is instead of stashing dirty changes first.
-   * The CLI sets this from `--no-stash` (or after the user declines the stash
-   * prompt). Defaults to `false` (stash if dirty) so the baseline reflects the
-   * committed state — mirroring `analyze`. Diff mode ignores this (never stashes).
-   */
-  skipStash?: boolean;
-  /** Adapter that triggered this run; auto-emitted in the `verify` telemetry payload. */
-  source?: TelemetrySource;
-  /**
-   * Source contracts from the store under this identity instead of deriving
-   * from `repoRoot`. The EE gate sets it to verify the PR head's stored
-   * contracts (`owner/repo` + head SHA) against the cloned working tree. When
-   * omitted, derived from `repoRoot`'s HEAD; `options.contractsDir` overrides both.
-   */
-  ref?: RepoRef;
-  /**
-   * Load the CONTRACTS from this ref instead of `ref`. The gate sets it to verify
-   * a PR head's CODE against the BASE's already-resolved contracts when the PR
-   * changes no spec docs — so it never re-scans, while the snapshot still keys by
-   * `ref` (the head). Omitted → contracts come from `ref`.
-   */
-  contractsRef?: RepoRef;
-  /**
-   * Transient verify: record ONLY this commit's per-commit snapshot, and skip the
-   * repo's canonical LATEST/runs/history writes. The EE gate sets it so a PR-head
-   * verify never moves the repo's baseline (the baseline job — non-transient — is
-   * the only writer that does). OSS/local never sets it. Defaults to `false`.
-   */
-  transient?: boolean;
-  /** Override the commit SHA when `ref` is omitted. */
-  commitOverride?: string;
-  /**
-   * Verify against the repo's EFFECTIVE contracts (enterprise): union the
-   * workspace contracts for this org UNDER the repo's, repo winning on a
-   * `${kind}:${identity}` collision. Omitted (OSS/local, or an EE repo not linked
-   * to a workspace) → repo-only, unchanged. The workspace layer is materialized
-   * transiently and cleaned up after the run.
-   */
-  workspaceOrgId?: string | null;
-}
-
-/**
- * Compare the canonical IL contracts against the code in `codeDir`
- * and persist the result to `.truecourse/.cache/verifier/`. Same
- * pattern as the curate/generate drivers: shared between CLI and
- * dashboard, drives a tracker through three phases (load contracts,
- * extract code-side operations, compare).
- */
-/**
- * Source the authored contract tree (`options.contractsDir` override → store)
- * and run `fn` with the local dir + the value to record in snapshots, always
- * cleaning up the materialization afterward. OSS: the store returns the live
- * `<repo>/.truecourse/contracts` with a no-op cleanup (byte-identical to the old
- * inline path). EE: a temp dir materialized from the content-addressed store,
- * `rm -rf`'d in the `finally`; the recorded value is a logical `contracts@<sha>`
- * descriptor, never the ephemeral temp path.
- */
-async function withContracts<T>(
-  repoRoot: string,
-  options: VerifyInProcessOptions,
-  tracker: StepTracker | undefined,
-  fn: (contractsDir: string, recordedContractsDir: string, baseContractsDir?: string) => Promise<T>,
-): Promise<T> {
-  const fallbackPath = path.join(repoRoot, '.truecourse', 'contracts');
-  // EFFECTIVE merge (enterprise): the workspace contracts are the BASE layer the
-  // repo's contracts override on a key collision. Absent org / no workspace
-  // corpus / OSS file store → null → repo-only (unchanged).
-  const wsMat = options.workspaceOrgId
-    ? await loadWorkspaceContracts({ workspaceOrgId: options.workspaceOrgId }, 'contracts')
-    : null;
-  let repoMat: MaterializedDir | null = null;
-  try {
-    let recorded: string;
-    if (options.contractsDir) {
-      if (!fs.existsSync(options.contractsDir)) {
-        const err = new Error(
-          `Contracts directory not found at ${options.contractsDir}. Run \`truecourse contracts generate\` first.`,
-        );
-        tracker?.error('load', err.message);
-        throw err;
-      }
-      repoMat = { dir: options.contractsDir, cleanup: async () => {} };
-      recorded = options.contractsDir;
-    } else {
-      // Contracts come from `contractsRef` when set (gate base-reuse), else `ref`.
-      const ref = options.contractsRef ?? options.ref ?? (await repoRef(repoRoot, options.commitOverride));
-      repoMat = await loadContracts(ref, 'contracts');
-      recorded = repoMat
-        ? contractsMaterializeInPlace()
-          ? repoMat.dir
-          : `contracts@${ref.commitSha}`
-        : 'workspace:contracts';
-    }
-
-    // Repo is the PRIMARY layer (wins on collision); workspace is the BASE. When
-    // the repo has NO contracts of its own, the workspace IS the corpus (no base)
-    // — the cross-repo ripple. Neither present → genuinely no spec.
-    if (!repoMat && !wsMat) {
-      const err = new Error(
-        `Contracts directory not found at ${fallbackPath}. Run \`truecourse contracts generate\` first.`,
-      );
-      tracker?.error('load', err.message);
-      throw err;
-    }
-    const primaryDir = (repoMat ?? wsMat!).dir;
-    const baseDir = repoMat ? wsMat?.dir : undefined;
-    return await fn(primaryDir, recorded, baseDir);
-  } finally {
-    await repoMat?.cleanup();
-    await wsMat?.cleanup();
-  }
-}
-
-export async function verifyInProcess(
-  repoRoot: string,
-  options: VerifyInProcessOptions = {},
-): Promise<VerifyInProcessResult> {
-  const { tracker } = options;
-  const startedAt = Date.now();
-  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
-
-  return withContracts(repoRoot, options, tracker, async (contractsDir, recordedContractsDir, baseContractsDir) => {
-  // The verifier doesn't expose per-phase hooks today, so we mark
-  // each step done as soon as `verify()` returns. The work is
-  // synchronous-feeling from the caller's POV (~hundreds of ms on
-  // the fixture), so a single progress emit per phase is fine.
-  tracker?.start('load');
-  let result: VerifyResult;
-  try {
-    // `verify()` internally: load .tc files → resolve → extract
-    // code-side operations → compare. We collapse those phases into
-    // one tracker call because the engine doesn't surface them yet.
-    // Stash dirty changes first (unless opted out) so the baseline reflects
-    // the committed state — same model as a full `analyze`.
-    result = await runWithStash(repoRoot, options.skipStash ?? false, tracker, () =>
-      verify({ contractsDir, codeDir, baseContractsDir }),
-    );
-  } catch (e) {
-    tracker?.error('load', (e as Error).message);
-    throw e;
-  }
-  tracker?.done(
-    'load',
-    `${result.artifactCount} artifact${result.artifactCount === 1 ? '' : 's'}`,
-  );
-
-  tracker?.start('extract-code');
-  tracker?.done(
-    'extract-code',
-    `${result.extractedOperationCount} operation${result.extractedOperationCount === 1 ? '' : 's'}`,
-  );
-
-  tracker?.start('compare');
-  tracker?.done(
-    'compare',
-    `${result.drifts.length} drift${result.drifts.length === 1 ? '' : 's'}`,
-  );
-
-  // Stored snapshots must be PORTABLE + repo-relative. The EE gate verifies on an
-  // EPHEMERAL clone (`repoRoot` = a temp dir like /tmp/tc-gate-verify-XXX), so the
-  // verifier's absolute drift paths are meaningless once the clone is deleted —
-  // the dashboard can't render or deep-link them. When persisting by `ref` (EE),
-  // rewrite drift paths to repo-root-relative POSIX form so the dashboard's "Where
-  // in the code" + the GitHub blob deep-link resolve correctly. OSS/local (no ref)
-  // keeps its absolute local paths for the in-app file viewer (unchanged).
-  if (options.ref) {
-    result.drifts = result.drifts.map((d) =>
-      d.filePath && path.isAbsolute(d.filePath)
-        ? { ...d, filePath: path.relative(repoRoot, d.filePath).split(path.sep).join('/') }
-        : d,
-    );
-  }
-
-  // Persist mirroring analyze: write a per-run snapshot, materialize LATEST
-  // (the diff baseline), append a history summary, and drop any stale diff.
-  const verifiedAt = new Date().toISOString();
-  const { branch, commitHash } = await gitMeta(repoRoot);
-  const runId = randomUUID();
-  const snapshot: VerifyRunSnapshot = {
-    id: runId,
-    verifiedAt,
-    branch,
-    commitHash,
-    contractsDir: recordedContractsDir,
-    codeDir,
-    artifactCount: result.artifactCount,
-    extractedOperationCount: result.extractedOperationCount,
-    drifts: result.drifts,
-    resolverErrors: result.resolverErrors,
-    unresolvedRefs: result.unresolvedRefs,
-  };
-  // Canonical persistence — the repo's LATEST + run timeline + history. A
-  // TRANSIENT verify (the gate, on a PR-head clone) SKIPS this so it never moves
-  // the repo's baseline; it records only the per-commit snapshot below. OSS/local
-  // is never transient, so its behaviour is unchanged.
-  if (!options.transient) {
-    // Hosted (EE) stores by repo identity, not files: the gate runs verify on an
-    // ephemeral clone (`repoRoot` = a temp dir), so persist by the ref's repoKey —
-    // otherwise the dashboard Verify tab (which reads by repoKey) never finds it.
-    // Only when the HOSTED store is active, though: the OSS file store must key by
-    // the working-tree path (a repoKey like `owner/repo` would write a bogus
-    // cwd-relative `.truecourse/`). OSS/local has no ref → repoRoot regardless.
-    const storeKey =
-      options.ref && !verifyMaterializeInPlace() ? options.ref.repoKey : repoRoot;
-    const { filename } = await writeVerifyRun(storeKey, snapshot);
-    const summary = summarizeDrifts(result.drifts);
-    const latest: VerifyLatest = {
-      head: filename,
-      run: { id: runId, verifiedAt, branch, commitHash, contractsDir: recordedContractsDir, codeDir },
-      artifactCount: result.artifactCount,
-      extractedOperationCount: result.extractedOperationCount,
-      drifts: result.drifts,
-      resolverErrors: result.resolverErrors,
-      unresolvedRefs: result.unresolvedRefs,
-      summary,
-    };
-    await writeVerifyLatest(storeKey, latest);
-    await appendVerifyHistory(storeKey, {
-      id: runId,
-      filename,
-      verifiedAt,
-      branch,
-      commitHash,
-      artifactCount: result.artifactCount,
-      driftCount: result.drifts.length,
-      bySeverity: summary.bySeverity,
-    });
-    await deleteVerifyDiff(storeKey); // baseline moved — any prior diff is obsolete
-    fs.rmSync(legacyVerifyStatePath(repoRoot), { force: true }); // drop pre-store cruft (file edition)
-  }
-
-  const state: VerifyState = {
-    verifiedAt,
-    contractsDir: recordedContractsDir,
-    codeDir,
-    artifactCount: result.artifactCount,
-    extractedOperationCount: result.extractedOperationCount,
-    drifts: result.drifts,
-    resolverErrors: result.resolverErrors,
-    unresolvedRefs: result.unresolvedRefs,
-    commitHash,
-  };
-
-  if (options.source) {
-    await trackEvent('verify', {
-      source: options.source,
-      mode: 'full',
-      artifactCountRange: bucketFileCount(result.artifactCount),
-      operationCountRange: bucketFileCount(result.extractedOperationCount),
-      driftCountRange: bucketFileCount(result.drifts.length),
-      durationRange: bucketDuration(Date.now() - startedAt),
-    });
-  }
-
-  // EE: persist this commit's verify snapshot so the dashboard ref switcher can
-  // show a PR's drift (the verify-store's LATEST is per-repo, not per-commit).
-  // OSS omits `ref`, so nothing extra is written.
-  if (options.ref) {
-    await saveSpec(options.ref, 'verifyState', state);
-  }
-
-  return { verify: result, state };
-  });
-}
-
-/** Best-effort current branch + commit; null when not a git repo. */
-async function gitMeta(repoRoot: string): Promise<{ branch: string | null; commitHash: string | null }> {
-  try {
-    const git = await getGit(repoRoot);
-    const branch = (await git.branch()).current || null;
-    const commitHash = (await git.revparse(['HEAD'])).trim() || null;
-    return { branch, commitHash };
-  } catch {
-    return { branch: null, commitHash: null };
-  }
-}
-
-/**
- * Run `fn` against the committed state by stashing the dirty working tree first
- * and popping after — mirroring `analyze-core`'s full-mode stash. No-ops when
- * `skipStash`, when the tree is clean, when the repo is a subdirectory of a
- * larger repo (stashing would touch parent-repo files), or when git is
- * unavailable.
- */
-async function runWithStash<T>(
-  repoRoot: string,
-  skipStash: boolean,
-  tracker: StepTracker | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  let didStash = false;
-  let stashGit: Awaited<ReturnType<typeof getGit>> | undefined;
-  if (!skipStash) {
-    try {
-      stashGit = await getGit(repoRoot);
-      const status = await stashGit.status();
-      if (!status.isClean()) {
-        const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
-        if (path.resolve(repoRoot) === path.resolve(gitRoot)) {
-          tracker?.detail?.('load', 'Stashing pending changes...');
-          const res = await stashGit.stash(['push', '--include-untracked', '-m', 'truecourse-verify-stash']);
-          didStash = !res.includes('No local changes');
-        }
-      }
-    } catch {
-      // Not a git repo / git unavailable — verify the current state as-is.
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    if (didStash && stashGit) {
-      tracker?.detail?.('load', 'Restoring pending changes...');
-      try {
-        await stashGit.stash(['pop']);
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(`[Verify] Failed to restore stashed changes. Run "git stash pop" manually. ${(e as Error).message}`);
-      }
-    }
-  }
-}
-
-/** Uncommitted working-tree changes from `git status`; empty when not a repo. */
-async function gitChangedFiles(repoRoot: string): Promise<import('../types/verify-snapshot.js').ChangedFile[]> {
-  const out: import('../types/verify-snapshot.js').ChangedFile[] = [];
-  try {
-    const git = await getGit(repoRoot);
-    const s = await git.status();
-    for (const f of s.not_added) out.push({ path: f, status: 'new' });
-    for (const f of s.created) out.push({ path: f, status: 'new' });
-    for (const f of s.modified) out.push({ path: f, status: 'modified' });
-    for (const f of s.staged) if (!out.some((c) => c.path === f)) out.push({ path: f, status: 'modified' });
-    for (const f of s.deleted) out.push({ path: f, status: 'deleted' });
-  } catch {
-    /* not a repo */
-  }
-  return out;
-}
-
-/**
- * Diff the current working tree's drifts against the committed `LATEST.json`
- * baseline (mirrors `analyze --diff`). Drifts are matched by obligation key
- * (`driftKey`) so the comparison is stable even though `ContractDrift.id`
- * regenerates each run. Writes `verifier/diff.json` and does NOT touch LATEST.
- */
-export async function verifyDiffInProcess(
-  repoRoot: string,
-  options: VerifyInProcessOptions = {},
-): Promise<VerifyDiffInProcessResult> {
-  const { tracker } = options;
-  const startedAt = Date.now();
-  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
-
-  // The diff is "what do my uncommitted changes do vs the committed baseline",
-  // so it requires a git repo (like `analyze --diff`).
-  if (!(await isGitRepo(repoRoot))) {
-    const err = new Error(
-      'Verify diff requires a git repository — the diff compares your working-tree changes against the committed baseline.',
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
-  const baseline = await readVerifyLatest(repoRoot);
-  if (!baseline) {
-    const err = new Error(
-      'No verify baseline found. Run `truecourse verify` first to establish LATEST.json.',
-    );
-    tracker?.error('load', err.message);
-    throw err;
-  }
-
-  return withContracts(repoRoot, options, tracker, async (contractsDir) => {
-  tracker?.start('load');
-  let result: VerifyResult;
-  try {
-    // Diff mode never stashes — it verifies the working tree as-is.
-    result = await verify({ contractsDir, codeDir });
-  } catch (e) {
-    tracker?.error('load', (e as Error).message);
-    throw e;
-  }
-  tracker?.done('load', `${result.artifactCount} artifact${result.artifactCount === 1 ? '' : 's'}`);
-
-  tracker?.start('extract-code');
-  tracker?.done('extract-code', `${result.extractedOperationCount} operation${result.extractedOperationCount === 1 ? '' : 's'}`);
-
-  tracker?.start('compare');
-  const { added, resolved, unchangedCount } = diffDrifts(baseline.drifts, result.drifts);
-
-  const { branch, commitHash } = await gitMeta(repoRoot);
-  const changedFiles = await gitChangedFiles(repoRoot);
-  const diff: VerifyDiff = {
-    id: randomUUID(),
-    baseRunId: baseline.run.id,
-    verifiedAt: new Date().toISOString(),
-    branch,
-    commitHash,
-    added,
-    resolved,
-    unchangedCount,
-    changedFiles,
-    summary: { added: added.length, resolved: resolved.length, unchanged: unchangedCount },
-  };
-  await writeVerifyDiff(repoRoot, diff);
-  tracker?.done('compare', `+${added.length} / -${resolved.length} drift${added.length + resolved.length === 1 ? '' : 's'}`);
-
-  if (options.source) {
-    await trackEvent('verify', {
-      source: options.source,
-      mode: 'diff',
-      addedRange: bucketFileCount(added.length),
-      resolvedRange: bucketFileCount(resolved.length),
-      durationRange: bucketDuration(Date.now() - startedAt),
-    });
-  }
-
-  return { verify: result, diff };
-  });
-}
-
 export interface InferInProcessOptions {
   tracker?: StepTracker;
   /** Where authored contracts live (the coverage baseline). Defaults to
@@ -1594,10 +1026,10 @@ export interface InferInProcessOptions {
 
 /**
  * Reverse-engineer undocumented decisions from `codeDir` and write them as
- * `inferred` `.tc` artifacts under `<contractsDir>/_inferred/`. The mirror of
- * `verifyInProcess`: instead of checking code against the spec, it surfaces
- * what the code decided that the spec never recorded. Coverage is computed
- * from authored contracts only, so a decision drops out once it's documented.
+ * `inferred` `.tc` artifacts under `<contractsDir>/_inferred/`. Instead of
+ * checking code against the spec, it surfaces what the code decided that the
+ * spec never recorded. Coverage is computed from authored contracts only, so a
+ * decision drops out once it's documented.
  */
 export async function inferInProcess(
   repoRoot: string,
@@ -1732,7 +1164,7 @@ async function persistInferred(
  * OSS Git-Diff: the inferred decisions the WORKING TREE adds/changes vs the
  * committed baseline (`specs/inferredDecisions.json`, committed like the analyze
  * `LATEST.json`). Re-runs inference on the working tree with `dryRun` so the
- * baseline file is untouched, then diffs against it. Mirrors `verifyDiffInProcess`.
+ * baseline file is untouched, then diffs against it.
  * EE uses the per-commit `/inferred/diff?ref=` route instead.
  */
 export async function inferDiffInProcess(
@@ -1991,12 +1423,15 @@ export async function recurateStoredCorpus(
 }
 
 /**
- * The default-branch baseline commit — the same anchor the BL-Drift PR diffs use
- * (the verify store's `isBaseline` snapshot). The base repo view + repo-scope
- * corpus live here; a PR-head scan never moves it. `null` before any baseline.
+ * The default-branch baseline commit for PR-scoped corpus reads. The EE gate's
+ * baseline job analyzes the default-branch head and persists it as the repo's
+ * LATEST analysis; PR-head analyses are stateless (diff-only) so they never move
+ * it. That commit is the base repo view + repo-scope corpus anchor. `null` before
+ * any baseline. The base is derived from the analyze store, not the working tree,
+ * so this resolves for editions with no live checkout (EE).
  */
 async function baselineSpecCommit(repoKey: string): Promise<string | null> {
-  return (await readVerifyState(repoKey))?.commitHash ?? null;
+  return (await readLatest(repoKey))?.analysis.commitHash ?? null;
 }
 
 /** The corpus stored at the baseline commit, or null when none is stored yet. */

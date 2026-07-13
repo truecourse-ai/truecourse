@@ -21,15 +21,8 @@ import {
   runRulesReset,
 } from "./commands/rules.js";
 import {
-  runContractsGenerate,
-  runContractsList,
-  runContractsValidate,
-} from "./commands/contracts.js";
-import {
   runSpecScan,
   runSpecStatus,
-  runVerify,
-  runInfer,
 } from "./commands/spec.js";
 import {
   runSpecConflictsList,
@@ -49,7 +42,6 @@ import {
   runSpecDocsExclude,
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
-import { runDriftsList, parseDriftSeverityFlag } from "./commands/drifts.js";
 import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -66,21 +58,6 @@ program
   .name("truecourse")
   .version("0.7.0-next.11")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
-
-/**
- * Print the discontinuation notice for a contracts/verify-pipeline command.
- *
- * The `contracts`, `verify`, `infer`, and `drifts` commands stay registered and
- * fully functional (EE's verification gate still rides the same code) but are
- * discontinued in favor of `guard` and hidden from `--help`. Each prints this
- * one-line notice on invocation. Written to stderr so piped stdout consumers
- * (agents parse these outputs) stay clean. Removal planned for 0.8.
- */
-function warnDiscontinued(command: string): void {
-  process.stderr.write(
-    `⚠ \`${command}\` is discontinued in favor of \`truecourse guard\` — see the README. Planned removal: 0.8.\n`,
-  );
-}
 
 const dashboardCmd = program
   .command("dashboard")
@@ -200,42 +177,6 @@ program
         severity: parseSeverityFlag(options.severity),
       });
     }
-  });
-
-// Contract framework — spec → .tc extraction + validation.
-// Discontinued in favor of `guard` — hidden from --help, prints a notice on use.
-const contractsCmd = program
-  .command("contracts", { hidden: true })
-  .description("Manage spec-driven contract artifacts");
-
-contractsCmd
-  .command("generate")
-  .description("Generate .tc artifacts from the curated corpus (corpus.json)")
-  .option("--diff", "Dry run — show what would change without writing")
-  .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
-  .option("--llm-transport <mode>", "How to reach the LLM: 'cli' (spawn claude -p, default) or 'agent' (filesystem mailbox)")
-  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
-  .action(async (options) => {
-    warnDiscontinued("contracts");
-    await runContractsGenerate({ diff: !!options.diff, yes: !!options.yes, llm: options.llmTransport, io: options.io });
-  });
-
-contractsCmd
-  .command("list")
-  .description("List the .tc artifacts in this repo (kind · identity · location)")
-  .option("--inferred", "Only inferred artifacts (reverse-engineered, in _inferred/)")
-  .option("--authored", "Only authored artifacts (exclude _inferred/)")
-  .action(async (options) => {
-    warnDiscontinued("contracts");
-    await runContractsList({ inferred: !!options.inferred, authored: !!options.authored });
-  });
-
-contractsCmd
-  .command("validate")
-  .description("Parse and resolve all .tc files, report any issues")
-  .action(async () => {
-    warnDiscontinued("contracts");
-    await runContractsValidate();
   });
 
 // Spec scan — docs → curated corpus (areas + doc relations + overlaps) in .truecourse/specs/.
@@ -382,58 +323,6 @@ docsCmd
   .description("Remove a force-exclude override")
   .action(async (docPath) => {
     await runSpecDocsUnexclude(docPath);
-  });
-
-// Verify — compares generated TC contracts against the code.
-// Discontinued in favor of `guard` — hidden from --help, prints a notice on use.
-program
-  .command("verify", { hidden: true })
-  .description("Compare code against the canonical TC contracts")
-  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
-  .option("--diff", "Diff current drifts against the committed LATEST baseline")
-  .option("--stash", "Pre-approve stashing pending changes (verify committed state)")
-  .option("--no-stash", "Verify the working tree as-is without stashing")
-  .action(async (options) => {
-    warnDiscontinued("verify");
-    await runVerify({ codeDir: options.codeDir, diff: options.diff, stash: options.stash });
-  });
-
-// Infer — reverse-engineers undocumented decisions from code into _inferred/.
-// Discontinued in favor of `guard` — hidden from --help, prints a notice on use.
-program
-  .command("infer", { hidden: true })
-  .description("Reverse-engineer undocumented decisions from code into inferred contracts")
-  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
-  .option("--dry-run", "Report what would be written without touching disk")
-  .action(async (options) => {
-    warnDiscontinued("infer");
-    await runInfer({ codeDir: options.codeDir, dryRun: options.dryRun });
-  });
-
-// Drifts — inspect the drifts from the latest verify. Reads verifier/LATEST.json
-// (no re-run); paginated + filterable like `truecourse list` for violations.
-// Discontinued in favor of `guard` — hidden from --help, prints a notice on use.
-const driftsCmd = program
-  .command("drifts", { hidden: true })
-  .description("Inspect drifts from the latest verify");
-
-driftsCmd
-  .command("list")
-  .description("List drifts from the latest verify (paginated)")
-  .option("--limit <n>", "Number of drifts to show (default: 20)", parseInt)
-  .option("--offset <n>", "Skip first N drifts", parseInt)
-  .option("--all", "Show all drifts")
-  .option(
-    "--severity <list>",
-    "Comma-separated severities to include (critical,high,medium,low,info)",
-  )
-  .action(async (options) => {
-    warnDiscontinued("drifts");
-    await runDriftsList({
-      limit: options.all ? Infinity : (options.limit ?? 20),
-      offset: options.offset ?? 0,
-      severity: parseDriftSeverityFlag(options.severity),
-    });
   });
 
 // Guard — run committed spec-section scenario tests (build once via recipe, run

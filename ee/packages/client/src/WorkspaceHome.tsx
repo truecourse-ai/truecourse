@@ -1,8 +1,8 @@
 /**
  * Enterprise Overview — the workspace governance dashboard. Leads with what the
- * PR gate is doing and what needs a human (failing gates, drift, never-analyzed
- * repos), then recent cross-repo gate activity. Replaces the OSS local-CLI
- * onboarding screen.
+ * PR gate is doing and what needs a human (failing gates, never-analyzed repos),
+ * then recent cross-repo gate activity. Replaces the OSS local-CLI onboarding
+ * screen.
  */
 
 import { useEffect, useState } from 'react';
@@ -33,7 +33,7 @@ function StatCard({ label, value, sub }: { label: string; value: number | string
 }
 
 interface Attention {
-  kind: 'blocked' | 'drift' | 'stale';
+  kind: 'blocked' | 'stale';
   text: string;
   to?: string;
   href?: string;
@@ -62,18 +62,14 @@ export default function WorkspaceHome() {
   const s = data?.stats;
   const blocked = runs.filter((r) => r.conclusion === 'failure');
 
-  // "Needs attention": blocking gate failures, then repos with open drift,
-  // then never-analyzed repos.
+  // "Needs attention": blocking gate failures, then never-analyzed repos.
   const attention: Attention[] = [
     ...blocked.map((r): Attention => ({
       kind: 'blocked',
-      text: `${r.repoFullName} · PR #${r.prNumber} blocked — ${r.addedCount} new drift`,
+      text: `${r.repoFullName} · PR #${r.prNumber} blocked — ${r.addedCount} new violation${r.addedCount === 1 ? '' : 's'}`,
       href: `https://github.com/${r.repoFullName}/pull/${r.prNumber}`,
       when: formatRelativeTime(r.createdAt),
     })),
-    ...(data?.repos ?? [])
-      .filter((r) => r.drift > 0)
-      .map((r): Attention => ({ kind: 'drift', text: `${r.name} — ${r.drift} open drift`, to: `/repos/${r.id}` })),
     ...(data?.repos ?? [])
       .filter((r) => r.lastAnalyzed === null)
       .map((r): Attention => ({ kind: 'stale', text: `${r.name} — never scanned`, to: `/repos/${r.id}` })),
@@ -81,7 +77,6 @@ export default function WorkspaceHome() {
 
   const attnColor: Record<Attention['kind'], string> = {
     blocked: 'bg-red-500',
-    drift: 'bg-amber-500',
     stale: 'bg-muted-foreground',
   };
 
@@ -110,7 +105,7 @@ export default function WorkspaceHome() {
 
       <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Repositories" value={s?.repoCount ?? '—'} />
-        <StatCard label="Open drift" value={s?.driftCount ?? '—'} />
+        <StatCard label="Violations" value={s?.violationCount ?? '—'} />
         <StatCard label="Blocked PRs" value={blocked.length} />
         <StatCard label="Not scanned" value={s?.staleCount ?? '—'} sub={s ? `of ${s.repoCount} repos` : undefined} />
       </div>
@@ -209,7 +204,6 @@ export default function WorkspaceHome() {
                   <span className="font-medium text-foreground">{r.name}</span>
                   <span className="flex items-center gap-4 text-xs text-muted-foreground">
                     <span>{r.violations} viol</span>
-                    <span>{r.drift ? `${r.drift} drift` : '—'}</span>
                     <span>{formatRelativeTime(r.lastAnalyzed)}</span>
                     <span aria-hidden>→</span>
                   </span>

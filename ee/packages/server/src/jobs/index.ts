@@ -19,16 +19,14 @@ import type { EeDb } from '@truecourse/ee-db';
 import {
   JobStore,
   NotificationStore,
-  ActiveJobExistsError,
   PendingBaselineStore,
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
-import { selectGateStore, getPrReverifier } from '@truecourse/ee-github-app';
+import { selectGateStore } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
-import { reverifyWorkspaceRepos } from './reverify.js';
 import {
   enqueueOrPendBaseline,
   replayPendingBaseline,
@@ -38,10 +36,6 @@ import {
   KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
   REPO_CONTRACTS_TASK,
-  PR_REGATE_TASK,
-  WORKSPACE_CONTRACTS_TASK,
-  prRegateJobKey,
-  workspaceContractsJobKey,
   type SyncJobPayload,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
@@ -62,8 +56,6 @@ export interface JobsApi {
    * running for that repo (so a redelivered push / re-connect is a no-op).
    */
   enqueueBaseline(req: BaselineEnqueueRequest): Promise<string | null>;
-  /** Enqueue a workspace contract refresh after a Knowledge decision (debounced). */
-  enqueueWorkspaceContracts(workspaceOrgId: string): Promise<void>;
 }
 
 function createEventsRouter(hub: EventHub): Router {
@@ -167,19 +159,6 @@ export async function registerJobs(
   const pendingBaselines = new PendingBaselineStore(opts.db);
   const hub = new EventHub(opts.connectionString);
 
-  // Create (or reuse) the single-flight job row for a debounced contract refresh.
-  // A burst of decisions coalesces onto ONE row (the partial-unique key), so the
-  // progress popup shows once per repo/workspace, not per click.
-  const ensureContractsJob = async (type: string, key: string, org: string): Promise<string> => {
-    try {
-      const job = await jobStore.create({ org, type, key });
-      return job.id;
-    } catch (err) {
-      if (err instanceof ActiveJobExistsError) return err.existing.id;
-      throw err;
-    }
-  };
-
   // Mount the routers first — pure wiring, no I/O — so the API surface is always
   // available even if the background services below fail to come up.
   registry.registerRouter('/api/ee/events', createEventsRouter(hub));
@@ -222,39 +201,12 @@ export async function registerJobs(
   const onBaselineSettled = (payload: BaselineJobPayload): Promise<void> =>
     replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
 
-  // Single-flight PR re-gate enqueue — a PR-scoped decision cleared that PR's last
-  // conflict, so re-gate just that one PR (durable, tracked + notified like a
-  // baseline). Keyed per repo AND PR: distinct PRs of a repo re-gate concurrently,
-  // but a redelivered decision for the same PR is a no-op. Mirrors enqueueBaseline.
-  const enqueuePrRegate = async (
-    workspaceOrgId: string,
-    repoFullName: string,
-    prNumber: number,
-  ): Promise<string | null> => {
-    if (!runner) throw new Error('the background job worker is not running');
-    const key = prRegateJobKey(repoFullName, prNumber);
-    let job;
-    try {
-      job = await jobStore.create({ org: workspaceOrgId, type: PR_REGATE_TASK, key });
-    } catch (err) {
-      // This PR is already re-gating — skip (idempotent re-delivered decision edit).
-      if (err instanceof ActiveJobExistsError) return null;
-      throw err;
-    }
-    await runner.addJob(
-      PR_REGATE_TASK,
-      { jobId: job.id, workspaceOrgId, repoFullName, prNumber },
-      { jobKey: key, maxAttempts: 1 },
-    );
-    return job.id;
-  };
-
   // Regenerate a repo's contracts after a decision leaves the spec conflict-free:
-  // re-baseline the SAME head with `force` (clone → curate → generate → verify —
-  // the baseline's own progress panel shows it) so the neutral baseline becomes a
-  // real drift baseline, then re-verify open PRs. Called directly by the decision
-  // task runner below (there is no separate `repo.contracts` job). The commit comes
-  // from the existing baseline saved at connect; getRepo gives installation/branch.
+  // re-baseline the SAME head with `force` (clone → curate → generate → analyze —
+  // the baseline's own progress panel shows it) so the previously-skipped contracts
+  // are generated. Called directly by the decision task runner below (there is no
+  // separate `repo.contracts` job). The commit comes from the existing baseline
+  // saved at connect; getRepo gives installation/branch.
   const onContractsRegenerated = async (repoKey: string, workspaceOrgId: string): Promise<void> => {
     const repo = await gateStore.getRepo(repoKey);
     if (!repo) return; // need the link
@@ -269,25 +221,7 @@ export async function registerJobs(
         force: true,
       });
     }
-    // Re-verify every open PR against the freshly regenerated contracts: a PR
-    // paused on `unresolved-conflicts` now gets a real verdict + refreshed comment
-    // without waiting for a new push. Best-effort, isolated from the baseline
-    // chain; a no-op when the GitHub App isn't configured (seam unset).
-    const reverify = getPrReverifier();
-    if (reverify) {
-      await reverify(repoKey).catch((err) =>
-        log.warn(
-          `[ee-jobs] PR re-verify after contracts regen failed for ${repoKey}: ${(err as Error).message}`,
-        ),
-      );
-    }
   };
-
-  // When a workspace's contracts change (KB sync / workspace decision), re-verify
-  // every connected repo against the new effective set (forced + quiet — see
-  // reverify.ts). Returns the count enqueued, for the sync notification.
-  const onWorkspaceContractsChanged = (workspaceOrgId: string): Promise<number> =>
-    reverifyWorkspaceRepos(gateStore, enqueueBaseline, workspaceOrgId);
 
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
@@ -300,7 +234,6 @@ export async function registerJobs(
       connectionString: opts.connectionString,
       masterSecret: opts.masterSecret,
       jobStore,
-      onWorkspaceContractsChanged,
       onBaselineSettled,
     });
     // A crash could have left pending follow-up baselines with no running job to
@@ -327,22 +260,10 @@ export async function registerJobs(
         return;
       }
       // Regenerate contracts by re-baselining directly (clone → curate → generate →
-      // verify → analyze, shown by the baseline's own progress panel) and re-verify
-      // open PRs. There is no separate "refreshing contracts" job/popup — the old
-      // wrapper did no work of its own beyond this call, so it was pure redundancy.
+      // analyze, shown by the baseline's own progress panel). There is no separate
+      // "refreshing contracts" job/popup — the old wrapper did no work of its own
+      // beyond this call, so it was pure redundancy.
       await onContractsRegenerated(task.repoKey, workspaceOrgId);
-    } else if (task.type === PR_REGATE_TASK && task.repoKey) {
-      // A PR-scoped decision cleared that PR's last conflict — enqueue a durable,
-      // single-flight re-gate of just that one PR (the worker runs it off the
-      // request path and notifies on completion), not inline fire-and-forget. OSS
-      // adapters pass only repoKey, so resolve the owning workspace from the link.
-      const workspaceOrgId =
-        task.workspaceOrgId ?? (await gateStore.getRepo(task.repoKey))?.workspaceOrgId;
-      if (!workspaceOrgId) {
-        log.warn(`[ee-jobs] pr.regate skipped: ${task.repoKey} is not a connected repo`);
-        return;
-      }
-      await enqueuePrRegate(workspaceOrgId, task.repoKey, task.prNumber);
     }
   });
 
@@ -361,15 +282,5 @@ export async function registerJobs(
       await runner.addJob(KNOWLEDGE_SYNC_TASK, payload, { jobKey, maxAttempts: 1 });
     },
     enqueueBaseline,
-    enqueueWorkspaceContracts: async (workspaceOrgId) => {
-      if (!runner) throw new Error('the background job worker is not running');
-      const key = workspaceContractsJobKey(workspaceOrgId);
-      const jobId = await ensureContractsJob(WORKSPACE_CONTRACTS_TASK, key, workspaceOrgId);
-      await runner.addJob(
-        WORKSPACE_CONTRACTS_TASK,
-        { jobId, workspaceOrgId },
-        { jobKey: key, maxAttempts: 1 },
-      );
-    },
   };
 }

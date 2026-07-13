@@ -9,10 +9,12 @@ contract system. The spec side (scan → curated corpus → areas → decisions)
 
 RETIREMENT DECIDED (2026-07-07): the contract surface (`contracts *`, `verify`, `infer`,
 dashboard contract/BL-Drift views) is **discontinued** in favor of guard. Step 1 (done): the
-BL Drift dashboard section is hidden from the section switcher in both OSS and EE (still
-URL-reachable — the EE Pulls feed deep-links into it) and the README documents the
-discontinuation. Step 2 (future): delete the contract-related code once guard covers the
-remaining gaps (the EE gate signal still runs on verify drifts until guard's EE phase lands).
+BL Drift dashboard section was hidden from the section switcher in both OSS and EE and the
+README documented the discontinuation. Step 2 (done 2026-07-13): the verify-drift code, the
+four CLI commands, the BL Drift dashboard, and EE's verify-drift gate usage were deleted; the
+EE gate ran on verify drifts until this cleanup removed it, and guard's EE phase re-adds
+gating on a separate branch. The reusable contract MATCHING ENGINE (extractor + verifier
+matching half + in-process generate/infer/curate) is KEPT for that branch — see item 24.
 
 **Scope: OSS first.** Everything in this plan lands in the OSS surface — core packages, CLI,
 local dashboard, file-based store. EE adaptation (hosted store adapters, PR-scoped guard runs,
@@ -483,20 +485,29 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    every claim needs its retry") — never a "ceiling" the bill can exceed. Same trust family
    as item 11 (estimate/runtime agreement).
 
-24. **Discontinued CLI commands: deprecation notice + hidden from help (user decision
-   2026-07-08).** STATUS: BUILT.
+24. **Verify surface retired — now FULLY REMOVED (done 2026-07-13).** STATUS: DONE.
+   The verify surface is gone across CLI, OSS dashboard, and EE: the `verify`/`drifts`/
+   `contracts`/`infer` CLI commands, the verify-drift core (`contract-verifier` verify.ts +
+   comparators + adapter/occurrence, core verify-store + drift-enrichment + verify-snapshot),
+   the BL Drift dashboard section, and EE's verify-drift gate usage were all deleted. What
+   survives is the reusable MATCHING ENGINE — the `contract-extractor` package and the
+   `contract-verifier` extractor/parser/resolver/conformance/infer half — plus the in-process
+   `generateFromCorpusInProcess` / `inferInProcess` / `curateInProcess` functions. No CLI or
+   dashboard exposes them; the guard-EE branch re-adds gating on top. The paragraphs below are
+   the historical rationale that led here.
+
    The contracts/verify pipeline commands (`contracts`, `verify`, `infer`,
-   `drifts`) stay REGISTERED and functional — EE's verification gate still rides the code —
-   but each prints a one-line deprecation notice on invocation (discontinued in favor of
-   `guard`, see README, removal planned for 0.8) and is hidden from `--help` so new users
-   never discover them. Outright removal deliberately deferred until the EE gate migrates.
-   The dashboard analog already shipped (BL Drift registry-hidden in both editions,
-   URL-reachable for EE Pulls deep links).
-   **SCOPE REVISED 2026-07-10 (user decision): contracts are KEPT, verify surface
-   retires.** The contracts pipeline stays for ONE purpose — the code↔spec relationship
+   `drifts`) originally stayed REGISTERED and functional — EE's verification gate then rode the
+   code — with each printing a one-line deprecation notice on invocation (discontinued in favor
+   of `guard`, see README) and hidden from `--help` so new users never discovered them. Outright
+   removal was deferred until the EE gate migrated, which is what the 2026-07-13 cleanup did.
+   The dashboard analog shipped earlier (BL Drift registry-hidden in both editions,
+   URL-reachable for EE Pulls deep links), then the whole section was removed.
+   **SCOPE REVISED 2026-07-10 (user decision): contracts KEPT, verify surface
+   retired.** The contracts pipeline was kept for ONE purpose — the code↔spec relationship
    map (`contracts generate` produces the spec-side artifacts; the verifier's MATCHING
-   ENGINE locates them in code) — and `infer` stays (undocumented-code detection; it is
-   built on the same engine). What retires at 0.8 is the VERIFY SURFACE only: drift
+   ENGINE locates them in code) — and `infer` was kept (undocumented-code detection; it is
+   built on the same engine). What retired was the VERIFY SURFACE only: drift
    verdicts, `verify`/`drifts` commands, the BL Drift reporting UI. The
    `contract-verifier` package survives as the engine under the map and infer. Confirmed
    2026-07-10: contracts generate consumes the NEW corpus (readCorpusForGenerate over
@@ -1393,9 +1404,10 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
 after that — order between them is a call to make when OSS v1 ships.
 
-Contract-surface retirement (CLI commands, dashboard views, EE gate signal migration) is
-**deliberately not a phase of this plan** — the contract system keeps running unchanged until
-guard has proven itself on real repos, and retirement gets its own plan then.
+Contract-surface retirement (CLI commands, dashboard views, EE gate signal migration) was
+**deliberately not a phase of this plan** — but it has since happened: the verify surface was
+fully removed on 2026-07-13 (see item 24), leaving only the reusable matching engine in-process
+for the guard-EE branch.
 
 Dogfood target for Phases 1–5: TrueCourse's own CLI (real specs in `docs/`, real binary), plus
 the existing sample-project fixtures for engine tests.

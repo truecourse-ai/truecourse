@@ -1,10 +1,10 @@
 /**
  * Coalesce-then-rerun for repo baselines. `enqueueBaseline` single-flights ONE
  * scan per repo (the `jobs` partial-unique key). A second default-branch push
- * whose enqueue loses that race used to be dropped — its drift baseline + contract
- * carry-over silently lost until some unrelated future push. Instead we record it
- * as the repo's pending follow-up (latest commit wins) and replay it exactly once,
- * at the NEWEST requested commit, when the running scan settles.
+ * whose enqueue loses that race used to be dropped — its contract carry-over
+ * silently lost until some unrelated future push. Instead we record it as the
+ * repo's pending follow-up (latest commit wins) and replay it exactly once, at
+ * the NEWEST requested commit, when the running scan settles.
  *
  * Deliberately NOT per-commit job keys: if C2 arrives while C1 runs, C1's result
  * is already obsolete — we want a single follow-up run at C2, not one per commit.
@@ -17,8 +17,7 @@ import { ActiveJobExistsError } from '@truecourse/ee-data-store';
 import type { JobStore, PendingBaselineStore, PendingBaselineView } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { REPO_BASELINE_TASK, baselineJobKey, type BaselineEnqueueRequest } from './constants.js';
-import type { BaselineJobPayload } from './constants.js';
-import type { EnqueueBaseline } from './reverify.js';
+import type { BaselineJobPayload, EnqueueBaseline } from './constants.js';
 
 /** Enqueue the graphile task once the tracked row exists (injected so the
  *  coalescing core is testable without graphile-worker). */
