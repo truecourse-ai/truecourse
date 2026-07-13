@@ -17,6 +17,7 @@
  * (files/git) still needs its own `setup` block — the prompt says so.
  */
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
@@ -91,9 +92,13 @@ export interface StaticProbes {
  * — see {@link StaticProbes} for the classes and their priority. An empty batch
  * derives nothing (no claims, no probes).
  */
-export function deriveStaticProbes(claimTexts: string[], entry: readonly string[]): StaticProbes {
+export function deriveStaticProbes(
+  claimTexts: string[],
+  entry: readonly string[],
+  extraProgramNames: readonly string[] = [],
+): StaticProbes {
   if (claimTexts.length === 0) return { helps: [], fragments: [] }
-  const programNames = programNamesOf(entry)
+  const programNames = programNamesOf(entry, extraProgramNames)
   // The bare `--help` is unconditional — reserve its dedupe key up front so a
   // salvaged/exact probe can never duplicate it.
   const seen = new Set<string>([probeKey(['--help'])])
@@ -133,31 +138,81 @@ export function deriveStaticProbes(claimTexts: string[], entry: readonly string[
 const EXPANSION_TOKEN = /^[a-z][a-z0-9-]{2,}$/
 
 /**
- * Phase-2 (expansion) probes: scan the BARE and `--help` transcripts' stdout+stderr
- * for candidate subcommand tokens ({@link EXPANSION_TOKEN}) that ALSO appear
- * (word-boundary) in the batch's claim texts, are not program names, and whose head
- * is not already covered by a salvaged `--help` — each becomes a `<token> --help`
- * probe. The caller fills whatever slots remain under the cap with these; false
- * positives just waste a slot.
+ * Phase-2 (expansion) probes: scan the BARE and `--help` transcripts for candidate
+ * subcommand tokens ({@link EXPANSION_TOKEN}) and turn each into a `<token> --help`
+ * probe. Candidates come from THREE sources, none gated on the claim texts (the
+ * command the model must invoke is the model's choice, not the claim's vocabulary):
+ *
+ *   1. line-leaders — the first token of each indented help line (commander/custom
+ *      style: `  add   Record…`)
+ *   2. brace-list entries — `{add,list,…}` (argparse style)
+ *   3. claim-text tokens — any help-output token that also appears (word-boundary)
+ *      in the claim texts
+ *
+ * Program names and heads already covered by a salvaged `--help` are removed. When
+ * more candidates exist than slots, the caller keeps them in PRIORITY order:
+ * (1∩3) line-leaders also named in claims → (1) line-leaders → (2) brace entries →
+ * (3) claim-text tokens. False positives just waste a slot.
  */
 export function deriveExpansionProbes(
   transcripts: ProbeTranscript[],
   claimTexts: string[],
   entry: readonly string[],
   alreadyProbedHeads: ReadonlySet<string>,
+  extraProgramNames: readonly string[] = [],
 ): string[][] {
-  const programNames = programNamesOf(entry)
+  const programNames = programNamesOf(entry, extraProgramNames)
   const claimBlob = claimTexts.join('\n').toLowerCase()
-  const out: string[][] = []
-  const seen = new Set<string>()
+  const inClaims = (token: string): boolean => wordBoundaryIncludes(claimBlob, token)
+
+  const lineLeaders: string[] = []
+  const braceEntries: string[] = []
+  const claimTokens: string[] = []
   for (const t of transcripts) {
     if (!isHelpSurfaceProbe(t.argv)) continue
-    for (const token of scanCandidateTokens(`${t.stdout}\n${t.stderr}`)) {
+    const blob = `${t.stdout}\n${t.stderr}`
+    lineLeaders.push(...lineLeaderTokens(blob))
+    braceEntries.push(...braceListTokens(blob))
+    for (const token of scanCandidateTokens(blob)) if (inClaims(token)) claimTokens.push(token)
+  }
+
+  // Priority buckets, highest first; a candidate is emitted once, in the first
+  // bucket that yields it.
+  const buckets: string[][] = [lineLeaders.filter(inClaims), lineLeaders, braceEntries, claimTokens]
+  const emitted = new Set<string>()
+  const out: string[][] = []
+  for (const bucket of buckets) {
+    for (const token of bucket) {
       if (!EXPANSION_TOKEN.test(token)) continue
-      if (programNames.has(token) || alreadyProbedHeads.has(token) || seen.has(token)) continue
-      if (!wordBoundaryIncludes(claimBlob, token)) continue
-      seen.add(token)
+      if (programNames.has(token) || alreadyProbedHeads.has(token) || emitted.has(token)) continue
+      emitted.add(token)
       out.push([token, '--help'])
+    }
+  }
+  return out
+}
+
+/** First token of each indented (leading-whitespace) help line — the commander/
+ *  custom subcommand list style (`  add   Record an expense`). Lowercased. */
+function lineLeaderTokens(text: string): string[] {
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    if (!/^\s+\S/.test(line)) continue
+    const first = line.trim().split(/\s+/)[0]
+    if (first) out.push(first.toLowerCase())
+  }
+  return out
+}
+
+/** Entries of argparse-style brace lists `{add,list,…}` anywhere in the output. */
+function braceListTokens(text: string): string[] {
+  const out: string[] = []
+  const re = /\{([a-z0-9][a-z0-9,_-]*)\}/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    for (const entry of m[1].split(',')) {
+      const token = entry.trim().toLowerCase()
+      if (token) out.push(token)
     }
   }
   return out
@@ -248,13 +303,20 @@ function wordBoundaryIncludes(haystack: string, token: string): boolean {
   return new RegExp(`\\b${escaped}\\b`).test(haystack)
 }
 
-/** Program names a leading fragment token is stripped against. */
-function programNamesOf(entry: readonly string[]): Set<string> {
+/**
+ * Program names a leading fragment token is stripped against (and expansion
+ * candidates are filtered against). Seeds from the recipe entry argv (`node`,
+ * `cli.js`, `cli`) plus `truecourse`; `extraProgramNames` carries the package's
+ * REAL command names (package.json `name` w/o scope + `bin` keys) so a spec
+ * fragment `` `xpn add …` `` strips `xpn` instead of probing it as a subcommand.
+ */
+function programNamesOf(entry: readonly string[], extraProgramNames: readonly string[] = []): Set<string> {
   const names = new Set<string>(['truecourse'])
   if (entry.length > 0) {
     addName(names, entry[0])
     addName(names, entry[entry.length - 1])
   }
+  for (const name of extraProgramNames) addName(names, name)
   return names
 }
 
@@ -363,7 +425,10 @@ export interface GroundProbesOptions {
  * transcript, phase-1 then phase-2.
  */
 export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTranscript[]> {
-  const { helps, fragments } = deriveStaticProbes(opts.claimTexts, opts.displayEntry)
+  // Learn the package's real command names once (name w/o scope + bin keys), so
+  // spec fragments that write the tool's own name (`` `xpn add …` ``) strip it.
+  const extraProgramNames = repoPackageProgramNames(opts.repoRoot)
+  const { helps, fragments } = deriveStaticProbes(opts.claimTexts, opts.displayEntry, extraProgramNames)
   if (helps.length === 0) return []
 
   const capture = (probes: string[][]): Promise<ProbeTranscript[]> =>
@@ -389,9 +454,16 @@ export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTran
   const salvagedHeads = new Set(
     helps.map((p) => p[0]).filter((t): t is string => Boolean(t) && t !== '--help'),
   )
-  const expansion = deriveExpansionProbes(phase1, opts.claimTexts, opts.displayEntry, salvagedHeads)
+  const expansion = deriveExpansionProbes(
+    phase1,
+    opts.claimTexts,
+    opts.displayEntry,
+    salvagedHeads,
+    extraProgramNames,
+  )
 
   // Phase 2: expansion helps first, then exact fragments, deduped and budgeted.
+  const expansionKeys = new Set(expansion.map(probeKey))
   const seen = new Set(helps.map(probeKey))
   const phase2: string[][] = []
   for (const argv of [...expansion, ...fragments]) {
@@ -404,7 +476,52 @@ export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTran
   if (phase2.length === 0) return phase1
 
   opts.onProbesPlanned?.(phase2.length)
-  return [...phase1, ...(await capture(phase2))]
+  const phase2Transcripts = await capture(phase2)
+  // Fix C: an AUTO-derived expansion probe (the model's guessed command, not a
+  // user-quoted fragment) that ran an unknown command — non-zero exit with no
+  // `usage` in its output — is dropped from the prompt. Its slot stays spent (it
+  // was already planned and captured); only the noisy transcript is withheld.
+  const kept = phase2Transcripts.filter(
+    (t) => !(expansionKeys.has(probeKey(t.argv)) && isUnknownCommandTranscript(t)),
+  )
+  return [...phase1, ...kept]
+}
+
+/** An expansion probe that hit an unknown command: non-zero (or killed) exit AND no
+ *  `usage` anywhere in its output — the signature of a garbage transcript. */
+function isUnknownCommandTranscript(t: ProbeTranscript): boolean {
+  if (t.exit === 0) return false
+  return !`${t.stdout}\n${t.stderr}`.toLowerCase().includes('usage')
+}
+
+/**
+ * The real command names the repo's package.json contributes: the package `name`
+ * with any `@scope/` stripped, plus every `bin` key. A missing or unparseable
+ * manifest (a non-node repo) contributes none — behavior is unchanged there.
+ */
+function repoPackageProgramNames(repoRoot: string): string[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')
+  } catch {
+    return []
+  }
+  let pkg: unknown
+  try {
+    pkg = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!pkg || typeof pkg !== 'object') return []
+  const names: string[] = []
+  const name = (pkg as { name?: unknown }).name
+  if (typeof name === 'string' && name) {
+    const scoped = /^@[^/]+\/(.+)$/.exec(name)
+    names.push(scoped ? scoped[1] : name)
+  }
+  const bin = (pkg as { bin?: unknown }).bin
+  if (bin && typeof bin === 'object') for (const key of Object.keys(bin)) if (key) names.push(key)
+  return names
 }
 
 /** Cache key: recipe fingerprint + the probe argv (resolved entry is machine-specific, excluded). */

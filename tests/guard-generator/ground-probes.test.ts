@@ -9,6 +9,8 @@
  * exact fragments under the raised cap of 10 so fragments can never starve a help.
  */
 
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect, afterEach } from 'vitest'
 import { resolveEntry } from '@truecourse/guard-runner'
 import {
@@ -113,6 +115,29 @@ describe('deriveStaticProbes', () => {
     expect(deriveStaticProbes([], ENTRY)).toEqual({ helps: [], fragments: [] })
   })
 
+  // Fix B — the package's real command names (from package.json name/bin) reach
+  // derivation as extraProgramNames, so a spec fragment written as `xpn add …`
+  // strips `xpn` and salvages the subcommand instead of probing an unknown `xpn`.
+  it('strips a leading token matching an extra program name (package name / bin key)', () => {
+    expect(
+      deriveStaticProbes(['`xpn add 12.50 --category food` records an expense'], ENTRY, ['xpn']),
+    ).toEqual({ helps: [['--help'], ['add', '--help']], fragments: [] })
+  })
+
+  it('treats a fragment that is only an extra program name as the bare probe', () => {
+    expect(deriveStaticProbes(['`xpn` prints usage'], ENTRY, ['xpn'])).toEqual({
+      helps: [[], ['--help']],
+      fragments: [],
+    })
+  })
+
+  it('keeps a program-name + flag fragment as an exact flag probe', () => {
+    expect(deriveStaticProbes(['`xpn --version` prints the version'], ENTRY, ['xpn'])).toEqual({
+      helps: [['--help']],
+      fragments: [['--version']],
+    })
+  })
+
   it('caps the helps at 10 and leaves fragments uncapped (the orchestrator budgets them)', () => {
     const salvaged = Array.from({ length: 11 }, (_, i) => `\`cmd${i} 1.00\` here`)
     const { helps } = deriveStaticProbes(['prose with no command', ...salvaged], ENTRY)
@@ -141,16 +166,69 @@ describe('deriveExpansionProbes', () => {
 
   const HELP = 'Usage: tool <command>\n\nCommands:\n  add\n  remove\n  config\n'
 
-  it('emits <token> --help for subcommand tokens found in BOTH the help output and the claim texts', () => {
+  it('probes EVERY listed subcommand (line-leaders), not only the ones named in claims', () => {
+    // Fix A: the claim-text filter is a priority boost, not a gate. `config` is
+    // listed by the help output but never named in the claims — it is still probed
+    // (just ordered after the claim-named subcommands).
     const out = deriveExpansionProbes([helpTranscript(HELP)], ['add remove'], ENTRY, new Set())
-    expect(out).toEqual([['add', '--help'], ['remove', '--help']])
-    // `config` is listed by help but never named by the claims → excluded.
-    expect(out).not.toContainEqual(['config', '--help'])
+    expect(out).toEqual([['add', '--help'], ['remove', '--help'], ['config', '--help']])
+  })
+
+  it('regression: a batch whose claims name NO subcommand still probes each listed one', () => {
+    // The retry-blindness bug: claims describe behavior ("exit code 3") without
+    // naming the command the model must invoke, yet `add`/`remove`/`config --help`
+    // must still be captured.
+    const out = deriveExpansionProbes(
+      [helpTranscript(HELP)],
+      ['An expense of 0 cents causes exit code 3.'],
+      ENTRY,
+      new Set(),
+    )
+    expect(out).toEqual([['add', '--help'], ['remove', '--help'], ['config', '--help']])
+  })
+
+  it('extracts subcommands from argparse-style brace lists {add,list,remove}', () => {
+    const out = deriveExpansionProbes(
+      [helpTranscript('usage: xpn [-h] {add,list,remove} ...\n')],
+      ['no command named in this claim'],
+      ENTRY,
+      new Set(),
+    )
+    expect(out).toEqual([['add', '--help'], ['list', '--help'], ['remove', '--help']])
+  })
+
+  it('orders candidates: (line-leader ∩ claim) → line-leader → brace → claim-text', () => {
+    // build: line-leader AND named in claims → first.
+    // deploy: line-leader, NOT in claims → second.
+    // pack/ship: brace-list entries → third/fourth.
+    // sync: appears only mid-prose in help but IS named in claims → last.
+    const help =
+      'Commands:\n  build   Compile\n  deploy  Ship it\nRun {pack,ship} to bundle. The verb sync also works.\n'
+    const out = deriveExpansionProbes([helpTranscript(help)], ['build and sync are documented'], ENTRY, new Set())
+    expect(out).toEqual([
+      ['build', '--help'],
+      ['deploy', '--help'],
+      ['pack', '--help'],
+      ['ship', '--help'],
+      ['sync', '--help'],
+    ])
   })
 
   it('excludes tokens already covered by a static probe', () => {
     const out = deriveExpansionProbes([helpTranscript(HELP)], ['add remove'], ENTRY, new Set(['add']))
-    expect(out).toEqual([['remove', '--help']])
+    expect(out).toEqual([['remove', '--help'], ['config', '--help']])
+  })
+
+  it('excludes an extra program name (package/bin) even when help lists it', () => {
+    // `xpn` is the tool's own name — a `help` line-leader `xpn` is not a subcommand.
+    const out = deriveExpansionProbes(
+      [helpTranscript('Commands:\n  xpn\n  add\n')],
+      ['add works'],
+      ENTRY,
+      new Set(),
+      ['xpn'],
+    )
+    expect(out).toEqual([['add', '--help']])
   })
 
   it('excludes program names even when the help output lists them', () => {
@@ -318,5 +396,102 @@ describe('groundProbes — two-phase capture (injected executor)', () => {
     })
     expect(planned).toBe(transcripts.length)
     expect(captured).toBe(transcripts.length)
+  })
+
+  // Fix B — groundProbes reads the repo-root package.json (name w/o scope + bin
+  // keys) and feeds those as extra program names to derivation.
+  it('learns the package name (scope stripped) from package.json and strips it from fragments', async () => {
+    const r = repo()
+    // A scoped package whose real command is `xpn` — the bare name must be learned.
+    fs.writeFileSync(
+      path.join(r, 'package.json'),
+      JSON.stringify({ name: '@scope/xpn', version: '0.0.0', bin: { xpn: 'bin.mjs' } }),
+    )
+    const resolvedEntry = resolveEntry(r, ENTRY)
+    const exec: ProbeExecutor = async (fullArgv) => {
+      const argv = fullArgv.slice(resolvedEntry.length)
+      const isBareHelp = argv.length === 1 && argv[0] === '--help'
+      // The help surface lists the tool's own name, plus real subcommands.
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: isBareHelp ? 'Commands:\n  xpn\n  add\n  remove\n' : '',
+        stderr: '',
+        timedOut: false,
+        durationMs: 1,
+      }
+    }
+
+    const transcripts = await groundProbes({
+      repoRoot: r,
+      claimTexts: ['`xpn add 5 --category food` records an expense'],
+      resolvedEntry,
+      displayEntry: ENTRY,
+      recipeFingerprint: 'sha256:pkgname',
+      exec,
+    })
+    const argvs = transcripts.map((t) => t.argv)
+    // `xpn add …` salvages `add --help`; `remove` expands; `xpn` is recognized as
+    // the program name — never probed as an unknown subcommand.
+    expect(argvs).toContainEqual(['add', '--help'])
+    expect(argvs).toContainEqual(['remove', '--help'])
+    expect(argvs).not.toContainEqual(['xpn', '--help'])
+    expect(argvs).not.toContainEqual(['xpn'])
+  })
+
+  // Fix C — a captured AUTO-expansion probe whose run failed with no `usage` in its
+  // output is dropped from the returned set (kept out of the prompt) but its slot
+  // stays spent; user-quoted fragments are never filtered.
+  it('drops a failed auto-expansion transcript but keeps its slot spent', async () => {
+    const r = repo()
+    const resolvedEntry = resolveEntry(r, ENTRY)
+    const exec: ProbeExecutor = async (fullArgv) => {
+      const argv = fullArgv.slice(resolvedEntry.length)
+      const isBareHelp = argv.length === 1 && argv[0] === '--help'
+      if (isBareHelp) return { exitCode: 0, signal: null, stdout: 'Commands:\n  add\n  phantom\n', stderr: '', timedOut: false, durationMs: 1 }
+      if (argv[0] === 'add') return { exitCode: 0, signal: null, stdout: 'Usage: cli add <amount>\n', stderr: '', timedOut: false, durationMs: 1 }
+      if (argv[0] === 'phantom') return { exitCode: 1, signal: null, stdout: '', stderr: 'unknown command: phantom\n', timedOut: false, durationMs: 1 }
+      return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, durationMs: 1 }
+    }
+
+    let planned = 0
+    const transcripts = await groundProbes({
+      repoRoot: r,
+      claimTexts: ['records an expense and exits 3'], // names no command
+      resolvedEntry,
+      displayEntry: ENTRY,
+      recipeFingerprint: 'sha256:fixc-drop',
+      exec,
+      onProbesPlanned: (n) => (planned += n),
+    })
+    const argvs = transcripts.map((t) => t.argv)
+    // `add --help` succeeded (exit 0) → kept; `phantom --help` failed with no
+    // "usage" → dropped from the prompt, though its slot was still spent.
+    expect(argvs).toContainEqual(['add', '--help'])
+    expect(argvs).not.toContainEqual(['phantom', '--help'])
+    // Planned/captured still count the dropped probe (bare + --help + add + phantom).
+    expect(planned).toBe(4)
+  })
+
+  it('keeps a failed user-quoted fragment transcript (Fix C filters expansion only)', async () => {
+    const r = repo()
+    const resolvedEntry = resolveEntry(r, ENTRY)
+    const exec: ProbeExecutor = async (fullArgv) => {
+      const argv = fullArgv.slice(resolvedEntry.length)
+      // The bare `--help` lists nothing; the quoted `boom` fragment fails with no usage.
+      if (argv[0] === 'boom') return { exitCode: 7, signal: null, stdout: '', stderr: 'fatal\n', timedOut: false, durationMs: 1 }
+      return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, durationMs: 1 }
+    }
+
+    const transcripts = await groundProbes({
+      repoRoot: r,
+      claimTexts: ['running `boom` fails hard'],
+      resolvedEntry,
+      displayEntry: ENTRY,
+      recipeFingerprint: 'sha256:fixc-keep',
+      exec,
+    })
+    // `boom` is a user-quoted exact fragment, not an auto-expansion → kept despite failing.
+    expect(transcripts.map((t) => t.argv)).toContainEqual(['boom'])
   })
 })
