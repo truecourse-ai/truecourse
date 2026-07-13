@@ -27,3 +27,34 @@ export const GenerateViolationsSchema = z.object({
 })
 
 export type GenerateViolationsInput = z.infer<typeof GenerateViolationsSchema>
+
+// ---------------------------------------------------------------------------
+// Directory browse (local-filesystem picker) — issue #41
+// ---------------------------------------------------------------------------
+
+/** Query for GET /api/repos/browse. `path` optional; server defaults to os.homedir(). */
+export const BrowseDirQuerySchema = z.object({
+  path: z.string().optional(),
+})
+export type BrowseDirQuery = z.infer<typeof BrowseDirQuerySchema>
+
+/** One non-hidden subdirectory of the browsed path. */
+export const BrowseEntrySchema = z.object({
+  /** Basename, e.g. "my-service". */
+  name: z.string(),
+  /** Absolute path to this subdirectory. */
+  path: z.string(),
+  /** True when the subdirectory contains a `.git` directory (a git repo). */
+  isRepo: z.boolean(),
+})
+export type BrowseEntry = z.infer<typeof BrowseEntrySchema>
+
+export const BrowseDirResponseSchema = z.object({
+  /** The (realpath-resolved) absolute directory being listed. */
+  path: z.string(),
+  /** Absolute parent path, or null when `path` is the filesystem root. */
+  parent: z.string().nullable(),
+  /** Non-hidden subdirectories, sorted alphabetically by name. */
+  entries: z.array(BrowseEntrySchema),
+})
+export type BrowseDirResponse = z.infer<typeof BrowseDirResponseSchema>
