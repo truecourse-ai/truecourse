@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
       # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
@@ -29,11 +29,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # OIDC trusted publishing needs a recent npm; Node 20 ships npm 10.x.
-      # Pinned to the npm 11 line: npm@latest crossed to 12 (needs node >=22)
-      # and broke this step on the node-20 runner (2026-07-08).
+      # OIDC trusted publishing needs a recent npm; the runner's bundled npm is
+      # older. Node 22 supports the current npm line (npm 12 requires node >=22),
+      # so `@latest` installs cleanly here.
       - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@11
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
