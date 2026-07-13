@@ -57,12 +57,7 @@ async function fetchApi<T>(
 }
 
 /** Verbs a repo card shows for its most-recent lifecycle event. */
-export type LatestEventKind =
-  | 'analyzed'
-  | 'scanned'
-  | 'generated'
-  | 'guarded'
-  | 'scenarios-generated';
+export type LatestEventKind = 'analyzed' | 'scanned' | 'generated' | 'guarded';
 
 export type RepoResponse = {
   id: string;

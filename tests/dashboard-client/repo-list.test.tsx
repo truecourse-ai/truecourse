@@ -40,7 +40,6 @@ const VERBS: Array<[LatestEventKind, string]> = [
   ['scanned', 'Scanned'],
   ['generated', 'Generated'],
   ['guarded', 'Guarded'],
-  ['scenarios-generated', 'Scenarios generated'],
 ];
 
 describe('RepoList — latest-event footer', () => {

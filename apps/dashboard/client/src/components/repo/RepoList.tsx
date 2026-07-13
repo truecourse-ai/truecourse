@@ -14,7 +14,6 @@ const EVENT_VERBS: Record<LatestEventKind, string> = {
   scanned: 'Scanned',
   generated: 'Generated',
   guarded: 'Guarded',
-  'scenarios-generated': 'Scenarios generated',
 };
 
 export function RepoList({ repos, onDelete }: RepoListProps) {

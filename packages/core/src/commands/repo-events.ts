@@ -13,19 +13,12 @@
 import { readGuardLatest, readGuardResult } from '@truecourse/guard-runner';
 import { readLatest } from '../lib/analysis-store.js';
 import { loadLatestSpec } from '../lib/spec-store.js';
-import { readGeneratedSummary } from './spec-in-process.js';
 
 /**
- * The lifecycle verbs a repo card can show. `generated` is `contracts generate`
- * (the `.tc` corpus); `scenarios-generated` is `guard generate` (the scenario
- * set) — kept distinct so the two "generate" actions never collide on a card.
+ * The lifecycle verbs a repo card can show. `generated` is `guard generate` (the
+ * scenario set); `guarded` is a `guard run`.
  */
-export type LatestEventKind =
-  | 'analyzed'
-  | 'scanned'
-  | 'generated'
-  | 'guarded'
-  | 'scenarios-generated';
+export type LatestEventKind = 'analyzed' | 'scanned' | 'generated' | 'guarded';
 
 export interface LatestEvent {
   kind: LatestEventKind;
@@ -88,9 +81,8 @@ export async function resolveLatestEvent(
       kind: 'scanned',
       at: await safe(async () => (await loadLatestSpec<{ generatedAt?: string }>(repoPath, 'corpus'))?.generatedAt),
     },
-    { kind: 'generated', at: safeSync(() => readGeneratedSummary(repoPath)?.generatedAt) },
+    { kind: 'generated', at: safeSync(() => readGuardResult(repoPath)?.generatedAt) },
     { kind: 'guarded', at: safeSync(() => readGuardLatest(repoPath)?.run.ranAt) },
-    { kind: 'scenarios-generated', at: safeSync(() => readGuardResult(repoPath)?.generatedAt) },
   ];
   return pickLatestEvent(candidates, registryLastAnalyzed);
 }

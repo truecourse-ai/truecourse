@@ -14,18 +14,11 @@ import type { GuardGenerateReport, GuardLatest } from '../../packages/shared/src
 const AT: Record<LatestEventKind, string> = {
   analyzed: '2026-07-01T00:00:00.000Z',
   scanned: '2026-07-02T00:00:00.000Z',
-  generated: '2026-07-03T00:00:00.000Z',
-  'scenarios-generated': '2026-07-05T00:00:00.000Z',
+  generated: '2026-07-05T00:00:00.000Z',
   guarded: '2026-07-06T00:00:00.000Z', // newest of all
 };
 
-const ALL_KINDS: LatestEventKind[] = [
-  'analyzed',
-  'scanned',
-  'generated',
-  'scenarios-generated',
-  'guarded',
-];
+const ALL_KINDS: LatestEventKind[] = ['analyzed', 'scanned', 'generated', 'guarded'];
 
 function guardLatest(ranAt: string): GuardLatest {
   return {
@@ -71,11 +64,9 @@ function seedSource(repo: string, kind: LatestEventKind, at: string): void {
     case 'scanned':
       return seed(repo, 'specs/corpus.json', { version: 3, generatedAt: at });
     case 'generated':
-      return seed(repo, 'contracts/result.json', { generatedAt: at });
+      return seed(repo, 'guard/result.json', guardReport(at));
     case 'guarded':
       return seed(repo, 'guard/LATEST.json', guardLatest(at));
-    case 'scenarios-generated':
-      return seed(repo, 'guard/result.json', guardReport(at));
   }
 }
 
