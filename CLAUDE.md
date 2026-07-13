@@ -77,6 +77,8 @@ npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and
 ## Testing
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
+- The full suite needs `pnpm build` run once first (tests resolve workspace packages from `dist/`) and the C# Roslyn host built (`dotnet build -c Release tools/csharp-roslyn-host`, once per checkout/worktree) — without the host the C# e2e test fails hard and the Roslyn semantic-rule tests skip.
+- `tests/setup.ts` hides the developer's global/system git config from the whole suite (`GIT_CONFIG_GLOBAL=/dev/null`), so host settings like `commit.gpgsign` can't leak into temp fixture repos. Tests that commit must set `user.name`/`user.email` per-repo.
 
 ## Conventions
 
