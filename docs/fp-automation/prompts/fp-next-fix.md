@@ -10,13 +10,44 @@ The 15-sessions-per-day routine cap is the binding constraint, so each
 session does meaningful batch work instead of one fix at a time. With
 N = 5, 15 sessions/day = ~75 fixes/day instead of 15.
 
+## Two phases, one PR per run
+
+fp-next-fix works the fix queue in **two phases**, and each session runs
+in exactly **one** of them (at most one PR per run):
+
+- **Normal phase** — the default. Fix issues that do **not** carry the
+  `<SCOPE>fp-human-review-needed` label, using only **in-bounds** changes
+  (the rule's visitor/pattern + the fixtures). Open a normal PR (label
+  `<SCOPE>fp-fix`) that `fp-next-fix-review` may auto-merge.
+- **Human-review phase** — entered only when the normal queue is empty
+  but issues carrying `<SCOPE>fp-human-review-needed` remain. In this
+  phase you are **allowed to go over the boundary** — targeted
+  cross-module refactors, type changes, etc. — to fix issues that a plain
+  in-bounds fix couldn't. Open a PR carrying **both** `<SCOPE>fp-fix` and
+  `<SCOPE>fp-human-review-needed`; `fp-next-fix-review` reviews it but does
+  **not** merge it — a human reviews and merges those.
+
+**The boundary is what routes an issue between phases.** When a
+normal-phase fix would require going over the in-bounds boundary (a
+cross-module refactor, or the rule is broken in more ways than the FP),
+you don't dead-end it: you **defer** the issue by adding
+`<SCOPE>fp-human-review-needed` and moving on. A later human-review-phase
+session fixes it with the broader access. This replaces the old
+"block-and-wait" behavior — the flagged queue is now worked, not parked.
+
+Only issues that **can't be fixed even with out-of-bounds access** (e.g.
+malformed issue data, or a refactor that turns out infeasible) become
+terminally stuck: they are marked `<SCOPE>fp-skipped` and surfaced to a
+human via the single `[<SCOPE>fp-campaign-stuck]` tracking issue.
+
 Per invocation:
-- Process issues until you've accumulated **5 successful fixes**, OR
-  you've attempted **10 issues**, OR the queue is empty.
-- Issues that can't produce a fix (malformed YAML / FP no longer
-  reproduces / broken-beyond-FP / refactor required) are skipped per
-  their respective paths; they count toward the 10-attempt cap but
-  not the 5-success cap.
+- Determine the phase up front (see "Determine the run phase"). Then
+  process issues from that phase's queue until you've accumulated
+  **5 successful fixes**, OR you've attempted **10 issues**, OR the
+  phase's queue is empty.
+- Issues that can't produce a fix are routed per "Bail-out routing"
+  below (defer to human-review, terminal-skip, or close); they count
+  toward the 10-attempt cap but not the 5-success cap.
 - Open ONE PR at the end with all successful fixes (or end with no PR
   if zero successes).
 
@@ -43,7 +74,10 @@ byte-identical to an unscoped run.
 - The triggering event is `pull_request.closed` (merged) on either a
   previous fp-fix PR (Trigger B) or the campaign's discovery PR
   (Trigger A, fp-next-fix-bootstrap). Either way, the merge is just
-  the cue that a new session should run.
+  the cue that a new session should run. Both normal and human-review
+  batch PRs live on `claude/<SCOPE>fp-fix/batch-…` branches, so merging
+  either kind (a human merges the human-review ones) fires the next
+  session.
 
 ## Session setup (once)
 
@@ -96,26 +130,53 @@ Before the per-issue loop:
   `.violations[]` by `ruleKey` and counting; populate `before_total`
   as the total length of `.violations[]`.
 
+## Determine the run phase (once, up front)
+
+After session setup, list open `<SCOPE>fp-fix` issues and split them into
+two **pickable** queues:
+
+- **normal-pickable** = open `<SCOPE>fp-fix` issues that lack
+  `<SCOPE>fp-human-review-needed`, `<SCOPE>fp-in-progress`, and
+  `<SCOPE>fp-skipped`.
+- **review-pickable** = open `<SCOPE>fp-fix` issues that **carry**
+  `<SCOPE>fp-human-review-needed` and lack `<SCOPE>fp-in-progress` and
+  `<SCOPE>fp-skipped`.
+
+Then:
+
+- **normal-pickable non-empty** → **phase = normal**. Work only the
+  normal queue this session.
+- **normal-pickable empty, review-pickable non-empty** → **phase =
+  human-review**. Work only the human-review queue this session, with
+  out-of-bounds access.
+- **both empty** → go to the **Queue-empty path**.
+
+**The phase is fixed for the whole session.** Every issue you pick comes
+from the chosen phase's queue, and you open at most one PR (normal, or
+human-review-labeled). If a normal-phase queue drains after only 2
+successes, you ship a normal PR with 2 fixes — you do **not** then start
+a human-review batch in the same session; the next session's phase check
+will pick up the human-review queue.
+
 ## Per-issue loop
 
 Repeat the steps below while `successes < 5 AND attempts < 10`. Each
-iteration is one "attempt" (success or skip).
+iteration is one "attempt" (success or skip). The steps are the same in
+both phases; the two differences are called out at step 8 (fix scope)
+and in "Bail-out routing" (how failures are handled).
 
 ### 1. Pick the next issue
 
-- List open issues on `truecourse-ai/truecourse` with label `<SCOPE>fp-fix`,
-  **excluding** any with label `<SCOPE>fp-in-progress`, `<SCOPE>fp-blocked`, or
-  `<SCOPE>fp-skipped`.
-- Also exclude any issue already in `fixed_issues` for this session.
-- If none (the **pickable** queue is empty — note this is also true
-  when open issues remain but every one is `<SCOPE>fp-blocked`/`<SCOPE>fp-skipped`):
+- From the current phase's queue (normal-pickable in normal phase,
+  review-pickable in human-review phase), exclude any issue already in
+  `fixed_issues` for this session.
+- If the phase's pickable queue is empty:
   - If `successes >= 1` → break out of the loop and go to "Open the
     batched PR" (ship the batch you've built).
   - If `successes == 0` → go to the **Queue-empty path**. Do **not**
     just end the session — an empty pickable queue is the cue to
     re-measure the campaign (re-analyze, recompute TP, then close /
-    re-discover / flag-stuck). This holds even when the only remaining
-    issues are blocked.
+    re-discover / flag-stuck).
 - Otherwise: pick the **oldest** by `created_at`.
 
 ### 2. Take the concurrency lock
@@ -131,24 +192,25 @@ iteration is one "attempt" (success or skip).
 
 - Parse the YAML block from the issue body. Extract `target_repo`,
   `target_ref`, `rule_key`, `samples[]`.
-- If the YAML is malformed: comment on the issue ("malformed YAML in
-  body — needs human review"), add label `<SCOPE>fp-blocked`, remove
-  `<SCOPE>fp-in-progress`, increment `attempts`, **continue to next iteration**.
+- If the YAML is malformed: this is **invalid issue data** — see
+  "Bail-out routing / Invalid issue data (terminal)". Increment
+  `attempts`, **continue to next iteration**.
 
 ### 4. Confirm the FP still reproduces
 
 - If `target_repo`/`target_ref` differs from any earlier issue in this
   session, that's surprising — all fp-fix issues in a campaign should
-  share the same target. Comment on the issue noting the mismatch,
-  add `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, increment `attempts`,
-  continue.
+  share the same target. This is **invalid issue data** — route it per
+  "Bail-out routing / Invalid issue data (terminal)", increment
+  `attempts`, continue.
 - Filter `/tmp/target/.truecourse/LATEST.json` `.violations[]` to
   entries with `ruleKey == <rule_key>`. Cross-reference at least one
   of the URLs in `samples[].url`.
 - If no violations remain for this rule at this ref (upstream changed
   or an earlier fix in this batch already resolved it): close the
   issue with comment "FP no longer reproduces at `<target_ref>`",
-  remove `<SCOPE>fp-in-progress`, increment `attempts`, continue.
+  remove `<SCOPE>fp-in-progress`, increment `attempts`, continue. (This
+  is a clean close, not a failure — no defer, no skip.)
 
 ### 5. Add a paraphrased FP to the positive fixture
 
@@ -204,13 +266,15 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   fire because their visitors haven't been fixed yet — that's fine,
   tolerated until step 9 below.
 - If the new negative case fails: the rule is broken in more ways
-  than the FP — comment on the issue with the test output, add
-  `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, **revert** this issue's
-  positive and negative fixture files (keep earlier-batch files
-  intact), increment `attempts`, continue.
+  than the FP. This is **over-the-boundary** work — route it per
+  "Bail-out routing / Over-the-boundary" (defer in normal phase; try
+  the broader fix, then terminal-skip if infeasible, in human-review
+  phase). Attach the test output to your comment. Increment `attempts`,
+  continue.
 
-### 8. Fix the visitor
+### 8. Fix the rule
 
+**Normal phase — in-bounds only.**
 - Edit only the rule's visitor / pattern under
   `packages/analyzer/src/rules/<domain>/…` (and/or
   `packages/analyzer/src/patterns/<domain>-patterns.ts` if the fix
@@ -218,9 +282,24 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
 - No unrelated refactors. Do not touch types, file discovery,
   resolvers, etc. unless the rule lives there.
 - If you can't fix it without a refactor that crosses module
-  boundaries: revert this issue's fixture additions, post a
-  `## Refactor needed` comment on the issue, add `<SCOPE>fp-blocked` label,
-  remove `<SCOPE>fp-in-progress`, increment `attempts`, continue.
+  boundaries: this is **over-the-boundary** work — route it per
+  "Bail-out routing / Over-the-boundary" (post a `## Refactor needed`
+  comment describing what's required, defer with
+  `<SCOPE>fp-human-review-needed`), increment `attempts`, continue. A
+  later human-review-phase session will do the refactor.
+
+**Human-review phase — over-the-boundary allowed.**
+- You are permitted to make the changes the rule genuinely needs to be
+  correct, **including** cross-module refactors: types, file discovery,
+  resolvers, data-flow, shared helpers. This is exactly why these PRs
+  are merged by a human, not auto-merged.
+- Keep the change **targeted**: only what this specific fix requires, no
+  unrelated refactors, no drive-by cleanups. **Never** touch
+  `docs/fp-automation/campaigns.yaml` or any of the four version-bump
+  locations — those belong to campaign-close, not an fp-fix batch.
+- If even an out-of-bounds fix isn't feasible (the refactor is too
+  large / would change the rule's contract in ways that need a human
+  design decision): route it per "Bail-out routing / Terminal (skip)".
 
 ### 9. Re-run tests, confirm green
 
@@ -228,23 +307,59 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
 - Required state: full test suite green, including all earlier-batch
   fixes (their visitors are fixed too, so their positive cases now
   pass).
-- If anything other than expected cases fails: revert this issue's
-  visitor change AND fixture files, comment on the issue with the
-  failure, add `<SCOPE>fp-blocked`, remove `<SCOPE>fp-in-progress`, increment
-  `attempts`, continue.
+- If anything other than expected cases fails: the fix has unintended
+  fallout. Route it per "Bail-out routing / Over-the-boundary" (defer
+  in normal phase; in human-review phase, either extend the fix to make
+  the suite green or terminal-skip if you can't). Revert as that routing
+  specifies, attach the failure, increment `attempts`, continue.
 
 ### 10. Mark success
 
 - Append `(issue_number, rule_key, positive_fixture_path,
   negative_fixture_path, visitor_summary)` to `fixed_issues`.
   `visitor_summary` is a 2–3 sentence summary of what you changed
-  and why.
+  and why. In human-review phase, also note **what went over the
+  boundary** (which non-rule files/modules you touched and why) so the
+  human reviewer knows where to focus.
 - Increment `successes` AND `attempts`.
 - **Do not** remove `<SCOPE>fp-in-progress` yet — the issue stays locked
   until the batch PR opens (in case the loop breaks early due to
   attempts cap or queue empty).
 - If `successes == 5` or `attempts == 10`: break out of the loop.
 - Otherwise: continue to next iteration.
+
+## Bail-out routing (defer vs terminal vs close)
+
+When step 3–9 can't produce a clean in-batch fix, route the issue by
+**cause** and **phase**. In every case, revert **only this issue's** own
+fixture/visitor changes (keep earlier-batch changes intact) before
+continuing.
+
+- **Over-the-boundary** (a cross-module refactor is required — step 8;
+  the rule is broken beyond the FP — step 7; or the fix causes unrelated
+  test fallout you can't contain in-bounds — step 9):
+  - **Normal phase → DEFER.** Comment on the issue explaining what's
+    needed (for the refactor case, a `## Refactor needed` section), add
+    label `<SCOPE>fp-human-review-needed`, remove `<SCOPE>fp-in-progress`.
+    Do **not** open any issue and do **not** mark it skipped — a later
+    human-review session will fix it.
+  - **Human-review phase → try the broader fix first** (you have
+    out-of-bounds access). Only if it's still infeasible, fall through
+    to **Terminal (skip)** below.
+- **Invalid issue data** (malformed YAML — step 3; `target_repo`/
+  `target_ref` mismatch — step 4): out-of-bounds access can't
+  manufacture missing/valid data, so this is **Terminal (skip)** in
+  either phase.
+- **Terminal (skip)** — the issue can't be fixed even with out-of-bounds
+  access: comment on the issue with the concrete blocker, add label
+  `<SCOPE>fp-skipped`, remove `<SCOPE>fp-in-progress`. (In human-review
+  phase, leave the `<SCOPE>fp-human-review-needed` label in place — the
+  `<SCOPE>fp-skipped` marker is what pulls it out of every pickable queue
+  and lands it on the campaign-stuck checklist.) These terminally-stuck
+  issues are surfaced to a human via `[<SCOPE>fp-campaign-stuck]` in the
+  Queue-empty path.
+- **No longer reproduces** (step 4): **close** the issue — not a
+  failure, no defer, no skip.
 
 ## After the loop: measure the FP-count delta on the target (REQUIRED)
 
@@ -295,10 +410,10 @@ After the loop:
 
 - If `successes == 0`: do **not** end here. You only reach this section
   with zero successes if you attempted issues that all failed
-  (blocked / no-reproduce / refactor) — the pickable queue ran out
+  (deferred / terminal / no-reproduce) — the pickable queue ran out
   mid-session. Go to the **Queue-empty path** to re-measure the
-  campaign. (Step 1 already routes a start-empty queue straight there;
-  this catches the case where the queue drained during the loop.)
+  campaign. (The phase check already routes a start-empty queue straight
+  there; this catches the case where the queue drained during the loop.)
 - If `successes >= 1`:
   - **Verify your branch.** Run `git rev-parse --abbrev-ref HEAD` and
     confirm it starts with `claude/<SCOPE>fp-fix/batch-`. If it doesn't —
@@ -326,11 +441,16 @@ After the loop:
     - One "## <rule_key>" section per fixed issue, each containing:
       - OSS source URLs from the issue's `samples[].url`.
       - The `visitor_summary` for that issue.
+    - **Human-review phase only** — a "## Human review required"
+      section at the top of the body: state that these fixes went
+      **over the in-bounds boundary** (list the non-rule files/modules
+      touched per fix), that `fp-next-fix-review` will review but not
+      merge, and that a human must review and merge. This is the signal
+      that distinguishes the two PR kinds in the body.
     - A "## Skipped this batch" section (only if any `attempts >
-      successes`): brief list of issues that were attempted but
-      skipped, with reason (malformed YAML / no-reproduces /
-      broken-beyond-FP / refactor-required). One line each, link
-      to the issue.
+      successes`): brief list of issues that were attempted but not
+      fixed, with routing (deferred-to-human-review / terminal-skip /
+      no-reproduce / invalid-data). One line each, link to the issue.
     - A "## FP-count delta (vs `<target_ref>` on `<target_repo>`)"
       section with a markdown table built from the after-loop
       measurements:
@@ -351,8 +471,14 @@ After the loop:
       a one-line note: `unavailable: <reason>`.
     - End the body with a line `cc @mushgev` so the reviewer gets a
       notification email on PR creation.
-  - Labels: `<SCOPE>fp-fix` (this label must be on the PR — it's what fires
-    the next routine invocation on merge).
+  - Labels:
+    - **Normal phase:** `<SCOPE>fp-fix` (this label must be on the PR —
+      it's what fires the next routine invocation on merge).
+    - **Human-review phase:** both `<SCOPE>fp-fix` **and**
+      `<SCOPE>fp-human-review-needed`. The `<SCOPE>fp-fix` label + the
+      `claude/<SCOPE>fp-fix/batch-…` branch still fire the next
+      invocation once a human merges; the `<SCOPE>fp-human-review-needed`
+      label is what tells `fp-next-fix-review` to review-but-not-merge.
   - For each fixed issue: comment on the issue with the PR URL, then
     remove the `<SCOPE>fp-in-progress` label (the merge will auto-close the
     issue via `Closes #N`).
@@ -360,14 +486,21 @@ After the loop:
 
 ## Queue-empty path
 
-Enter this path when the **pickable** queue is empty AND
-`successes == 0` this session. "Pickable empty" means step 1 found no
-open `<SCOPE>fp-fix` issue that lacks `<SCOPE>fp-in-progress`/`<SCOPE>fp-blocked`/`<SCOPE>fp-skipped`
-— **including the case where open issues remain but all are blocked.**
-Do not require "zero issues exist at all"; all-blocked counts.
+Enter this path when **both** pickable queues are empty AND
+`successes == 0` this session. "Both empty" means the phase check (and
+step 1) found no open `<SCOPE>fp-fix` issue that lacks
+`<SCOPE>fp-in-progress`/`<SCOPE>fp-skipped` in either the normal **or** the
+human-review queue — i.e. every remaining open issue is already
+in-progress (another session) or `<SCOPE>fp-skipped` (terminally stuck),
+or there are no open issues at all.
 
 (If `successes >= 1`, you ship the batch PR instead — never run this
 path in a session that already produced fixes.)
+
+Note the change from the old design: an all-`<SCOPE>fp-human-review-needed`
+queue is **no longer** a reason to enter this path — that's a
+human-review-phase run, and you'd be fixing those issues, not parking
+them here.
 
 1. Find the campaign in `docs/fp-automation/campaigns.yaml` with
    `status: in_progress` or `status: discovering`. There should be
@@ -414,47 +547,58 @@ path in a session that already produced fixes.)
 
    **File new issues, but dedupe first.** For each rule that still
    shows FPs, check whether an **open** `<SCOPE>fp-fix` issue for that
-   `rule_key` already exists (any label — `<SCOPE>fp-blocked` counts).
+   `rule_key` already exists (any label — `<SCOPE>fp-human-review-needed`
+   and `<SCOPE>fp-skipped` both count).
    - Rule has no open issue → file a new fp-fix issue (same shape as
-     discovery).
+     discovery). New issues are unflagged, so they land in the normal
+     queue.
    - Rule already has an open issue → **skip it**. Re-filing a rule
-     that's already tracked (especially one that's `<SCOPE>fp-blocked`) just
-     creates duplicates.
+     that's already tracked (especially one that's
+     `<SCOPE>fp-human-review-needed` or `<SCOPE>fp-skipped`) just creates
+     duplicates.
 
    **Then branch on what you filed:**
    - **Filed ≥ 1 new issue** → continue into the per-issue loop in
-     this same session. The target clone, dist build, `before_counts`,
-     and counters are all still valid; only the issue list needs
+     this same session as a **normal-phase** run (the new issues are
+     unflagged). The target clone, dist build, `before_counts`, and
+     counters are all still valid; only the issue list needs
      re-fetching. If the budget allows at least one success, the
      session ends with a normal batched PR (carrying the FP-count
-     delta, firing Trigger B on merge). This removes the old manual
-     "Run now" hand-off.
-   - **Filed 0 new issues** (every FP-rule already has an open issue,
-     and all pickable ones are blocked) → the campaign **cannot
-     self-progress**: the only thing standing between it and 0.90 is
-     human-gated work. Do not end silently. Instead **file or update a
-     single tracking issue**:
-     - First search for an open issue titled
-       `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`.
-     - If none exists → open one. Title:
-       `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`. Body: current `tp_rate`,
-       the close threshold (0.90), and a checklist of every open
-       `<SCOPE>fp-blocked` issue (number + rule_key) that must be resolved by
-       a human before automation can proceed. End the body with
-       `cc @mushgev`.
-     - If one already exists → add a comment refreshing the `tp_rate`
-       and the current blocked list (don't open a duplicate).
-     - Then end the session. Opening/commenting the tracking issue is
-       the human signal — never dead-end without it.
+     delta, firing Trigger B on merge).
+   - **Filed 0 new issues** (every FP-rule already has an open issue) →
+     the campaign **cannot self-progress via new discovery**. Two
+     sub-cases:
+     - If any open `<SCOPE>fp-skipped` issues exist → these are the
+       terminally-stuck ones that need a human. **File or update a
+       single tracking issue:**
+       - First search for an open issue titled
+         `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`.
+       - If none exists → open one. Title:
+         `[<SCOPE>fp-campaign-stuck] <owner>/<repo>`. Body: current
+         `tp_rate`, the close threshold (0.90), and a checklist of every
+         open `<SCOPE>fp-skipped` issue (number + rule_key + the blocker
+         reason) that a human must resolve before automation can
+         proceed. End the body with `cc @mushgev`.
+       - If one already exists → add a comment refreshing the `tp_rate`
+         and the current `<SCOPE>fp-skipped` list (don't open a
+         duplicate).
+       - Then end the session. Opening/commenting the tracking issue is
+         the human signal — never dead-end without it.
+     - If there are **no** `<SCOPE>fp-skipped` issues (the only remaining
+       open issues are `<SCOPE>fp-in-progress` in another session) →
+       another session is actively handling the queue. End quietly; the
+       next fire will re-check. Don't open a tracking issue for
+       in-flight work.
 
 If the queue empties during the per-issue loop **after** at least one
 success, go to "Open the batched PR" with what you have — don't run
-the queue-empty path in the same session. The next session's loop will
-hit a true empty queue and run the close logic.
+the queue-empty path in the same session. The next session's phase
+check will hit a truly empty queue and run the close logic.
 
 ## Hard constraints
 
-- At most one **PR-opening** per session.
+- At most one **PR-opening** per session — normal **or**
+  human-review-labeled, never both. The phase is fixed at session start.
 - At most **5 successful fixes** and **10 total attempts** per session.
 - **Every PR body must contain a `## FP-count delta` section** —
   either a populated `Before | After | Delta` table or an explicit
@@ -474,14 +618,27 @@ hit a true empty queue and run the close logic.
   OSS owner/repo, the upstream's source filenames, or upstream-themed
   identifiers. The committed fixture should look like generic
   domain-agnostic code that happens to trigger the rule.
-- Never change anything outside `packages/analyzer/src/rules/`,
-  `packages/analyzer/src/patterns/`, `tests/fixtures/sample-*/`, and
-  (in the queue-empty path) `docs/fp-automation/campaigns.yaml` +
-  the four version-bump locations.
-- A skipped (blocked / no-reproduces / refactor) issue only reverts
-  **its own** fixture and visitor changes, never earlier-batch
-  changes. The session's working tree is the accumulating draft of
-  the batch PR.
+- **Change scope depends on phase:**
+  - **Normal phase** — only in-bounds:
+    `packages/analyzer/src/rules/`, `packages/analyzer/src/patterns/`,
+    and `tests/fixtures/sample-*/`. A fix that needs to go over that
+    boundary is **deferred** with `<SCOPE>fp-human-review-needed`, never
+    forced.
+  - **Human-review phase** — you may go **over the boundary** with
+    **targeted** cross-module changes (types, file discovery, resolvers,
+    data-flow, shared helpers) as the flagged fix requires. This is why
+    those PRs are human-merged.
+  - **Neither phase** ever touches `docs/fp-automation/campaigns.yaml` or
+    the four version-bump locations — those belong to the queue-empty /
+    campaign-close path only.
+- **Bail-out routing** (see the section above): normal-phase
+  over-the-boundary failures **defer** (`<SCOPE>fp-human-review-needed`);
+  invalid-data failures are **terminal** (`<SCOPE>fp-skipped`);
+  human-review-phase failures are **terminal** (`<SCOPE>fp-skipped`, kept
+  alongside `<SCOPE>fp-human-review-needed`). A deferred/terminal/close
+  issue reverts only **its own** fixture and visitor changes, never
+  earlier-batch changes. The session's working tree is the accumulating
+  draft of the batch PR.
 - If anything is ambiguous, document it on the issue and continue the
   loop (or end the loop if it's session-wide). Do not invent state,
   do not skip steps, do not "try one more thing."

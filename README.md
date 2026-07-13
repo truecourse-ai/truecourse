@@ -457,12 +457,15 @@ Or set `TRUECOURSE_TELEMETRY=0` to opt out.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
+pnpm build              # Build all packages — required before the first `pnpm test` (tests resolve workspace packages from their dist/)
+dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK — see note below
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
 pnpm test               # Run tests
-pnpm build              # Build all packages
 ```
 
 `pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
+
+The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.
 
 ## Community
 

@@ -2581,13 +2581,24 @@ describe('code-quality/deterministic/require-yield', () => {
 });
 
 describe('code-quality/deterministic/class-prototype-assignment', () => {
-  it('detects prototype method assignment', () => {
+  it('detects prototype method assignment on an ES6 class', () => {
+    const violations = check(`
+      class Animal { constructor(name) { this.name = name; } }
+      Animal.prototype.speak = function() { return this.name; };
+    `, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag prototype assignment on an ES5 constructor function', () => {
+    // Idiomatic ES5 — the receiver is a plain constructor function, not a
+    // `class`, so this is not "inconsistent with class syntax" (issue #734).
     const violations = check(`
       function Animal(name) { this.name = name; }
       Animal.prototype.speak = function() { return this.name; };
     `, 'javascript');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/class-prototype-assignment');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag extend-native (handled by separate rule)', () => {

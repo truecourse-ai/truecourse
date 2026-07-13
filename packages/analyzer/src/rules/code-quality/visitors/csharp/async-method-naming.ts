@@ -1,3 +1,4 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { hasCSharpModifier } from '../../../_shared/csharp-helpers.js'
@@ -24,6 +25,28 @@ const HANDLER_ATTRIBUTES = new Set([
   'Route', 'Area', 'AcceptVerbs',
 ])
 
+/**
+ * CLR event handlers conventionally do NOT carry the `Async` suffix — the runtime
+ * invokes them through a delegate, not by name, and they are the standard use of
+ * `async void`. Recognize the two idioms so they aren't flagged:
+ *  - the canonical `(object sender, EventArgs e)` signature (first parameter typed
+ *    `object`, second a `…EventArgs` type), or
+ *  - a method subscribed to an event via `+=` somewhere in the same file
+ *    (`source.Changed += OnChanged;`), which covers parameterless handlers.
+ */
+function isEventHandler(node: SyntaxNode, name: string, sourceCode: string): boolean {
+  const params = node.childForFieldName('parameters')
+  if (params) {
+    const ps = params.namedChildren.filter((c) => c?.type === 'parameter')
+    if (ps.length === 2) {
+      const t0 = ps[0]?.childForFieldName('type')?.text ?? ''
+      const t1 = ps[1]?.childForFieldName('type')?.text ?? ''
+      if ((t0 === 'object' || t0 === 'object?') && /EventArgs$/.test(t1)) return true
+    }
+  }
+  return new RegExp('\\+=\\s*(this\\.)?' + name + '\\b').test(sourceCode)
+}
+
 export const csharpAsyncMethodNamingVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/async-method-naming',
   languages: ['csharp'],
@@ -37,6 +60,7 @@ export const csharpAsyncMethodNamingVisitor: CodeRuleVisitor = {
     if (name === 'Main') return null
     if (isCSharpTestMethod(node)) return null
     if (getCSharpDeclAttributeNames(node).some((a) => HANDLER_ATTRIBUTES.has(a))) return null
+    if (isEventHandler(node, name, sourceCode)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

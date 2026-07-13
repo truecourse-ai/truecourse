@@ -11,15 +11,28 @@ export const csharpTooManyClassesPerFileVisitor: CodeRuleVisitor = {
 
     // Records / structs / interfaces / enums are not counted — grouping small
     // record DTOs or an interface with its enum in one file is idiomatic C#.
-    function walk(n: SyntaxNode) {
-      if (n.type === 'class_declaration') classCount++
+    //
+    // Only TOP-LEVEL classes are counted: a nested class is part of its outer
+    // type, not a separate file-worth of code. Counting nested types flagged
+    // idiomatic single-purpose files — an outer holder whose nested static
+    // classes namespace constants/permissions/error-codes (e.g. `Foo { Bar {…},
+    // Baz {…} }`) — that cannot and should not be split into one file per class.
+    function walk(n: SyntaxNode, insideClass: boolean) {
+      if (n.type === 'class_declaration') {
+        if (!insideClass) classCount++
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child) walk(child, true)
+        }
+        return
+      }
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i)
-        if (child) walk(child)
+        if (child) walk(child, insideClass)
       }
     }
 
-    walk(node)
+    walk(node, false)
 
     if (classCount > 3) {
       return makeViolation(

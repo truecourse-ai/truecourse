@@ -47,6 +47,23 @@ export const csharpUnnecessaryNamespaceQualifierVisitor: CodeRuleVisitor = {
       // The using directives themselves obviously repeat their own target.
       if (n.type === 'using_directive') return
 
+      // A namespace declaration's OWN name is not a shortenable reference: even
+      // when `using Volo.Abp;` is present, `namespace Volo.Abp.X` must spell out
+      // its full name — a using can't shorten a declaration. Skip the name so the
+      // extremely common `using <parent>;` + `namespace <parent>.<child>` pairing
+      // isn't reported.
+      if (n.type === 'file_scoped_namespace_declaration') {
+        // Its only child is the namespace name; the members are siblings walked
+        // separately, so there is nothing further to descend into here.
+        return
+      }
+      if (n.type === 'namespace_declaration') {
+        // Skip the name node but still walk the block body.
+        const body = n.namedChildren.find((c) => c?.type === 'declaration_list')
+        if (body) walk(body)
+        return
+      }
+
       // Expression context: `System.Text.Json.JsonSerializer.Serialize(…)` —
       // the receiver chain that spells out an imported namespace.
       if (n.type === 'member_access_expression') {
