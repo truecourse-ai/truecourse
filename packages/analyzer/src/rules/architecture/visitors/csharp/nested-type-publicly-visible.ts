@@ -23,11 +23,15 @@ function isNestedInType(node: SyntaxNode): boolean {
 }
 
 /**
- * A `static` class whose members are all constants (`const` / `static
- * readonly` fields) is an intentional namespacing idiom — grouping related
- * names (permission keys, bundle names, option names) under an owning type —
- * not a leaked implementation helper. Such a constant container is deliberately
- * public and should not be flagged.
+ * A `static` class whose members are all constant-like names — `const` /
+ * `static` fields — or nested classes that are themselves constant containers is
+ * an intentional namespacing idiom: grouping related names (permission keys,
+ * bundle names, option names, error codes) under an owning type, not a leaked
+ * implementation helper. Such a container is deliberately public and should not
+ * be flagged. Both the flat form (all const/static fields) and the grouped form
+ * (nested static holder classes, e.g. `Permissions { Blogs {…}, Posts {…} }`)
+ * qualify; a `static` field need not be `readonly`, since bundle-name holders
+ * often expose plain mutable `public static string` fields.
  */
 function isConstantContainer(node: SyntaxNode): boolean {
   if (node.type !== 'class_declaration') return false
@@ -36,12 +40,15 @@ function isConstantContainer(node: SyntaxNode): boolean {
   if (!body) return false
   const members = body.namedChildren.filter((c) => c && c.type !== 'comment')
   if (members.length === 0) return false
-  return members.every(
-    (m) =>
-      m?.type === 'field_declaration' &&
-      (hasCSharpModifier(m, 'const') ||
-        (hasCSharpModifier(m, 'static') && hasCSharpModifier(m, 'readonly'))),
-  )
+  return members.every((m) => {
+    if (!m) return false
+    if (m.type === 'field_declaration')
+      return hasCSharpModifier(m, 'const') || hasCSharpModifier(m, 'static')
+    // Nested grouping classes that are themselves constant containers keep the
+    // whole file a single cohesive constants namespace.
+    if (m.type === 'class_declaration') return isConstantContainer(m)
+    return false
+  })
 }
 
 export const csharpNestedTypePubliclyVisibleVisitor: CodeRuleVisitor = {

@@ -18,6 +18,18 @@ import { makeViolation } from '../../../types.js'
  */
 const DELEGATE_OR_EXPRESSION_GENERICS = new Set(['Func', 'Action', 'Predicate', 'Expression'])
 
+// Outer generics whose type argument is fixed by a framework/DI contract, not a
+// shape the caller constructs. `ILogger<T>` is a logger *category* type — the
+// category being itself generic (`ILogger<Repository<User>>`) is incidental, and
+// the value is dependency-injected, never built by the caller — so a "name it"
+// suggestion is noise.
+const FRAMEWORK_CONTAINER_GENERICS = new Set(['ILogger'])
+
+// Inner generics that are the canonical, idiomatic content of a collection and
+// can't be named away: `IEnumerable<KeyValuePair<K, V>>` is exactly what a
+// dictionary enumerates as.
+const IDIOMATIC_INNER_GENERICS = new Set(['KeyValuePair'])
+
 /** The simple identifier of a generic_name (`Func` for `Func<…>`). */
 function genericBaseName(generic: SyntaxNode): string {
   return generic.namedChildren.find((c) => c?.type === 'identifier')?.text ?? ''
@@ -38,11 +50,18 @@ function asGenericName(typeNode: SyntaxNode | null): SyntaxNode | null {
 function hasNestedGeneric(typeNode: SyntaxNode): boolean {
   const generic = asGenericName(typeNode)
   if (!generic) return false
+  const baseName = genericBaseName(generic)
   // Delegate/expression-tree generics nest by design and can't be named away.
-  if (DELEGATE_OR_EXPRESSION_GENERICS.has(genericBaseName(generic))) return false
+  if (DELEGATE_OR_EXPRESSION_GENERICS.has(baseName)) return false
+  // DI/framework container generics (e.g. `ILogger<T>`) are injected, not built.
+  if (FRAMEWORK_CONTAINER_GENERICS.has(baseName)) return false
   const args = generic.namedChildren.find((c) => c?.type === 'type_argument_list')
   if (!args) return false
-  return args.namedChildren.some((arg) => asGenericName(arg) !== null)
+  return args.namedChildren.some((arg) => {
+    const inner = asGenericName(arg)
+    // An idiomatic inner shape (e.g. `KeyValuePair<K, V>`) isn't a nesting smell.
+    return inner !== null && !IDIOMATIC_INNER_GENERICS.has(genericBaseName(inner))
+  })
 }
 
 export const csharpNestedGenericParameterVisitor: CodeRuleVisitor = {
