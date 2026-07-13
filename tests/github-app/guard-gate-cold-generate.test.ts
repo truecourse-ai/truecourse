@@ -173,6 +173,38 @@ describe('defaultGuardColdGenerate', () => {
     }
   });
 
+  it('copies birth-finding evidence out of the checkout so it resolves after cleanup', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
+    const evidencePath = '.truecourse/guard/evidence/gen1234_abcd/s7';
+    const finding = {
+      doc: 'README.md',
+      anchor: 'intro',
+      kind: 'birth' as const,
+      title: 'does a thing',
+      step: 2,
+      expected: 'exit 0',
+      actual: 'exit 1',
+      evidencePath,
+    };
+    const inner = fakeGenerateWriting({ ...okGenerateResult(), birthFindings: [finding] });
+    const generate = vi.fn(async (d: string, t?: unknown) => {
+      // The birth run wrote its transcript into the checkout (removed after the gate).
+      writeFile(d, `${evidencePath}/transcript.txt`, 'birth transcript');
+      return inner(d, t as never);
+    });
+    try {
+      expect(await defaultGuardColdGenerate(guardStore, ref, dir, generate)).not.toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    // The checkout is gone, but the birth evidence resolves through the store.
+    expect(await guardStore.readGuardEvidenceAt(REPO, evidencePath, 'transcript.txt')).toBe(
+      'birth transcript',
+    );
+  });
+
   it('returns null (and persists nothing) when no curated corpus is stored', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-cold-'));
     const generate = vi.fn();

@@ -617,6 +617,39 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
      the retry path re-grounds through the same two phases. `GENERATE_SYSTEM_PROMPT`
      unchanged. STATUS: BUILT (PR 1). PR 2 (EE evidence persistence) is a separate change.
 
+36. **EE birth-finding evidence persistence (findings analysis 2026-07-13, PR 2 of 2).**
+   The full-transcript layer behind item 35's inline excerpts. In the hosted edition
+   `guard generate` runs in an EPHEMERAL job checkout; a birth finding's `evidencePath`
+   points into `guard/evidence/<runId>/<scenarioSeg>` inside that checkout, which nothing
+   copied out before the checkout was removed — the gate's `persistFailureEvidence` only
+   covered real (persisted) runs, and the store couldn't accept birth evidence: a birth run
+   is `persist: false`, so it never creates a `guard_runs` row for `writeGuardEvidence` to
+   attach to. The dashboard finding-evidence view therefore 404'd (`{"error":"Evidence not
+   found."}`). Root-cause fix, three parts:
+   - **Store.** New `evidence` jsonb column on `guard_results` (default `{}`, migration
+     `0006_zippy_nomad`), the same manifest shape as `guard_runs.evidence`
+     (`{ "<scenarioSeg>/<file>": contentSha }`) with bodies in the content pool under scope
+     `guard-evidence`. New `writeGuardResultEvidence(ref, scenarioSeg, files)` on the
+     `GuardStore` interface merges entries onto the `(repoKey, commitSha)` report row via the
+     same atomic jsonb `||` UPDATE runs use (throws when no report row exists). The OSS file
+     store no-ops — its birth evidence already sits in the working tree where the reader
+     looks. `readGuardEvidenceAt` gains a fallback: ONLY when the runId embedded in the
+     evidence path matches no `guard_runs` row (a matching run row is authoritative — a key
+     missing there is a miss), it resolves `<scenarioSeg>/<file>` against the repo's
+     `guard_results` evidence manifests (newest report holding the key, filtered in SQL via
+     `jsonb_exists`).
+   - **Write path.** Every ephemeral-checkout generate — onboarding, head-regen, and the
+     gate's cold generate — persists via a shared `persistBirthEvidence(store, ref,
+     checkoutDir, report)` helper — the `persistFailureEvidence` analogue (both share a
+     `collectEvidenceFiles` dir-reader) — that reads each birth finding's evidence dir out of
+     the checkout BEFORE cleanup and `putText`s + merges it onto the report row. Head-regen
+     and cold generate get it from `persistGeneratedGuardCorpus`; onboarding calls it after
+     its own `writeGuardResult`. The worker wiring is unchanged (both jobs use the default
+     pipelines).
+   - **Read path.** The dashboard `/guard/finding-evidence` route and the finding UI need NO
+     change — the fallback slots in beneath the existing `readGuardEvidenceAt` surface.
+   STATUS: BUILT (PR 2).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good

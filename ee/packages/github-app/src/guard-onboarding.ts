@@ -24,6 +24,8 @@ import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
 import {
   saveScenarios,
   writeGuardResult,
+  getGuardStore,
+  type GuardStore,
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
 import {
@@ -171,6 +173,54 @@ export async function materializeAndGenerateGuard(
   return { guard, report };
 }
 
+/**
+ * Read an evidence dir out of a checkout as `{ fileName: body }`, or `null` when
+ * the dir is missing or holds no regular files (nothing transcribed). Shared by
+ * the gate's `persistFailureEvidence` and the generate jobs' `persistBirthEvidence`.
+ */
+export function collectEvidenceFiles(
+  checkoutDir: string,
+  evidencePath: string,
+): Record<string, string> | null {
+  const dir = path.join(checkoutDir, evidencePath);
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const files: Record<string, string> = {};
+  for (const name of names) {
+    const file = path.join(dir, name);
+    if (fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf-8');
+  }
+  return Object.keys(files).length > 0 ? files : null;
+}
+
+/**
+ * Copy each birth finding's transcript out of the checkout into the guard store
+ * before the (ephemeral) checkout is removed — the generate-jobs analogue of the
+ * gate's `persistFailureEvidence`. A birth run is `persist: false` (no run row), so
+ * its evidence attaches to the generate report at `ref`'s commit; the report row must
+ * already be persisted. The finding's `evidencePath` is the sanitized
+ * `.truecourse/guard/evidence/<runId>/<scenarioSeg>` dir, so the scenario segment is
+ * its basename. The OSS file store no-ops (its evidence is already on disk).
+ */
+export async function persistBirthEvidence(
+  guardStore: GuardStore,
+  ref: RepoRef,
+  checkoutDir: string,
+  report: GuardGenerateReport,
+): Promise<void> {
+  for (const finding of report.birthFindings) {
+    if (!finding.evidencePath) continue;
+    const files = collectEvidenceFiles(checkoutDir, finding.evidencePath);
+    if (!files) continue;
+    const scenarioSeg = finding.evidencePath.split('/').pop()!;
+    await guardStore.writeGuardResultEvidence(ref, scenarioSeg, files);
+  }
+}
+
 /** The injectable heavy steps (network + LLM); production uses the defaults. */
 export interface GuardOnboardingSeams {
   /** Shallow-clone the repo pinned to `req.commitSha` into `dir`. */
@@ -258,9 +308,11 @@ export function createGuardOnboardingPipeline(
           return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true };
         }
 
-        // Persist the scenario tree the generate wrote into the clone, then the report.
+        // Persist the scenario tree the generate wrote into the clone, then the
+        // report, then copy any birth-finding transcripts out before the clone goes.
         const { fileCount } = await saveScenarios(ref, scenariosDir(tmp));
         await writeGuardResult(ref, generated.report);
+        await persistBirthEvidence(getGuardStore(), ref, tmp, generated.report);
 
         return {
           savedFileCount: fileCount,

@@ -40,7 +40,12 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner';
 import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
-import { materializeAndGenerateGuard, type GuardGenerateFn } from './guard-onboarding.js';
+import {
+  materializeAndGenerateGuard,
+  collectEvidenceFiles,
+  persistBirthEvidence,
+  type GuardGenerateFn,
+} from './guard-onboarding.js';
 import type { GateStore } from './store/types.js';
 import {
   getInstallationToken,
@@ -302,7 +307,9 @@ async function loadLatestScenarios(
  * given guard store, so tests key their PGlite store not the process-global
  * one), then read the corpus back THROUGH the store so the same parse +
  * recipe-validation path (and InvalidGuardRecipeError contract) applies.
- * Shared by the gate's cold-generate and the spec-change head-regen.
+ * Shared by the gate's cold-generate and the spec-change head-regen. Birth
+ * findings' transcripts are copied out here too (the report row they hang off
+ * was just written), so every caller persists evidence before the checkout goes.
  */
 export async function persistGeneratedGuardCorpus(
   guardStore: GuardStore,
@@ -312,6 +319,7 @@ export async function persistGeneratedGuardCorpus(
 ): Promise<GuardGateCorpus | null> {
   await guardStore.saveScenarios(ref, scenariosDir(checkoutDir));
   await guardStore.writeGuardResult(ref, report);
+  await persistBirthEvidence(guardStore, ref, checkoutDir, report);
   return defaultLoadCorpus(guardStore, ref);
 }
 
@@ -448,19 +456,8 @@ async function persistFailureEvidence(
 ): Promise<void> {
   for (const s of latest.scenarios) {
     if ((s.outcome !== 'fail' && s.outcome !== 'error') || !s.evidencePath) continue;
-    const dir = path.join(checkoutDir, s.evidencePath);
-    let names: string[];
-    try {
-      names = fs.readdirSync(dir);
-    } catch {
-      continue; // nothing transcribed (e.g. a setup error that escaped before any step)
-    }
-    const files: Record<string, string> = {};
-    for (const name of names) {
-      const file = path.join(dir, name);
-      if (fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf-8');
-    }
-    if (Object.keys(files).length > 0) {
+    const files = collectEvidenceFiles(checkoutDir, s.evidencePath);
+    if (files) {
       await guardStore.writeGuardEvidence(repoKey, latest.run.runId, s.id, files);
     }
   }

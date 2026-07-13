@@ -164,7 +164,8 @@ export function createGuardHeadRegenPipeline(seams: GuardHeadRegenSeams = {}): G
         if (!generated) return { scenariosWritten: 0, noCorpus: true, corpus: null };
 
         // Persist under the head + read the corpus back through the store for
-        // the re-gate (the shared cold-generate persistence path).
+        // the re-gate (the shared cold-generate persistence path; it also copies
+        // birth-finding transcripts out before the checkout is removed).
         const corpus = await persistGeneratedGuardCorpus(guardStore(), ref, tmp, generated.report);
         return { scenariosWritten: generated.guard.written.length, noCorpus: false, corpus };
       } finally {

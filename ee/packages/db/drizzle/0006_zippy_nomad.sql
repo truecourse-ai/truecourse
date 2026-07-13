@@ -1,0 +1,1 @@
+ALTER TABLE "guard_results" ADD COLUMN "evidence" jsonb DEFAULT '{}'::jsonb NOT NULL;

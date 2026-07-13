@@ -131,6 +131,20 @@ export interface GuardStore {
     evidenceDir: string,
     file: string,
   ): Promise<string | null>;
+  /**
+   * Persist a BIRTH-finding's evidence for a generate result. A birth run is
+   * `persist: false`, so it never creates a run row — its transcripts attach to the
+   * generate report (`ref`'s commit) instead, resolved by `readGuardEvidenceAt`'s
+   * fallback. The OSS file store is a no-op: the generator already wrote the
+   * transcript into the working tree, where `readGuardEvidenceAt` reads it. `scenarioSeg`
+   * is the finding's already-sanitized evidencePath basename (re-sanitized defensively);
+   * file names must be plain (no separators / `..`).
+   */
+  writeGuardResultEvidence(
+    ref: RepoRef,
+    scenarioSeg: string,
+    files: Record<string, string>,
+  ): Promise<void>;
 
   // --- Scenario corpus ------------------------------------------------------
   // Keyed like the contract corpus: saves are per `RepoRef` (repo + commit; the
@@ -289,6 +303,12 @@ class FileGuardStore implements GuardStore {
     return fs.readFileSync(full, 'utf-8');
   }
 
+  async writeGuardResultEvidence(): Promise<void> {
+    // No-op: OSS birth evidence already lives in the working tree under
+    // `.truecourse/guard/evidence/`, where `readGuardEvidenceAt` reads it directly.
+    // Only the hosted store (ephemeral checkout) must copy it out.
+  }
+
   async saveScenarios(ref: RepoRef, _sourceDir: string): Promise<SaveScenariosResult> {
     // The corpus is already on disk (the guard-runner/generator wrote it in place),
     // so there is nothing to copy — report the count, matching the contract store.
@@ -413,6 +433,11 @@ export const readGuardEvidenceAt = (
   evidenceDir: string,
   file: string,
 ): Promise<string | null> => active.readGuardEvidenceAt(repoPath, evidenceDir, file);
+export const writeGuardResultEvidence = (
+  ref: RepoRef,
+  scenarioSeg: string,
+  files: Record<string, string>,
+): Promise<void> => active.writeGuardResultEvidence(ref, scenarioSeg, files);
 
 export const saveScenarios = (ref: RepoRef, sourceDir: string): Promise<SaveScenariosResult> =>
   active.saveScenarios(ref, sourceDir);

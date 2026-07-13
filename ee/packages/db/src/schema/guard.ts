@@ -70,6 +70,13 @@ export const guardResults = pgTable(
     commitSha: text('commit_sha').notNull(),
     /** Full `GuardGenerateReport` — the last `guard generate` run-result. */
     report: jsonb('report').$type<unknown>().notNull(),
+    /**
+     * Birth-finding evidence manifest `{ "<scenarioSeg>/<file>": 'sha256-…' }` into
+     * `content` (scope guard-evidence). A birth run is `persist: false`, so it never
+     * creates a `guard_runs` row — its transcripts hang off the generate report here,
+     * copied out of the (ephemeral) checkout by the EE generate jobs.
+     */
+    evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
     generatedAt: ts('generated_at').notNull(),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),

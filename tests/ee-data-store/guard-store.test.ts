@@ -370,6 +370,98 @@ describe('PgGuardStore — evidence (pglite + Postgres content)', () => {
   });
 });
 
+describe('PgGuardStore — birth-finding (result) evidence (pglite + Postgres content)', () => {
+  let client: PGlite;
+  let db: EeDb;
+  let store: PgGuardStore;
+  beforeEach(async () => {
+    client = new PGlite();
+    db = await makeDb(client);
+    store = new PgGuardStore(db);
+  });
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it('persists birth evidence onto the guardResults row; readGuardEvidenceAt resolves it without a run row', async () => {
+    // The generate report row must exist first — evidence merges onto it.
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    await store.writeGuardResultEvidence(refAt('c1'), 's5', {
+      'transcript.txt': 'birth run failed at step 2',
+      'diff.txt': 'expected exit 0, got 1',
+    });
+
+    // A birth finding's evidencePath embeds a GENERATE runId that never created a
+    // guard_runs row (birth runs are `persist: false`) — the read must fall back to
+    // the guardResults evidence manifest.
+    const evPath = '.truecourse/guard/evidence/gen-run-1/s5';
+    expect(await store.readGuardEvidenceAt(REPO, evPath, 'transcript.txt')).toBe('birth run failed at step 2');
+    expect(await store.readGuardEvidenceAt(REPO, evPath, 'diff.txt')).toBe('expected exit 0, got 1');
+    // absent file → null
+    expect(await store.readGuardEvidenceAt(REPO, evPath, 'missing.txt')).toBeNull();
+    // unsafe file segment → null, never a read
+    expect(await store.readGuardEvidenceAt(REPO, evPath, '../escape')).toBeNull();
+    // bodies are content-addressed under the evidence scope
+    expect(await scopeCount(db, contentScope.guardEvidence(REPO))).toBe(2);
+    // isolated by repo
+    expect(await store.readGuardEvidenceAt('other/repo', evPath, 'transcript.txt')).toBeNull();
+  });
+
+  it('the run-row read still wins for a real run; birth evidence resolves only via the fallback', async () => {
+    // A real run + its evidence (the guard_runs path).
+    await store.writeGuardRun(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
+    await store.writeGuardEvidence(REPO, 'r1', 's1', { 'transcript.txt': 'run evidence' });
+    // A birth finding on the same commit's report, under a distinct generate runId.
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    await store.writeGuardResultEvidence(refAt('c1'), 's9', { 'transcript.txt': 'birth evidence' });
+
+    expect(
+      await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1/s1', 'transcript.txt'),
+    ).toBe('run evidence');
+    expect(
+      await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/gen-2/s9', 'transcript.txt'),
+    ).toBe('birth evidence');
+  });
+
+  it('a matching run row is authoritative — a key missing there never falls back to result evidence', async () => {
+    // Run row r1 exists but holds no evidence for s1 (e.g. the evidence write failed).
+    await store.writeGuardRun(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
+    // A report-level manifest happens to hold the same <scenarioSeg>/<file> key.
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    await store.writeGuardResultEvidence(refAt('c1'), 's1', { 'transcript.txt': 'birth evidence' });
+
+    // The r1 read is a miss, not the stale birth transcript — fallback only fires
+    // when NO run row matches the runId.
+    expect(
+      await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1/s1', 'transcript.txt'),
+    ).toBeNull();
+  });
+
+  it('sanitizes a dotted scenario segment and round-trips through the manifest key', async () => {
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    // The evidencePath already carries the SANITIZED segment (dots kept, slash → _).
+    await store.writeGuardResultEvidence(refAt('c1'), 'quick.start_1', { 'log.txt': 'hi' });
+    expect(
+      await store.readGuardEvidenceAt(REPO, '.truecourse/guard/evidence/g1/quick.start_1', 'log.txt'),
+    ).toBe('hi');
+  });
+
+  it('rejects an unsafe evidence file name on write', async () => {
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    await expect(store.writeGuardResultEvidence(refAt('c1'), 's1', { '../evil': 'x' })).rejects.toThrow(/unsafe/i);
+  });
+
+  it('throws when the commit has no generate report row to attach evidence to', async () => {
+    await expect(store.writeGuardResultEvidence(refAt('nope'), 's1', { 'log.txt': 'x' })).rejects.toThrow(
+      /no guard result/i,
+    );
+  });
+
+  it('rejects an empty commit SHA on writeGuardResultEvidence', async () => {
+    await expect(store.writeGuardResultEvidence(refAt(''), 's1', { 'log.txt': 'x' })).rejects.toThrow(/commit SHA/i);
+  });
+});
+
 describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
   let client: PGlite;
   let db: EeDb;

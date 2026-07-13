@@ -22,6 +22,7 @@ import {
   resetGuardStore,
   listScenarioFiles,
   readGuardResult,
+  readGuardEvidenceAt,
   readManifest,
   readRecipeRaw,
   type RepoRef,
@@ -215,6 +216,50 @@ describe('guard onboarding pipeline', () => {
 
     // Clone cleaned up.
     expect(fs.existsSync(cloneDir)).toBe(false);
+  });
+
+  it('copies birth-finding evidence out of the checkout so it resolves after cleanup', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const RUN_ID = 'gen1234_abcd';
+    const evidencePath = `.truecourse/guard/evidence/${RUN_ID}/s7`;
+    const finding = {
+      doc: 'README.md',
+      anchor: 'intro',
+      kind: 'birth' as const,
+      title: 'does a thing',
+      step: 2,
+      expected: 'exit 0',
+      actual: 'exit 1',
+      evidencePath,
+    };
+    let cloneDir = '';
+    const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      cloneDir = dir;
+    });
+    const generate = vi.fn(async (dir: string) => {
+      writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ guard: 1, sections: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 1\nid: s1\n');
+      // The birth run wrote its transcript into the checkout (removed after run).
+      writeFile(dir, `${evidencePath}/transcript.txt`, 'birth transcript');
+      writeFile(dir, `${evidencePath}/diff.txt`, 'expected exit 0, got 1');
+      const result = makeGuardResult({ birthFindings: [finding] });
+      writeCloneGuardResult(dir, buildGuardReport(result, '2026-07-09T12:00:00.000Z'));
+      return { guard: result };
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    const result = await pipeline.run(deps, request);
+    expect(result.noCorpus).toBe(false);
+
+    // The report persisted with the finding + its evidence pointer.
+    const report = await readGuardResult(REPO, SHA);
+    expect(report!.birthFindings[0]!.evidencePath).toBe(evidencePath);
+
+    // The checkout is gone, but the birth evidence resolves through the store.
+    expect(fs.existsSync(cloneDir)).toBe(false);
+    expect(await readGuardEvidenceAt(REPO, evidencePath, 'transcript.txt')).toBe('birth transcript');
+    expect(await readGuardEvidenceAt(REPO, evidencePath, 'diff.txt')).toBe('expected exit 0, got 1');
   });
 
   it('a committed corpus in the clone suffices when none is stored (no false noCorpus)', async () => {
