@@ -1,0 +1,38 @@
+name: Block human-review merges
+
+# Deterministic merge gate for the fp-automation loop: while a PR carries a
+# human-review-needed label, this check fails so the PR cannot be merged —
+# not by a human's merge button and not by the fp-next-fix-review routine's
+# API merge (a failing required check makes the REST merge return 405).
+#
+# To actually enforce it, mark the `block-human-review` check as a required
+# status check in the `main` branch protection rule / ruleset (and enable
+# "Do not allow bypassing the above settings"). See
+# docs/fp-automation/README.md for the setup steps.
+
+on:
+  pull_request:
+    types: [opened, reopened, labeled, unlabeled, synchronize]
+
+# When labels change in quick succession, only the latest run matters.
+concurrency:
+  group: block-human-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  block-human-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail while a human-review-needed label is present
+        env:
+          # JSON array of the PR's current label names.
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          echo "PR labels: $LABELS"
+          # Substring match catches both the default `fp-human-review-needed`
+          # and the C# account's `cs-fp-human-review-needed` scoped label.
+          if echo "$LABELS" | grep -q 'fp-human-review-needed'; then
+            echo "::error::PR carries a human-review-needed label — a human must review and merge. Blocked until the label is removed."
+            exit 1
+          fi
+          echo "No human-review-needed label present — not blocking."
