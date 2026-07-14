@@ -122,7 +122,7 @@ export const SECTIONS: SectionDescriptor[] = [
   {
     // Spec-section scenario coverage as a top-level module (OSS — never gated).
     id: 'guard',
-    label: 'Guard',
+    label: 'Spec Guard',
     description: 'Spec-section scenario coverage, generation, drifts',
     icon: FlaskConical,
     defaultTab: 'coverage',
