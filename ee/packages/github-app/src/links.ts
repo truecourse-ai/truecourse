@@ -28,6 +28,18 @@ export async function prCodeQualityUrl(
   return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=codequality&tab=analytics`;
 }
 
+/** Deep link to a repo's PR-scoped Spec Guard view (the runs surface). */
+export async function prGuardUrl(
+  appUrl: string | undefined,
+  repoFullName: string,
+  prNumber: number,
+): Promise<string | undefined> {
+  if (!appUrl) return undefined;
+  const slug = await repoSlug(repoFullName);
+  if (!slug) return undefined;
+  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=guard&tab=runs`;
+}
+
 /** Link to a repo's dashboard page (drift/overview). */
 export async function repoDashboardUrl(
   appUrl: string | undefined,

@@ -1,6 +1,6 @@
 /**
- * Guard-gate webhook handler: on a PR event, open the in-progress drift Check
- * for the head sha and enqueue the durable `guard.gate` job that completes it.
+ * Guard-gate webhook handler: on a PR event, open the in-progress Spec Guard
+ * Check for the head sha and enqueue the durable `guard.gate` job that completes it.
  * All the heavy work (clone, base resolution, scenario execution, verdict) lives
  * in the job's pipeline — this handler is fast: one Check create + one enqueue,
  * so the Check sits "running" while the job is queued and survives a restart as

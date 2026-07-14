@@ -30,7 +30,7 @@ edition run with `ee/` absent.
 ## LLM providers (Models page)
 
 The OSS/local product runs the `claude` CLI for all LLM work (spec scans,
-inference, verification, analysis). A hosted enterprise deploy can't depend on
+guard scenario generation, analysis). A hosted enterprise deploy can't depend on
 a per-user CLI binary, so the enterprise edition swaps in an **API transport**
 that talks to **Anthropic, OpenAI, AWS Bedrock, or GitHub Copilot** (Copilot
 via the OpenAI-compatible endpoint).
@@ -53,41 +53,129 @@ an alternative to the UI.
 `TRUECOURSE_SECRET_KEY` (the encryption master secret). See `.env.example` for
 the full provider env block.
 
-## GitHub App (PR gate)
+## GitHub App (Spec Guard PR gate)
 
-Enterprise users install the App and connect a repo; on every PR it:
+Enterprise users install the App and connect a repo. **Spec Guard** is the PR
+gate: scenarios are generated server-side from the repo's spec corpus and run on
+every pull request, so a behavioral regression against the spec is caught before
+merge. Guard replaced the old contract-verify **drift gate** — same gate role,
+new engine (spec-section-bound scenario tests that execute the repo's behavior,
+not static `.tc` matching). There is no per-repo feature flag: guard is the only
+spec-gating engine.
 
-1. **Spec scan** — if the PR changes spec docs, offers (a checkbox comment) to
-   re-scan + regenerate contracts and commit them back.
-2. **Infer** — offers to reverse-engineer undocumented decisions from the
-   changed code and commit them under `.truecourse/contracts/_inferred/`.
-3. **Drift gate** — automatically verifies the PR head against the base,
-   posts a **blocking GitHub Check** (advisory is per-repo configurable),
-   a summary comment, and inline comments on each new drift. Fails the PR
-   when it introduces new contract drift. The baseline is refreshed on merge
-   to the default branch. Fork PRs are gated (read-only via the pull ref).
+Every PR posts **two GitHub Checks**:
 
-Configured per-repo addresses are emailed via [Resend](https://resend.com)
-when: the drift gate **fails** on a blocking PR, a PR **adds spec documents**
-worth re-scanning, or inference **captures new contracts** from a PR's code.
+- **`TrueCourse / Code Quality`** — the `analyzeCore` violations gate. A distinct
+  code-quality signal, unrelated to the spec gate; kept as-is.
+- **`TrueCourse / Spec Guard`** — the guard gate (below).
+
+Connecting a repo enqueues an onboarding generate job against the default branch,
+so the repo is gated without manual setup. Scenarios, runs, decisions, and
+evidence live server-side (Postgres + blob), keyed by repo and commit — no bot
+commits into the repository.
+
+### Gate semantics
+
+- **New-failures-vs-base.** The Check **fails only on scenarios that pass on the
+  base branch and fail on the PR head** — pre-existing red never blocks unrelated
+  work. Blocking is per-repo configurable (advisory posts the same verdict as
+  neutral).
+- **Baseline.** Base results come from the stored baseline (refreshed on every
+  merge to the default branch, coalesced under load) or the exact base-commit run;
+  on a miss or race the gate does a **lazy base run** on its own checkout. With no
+  baseline at all the Check is neutral ("baseline not established") — never a
+  failure.
+- **Cold-generate on first contact.** If a PR arrives before onboarding generation
+  finished, the gate generates scenarios on its own checkout and persists them
+  under the commit, so the gate is correct from first contact rather than
+  neutral-until-someone-notices.
+- **Dismissals honored.** Repo-level dismissed claims **and** the PR-scoped
+  dismissals overlay are both excluded from the verdict; the overlay promotes into
+  the repo's decisions when the PR merges.
+- **Held scenarios excluded.** Only the committed scenario corpus runs; held
+  (birth-passed-but-withheld) scenarios never reach the gate.
+- **Stale bindings are annotations.** Scenarios whose bound spec section changed
+  (stale) or disappeared (orphaned) surface as inline **warning annotations** on
+  the doc section, never as failures — spec edits don't instantly red-flag a PR.
+- **Neutral** = a repo with genuinely no spec documents (nothing to check), or the
+  kill-switch (below).
+- **Error Check** = the gate produced no verdict: build failure/timeout, run
+  timeout, a broken built entry, generation failure, an unparseable committed
+  recipe, or infra failure. An error settles as a **failure-styled Check** so a
+  broken gate never silently passes — it never collapses to neutral.
+
+A PR that **changes spec documents** is offered a checkbox comment that
+regenerates scenarios for the PR head server-side and re-gates, so spec changes
+and their scenario updates land together. Fork PRs are gated read-only via the
+pull ref (which lives in the base repo).
+
+### Capability
+
+The enterprise server plugin advertises a `guard` capability **only after** the
+guard subsystem (store, jobs, routes) registers successfully — a misconfigured or
+dead job queue degrades visibly (guard actions stay hidden) instead of
+half-working. Job-backed hosted generate/run and the gate surfaces gate on
+`guard`; local-only guard actions gate on the community `local-filesystem`
+capability and are hidden in hosted mode.
+
+### Guard-failure emails
+
+Configured per-repo addresses (`notifyEmails`) are emailed via
+[Resend](https://resend.com) when the **Spec Guard Check fails** on a blocking PR
+(one message per recipient, so addresses aren't disclosed to each other and one
+bad address can't fail the batch). Emails are **failure-only**: no email for
+error Checks (infra/build/timeout — operator noise, visible in the jobs UI),
+neutral Checks, or stale/held-only outcomes. Gated on the per-repo `gateFailure`
+notification preference. Requires `RESEND_API_KEY` + `RESEND_FROM`; absent, the
+gate runs without email.
+
+### Kill-switch and rollback (operators)
+
+- **Kill-switch:** set `TRUECOURSE_GUARD_GATE_DISABLED` (truthy) to flip the gate
+  to a **neutral Check with a "gate disabled" note** — no clone, no run. This
+  stops a misbehaving gate in minutes without a redeploy. `0`/`false`/empty =
+  enabled.
+- **Rollback:** kill-switch first, then revision rollback if needed. Rollback is
+  safe because every guard database migration is **purely additive** — the worst
+  failure state is "temporarily un-gated," never "wrong engine." The verify engine
+  never returns.
+- **Concurrency:** `TRUECOURSE_GUARD_GATE_CONCURRENCY` bounds the worker pool (max
+  concurrent guard-gate build+run executions per process, default 2) so concurrent
+  PRs across tenants can't stampede the container. Gate execution is a durable job
+  that survives a server restart; per-phase hard timeouts (build ~10 min, run
+  ~15 min) settle a hung build as an error Check.
+
+### Known v1 regression: workspace-level contracts
+
+Workspace-level (cross-repo) contracts are **dropped in v1** with no guard
+equivalent yet — a **documented known regression**, not a silent loss. The
+cross-repo ripple that workspace contracts provided has no hosted guard analog
+(workspace-level scenarios are a later design). **Contract generation code and
+stores are dormant, not removed:** the data is preserved, and contracts return as
+the planned **spec→code** linking layer (guard links spec→test today; contracts
+will later link a failed scenario to the code that caused it). The client
+Knowledge surface points at guard rather than presenting workspace contracts as a
+live feature.
 
 **Storage:** a `GateStore` interface — file-based by default
 (`~/.truecourse/github-app/`), Postgres when `DATABASE_URL` is set (hosted).
+Guard scenarios/runs/decisions are Postgres tables (additive migration) with
+evidence transcripts in the blob store.
 
 **Required GitHub App permissions:** Checks (write), Pull requests (write),
-Contents (**read & write** — scan/infer commit regenerated and inferred
-contracts back to the PR branch), Metadata (read). Subscribe to `pull_request`,
-`push`, `installation`, and `issue_comment` events. Set the webhook URL to
+Contents (**read** — hosted guard stores scenarios server-side and needs no
+commit-back), Metadata (read). Subscribe to `pull_request`, `push`,
+`installation`, and `issue_comment` events. Set the webhook URL to
 `<server>/api/ee/github/webhook` and the Setup URL to
 `<server>/api/ee/github/setup`.
 
 **Env** (see `.env.example`): `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
 `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`; optional `RESEND_API_KEY` +
-`RESEND_FROM` (email), `DATABASE_URL` (hosted Postgres store),
-`TRUECOURSE_GUARD_GATE_DISABLED` (guard-gate kill-switch — truthy disables the
-gate and PRs get a neutral Check with a "gate disabled" note; `0`/`false`/empty
-= enabled), and `TRUECOURSE_GUARD_GATE_CONCURRENCY` (max concurrent guard-gate
-build+run executions per process, default 2).
+`RESEND_FROM` (guard-failure emails), `DATABASE_URL` (hosted Postgres store),
+`TRUECOURSE_GUARD_GATE_DISABLED` (kill-switch — truthy disables the gate and PRs
+get a neutral Check with a "gate disabled" note; `0`/`false`/empty = enabled),
+and `TRUECOURSE_GUARD_GATE_CONCURRENCY` (max concurrent guard-gate build+run
+executions per process, default 2).
 
 ## Error tracking (Sentry)
 

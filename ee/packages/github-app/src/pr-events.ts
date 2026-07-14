@@ -1,7 +1,7 @@
 /**
- * Shared helpers for the PR-event handlers (the drift gate, the guard gate, and
- * the infer offer). The PR actions we react to, the permissions that authorize
- * an actor-triggered run, and the fork check (a head in a different repo).
+ * Shared helpers for the PR-event handlers (the Code Quality gate and the guard
+ * gate). The PR actions we react to, the permissions that authorize an
+ * actor-triggered run, and the fork check (a head in a different repo).
  */
 
 import type { PullRequestPayload } from './webhook.js';

@@ -37,7 +37,7 @@ export interface RepoLinkRecord {
   /** Min new-violation severity that fails the Code Quality Check (default `high`). */
   codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical';
   enabled: boolean;
-  /** Addresses notified (via Resend) when the gate fails. */
+  /** Addresses notified (via Resend) when the Spec Guard gate fails. */
   notifyEmails?: string[];
   /** Per-type email toggles. Absent = every type on (the default). */
   notifications?: GithubNotificationPrefs;

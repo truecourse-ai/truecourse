@@ -11,7 +11,7 @@ import type { CheckAnnotation } from './octokit.js';
 import type { GuardGateDecision } from './guard-gate.js';
 
 /** The guard gate's own Check — one verdict per PR, alongside Code Quality. */
-export const GUARD_GATE_CHECK_NAME = 'TrueCourse / Guard';
+export const GUARD_GATE_CHECK_NAME = 'TrueCourse / Spec Guard';
 
 /** Inline warning on a stale/orphaned scenario's bound doc section — a
  *  `CheckAnnotation` pinned to warning level (stale bindings never fail),

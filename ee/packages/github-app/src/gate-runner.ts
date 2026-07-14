@@ -23,12 +23,12 @@ import {
   type GithubAuth,
 } from './github.js';
 
-export interface GateVerifyDeps {
+export interface GateAnalyzeDeps {
   store: GateStore;
   auth: GithubAuth;
 }
 
-export interface GateVerifyRequest {
+export interface GateAnalyzeRequest {
   repoFullName: string;
   installationId: number;
   prNumber: number;
@@ -38,7 +38,7 @@ export interface GateVerifyRequest {
   enableLlmAnalysis?: boolean;
 }
 
-export interface GateVerifyOutput {
+export interface GateAnalyzeOutput {
   baseSha: string | null;
   /** The sha we actually analyzed (resolved from the pull ref). */
   headSha: string | null;
@@ -51,11 +51,11 @@ export interface GateVerifyOutput {
   codeQualityAdded: ViolationRecord[] | null;
 }
 
-export async function runGateVerify(
-  deps: GateVerifyDeps,
-  req: GateVerifyRequest,
-): Promise<GateVerifyOutput> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-verify-'));
+export async function runGateAnalyze(
+  deps: GateAnalyzeDeps,
+  req: GateAnalyzeRequest,
+): Promise<GateAnalyzeOutput> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-analyze-'));
 
   try {
     const token = await getInstallationToken(deps.auth, req.installationId);

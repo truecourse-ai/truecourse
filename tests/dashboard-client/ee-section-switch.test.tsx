@@ -12,10 +12,10 @@ import userEvent from '@testing-library/user-event';
 import { EeSectionSwitch } from '@/ee/EeSectionSwitch';
 
 describe('EeSectionSwitch', () => {
-  it('offers exactly Guard and Code Quality', () => {
+  it('offers exactly Code Quality and Spec Guard', () => {
     render(<EeSectionSwitch section="codequality" onSectionChange={() => {}} />);
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Guard', 'Code Quality']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Code Quality', 'Spec Guard']);
   });
 
   it('clicking Guard fires onSectionChange("guard")', async () => {

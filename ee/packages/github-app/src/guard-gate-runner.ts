@@ -4,7 +4,7 @@
  * resolves the base guard results (stored baseline → exact-commit row → lazy
  * base run), executes the COMMITTED scenario corpus against the PR head through
  * the `GuardExecutor` seam under the process-wide concurrency limiter, and
- * completes the drift Check with new-failures-vs-base semantics
+ * completes the Spec Guard Check with new-failures-vs-base semantics
  * (`decideGuardGate`). Stale/orphaned bindings become inline annotations; every
  * engine-level failure posts an error-styled FAILURE Check; the deployment
  * kill-switch short-circuits to neutral before any clone.
@@ -56,6 +56,9 @@ import {
 } from './github.js';
 import { splitRepo, postCheck, type OctokitClient } from './octokit.js';
 import { decideGuardGate, emptyGuardGateDiff, type GuardGateDecision } from './guard-gate.js';
+import { wantsNotification } from './notifications.js';
+import { prGuardUrl } from './links.js';
+import type { EmailNotifier } from './email.js';
 import {
   GUARD_GATE_CHECK_NAME,
   capGuardAnnotations,
@@ -159,6 +162,10 @@ export interface GuardGatePipelineDeps {
   execute: GuardExecutor;
   /** Gates ONLY the executor calls — clone and Check posting run outside the permit. */
   limiter: GuardGateLimiter;
+  /** Resend-backed email notifier; set when RESEND_API_KEY is configured, else absent (no emails). */
+  notifier?: EmailNotifier;
+  /** Dashboard origin for the PR-scoped guard deep link in the failure email; absent → no link. */
+  appUrl?: string;
 }
 
 /** The resolved gate target — `GuardGateJobPayload` minus the job envelope. */
@@ -190,7 +197,7 @@ export interface GuardGateRunOptions {
    * Skip the redelivery fast path (decide-from-stored-run) and re-execute the
    * head. Set by the spec-change regen re-gate: the writer deliberately wants the
    * PR's freshly-regenerated scenarios run, even though a prior gate already
-   * stored a run for this head. Mirrors the drift gate's `force` re-verify.
+   * stored a run for this head.
    */
   force?: boolean;
 }
@@ -499,6 +506,41 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
       const blocking = link?.blocking ?? true;
       const dismissed = await foldDismissals(deps.guardStore, repoKey, payload.prNumber);
 
+      // Gate-failure email — fired fire-and-forget after the Check is recorded,
+      // so a redelivery (deduped by the stored head run) can't re-send. Sends
+      // ONLY on a blocking `failure` (new failures vs base): the internal 'error'
+      // conclusion renders as a FAILURE Check but must NOT notify (infra/build/
+      // timeout is not the PR's red), and neutral/advisory outcomes stay silent.
+      const prUrl = `https://github.com/${repoKey}/pull/${payload.prNumber}`;
+      const checkUrl = `${prUrl}/checks`;
+      const emailFailure = async (decision: GuardGateDecision): Promise<void> => {
+        const notifyEmails = link?.notifyEmails ?? [];
+        if (
+          !deps.notifier ||
+          !link ||
+          decision.conclusion !== 'failure' ||
+          notifyEmails.length === 0 ||
+          !wantsNotification(link, 'gateFailure')
+        ) {
+          return;
+        }
+        // Resolve the deep link in the main flow (a fast local registry read,
+        // and only ever on a blocking failure with recipients) so the actual
+        // send below can be fired synchronously; the network send itself stays
+        // fire-and-forget (the notifier never throws — see createEmailNotifier).
+        const dashboardUrl = await prGuardUrl(deps.appUrl, repoKey, payload.prNumber).catch(
+          () => undefined,
+        );
+        void deps.notifier.sendGuardGateFailure(notifyEmails, {
+          repoFullName: repoKey,
+          prNumber: payload.prNumber,
+          prUrl,
+          failing: decision.diff.newlyFailing,
+          checkUrl,
+          dashboardUrl,
+        });
+      };
+
       // Redelivery fast path: this head was already gated and its run persisted
       // (decision 5) — decide from the stored results, no clone, no run. The base
       // comes from the store only (no checkout exists for a lazy base run), and
@@ -513,6 +555,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         await opts.onPhase?.('verdict');
         await post(render(decision), guardGateCheckOutput(decision));
         await recordGuardGateRun(deps.store, payload, decision);
+        await emailFailure(decision);
         return decision;
       }
 
@@ -640,6 +683,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         }
         await post(render(decision), output);
         await recordGuardGateRun(deps.store, payload, decision);
+        await emailFailure(decision);
 
         // Persist the head run (non-baseline row keyed by headSha — decision 5:
         // redelivery dedupe) + its failure transcripts, before the checkout goes.

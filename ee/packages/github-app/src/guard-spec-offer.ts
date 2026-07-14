@@ -139,7 +139,7 @@ export async function handleCommentEditedGuardSpec(
   const prNumber = payload.issue.number;
   const installationId = payload.installation.id;
 
-  // Only a repo writer may trigger server-side LLM work (mirrors the infer checkbox).
+  // Only a repo writer may trigger server-side LLM work (same rule as the spec-scan checkbox).
   const perm = await getActorPermission(octokit, coords, payload.sender?.login ?? '');
   if (!WRITE_PERMISSIONS.includes(perm)) {
     log.warn(

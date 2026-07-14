@@ -27,8 +27,11 @@ const eeClientModule: EeClientModule = {
       load: () => import('./PullRequestsPage'),
       requiredCapability: 'github-gate',
     },
-    // TODO(spec-guard): Knowledge showed workspace contracts; migrate to guard
-    // coverage/scenarios (route + nav item removed with the contract subsystem).
+    // v1 regression: the Knowledge surface used to present workspace (cross-repo)
+    // contracts; that route + nav item are paused (removed here) while the contract
+    // subsystem is dormant. The data is preserved and cross-repo contracts are
+    // planned to return as the spec→code linking layer. Per-repo verification is
+    // covered today by the Spec Guard gate (guard coverage/scenarios).
     {
       path: '/settings',
       load: () => import('./SettingsPage'),

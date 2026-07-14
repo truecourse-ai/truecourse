@@ -46,7 +46,7 @@ function annotation(i: number): GuardStaleAnnotation {
 
 describe('guardGateCheckOutput', () => {
   it('the guard gate posts under its own Check name', () => {
-    expect(GUARD_GATE_CHECK_NAME).toBe('TrueCourse / Guard');
+    expect(GUARD_GATE_CHECK_NAME).toBe('TrueCourse / Spec Guard');
   });
 
   it('success reads cleanly and counts resolved scenarios', () => {

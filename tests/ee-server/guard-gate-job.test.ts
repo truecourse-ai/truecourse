@@ -222,7 +222,7 @@ describe('runGuardGate — worker body', () => {
 
     expect(calls.check).toHaveLength(1);
     expect(calls.check[0]).toMatchObject({
-      name: 'TrueCourse / Guard',
+      name: 'TrueCourse / Spec Guard',
       head_sha: HEAD_SHA,
       status: 'completed',
       conclusion: 'failure',

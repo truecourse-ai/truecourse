@@ -1,9 +1,12 @@
 # Spec Guard — Section-Bound Scenario Tests Replace Contract Verify
 
 STATUS: OSS v1 BUILT (Phases 0–5, 2026-07-07) — design agreed 2026-07-03; open work: the
-follow-ups and decided-not-built items in the body (fidelity review v1.5, stub/http
-capabilities, OSS AI-SDK transport, scan-staleness signal) and Phases 6–8 (api/tui/web
-drivers, EE). This plan adds **generated, spec-section-bound
+follow-ups and decided-not-built items in the body (stub/http/clock capabilities, OSS
+AI-SDK transport, the generate batch-size dial, cross-area overlap dedup, section-level
+precedence in extraction, the guard-helpers-to-shared move) and Phases 6–7 (api/tui/web
+drivers). Phase 8 (EE adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry
+below. (Fidelity review and the scan-staleness signal, once listed here as open, are BUILT
+— items 33 and 31a.) This plan adds **generated, spec-section-bound
 scenario tests** ("guards") as the new verification artifact, built alongside the existing
 contract system. The spec side (scan → curated corpus → areas → decisions) is untouched.
 
@@ -15,6 +18,15 @@ four CLI commands, the BL Drift dashboard, and EE's verify-drift gate usage were
 EE gate ran on verify drifts until this cleanup removed it, and guard's EE phase re-adds
 gating on a separate branch. The reusable contract MATCHING ENGINE (extractor + verifier
 matching half + in-process generate/infer/curate) is KEPT for that branch — see item 24.
+
+Retirement is strictly gate-CONSUMERS; contract GENERATION code and stores are **dormant,
+not dead** — they are the planned **spec→code** half of the linking story. Guard links
+spec→test today (a section to the scenarios that guard it); contracts will later link
+spec→code, connecting a failed guard scenario to the code that caused it. Nothing that
+generates or stores contracts is deleted in any cleanup. The EE PR gate posts **two** Checks:
+`TrueCourse / Code Quality` (the `analyzeCore` violations gate — a distinct signal, kept) and
+`TrueCourse / Spec Guard` (the guard gate — renamed from `TrueCourse / Guard`, safe because no
+clients depend on the old name yet). Guard is the only spec-gating engine; verify never returns.
 
 **Scope: OSS first.** Everything in this plan lands in the OSS surface — core packages, CLI,
 local dashboard, file-based store. EE adaptation (hosted store adapters, PR-scoped guard runs,
@@ -1458,24 +1470,56 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
 - **Phase 6 — api driver.** Environment recipe v2 (compose), ephemeral datastores, network-
   boundary fakes, egress control. STATUS: NOT STARTED (post-v1)
 - **Phase 7 — tui / web drivers.** PTY tier; Playwright tier. STATUS: NOT STARTED (post-v1)
-- **Phase 8 — EE adaptation.** Only after the OSS loop (Phases 0–5) is proven on real repos:
-  guard store behind the EE storage adapters (Postgres/blob, repo read-only), PR-scoped guard
-  runs (baseline anchored to PR-head, per-PR overlay — same pattern as spec PR-scoping), an
-  additive gate check powered by guard runs (the verify-drift signal stays), hosted execution
-  tier (warm per-repo snapshots, credential rotation), spec-section coverage in the EE repo
-  views. STATUS: IN PROGRESS (branch `sm/spec-guards-ee`, working tree awaiting review;
-  detailed issue tracking lives in the external guard-ee-hosted-gate tracker) — landed so far:
-  Pg guard store behind the GuardStore seam, the GuardExecutor seam, the hosted guard-generate
-  onboarding chain, the PR guard-gate durable job + diff Check (kill-switch env,
-  concurrency limiter, crash/orphan Check settlement, abort-signal cancellation), and
-  refresh-on-merge + deploy backfill (issue 06): the `guard.baseline` durable job (its own
-  pending-buffer coalescing, shared gate limiter), the merge and post-generate refresh chains
-  (complement of onboarding), and the one-time deploy backfill (operator-scoped repo
-  enumeration + a run-once marker, generate-vs-baseline routing per repo), and the EE Guard
-  lens (issue 07): the guard section as a third EE repo-console lens (Coverage / Scenarios /
-  Runs, always visible — actions still capability-self-gated), the pure `ee-lens` coherence
-  module + `EeSectionSwitch` guard segment, and a per-PR guard deep link in the Pulls feed.
-  Remaining: the hosted execution tier.
+- **Phase 8 — EE adaptation: hosted Guard replaces the verify drift gate.** Guard becomes the
+  enterprise PR gate — scenarios generated server-side from the spec corpus, run on every PR,
+  posting the gate Check with a new engine. STATUS: IN PROGRESS (branch `sm/spec-guards-ee`,
+  working tree awaiting review). EE swaps seams, not logic: the file store becomes Postgres +
+  blob behind the `GuardStore` interface, execution goes behind the `GuardExecutor` seam,
+  child processes get a minimal explicitly-constructed env (no DB URL / master secret / App
+  key), and gate runs are durable jobs under a bounded worker pool with per-phase timeouts.
+  Diff-gate semantics: the Check fails ONLY on scenarios that pass on base and fail on head;
+  repo + PR-overlay dismissals honored, held scenarios excluded, stale/orphaned bindings become
+  annotations, infra/build/timeout/generation failures settle as an error Check, a genuine
+  absence of spec docs is neutral. Detailed issue tracking lives in the external
+  guard-ee-hosted-gate tracker; the decided sub-phases:
+  - **08.01 — Guard schema + Pg guard store.** Additive drizzle migration; scenario/run/decision
+    persistence + blob-evidence pointers behind the `GuardStore` seam. STATUS: BUILT (awaiting review).
+  - **08.02 — GuardExecutor seam + minimal-env execution.** The single injected `GuardExecutor`
+    function (checkout + scenarios + recipe → run report) at the customer-code boundary; minimal
+    child env. STATUS: BUILT (awaiting review).
+  - **08.03 — Onboarding generate job + `guard` capability.** Repo connect enqueues a server-side
+    generate against the default branch; the `guard` capability advertised only after the guard
+    subsystem (store/jobs/routes) registers. STATUS: BUILT (awaiting review).
+  - **08.04 — Gate-execution durable job + diff Check (warm path).** The webhook enqueues gate
+    execution; the Check sits in-progress while queued; new-failures-vs-base verdict, kill-switch
+    neutral, stale annotations, error-vs-neutral settlement, abort-signal cancellation.
+    STATUS: BUILT (awaiting review).
+  - **08.05 — Cold-generate at gate + spec-change checkbox regen.** First-contact cold-generate on
+    the gate's own checkout (persisted under the commit, never neutral-until-noticed); a
+    spec-doc-changing PR is offered a checkbox comment that regenerates scenarios for the head and
+    re-gates. STATUS: BUILT (awaiting review).
+  - **08.06 — Merge baseline refresh + deploy backfill.** The `guard.baseline` durable job
+    (pending-buffer coalescing, shared gate limiter) refreshes the baseline on merge to the default
+    branch; a one-time deploy backfill enqueues generate + baseline run for every connected repo.
+    STATUS: BUILT (awaiting review).
+  - **08.07 — Hosted PR-scoped dashboard guard views + evidence.** The EE Guard lens as a third
+    repo-console lens (Coverage / Scenarios / Runs), PR-scoped via the head-SHA tab-ref pattern,
+    with per-PR deep links in the Pulls feed and the evidence transcript viewer. STATUS: BUILT
+    (awaiting review).
+  - **08.08 — PR dismissals overlay + merge promotion.** Per-PR scenario dismissals kept as an
+    overlay that promotes into the repo's decisions on merge — the spec-decisions carry-over pattern.
+    STATUS: BUILT (awaiting review).
+  - **08.09 — Retire verify-gate consumers + guard-failure emails + docs.** Verify runs, the
+    drift Check content, inline drift comments, drift-failure emails, the infer checkbox, and the
+    workspace-contracts job retire; guard-failure emails (Resend, per-repo `notifyEmails`,
+    `gateFailure` pref, sent on Check FAILURE only) take over the notification role. The guard
+    Check posts as `TrueCourse / Spec Guard`; the `TrueCourse / Code Quality` violations gate stays
+    as a separate signal. Contract generation code and stores stay dormant-but-intact (see the
+    RETIREMENT DECIDED note above — they are the future spec→code linking half). Workspace-level
+    (cross-repo) contracts drop in v1: a documented known regression (data preserved, returns with
+    the spec→code work). STATUS: BUILT 2026-07-14 (sm/spec-guards-ee, awaiting review).
+  - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
+    credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
 after that — order between them is a call to make when OSS v1 ships.
@@ -1500,10 +1544,14 @@ the existing sample-project fixtures for engine tests.
   changed sections/code becomes the default and full runs move to the gate.
 - **CLIs with unavoidable nondeterminism** beyond the normalizer set (random ids in output,
   locale-dependent formatting) — extend normalizers case-by-case; never add retries.
-- **Two verification systems coexist** (contract verify + guard run) until retirement is decided
-  — the dashboard and docs must keep the two vocabularies clearly apart so users aren't confused
-  about which drift is which.
-- **EE workspace contracts** (Knowledge plan) still produce `.tc` — if guard eventually replaces
-  contracts, EE needs its own answer (workspace-level scenarios?). Out of scope here.
+- **Two verification systems coexist** (contract verify + guard run) — RESOLVED: the verify
+  surface was fully removed on 2026-07-13 (item 24) and guard is now the only user-facing
+  verification engine, so the vocabularies no longer overlap. The contract generation engine
+  remains in-process (dormant, the future spec→code linking half — not a competing "drift").
+- **EE workspace contracts** (Knowledge plan): the workspace-contracts job retired with the
+  Phase-8 gate swap, and guard has no cross-repo equivalent yet — workspace-level (cross-repo)
+  scenarios are a later design. The loss of the cross-repo ripple is a **documented known v1
+  regression** (data preserved, feature returns with the spec→code linking work); the client
+  Knowledge surface points at guard rather than presenting workspace contracts as live.
 - **`infer`** stays contract-native. Whether an infer-equivalent exists in the guard world
   (generating scenarios for *undocumented* behavior) is deliberately deferred.

@@ -11,6 +11,7 @@ import type { EeDb } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
 import { loadGithubAppConfig } from './config.js';
 import { createGithubAuth } from './github.js';
+import { notifierFromConfig } from './email.js';
 import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
 import { createWebhookRouter } from './webhook.js';
@@ -83,6 +84,7 @@ export async function registerGithubApp(
     opts.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
   const store = selectGateStore(opts.db ?? null);
   const auth = createGithubAuth(cfg);
+  const notifier = notifierFromConfig(cfg);
 
   // Shared deps for the Code Quality gate. The gate in-flight set is keyed by
   // `${repo}#${sha}` (concurrent deliveries of the same head).
@@ -112,6 +114,8 @@ export async function registerGithubApp(
             octokitFor: offerDeps.octokitFor,
             execute: getGuardExecutor(),
             limiter: { run: (fn) => fn() },
+            notifier,
+            appUrl,
           },
           req,
         )
@@ -159,6 +163,8 @@ export async function registerGithubApp(
             octokitFor: offerDeps.octokitFor,
             execute: getGuardExecutor(),
             limiter: { run: (fn) => fn() },
+            notifier,
+            appUrl,
           },
           {
             repoFullName: req.repoFullName,
@@ -309,6 +315,13 @@ export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineRe
 export { handlePullRequestClosed } from './pr-closed.js';
 export { upsertPrState, prStateFromPayload } from './pr-state.js';
 export { loadGithubAppConfig } from './config.js';
+export {
+  createEmailNotifier,
+  notifierFromConfig,
+  type EmailNotifier,
+  type ResendLike,
+  type GuardGateFailureEmail,
+} from './email.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
 
@@ -348,10 +361,10 @@ export {
   cqCheckOutput,
 } from './gate-comment.js';
 export {
-  runGateVerify,
-  type GateVerifyDeps,
-  type GateVerifyRequest,
-  type GateVerifyOutput,
+  runGateAnalyze,
+  type GateAnalyzeDeps,
+  type GateAnalyzeRequest,
+  type GateAnalyzeOutput,
 } from './gate-runner.js';
 export {
   handlePullRequestGate,

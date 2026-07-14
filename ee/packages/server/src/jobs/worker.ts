@@ -34,6 +34,7 @@ import {
   defaultGuardGatePipeline,
   defaultGuardBaselinePipeline,
   defaultGuardHeadRegenPipeline,
+  notifierFromConfig,
   postGuardGateErrorCheck,
   type BaselineResult,
   type GuardOnboardingPipeline,
@@ -343,6 +344,7 @@ export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJob
       const cfg = loadGithubAppConfig();
       if (!cfg) throw new Error('the GitHub App is not configured');
       const octokitFor = deps.octokitFor ?? ((id: number) => installationOctokit(cfg, id));
+      const notifier = notifierFromConfig(cfg);
       try {
         const decision = await deps.pipeline.run(
           {
@@ -352,6 +354,8 @@ export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJob
             octokitFor,
             execute: getGuardExecutor(),
             limiter: guardGateLimiter,
+            notifier,
+            appUrl: process.env.WORKOS_APP_URL ?? 'http://localhost:3000',
           },
           p,
           // ctx.signal = graphile's abortSignal — the pipeline threads it into
@@ -519,6 +523,8 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
           octokitFor: (id) => installationOctokit(cfg, id),
           execute: getGuardExecutor(),
           limiter: guardGateLimiter,
+          notifier: notifierFromConfig(cfg),
+          appUrl: process.env.WORKOS_APP_URL ?? 'http://localhost:3000',
         },
         gateReq,
         { force: true, signal },
