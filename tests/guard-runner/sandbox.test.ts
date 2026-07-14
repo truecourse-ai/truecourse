@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { createSandbox, SandboxError, listSandboxFiles } from '@truecourse/guard-runner'
 
@@ -105,6 +106,49 @@ describe('createSandbox — setup.files', () => {
   it('rejects a path that escapes the sandbox', () => {
     expect(() => make({ setupFiles: { '../escape.txt': 'x' } })).toThrow(SandboxError)
     expect(() => make({ setupFiles: { '/etc/passwd': 'x' } })).toThrow(SandboxError)
+  })
+})
+
+describe('createSandbox — packageLinks', () => {
+  const pkgDirs: string[] = []
+  afterEach(() => {
+    while (pkgDirs.length) fs.rmSync(pkgDirs.pop()!, { recursive: true, force: true })
+  })
+  function pkgDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-sbx-pkg-'))
+    pkgDirs.push(dir)
+    return dir
+  }
+
+  it('links a package into node_modules by name', () => {
+    const dir = pkgDir()
+    const sb = make({ packageLinks: [{ name: 'mypkg', dir }] })
+    const link = path.join(sb.cwd, 'node_modules', 'mypkg')
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(fs.realpathSync(link)).toBe(fs.realpathSync(dir))
+  })
+
+  it('creates the scope parent for a scoped name', () => {
+    const dir = pkgDir()
+    const sb = make({ packageLinks: [{ name: '@scope/pkg', dir }] })
+    const link = path.join(sb.cwd, 'node_modules', '@scope', 'pkg')
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true)
+  })
+
+  it('never overwrites a path the scenario seeded — the seeded stub wins', () => {
+    const dir = pkgDir()
+    const sb = make({
+      setupFiles: { 'node_modules/mypkg/index.js': 'module.exports = "stub"' },
+      packageLinks: [{ name: 'mypkg', dir }],
+    })
+    const target = path.join(sb.cwd, 'node_modules', 'mypkg')
+    expect(fs.lstatSync(target).isSymbolicLink()).toBe(false)
+    expect(fs.readFileSync(path.join(target, 'index.js'), 'utf-8')).toBe('module.exports = "stub"')
+  })
+
+  it('rejects a link name that escapes node_modules', () => {
+    const dir = pkgDir()
+    expect(() => make({ packageLinks: [{ name: '../evil', dir }] })).toThrow(SandboxError)
   })
 })
 

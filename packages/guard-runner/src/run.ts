@@ -18,6 +18,7 @@ import {
   type GuardSummary,
 } from '@truecourse/shared'
 import { loadRecipe, resolveEntry, RecipeError } from './recipe.js'
+import { discoverPackageLinks } from './package-links.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, type BuildResult } from './build.js'
 import { preflightEntry, type EntryPreflightResult } from './preflight.js'
@@ -172,12 +173,15 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // Pass evidence is part of the persisted run baseline; a non-persisted (birth
   // validation) run captures none for its passing candidates — the next real run does.
   const capturePassEvidence = opts.persist !== false
+  // Discovered once per run — every sandbox links the same package(s) under test.
+  const packageLinks = discoverPackageLinks(repoRoot)
   const executed = await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
     const outcome = await runScenario(scenario, {
       repoRoot,
       runId,
       resolvedEntry,
       recipeEnv: loaded.recipe.env,
+      packageLinks,
       stepTimeoutMs,
       capturePassEvidence,
     })

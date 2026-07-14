@@ -1,7 +1,9 @@
 /**
  * Per-scenario sandbox: a fresh temp `cwd`, an isolated `HOME`/`XDG_*` inside the
  * sandbox (the user's real machine state never leaks in or gets touched), a pinned
- * deterministic env, and declaratively seeded `setup.files`.
+ * deterministic env, declaratively seeded `setup.files`, and the package(s) under
+ * test linked into `node_modules` so bare-specifier imports of the target resolve
+ * (see `package-links.ts`).
  *
  * The child env is built from an ALLOWLIST, not from `process.env`. Only what a
  * program legitimately needs to run — `PATH`, the sandbox-redirected HOME/XDG/TMP,
@@ -17,6 +19,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { PackageLink } from './package-links.js'
 
 /**
  * Determinism pins applied to every sandbox — the single source for both the
@@ -47,6 +50,8 @@ export interface SandboxOptions {
   recipeEnv?: Record<string, string>
   scenarioEnv?: Record<string, string>
   setupFiles?: Record<string, string>
+  /** Packages to link into `node_modules` by name (the package(s) under test). */
+  packageLinks?: readonly PackageLink[]
 }
 
 export function createSandbox(opts: SandboxOptions = {}): Sandbox {
@@ -84,6 +89,7 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)
 
   if (opts.setupFiles) seedFiles(cwd, opts.setupFiles)
+  if (opts.packageLinks) linkPackages(cwd, opts.packageLinks)
 
   return {
     cwd,
@@ -92,6 +98,37 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true })
     },
+  }
+}
+
+/**
+ * Symlink each package into `cwd/node_modules/<name>` — `npm link` semantics, so
+ * a scenario can import the package-under-test by its published name. Runs AFTER
+ * `setup.files` seeding and never over an existing path: a scenario that seeds
+ * its own `node_modules/<name>` stub keeps it, and seeded files can never be
+ * written THROUGH a link into the real repo. `junction` keeps Windows
+ * privilege-free (the type is ignored elsewhere).
+ */
+function linkPackages(cwd: string, links: readonly PackageLink[]): void {
+  const nodeModules = path.join(cwd, 'node_modules')
+  for (const { name, dir } of links) {
+    const target = path.resolve(nodeModules, name)
+    if (!target.startsWith(nodeModules + path.sep)) {
+      throw new SandboxError(`package link name escapes node_modules: ${name}`)
+    }
+    if (lexists(target)) continue
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.symlinkSync(dir, target, 'junction')
+  }
+}
+
+/** lstat-based existence — a seeded dangling symlink still counts as present. */
+function lexists(p: string): boolean {
+  try {
+    fs.lstatSync(p)
+    return true
+  } catch {
+    return false
   }
 }
 

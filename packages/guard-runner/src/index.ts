@@ -25,6 +25,9 @@ export type { RunScenarioContext } from './run-scenario.js'
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
 
+export { discoverPackageLinks } from './package-links.js'
+export type { PackageLink } from './package-links.js'
+
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
 export type { CapabilityContext } from './capabilities/index.js'
 export { materializeGit } from './capabilities/git.js'

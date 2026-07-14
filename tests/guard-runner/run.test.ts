@@ -414,6 +414,70 @@ describe('runGuard — end to end', () => {
     expect(res.latest.scenarios[0].outcome).toBe('pass')
   })
 
+  it('resolves the package-under-test by bare name inside the sandbox (#754)', async () => {
+    // The tsx failure mode: a scenario's seeded entry file imports the target
+    // package by its published name. The sandbox cwd is a bare temp dir, so
+    // without the node_modules link Node dies with ERR_MODULE_NOT_FOUND before
+    // any behavior runs. The temp repo IS the package (`tmp-fixture-repo`).
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'index.js'), "module.exports = { greeting: require('dep-of-pkg')() }\n")
+    fs.writeFileSync(path.join(r, 'extra.js'), "module.exports = { tag: 'via-subpath' }\n")
+    // The package's own dependency, installed only in the REPO's node_modules —
+    // it resolves through the link's realpath, exactly like `npm link`.
+    const depDir = path.join(r, 'node_modules', 'dep-of-pkg')
+    fs.mkdirSync(depDir, { recursive: true })
+    fs.writeFileSync(path.join(depDir, 'package.json'), JSON.stringify({ name: 'dep-of-pkg', main: 'index.js' }))
+    fs.writeFileSync(path.join(depDir, 'index.js'), "module.exports = () => 'hello-from-package'\n")
+
+    writeRecipe(r, { entry: ['node'] })
+    writeScenario(
+      r,
+      'byname.yaml',
+      scenario({
+        id: 'byname',
+        setup: {
+          files: {
+            'entry.mjs': "import pkg from 'tmp-fixture-repo'\nconsole.log('by-name:', pkg.greeting)\n",
+            'sub.cjs': "const extra = require('tmp-fixture-repo/extra.js')\nconsole.log('subpath:', extra.tag)\n",
+          },
+        },
+        steps: [
+          { run: ['entry.mjs'], expect: { exit: 0, stdout: { contains: 'by-name: hello-from-package' } } },
+          { run: ['sub.cjs'], expect: { exit: 0, stdout: { contains: 'subpath: via-subpath' } } },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true, scenarioId: 'byname' })
+    if (res.status !== 'ok') throw new Error('expected ok')
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+    expect(res.latest.scenarios[0].failure).toBeUndefined()
+  })
+
+  it('resolves workspace packages by name too (monorepo target)', async () => {
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n")
+    const lib = path.join(r, 'packages', 'lib')
+    fs.mkdirSync(lib, { recursive: true })
+    fs.writeFileSync(path.join(lib, 'package.json'), JSON.stringify({ name: '@acme/lib', main: 'index.js' }))
+    fs.writeFileSync(path.join(lib, 'index.js'), "module.exports = { answer: 42 }\n")
+
+    writeRecipe(r, { entry: ['node'] })
+    writeScenario(
+      r,
+      'ws.yaml',
+      scenario({
+        id: 'ws',
+        setup: { files: { 'entry.cjs': "console.log('answer:', require('@acme/lib').answer)\n" } },
+        steps: [{ run: ['entry.cjs'], expect: { exit: 0, stdout: { contains: 'answer: 42' } } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true, scenarioId: 'ws' })
+    if (res.status !== 'ok') throw new Error('expected ok')
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+
   it('opts.concurrency overrides TRUECOURSE_MAX_CONCURRENCY (barrier scenarios pair up in parallel)', async () => {
     // Two scenarios each write a sentinel and block until the other's appears, with
     // a 5s poll cap. Concurrency ≥ 2 → both pair instantly; serial (concurrency 1) →

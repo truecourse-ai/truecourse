@@ -9,6 +9,7 @@
 
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
+import type { PackageLink } from './package-links.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
@@ -24,6 +25,8 @@ export interface RunScenarioContext {
   runId: string
   resolvedEntry: string[]
   recipeEnv?: Record<string, string>
+  /** The package(s) under test, linked into every sandbox's `node_modules`. */
+  packageLinks?: readonly PackageLink[]
   stepTimeoutMs: number
   /**
    * Write the evidence transcript for a `pass` too (proof of what executed). A
@@ -76,6 +79,7 @@ export async function runScenario(
       recipeEnv: ctx.recipeEnv,
       scenarioEnv: scenario.setup?.env,
       setupFiles: scenario.setup?.files,
+      packageLinks: ctx.packageLinks,
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
