@@ -8,7 +8,8 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
-import { loadSpec } from '@truecourse/core/lib/spec-store';
+import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
+import { openConflicts, type CorpusLike, type DecisionsLike } from '@truecourse/shared';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -155,14 +156,19 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         ]);
         const commit = baseline?.commitSha ?? null;
         const corpus = commit
-          ? await loadSpec<{ areas?: Array<{ overlaps?: unknown[] }> }>(
-              { repoKey: r.repoFullName, commitSha: commit },
-              'corpus',
-            ).catch(() => null)
+          ? await loadSpec<CorpusLike>({ repoKey: r.repoFullName, commitSha: commit }, 'corpus').catch(
+              () => null,
+            )
           : null;
-        const overlapCount =
-          corpus?.areas?.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
-        return toRepoSummary(r, project?.slug ?? null, overlapCount);
+        // Open = the SAME shared derivation the generate gate and the Coverage
+        // sidebar use. A verdict/dismissal/exclude resolves a dispute WITHOUT
+        // removing the flagged overlap from the corpus, so a raw overlap count
+        // would keep a repo "Needs review" forever after its conflicts are resolved.
+        const decisions = corpus
+          ? ((await loadLatestSpec<DecisionsLike>(r.repoFullName, 'decisions').catch(() => null)) ?? {})
+          : {};
+        const openCount = corpus?.areas ? openConflicts(corpus, decisions).length : 0;
+        return toRepoSummary(r, project?.slug ?? null, openCount);
       }),
     );
     const body: GithubConnectStatusResponse = {
