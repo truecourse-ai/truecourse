@@ -98,12 +98,12 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Releasing v$VERSION"
 
-      # PR-merge path only: create + push the tag on the merge commit. The tag
-      # push path skips this (its tag already exists). Idempotent: if the tag
-      # is already present locally or on the remote, we leave it alone so a
-      # re-run can't fail here.
+      # Ensure the release tag exists on both trigger paths — a `v*` tag is
+      # itself a release for this repo, so the workflow always guarantees it.
+      # Idempotent: if the tag is already present locally or on the remote we
+      # leave it alone, so on the tag-push path (where the triggering tag
+      # already exists) this is a safe no-op, and a re-run can't fail here.
       - name: Create and push release tag
-        if: github.event_name == 'pull_request'
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
