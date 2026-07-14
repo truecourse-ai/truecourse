@@ -82,7 +82,7 @@ export const FAILING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['boom'], ex
 
 /** How a section's claims are described in an {@link extractBy} spec. */
 export type ClaimSpec =
-  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui'; reason?: string }>
+  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string }>
   | { untestable: string }
 
 /**

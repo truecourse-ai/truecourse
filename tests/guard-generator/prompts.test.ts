@@ -89,9 +89,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: item-23's llm-provider classification rule moved this from
-    // d2fdc2266c5a8408 (the OUTPUT_ONLY_GUARDRAIL roll). It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('2f26bbf187a8a087')
+    // Pinned literal: the library-driver classification (programmatic import-by-name
+    // claims are recorded, not authored) moved this from 2f26bbf187a8a087 (item-23's
+    // llm-provider rule). It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('55c0ace88c3f3a5a')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -103,6 +104,15 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('Do NOT extract such a command')
     // General, not a fixed command list.
     expect(EXTRACT_SYSTEM_PROMPT).toContain('any provider-auth-dependent command')
+  })
+
+  // Programmatic import-by-name API claims classify as library (recorded, not authored).
+  it('EXTRACT_SYSTEM_PROMPT classifies programmatic-API claims as library, by consumption form', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('- library — ')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('IMPORTING it from user')
+    // The deciding line is how the docs consume it, not which feature it is.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('documented consumption form')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('extract api/web/tui/library claims')
   })
 
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).

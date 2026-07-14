@@ -14,8 +14,9 @@
  *               evidence; still-failing candidates are birth findings, never kept.
  *   6. manifest rewrite the binding record with the settled outcomes.
  *
- * Unchanged sections are skipped entirely; api/web/tui/untestable and no-claim
- * sections land in the result + manifest as visible coverage gaps.
+ * Unchanged sections are skipped entirely; awaiting-driver (api/web/tui/library),
+ * untestable, and no-claim sections land in the result + manifest as visible
+ * coverage gaps.
  */
 
 import { createHash } from 'node:crypto'

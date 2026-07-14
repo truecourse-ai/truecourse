@@ -127,6 +127,15 @@ Driver verb sets (each closed; later drivers add vocabulary, never change the en
 - **api (later)**: environment boot + `request` / `expect` status, body, resulting datastore state.
 - **web (later)**: api environment + browser verbs (`navigate`, `click`, `fill`,
   `expect visible`) — Playwright underneath, scenario stays declarative.
+- **library (later)**: the package's programmatic API consumed by importing it from
+  user code (`import 'tsx'`, `require('pkg/sub')`, calling exports). Registered as a
+  recorded-only driver (2026-07-14): extraction classifies import-by-name claims as
+  `library` and their sections surface as "Needs library driver" gaps instead of
+  being authored as cli scenarios. The runner already links the package-under-test
+  into every sandbox's `node_modules` (npm-link semantics, issue #754), so when this
+  driver ships it can execute seeded user programs immediately; the open design
+  question is value-level assertions (in-process) vs the cli driver's process-level
+  observables.
 
 **The driver contract (how api/web/tui land additively).** The scenario **envelope is frozen** —
 `guard`, `id`, `title`, `binds`, `driver`, `setup`, `steps`, `normalize`, and the run-outcome set
@@ -1388,7 +1397,9 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   client and CLI import one copy (client currently mirrors them).
 - **Phase 6 — api driver.** Environment recipe v2 (compose), ephemeral datastores, network-
   boundary fakes, egress control. STATUS: NOT STARTED (post-v1)
-- **Phase 7 — tui / web drivers.** PTY tier; Playwright tier. STATUS: NOT STARTED (post-v1)
+- **Phase 7 — tui / web / library drivers.** PTY tier; Playwright tier; in-process
+  programmatic-API tier (sections already classified + sandbox package links in place).
+  STATUS: NOT STARTED (post-v1)
 - **Phase 8 — EE adaptation.** Only after the OSS loop (Phases 0–5) is proven on real repos:
   guard store behind the EE storage adapters (Postgres/blob, repo read-only), PR-scoped guard
   runs (baseline anchored to PR-head, per-PR overlay — same pattern as spec PR-scoping), an

@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
+  CLAIM_DRIVERS,
   DocExtractionSchema,
   RecipeProposalSchema,
   RawGeneratedScenarioSchema,
@@ -100,10 +101,16 @@ This is the most important rule after faithfulness:
 - cli — a command-line program's behavior when invoked with arguments (and
   optional stdin): its exit code, what it writes to stdout/stderr, or the files it
   creates or changes. This is the ONLY driver a test is authored for today; still
-  extract api/web/tui claims so the coverage picture stays honest.
+  extract api/web/tui/library claims so the coverage picture stays honest.
 - api — an HTTP/RPC service's response, or the datastore state a request leaves.
 - web — a browser UI (navigation, clicks, visible content).
 - tui — an interactive terminal UI (keystrokes, on-screen contents).
+- library — the package's programmatic API, consumed by IMPORTING it from user
+  code: \`import\`/\`require\` of the package or its subpaths, calling its exported
+  functions/classes/hooks, registering it from a program. The deciding line is the
+  documented consumption form, not the feature: the SAME capability is \`cli\` when
+  the docs invoke a command and \`library\` when they tell the user to write code
+  that imports the package.
 
 # Faithfulness — the prime directive
 Extract ONLY what the text states. Never infer a behavior the words do not state.
@@ -143,7 +150,7 @@ ${EXTRACTION_JSON_SCHEMA}
 Concretely:
   { "claims": [
       { "claim": "<one declarative sentence>",
-        "driver": "cli" | "api" | "web" | "tui",
+        "driver": "cli" | "api" | "web" | "tui" | "library",
         "sectionAnchor": "<an anchor copied verbatim from the outline>",
         "reason": "<the observable behavior a test would assert>" } ],
     "untestable": [
@@ -202,7 +209,7 @@ export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object with "claims" and "untestable" arrays matching',
-      'the schema above, and NOTHING else. Every "driver" is one of cli|api|web|tui;',
+      `the schema above, and NOTHING else. Every "driver" is one of ${CLAIM_DRIVERS.join('|')};`,
       'every "sectionAnchor" is an anchor copied verbatim from the outline.',
     )
   }
