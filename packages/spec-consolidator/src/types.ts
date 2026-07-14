@@ -54,8 +54,7 @@ export type DocKind = z.infer<typeof DocKindSchema>;
 
 /**
  * The three doc→doc relations the curated-corpus pipeline resolves an
- * overlap into (see docs/SPEC_SCAN_REDESIGN_PLAN.md "three doc-level
- * relations"):
+ * overlap into:
  *
  *   - "replace"    hard supersession — `newer` fully replaces `older`;
  *                  `older` is excluded from generate. Real version chains.

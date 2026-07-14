@@ -19,15 +19,8 @@ __pycache__/
 assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
-
-# Ignore .claude/ (local settings + CLI-installed skills).
 .claude/
 
 # .NET build artifacts (fixture projects)
 tests/fixtures/**/bin/
 tests/fixtures/**/obj/
-
-# Local TrueCourse store
-.truecourse/
-
-.truecourse_/

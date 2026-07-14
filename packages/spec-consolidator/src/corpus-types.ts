@@ -1,6 +1,6 @@
 /**
- * Types for the **curated doc corpus** — the spec-scan redesign's unit of
- * curation (docs/SPEC_SCAN_REDESIGN_PLAN.md). The corpus never disassembles a
+ * Types for the **curated doc corpus** — the spec-scan pipeline's unit of
+ * curation. The corpus never disassembles a
  * doc into claims; it annotates each doc with the AREAS it covers, groups docs
  * by area, flags within-area OVERLAPS, and records doc→doc RELATIONS. The only
  * structured artifact downstream is the contract, produced later at generate
