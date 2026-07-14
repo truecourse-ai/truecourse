@@ -248,7 +248,7 @@ Sections are the binding unit. Anchors must survive spec edits without lying.
     env as `{ ...process.env }` (sandbox.ts) — HOME/XDG are redirected, but host env VARS leak
     through, so credential-carrying vars (`ANTHROPIC_API_KEY`, proxy config) make scenario
     outcomes machine-dependent: `3-7-1-canonicalization-vocabulary.1` passed birth in an
-    authenticated terminal and failed in a different shell because `contracts generate`'s
+    authenticated terminal and failed in a different shell because the entry's
     claude preflight saw different auth. Fix: ALLOWLIST env instead of passthrough — `PATH` +
     the pinned determinism vars + `recipe.env` + `setup.env`, nothing else. Anything a program
     legitimately needs must be declared (recipe/setup/capability), never inherited.
@@ -324,7 +324,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    cancel during the retry round loses all retry work (tonight: 231 calls ≈ $58 would have
    evaporated). Cache per claim keyed on (prompt fingerprint, claim, section, retry-evidence
    hash) so stopping is always cheap and resume is exact.
-6b. **Retry capability-declaration errors — SPLIT 2026-07-08: retry-routing half IN BUILD (engine-only, cache-safe); prompt-loudness half stays queued for the next fingerprint batch (rolling the authoring prompt re-keys the authoring cache and would re-author everything, including the currently held-ready scenarios).**
+6b. **Retry capability-declaration errors — BUILT 2026-07-08/10: retry-routing half (engine, cache-safe) + the prompt-loudness half (shipped in the item-32 fingerprint batch).**
    Original item: **Retry capability-declaration errors (from the 2026-07-07 Anthropic run: 19 sections
    lost).** A scenario declaring `setup.git` commit files it never seeded fails materialization
    with a precise message ("declared file does not exist in the sandbox: seed it via
@@ -503,18 +503,14 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    removal was deferred until the EE gate migrated, which is what the 2026-07-13 cleanup did.
    The dashboard analog shipped earlier (BL Drift registry-hidden in both editions,
    URL-reachable for EE Pulls deep links), then the whole section was removed.
-   **SCOPE REVISED 2026-07-10 (user decision): contracts KEPT, verify surface
-   retired.** The contracts pipeline was kept for ONE purpose — the code↔spec relationship
-   map (`contracts generate` produces the spec-side artifacts; the verifier's MATCHING
-   ENGINE locates them in code) — and `infer` was kept (undocumented-code detection; it is
-   built on the same engine). What retired was the VERIFY SURFACE only: drift
-   verdicts, `verify`/`drifts` commands, the BL Drift reporting UI. The
-   `contract-verifier` package survives as the engine under the map and infer. Confirmed
-   2026-07-10: contracts generate consumes the NEW corpus (readCorpusForGenerate over
-   specs/corpus.json; the old claims mechanism is fully gone), so all guard-era corpus
-   changes are additive for it. Follow-up when contracts get touched next: contracts
-   generate should gain the same open-conflicts gate guard generate has (item 25); today
-   it generates from a conflicted corpus without complaint.
+   **FINAL (2026-07-13 cleanup): all four command families REMOVED (CLI + dashboard,
+   OSS + EE), the reusable ENGINE kept.** Guard fully replaces the verify/drift pipeline,
+   so `verify`/`drifts`/`contracts`/`infer` are no longer user commands and the BL Drift
+   dashboard section is gone. What remains is the framework-agnostic engine —
+   `contract-extractor`, the `contract-verifier` MATCHING ENGINE (code-fact extraction +
+   `.tc` parser/resolver + `infer`), and the core in-process functions — kept for
+   programmatic / EE use only. The verify-drift half (comparators, verify-store,
+   drift-enrichment) was deleted outright.
 
 
 34. **CLI progress renderer duplicates lines when a status line wraps (live 2026-07-10).**
@@ -762,14 +758,13 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    pre-estimate), the CLI (`spec conflicts`/`spec status`), and the client
    (SpecCorpusView/SpecOverlapDetail) — no second copy; CLI prints the full list + exits 1,
    the dashboard action returns 422 with the same report.
-26. **Scan outro points at guard, not contracts (user report 2026-07-09).** `spec scan`
-   ends with "Run `truecourse contracts generate`" — a contracts-era fossil (that pipeline
-   is deprecated, item 24). New outro: with open conflicts → "N conflicts to resolve
+26. **Scan outro points at guard (user report 2026-07-09).** `spec scan` ended with a
+   contracts-era next-step fossil. New outro: with open conflicts → "N conflicts to resolve
    (`truecourse spec conflicts list`), then `truecourse guard generate`"; conflict-free →
-   "Run `truecourse guard generate`". No mention of contracts.
+   "Run `truecourse guard generate`".
    STATUS: BUILT 2026-07-09 — scan + `spec status` outros point at `truecourse guard generate`
    (conflict-free) / count open conflicts via the same derivation and route to `spec conflicts
-   list`; no scan/spec-flow next-step names `contracts generate`.
+   list`.
 
 21. **Stacked non-interactive gates defeat the single retry (findings analysis
    2026-07-08, queued).** `analyze` demands two sequential decisions non-interactively
@@ -913,8 +908,8 @@ Stages, each cached under `.cache/guard/` (content-keyed KV, same pattern as
    mode (green tests, false confidence) and gets its own gate.
 
 **Authorship is output-only (the transport seam).** Scenario generation, testability
-classification, and recipe discovery all ride the existing `LlmTransport` seam exactly like scan
-and contract generate: the model **returns** content (scenario YAML, verdict JSON, recipe JSON)
+classification, and recipe discovery all ride the existing `LlmTransport` seam exactly like spec
+scan: the model **returns** content (scenario YAML, verdict JSON, recipe JSON)
 and never writes files, never runs commands, never uses agentic tools. The engine parses,
 Zod-validates, birth-validates, and writes. This is what keeps guard edition-portable — OSS runs
 the `claude` CLI (text/JSON out), EE swaps in the AI-SDK transport with identical prompts — and
