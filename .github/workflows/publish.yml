@@ -1,19 +1,122 @@
 name: Publish to npm
 
+# Two ways in, one publish path:
+#
+#   1. push a `v*` tag        — manual / prerelease releases (unchanged).
+#   2. merge a campaign-close  — the fp-automation loop's release trigger.
+#      PR (label *fp-campaign-complete*)
+#
+# Why the PR-merge trigger exists: routine sessions run under a branch push
+# policy that only permits `claude/`-prefixed refs, so a routine can never
+# push a `v*` tag itself (that push is denied 403 — see issue #752). Instead,
+# merging the campaign-close PR lets THIS workflow — which runs with a token
+# that can write refs — create the tag and publish. The tag + publish happen
+# in the same run on purpose: a tag pushed by GITHUB_TOKEN does NOT start a
+# new workflow run (GitHub's recursion guard), so we must not rely on the
+# `push: tags` trigger firing for tags we create here.
+#
+# Everything runs top-level in this file (not a reusable `workflow_call`) so
+# the npm OIDC trusted-publisher config — pinned to `publish.yml` — matches on
+# both trigger paths.
+
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    types: [closed]
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  # Decide whether this event should release. Kept as a separate gate so the
+  # label check can substring-match (catching both the default
+  # `fp-campaign-complete` and the C# account's `cs-fp-campaign-complete`),
+  # which `if: contains(labels.*.name, …)` can't do (it's exact-match only).
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            echo "Tag push — releasing."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$MERGED" = "true" ] && echo "$LABELS" | grep -q 'fp-campaign-complete'; then
+            echo "Merged campaign-close PR — releasing."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Not a release event — skipping."
+          echo "release=false" >> "$GITHUB_OUTPUT"
+
   publish:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR-merge path: build + tag the merge commit. Tag path: default ref
+          # (the tag) is checked out. fetch-depth 0 brings tags so the
+          # "does the tag already exist" guard below is accurate.
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || '' }}
+
+      # Resolve the version to publish and the tag name. On the PR-merge path
+      # the tag doesn't exist yet, so we also assert the four version
+      # locations agree (CLAUDE.md "Releasing") — a mismatch fails the release
+      # here, the deterministic gate. (The fp-campaign-close routine performs
+      # the same check for human-facing alerting, but this is authoritative.)
+      - name: Resolve version and tag
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            CLI=$(jq -r .version tools/cli/package.json)
+            CORE=$(jq -r .version packages/core/package.json)
+            SRV=$(jq -r .version apps/dashboard/server/package.json)
+            IDX=$(grep -oE '\.version\("[^"]+"\)' tools/cli/src/index.ts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+            echo "cli=$CLI core=$CORE server=$SRV index.ts=$IDX"
+            if [ "$CORE" != "$CLI" ] || [ "$SRV" != "$CLI" ] || [ "$IDX" != "$CLI" ]; then
+              echo "::error::Version mismatch across the four locations — refusing to release. cli=$CLI core=$CORE server=$SRV index.ts=$IDX"
+              exit 1
+            fi
+            VERSION="$CLI"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION"
+
+      # PR-merge path only: create + push the tag on the merge commit. The tag
+      # push path skips this (its tag already exists). Idempotent: if the tag
+      # is already present locally or on the remote, we leave it alone so a
+      # re-run can't fail here.
+      - name: Create and push release tag
+        if: github.event_name == 'pull_request'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1 || \
+             git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping tag creation."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "Pushed $TAG."
+          fi
 
       - uses: pnpm/action-setup@v4
 
@@ -50,10 +153,11 @@ jobs:
       - name: Build dist
         run: pnpm build:dist
 
-      - name: Set version from tag
+      - name: Set version on the dist package
         id: version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
           cd dist
           npm pkg set version="$VERSION"
           if [[ "$VERSION" == *-* ]]; then
@@ -71,6 +175,6 @@ jobs:
         working-directory: dist
 
       - name: Create GitHub Release
-        run: gh release create "${{ github.ref_name }}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.meta.outputs.tag }}" --generate-notes

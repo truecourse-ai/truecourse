@@ -62,10 +62,13 @@ For each target OSS repo:
    (see below) that bumps the version and flips campaign `status: done`.
    If TP < 90 %, it files new `fp-fix` issues; the campaign continues
    without a release.
-7. When the campaign-close PR merges, two routines fire in parallel:
-   `fp-campaign-close` pushes `vX.Y.Z` (publish.yml ships from dist —
-   byte-equal to what fp-next-fix just verified), and `fp-discover`
-   starts the next pending campaign.
+7. When the campaign-close PR merges, the release happens automatically:
+   `.github/workflows/publish.yml` (triggered by that merge) creates the
+   `vX.Y.Z` tag and ships from dist — byte-equal to what fp-next-fix just
+   verified. Two routines also fire in parallel: `fp-campaign-close`
+   confirms the version and alerts a human on mismatch (it does **not**
+   push the tag — see below), and `fp-discover` starts the next pending
+   campaign.
 
 ### Campaign-close PR
 
@@ -84,9 +87,11 @@ the freshly-built dist, it opens a campaign-close PR that:
 - Carries the **`fp-campaign-complete`** label.
 - Branch name `claude/<SCOPE>fp-campaign-close/<owner>-<repo>`.
 
-On merge, `fp-campaign-close` pushes the tag (publish.yml ships to npm)
-and `fp-discover` fires on the same event to start the next pending
-campaign — both routines run in parallel, each doing one job.
+On merge, `publish.yml` creates the tag and ships to npm (see
+["Release on merge"](#release-on-merge-publishyml) below);
+`fp-campaign-close` verifies the version and alerts on mismatch, and
+`fp-discover` fires on the same event to start the next pending
+campaign — the routines run in parallel, each doing one job.
 
 ### Borderline FPs
 
@@ -181,17 +186,17 @@ So an FP fix means:
 │ Routine: fp-campaign-close (parallel with fp-discover)   │
 │ trigger: pull_request.closed                             │
 │   Is merged=true, Head Branch starts-with                │
-│   claude/<SCOPE>fp-campaign-close/,                      │
+│   claude/<SCOPE>fp-campaign-close/                       │
 │                                                          │
+│ Release is automatic: publish.yml (on this same PR       │
+│ merge) tags vX.Y.Z + ships dist/ to npm + GH Release.    │
 │                                                          │
-│ 1. Read new version from tools/cli/package.json,         │
-│    sanity-check the 4 locations agree                    │
-│ 2. git tag vX.Y.Z, git push origin vX.Y.Z                │
-│    (publish.yml ships dist/ to npm + creates GH Release) │
-│                                                          │
-│ No analyze, no verification — fp-next-fix already        │
-│ measured TP ≥ 90% against the same dist artifact         │
-│ publish.yml is about to ship.                            │
+│ This routine does NOT push the tag (routine sessions     │
+│ can't push v* refs — issue #752). It only:               │
+│ 1. Reads version from tools/cli/package.json,            │
+│    checks the 4 locations agree                          │
+│ 2. On mismatch -> opens an alert issue (cc @mushgev);    │
+│    otherwise posts a summary and ends.                   │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -526,28 +531,70 @@ and opens a human-merged PR. Only issues that can't be fixed even
 out-of-bounds become terminal (`fp-skipped`) and land on the
 `[fp-campaign-stuck]` issue.
 
-### 3. `fp-campaign-close` — tag and chain to the next campaign
+### 3. `fp-campaign-close` — confirm the release and chain to the next campaign
 
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
 | **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/<SCOPE>fp-campaign-close/` |
 | **Repositories** | `truecourse-ai/truecourse` |
-| **Branch push policy** | Default — only needs to push a tag, not a branch |
+| **Branch push policy** | Default — this routine pushes **nothing** (no tag, no branch) |
 | **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-campaign-close.md` |
+
+**The routine does not push the tag** — `publish.yml` does, on the same
+merge event (see ["Release on merge"](#release-on-merge-publishyml)). A
+routine session runs under a branch push policy that only permits
+`claude/`-prefixed refs, so pushing `v<version>` is denied `403` — this is
+exactly what [issue #752](https://github.com/truecourse-ai/truecourse/issues/752)
+hit. Tagging therefore lives in CI, which runs with a token that can write
+refs. The routine is now a **human-facing safety net** on top of CI.
 
 Steps the session takes:
 1. Read new version from `tools/cli/package.json`. Sanity-check the
    other three locations agree (CLAUDE.md "Releasing").
-2. `git tag v<version> && git push origin v<version>`. The existing
-   `.github/workflows/publish.yml` triggers, ships `dist/` to npm,
-   creates the GitHub Release.
-3. End. No verification step — fp-next-fix already measured TP ≥ 90 %
-   against the same dist artifact publish.yml is shipping.
+2. If the four disagree → open a `[<SCOPE>fp-campaign-close] version
+   mismatch after merge` issue (`cc @mushgev`) so a human is notified.
+   `publish.yml` performs the same check and **fails the release** on a
+   mismatch, so nothing ships either way.
+3. If they agree → the routine does nothing to the repo (no tag, no push,
+   no build); `publish.yml` is already creating the tag and publishing.
+   Post a one-line summary and end. No verification step — fp-next-fix
+   already measured TP ≥ 90 % against the same dist artifact publish.yml
+   is shipping.
 
 `fp-discover` listens to the same merge event and runs in parallel,
 starting the next pending campaign from `campaigns.yaml`.
+
+### Release on merge (`publish.yml`)
+
+`.github/workflows/publish.yml` is the single place that publishes. It has
+two entry points, both running the same steps top-level so npm's OIDC
+trusted-publisher config (pinned to `publish.yml`) matches either way:
+
+- **`push` of a `v*` tag** — manual / prerelease releases (unchanged). The
+  version comes from the tag; the tag already exists, so no tag is created.
+- **`pull_request.closed`** where the merged PR carries a
+  `*fp-campaign-complete` label (substring match, so both the default
+  `fp-campaign-complete` and the `cs-`-scoped label are caught) — the
+  fp-automation release path. Here the workflow:
+  1. reads the version from `tools/cli/package.json` and asserts the four
+     version locations agree (fails the release on mismatch — the
+     authoritative gate);
+  2. creates and pushes the `v<version>` tag on the merge commit
+     (idempotent — skips if it already exists);
+  3. builds, tests, and publishes to npm + creates the GitHub Release.
+
+The tag is created **and** published in one run on purpose: a tag pushed by
+`GITHUB_TOKEN` does **not** start a new workflow run (GitHub's recursion
+guard), so the `push: tags` trigger can't be relied on for tags the workflow
+creates itself.
+
+> **One-time setup:** if a repository/organization **tag ruleset** protects
+> `v*` tags, add this workflow's actor (the GitHub Actions bot) to the
+> ruleset's bypass list, or the CI tag push will `403` too. This grants tag
+> creation to **one** trusted, auditable workflow — not to every ephemeral
+> routine session.
 
 ## Auxiliary routine: `fp-stale-pr-notify` (monitoring)
 
@@ -673,11 +720,11 @@ One-time, before the first run:
    empty.
 6. **Outer loop is fully automatic**: when the queue empties,
    fp-next-fix re-analyzes against the freshly-built dist; if TP ≥ 90 %
-   it opens a campaign-close PR. Merging that PR fires
-   `fp-campaign-close` (tags + publishes) and `fp-discover` (starts
-   the next pending campaign's discovery) in parallel — and merging
-   *that* next discovery PR restarts the inner loop. No "Run now"
-   needed after the very first campaign.
+   it opens a campaign-close PR. Merging that PR triggers `publish.yml`
+   (tags + publishes) and fires `fp-campaign-close` (confirms the version)
+   and `fp-discover` (starts the next pending campaign's discovery) in
+   parallel — and merging *that* next discovery PR restarts the inner loop.
+   No "Run now" needed after the very first campaign.
 
 **Optional — the `fp-stale-pr-notify` monitor** (see "Auxiliary routine"
 above). Independent of the loop; set up only if you want Telegram alerts
@@ -747,7 +794,10 @@ A **campaign-close PR** is mergeable when:
   label `fp-campaign-complete`.
 
 A repo is "done" when its campaign-close PR is merged and `vX.Y.Z` is
-tagged. The 90 % gate was verified pre-merge by fp-next-fix against the
+tagged + published by `publish.yml` (the merge triggers it — the
+`fp-campaign-close` routine no longer pushes the tag; see
+["Release on merge"](#release-on-merge-publishyml)). The 90 % gate was
+verified pre-merge by fp-next-fix against the
 dist artifact; `fp-discover` fires on the same merge event to start the
 next pending campaign automatically. The campaigns file is the audit
 trail.
@@ -806,9 +856,9 @@ If green-lit:
    From there:
    - **Inner loop** (auto): fp-fix PR merges drive `fp-next-fix` until
      the campaign queue is empty.
-   - **Outer loop** (auto): campaign-close PR merges fire
-     `fp-campaign-close`, which tags + publishes + verifies against the
-     just-published version. If TP < 90 % it files new fp-fix issues
-     and the inner loop resumes.
+   - **Outer loop** (auto): a campaign-close PR merge triggers
+     `publish.yml` (tags + publishes) and fires `fp-campaign-close`
+     (confirms the version, alerts on mismatch). If TP < 90 % the
+     queue-empty path files new fp-fix issues and the inner loop resumes.
    - **Next campaign** (manual): once a campaign reaches
      `status: done`, click **Run now** on `fp-discover` again.

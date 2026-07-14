@@ -87,7 +87,9 @@ When bumping the package version, update all four places — `package.json` alon
 
 The internal packages (`@truecourse/dashboard-client`, `@truecourse/analyzer`, `@truecourse/shared`) are marked `private: true` and never published — leave their versions at `0.1.0`.
 
-npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and the GitHub Actions workflow publishes `truecourse` to npm. Never `npm publish` manually.
+npm publishing is automated via `.github/workflows/publish.yml`, which has two triggers — both run the same publish steps, so never `npm publish` manually:
+- **Push a git tag `vX.Y.Z`** (after merging to `main`) — the manual / prerelease path.
+- **Merge a campaign-close PR** (labelled `*fp-campaign-complete`) — the fp-automation path. The workflow verifies the four version locations agree, then creates the `vX.Y.Z` tag on the merge commit and publishes. The `fp-campaign-close` routine does **not** push the tag (routine sessions can't push `v*` refs — issue #752); CI owns tagging. See `docs/fp-automation/README.md` → "Release on merge".
 
 ## Testing
 
