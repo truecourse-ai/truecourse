@@ -28,7 +28,7 @@ import {
   loadSpec,
   specsMaterializeInPlace,
 } from '@truecourse/core/lib/spec-store';
-import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
+import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
@@ -276,7 +276,7 @@ async function enqueueGuardGenerateRefresh(repoKey: string): Promise<void> {
 // scenarios), enqueue a hosted guard generate too. The guard-store read is gated on
 // `openConflicts === 0` so the hot path (conflicts still remain) never touches it.
 async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
-  if (contractsMaterializeInPlace()) return;
+  if (specsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
   if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
     await enqueueContractsRefresh(repoKey);
@@ -428,7 +428,7 @@ async function mutateSpecDecision(
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!contractsMaterializeInPlace()) {
+  if (!specsMaterializeInPlace()) {
     await mutate();
     await recurateAndRegenIfResolved(repoPath);
     res.json(await corpusPayload(repoPath));
@@ -563,7 +563,7 @@ async function mutateConflictResolution(
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!contractsMaterializeInPlace()) {
+  if (!specsMaterializeInPlace()) {
     // EE repo scope: re-curate is how EE decisions flow; return the full corpus
     // (folding the recorded verdict), same as an include/exclude edit.
     await mutate();
@@ -678,7 +678,7 @@ router.get(
       // stat, and the gate produces spec → contracts TOGETHER per commit, so the
       // latest stored sets are always in sync. Report existence from the stores;
       // nothing is stale.
-      if (!contractsMaterializeInPlace()) {
+      if (!specsMaterializeInPlace()) {
         const [corpus, contractFiles] = await Promise.all([
           loadLatestSpec<unknown>(repo.path, 'corpus'),
           listContractFiles(repo.path, 'contracts'),
