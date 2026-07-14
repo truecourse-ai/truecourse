@@ -9,7 +9,6 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 
 export function useSpecStaleness(repoId: string | undefined) {
-  const [contractsStale, setContractsStale] = useState(false);
   const [decisionsPending, setDecisionsPending] = useState(false);
   const [docsChanged, setDocsChanged] = useState(false);
 
@@ -17,7 +16,6 @@ export function useSpecStaleness(repoId: string | undefined) {
     if (!repoId) return;
     try {
       const r = await api.getSpecStaleness(repoId);
-      setContractsStale(r.contractsStale);
       setDecisionsPending(r.decisionsPending);
       setDocsChanged(r.docsChanged);
     } catch {
@@ -30,5 +28,5 @@ export function useSpecStaleness(repoId: string | undefined) {
     refetch();
   }, [refetch]);
 
-  return { contractsStale, decisionsPending, docsChanged, refetch };
+  return { decisionsPending, docsChanged, refetch };
 }

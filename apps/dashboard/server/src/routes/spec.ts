@@ -41,7 +41,6 @@ import {
   CURATE_STEPS,
   EstimateDeclined,
   generatedMarkerPath,
-  isCorpusStale,
   getCorpus,
   getDecisions,
   recuratePrCorpus,
@@ -632,11 +631,8 @@ router.delete(
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/staleness
 //
-// Cheap mtime probe powering the amber dots on Generate.
+// Cheap mtime probe powering the amber dots on Scan.
 //
-//   contractsStale  corpus.json is newer than the last generate marker
-//                   (or the marker is missing → never generated against
-//                   the current corpus)
 //   decisionsPending recorded include/exclude/relation/conflict decisions are
 //                   newer than the curated corpus — a Scan would materialize them.
 //   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
@@ -663,7 +659,6 @@ router.get(
           listContractFiles(repo.path, 'contracts'),
         ]);
         res.json({
-          contractsStale: false,
           // EE re-curates on every decision, so decisions never outrun the corpus.
           decisionsPending: false,
           // EE has no live tree — docs can't drift out from under the stored corpus.
@@ -674,15 +669,11 @@ router.get(
         return;
       }
 
-      // OSS. Contracts staleness is content-based via the generate manifest, so a
-      // no-op scan that rewrites corpus.json doesn't falsely flag it (mtimes lie).
+      // OSS: corpus/generated presence from the live tree's marker files.
       const corpusMtime = mtimeIfExists(corpusFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
 
-      const contractsStale = isCorpusStale(repo.path);
-
       res.json({
-        contractsStale,
         decisionsPending: hasPendingDecisions(repo.path),
         docsChanged: hasChangedDocs(repo.path),
         hasCorpus: corpusMtime !== null,

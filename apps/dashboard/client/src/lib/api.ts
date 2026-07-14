@@ -752,7 +752,6 @@ export type ContractsFile = {
 };
 
 export type SpecStalenessResponse = {
-  contractsStale: boolean;
   /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
   /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
