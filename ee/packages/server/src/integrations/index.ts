@@ -3,8 +3,7 @@
  * `GET /` lists every connector with its field metadata + current connection;
  * `POST /` saves one, `POST /test` checks credentials live, `DELETE /:kind`
  * disconnects. Adding a connector needs no route changes. Secret fields are
- * encrypted at rest and never returned to the client. The sync itself lives on
- * `/api/ee/knowledge/sync`.
+ * encrypted at rest and never returned to the client.
  */
 
 import { Router, type Request, type Response } from 'express';

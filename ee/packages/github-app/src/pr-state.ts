@@ -2,7 +2,7 @@
  * PR open/closed/merged state tracking. Every pull_request webhook upserts the
  * PR's current state into the gate store so the dashboard feed can filter
  * (GitHub-style: Open by default, with a Closed toggle). Independent of the gate
- * and infer flows — it runs first and is non-fatal on failure.
+ * flow — it runs first and is non-fatal on failure.
  */
 
 import type { GateStore, PrState } from './store/types.js';

@@ -9,7 +9,6 @@ import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
 import { loadSpec } from '@truecourse/core/lib/spec-store';
-import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -54,7 +53,6 @@ function toRepoSummary(
   r: RepoLinkRecord,
   slug: string | null,
   openConflicts: number,
-  hasContracts: boolean,
 ): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
@@ -68,7 +66,6 @@ function toRepoSummary(
     notifications: resolveNotificationPrefs(r),
     slug,
     openConflicts,
-    hasContracts,
   };
 }
 
@@ -165,16 +162,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
           : null;
         const overlapCount =
           corpus?.areas?.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
-        // hasContracts: any generated contract files at the baseline commit.
-        const files = commit
-          ? await listContractFiles(r.repoFullName, 'contracts', commit).catch(() => [])
-          : [];
-        return toRepoSummary(
-          r,
-          project?.slug ?? null,
-          overlapCount,
-          files.length > 0,
-        );
+        return toRepoSummary(r, project?.slug ?? null, overlapCount);
       }),
     );
     const body: GithubConnectStatusResponse = {
@@ -316,8 +304,8 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     await registerProject(repoFullName, repoFullName);
 
     // Kick off the INITIAL scan now (background job) rather than waiting for the
-    // next default-branch push — so the repo's spec/contracts (and the merge with
-    // workspace Knowledge) populate as soon as it's connected, in either order.
+    // next default-branch push — so the repo's spec + Code Quality baseline populate
+    // as soon as it's connected.
     // Best-effort: a failure to enqueue must not fail the link.
     if (deps.enqueueBaseline) {
       try {

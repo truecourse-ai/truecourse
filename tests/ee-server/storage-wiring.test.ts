@@ -7,7 +7,6 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDbHandle } from '@truecourse/ee-db';
 import { installEeStores, sweepStaleTempDirs } from '../../ee/packages/server/src/storage';
-import { getContractStore, resetContractStore } from '@truecourse/core/lib/contract-store';
 import { getSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { getRepoConfigStore, resetRepoConfigStore } from '@truecourse/core/config/project-config';
 import { getUiStateStore, resetUiStateStore } from '@truecourse/core/config/ui-state';
@@ -15,7 +14,6 @@ import { getRegistryStore, resetRegistryStore } from '@truecourse/core/config/re
 import { getAnalyzeLock, resetAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
 import { getKvCacheStore, resetKvCacheStore } from '@truecourse/llm';
 import {
-  PgContractStore,
   PgSpecStore,
   PgRepoConfigStore,
   PgUiStateStore,
@@ -31,7 +29,6 @@ const stubLockPool = {
 } as unknown as EeDbHandle['lockPool'];
 
 function resetAll() {
-  resetContractStore();
   resetSpecStore();
   resetRepoConfigStore();
   resetUiStateStore();
@@ -60,7 +57,6 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
   });
 
   it('installs every hosted store + the advisory-lock seam', () => {
-    expect(getContractStore()).toBeInstanceOf(PgContractStore);
     expect(getSpecStore()).toBeInstanceOf(PgSpecStore);
     expect(getRepoConfigStore()).toBeInstanceOf(PgRepoConfigStore);
     expect(getUiStateStore()).toBeInstanceOf(PgUiStateStore);
@@ -101,7 +97,7 @@ describe('sweepStaleTempDirs', () => {
       return d;
     };
     const stale = mk('tc-gate-stale-xyz');
-    const fresh = mk('tc-contracts-fresh-abc');
+    const fresh = mk('tc-gate-fresh-abc');
     const unrelated = mk('other-tool-123');
 
     // Age the stale dir past the 1h window.

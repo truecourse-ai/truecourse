@@ -16,14 +16,9 @@ import { runBaseline } from './baseline.js';
 import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
 import { installationOctokit } from './octokit.js';
-import {
-  handlePullRequestInferOffer,
-  handleCommentEditedInfer,
-} from './infer-offer.js';
 import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
-import { createEmailNotifier } from './email.js';
 import { reportGithubError } from './observability.js';
 
 /**
@@ -72,23 +67,15 @@ export async function registerGithubApp(
     opts.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
   const store = selectGateStore(opts.db ?? null);
   const auth = createGithubAuth(cfg);
-  const notifier = cfg.resendApiKey
-    ? createEmailNotifier(cfg.resendApiKey, cfg.emailFrom)
-    : undefined;
 
-  // Shared deps for the gate + interactive flows. The comment in-flight set is
-  // keyed by comment id (scan/infer use distinct comments), the offer set by
-  // `${repo}#${pr}#<type>`, and the gate set by `${repo}#${sha}` — so all of
-  // them safely share this object.
+  // Shared deps for the Code Quality gate. The gate in-flight set is keyed by
+  // `${repo}#${sha}` (concurrent deliveries of the same head).
   const offerDeps = {
     store,
     auth,
     appUrl,
     octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
-    inFlight: new Set<number>(),
-    offerInFlight: new Set<string>(),
     gateInFlight: new Set<string>(),
-    notifier,
     codeAnalysisLlm: opts.codeAnalysisLlm,
   };
 
@@ -99,10 +86,10 @@ export async function registerGithubApp(
       secret: cfg.webhookSecret,
       store,
       onBaseline: (trigger) => {
-        // Refresh the repo's spec → contracts → drift-gate baseline on a merge to
-        // the default branch. Prefer the background job queue (progress + a
-        // notification, durable); fall back to inline fire-and-forget when no
-        // queue is wired (unit tests). EE does not run the OSS code-analysis pass.
+        // Refresh the repo's spec + Code Quality baseline on a merge to the default
+        // branch. Prefer the background job queue (progress + a notification,
+        // durable); fall back to inline fire-and-forget when no queue is wired
+        // (unit tests).
         const repo = trigger.repoFullName;
         if (opts.enqueueBaseline) {
           void opts.enqueueBaseline(trigger).catch((err) =>
@@ -115,41 +102,27 @@ export async function registerGithubApp(
           trigger,
         ).catch((err) => reportGithubError(store, 'baseline failed', { repo }, err));
       },
-      // On PR open/sync: run the Code Quality gate (analyze the head vs the
-      // baseline) and offer an infer run.
+      // On PR open/sync: run the Code Quality gate (analyze the head vs the baseline).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
         // Track the PR's open/closed/merged state for the dashboard feed first —
-        // independent of the gate/infer outcomes below, and non-fatal on failure.
+        // independent of the gate outcome below, and non-fatal on failure.
         void upsertPrState(store, payload).catch((err) =>
           reportGithubError(store, 'pr state upsert failed', ctx, err),
         );
-        // Merge/close: promote (merged) or discard (unmerged) the PR's decisions
-        // overlay + clean up its PR-scoped Code Quality diff. Neither gate nor infer
-        // reacts to `closed`, so handle it here and stop.
+        // Merge/close: promote (merged) or discard (unmerged) the PR's spec-decision
+        // overlay + clean up its PR-scoped Code Quality diff. The gate doesn't react
+        // to `closed`, so handle it here and stop.
         if (payload.action === 'closed') {
           void handlePullRequestClosed(payload).catch((err) =>
             reportGithubError(store, 'pr closed handling failed', ctx, err),
           );
           return;
         }
-        // Run the gate FIRST, then infer — never concurrently. Infer reads the
-        // repo's contracts (baseline) to decide what's still undocumented; keeping
-        // them sequential avoids interleaving two clones/analyses for one PR.
-        void (async () => {
-          await handlePullRequestGate(offerDeps, payload).catch((err) =>
-            reportGithubError(store, 'gate failed', ctx, err),
-          );
-          await handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
-            reportGithubError(store, 'infer offer failed', ctx, err),
-          );
-        })();
-      },
-      // On comment edit: the matching handler (by marker) runs its checkbox flow.
-      onCommentEdited: (payload) => {
-        const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
-        void handleCommentEditedInfer(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'comment-edited infer failed', ctx, err),
+        // TODO(spec-guard): guard becomes the second gate check alongside Code
+        // Quality here — the spec→contract→infer PR check was removed.
+        void handlePullRequestGate(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'gate failed', ctx, err),
         );
       },
     }),
@@ -180,7 +153,7 @@ export type {
   IssueCommentPayload,
 } from './webhook.js';
 export { createConnectRouter } from './connect.js';
-export { runBaseline, resolveMergedPr, resolveMergeAnchor, type BaselineResult } from './baseline.js';
+export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineResult } from './baseline.js';
 export { handlePullRequestClosed } from './pr-closed.js';
 export { upsertPrState, prStateFromPayload } from './pr-state.js';
 export { loadGithubAppConfig } from './config.js';
@@ -205,25 +178,6 @@ export {
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';
-
-// Phase 3: infer undocumented decisions
-export {
-  INFER_MARKER,
-  INFER_CHECKBOX_LABEL,
-  renderInferComment,
-  isInferComment,
-  isInferCheckboxChecked,
-  hasInferOffer,
-  type InferCommentStatus,
-  type DecisionSummary,
-} from './infer-comment.js';
-export { runInfer, defaultInferPipeline, type InferPipeline } from './infer-scan.js';
-export { diffDecisions, type InferDiff } from '@truecourse/core/lib/inferred-decisions';
-export {
-  handlePullRequestInferOffer,
-  handleCommentEditedInfer,
-  type InferOfferDeps,
-} from './infer-offer.js';
 
 // Code Quality gate
 export {
@@ -250,10 +204,3 @@ export {
   handlePullRequestGate,
   type GateHandlerDeps,
 } from './gate-handler.js';
-
-// Email notifications
-export {
-  createEmailNotifier,
-  type EmailNotifier,
-  type ResendLike,
-} from './email.js';

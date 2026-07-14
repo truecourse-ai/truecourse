@@ -39,7 +39,7 @@ interface JobsContextValue {
   notifications: NotificationView[];
   unreadCount: number;
   activeJobs: JobView[];
-  /** The active job holding (type, key), if any — e.g. ('knowledge.sync', 'knowledge.sync:confluence'). */
+  /** The active job holding (type, key), if any — e.g. ('repo.baseline', 'repo.baseline:owner/repo'). */
   activeJobFor: (type: string, key: string) => JobView | undefined;
   markAllRead: () => Promise<void>;
   markRead: (ids: string[]) => Promise<void>;
@@ -96,8 +96,8 @@ export default function JobsProvider({ children }: { children: ReactNode }) {
       setNotifications((prev) => [n, ...prev]);
       setUnreadCount((c) => c + 1);
       // Clear the now-terminal job from activeJobs (its popup card vanishes) and
-      // surface the durable outcome as a toast. Quiet jobs (contract refresh)
-      // send no notification — their card just disappears on the terminal event.
+      // surface the durable outcome as a toast. Quiet jobs send no notification —
+      // their card just disappears on the terminal event.
       if (ev.jobId) setActiveJobs((prev) => prev.filter((j) => j.id !== ev.jobId));
       const opts = { description: n.body ?? undefined, duration: 10000 };
       if (n.level === 'error') toast.error(n.title, opts);

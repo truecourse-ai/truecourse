@@ -17,8 +17,6 @@ import type { JobView } from '@truecourse/shared';
 function jobTitle(job: JobView): string {
   if (job.title) return job.title;
   switch (job.type) {
-    case 'knowledge.sync':
-      return 'Syncing knowledge';
     case 'repo.baseline':
       return 'Scanning repository';
     default:

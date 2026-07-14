@@ -14,18 +14,6 @@ async function repoSlug(repoFullName: string): Promise<string | null> {
   return entry?.slug ?? null;
 }
 
-/** Deep link to a PR's Contracts tab (head ref → surfaces its inferred contracts). */
-export async function contractsDashboardUrl(
-  appUrl: string | undefined,
-  repoFullName: string,
-  prNumber: number,
-): Promise<string | undefined> {
-  if (!appUrl) return undefined;
-  const slug = await repoSlug(repoFullName);
-  if (!slug) return undefined;
-  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=verification&tab=contracts`;
-}
-
 /** Deep link to a repo's PR Code Quality analytics view. */
 export async function prCodeQualityUrl(
   appUrl: string | undefined,

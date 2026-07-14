@@ -56,7 +56,7 @@ export function isCodeFile(filePath: string): boolean {
   return !filePath.split('/').some((seg) => DOC_DISCOVERY_SKIP_DIRS.has(seg));
 }
 
-/** Does the PR touch analyzable code (so inference is worth offering)? */
+/** Does the PR touch analyzable code (so a Code Quality analyze is worth running)? */
 export function hasCodeChanges(changedFiles: string[]): boolean {
   return changedFiles.some(isCodeFile);
 }

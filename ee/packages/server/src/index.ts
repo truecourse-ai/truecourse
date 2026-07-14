@@ -20,7 +20,6 @@ import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
-import { registerKnowledge } from './knowledge/index.js';
 import { registerIntegrations } from './integrations/index.js';
 import { registerJobs } from './jobs/index.js';
 import { registerAdmin } from './admin/index.js';
@@ -112,16 +111,13 @@ const plugin: EePlugin = {
 
     // Background jobs + notifications: the in-process graphile-worker runner, the
     // LISTEN/NOTIFY event hub, and the SSE/jobs/notifications routers. Returns the
-    // queue API the Knowledge router enqueues sync jobs onto. Started before
-    // Knowledge so its `/sync` route has the queue; jobs only run on demand, by
-    // which point the LLM transport (below) is installed.
+    // queue API the gate enqueues repo-baseline scans onto. jobs only run on demand,
+    // by which point the LLM transport (below) is installed.
     const jobs = await registerJobs(registry, { db: eeDb, masterSecret, connectionString: databaseUrl });
     plugin.capabilities.push('jobs');
 
-    // Workspace Knowledge (Spec/Contracts/Decisions reads + connector sync) and
-    // Settings → Integrations (encrypted connector tokens). Both need the
-    // Postgres stores installed above + the master secret.
-    registerKnowledge(registry, { db: eeDb, masterSecret, jobs });
+    // Settings → Integrations (encrypted connector tokens). Needs the Postgres
+    // stores installed above + the master secret.
     registerIntegrations(registry, { db: eeDb, masterSecret });
     plugin.capabilities.push('knowledge');
 

@@ -7,9 +7,8 @@
  *   - GET  /api/ee/jobs[?active=1]   — job status (seeds the UI's "Syncing" state)
  *   - GET/POST /api/ee/notifications — the durable feed + read-state
  *
- * It returns a `JobsApi` (the shared `JobStore` + an `enqueueSync`) that the
- * Knowledge router uses so `/sync` can create + enqueue a job instead of running
- * the work inline.
+ * It returns a `JobsApi` (the shared `JobStore` + an `enqueueBaseline`) that the
+ * gate uses to run a repo scan on the background queue instead of inline.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -22,9 +21,7 @@ import {
   PendingBaselineStore,
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import type { Runner } from 'graphile-worker';
-import { selectGateStore } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import {
@@ -33,10 +30,7 @@ import {
   drainPendingBaselines,
 } from './pending-baseline.js';
 import {
-  KNOWLEDGE_SYNC_TASK,
   REPO_BASELINE_TASK,
-  REPO_CONTRACTS_TASK,
-  type SyncJobPayload,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
 } from './constants.js';
@@ -45,11 +39,9 @@ function orgIdOf(req: Request): string | null {
   return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
 }
 
-/** The job surface other modules enqueue onto: the shared store + the enqueues. */
+/** The job surface other modules enqueue onto: the shared store + the enqueue. */
 export interface JobsApi {
   jobStore: JobStore;
-  /** Enqueue a connector sync (maxAttempts:1 — a failure is terminal, see worker.ts). */
-  enqueueSync(payload: SyncJobPayload, jobKey: string): Promise<void>;
   /**
    * Enqueue an initial/refresh repo scan (connect + default-branch push). Single-
    * flight per repo: returns the new job id, or null when a scan is already
@@ -167,14 +159,12 @@ export async function registerJobs(
 
   // Start the background services (need a live Postgres). A failure here must NOT
   // prevent the dashboard from booting — the HTTP server (auth, reads, capabilities)
-  // still comes up; jobs simply don't process until a restart succeeds. enqueueSync
+  // still comes up; jobs simply don't process until a restart succeeds. enqueueBaseline
   // throws clearly if the worker never started.
   let runner: Runner | null = null;
 
-  const gateStore = selectGateStore(opts.db);
-
-  // Single-flight repo-baseline enqueue — shared by connect/push (returned below)
-  // and the post-contracts chain. Closes over the `runner` assigned just below.
+  // Single-flight repo-baseline enqueue — shared by connect/push (returned below).
+  // Closes over the `runner` assigned just below.
   // Coalesces (rather than drops) a push that loses the single-flight race: the
   // dropped request is recorded as the repo's pending follow-up and replayed when
   // the running scan settles (see pending-baseline.ts). Idempotent for a
@@ -201,28 +191,6 @@ export async function registerJobs(
   const onBaselineSettled = (payload: BaselineJobPayload): Promise<void> =>
     replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
 
-  // Regenerate a repo's contracts after a decision leaves the spec conflict-free:
-  // re-baseline the SAME head with `force` (clone → curate → generate → analyze —
-  // the baseline's own progress panel shows it) so the previously-skipped contracts
-  // are generated. Called directly by the decision task runner below (there is no
-  // separate `repo.contracts` job). The commit comes from the existing baseline
-  // saved at connect; getRepo gives installation/branch.
-  const onContractsRegenerated = async (repoKey: string, workspaceOrgId: string): Promise<void> => {
-    const repo = await gateStore.getRepo(repoKey);
-    if (!repo) return; // need the link
-    const baseline = await gateStore.getBaseline(repoKey);
-    if (baseline) {
-      await enqueueBaseline({
-        repoFullName: repoKey,
-        installationId: repo.installationId,
-        defaultBranch: repo.defaultBranch,
-        commitSha: baseline.commitSha,
-        workspaceOrgId,
-        force: true,
-      });
-    }
-  };
-
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
     // job. Reap them so the single-flight key frees and stale "Syncing…" clears.
@@ -245,31 +213,8 @@ export async function registerJobs(
     log.error(`[ee-jobs] background services failed to start (jobs will not process): ${(err as Error).message}`);
   }
 
-  // Let OSS adapters (the dashboard decision routes) defer work onto this queue
-  // without importing ee/ — e.g. the post-decision contract refresh runs here,
-  // off the request path. jobKey debounces a burst of decisions per repo.
-  setBackgroundTaskRunner(async (task) => {
-    if (!runner) throw new Error('the background job worker is not running');
-    if (task.type === REPO_CONTRACTS_TASK && task.repoKey) {
-      // OSS adapters (the shared spec routes) pass only repoKey — resolve the
-      // owning workspace from the gate link so the work is scoped + notified.
-      const workspaceOrgId =
-        task.workspaceOrgId ?? (await gateStore.getRepo(task.repoKey))?.workspaceOrgId;
-      if (!workspaceOrgId) {
-        log.warn(`[ee-jobs] contract regeneration skipped: ${task.repoKey} is not a connected repo`);
-        return;
-      }
-      // Regenerate contracts by re-baselining directly (clone → curate → generate →
-      // analyze, shown by the baseline's own progress panel). There is no separate
-      // "refreshing contracts" job/popup — the old wrapper did no work of its own
-      // beyond this call, so it was pure redundancy.
-      await onContractsRegenerated(task.repoKey, workspaceOrgId);
-    }
-  });
-
   for (const sig of ['SIGTERM', 'SIGINT'] as const) {
     process.once(sig, () => {
-      setBackgroundTaskRunner(null);
       void runner?.stop().catch(() => {});
       void hub.stop().catch(() => {});
     });
@@ -277,10 +222,6 @@ export async function registerJobs(
 
   return {
     jobStore,
-    enqueueSync: async (payload, jobKey) => {
-      if (!runner) throw new Error('the background job worker is not running');
-      await runner.addJob(KNOWLEDGE_SYNC_TASK, payload, { jobKey, maxAttempts: 1 });
-    },
     enqueueBaseline,
   };
 }
