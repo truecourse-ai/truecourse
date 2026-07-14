@@ -14,6 +14,19 @@ import { useSearchParams } from 'react-router-dom';
 
 export interface GuardViewState {
   openSpecSection: (doc: string, section: string) => void;
+  /**
+   * Jump to the Coverage tab with a specific conflict's resolution detail open —
+   * the route the Scenarios-tab blocked panel takes for each open conflict. Writes
+   * `?gconf=<overlapKey>` and drops the doc/section tab so the conflict wins the
+   * coverage read.
+   */
+  openSpecConflict: (overlapKey: string) => void;
+  /**
+   * Jump to the Coverage tab with no specific selection — the route the Runs-tab
+   * blocked note takes ("resolve the conflicts on Coverage"). Lands the tab; the
+   * user picks a conflict from its sidebar.
+   */
+  openSpecCoverage: () => void;
 }
 
 export function useGuardView(): GuardViewState {
@@ -38,5 +51,32 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  return { openSpecSection };
+  const openSpecConflict = useCallback(
+    (overlapKey: string) => {
+      setParams((prev) => {
+        const q = new URLSearchParams(prev);
+        q.set('section', 'guard');
+        q.set('tab', 'coverage');
+        q.delete('gdrift');
+        // The conflict owns the coverage read — drop any active doc tab + section.
+        q.delete('guard');
+        q.delete('gsec');
+        q.set('gconf', overlapKey);
+        return q;
+      });
+    },
+    [setParams],
+  );
+
+  const openSpecCoverage = useCallback(() => {
+    setParams((prev) => {
+      const q = new URLSearchParams(prev);
+      q.set('section', 'guard');
+      q.set('tab', 'coverage');
+      q.delete('gdrift');
+      return q;
+    });
+  }, [setParams]);
+
+  return { openSpecSection, openSpecConflict, openSpecCoverage };
 }

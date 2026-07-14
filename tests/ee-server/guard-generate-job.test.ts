@@ -9,7 +9,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
-import type { GuardOnboardingPipeline } from '@truecourse/ee-github-app';
+import type {
+  GuardConflictsBlockedEmail,
+  GuardOnboardingPipeline,
+  EmailNotifier,
+} from '@truecourse/ee-github-app';
+import { selectGateStore } from '@truecourse/ee-github-app';
 import {
   JobStore,
   NotificationStore,
@@ -17,6 +22,38 @@ import {
 } from '../../ee/packages/data-store/src/index';
 import { REPO_GUARD_TASK, guardJobKey } from '../../ee/packages/server/src/jobs/constants';
 import { runGuardGenerate } from '../../ee/packages/server/src/jobs/worker';
+
+/** A notifier that records only the conflicts-blocked sends. */
+function fakeNotifier() {
+  const sent: Array<{ to: string[]; email: GuardConflictsBlockedEmail }> = [];
+  const notifier: EmailNotifier = {
+    sendGuardGateFailure: async () => {},
+    sendGuardConflictsBlocked: async (to, email) => void sent.push({ to, email }),
+  };
+  return { notifier, sent };
+}
+
+async function linkRepo(
+  db: EeDb,
+  over: Partial<Parameters<ReturnType<typeof selectGateStore>['linkRepo']>[0]> = {},
+): Promise<void> {
+  await selectGateStore(db).linkRepo({
+    repoFullName: REPO,
+    installationId: 42,
+    workspaceOrgId: ORG,
+    defaultBranch: 'main',
+    blocking: true,
+    enabled: true,
+    notifyEmails: ['a@x.com', 'b@x.com'],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+}
+
+const blockedRun: GuardOnboardingPipeline = {
+  run: async () => ({ savedFileCount: 0, scenariosWritten: 0, noCorpus: false, openConflicts: 2 }),
+};
 
 const ORG = 'org_A';
 const REPO = 'acme/api';
@@ -111,7 +148,7 @@ describe('runGuardGenerate — worker body', () => {
           const j = await jobStore.get(job.id);
           if (j) progressAfter.push({ ...j.progress });
         }
-        return { savedFileCount: 5, scenariosWritten: 3, noCorpus: false };
+        return { savedFileCount: 5, scenariosWritten: 3, noCorpus: false, openConflicts: 0 };
       }),
     };
 
@@ -145,7 +182,7 @@ describe('runGuardGenerate — worker body', () => {
     const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
 
     const pipeline: GuardOnboardingPipeline = {
-      run: async () => ({ savedFileCount: 0, scenariosWritten: 0, noCorpus: true }),
+      run: async () => ({ savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 }),
     };
 
     await runGuardGenerate({ db, jobStore, notifications, pipeline }, payloadFor(job.id));
@@ -167,7 +204,7 @@ describe('runGuardGenerate — worker body', () => {
     const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
 
     const pipeline: GuardOnboardingPipeline = {
-      run: async () => ({ savedFileCount: 3, scenariosWritten: 1, noCorpus: false }),
+      run: async () => ({ savedFileCount: 3, scenariosWritten: 1, noCorpus: false, openConflicts: 0 }),
     };
     await runGuardGenerate({ db, jobStore, notifications, pipeline }, payloadFor(job.id));
 
@@ -202,6 +239,105 @@ describe('runGuardGenerate — worker body', () => {
       title: 'Guard generation failed — acme/api',
     });
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, detail: 'LLM upstream 500' });
+  });
+
+  it('a blocked (open-conflicts) generate completes with a WARNING notice + the conflict count', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+
+    await runGuardGenerate({ db, jobStore, notifications, pipeline: blockedRun }, payloadFor(job.id));
+
+    const done = await jobStore.get(job.id);
+    // Completes (not failed) — a needs-attention outcome, not an error.
+    expect(done?.status).toBe('succeeded');
+    expect(done?.result).toMatchObject({ repoFullName: REPO, scenariosWritten: 0, openConflicts: 2 });
+
+    const notes = await notifications.listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      kind: REPO_GUARD_TASK,
+      level: 'warning',
+      title: 'Scenario generation blocked — 2 spec conflicts to resolve',
+    });
+    expect(notes[0]?.body).toContain('Spec Guard');
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, openConflicts: 2 });
+  });
+
+  it('singular wording for exactly one conflict', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+    const pipeline: GuardOnboardingPipeline = {
+      run: async () => ({ savedFileCount: 0, scenariosWritten: 0, noCorpus: false, openConflicts: 1 }),
+    };
+
+    await runGuardGenerate({ db, jobStore, notifications, pipeline }, payloadFor(job.id));
+
+    const notes = await notifications.listForOrg(ORG);
+    expect(notes[0]?.title).toBe('Scenario generation blocked — 1 spec conflict to resolve');
+  });
+
+  it('emails the repo notify addresses on a blocked generate when the conflicts pref is on', async () => {
+    await linkRepo(db);
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+    const { notifier, sent } = fakeNotifier();
+
+    await runGuardGenerate(
+      { db, jobStore, notifications, pipeline: blockedRun, notifier },
+      payloadFor(job.id),
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toEqual(['a@x.com', 'b@x.com']);
+    expect(sent[0].email).toMatchObject({ repoFullName: REPO, conflicts: 2 });
+    // The job still notifies in-app regardless of the email.
+    expect((await notifications.listForOrg(ORG))[0]?.level).toBe('warning');
+  });
+
+  it('does not email when the conflicts pref is off (job still notifies in-app)', async () => {
+    await linkRepo(db, { notifications: { gateFailure: true, conflicts: false } });
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+    const { notifier, sent } = fakeNotifier();
+
+    await runGuardGenerate(
+      { db, jobStore, notifications, pipeline: blockedRun, notifier },
+      payloadFor(job.id),
+    );
+
+    expect(sent).toHaveLength(0);
+    expect((await notifications.listForOrg(ORG))).toHaveLength(1);
+  });
+
+  it('does not email when no notify addresses are configured', async () => {
+    await linkRepo(db, { notifyEmails: [] });
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+    const { notifier, sent } = fakeNotifier();
+
+    await runGuardGenerate(
+      { db, jobStore, notifications, pipeline: blockedRun, notifier },
+      payloadFor(job.id),
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('a blocked generate with no notifier wired still completes with the in-app warning', async () => {
+    await linkRepo(db);
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+
+    await runGuardGenerate({ db, jobStore, notifications, pipeline: blockedRun }, payloadFor(job.id));
+
+    expect((await jobStore.get(job.id))?.status).toBe('succeeded');
+    expect((await notifications.listForOrg(ORG))[0]?.level).toBe('warning');
   });
 
   it('fails the job when the GitHub App is not configured', async () => {

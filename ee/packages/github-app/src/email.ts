@@ -22,8 +22,19 @@ export interface GuardGateFailureEmail {
   dashboardUrl?: string;
 }
 
+/** The "scenario generation is blocked on unresolved spec conflicts" email —
+ *  the guard-generate / spec-regen analogue of the gate-failure notice. */
+export interface GuardConflictsBlockedEmail {
+  repoFullName: string;
+  /** Open spec conflicts that blocked generation — resolve these to unblock. */
+  conflicts: number;
+  /** Deep link to the repo's Spec Guard → Coverage tab, when derivable. */
+  dashboardUrl?: string;
+}
+
 export interface EmailNotifier {
   sendGuardGateFailure(to: string[], email: GuardGateFailureEmail): Promise<void>;
+  sendGuardConflictsBlocked(to: string[], email: GuardConflictsBlockedEmail): Promise<void>;
 }
 
 /** The slice of the Resend client we use — injectable for tests. */
@@ -111,6 +122,20 @@ export function createEmailNotifier(
       const html =
         `<p>The TrueCourse guard gate failed on ${prLink(email)} ` +
         `with ${n} new failing scenario${plural(n)}:</p><ul>${items}</ul>${more}${links}`;
+      await sendEach(to, subject, html);
+    },
+
+    async sendGuardConflictsBlocked(to, email) {
+      const n = email.conflicts;
+      const subject = `TrueCourse: scenario generation blocked on ${email.repoFullName} — ${n} spec conflict${plural(n)}`;
+      const link = email.dashboardUrl
+        ? `<p><a href="${escapeHtml(email.dashboardUrl)}">Resolve them in the Spec Guard → Coverage tab</a></p>`
+        : '';
+      const html =
+        `<p>TrueCourse could not generate guard scenarios for <strong>${escapeHtml(email.repoFullName)}</strong>: ` +
+        `${n} open spec conflict${plural(n)} must be resolved first.</p>` +
+        `<p>Extracting both sides of an unresolved overlap births a red finding that is really the dispute, ` +
+        `so generation is paused until the conflicts are resolved.</p>${link}`;
       await sendEach(to, subject, html);
     },
   };

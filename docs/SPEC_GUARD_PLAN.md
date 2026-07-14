@@ -1518,6 +1518,25 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
     RETIREMENT DECIDED note above — they are the future spec→code linking half). Workspace-level
     (cross-repo) contracts drop in v1: a documented known regression (data preserved, returns with
     the spec→code work). STATUS: BUILT 2026-07-14 (sm/spec-guards-ee, awaiting review).
+  - **08.10 — Open-conflict gate parity + blocked-generation surface.** The OSS guard-generate
+    conflict gate silently never fired in EE (`assertNoOpenConflicts` read the corpus through the
+    active spec store keyed by the ephemeral checkout path — a Pg miss), so birth generation ran
+    over conflicted corpora: both sides extracted, disputed sections failed birth and settled
+    nothing, leaving an empty scenario set with a populated Runs tab. Root fix: the gate reads the
+    on-disk materialized `specs/{corpus,decisions}.json` (the generator's own doc authority), and
+    the EE materialize step writes `decisions.json` alongside the corpus (also unblocks losing-side
+    claim suppression). All three EE entry points handle the gate: onboarding and spec-regen catch
+    `OpenConflictsError` and persist a `status: 'open-conflicts'` report (no scenarios, no chained
+    baseline run — `generateWasBlocked` suppresses it), the gate's cold-generate settles the Check
+    NEUTRAL ("pending spec-conflict resolution", never the error bucket). Blocked outcome notifies
+    in-app (warning) and emails via the previously-stub `conflicts` pref
+    (`sendGuardConflictsBlocked`). Dashboard: Scenarios tab renders a blocked panel with the LIVE
+    open-conflict list (corpus-derived, never snapshotted in the report) deep-linking into the
+    Coverage resolver; Runs tab empty state gets the one-line variant. A repo-scope decision that
+    clears the last conflict while the guard report is blocked auto-enqueues a hosted guard
+    generate (core seam installed by the EE server, alongside the contracts refresh). OSS behavior
+    unchanged (interactive hard-fail, nothing persisted). STATUS: BUILT 2026-07-14
+    (sm/spec-guards-ee, awaiting review).
   - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
     credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 

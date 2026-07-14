@@ -53,6 +53,23 @@ export async function chainGuardOnboarding(
   }
 }
 
+/**
+ * Whether a settled guard-generate ended BLOCKED on unresolved spec conflicts —
+ * keyed off the run's result `openConflicts` count. A blocked generate persisted
+ * an `open-conflicts` report (so `hasGuardState` is now true) but saved NO
+ * scenario set, so a baseline RUN chained off it would run against nothing and
+ * strand a run row with an empty Scenarios tab. The generate-settle chain calls
+ * this to suppress {@link chainGuardBaselineRefresh} in that case.
+ */
+export function generateWasBlocked(result: unknown): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    typeof (result as { openConflicts?: unknown }).openConflicts === 'number' &&
+    (result as { openConflicts: number }).openConflicts > 0
+  );
+}
+
 /** The commit-carrying shape both chains project a guard-baseline request from
  *  (a settled repo.baseline OR a settled repo.guard payload — both carry these). */
 export type GuardRefreshSource = GuardBaselineEnqueueRequest;

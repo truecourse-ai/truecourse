@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   chainGuardOnboarding,
   chainGuardBaselineRefresh,
+  generateWasBlocked,
 } from '../../ee/packages/server/src/jobs/guard-chain';
 import type { BaselineJobPayload } from '../../ee/packages/server/src/jobs/constants';
 
@@ -123,5 +124,42 @@ describe('chainGuardBaselineRefresh — the complement (fires when guard state E
 
     const boom = { hasGuardState: vi.fn().mockRejectedValue(new Error('pg down')), enqueueGuardBaseline: vi.fn() };
     await expect(chainGuardBaselineRefresh(boom, payload, 'succeeded')).resolves.toBeNull();
+  });
+});
+
+describe('generateWasBlocked — the settle-chain suppression predicate', () => {
+  it('is true only when the generate result carries a positive openConflicts count', () => {
+    expect(generateWasBlocked({ repoFullName: 'acme/api', scenariosWritten: 0, openConflicts: 2 })).toBe(true);
+    expect(generateWasBlocked({ repoFullName: 'acme/api', scenariosWritten: 0, openConflicts: 1 })).toBe(true);
+  });
+
+  it('is false for a normal generate result (openConflicts 0 or absent) and non-objects', () => {
+    expect(generateWasBlocked({ repoFullName: 'acme/api', scenariosWritten: 3, openConflicts: 0 })).toBe(false);
+    expect(generateWasBlocked({ repoFullName: 'acme/api', scenariosWritten: 3 })).toBe(false);
+    expect(generateWasBlocked(undefined)).toBe(false);
+    expect(generateWasBlocked(null)).toBe(false);
+    expect(generateWasBlocked('nope')).toBe(false);
+  });
+
+  it('a blocked generate settle enqueues NO baseline run (the "Runs populated, Scenarios empty" bug)', async () => {
+    // The blocked generate persisted an open-conflicts report, so hasGuardState is
+    // true — the refresh chain WOULD fire. The settle gate suppresses it on the
+    // result before the chain is consulted.
+    const enqueueGuardBaseline = vi.fn().mockResolvedValue('job_b1');
+    const hasGuardState = vi.fn().mockResolvedValue(true);
+    const blockedResult = { repoFullName: 'acme/api', scenariosWritten: 0, openConflicts: 2 };
+
+    // The wiring onGuardGenerateSettled uses: skip when blocked, else chain.
+    const onGuardGenerateSettled = async (result: unknown): Promise<void> => {
+      if (generateWasBlocked(result)) return;
+      await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, 'succeeded');
+    };
+
+    await onGuardGenerateSettled(blockedResult);
+    expect(enqueueGuardBaseline).not.toHaveBeenCalled();
+
+    // A normal generate result DOES chain the refresh.
+    await onGuardGenerateSettled({ repoFullName: 'acme/api', scenariosWritten: 3, openConflicts: 0 });
+    expect(enqueueGuardBaseline).toHaveBeenCalledTimes(1);
   });
 });

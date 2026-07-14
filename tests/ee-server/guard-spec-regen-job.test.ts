@@ -14,7 +14,10 @@ import type {
   GuardHeadRegenPipeline,
   GuardGateRunRequest,
   GuardGateCorpus,
+  GuardConflictsBlockedEmail,
+  EmailNotifier,
 } from '@truecourse/ee-github-app';
+import { selectGateStore } from '@truecourse/ee-github-app';
 import { JobStore, NotificationStore } from '../../ee/packages/data-store/src/index';
 import {
   GUARD_SPEC_REGEN_TASK,
@@ -96,6 +99,37 @@ function makeOctokit() {
   };
   return { octokit, calls };
 }
+
+function fakeNotifier() {
+  const sent: Array<{ to: string[]; email: GuardConflictsBlockedEmail }> = [];
+  const notifier: EmailNotifier = {
+    sendGuardGateFailure: async () => {},
+    sendGuardConflictsBlocked: async (to, email) => void sent.push({ to, email }),
+  };
+  return { notifier, sent };
+}
+
+async function linkRepo(
+  over: Partial<Parameters<ReturnType<typeof selectGateStore>['linkRepo']>[0]> = {},
+): Promise<void> {
+  await selectGateStore(db).linkRepo({
+    repoFullName: REPO,
+    installationId: 42,
+    workspaceOrgId: ORG,
+    defaultBranch: 'main',
+    blocking: true,
+    enabled: true,
+    notifyEmails: ['a@x.com'],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+}
+
+/** A head-regen that came back blocked on open spec conflicts. */
+const blockedRegen: GuardHeadRegenPipeline = {
+  run: async () => ({ scenariosWritten: 0, noCorpus: false, corpus: null, openConflicts: 2 }),
+};
 
 describe('runGuardSpecRegen — worker body', () => {
   it('regenerates, re-gates against the PR corpus, settles the comment to done, and notifies', async () => {
@@ -216,6 +250,83 @@ describe('runGuardSpecRegen — worker body', () => {
       level: 'error',
       title: 'Guard regeneration failed — acme/api',
     });
+  });
+
+  it('a blocked (open-conflicts) regen settles the comment to blocked, skips the re-gate, and warns', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({
+      org: ORG,
+      type: GUARD_SPEC_REGEN_TASK,
+      key: guardSpecRegenJobKey(REPO, HEAD_SHA),
+    });
+    const { octokit, calls } = makeOctokit();
+    const regate = vi.fn();
+
+    await runGuardSpecRegen(
+      { db, jobStore, notifications, headRegenPipeline: blockedRegen, regate, octokitFor: () => octokit },
+      payloadFor(job.id),
+    );
+
+    // No re-gate on a blocked regen; the comment settles to the blocked notice.
+    expect(regate).not.toHaveBeenCalled();
+    const last = calls.update[calls.update.length - 1];
+    expect(last.body).toContain('Scenario generation blocked');
+    expect(last.body).toContain('2 open spec conflicts');
+
+    // Completes (not fails) with a WARNING notification.
+    expect((await jobStore.get(job.id))?.status).toBe('succeeded');
+    const notes = await notifications.listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      kind: GUARD_SPEC_REGEN_TASK,
+      level: 'warning',
+      title: 'Scenario generation blocked — 2 spec conflicts to resolve',
+    });
+  });
+
+  it('emails the notify addresses on a blocked regen when the conflicts pref is on', async () => {
+    await linkRepo();
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({
+      org: ORG,
+      type: GUARD_SPEC_REGEN_TASK,
+      key: guardSpecRegenJobKey(REPO, HEAD_SHA),
+    });
+    const { octokit } = makeOctokit();
+    const { notifier, sent } = fakeNotifier();
+
+    await runGuardSpecRegen(
+      { db, jobStore, notifications, headRegenPipeline: blockedRegen, regate: vi.fn(), octokitFor: () => octokit, notifier },
+      payloadFor(job.id),
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toEqual(['a@x.com']);
+    expect(sent[0].email).toMatchObject({ repoFullName: REPO, conflicts: 2 });
+  });
+
+  it('does not email on a blocked regen when the conflicts pref is off', async () => {
+    await linkRepo({ notifications: { gateFailure: true, conflicts: false } });
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({
+      org: ORG,
+      type: GUARD_SPEC_REGEN_TASK,
+      key: guardSpecRegenJobKey(REPO, HEAD_SHA),
+    });
+    const { octokit } = makeOctokit();
+    const { notifier, sent } = fakeNotifier();
+
+    await runGuardSpecRegen(
+      { db, jobStore, notifications, headRegenPipeline: blockedRegen, regate: vi.fn(), octokitFor: () => octokit, notifier },
+      payloadFor(job.id),
+    );
+
+    expect(sent).toHaveLength(0);
+    // The in-app warning still posts.
+    expect((await notifications.listForOrg(ORG))[0]?.level).toBe('warning');
   });
 
   it('fails when the GitHub App is not configured (pipeline never runs)', async () => {

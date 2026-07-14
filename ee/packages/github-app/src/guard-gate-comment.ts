@@ -105,6 +105,19 @@ export function guardGateCheckOutput(decision: GuardGateDecision): GuardGateChec
   };
 }
 
+/** Neutral Check output for a cold-generate blocked on unresolved spec conflicts:
+ *  the gate can't generate scenarios until the disputes are resolved, so it is
+ *  pending — NOT a broken gate (which would be the error bucket). */
+export function guardGateOpenConflictsOutput(conflicts: number): { title: string; summary: string } {
+  const n = count(conflicts, 'open conflict');
+  return {
+    title: 'Scenario generation pending — spec conflicts',
+    summary:
+      `Scenario generation is pending spec-conflict resolution — ${n}. ` +
+      "Resolve them in the dashboard's Spec Guard → Coverage tab, then this PR gates automatically.",
+  };
+}
+
 /** Global deployment kill switch: truthy → neutral Check, no clone, no run. */
 export const GUARD_GATE_KILL_SWITCH_ENV = 'TRUECOURSE_GUARD_GATE_DISABLED';
 

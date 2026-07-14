@@ -54,6 +54,7 @@ import { GuardScenarioDetail } from '@/components/guard/GuardScenarioDetail';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
 import { GuardHeldDetail } from '@/components/guard/GuardHeldDetail';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
+import { buildOpenConflictRows, type BlockedConflictRow } from '@/components/guard/GuardBlockedPanel';
 import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
 import { GuardSectionActions } from '@/components/guard/GuardSectionActions';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -324,13 +325,18 @@ function RepoPageInner() {
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
   const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey, refForTabs);
+  // Birth generation ended `open-conflicts`: the spec corpus still carries
+  // unresolved disagreements, so no scenarios/runs exist. The Scenarios tab shows
+  // the blocked panel (live conflict list) and the Runs tab a blocked note.
+  const guardBlocked = guardReport?.status === 'open-conflicts';
   // UI-triggered guard actions: Generate (Scenarios tab, estimate-gated) and Run
   // (Drifts tab, deterministic). Held at page level so the in-flight state survives
   // tab switches, exactly like specCorpus / contractsGenerating.
   const guardGen = useGuardGenerate(repoId);
   const guardRun = useGuardRun(repoId);
-  // The bidirectional jump from a guard drift into the coverage tab.
-  const { openSpecSection } = useGuardView();
+  // The bidirectional jump from a guard drift / scenario / finding into the
+  // coverage tab (a section, a specific conflict, or the tab itself).
+  const { openSpecSection, openSpecConflict } = useGuardView();
   // Guard's OWN coverage tab set (`?guard` docs + `?gconf` conflicts + the
   // within-doc `?gsec` section) — the shared preview/pin tab model, kept separate
   // from BL Drift's `?spec`/DriftViewContext so the two never bleed. The coverage
@@ -869,8 +875,23 @@ function RepoPageInner() {
   }, [flowList, syncFlowNames]);
 
   // Corpus-path state — owns the corpus fetch + Scan so the header (not the
-  // panel) drives it. Read by the Guard Coverage doc picker.
-  const specCorpus = useSpecCorpus(repoId, leftTab === 'coverage', refForTabs, prNumber ?? undefined);
+  // panel) drives it. Read by the Guard Coverage doc picker AND, when generation
+  // is blocked on conflicts, by the Scenarios-tab blocked panel — so the corpus is
+  // also fetched on the Scenarios tab in that (only that) state, to list the open
+  // conflicts LIVE. No extra call in the common (not-blocked) case.
+  const specCorpus = useSpecCorpus(
+    repoId,
+    leftTab === 'coverage' || (leftTab === 'scenarios' && guardBlocked),
+    refForTabs,
+    prNumber ?? undefined,
+  );
+  // The LIVE open conflicts for the Scenarios-tab blocked panel: `null` while the
+  // corpus is still loading (panel spins), else the unresolved subset derived from
+  // the corpus (drops instantly when one is resolved on the Coverage tab).
+  const guardOpenConflicts = useMemo<BlockedConflictRow[] | null>(
+    () => (guardBlocked ? (specCorpus.data ? buildOpenConflictRows(specCorpus.data) : null) : []),
+    [guardBlocked, specCorpus.data],
+  );
 
   // Per-tab header actions — shared by both the OSS Header and the EE repo chrome.
   const sectionActionsNode =
@@ -1372,13 +1393,22 @@ function RepoPageInner() {
                       loading={guardScenarios.loading}
                       error={guardScenarios.error}
                       onOpenSpec={openSpecSection}
+                      // When the report is `open-conflicts`, the overview renders
+                      // the blocked panel over these live conflicts instead.
+                      conflicts={guardOpenConflicts}
+                      onOpenConflict={openSpecConflict}
                     />
                   );
                 })()}
               </div>
             </div>
           ) : leftTab === 'guarddrifts' ? (
-            <GuardDriftsView repoId={repoId} reloadKey={guardReloadKey} prRef={refForTabs} />
+            <GuardDriftsView
+              repoId={repoId}
+              reloadKey={guardReloadKey}
+              prRef={refForTabs}
+              blockedOnConflicts={guardBlocked}
+            />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}

@@ -28,7 +28,11 @@ import {
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
-import { buildGuardReport } from '@truecourse/core/commands/guard-in-process';
+import {
+  buildGuardReport,
+  guardGenerateInProcess,
+  OpenConflictsError,
+} from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
 import {
   generateGuards,
@@ -173,7 +177,7 @@ describe('guard onboarding pipeline', () => {
 
     const result = await pipeline.run(deps, request);
 
-    expect(result).toEqual({ savedFileCount: 0, scenariosWritten: 0, noCorpus: true });
+    expect(result).toEqual({ savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 });
     expect(generate).not.toHaveBeenCalled();
     expect(await readGuardResult(REPO)).toBeNull();
     // The temp clone is removed even on the no-op path.
@@ -200,7 +204,7 @@ describe('guard onboarding pipeline', () => {
 
     expect(sawCorpusInClone).toBe(true);
     // recipe.json + manifest.json + cli/s1.yaml persisted; 1 scenario written.
-    expect(result).toEqual({ savedFileCount: 3, scenariosWritten: 1, noCorpus: false });
+    expect(result).toEqual({ savedFileCount: 3, scenariosWritten: 1, noCorpus: false, openConflicts: 0 });
 
     // The scenario corpus is readable back through the store seam at the ref
     // (listScenarioFiles lists the YAMLs; recipe/manifest have their own readers).
@@ -369,6 +373,121 @@ describe('guard onboarding pipeline', () => {
     const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
 
     await expect(pipeline.run(deps, request)).rejects.toThrow(/install `false` failed/);
+    expect(await readGuardResult(REPO)).toBeNull();
+    expect(await listScenarioFiles(REPO)).toEqual([]);
+  });
+
+  // ------------------------------------------------------------------
+  // Open-conflict gate, EE parity. OSS `guard generate` hard-fails on an
+  // unresolved within-area overlap (see tests/core/guard-generate-conflict-gate)
+  // because extracting both sides births a red finding that is really the
+  // dispute. Birth generation runs the SAME `guardGenerateInProcess`, so the
+  // same corpus must hit the same gate — the gate reads the corpus + decisions
+  // the pipeline MATERIALIZES into the checkout, so both fire on the ephemeral
+  // clone the store keys nothing under.
+  // ------------------------------------------------------------------
+
+  const CONFLICT_NOTE = 'auth0_id vs auth0_sub for the user identity';
+  const conflictedCorpus = {
+    version: 3,
+    generatedAt: '2026-07-09T00:00:00.000Z',
+    docs: [
+      { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/users-entity'] },
+      { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/users-entity'] },
+    ],
+    areas: [
+      {
+        id: 'booking/users-entity',
+        product: 'booking',
+        concern: 'users-entity',
+        docRefs: ['docs/v1.md', 'docs/v2.md'],
+        overlaps: [{ docs: ['docs/v1.md', 'docs/v2.md'], note: CONFLICT_NOTE, sections: [] }],
+      },
+    ],
+    relations: [],
+    skippedDocs: [],
+  };
+  const cloneConflictDocs = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+    writeFile(dir, 'docs/v1.md', '# Users v1\nThe user identity is auth0_id.');
+    writeFile(dir, 'docs/v2.md', '# Users v2\nThe user identity is auth0_sub.');
+  });
+  /** The production generate seam (the real in-process driver) with a sentinel at
+   *  every LLM stage — reaching one proves the gate let generation through. */
+  function guardGenerateWithSentinel(sentinel: () => Promise<never>): (dir: string) => Promise<unknown> {
+    return (dir: string) =>
+      guardGenerateInProcess(dir, {
+        recipeRunner: sentinel as never,
+        extractRunner: sentinel as never,
+        generateRunner: sentinel as never,
+        fidelityRunner: sentinel as never,
+      });
+  }
+
+  it('a stored corpus with an unresolved overlap hits the conflict gate: a blocked report persists, no scenario set', async () => {
+    await saveSpec(ref, 'corpus', conflictedCorpus);
+    const llmStage = vi.fn(async (): Promise<never> => {
+      throw new Error('the conflict gate must fire before any LLM stage');
+    });
+    const pipeline = createGuardOnboardingPipeline({
+      cloneRepo: cloneConflictDocs,
+      generate: guardGenerateWithSentinel(llmStage),
+    });
+
+    // The run RESOLVES — a needs-attention outcome, not a failure — reporting the
+    // open-conflict count and skipping the scenario write.
+    const result = await pipeline.run(deps, request);
+    expect(result).toEqual({ savedFileCount: 0, scenariosWritten: 0, noCorpus: false, openConflicts: 1 });
+    expect(llmStage).not.toHaveBeenCalled();
+
+    // A blocked `open-conflicts` report persisted, naming both disputing docs; NO
+    // scenario set, so the chain never fires a baseline run over an empty corpus.
+    const report = await readGuardResult(REPO, SHA);
+    expect(report).not.toBeNull();
+    expect(report!.status).toBe('open-conflicts');
+    expect(report!.reason).toContain('docs/v1.md');
+    expect(report!.reason).toContain('docs/v2.md');
+    expect(report!.reason).toContain(CONFLICT_NOTE);
+    expect(await listScenarioFiles(REPO)).toEqual([]);
+  });
+
+  it('a stored resolving verdict is materialized into the checkout and lets generation past the gate', async () => {
+    await saveSpec(ref, 'corpus', conflictedCorpus);
+    // A section-scoped verdict on the sectionless overlap (null anchors match its
+    // identity) resolves the dispute — the gate must let generation proceed.
+    await saveSpec(ref, 'decisions', {
+      version: 1,
+      manualIncludes: [],
+      manualExcludes: [],
+      relations: [],
+      manualAreas: [],
+      conflictResolutions: [
+        {
+          docA: 'docs/v1.md',
+          anchorA: null,
+          docB: 'docs/v2.md',
+          anchorB: null,
+          verdict: 'b',
+          resolvedAt: '2026-07-10T00:00:00Z',
+        },
+      ],
+    });
+    // Sentinel at the first LLM stage (recipe discovery): reaching it proves the
+    // gate let generation through. It throws, so the run rejects — but NOT with an
+    // OpenConflictsError, and the sentinel was invoked.
+    const llmStage = vi.fn(async (): Promise<never> => {
+      throw new Error('gate passed — reached an LLM stage');
+    });
+    const pipeline = createGuardOnboardingPipeline({
+      cloneRepo: cloneConflictDocs,
+      generate: guardGenerateWithSentinel(llmStage),
+    });
+
+    const err = await pipeline.run(deps, request).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(OpenConflictsError);
+    expect(llmStage).toHaveBeenCalled();
+
+    // The generate threw past the gate, so no report / scenarios were persisted.
     expect(await readGuardResult(REPO)).toBeNull();
     expect(await listScenarioFiles(REPO)).toEqual([]);
   });

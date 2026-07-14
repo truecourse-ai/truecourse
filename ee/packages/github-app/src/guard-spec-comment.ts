@@ -17,6 +17,7 @@ export type GuardSpecCommentStatus =
   | 'running'
   | 'done'
   | 'nochange'
+  | 'blocked'
   | 'error';
 
 export interface GuardSpecCommentData {
@@ -26,6 +27,8 @@ export interface GuardSpecCommentData {
   scenariosWritten?: number;
   /** The PR head commit the scenarios were generated from + persisted under. */
   commitSha?: string;
+  /** Open spec conflicts blocking regeneration (the `blocked` summary). */
+  conflicts?: number;
   error?: string;
 }
 
@@ -82,6 +85,16 @@ export function renderGuardSpecComment(
         `### ✅ No guard scenarios to regenerate\n\n` +
         `The changed spec documents produced no scenarios (no doc universe yet).`
       );
+    case 'blocked': {
+      const n = data.conflicts ?? 0;
+      return (
+        head +
+        `### 🛡️ Scenario generation blocked — spec conflicts\n\n` +
+        `${n} open spec conflict${n === 1 ? '' : 's'} must be resolved before scenarios can ` +
+        `regenerate. Resolve them in the dashboard's Spec Guard → Coverage tab, then re-tick to retry.\n\n` +
+        `${checkbox}\n\n_Check the box to retry once the conflicts are resolved._`
+      );
+    }
     case 'error':
       return (
         head +

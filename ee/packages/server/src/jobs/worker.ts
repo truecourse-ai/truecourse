@@ -36,6 +36,9 @@ import {
   defaultGuardHeadRegenPipeline,
   notifierFromConfig,
   postGuardGateErrorCheck,
+  wantsNotification,
+  repoGuardCoverageUrl,
+  type EmailNotifier,
   type BaselineResult,
   type GuardOnboardingPipeline,
   type GuardGatePipeline,
@@ -53,7 +56,13 @@ import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { JobStepTracker } from './steps.js';
-import { executeJob, type JobDefinition, type JobOutcomeStatus, type JobRuntime } from './harness.js';
+import {
+  executeJob,
+  type JobDefinition,
+  type JobNotification,
+  type JobOutcomeStatus,
+  type JobRuntime,
+} from './harness.js';
 import {
   REPO_BASELINE_TASK,
   REPO_BASELINE_TITLE,
@@ -115,7 +124,11 @@ export interface StartWorkerDeps {
    * gate diffs against a warm baseline instead of paying a lazy base run (issue 06).
    * Wired only onto the guard-generate definition.
    */
-  onGuardGenerateSettled?: (payload: GuardGenerateJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
+  onGuardGenerateSettled?: (
+    payload: GuardGenerateJobPayload,
+    outcome: JobOutcomeStatus,
+    result?: unknown,
+  ) => Promise<void>;
   /**
    * Called after a `guard.baseline` job goes terminal (success OR failure), once
    * its single-flight key is free — replays any coalesced follow-up refresh for
@@ -167,6 +180,54 @@ function baselineNotice(
     title: 'Repository scan complete',
     body: `${repoFullName} — spec & Code Quality baseline are ready.`,
   };
+}
+
+/**
+ * The shared "scenario generation blocked on open spec conflicts" in-app notice —
+ * a needs-attention WARNING, not a failure. Wording is identical for the onboarding
+ * generate and the spec-change regen; both point the user at the repo's Spec Guard
+ * Coverage tab where the conflicts are resolved.
+ */
+function conflictsBlockedNotification(repoFullName: string, conflicts: number): JobNotification {
+  const s = conflicts === 1 ? '' : 's';
+  return {
+    level: 'warning',
+    title: `Scenario generation blocked — ${conflicts} spec conflict${s} to resolve`,
+    body: `${repoFullName} — resolve the ${conflicts} open spec conflict${s} in the Spec Guard → Coverage tab, then scenario generation re-runs.`,
+    data: { repoFullName, openConflicts: conflicts },
+  };
+}
+
+/** The conflicts-email injection seam the guard generate/spec-regen jobs share:
+ *  tests pass fakes; production resolves the notifier from the app config per
+ *  invocation (a key added after boot is honored) and the origin from the env. */
+export interface ConflictsEmailSeam {
+  notifier?: EmailNotifier;
+  appUrl?: string;
+}
+
+/**
+ * Fire the "generation blocked" email — best-effort, gated exactly like the gate's
+ * failure email: the repo link must carry notify addresses AND have the `conflicts`
+ * pref on. A missing notifier (Resend unconfigured) or a pref-off is a silent no-op;
+ * the job still posts its in-app warning. The deep link (repo Spec Guard Coverage
+ * tab) is resolved best-effort — omitted when the repo has no dashboard slug yet.
+ */
+async function emailConflictsBlocked(
+  db: EeDb,
+  repoFullName: string,
+  conflicts: number,
+  seam: ConflictsEmailSeam,
+  cfg: Parameters<typeof notifierFromConfig>[0],
+): Promise<void> {
+  const notifier = seam.notifier ?? notifierFromConfig(cfg);
+  if (!notifier) return;
+  const link = await selectGateStore(db).getRepo(repoFullName);
+  const notifyEmails = link?.notifyEmails ?? [];
+  if (!link || notifyEmails.length === 0 || !wantsNotification(link, 'conflicts')) return;
+  const appUrl = seam.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
+  const dashboardUrl = await repoGuardCoverageUrl(appUrl, repoFullName).catch(() => undefined);
+  void notifier.sendGuardConflictsBlocked(notifyEmails, { repoFullName, conflicts, dashboardUrl });
 }
 
 // --- Job definitions -------------------------------------------------
@@ -244,17 +305,30 @@ function repoBaselineJob(
  * is a clean success with distinct wording — scenarios generate once the spec is
  * scanned (the onboarding chain re-fires after the next successful baseline).
  */
-export function guardGenerateJob(
-  pipeline: GuardOnboardingPipeline,
-  onSettled?: (payload: GuardGenerateJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
-): JobDefinition<GuardGenerateJobPayload> {
+/** Deps the guard-generate job needs: the shared db (repo-link lookup for the
+ *  conflicts email) + the onboarding pipeline + the conflicts-email seam. */
+export interface GuardGenerateJobDeps extends ConflictsEmailSeam {
+  db: EeDb;
+  pipeline: GuardOnboardingPipeline;
+  onSettled?: (
+    payload: GuardGenerateJobPayload,
+    outcome: JobOutcomeStatus,
+    result?: unknown,
+  ) => Promise<void>;
+}
+
+export function guardGenerateJob(deps: GuardGenerateJobDeps): JobDefinition<GuardGenerateJobPayload> {
+  const { pipeline, onSettled } = deps;
   return {
     type: REPO_GUARD_TASK,
     title: REPO_GUARD_TITLE,
     steps: REPO_GUARD_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
-    onSettled: onSettled ? (ctx, outcome) => onSettled(ctx.payload, outcome) : undefined,
+    // Thread the run result through so the settle chain can suppress a baseline
+    // RUN after a BLOCKED generate (it persisted an open-conflicts report, which
+    // would otherwise satisfy hasGuardState and chain a run against no scenarios).
+    onSettled: onSettled ? (ctx, outcome, result) => onSettled(ctx.payload, outcome, result) : undefined,
     sentry: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
@@ -275,6 +349,18 @@ export function guardGenerateJob(
           generateTracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
         },
       );
+
+      // Blocked on unresolved spec conflicts: the pipeline persisted a blocked
+      // report and saved NO scenarios. Complete (not fail) with a WARNING notice
+      // + the gated email, and carry the count so the settle chain suppresses the
+      // baseline run. Must precede the noCorpus/scenarios paths (both are false here).
+      if (result.openConflicts > 0) {
+        await emailConflictsBlocked(deps.db, repoFullName, result.openConflicts, deps, cfg);
+        return {
+          result: { repoFullName, scenariosWritten: 0, openConflicts: result.openConflicts },
+          notification: conflictsBlockedNotification(repoFullName, result.openConflicts),
+        };
+      }
 
       if (result.noCorpus) {
         return {
@@ -492,7 +578,7 @@ export function guardBaselineJob(deps: GuardBaselineJobDeps): JobDefinition<Guar
  *  `regate` (default = the gate pipeline run inline with the PR's regenerated
  *  corpus injected + `force`) and `octokitFor` (the checkbox-comment updater) are
  *  injectable so tests drive the body without a network or the executor. */
-export interface GuardSpecRegenJobDeps {
+export interface GuardSpecRegenJobDeps extends ConflictsEmailSeam {
   db: EeDb;
   headRegenPipeline: GuardHeadRegenPipeline;
   regate?: (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => Promise<void>;
@@ -567,6 +653,27 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
             generateTracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
           },
         );
+
+        // Blocked on the head's own unresolved spec conflicts: the pipeline
+        // persisted a blocked report under the head and saved NO scenarios. Settle
+        // the checkbox comment to the blocked notice, skip the re-gate, and complete
+        // (not fail) with the WARNING + gated email. The writer resolves the
+        // conflicts, then re-ticks. Must precede the noCorpus/nochange branch below
+        // (blocked has corpus === null).
+        if (regen.openConflicts && regen.openConflicts > 0) {
+          const n = regen.openConflicts;
+          await updateComment(
+            octokit,
+            coords,
+            p.commentId,
+            renderGuardSpecComment('blocked', { conflicts: n }),
+          ).catch(() => undefined);
+          await emailConflictsBlocked(deps.db, p.repoFullName, n, deps, cfg);
+          return {
+            result: { repoFullName: p.repoFullName, prNumber: p.prNumber, openConflicts: n },
+            notification: conflictsBlockedNotification(p.repoFullName, n),
+          };
+        }
 
         // No doc universe after the head scan → nothing to regenerate or re-gate.
         if (regen.noCorpus || !regen.corpus) {
@@ -656,7 +763,7 @@ function registerJob<P extends { jobId: string }>(
 
 /** Deps the exported `runGuardGenerate` test seam needs — the stores + the
  *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live). */
-export interface RunGuardGenerateDeps {
+export interface RunGuardGenerateDeps extends ConflictsEmailSeam {
   db: EeDb;
   jobStore: JobStore;
   notifications: NotificationStore;
@@ -673,7 +780,12 @@ export async function runGuardGenerate(
 ): Promise<void> {
   await executeJob(
     { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
-    guardGenerateJob(deps.pipeline),
+    guardGenerateJob({
+      db: deps.db,
+      pipeline: deps.pipeline,
+      notifier: deps.notifier,
+      appUrl: deps.appUrl,
+    }),
     payload,
   );
 }
@@ -741,7 +853,7 @@ export async function runGuardBaseline(
 
 /** Deps the exported `runGuardSpecRegen` test seam needs — the stores + the
  *  head-regen pipeline (faked in tests) + the injectable re-gate / comment updater. */
-export interface RunGuardSpecRegenDeps {
+export interface RunGuardSpecRegenDeps extends ConflictsEmailSeam {
   db: EeDb;
   jobStore: JobStore;
   notifications: NotificationStore;
@@ -766,6 +878,8 @@ export async function runGuardSpecRegen(
       headRegenPipeline: deps.headRegenPipeline,
       regate: deps.regate,
       octokitFor: deps.octokitFor,
+      notifier: deps.notifier,
+      appUrl: deps.appUrl,
     }),
     payload,
     { signal: deps.signal },
@@ -786,7 +900,11 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
       [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
       [REPO_GUARD_TASK]: registerJob(
         rt,
-        guardGenerateJob(defaultGuardOnboardingPipeline, deps.onGuardGenerateSettled),
+        guardGenerateJob({
+          db,
+          pipeline: defaultGuardOnboardingPipeline,
+          onSettled: deps.onGuardGenerateSettled,
+        }),
       ),
       // Factory form: the job body reads the live guard store/executor seams per
       // invocation (github-app / OSS setup may install them after the worker starts).

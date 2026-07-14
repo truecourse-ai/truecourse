@@ -167,3 +167,102 @@ describe('guard email notifier — sendGuardGateFailure', () => {
     expect(sends).toHaveLength(0);
   });
 });
+
+describe('guard email notifier — sendGuardConflictsBlocked', () => {
+  it('sends one message per recipient with the blocked-count subject', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked(['a@x.com', 'b@x.com'], {
+      repoFullName: 'acme/api',
+      conflicts: 2,
+    });
+
+    expect(sends).toHaveLength(2);
+    expect(sends.map((s) => s.to)).toEqual([['a@x.com'], ['b@x.com']]);
+    for (const s of sends) {
+      expect(s.from).toBe(FROM);
+      expect(s.subject).toBe(
+        'TrueCourse: scenario generation blocked on acme/api — 2 spec conflicts',
+      );
+    }
+  });
+
+  it('singularizes the subject for exactly one conflict', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked(['a@x.com'], {
+      repoFullName: 'acme/api',
+      conflicts: 1,
+    });
+
+    expect(sends[0].subject).toBe(
+      'TrueCourse: scenario generation blocked on acme/api — 1 spec conflict',
+    );
+  });
+
+  it('names the count and links the Spec Guard Coverage tab when a dashboard url is given', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked(['a@x.com'], {
+      repoFullName: 'acme/api',
+      conflicts: 3,
+      dashboardUrl: 'https://app/repos/acme-api?section=guard&tab=coverage',
+    });
+
+    const html = sends[0].html;
+    expect(html).toContain('3 open spec conflicts');
+    expect(html).toContain('https://app/repos/acme-api?section=guard&amp;tab=coverage');
+  });
+
+  it('omits the link when no dashboard url is derivable', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked(['a@x.com'], {
+      repoFullName: 'acme/api',
+      conflicts: 1,
+    });
+
+    expect(sends[0].html).not.toContain('<a href');
+  });
+
+  it('escapes HTML in the repo name', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked(['a@x.com'], {
+      repoFullName: 'acme/<b>api</b>',
+      conflicts: 1,
+    });
+
+    const html = sends[0].html;
+    expect(html).not.toContain('<b>api</b>');
+    expect(html).toContain('acme/&lt;b&gt;api&lt;/b&gt;');
+  });
+
+  it('one failing address does not stop the rest, and the sender never throws', async () => {
+    const { client, sends } = fakeResend({ failOn: 'bad@x.com', throwOn: 'boom@x.com' });
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await expect(
+      notifier.sendGuardConflictsBlocked(['bad@x.com', 'boom@x.com', 'ok@x.com'], {
+        repoFullName: 'acme/api',
+        conflicts: 2,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sends.map((s) => s.to[0])).toEqual(['bad@x.com', 'boom@x.com', 'ok@x.com']);
+  });
+
+  it('is a no-op for an empty recipient list', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardConflictsBlocked([], { repoFullName: 'acme/api', conflicts: 1 });
+
+    expect(sends).toHaveLength(0);
+  });
+});

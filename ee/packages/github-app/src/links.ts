@@ -40,6 +40,18 @@ export async function prGuardUrl(
   return `${appUrl.replace(/\/$/, '')}/repos/${slug}?pr=${prNumber}&section=guard&tab=runs`;
 }
 
+/** Deep link to a repo's Spec Guard → Coverage tab — where open spec conflicts
+ *  are resolved. Repo-scoped (no PR), for the conflicts-blocked notices. */
+export async function repoGuardCoverageUrl(
+  appUrl: string | undefined,
+  repoFullName: string,
+): Promise<string | undefined> {
+  if (!appUrl) return undefined;
+  const slug = await repoSlug(repoFullName);
+  if (!slug) return undefined;
+  return `${appUrl.replace(/\/$/, '')}/repos/${slug}?section=guard&tab=coverage`;
+}
+
 /** Link to a repo's dashboard page (drift/overview). */
 export async function repoDashboardUrl(
   appUrl: string | undefined,

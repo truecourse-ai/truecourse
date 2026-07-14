@@ -46,8 +46,9 @@ import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
+import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
-import { EstimateDeclined, stageUsageTag, getCorpus, getDecisions } from './spec-in-process.js';
+import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
@@ -91,11 +92,18 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
  * really the dispute. Read the corpus + decisions and fail before any LLM/build
  * work (and before the estimate) when any overlap is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
+ *
+ * Reads the ON-DISK `.truecourse/specs/{corpus,decisions}.json` the generator
+ * itself reads (via the spec-consolidator file readers) — NOT the active spec
+ * store. OSS is byte-identical (the store was these files). EE materializes both
+ * artifacts into the checkout before generate, so the gate and the generator see
+ * the same corpus + resolutions; a store keyed by `owner/repo` would miss under
+ * the ephemeral checkout path and silently skip the gate.
  */
-async function assertNoOpenConflicts(repoRoot: string): Promise<void> {
-  const corpus = await getCorpus(repoRoot);
+function assertNoOpenConflicts(repoRoot: string): void {
+  const corpus = readCorpus(repoRoot);
   if (!corpus) return;
-  const decisions = await getDecisions(repoRoot);
+  const decisions = readDecisions(repoRoot);
   const open = openConflicts(corpus, decisions);
   if (open.length > 0) throw new OpenConflictsError(open);
 }
@@ -186,7 +194,7 @@ export async function guardGenerateInProcess(
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.
-  await assertNoOpenConflicts(repoRoot);
+  assertNoOpenConflicts(repoRoot);
 
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
@@ -434,6 +442,35 @@ export function buildGuardReport(
   usage?: GuardGenerateUsage,
 ): GuardGenerateReport {
   return { ...result, generatedAt, ...(usage ? { usage } : {}) };
+}
+
+/**
+ * The blocked report an unresolved-conflict generate persists: `status:
+ * 'open-conflicts'` with the error's formatted multi-line message as `reason`,
+ * and every list field empty (nothing generated). The conflict list is NOT
+ * snapshotted — surfaces render it live from the corpus. Used by EE onboarding to
+ * record a needs-attention outcome without saving a scenario set; OSS never
+ * persists it (the CLI throws the error and writes no report).
+ */
+export function buildOpenConflictsReport(
+  error: OpenConflictsError,
+  generatedAt: string,
+): GuardGenerateReport {
+  return {
+    generatedAt,
+    status: 'open-conflicts',
+    reason: error.message,
+    sectionsTotal: 0,
+    sectionsChanged: 0,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  };
 }
 
 // ---------------------------------------------------------------------------

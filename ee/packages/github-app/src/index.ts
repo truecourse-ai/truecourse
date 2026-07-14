@@ -321,7 +321,10 @@ export {
   type EmailNotifier,
   type ResendLike,
   type GuardGateFailureEmail,
+  type GuardConflictsBlockedEmail,
 } from './email.js';
+export { wantsNotification } from './notifications.js';
+export { repoGuardCoverageUrl } from './links.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
 

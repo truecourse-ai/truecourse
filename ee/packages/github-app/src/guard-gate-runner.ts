@@ -39,7 +39,10 @@ import {
   type GuardExecutor,
   type Recipe,
 } from '@truecourse/guard-runner';
-import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
+import {
+  guardGenerateInProcess,
+  OpenConflictsError,
+} from '@truecourse/core/commands/guard-in-process';
 import {
   materializeAndGenerateGuard,
   collectEvidenceFiles,
@@ -65,6 +68,7 @@ import {
   guardGateCheckOutput,
   guardGateDisabled,
   guardGateDisabledOutput,
+  guardGateOpenConflictsOutput,
   type GuardStaleAnnotation,
 } from './guard-gate-comment.js';
 
@@ -604,9 +608,19 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         // reach here — a stored corpus makes `corpus` non-null above.
         if (corpus === null && !invalidRecipe) {
           const coldRef: RepoRef = { repoKey, commitSha: baseSha };
-          corpus = seams.coldGenerate
-            ? await seams.coldGenerate(coldRef, tmp, opts.signal)
-            : await defaultGuardColdGenerate(deps.guardStore, coldRef, tmp);
+          try {
+            corpus = seams.coldGenerate
+              ? await seams.coldGenerate(coldRef, tmp, opts.signal)
+              : await defaultGuardColdGenerate(deps.guardStore, coldRef, tmp);
+          } catch (err) {
+            // Unresolved spec conflicts block generation: the gate is PENDING,
+            // not broken. Settle NEUTRAL (never the error bucket, so no
+            // gate-failure email fires) and point the user at the dashboard.
+            if (!(err instanceof OpenConflictsError)) throw err;
+            await opts.onPhase?.('verdict');
+            await post('neutral', guardGateOpenConflictsOutput(err.conflicts.length));
+            return { conclusion: 'neutral', diff: emptyGuardGateDiff() };
+          }
         }
 
         // Base results: stored baseline / exact-commit row, else a lazy base run

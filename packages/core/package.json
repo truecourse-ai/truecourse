@@ -104,6 +104,10 @@
       "types": "./dist/lib/guard-gate-pending.d.ts",
       "import": "./dist/lib/guard-gate-pending.js"
     },
+    "./lib/guard-generate-enqueue": {
+      "types": "./dist/lib/guard-generate-enqueue.d.ts",
+      "import": "./dist/lib/guard-generate-enqueue.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"

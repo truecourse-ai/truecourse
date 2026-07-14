@@ -17,6 +17,7 @@ import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
@@ -24,7 +25,7 @@ import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
 import { registerJobs } from './jobs/index.js';
-import { createGuardRouter } from './guard/index.js';
+import { createGuardRouter, createGuardGenerateEnqueue } from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
 import { initSentry, flushSentry } from './observability/sentry.js';
@@ -148,6 +149,14 @@ const plugin: EePlugin = {
       createGuardRouter({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
     );
     if (jobs.workerStarted) plugin.capabilities.push('guard');
+
+    // A repo-scope spec decision that clears the last conflict (handled by the OSS
+    // dashboard spec routes) can unblock a guard generate that had stalled on it.
+    // Install the core seam the routes call — same repo→request resolution as the
+    // manual Generate router above, keyed by repoKey alone (no HTTP request).
+    setGuardGenerateEnqueue(
+      createGuardGenerateEnqueue({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App

@@ -33,6 +33,7 @@ import { selectGateStore } from '../../ee/packages/github-app/src/store/index';
 import type { GateStore } from '../../ee/packages/github-app/src/store/types';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import type { RepoRef } from '@truecourse/core/lib/guard-store';
+import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
   createGuardGatePipeline,
   cloneAbortSignal,
@@ -918,6 +919,34 @@ describe('guard-gate pipeline — cold-generate on a scenario miss', () => {
     const { deps } = makeDeps(neverExecute);
 
     await expect(pipeline.run(deps, payload())).rejects.toThrow('LLM upstream 500');
+    expect(fs.existsSync(seen.dir!)).toBe(false);
+  });
+
+  it('a cold-generate blocked on open spec conflicts settles NEUTRAL (not error), executor never runs', async () => {
+    const { clone, seen } = fakeClone();
+    const pipeline = createGuardGatePipeline({
+      clone,
+      loadCorpus: async () => null,
+      coldGenerate: async () => {
+        throw new OpenConflictsError([
+          { area: 'cli', a: 'docs/a.md', b: 'docs/b.md', note: 'contradict' },
+          { area: 'api', a: 'docs/c.md', b: 'docs/d.md' },
+        ]);
+      },
+      checkout: async () => {},
+    });
+    const { deps, calls } = makeDeps(neverExecute);
+
+    const decision = await pipeline.run(deps, payload());
+
+    // Neutral, NOT the error bucket — a pending resolution isn't a broken gate.
+    expect(decision.conclusion).toBe('neutral');
+    expect(decision.errorReason).toBeUndefined();
+    expect(calls.check[0].conclusion).toBe('neutral');
+    expect(calls.check[0].output.title).toBe('Scenario generation pending — spec conflicts');
+    expect(calls.check[0].output.summary).toContain('2 open conflict');
+    expect(calls.check[0].output.summary).toContain('Spec Guard');
+    // The checkout is still cleaned up.
     expect(fs.existsSync(seen.dir!)).toBe(false);
   });
 

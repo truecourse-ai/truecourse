@@ -17,7 +17,7 @@ import { PgSpecStore, PgGuardStore } from '../../ee/packages/data-store/src/inde
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import { setGuardStore, resetGuardStore, type RepoRef } from '@truecourse/core/lib/guard-store';
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
-import { buildGuardReport } from '@truecourse/core/commands/guard-in-process';
+import { buildGuardReport, OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
 import type { GuardGenerateResult } from '@truecourse/guard-generator';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
@@ -220,6 +220,27 @@ describe('guard head-regen pipeline', () => {
     const pipeline = createGuardHeadRegenPipeline({ clone, scan, generate });
 
     await expect(pipeline.run(deps, request)).rejects.toThrow('no build recipe');
+    expect(await guardStore.readRecipeRaw(REPO, HEAD_SHA)).toBeNull();
+  });
+
+  it('a head blocked on open spec conflicts persists a blocked report + NO scenarios, returns openConflicts', async () => {
+    const clone = vi.fn(async () => {});
+    const scan = fakeScan();
+    const generate = vi.fn(async () => {
+      throw new OpenConflictsError([
+        { area: 'cli', a: 'docs/a.md', b: 'docs/b.md', note: 'contradict' },
+        { area: 'api', a: 'docs/c.md', b: 'docs/d.md' },
+      ]);
+    });
+    const pipeline = createGuardHeadRegenPipeline({ clone, scan, generate });
+
+    const result = await pipeline.run(deps, request);
+
+    // Resolves (not throws) with the count and no corpus for the re-gate to run.
+    expect(result).toEqual({ scenariosWritten: 0, noCorpus: false, corpus: null, openConflicts: 2 });
+    // A blocked report is persisted under the head; NO scenario set is saved.
+    const report = await guardStore.readGuardResult(REPO, HEAD_SHA);
+    expect(report?.status).toBe('open-conflicts');
     expect(await guardStore.readRecipeRaw(REPO, HEAD_SHA)).toBeNull();
   });
 

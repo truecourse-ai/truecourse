@@ -31,12 +31,14 @@ import {
 import {
   guardGenerateInProcess,
   buildGuardReport,
+  buildOpenConflictsReport,
+  OpenConflictsError,
   type GuardGenerateInProcessResult,
 } from '@truecourse/core/commands/guard-in-process';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
-import { corpusFilePath } from '@truecourse/spec-consolidator';
+import { corpusFilePath, decisionsPath } from '@truecourse/spec-consolidator';
 import { scenariosDir, readGuardResult as readCloneGuardResult } from '@truecourse/guard-runner';
 import { hasGuardUniverse, type GuardGenerateResult } from '@truecourse/guard-generator';
 import {
@@ -62,6 +64,13 @@ export interface GuardOnboardingResult {
   scenariosWritten: number;
   /** No curated corpus (stored or committed) → clean no-op success. */
   noCorpus: boolean;
+  /**
+   * Open spec conflicts that BLOCKED generation (the gate fired) — 0 on every
+   * normal path. Non-zero means a blocked `open-conflicts` report was persisted
+   * and NO scenario set was saved: a needs-attention outcome, not a failure (the
+   * run resolves). The user resolves the conflicts, then generate re-fires.
+   */
+  openConflicts: number;
 }
 
 /** What the pipeline needs from the GitHub App (clone auth). */
@@ -103,6 +112,19 @@ export async function materializeStoredCorpus(ref: RepoRef, checkoutDir: string)
   const file = corpusFilePath(checkoutDir);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(corpus, null, 2) + '\n');
+
+  // Materialize the stored decisions alongside the corpus. Load-bearing twice: the
+  // generate conflict gate reads `decisions.json` (a resolved conflict must travel
+  // with the corpus it resolves, else the gate re-fires on the checkout), and the
+  // generator's losing-side claim suppression reads the same file. Absent when the
+  // repo has no stored resolutions — the checkout simply has none.
+  const decisions =
+    (await loadSpec(ref, 'decisions')) ?? (await loadLatestSpec(ref.repoKey, 'decisions'));
+  if (decisions != null) {
+    const decFile = decisionsPath(checkoutDir);
+    fs.mkdirSync(path.dirname(decFile), { recursive: true });
+    fs.writeFileSync(decFile, JSON.stringify(decisions, null, 2) + '\n');
+  }
   return true;
 }
 
@@ -298,14 +320,32 @@ export function createGuardOnboardingPipeline(
         await progress.onPhase?.('clone');
         await cloneRepo(deps, req, tmp);
 
-        const generated = await materializeAndGenerateGuard(ref, tmp, generate, {
-          onGenerateStart: () => progress.onPhase?.('generate'),
-          tracker: progress.generateTracker,
-        });
+        let generated;
+        try {
+          generated = await materializeAndGenerateGuard(ref, tmp, generate, {
+            onGenerateStart: () => progress.onPhase?.('generate'),
+            tracker: progress.generateTracker,
+          });
+        } catch (e) {
+          // The generate gate hard-fails on unresolved spec conflicts. Persist a
+          // blocked `open-conflicts` report (NO scenario set) and RESOLVE — a
+          // needs-attention outcome, not a failure. The user resolves the conflicts,
+          // then generate re-fires.
+          if (e instanceof OpenConflictsError) {
+            await writeGuardResult(ref, buildOpenConflictsReport(e, new Date().toISOString()));
+            return {
+              savedFileCount: 0,
+              scenariosWritten: 0,
+              noCorpus: false,
+              openConflicts: e.conflicts.length,
+            };
+          }
+          throw e;
+        }
         // No curated corpus / no docs → clean no-op: scenarios arrive once the
         // spec is scanned (the onboarding chain re-fires after the next baseline).
         if (!generated) {
-          return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true };
+          return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 };
         }
 
         // Persist the scenario tree the generate wrote into the clone, then the
@@ -318,6 +358,7 @@ export function createGuardOnboardingPipeline(
           savedFileCount: fileCount,
           scenariosWritten: generated.guard.written.length,
           noCorpus: false,
+          openConflicts: 0,
         };
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });

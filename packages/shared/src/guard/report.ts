@@ -311,8 +311,13 @@ export type GuardGenerateUsage = z.infer<typeof GuardGenerateUsageSchema>
 export const GuardGenerateReportSchema = z
   .object({
     generatedAt: z.string(),
-    status: z.enum(['ok', 'no-docs', 'recipe-failed']),
-    /** For `no-docs` / `recipe-failed`: the user-facing reason. */
+    status: z.enum(['ok', 'no-docs', 'recipe-failed', 'open-conflicts']),
+    /**
+     * For `no-docs` / `recipe-failed` / `open-conflicts`: the user-facing reason.
+     * For `open-conflicts` it carries the full formatted conflict message (the
+     * conflict list itself is not snapshotted — surfaces render it live from the
+     * corpus).
+     */
     reason: z.string().optional(),
     recipe: GuardRecipeReportSchema.optional(),
     sectionsTotal: z.number().int().nonnegative(),

@@ -98,3 +98,32 @@ export function createGuardRouter(deps: GuardRouterDeps): Router {
 
   return router;
 }
+
+/**
+ * Build the `repoKey → enqueue` seam the dashboard installs via
+ * `setGuardGenerateEnqueue`. A repo-scope decision that clears the last spec
+ * conflict fires this so a generate that had stalled BLOCKED on that conflict
+ * finally authors its scenarios.
+ *
+ * Resolution is the SAME as the manual "Generate" router (installation, default
+ * branch, baseline commit, workspace org — all from the stored gate records),
+ * minus the request org: there is no HTTP request here, so the org is the link's
+ * own `workspaceOrgId`. Best-effort — silently no-ops when the repo isn't
+ * connected or has no baseline yet; the single-flight key makes a redundant
+ * enqueue (a generate already running) a harmless null.
+ */
+export function createGuardGenerateEnqueue(deps: GuardRouterDeps): (repoKey: string) => Promise<void> {
+  return async (repoKey: string): Promise<void> => {
+    const link = await deps.store.getRepo(repoKey);
+    if (!link?.workspaceOrgId) return;
+    const baseline = await deps.store.getBaseline(repoKey);
+    if (!baseline) return;
+    await deps.enqueueGuardGenerate({
+      repoFullName: repoKey,
+      installationId: link.installationId,
+      defaultBranch: link.defaultBranch,
+      commitSha: baseline.commitSha,
+      workspaceOrgId: link.workspaceOrgId,
+    });
+  };
+}

@@ -59,7 +59,14 @@ import {
   resetContractStore,
   type ContractStore,
 } from '@truecourse/core/lib/contract-store';
+import {
+  setGuardStore,
+  resetGuardStore,
+  type GuardStore,
+} from '@truecourse/core/lib/guard-store';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -322,6 +329,17 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     });
   };
 
+  // A guard store whose generate report is `status`. `open-conflicts` = a generate
+  // that stalled BLOCKED before authoring scenarios (the unblock trigger); anything
+  // else = a healthy report that must NOT re-trigger. `null` = no report at all.
+  const stubGuardReport = (status: GuardGenerateReport['status'] | null): void => {
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async () =>
+        status === null ? null : ({ status } as unknown as GuardGenerateReport),
+    } as unknown as GuardStore);
+  };
+
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
     // A store that reports it does NOT materialize in place = hosted EE. Only the
@@ -332,6 +350,8 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
   });
   afterEach(async () => {
     resetContractStore();
+    resetGuardStore();
+    setGuardGenerateEnqueue(null);
     setBackgroundTaskRunner(null);
     await teardownTestFixture(fixture.project.slug);
   });
@@ -399,6 +419,79 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
       .expect(200);
     expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+  });
+
+  // A decision clearing the last conflict must ALSO unblock a guard generate that
+  // stalled on that conflict: when the repo's current generate report is
+  // `open-conflicts`, the installed guard-generate seam fires with the repoKey.
+  it('clearing the last conflict with a BLOCKED (open-conflicts) generate report enqueues a guard generate', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
+      .expect(200);
+    expect(enqueued).toEqual([fixture.repoPath]);
+  });
+
+  it('does NOT enqueue a guard generate when the report is healthy (not open-conflicts)', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    stubGuardReport('ok');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('does NOT enqueue a guard generate while conflicts remain (guard report never consulted)', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    let guardRead = false;
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async () => {
+        guardRead = true;
+        return { status: 'open-conflicts' } as unknown as GuardGenerateReport;
+      },
+    } as unknown as GuardStore);
+    seedCorpus();
+    stubRecurate(2); // conflicts remain
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([]);
+    expect(guardRead).toBe(false); // hot path stays cheap — the store is never read
+  });
+
+  it('a BLOCKED report with no guard-generate seam installed (OSS) is a no-op, not an error', async () => {
+    // No setGuardGenerateEnqueue → getGuardGenerateEnqueue() is null; the route must
+    // simply skip it (the contracts enqueue still runs).
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus();
+    stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
     expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
   });
 });

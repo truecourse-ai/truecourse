@@ -35,7 +35,11 @@ import {
 import { EventHub } from './events.js';
 import { startWorker } from './worker.js';
 import type { JobOutcomeStatus } from './harness.js';
-import { chainGuardOnboarding, chainGuardBaselineRefresh } from './guard-chain.js';
+import {
+  chainGuardOnboarding,
+  chainGuardBaselineRefresh,
+  generateWasBlocked,
+} from './guard-chain.js';
 import { settleOrphanedGuardGates } from './orphans.js';
 import {
   enqueueOrPendBaseline,
@@ -363,7 +367,12 @@ export async function registerJobs(
   const onGuardGenerateSettled = async (
     payload: GuardGenerateEnqueueRequest & { jobId: string },
     outcome: JobOutcomeStatus,
+    result?: unknown,
   ): Promise<void> => {
+    // A generate BLOCKED on open spec conflicts persisted an open-conflicts report
+    // (hasGuardState is now true) but saved NO scenarios — chaining a baseline run
+    // would strand a run row against an empty Scenarios tab. Suppress it.
+    if (generateWasBlocked(result)) return;
     await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
   };
 

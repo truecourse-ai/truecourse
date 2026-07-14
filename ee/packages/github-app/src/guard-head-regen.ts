@@ -16,7 +16,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { getGuardStore, type GuardStore, type RepoRef } from '@truecourse/core/lib/guard-store';
-import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
+import {
+  guardGenerateInProcess,
+  buildOpenConflictsReport,
+  OpenConflictsError,
+} from '@truecourse/core/commands/guard-in-process';
 import type { StepTracker } from '@truecourse/core/progress';
 import {
   getInstallationToken,
@@ -51,6 +55,13 @@ export interface GuardHeadRegenResult {
   noCorpus: boolean;
   /** The freshly parsed corpus for the re-gate's loadCorpus seam (null when noCorpus). */
   corpus: GuardGateCorpus | null;
+  /**
+   * Open spec conflicts that BLOCKED regeneration — present (>0) only on the
+   * blocked path, where a blocked `open-conflicts` report was persisted under the
+   * head and NO scenario set was saved. The job turns it into a needs-attention
+   * warning + email and skips the re-gate; absent on every normal path.
+   */
+  openConflicts?: number;
 }
 
 export interface GuardHeadRegenDeps {
@@ -156,11 +167,24 @@ export function createGuardHeadRegenPipeline(seams: GuardHeadRegenSeams = {}): G
         await progress.onPhase?.('scan');
         await scan(tmp, ref, progress.scanTracker);
 
-        const generated = await materializeAndGenerateGuard(ref, tmp, generate, {
-          skipMaterialize: true, // the scan just wrote the head's fresh corpus.json
-          onGenerateStart: () => progress.onPhase?.('generate'),
-          tracker: progress.generateTracker,
-        });
+        let generated;
+        try {
+          generated = await materializeAndGenerateGuard(ref, tmp, generate, {
+            skipMaterialize: true, // the scan just wrote the head's fresh corpus.json
+            onGenerateStart: () => progress.onPhase?.('generate'),
+            tracker: progress.generateTracker,
+          });
+        } catch (e) {
+          // The head's own specs still carry unresolved conflicts. Persist a blocked
+          // `open-conflicts` report under the head (NO scenario set), and RESOLVE with
+          // the count — the job posts a needs-attention warning + email and skips the
+          // re-gate. The writer resolves the conflicts, then re-ticks the checkbox.
+          if (e instanceof OpenConflictsError) {
+            await guardStore().writeGuardResult(ref, buildOpenConflictsReport(e, new Date().toISOString()));
+            return { scenariosWritten: 0, noCorpus: false, corpus: null, openConflicts: e.conflicts.length };
+          }
+          throw e;
+        }
         if (!generated) return { scenariosWritten: 0, noCorpus: true, corpus: null };
 
         // Persist under the head + read the corpus back through the store for

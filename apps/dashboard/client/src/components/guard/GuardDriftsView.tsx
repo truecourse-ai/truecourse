@@ -12,7 +12,7 @@
  */
 
 import { useMemo } from 'react';
-import { FlaskConical, Loader2, PlayCircle } from 'lucide-react';
+import { FlaskConical, GitMerge, Loader2, PlayCircle } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useGuardRuns } from '@/hooks/useGuardRuns';
 import { useGuardView } from '@/hooks/useGuardView';
@@ -33,6 +33,7 @@ export function GuardDriftsView({
   enabled = true,
   reloadKey = 0,
   prRef,
+  blockedOnConflicts = false,
 }: {
   repoId: string;
   enabled?: boolean;
@@ -41,8 +42,15 @@ export function GuardDriftsView({
   /** The PR head SHA when viewing a pull request (EE) — scopes the run to that
    *  commit and switches the empty state to the gate-status card. */
   prRef?: string;
+  /**
+   * The last guard generate ended `open-conflicts` — scenario generation is
+   * blocked, so there can be no run. The no-run empty state says so and routes to
+   * the Coverage tab (the full conflict list lives on the Scenarios tab). Repo
+   * view only; the PR view's gate-status cards take precedence.
+   */
+  blockedOnConflicts?: boolean;
 }) {
-  const { openSpecSection } = useGuardView();
+  const { openSpecSection, openSpecCoverage } = useGuardView();
   const { latest, history, run, selectedRunId, selectRun, pending, loading, error } = useGuardRuns(
     repoId,
     enabled,
@@ -98,6 +106,31 @@ export function GuardDriftsView({
           icon={PlayCircle}
           title="Guard gate hasn't run at this commit yet"
           body="No guard run is stored for this pull request's head. It appears here once the gate completes."
+        />
+      );
+    }
+    // Scenario generation is blocked on unresolved spec conflicts, so no scenarios
+    // exist to run. Point at the Coverage tab to resolve them rather than at a run
+    // that can't happen yet.
+    if (blockedOnConflicts) {
+      return (
+        <EmptyState
+          icon={GitMerge}
+          title="Blocked by open spec conflicts"
+          body={
+            <>
+              Spec Guard can't run until scenarios are generated, which is blocked by unresolved spec
+              conflicts.{' '}
+              <button
+                type="button"
+                onClick={openSpecCoverage}
+                className="text-primary underline hover:text-primary/80"
+              >
+                Resolve them on the Coverage tab
+              </button>{' '}
+              to unblock generation.
+            </>
+          }
         />
       );
     }

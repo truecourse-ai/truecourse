@@ -220,6 +220,23 @@ describe('registerJobs — generate→baseline chain', () => {
     expect(addJobMock).not.toHaveBeenCalled();
   });
 
+  it('a BLOCKED generate (open-conflicts report stored) chains NO baseline run', async () => {
+    // The blocked generate persisted an open-conflicts report, so hasGuardState is
+    // true and the refresh chain WOULD otherwise fire. The settle result's
+    // openConflicts count suppresses it — no run row (the "Runs populated,
+    // Scenarios empty" bug).
+    await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    const onGuardGenerateSettled = await generateSettledHook();
+
+    await onGuardGenerateSettled(baselinePayload, 'succeeded', {
+      repoFullName: REPO,
+      scenariosWritten: 0,
+      openConflicts: 2,
+    });
+
+    expect(addJobMock).not.toHaveBeenCalled();
+  });
+
   it('passes the guard-baseline settle hook to the worker', async () => {
     await reg();
     const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
