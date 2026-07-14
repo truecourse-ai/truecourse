@@ -61,13 +61,17 @@ function runShellStep(
       cwd: repoRoot,
       env: constructChildEnv({ recipeEnv: env, passthrough: BUILD_PASSTHROUGH }),
       shell: true,
+      // Group-lead the shell (POSIX) so the kill below can SIGKILL the whole
+      // group: the shell may fork the command rather than exec it, and killing
+      // only the shell would leave that grandchild alive holding our pipes.
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
     let output = ''
     let settled = false
 
-    const kill = armChildKill(child, timeoutMs, signal)
+    const kill = armChildKill(child, timeoutMs, signal, { processGroup: true })
 
     const finish = (exitCode: number | null): void => {
       if (settled) return

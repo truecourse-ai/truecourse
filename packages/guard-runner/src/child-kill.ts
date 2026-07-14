@@ -16,15 +16,37 @@ export interface ChildKillControls {
   disarm(): void
 }
 
+export interface ChildKillOptions {
+  /**
+   * SIGKILL the child's whole process group (POSIX only), not just the direct
+   * child. Required for `shell: true` spawns: there the direct child is the shell,
+   * and when the shell forks the command instead of exec-ing it (dash on Linux
+   * does), killing the shell alone leaves the grandchild holding the stdio pipes —
+   * `close` never fires. The caller must have spawned with `detached: true` so the
+   * shell leads its own group and `kill(-pid)` cannot reach the host's group.
+   */
+  processGroup?: boolean
+}
+
 export function armChildKill(
   child: Pick<ChildProcess, 'kill' | 'pid'>,
   timeoutMs: number,
   signal?: AbortSignal,
+  options?: ChildKillOptions,
 ): ChildKillControls {
   // A failed spawn (e.g. ENOENT) has no pid; `kill()` would then signal pid 0 —
   // the WHOLE process group, host included. Never signal a child that never ran.
   const kill = (): void => {
-    if (child.pid !== undefined) child.kill('SIGKILL')
+    if (child.pid === undefined) return
+    if (options?.processGroup && process.platform !== 'win32') {
+      try {
+        process.kill(-child.pid, 'SIGKILL')
+        return
+      } catch {
+        // Group already gone (ESRCH) or not a group leader — fall through.
+      }
+    }
+    child.kill('SIGKILL')
   }
 
   let timedOut = false
