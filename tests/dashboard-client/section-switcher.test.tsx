@@ -29,19 +29,32 @@ describe('SectionSwitcher (harness smoke test)', () => {
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
 
     expect(
-      screen.getByRole('menuitemradio', { name: /BL Drift/i }),
+      screen.getByRole('menuitemradio', { name: /Guard/i }),
     ).toBeInTheDocument();
   });
 
-  it('invokes onChange when a different section is picked', async () => {
+  it('exposes the visible OSS sections and hides the discontinued BL Drift', async () => {
+    const user = userEvent.setup();
+    render(<SectionSwitcher value="codequality" onChange={() => {}} />);
+
+    await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
+
+    expect(screen.getByRole('menuitemradio', { name: /Code Analysis/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: /Guard/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitemradio', { name: /BL Drift/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('switches into the Guard section when picked', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<SectionSwitcher value="codequality" onChange={onChange} />);
 
     await user.click(screen.getByRole('button', { name: /Code Analysis/i }));
-    await user.click(screen.getByRole('menuitemradio', { name: /BL Drift/i }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Guard/i }));
 
-    expect(onChange).toHaveBeenCalledExactlyOnceWith('verification');
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('guard');
   });
 
   it('does not invoke onChange when the current section is re-picked', async () => {

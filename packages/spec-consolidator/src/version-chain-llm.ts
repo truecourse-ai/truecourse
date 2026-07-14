@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, stripCodeFences, type LlmTransport } from '@truecourse/shared/llm';
+import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
 
@@ -78,7 +78,7 @@ export interface DetectedChainOutput {
   }>;
 }
 
-const DetectedChainOutputSchema = z.object({
+export const DetectedChainOutputSchema = z.object({
   chains: z.array(
     z.object({
       members: z.array(z.string().min(1)).min(2),
@@ -140,6 +140,8 @@ export async function detectVersionChainsViaLlm(
 // ---------------------------------------------------------------------------
 
 export const CHAIN_DETECTION_SYSTEM_PROMPT = `You analyze a set of documentation files and identify VERSION CHAINS — pairs or groups where one doc clearly supersedes another.
+
+${OUTPUT_ONLY_GUARDRAIL}
 
 A version chain exists when one doc is a direct successor of another covering the same subject. Real-world signals include:
 

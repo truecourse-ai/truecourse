@@ -19,13 +19,23 @@
  *   - `.truecourse/` — the consolidator's own outputs live here. If
  *     we re-discovered them, every run would compound on its previous
  *     output and the canonical spec would echo into itself.
+ *
+ * Include-scope: when `spec.include` is set in `.truecourse/config.json`, only
+ * markdown matching one of its globs enters the universe. `.truecourseignore`
+ * is still applied first, so it always subtracts — an include glob can never
+ * resurrect an ignored path. Absent/empty scope → everything (unchanged).
  */
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadTcIgnore, DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS } from '@truecourse/shared';
+import {
+  loadTcIgnore,
+  loadSpecScope,
+  DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
+  type SpecScope,
+} from '@truecourse/shared';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
@@ -75,6 +85,12 @@ export interface DiscoveryOptions {
    * mtime. Useful for tests that don't want a git dependency.
    */
   skipGit?: boolean;
+  /**
+   * Include-scope override. Defaults to the repo's `spec.include` read from
+   * `.truecourse/config.json`. Callers that already loaded the scope pass it
+   * here so discovery and their own scope checks agree without re-reading.
+   */
+  scope?: SpecScope;
 }
 
 /**
@@ -88,6 +104,9 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
   const out: DocCandidate[] = [];
   // Repo-root `.truecourseignore` — same exclusions as code analysis.
   const tcIgnore = loadTcIgnore(rootDir);
+  // Opt-in include-scope (`spec.include`). Inactive ⇒ everything, and the guard
+  // below is skipped, so a no-config repo walks byte-identically to before.
+  const scope = opts.scope ?? loadSpecScope(rootDir);
 
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -127,6 +146,14 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
       }
       if (!entry.isFile()) continue;
       if (path.extname(entry.name).toLowerCase() !== '.md') continue;
+      // Include-scope: when configured, only markdown matching a scope glob
+      // enters the universe. `.truecourseignore` already subtracted above, so a
+      // scope glob can never resurrect an ignored path. Out-of-scope files are
+      // never candidates — they don't appear in skippedDocs either.
+      if (scope.active) {
+        const rel = path.relative(rootDir, full).split(path.sep).join('/');
+        if (!scope.includes(rel)) continue;
+      }
 
       const candidate = makeCandidate(full, rootDir, previewLines, opts);
       if (candidate) out.push(candidate);

@@ -1,4 +1,16 @@
-import type { BrowseDirResponse, CapabilitiesResponse } from '@truecourse/shared';
+import type {
+  BrowseDirResponse,
+  CapabilitiesResponse,
+  GuardDecisions,
+  GuardDocCoverage,
+  GuardGenerateReport,
+  GuardHistory,
+  GuardLatest,
+  GuardScenarioInventory,
+  GuardScenarioSource,
+  GuardStaleness,
+} from '@truecourse/shared';
+import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -44,11 +56,16 @@ async function fetchApi<T>(
   return res.json();
 }
 
+/** Verbs a repo card shows for its most-recent lifecycle event. */
+export type LatestEventKind = 'analyzed' | 'scanned' | 'generated' | 'guarded';
+
 export type RepoResponse = {
   id: string;
   name: string;
   path: string;
   lastAnalyzed?: string;
+  /** Most recent lifecycle event across features (home-page card), or null. */
+  latestEvent?: { kind: LatestEventKind; at: string } | null;
   branches?: string[];
   defaultBranch?: string;
   isGitRepo?: boolean;
@@ -675,156 +692,33 @@ export function getAnalyticsResolution(
 // Spec Consolidation (Module 1)
 // ---------------------------------------------------------------------------
 
-export type SpecClaim = {
-  id: string;
-  topic: string;
-  subject: string;
-  content: unknown;
-  /** 'definition' = the section's primary subject; 'constraint' = narrowing rule. */
-  kind?: 'definition' | 'constraint';
-  provenance: { file: string; line: number; quote: string };
-  metadata: { docKind: string; status?: string; lastTouched: string };
-  /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
-  layer?: 'workspace' | 'repo';
-};
-
-export type SpecConflictCandidate = {
-  index: number;
-  weight: 'newest' | 'newer' | 'older' | 'oldest';
-  claim: SpecClaim;
-};
-
-export type SpecConflict = {
-  id: string;
-  topic: string;
-  subject: string;
-  module?: string;
-  candidates: SpecConflictCandidate[];
-  defaultPick: number;
-  /** Plain-English LLM-generated explanation of how candidates differ. */
-  explanation?: string;
-  /**
-   * Opus (LLM resolver) verdict for this open conflict — present only
-   * when the resolver returned medium/low confidence. High-confidence
-   * verdicts auto-applied and the conflict is in decidedConflicts.
-   */
-  resolverVerdict?: {
-    confidence: 'high' | 'medium' | 'low';
-    reasoning: string;
-    pick: number;
-  };
-  /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
-  candidateFingerprint: string;
-};
-
-export type SpecResolution =
-  | { kind: 'pick'; candidateIndex: number }
-  | { kind: 'custom'; content: string };
-
-export type SpecDecision = {
-  conflictId: string;
-  resolution: SpecResolution;
-  resolvedAt: string;
-  candidateFingerprint: string;
-  note?: string;
-};
-
-export type SpecDecisionsFile = {
-  version: 1;
-  decisions: SpecDecision[];
-};
-
-export type SpecScanResponse = {
-  /** Set on persisted state and on fresh scans. Absent on legacy responses. */
-  scannedAt?: string;
-  docsScanned: number;
-  blocksAttempted: number;
-  claimsExtracted: number;
-  resolved: number;
-  decided: number;
-  openConflicts: SpecConflict[];
-  decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
-  /**
-   * Docs the LLM relevance filter excluded from extraction. Each has a
-   * short reason. User can force-include via the include endpoint.
-   * Absent on older scan-state files; treat as [].
-   */
-  skippedDocs?: Array<{ path: string; reason: string }>;
-};
-
 export type IlValidationIssue = {
   artifactKey: string;
   message: string;
   severity: 'hard' | 'soft';
   tcSource?: string;
+  /** Repair tried and failed to fix this artifact's syntax. */
+  repairAttempted?: boolean;
+  /** The last parser error after repair gave up. */
+  repairFailReason?: string;
 };
 
-export type ContractsGenerateResponse = {
-  il:
-    | {
-        written: number;
-        validationIssues: IlValidationIssue[];
-        mergeDiagnostics: unknown[];
-      }
-    | { error: string }
-    | { skipped: string };
+/** An enumerated target that never got a contract written (a genuine miss after the gap judge). */
+export type IlCoverageGap = {
+  areaId: string;
+  kind: string;
+  identity: string;
+  /** The enumerator's hint for this target. */
+  hint?: string;
+  /** The gap judge's reason for keeping it as a genuine miss. */
+  reason?: string;
 };
-
-export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
-  return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
-}
-
-export type CanonicalSpecTopic = {
-  topic: string;
-  claimCount: number;
-  /** Every claim in this topic is inherited from workspace Knowledge (enterprise). */
-  inherited?: boolean;
-};
-
-export type CanonicalSpecModule = {
-  name: string;
-  manifest: Record<string, unknown>;
-  topics: CanonicalSpecTopic[];
-  /** Every topic in this module is entirely workspace-inherited (enterprise). */
-  inherited?: boolean;
-};
-
-export type CanonicalSpecTree = {
-  hasCanonical: boolean;
-  generatedAt?: string;
-  modules: CanonicalSpecModule[];
-};
-
-export type CanonicalSpecSection = {
-  module: string;
-  topic: string;
-  manifest: Record<string, unknown>;
-  claims: SpecClaim[];
-};
-
-export function getSpecCanonicalTree(
-  repoId: string,
-  ref?: string,
-): Promise<CanonicalSpecTree> {
-  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree${q}`);
-}
-
-export function getSpecCanonicalSection(
-  repoId: string,
-  moduleName: string,
-  topic: string,
-  ref?: string,
-): Promise<CanonicalSpecSection> {
-  const params = new URLSearchParams({ module: moduleName, topic });
-  if (ref) params.set('ref', ref);
-  return fetchApi<CanonicalSpecSection>(
-    `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
-  );
-}
 
 // ---------------------------------------------------------------------------
-// Contracts (Module 2)
+// Contracts (Module 2) — types only. The `.tc` corpus browser is reused by the
+// enterprise Workspace Knowledge page (`ee/packages/client`), which reads its
+// own `/api/ee/knowledge/contracts/*` routes; the OSS repo Contracts tab and
+// its `/api/repos/:id/contracts/*` routes are retired.
 // ---------------------------------------------------------------------------
 
 export type ContractsTree = {
@@ -840,6 +734,16 @@ export type ContractsTree = {
       inferred?: boolean;
     }>;
   }>;
+  /**
+   * The last `contracts generate` run's outcome, persisted so it survives a
+   * reload. Null when never generated (or EE, where generate runs server-side).
+   */
+  lastGenerate?: {
+    generatedAt: string;
+    written: number;
+    gaps: IlCoverageGap[];
+    validationIssues: IlValidationIssue[];
+  } | null;
 };
 
 export type ContractsFile = {
@@ -847,333 +751,454 @@ export type ContractsFile = {
   content: string;
 };
 
-export function getContractsTree(repoId: string, ref?: string): Promise<ContractsTree> {
-  const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree${q}`);
-}
-
-export type ContractsDiff = { added: string[]; removed: string[]; modified: string[] };
-
-export function getContractsDiff(repoId: string, ref: string): Promise<ContractsDiff> {
-  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff?ref=${encodeURIComponent(ref)}`);
-}
-
-/** OSS Git-Diff: run the working-tree-vs-committed contracts diff. */
-export function postContractsDiff(repoId: string): Promise<ContractsDiff> {
-  return fetchApi<ContractsDiff>(`/api/repos/${repoId}/contracts/diff`, { method: 'POST' });
-}
-
-export type SpecDiff = {
-  added: Array<{ id: string; module: string; topic: string; subject: string }>;
-  removed: Array<{ id: string; module: string; topic: string; subject: string }>;
-  openConflicts: Array<{ id: string; topic: string; subject: string }>;
-  newConflictCount: number;
-};
-
-export function getSpecDiff(repoId: string, ref: string): Promise<SpecDiff> {
-  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff?ref=${encodeURIComponent(ref)}`);
-}
-
-/** OSS Git-Diff: run the working-tree-vs-committed spec (claims) diff. */
-export function postSpecDiff(repoId: string): Promise<SpecDiff> {
-  return fetchApi<SpecDiff>(`/api/repos/${repoId}/spec/diff`, { method: 'POST' });
-}
-
-export function getContractsFile(
-  repoId: string,
-  filePath: string,
-  ref?: string,
-): Promise<ContractsFile> {
-  const params = new URLSearchParams({ path: filePath });
-  if (ref) params.set('ref', ref);
-  return fetchApi<ContractsFile>(`/api/repos/${repoId}/contracts/file?${params.toString()}`);
-}
-
-// ---------------------------------------------------------------------------
-// Verify (Module 3 — code vs contracts drift detection)
-// ---------------------------------------------------------------------------
-
-export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
-
-export type ContractDrift = {
-  id: string;
-  artifactRef?: { type: string; identity: string } | null;
-  obligationKey: string;
-  severity: DriftSeverity;
-  message: string;
-  filePath?: string | null;
-  lineStart?: number | null;
-  lineEnd?: number | null;
-  specSide?: unknown;
-  codeSide?: unknown;
-  /** Spec-side origin of the requirement this drift came from (source doc +
-   *  section + line range). Absent on old snapshots predating the field.
-   *  `sourceUrl`/`sourceLabel` are attached by the server when the source is a
-   *  synced workspace-KB doc (external link + title), e.g. a Confluence page. */
-  specOrigin?: {
-    source: string;
-    section: string;
-    lines: [number, number];
-    sourceUrl?: string | null;
-    sourceLabel?: string | null;
-  } | null;
-};
-
-export type VerifyState = {
-  verifiedAt: string;
-  contractsDir: string;
-  codeDir: string;
-  artifactCount: number;
-  extractedOperationCount: number;
-  drifts: ContractDrift[];
-  resolverErrors: string[];
-  unresolvedRefs: string[];
-  /**
-   * Commit the drifts were observed at (baseline commit for the latest state,
-   * the snapshot's commit for a past run / PR head). Lets EE deep-link drift
-   * sites to the GitHub blob at the right sha even in the non-PR base view.
-   */
-  commitHash?: string | null;
-};
-
-/**
- * Persisted verify state. Returns null on 404 (no run yet); other
- * errors propagate.
- */
-export async function getVerifyState(
-  repoId: string,
-  ref?: string,
-): Promise<VerifyState | null> {
-  try {
-    const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state${q}`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-export function postVerifyRun(repoId: string): Promise<VerifyState> {
-  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/run`, {
-    method: 'POST',
-  });
-}
-
-export type ChangedFile = { path: string; status: 'new' | 'modified' | 'deleted' };
-
-export type VerifyDiff = {
-  id: string;
-  baseRunId: string;
-  verifiedAt: string;
-  branch: string | null;
-  commitHash: string | null;
-  added: ContractDrift[];
-  resolved: ContractDrift[];
-  unchangedCount: number;
-  changedFiles: ChangedFile[];
-  summary: { added: number; resolved: number; unchanged: number };
-};
-
-/**
- * Read the verify diff. Null on 404 (none computed yet).
- * `ref` (EE) → that commit's snapshot diffed against the repo's baseline (derived
- * server-side); omitted → the OSS working-tree diff.
- */
-export async function getVerifyDiff(
-  repoId: string,
-  opts?: { ref?: string },
-): Promise<VerifyDiff | null> {
-  try {
-    const q = opts?.ref ? `?ref=${encodeURIComponent(opts.ref)}` : '';
-    return await fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff${q}`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-/** Compute + persist a fresh verify diff against the committed baseline. */
-export function postVerifyDiff(repoId: string): Promise<VerifyDiff> {
-  return fetchApi<VerifyDiff>(`/api/repos/${repoId}/verify/diff`, {
-    method: 'POST',
-  });
-}
-
-/** Human-readable prose for one drift — never replaces the structured original. */
-export type EnrichedDrift = {
-  /** One plain sentence: what the spec REQUIRES. */
-  specReadable: string;
-  /** One plain sentence: what the code ACTUALLY DOES. */
-  codeReadable: string;
-  /** One sentence combining both ("Spec requires X, but the code does Y."). */
-  summary: string;
-};
-
-/**
- * On-demand, cached LLM enrichment of one drift into readable prose. Returns
- * `null` when no LLM transport is configured (204) or the call failed — the
- * caller then keeps the structured rendering. Repo-agnostic + content-addressed
- * server-side, so a drift the gate already enriched is a cache hit.
- *
- * Send the drift's content fields verbatim (the same string `specSide`/`codeSide`
- * the snapshot stored) so the server derives the same content key as the gate.
- */
-export async function postDriftEnrich(
-  repoId: string,
-  drift: Pick<
-    ContractDrift,
-    'artifactRef' | 'obligationKey' | 'message' | 'severity' | 'specSide' | 'codeSide' | 'specOrigin'
-  >,
-): Promise<EnrichedDrift | null> {
-  // 204 → fetchApi returns undefined; normalize to null for "no enrichment".
-  return (
-    (await fetchApi<EnrichedDrift | undefined>(
-      `/api/repos/${repoId}/verify/drift/enrich`,
-      { method: 'POST', body: JSON.stringify(drift) },
-    )) ?? null
-  );
-}
-
-export type VerifyHistoryEntry = {
-  id: string;
-  filename: string;
-  verifiedAt: string;
-  branch: string | null;
-  commitHash: string | null;
-  artifactCount: number;
-  driftCount: number;
-  bySeverity: Record<DriftSeverity, number>;
-};
-export type VerifyHistory = { runs: VerifyHistoryEntry[] };
-
-/** Per-run drift summaries for the trend chart. Empty when no runs yet. */
-export async function getVerifyHistory(repoId: string): Promise<VerifyHistory> {
-  try {
-    return await fetchApi<VerifyHistory>(`/api/repos/${repoId}/verify/history`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return { runs: [] };
-    throw e;
-  }
-}
-
-/** State for a specific past verify run (for the runs dropdown). */
-export function getVerifyRun(repoId: string, runId: string): Promise<VerifyState> {
-  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/runs/${runId}`);
-}
-
-/** Delete a past verify run (snapshot + history entry). */
-export function deleteVerifyRun(repoId: string, runId: string): Promise<{ deleted: boolean }> {
-  return fetchApi<{ deleted: boolean }>(`/api/repos/${repoId}/verify/runs/${runId}`, {
-    method: 'DELETE',
-  });
-}
-
-/**
- * Read the persisted scan-state. Returns null when the server
- * responds 404 (no scan has been run yet) — any other error
- * propagates so the caller can show it.
- */
-export async function getSpecScanState(repoId: string): Promise<SpecScanResponse | null> {
-  try {
-    return await fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan-state`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
-export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
-}
-
-export function deleteSpecDecision(
-  repoId: string,
-  conflictId: string,
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(
-    `/api/repos/${repoId}/spec/decisions/${encodeURIComponent(conflictId)}`,
-    { method: 'DELETE' },
-  );
-}
-
-export function postSpecDecision(
-  repoId: string,
-  payload: { conflictId: string; resolution: SpecResolution; candidateFingerprint: string; note?: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecManualInclude(
-  repoId: string,
-  payload: { path: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function deleteSpecManualInclude(
-  repoId: string,
-  payload: { path: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
-    method: 'DELETE',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecManualChain(
-  repoId: string,
-  payload: { older: string; newer: string; note?: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function deleteSpecManualChain(
-  repoId: string,
-  payload: { older: string; newer: string },
-): Promise<SpecDecisionsFile> {
-  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
-    method: 'DELETE',
-    body: JSON.stringify(payload),
-  });
-}
-
-export function postSpecDecisionsBatch(
-  repoId: string,
-  mode: 'all-defaults',
-): Promise<{ added: number; decisions: SpecDecisionsFile }> {
-  return fetchApi(`/api/repos/${repoId}/spec/decisions/batch`, {
-    method: 'POST',
-    body: JSON.stringify({ mode }),
-  });
-}
-
-export function postContractsGenerate(
-  repoId: string,
-): Promise<ContractsGenerateResponse> {
-  return fetchApi<ContractsGenerateResponse>(
-    `/api/repos/${repoId}/contracts/generate`,
-    { method: 'POST' },
-  );
-}
-
 export type SpecStalenessResponse = {
-  contractsStale: boolean;
-  verifyStale: boolean;
-  hasClaims: boolean;
+  /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
+  decisionsPending: boolean;
+  /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
+  docsChanged: boolean;
+  hasCorpus: boolean;
   hasGenerated: boolean;
-  hasVerified: boolean;
 };
 
 export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
   return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
+}
+
+// ---------------------------------------------------------------------------
+// Corpus path (spec-scan redesign) — the curated doc corpus. Areas group docs;
+// an overlap is two same-area docs that may disagree, resolved by a
+// section-scoped verdict (pick-a-side / dismissal) or a force-exclude. Doc→doc
+// relations are lifecycle/precedence metadata and never resolve a conflict.
+// ---------------------------------------------------------------------------
+
+export type SpecRelationType = 'replace' | 'precedence' | 'keep-both';
+
+export interface SpecRelation {
+  type: SpecRelationType;
+  older: string;
+  newer: string;
+  scope?: string;
+  detectedFrom?: 'filename' | 'llm' | 'manual';
+  note?: string;
+}
+
+export interface SpecOverlapSection {
+  doc: string;
+  /** Heading of the conflicting section, or null when it lives in the doc's preamble. */
+  heading: string | null;
+  /** The verbatim disputed sentence, when the detector captured one — carried into a
+   *  pick-a-side verdict so the loser's claim is suppressed at guard generate. */
+  quote?: string;
+}
+
+/** A section-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or dismissal.
+ *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
+export interface SpecConflictResolution {
+  docA: string;
+  anchorA: string | null;
+  quoteA?: string;
+  docB: string;
+  anchorB: string | null;
+  quoteB?: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  resolvedAt?: string;
+  note?: string;
+}
+
+export interface SpecOverlap {
+  docs: [string, string];
+  note: string;
+  /** Conflicting sections per doc (markdown headings), when known. */
+  sections?: SpecOverlapSection[];
+  /**
+   * Every area this (possibly cross-area-merged) dispute spans. Detection runs
+   * per area, so one disagreement on a pair sharing several areas is flagged in
+   * each and merged to one record; a resolution scoped to any spanned area (or an
+   * unscoped one) clears it everywhere. Empty on older corpora.
+   */
+  areas?: string[];
+}
+
+export interface SpecCorpusDoc {
+  ref: string;
+  kind: string;
+  status?: string;
+  lastTouched: string;
+  areaTags: string[];
+}
+
+export interface SpecCorpusArea {
+  id: string;
+  product: string;
+  concern: string;
+  docRefs: string[];
+  overlaps: SpecOverlap[];
+}
+
+export interface SpecSkippedDoc {
+  ref: string;
+  reason: string;
+}
+
+export interface SpecCorpus {
+  version: number;
+  generatedAt: string;
+  docs: SpecCorpusDoc[];
+  areas: SpecCorpusArea[];
+  /** Auto-detected relations (corpus-side). User relations come separately. */
+  relations: SpecRelation[];
+  /** Docs the relevance filter dropped (path + reason). */
+  skippedDocs?: SpecSkippedDoc[];
+}
+
+export interface SpecCorpusResponse {
+  corpus: SpecCorpus;
+  userRelations: SpecRelation[];
+  /** Doc refs the user force-included (bypass the relevance filter). */
+  manualIncludes?: string[];
+  /** Doc refs the user force-excluded (dropped from the corpus). */
+  manualExcludes?: string[];
+  /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
+  conflictResolutions?: SpecConflictResolution[];
+  /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
+  noChanges?: boolean;
+  /**
+   * EE PR view: the commit whose corpus was actually returned. When it differs
+   * from the requested `ref`, the server fell back to the baseline corpus (e.g.
+   * a code-only PR whose head was never spec-scanned).
+   */
+  corpusCommit?: string;
+}
+
+/** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
+export interface SpecScanCancelled {
+  cancelled: true;
+}
+
+/**
+ * OSS include/exclude ack: the persisted decision lists only. The corpus is
+ * unchanged by an OSS decision (no re-curate), so no corpus is returned — the
+ * client keeps its optimistic row move until the next Scan. PR scope (EE) returns
+ * the full re-curated `SpecCorpusResponse` instead.
+ */
+export interface SpecDecisionAck {
+  manualIncludes: string[];
+  manualExcludes: string[];
+}
+
+/**
+ * OSS conflict-verdict ack: the persisted verdicts only (no corpus — a verdict
+ * doesn't re-curate). The client re-derives resolved/dismissed state from these.
+ * PR scope (EE) returns the full re-curated `SpecCorpusResponse` instead.
+ */
+export interface SpecConflictAck {
+  conflictResolutions: SpecConflictResolution[];
+}
+
+/**
+ * EE PR scope for the spec decision routes: `?pr=<n>&ref=<headSha>` (both
+ * required together). Empty outside a PR view, so OSS URLs are unchanged.
+ */
+function prScopeQuery(opts?: { pr?: number; ref?: string }): string {
+  return opts?.pr != null && opts.ref ? `?pr=${opts.pr}&ref=${encodeURIComponent(opts.ref)}` : '';
+}
+
+/** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
+export async function getSpecCorpus(
+  repoId: string,
+  ref?: string,
+  pr?: number,
+): Promise<SpecCorpusResponse | null> {
+  const params = new URLSearchParams();
+  if (ref) params.set('ref', ref);
+  if (pr != null) params.set('pr', String(pr));
+  const q = params.size > 0 ? `?${params.toString()}` : '';
+  try {
+    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus${q}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * Run a fresh corpus scan (curate), persist corpus.json, return it — or
+ * `{ cancelled: true }` when the user dismisses the cost-estimate confirm.
+ */
+export function getSpecCorpusScan(
+  repoId: string,
+): Promise<SpecCorpusResponse | SpecScanCancelled> {
+  return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
+}
+
+/** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
+export function getSpecDoc(repoId: string, ref: string, commit?: string): Promise<{ ref: string; content: string }> {
+  const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
+  return fetchApi<{ ref: string; content: string }>(
+    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Guard — spec-section scenario coverage (read-only, diff-free).
+// ---------------------------------------------------------------------------
+
+/** The two amber-dot signals for the Guard tab (generate / run staleness). */
+export function getGuardStaleness(repoId: string): Promise<GuardStaleness> {
+  return fetchApi<GuardStaleness>(`/api/repos/${repoId}/guard/staleness`);
+}
+
+/** The last guard run's materialized state; null on 404 (never run). */
+export async function getGuardLatest(repoId: string): Promise<GuardLatest | null> {
+  try {
+    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/latest`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The append-only run-summary history (empty `{ runs: [] }` until a run exists). */
+export function getGuardHistory(repoId: string): Promise<GuardHistory> {
+  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history`);
+}
+
+/** One past run's materialized state by id; null on 404 (unknown run). */
+export async function getGuardRun(repoId: string, runId: string): Promise<GuardLatest | null> {
+  try {
+    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/runs/${encodeURIComponent(runId)}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The last `guard generate` report; null on 404 (never generated). */
+export async function getGuardReport(repoId: string): Promise<GuardGenerateReport | null> {
+  try {
+    return await fetchApi<GuardGenerateReport>(`/api/repos/${repoId}/guard/report`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). */
+export async function getGuardCoverage(repoId: string, doc: string): Promise<GuardDocCoverage | null> {
+  try {
+    return await fetchApi<GuardDocCoverage>(
+      `/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`,
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The committed-scenario inventory + recipe card for the Scenarios tab. */
+export function getGuardScenarios(repoId: string): Promise<GuardScenarioInventory> {
+  return fetchApi<GuardScenarioInventory>(`/api/repos/${repoId}/guard/scenarios`);
+}
+
+/** A scenario's raw YAML source; null on 404 (unknown id). */
+export async function getGuardScenarioSource(repoId: string, id: string): Promise<GuardScenarioSource | null> {
+  try {
+    return await fetchApi<GuardScenarioSource>(
+      `/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`,
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/**
+ * A failed scenario's evidence transcript (text/plain). `fetchApi` is JSON-only,
+ * so this reads the raw body itself. Throws `ApiError` on a non-OK response
+ * (e.g. 404 when no transcript was captured).
+ */
+export async function getGuardEvidence(
+  repoId: string,
+  runId: string,
+  scenarioId: string,
+  file?: string,
+): Promise<string> {
+  const params = new URLSearchParams({ runId, scenarioId });
+  if (file) params.set('file', file);
+  const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/evidence?${params.toString()}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  return res.text();
+}
+
+/**
+ * A birth finding's evidence transcript, addressed by its stored `evidencePath`
+ * (the finding carries the whole pointer, not a run id + scenario id). text/plain;
+ * throws `ApiError` on a non-OK response (404 when no transcript was written).
+ */
+export async function getGuardFindingEvidence(
+  repoId: string,
+  evidencePath: string,
+  file?: string,
+): Promise<string> {
+  const params = new URLSearchParams({ path: evidencePath });
+  if (file) params.set('file', file);
+  const res = await fetch(`${BASE_URL}/api/repos/${repoId}/guard/finding-evidence?${params.toString()}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
+  return res.text();
+}
+
+/** The committable guard decisions (dismissed claims) — always 200 (empty until
+ *  the user dismisses anything). */
+export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
+}
+
+/** The identity a dismissal keys on: doc + section anchor + the extracted claim's
+ *  stable text (a finding's `claim`). */
+export interface GuardClaimIdentity {
+  doc: string;
+  anchor: string;
+  title: string;
+}
+
+/** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
+ *  updated decisions so the caller re-derives dismissed state without a GET. */
+export function dismissGuardClaim(
+  repoId: string,
+  claim: GuardClaimIdentity & { note?: string },
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify(claim),
+  });
+}
+
+/** Reverse a dismissal by its identity; returns the updated decisions. */
+export function undismissGuardClaim(repoId: string, claim: GuardClaimIdentity): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
+    method: 'POST',
+    body: JSON.stringify(claim),
+  });
+}
+
+// Guard actions — trigger `guard generate` / `guard run` from the dashboard. The
+// estimate is the SAME estimateGuardTokens the CLI prompt renders (no re-derive);
+// progress streams over `spec:progress` and completes with `spec:complete`
+// (`kind: guard-generate | guard-run`).
+
+/** The pre-flight guard-generate estimate. `stages: []` ⇒ nothing changed ⇒ the
+ *  client skips the modal and triggers directly. */
+export function getGuardEstimate(repoId: string): Promise<{ estimate: LlmEstimateData }> {
+  return fetchApi<{ estimate: LlmEstimateData }>(`/api/repos/${repoId}/guard/estimate`);
+}
+
+export interface GuardGenerateTriggerResult {
+  status?: string;
+  noChanges?: boolean;
+  written?: number;
+  birthFindings?: number;
+  /** True when the user declined the estimate — a clean no-op, not an error. */
+  cancelled?: boolean;
+}
+
+/** Trigger `guard generate`. `confirmed` is the user's answer to the estimate modal
+ *  (always true once the modal is confirmed, or when there were no stages). */
+export function triggerGuardGenerate(repoId: string, confirmed: boolean): Promise<GuardGenerateTriggerResult> {
+  return fetchApi<GuardGenerateTriggerResult>(`/api/repos/${repoId}/guard/generate`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed }),
+  });
+}
+
+export interface GuardRunTriggerResult {
+  status: string;
+  summary?: { total: number; pass: number; fail: number; stale: number; orphaned: number; error: number };
+  /** Present on a non-ok status (no recipe / no scenarios / build failure). */
+  message?: string;
+}
+
+/** Trigger `guard run` — deterministic, LLM-free, no estimate. */
+export function triggerGuardRun(repoId: string): Promise<GuardRunTriggerResult> {
+  return fetchApi<GuardRunTriggerResult>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
+}
+
+// The optional `scope` on every spec decision mutation is the EE PR view
+// (`?pr=&ref=`); in PR scope the server re-curates the PR head and returns the
+// fresh corpus. Repo scope is unchanged — no query.
+type SpecMutationScope = { pr?: number; ref?: string };
+
+// OSS records the decision and returns a `SpecDecisionAck` (no re-curate); PR scope
+// (EE) re-curates and returns the full `SpecCorpusResponse`.
+
+/** Force-include a relevance-dropped doc. */
+export function addSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Remove a force-include override. */
+export function removeSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Force-exclude an otherwise-kept doc (drops it + its conflicts on the next Scan). */
+export function addSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/** Remove a force-exclude override (restore the doc). */
+export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
+  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+/**
+ * Record a section-scoped conflict verdict (pick-a-side / dismissal). OSS returns
+ * a `SpecConflictAck` (no re-curate); PR scope (EE) returns the full re-curated corpus.
+ */
+export function postSpecConflictResolution(
+  repoId: string,
+  payload: {
+    docA: string;
+    anchorA: string | null;
+    quoteA?: string;
+    docB: string;
+    anchorB: string | null;
+    quoteB?: string;
+    verdict: 'a' | 'b' | 'dismissed';
+    note?: string;
+  },
+  scope?: SpecMutationScope,
+): Promise<SpecConflictAck | SpecCorpusResponse> {
+  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/** Remove a conflict verdict by dispute identity. Repo scope returns the ack; PR the corpus. */
+export function deleteSpecConflictResolution(
+  repoId: string,
+  payload: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  scope?: SpecMutationScope,
+): Promise<SpecConflictAck | SpecCorpusResponse> {
+  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
+    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
+    { method: 'DELETE', body: JSON.stringify(payload) },
+  );
 }
 

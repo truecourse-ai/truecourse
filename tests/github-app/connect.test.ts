@@ -224,7 +224,6 @@ describe('connect router', () => {
     let res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: true,
-      inferResult: true,
       conflicts: true,
     });
 
@@ -237,7 +236,6 @@ describe('connect router', () => {
     res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: false,
-      inferResult: true,
       conflicts: true,
     });
   });
@@ -356,5 +354,89 @@ describe('connect router', () => {
     expect(res.body.runs[0].prNumber).toBe(7);
     expect(res.body.runs[0].id).toBe('run-new');
     expect(res.body.runs[0].conclusion).toBe('success');
+  });
+
+  it('annotates the per-repo runs feed with PR state + title (null when untracked)', async () => {
+    await seedInstallation('org_A');
+    await store.linkRepo({
+      repoFullName: 'acme/api',
+      installationId: 100,
+      workspaceOrgId: 'org_A',
+      defaultBranch: 'main',
+      blocking: true,
+      enabled: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const mkRun = (id: string, pr: number) => ({
+      id,
+      repoFullName: 'acme/api',
+      prNumber: pr,
+      headSha: `sha-${pr}`,
+      baseSha: 'base',
+      conclusion: 'success' as const,
+      addedCount: 0,
+      resolvedCount: 0,
+      createdAt: `2026-01-0${pr}T00:00:00.000Z`,
+    });
+    await store.recordRun(mkRun('run-merged', 1));
+    await store.recordRun(mkRun('run-untracked', 2));
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 1,
+      title: 'Add widget',
+      state: 'merged',
+      headSha: 'sha-1',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const res = await request(app)
+      .get('/api/ee/github/repos/acme/api/runs')
+      .expect(200);
+    const byId = Object.fromEntries(res.body.runs.map((r: any) => [r.id, r]));
+    expect(byId['run-merged'].prState).toBe('merged');
+    expect(byId['run-merged'].title).toBe('Add widget');
+    // A run whose PR has no gh_prs row (pre-tracking history) → null state/title.
+    expect(byId['run-untracked'].prState).toBeNull();
+    expect(byId['run-untracked'].title).toBeNull();
+  });
+
+  it('carries PR state + title on the workspace feed (one row per PR)', async () => {
+    await seedInstallation('org_A');
+    await store.linkRepo({
+      repoFullName: 'acme/api',
+      installationId: 100,
+      workspaceOrgId: 'org_A',
+      defaultBranch: 'main',
+      blocking: true,
+      enabled: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await store.recordRun({
+      id: 'run-open',
+      repoFullName: 'acme/api',
+      prNumber: 5,
+      headSha: 'sha-5',
+      baseSha: 'base',
+      conclusion: 'failure',
+      addedCount: 1,
+      resolvedCount: 0,
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 5,
+      title: 'Open work',
+      state: 'open',
+      headSha: 'sha-5',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const res = await request(app).get('/api/ee/github/runs').expect(200);
+    expect(res.body.runs).toHaveLength(1);
+    expect(res.body.runs[0].prNumber).toBe(5);
+    expect(res.body.runs[0].prState).toBe('open');
+    expect(res.body.runs[0].title).toBe('Open work');
   });
 });

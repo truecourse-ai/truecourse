@@ -3,7 +3,7 @@
  * extraction cache. Content-addressed and keyed globally by `(cache_name,
  * cache_key)` in `extraction_cache` (the `scope`/repo root is ignored): a slice
  * or block unchanged across runs/commits/repos hits the cache and skips the LLM.
- * This is what keeps re-generation cheap now that contracts aren't committed.
+ * This is what keeps re-running the LLM spec stages cheap.
  */
 
 import { and, eq } from 'drizzle-orm';

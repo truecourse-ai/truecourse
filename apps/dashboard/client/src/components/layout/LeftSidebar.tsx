@@ -1,7 +1,5 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
-import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   getTab,
   useVisibleTabsForSection,
@@ -27,12 +25,6 @@ type LeftSidebarProps = {
   minWidth?: number;
   badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
   /**
-   * Per-tab advisory: when set, an amber warning icon is rendered on the
-   * rail button and (for the active tab) inside the panel header. The
-   * value is the tooltip text shown on hover.
-   */
-  tabWarnings?: Partial<Record<LeftTab, string | null>>;
-  /**
    * Hide the vertical icon rail (EE renders a horizontal tab bar instead).
    * The side panel still shows for the active tab.
    */
@@ -47,7 +39,6 @@ export function LeftSidebar({
   defaultWidth = 350,
   minWidth = 260,
   badgeCounts,
-  tabWarnings,
   hideRail = false,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
@@ -163,17 +154,6 @@ export function LeftSidebar({
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTabLabel}
             </span>
-            {(() => {
-              const warning = activeTab ? tabWarnings?.[activeTab] : undefined;
-              if (!warning) return null;
-              return (
-                <HoverPopover align="start" width="wide" content={warning}>
-                  <span className="flex items-center text-amber-400">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                  </span>
-                </HoverPopover>
-              );
-            })()}
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
               if (badge == null) return null;

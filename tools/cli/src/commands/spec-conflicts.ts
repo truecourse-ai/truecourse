@@ -1,324 +1,233 @@
 /**
- * `truecourse spec conflicts <sub>` — agent-friendly conflict surface.
+ * `truecourse spec conflicts <sub>` — corpus overlap surface (agent-friendly).
  *
- *   list   [--decided] [--all]              list open conflicts
- *   show   <id>                             full detail for one
- *   pick   <id> <candidateIndex> [--note]   write a `pick` decision
- *   custom <id> --text "..."                write a `custom` decision
- *   revoke <id>                             remove a previously-saved decision
+ * In the curated-corpus model a "conflict" is a flagged within-area OVERLAP —
+ * two docs whose specific sections may disagree. It resolves with a
+ * SECTION-scoped verdict on the disagreement itself (plan item 31):
+ *   - pick a side  (`--right <docPath>`) — the other side's disputed claim is
+ *                  suppressed at guard generate; the winner stands.
+ *   - dismiss      (`--dismiss`)          — a detector false-positive; resolves
+ *                  the gate, suppresses nothing.
+ * Doc-LEVEL relations (replace / precedence / keep-both) are a different tool —
+ * document lifecycle/precedence, owned by `spec chains` — and never resolve a
+ * conflict.
  *
- * Write commands persist to decisions.json and refresh the scan-state so a
- * subsequent `list` reflects the change.
+ *   list                         flagged overlaps + their resolved/dismissed state
+ *   show <area>                  the overlapping docs' prose excerpts for one area
+ *   resolve <n|area> --right P   pick a side (loser's claim suppressed at generate)
+ *   resolve <n|area> --dismiss   mark not-a-real-conflict
  */
 
 import * as p from '@clack/prompts';
+import fs from 'node:fs';
 import path from 'node:path';
-import { candidateFingerprint } from '@truecourse/spec-consolidator';
-import type { Conflict } from '@truecourse/spec-consolidator';
-import { StepTracker } from '@truecourse/core/progress';
+import { readCorpus, readCorpusDecisions } from '@truecourse/spec-consolidator';
+import type { CuratedCorpus, ConflictResolution } from '@truecourse/spec-consolidator';
 import {
-  scanInProcess,
-  SCAN_STEPS,
-  upsertDecision,
-  revokeDecision as revokeDecisionInProcess,
-} from '@truecourse/core/commands/spec-in-process';
-import { readScanState } from '@truecourse/spec-consolidator';
-import { createStdoutStepRenderer } from '../lib/stdout-step-renderer.js';
+  buildCorpusConflicts,
+  orphanedConflictResolutions,
+  type CorpusConflict,
+} from '@truecourse/shared';
+import { addConflictResolution } from '@truecourse/core/commands/spec-in-process';
 
 export interface RunSpecConflictsOptions {
   cwd?: string;
 }
 
-const repoRoot = (opts: RunSpecConflictsOptions): string => opts.cwd ?? process.cwd();
+const root = (opts: RunSpecConflictsOptions): string => opts.cwd ?? process.cwd();
+const base = (ref: string): string => ref.split('/').pop() ?? ref;
 
-// ---------------------------------------------------------------------------
-// Shared: load the current scan-state, scanning if necessary
-// ---------------------------------------------------------------------------
-
-interface LoadedScan {
-  open: Conflict[];
-  decided: Array<{ conflict: Conflict; decision: unknown }>;
-}
-
-async function loadScan(root: string): Promise<LoadedScan> {
-  const cached = readScanState(root);
-  if (cached) {
-    return {
-      open: cached.openConflicts as Conflict[],
-      decided: cached.decidedConflicts as Array<{ conflict: Conflict; decision: unknown }>,
-    };
-  }
-  // No cache — run a scan first.
-  const renderer = createStdoutStepRenderer();
-  const tracker = new StepTracker(renderer.onProgress, SCAN_STEPS.map((s) => ({ ...s })));
-  try {
-    const { consolidate } = await scanInProcess(root, { tracker });
-    renderer.dispose();
-    return {
-      open: consolidate.merge.openConflicts,
-      decided: consolidate.merge.decidedConflicts.map((d) => ({
-        conflict: d.conflict,
-        decision: d.decision,
-      })),
-    };
-  } catch (e) {
-    renderer.dispose();
-    throw e;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// list
-// ---------------------------------------------------------------------------
-
-export async function runSpecConflictsList(
-  opts: RunSpecConflictsOptions & { decided?: boolean; all?: boolean } = {},
-): Promise<void> {
-  const root = repoRoot(opts);
-  const scan = await loadScan(root);
-  const open = scan.open.map(serializeConflict);
-  const decided = scan.decided.map((d) => ({
-    conflict: serializeConflict(d.conflict),
-    decision: d.decision,
-  }));
-
-  p.intro('Conflicts');
-  const which = opts.all ? 'all' : opts.decided ? 'decided' : 'open';
-  const list = opts.all ? [...open, ...decided.map((d) => d.conflict)] : opts.decided ? decided.map((d) => d.conflict) : open;
-  p.log.step(`${list.length} ${which} conflicts`);
-  for (const c of list) {
-    p.log.message(`  • ${c.id}  [${c.topic}] ${c.subject}  (${c.candidates.length} candidates)`);
-  }
-  p.outro('`show <id>` for detail · resolve with `pick <id> <n>` or `custom <id> --text "…"`.');
-}
-
-// ---------------------------------------------------------------------------
-// show
-// ---------------------------------------------------------------------------
-
-export async function runSpecConflictsShow(
-  conflictId: string,
-  opts: RunSpecConflictsOptions & { diff?: boolean } = {},
-): Promise<void> {
-  const root = repoRoot(opts);
-  const scan = await loadScan(root);
-  const conflict =
-    scan.open.find((c) => c.id === conflictId) ??
-    scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
-  if (!conflict) {
-    p.cancel(`Conflict ${conflictId} not found.`);
+function loadCorpusOrExit(repoRoot: string): CuratedCorpus {
+  const corpus = readCorpus(repoRoot);
+  if (!corpus) {
+    p.cancel('No corpus found — run `truecourse spec scan` first.');
     process.exit(1);
   }
-  p.intro(`Conflict ${conflict.id} — ${conflict.subject}`);
-  p.log.step(`topic: ${conflict.topic}`);
-  if (conflict.explanation) p.log.message(conflict.explanation);
-  p.log.step(`${conflict.candidates.length} candidates (default-pick: ${conflict.defaultPick})`);
-  for (const cand of conflict.candidates) {
-    const meta = cand.claim.metadata;
-    p.log.message(
-      `  [${cand.index}] ${cand.weight}  ${cand.claim.provenance.file}:${cand.claim.provenance.line}` +
-        `  kind=${meta.docKind}  status=${meta.status ?? '-'}`,
-    );
+  return corpus;
+}
+
+/** How a conflict is resolved, for the list/show rendering. */
+function resolvedLabel(c: CorpusConflict): string {
+  if (c.resolution) {
+    if (c.resolution.verdict === 'dismissed') return 'dismissed (not a real conflict)';
+    const winner = c.resolution.verdict === 'a' ? c.resolution.docA : c.resolution.docB;
+    return `${base(winner)} is right (loser’s claim suppressed at generate)`;
   }
-  if (opts.diff) {
-    const diffs = computeFieldDifferences(conflict);
-    if (diffs.length === 0) {
-      p.log.step('field differences: none — candidates structurally identical');
+  if (c.excludedRef) return `${base(c.excludedRef)} excluded`;
+  return 'resolved';
+}
+
+export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): Promise<void> {
+  const repoRoot = root(opts);
+  const corpus = loadCorpusOrExit(repoRoot);
+  const decisions = readCorpusDecisions(repoRoot);
+  const conflicts = buildCorpusConflicts(corpus, decisions);
+  const open = conflicts.filter((c) => !c.resolved);
+  const orphaned = orphanedConflictResolutions(corpus, decisions);
+
+  p.intro('Overlaps (where two docs’ sections may disagree)');
+  // Number every conflict so `resolve <n>` addresses it directly.
+  conflicts.forEach((c, i) => {
+    const n = i + 1;
+    if (c.resolved) {
+      p.log.step(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}  — resolved: ${resolvedLabel(c)}`);
     } else {
-      p.log.step(`field differences: ${diffs.length}`);
-      for (const d of diffs.slice(0, 12)) {
-        p.log.message(
-          `  ${d.path}  [${d.fromIndex}] ${shortJson(d.fromValue)}  ·  [${d.toIndex}] ${shortJson(d.toValue)}`,
-        );
-      }
-      if (diffs.length > 12) p.log.message(`  … and ${diffs.length - 12} more`);
+      p.log.warn(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
+      p.log.message(`   pick a side: truecourse spec conflicts resolve ${n} --right ${c.a}   (or --right ${c.b}, or --dismiss)`);
     }
-  }
-  if (!opts.diff) p.log.message('add --diff to see field-level differences.');
-  p.outro(
-    `resolve: truecourse spec conflicts pick ${conflict.id} <n>  ·  custom ${conflict.id} --text "…"`,
-  );
-}
+  });
+  if (conflicts.length === 0) p.log.step('No overlaps flagged.');
 
-// ---------------------------------------------------------------------------
-// pick / custom / revoke
-// ---------------------------------------------------------------------------
-
-export async function runSpecConflictsPick(
-  conflictId: string,
-  candidateIndex: number,
-  opts: RunSpecConflictsOptions & { note?: string } = {},
-): Promise<void> {
-  const root = repoRoot(opts);
-  const scan = await loadScan(root);
-  const conflict = scan.open.find((c) => c.id === conflictId) ?? scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
-  if (!conflict) return failNotFound(conflictId);
-  if (!Number.isInteger(candidateIndex) || candidateIndex < 0 || candidateIndex >= conflict.candidates.length) {
-    return fail(
-      `candidateIndex ${candidateIndex} out of range (0..${conflict.candidates.length - 1})`,
+  if (orphaned.length > 0) {
+    p.log.warn(
+      `${orphaned.length} orphaned resolution${orphaned.length === 1 ? '' : 's'} — recorded but no longer match a flagged conflict (the docs changed):`,
     );
+    for (const o of orphaned) p.log.message(`   ${base(o.docA)}  ↔  ${base(o.docB)}  (${o.verdict})`);
   }
-  await upsertDecision(root, {
-    conflictId,
-    resolution: { kind: 'pick', candidateIndex },
-    candidateFingerprint: candidateFingerprint(conflict),
-    note: opts.note,
-  });
-  await refreshScan(root);
-  emitOk(
-    `Picked candidate ${candidateIndex} on ${conflictId.slice(0, 12)}…`,
-    'next: resolve remaining (`truecourse spec conflicts list`) or `truecourse contracts generate`.',
+  p.outro(
+    `${open.length} open · ${conflicts.length - open.length} resolved${orphaned.length ? ` · ${orphaned.length} orphaned` : ''}. Inspect with \`spec conflicts show <area>\`.`,
   );
 }
 
-export async function runSpecConflictsCustom(
-  conflictId: string,
-  text: string,
-  opts: RunSpecConflictsOptions = {},
-): Promise<void> {
-  const root = repoRoot(opts);
-  const scan = await loadScan(root);
-  const conflict = scan.open.find((c) => c.id === conflictId) ?? scan.decided.find((d) => d.conflict.id === conflictId)?.conflict;
-  if (!conflict) return failNotFound(conflictId);
-  if (!text || !text.trim()) {
-    return fail('--text must be a non-empty string');
+/** First ~`max` lines of a doc, preferring the window around the overlap note's terms. */
+function excerpt(repoRoot: string, ref: string, note: string, max = 20): string {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(repoRoot, ref), 'utf-8');
+  } catch {
+    return `    (could not read ${ref})`;
   }
-  await upsertDecision(root, {
-    conflictId,
-    resolution: { kind: 'custom', content: text },
-    candidateFingerprint: candidateFingerprint(conflict),
-  });
-  await refreshScan(root);
-  emitOk(
-    `Wrote custom answer for ${conflictId.slice(0, 12)}…`,
-    'next: resolve remaining (`truecourse spec conflicts list`) or `truecourse contracts generate`.',
-  );
+  const lines = text.split('\n');
+  const terms = note
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/)
+    .filter((t) => t.length >= 4);
+  const hit = terms.length ? lines.findIndex((l) => terms.some((t) => l.toLowerCase().includes(t))) : -1;
+  const start = hit > 3 ? hit - 2 : 0;
+  return lines
+    .slice(start, start + max)
+    .map((l) => `    ${l}`)
+    .join('\n');
 }
 
-export async function runSpecConflictsRevoke(
-  conflictId: string,
-  opts: RunSpecConflictsOptions = {},
-): Promise<void> {
-  const root = repoRoot(opts);
-  await revokeDecisionInProcess(root, conflictId);
-  await refreshScan(root);
-  emitOk(
-    `Revoked decision for ${conflictId.slice(0, 12)}…`,
-    `re-resolve: truecourse spec conflicts pick ${conflictId} <n>  ·  custom ${conflictId} --text "…"`,
-  );
+export async function runSpecConflictsShow(area: string, opts: RunSpecConflictsOptions = {}): Promise<void> {
+  const repoRoot = root(opts);
+  const corpus = loadCorpusOrExit(repoRoot);
+  const a = corpus.areas.find((x) => x.id === area);
+  if (!a) {
+    p.cancel(`No such area: ${area}. List areas with \`spec status\`.`);
+    process.exit(1);
+  }
+  const conflicts = buildCorpusConflicts(corpus, readCorpusDecisions(repoRoot));
+  p.intro(`Overlaps in ${area}`);
+  if (a.overlaps.length === 0) p.log.step('(no overlaps in this area)');
+  for (const ov of a.overlaps) {
+    const [da, db] = ov.docs;
+    const c = conflicts.find(
+      (x) => (x.areas.includes(area) || x.area === area) && ((x.a === da && x.b === db) || (x.a === db && x.b === da)),
+    );
+    p.log.warn(`${base(da)}  ↔  ${base(db)}${ov.note ? `   · ${ov.note}` : ''}`);
+    p.log.message(c && c.resolved ? `  resolved → ${resolvedLabel(c)}` : '  open');
+    p.log.message(`  ${da}:`);
+    p.log.message(excerpt(repoRoot, da, ov.note));
+    p.log.message(`  ${db}:`);
+    p.log.message(excerpt(repoRoot, db, ov.note));
+  }
+  p.outro('resolve with `spec conflicts resolve <n|area> --right <docPath>` (pick a side) or `--dismiss`.');
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
+export interface RunSpecConflictsResolveOptions extends RunSpecConflictsOptions {
+  /** Side verdict — the winning doc path (loser's disputed claim is suppressed). */
+  right?: string;
+  /** Dismiss the conflict as a detector false-positive. */
+  dismiss?: boolean;
+  /** Optional rationale, persisted on the verdict. */
+  note?: string;
+}
 
-function serializeConflict(c: Conflict): Conflict & { candidateFingerprint: string } {
+/** Identify the target conflict for a section-scoped verdict from `<n|area>`. */
+function pickConflict(
+  target: string,
+  conflicts: CorpusConflict[],
+  right: string | undefined,
+): CorpusConflict | { error: string } {
+  if (/^\d+$/.test(target)) {
+    const idx = Number(target) - 1;
+    if (idx < 0 || idx >= conflicts.length) {
+      return { error: `No conflict #${target}. Run \`spec conflicts list\` (${conflicts.length} listed).` };
+    }
+    return conflicts[idx];
+  }
+  // Area form: the conflicts flagged in this area, narrowed by --right when given.
+  let inArea = conflicts.filter((c) => c.areas.includes(target) || c.area === target);
+  if (inArea.length === 0) return { error: `No conflicts in area ${target}. List them with \`spec conflicts list\`.` };
+  if (right) inArea = inArea.filter((c) => c.a === right || c.b === right);
+  if (inArea.length === 0) return { error: `No conflict in ${target} involves ${right}.` };
+  if (inArea.length > 1) {
+    return { error: `Area ${target} has ${inArea.length} conflicts — address one by its number (\`spec conflicts list\`).` };
+  }
+  return inArea[0];
+}
+
+/** Build the persisted resolution from a conflict + verdict. */
+function buildResolution(
+  c: CorpusConflict,
+  verdict: 'a' | 'b' | 'dismissed',
+  note?: string,
+): ConflictResolution {
+  const secOf = (doc: string) => (c.sections ?? []).find((s) => s.doc === doc);
   return {
-    ...c,
-    candidateFingerprint: candidateFingerprint(c),
+    docA: c.a,
+    anchorA: secOf(c.a)?.heading ?? null,
+    quoteA: secOf(c.a)?.quote,
+    docB: c.b,
+    anchorB: secOf(c.b)?.heading ?? null,
+    quoteB: secOf(c.b)?.quote,
+    verdict,
+    resolvedAt: new Date().toISOString(),
+    note,
   };
 }
 
-async function refreshScan(root: string): Promise<void> {
-  // Re-merge so the next read reflects the change.
-  await scanInProcess(root, {});
-}
+export async function runSpecConflictsResolve(
+  target: string,
+  opts: RunSpecConflictsResolveOptions,
+): Promise<void> {
+  const repoRoot = root(opts);
+  const corpus = loadCorpusOrExit(repoRoot);
+  const decisions = readCorpusDecisions(repoRoot);
 
-function emitOk(msg: string, hint?: string): void {
-  if (hint) p.log.message(hint);
-  p.outro(msg);
+  if (!opts.right && !opts.dismiss) {
+    return fail('Pass --right <docPath> (pick a side) or --dismiss. Doc-level relations live in `spec chains add` and never resolve a conflict.');
+  }
+  if (opts.right && opts.dismiss) return fail('Pass either --right <docPath> or --dismiss, not both.');
+  const conflicts = buildCorpusConflicts(corpus, decisions);
+  const picked = pickConflict(target, conflicts, opts.right);
+  if ('error' in picked) return fail(picked.error);
+
+  let verdict: 'a' | 'b' | 'dismissed';
+  if (opts.dismiss) {
+    verdict = 'dismissed';
+  } else {
+    if (opts.right !== picked.a && opts.right !== picked.b) {
+      return fail(`--right must be one of the disputing docs: ${picked.a} or ${picked.b}.`);
+    }
+    verdict = opts.right === picked.a ? 'a' : 'b';
+  }
+
+  await addConflictResolution(repoRoot, buildResolution(picked, verdict, opts.note));
+  // No re-scan: the corpus is unchanged and the resolved-derivation reads the
+  // verdict live; a single later `spec scan` applies any batch (the skips model).
+  if (verdict === 'dismissed') {
+    p.outro(`Dismissed: ${base(picked.a)} ↔ ${base(picked.b)} is not a real conflict.`);
+  } else {
+    const winner = verdict === 'a' ? picked.a : picked.b;
+    const loser = verdict === 'a' ? picked.b : picked.a;
+    p.outro(`Recorded: ${base(winner)} is right. ${base(loser)}’s disputed claim is suppressed at \`truecourse guard generate\`.`);
+  }
 }
 
 function fail(msg: string): never {
   p.cancel(msg);
   process.exit(1);
-}
-
-function failNotFound(id: string): never {
-  return fail(`conflict ${id} not found`);
-}
-
-// Avoid an `import path` removal at build time when this file otherwise
-// doesn't need it.
-void path;
-
-// ---------------------------------------------------------------------------
-// Field-level diff — opt-in via `--diff`. Useful for agents that want a
-// precise list of which JSON paths in a candidate's structured content
-// differ from each other candidate's. Pure structural diff; no semantic
-// interpretation.
-// ---------------------------------------------------------------------------
-
-interface FieldDifference {
-  /** Dot-joined path into `claim.content`. `(root)` when scalars differ. */
-  path: string;
-  /** Pair this diff is computed between. */
-  fromIndex: number;
-  toIndex: number;
-  fromValue: unknown;
-  toValue: unknown;
-}
-
-function computeFieldDifferences(conflict: Conflict): FieldDifference[] {
-  const out: FieldDifference[] = [];
-  for (let i = 0; i < conflict.candidates.length; i++) {
-    for (let j = i + 1; j < conflict.candidates.length; j++) {
-      const a = conflict.candidates[i].claim.content;
-      const b = conflict.candidates[j].claim.content;
-      for (const path of diffPaths(a, b)) {
-        out.push({
-          path,
-          fromIndex: i,
-          toIndex: j,
-          fromValue: getPath(a, path),
-          toValue: getPath(b, path),
-        });
-      }
-    }
-  }
-  return out;
-}
-
-/** Return all leaf paths where `a` and `b` disagree. Missing key counts as a diff. */
-function diffPaths(a: unknown, b: unknown, prefix = ''): string[] {
-  const out: string[] = [];
-  const aIsObj = a !== null && typeof a === 'object' && !Array.isArray(a);
-  const bIsObj = b !== null && typeof b === 'object' && !Array.isArray(b);
-  if (aIsObj && bIsObj) {
-    const keys = new Set([
-      ...Object.keys(a as object),
-      ...Object.keys(b as object),
-    ]);
-    for (const k of keys) {
-      const childPath = prefix ? `${prefix}.${k}` : k;
-      out.push(
-        ...diffPaths(
-          (a as Record<string, unknown>)[k],
-          (b as Record<string, unknown>)[k],
-          childPath,
-        ),
-      );
-    }
-    return out;
-  }
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    out.push(prefix || '(root)');
-  }
-  return out;
-}
-
-function getPath(value: unknown, path: string): unknown {
-  if (path === '(root)' || !path) return value;
-  let cur: unknown = value;
-  for (const part of path.split('.')) {
-    if (cur === null || typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[part];
-  }
-  return cur;
-}
-
-function shortJson(value: unknown): string {
-  if (value === undefined) return '∅';
-  const s = JSON.stringify(value);
-  return s.length > 60 ? s.slice(0, 60) + '…' : s;
 }

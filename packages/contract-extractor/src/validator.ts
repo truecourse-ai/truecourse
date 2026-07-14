@@ -30,6 +30,10 @@ export interface ValidationIssue {
    * artifacts that DID resolve.
    */
   severity: 'hard' | 'soft';
+  /** True when the repair pass tried (and failed) to fix this artifact's syntax. */
+  repairAttempted?: boolean;
+  /** The last parser error after repair gave up — surfaced so the user sees WHY repair failed. */
+  repairFailReason?: string;
 }
 
 export interface ValidationResult {
@@ -50,6 +54,11 @@ export function validateMerged(artifacts: MergedArtifact[]): ValidationResult {
   const fileNodes: ReturnType<typeof parserOhm.parseTcFile>[] = [];
   for (const a of artifacts) {
     const key = `${a.kind}:${a.identity}`;
+    // When the repair pass already tried and failed on this artifact, annotate the
+    // issue so the user sees that repair was attempted + why it gave up.
+    const repairTag = a.repairFailReason
+      ? { repairAttempted: true, repairFailReason: a.repairFailReason }
+      : {};
     try {
       const node = parserOhm.parseTcFile(`<llm:${key}>`, a.winning.tcSource);
       if (node.statements.length === 0) {
@@ -58,6 +67,7 @@ export function validateMerged(artifacts: MergedArtifact[]): ValidationResult {
           message: 'tcSource produced zero statements',
           tcSource: a.winning.tcSource,
           severity: 'hard',
+          ...repairTag,
         });
         continue;
       }
@@ -69,6 +79,7 @@ export function validateMerged(artifacts: MergedArtifact[]): ValidationResult {
         message: `parse error: ${message}`,
         tcSource: a.winning.tcSource,
         severity: 'hard',
+        ...repairTag,
       });
     }
   }

@@ -32,7 +32,7 @@ function Probe() {
       <span data-testid="section">{section}</span>
       <span data-testid="tab">{leftTab}</span>
       <span data-testid="search">{loc.search}</span>
-      <button onClick={() => setSection('verification')}>to-drift</button>
+      <button onClick={() => setSection('guard')}>to-guard</button>
       <button onClick={() => setSection('codequality')}>to-analysis</button>
       <button onClick={() => setLeftTab('files')}>tab-files</button>
       <button onClick={() => setLeftTab('home')}>tab-home</button>
@@ -55,12 +55,6 @@ describe('NavigationContext — initial state from URL', () => {
     renderAt('/repos/abc');
     expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
-  });
-
-  it('reads ?section=verification and defaults its tab to spec', () => {
-    renderAt('/repos/abc?section=verification');
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
   });
 
   it('reads an explicit ?tab', () => {
@@ -86,35 +80,107 @@ describe('NavigationContext — initial state from URL', () => {
   });
 
   it('snaps an out-of-section tab back to the section default', () => {
-    // `files` belongs to analysis, not drift → expect the drift default.
-    renderAt('/repos/abc?section=verification&tab=files');
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
+    // `files` belongs to analysis, not guard → expect the guard default.
+    renderAt('/repos/abc?section=guard&tab=files');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+});
+
+describe('NavigationContext — guard section routing', () => {
+  it('infers the guard section from a guard tab param (no explicit ?section)', () => {
+    renderAt('/repos/abc?tab=coverage');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('routes ?tab=guarddrifts to the guard section', () => {
+    renderAt('/repos/abc?tab=guarddrifts');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guarddrifts');
+  });
+
+  it('reads ?section=guard and defaults its tab to coverage', () => {
+    renderAt('/repos/abc?section=guard');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?guard=<doc> deep link opens guard/coverage', () => {
+    renderAt('/repos/abc?guard=docs%2FSPEC.md&gsec=intro');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?gconf=<overlap> conflict deep link opens guard/coverage', () => {
+    renderAt('/repos/abc?gconf=overlap%3A%3Acore%2Fauth%3A%3Aa.md%3A%3Ab.md');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('a ?gscn=<scenario> deep link opens guard/scenarios', () => {
+    renderAt('/repos/abc?gscn=a1');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+  });
+
+  // The retired Guard Spec tab (merged into Coverage) — old links must still land.
+  it('maps the retired ?tab=guardspec to guard/coverage', () => {
+    renderAt('/repos/abc?tab=guardspec');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  // Legacy URLs from the retired GuardView segmented host must still resolve.
+  it('maps the legacy ?tab=guard to guard/coverage', () => {
+    renderAt('/repos/abc?tab=guard');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
+  });
+
+  it('maps the legacy ?tab=guard&gview=drifts to the guard drifts tab', () => {
+    renderAt('/repos/abc?tab=guard&gview=drifts');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guarddrifts');
+  });
+
+  // The Generate/Report tab folded into Scenarios (its "last generate" strip), so
+  // both the legacy `?gview=report` chain and the retired `?tab=guardreport` land there.
+  it('maps the legacy ?tab=guard&gview=report to the guard scenarios tab', () => {
+    renderAt('/repos/abc?tab=guard&gview=report');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
+  });
+
+  it('maps the retired ?tab=guardreport to the guard scenarios tab', () => {
+    renderAt('/repos/abc?tab=guardreport');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('scenarios');
   });
 });
 
 describe('NavigationContext — setters write the URL', () => {
-  it('setSection(verification) switches section, resets tab, sets ?section=verification&tab=spec', async () => {
+  it('setSection(guard) switches section, resets tab, sets ?section=guard&tab=coverage', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc');
-    await user.click(screen.getByText('to-drift'));
+    await user.click(screen.getByText('to-guard'));
 
-    expect(screen.getByTestId('section')).toHaveTextContent('verification');
-    expect(screen.getByTestId('tab')).toHaveTextContent('spec');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).toContain('section=verification');
-    expect(search).toContain('tab=spec');
+    expect(search).toContain('section=guard');
+    expect(search).toContain('tab=coverage');
   });
 
-  it('setSection(codequality) clears ?section and lands on home (no ?tab)', async () => {
+  it('setSection(codequality) clears the guard ?section and lands on home (no ?tab)', async () => {
     const user = userEvent.setup();
-    renderAt('/repos/abc?section=verification');
+    renderAt('/repos/abc?section=guard');
     await user.click(screen.getByText('to-analysis'));
 
     expect(screen.getByTestId('section')).toHaveTextContent('codequality');
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
     const search = screen.getByTestId('search').textContent ?? '';
-    expect(search).not.toContain('section=verification');
+    expect(search).not.toContain('section=guard');
     expect(search).not.toContain('tab=');
   });
 

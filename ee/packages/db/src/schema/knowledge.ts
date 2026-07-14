@@ -30,7 +30,7 @@ export const workspaceSpecSets = pgTable(
   'workspace_spec_sets',
   {
     workspaceOrgId: text('workspace_org_id').notNull(),
-    artifact: text('artifact').notNull(), // 'claims' | 'scanState'
+    artifact: text('artifact').notNull(), // 'corpus' | 'decisions'
     /** sha into `content` (scope = org) — the immutable artifact body. */
     contentSha: text('content_sha').notNull(),
     createdAt: ts('created_at').notNull(),

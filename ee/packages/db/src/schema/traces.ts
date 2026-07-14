@@ -28,7 +28,7 @@ export const llmTraces = pgTable(
     traceId: text('trace_id'),
     /** A sub-call's parent (repair → its source extraction). */
     parentId: text('parent_id'),
-    /** Pipeline stage, e.g. 'contract.extract' / 'spec.claimExtract'. */
+    /** Pipeline stage, e.g. 'contract.extract' / 'spec.relevance'. */
     stage: text('stage'),
     /** The call's natural id, e.g. 'contract.extract:<sliceId>'. */
     callId: text('call_id'),

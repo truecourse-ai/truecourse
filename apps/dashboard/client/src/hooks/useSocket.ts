@@ -18,12 +18,38 @@ export type AnalysisProgress = {
   steps?: AnalysisStep[];
 };
 
+/**
+ * The pre-flight LLM cost estimate the confirm modal renders. Shared by the socket
+ * gate (analyze / spec scan push it over `analysis:llm-estimate`) and the guard
+ * GET estimate route — one shape, one modal component.
+ */
+export type LlmEstimateData = {
+  totalEstimatedTokens: number;
+  tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>;
+  /** Per-stage breakdown for spec scan / contracts generate / guard generate. */
+  stages?: Array<{
+    stage: string;
+    label?: string;
+    model: string;
+    calls: number;
+    estimatedTokens: number;
+    callsRange?: { low: number; high: number };
+    /** Ceiling USD cost for this stage (present only when prices were available). */
+    estimatedCostUsd?: number;
+  }>;
+  /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
+  subjectLabel?: string;
+  /** Ceiling USD cost for the whole run (prices the high end, ignores caching). */
+  estimatedCostUsd?: number;
+  /** Provenance of the prices behind the cost. */
+  costSource?: 'live' | 'cache' | 'bundled';
+  /** True when some stage's model couldn't be priced. */
+  costPartial?: boolean;
+};
+
 export type LlmEstimate = {
   repoId: string;
-  estimate: {
-    totalEstimatedTokens: number;
-    tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>;
-  };
+  estimate: LlmEstimateData;
 };
 
 export type StashConfirmRequest = {

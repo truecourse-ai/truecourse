@@ -16,16 +16,9 @@ import { runBaseline } from './baseline.js';
 import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
 import { installationOctokit } from './octokit.js';
-import {
-  handlePullRequestInferOffer,
-  handleCommentEditedInfer,
-} from './infer-offer.js';
-import {
-  handlePullRequestGate,
-  reverifyOpenPrs,
-  setPrReverifier,
-} from './gate-handler.js';
-import { createEmailNotifier } from './email.js';
+import { handlePullRequestGate } from './gate-handler.js';
+import { handlePullRequestClosed } from './pr-closed.js';
+import { upsertPrState } from './pr-state.js';
 import { reportGithubError } from './observability.js';
 
 /**
@@ -74,30 +67,17 @@ export async function registerGithubApp(
     opts.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
   const store = selectGateStore(opts.db ?? null);
   const auth = createGithubAuth(cfg);
-  const notifier = cfg.resendApiKey
-    ? createEmailNotifier(cfg.resendApiKey, cfg.emailFrom)
-    : undefined;
 
-  // Shared deps for the gate + interactive flows. The comment in-flight set is
-  // keyed by comment id (scan/infer use distinct comments), the offer set by
-  // `${repo}#${pr}#<type>`, and the gate set by `${repo}#${sha}` — so all of
-  // them safely share this object.
+  // Shared deps for the Code Quality gate. The gate in-flight set is keyed by
+  // `${repo}#${sha}` (concurrent deliveries of the same head).
   const offerDeps = {
     store,
     auth,
     appUrl,
     octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
-    inFlight: new Set<number>(),
-    offerInFlight: new Set<string>(),
     gateInFlight: new Set<string>(),
-    notifier,
     codeAnalysisLlm: opts.codeAnalysisLlm,
   };
-
-  // Let the EE jobs layer re-verify open PRs after the repo.contracts job
-  // regenerates contracts (post-conflict-resolution), without reaching into the
-  // gate's deps. The seam is null until set here, so SSO-only deploys no-op.
-  setPrReverifier((repoFullName) => reverifyOpenPrs(offerDeps, repoFullName));
 
   // Public: GitHub posts here with no session; verified by HMAC signature.
   registry.registerRouter(
@@ -106,10 +86,10 @@ export async function registerGithubApp(
       secret: cfg.webhookSecret,
       store,
       onBaseline: (trigger) => {
-        // Refresh the repo's spec → contracts → drift-gate baseline on a merge to
-        // the default branch. Prefer the background job queue (progress + a
-        // notification, durable); fall back to inline fire-and-forget when no
-        // queue is wired (unit tests). EE does not run the OSS code-analysis pass.
+        // Refresh the repo's spec + Code Quality baseline on a merge to the default
+        // branch. Prefer the background job queue (progress + a notification,
+        // durable); fall back to inline fire-and-forget when no queue is wired
+        // (unit tests).
         const repo = trigger.repoFullName;
         if (opts.enqueueBaseline) {
           void opts.enqueueBaseline(trigger).catch((err) =>
@@ -117,34 +97,32 @@ export async function registerGithubApp(
           );
           return;
         }
-        void runBaseline({ store, auth }, trigger).catch((err) =>
-          reportGithubError(store, 'baseline failed', { repo }, err),
-        );
+        void runBaseline(
+          { store, auth, octokitFor: (id) => installationOctokit(cfg, id) },
+          trigger,
+        ).catch((err) => reportGithubError(store, 'baseline failed', { repo }, err));
       },
-      // On PR open/sync: run the drift gate (Phase 4) — it scans the head's specs
-      // automatically when the PR changes them — and offer an infer run (Phase 3).
+      // On PR open/sync: run the Code Quality gate (analyze the head vs the baseline).
       onPullRequest: (payload) => {
         const ctx = { repo: payload.repository.full_name, pr: payload.number };
-        // Run the gate FIRST, then infer — never concurrently. The gate generates
-        // the head's contracts (the cold path, when the PR changed a spec); infer
-        // subtracts those contracts to decide what's still undocumented. Racing them
-        // means infer reads before the contracts exist and re-offers decisions the PR
-        // just documented. A gate failure still lets infer run — it falls back to the
-        // baseline contracts (see InferInProcessOptions.contractsRef).
-        void (async () => {
-          await handlePullRequestGate(offerDeps, payload).catch((err) =>
-            reportGithubError(store, 'gate failed', ctx, err),
+        // Track the PR's open/closed/merged state for the dashboard feed first —
+        // independent of the gate outcome below, and non-fatal on failure.
+        void upsertPrState(store, payload).catch((err) =>
+          reportGithubError(store, 'pr state upsert failed', ctx, err),
+        );
+        // Merge/close: promote (merged) or discard (unmerged) the PR's spec-decision
+        // overlay + clean up its PR-scoped Code Quality diff. The gate doesn't react
+        // to `closed`, so handle it here and stop.
+        if (payload.action === 'closed') {
+          void handlePullRequestClosed(payload).catch((err) =>
+            reportGithubError(store, 'pr closed handling failed', ctx, err),
           );
-          await handlePullRequestInferOffer(offerDeps, payload).catch((err) =>
-            reportGithubError(store, 'infer offer failed', ctx, err),
-          );
-        })();
-      },
-      // On comment edit: the matching handler (by marker) runs its checkbox flow.
-      onCommentEdited: (payload) => {
-        const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
-        void handleCommentEditedInfer(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'comment-edited infer failed', ctx, err),
+          return;
+        }
+        // TODO(spec-guard): guard becomes the second gate check alongside Code
+        // Quality here — the spec→contract→infer PR check was removed.
+        void handlePullRequestGate(offerDeps, payload).catch((err) =>
+          reportGithubError(store, 'gate failed', ctx, err),
         );
       },
     }),
@@ -175,7 +153,9 @@ export type {
   IssueCommentPayload,
 } from './webhook.js';
 export { createConnectRouter } from './connect.js';
-export { runBaseline, type BaselineResult } from './baseline.js';
+export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineResult } from './baseline.js';
+export { handlePullRequestClosed } from './pr-closed.js';
+export { upsertPrState, prStateFromPayload } from './pr-state.js';
 export { loadGithubAppConfig } from './config.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
@@ -184,6 +164,7 @@ export * from './store/index.js';
 export {
   isSpecDoc,
   detectSpecDocChanges,
+  specScopeFromConfigJson,
   isCodeFile,
   hasCodeChanges,
 } from './spec-detect.js';
@@ -192,70 +173,34 @@ export {
   installationOctokit,
   splitRepo,
   findComment,
+  listPrsForCommit,
+  getFileContent,
   type OctokitClient,
 } from './octokit.js';
+export { readRepoDocFromGithub } from './repo-doc.js';
 
-// Phase 3: infer undocumented decisions
+// Code Quality gate
 export {
-  INFER_MARKER,
-  INFER_CHECKBOX_LABEL,
-  renderInferComment,
-  isInferComment,
-  isInferCheckboxChecked,
-  hasInferOffer,
-  type InferCommentStatus,
-  type DecisionSummary,
-} from './infer-comment.js';
-export { runInfer, defaultInferPipeline, type InferPipeline } from './infer-scan.js';
-export { diffDecisions, type InferDiff } from '@truecourse/core/lib/inferred-decisions';
-export {
-  handlePullRequestInferOffer,
-  handleCommentEditedInfer,
-  type InferOfferDeps,
-} from './infer-offer.js';
-
-// Phase 4: drift gate
-export {
-  decideGate,
   decideCodeQuality,
   type GateConclusion,
-  type GateDecision,
-  type GateOptions,
   type GateSeverity,
   type CodeQualityDecision,
   type CodeQualityOptions,
 } from './gate.js';
 export {
   GATE_MARKER,
-  GATE_CHECK_NAME,
   CODE_QUALITY_CHECK_NAME,
   isGateComment,
   renderGateComment,
-  gateCheckOutput,
   cqCheckOutput,
-  inlineDriftBody,
-  type DriftEnrichmentMap,
 } from './gate-comment.js';
 export {
   runGateVerify,
-  driftsForCommit,
-  type VerifyFn,
+  type GateVerifyDeps,
+  type GateVerifyRequest,
   type GateVerifyOutput,
-  type CommitDrifts,
 } from './gate-runner.js';
 export {
   handlePullRequestGate,
-  reverifyOpenPrs,
-  setPrReverifier,
-  getPrReverifier,
   type GateHandlerDeps,
 } from './gate-handler.js';
-
-// Phase 5: email notifications
-export {
-  createEmailNotifier,
-  type EmailNotifier,
-  type GateFailureEmail,
-  type ConflictsEmail,
-  type ResendLike,
-} from './email.js';

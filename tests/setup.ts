@@ -7,6 +7,11 @@ import { initParsers } from '../packages/analyzer/src/parser'
 // directly to assert it's called.)
 process.env.TRUECOURSE_TELEMETRY = '0'
 
+// Never fetch live model prices from OpenRouter in tests — the pre-flight cost
+// estimate falls back to bundled list prices. (`model-prices.test.ts` deletes
+// this to exercise the real fetch/cache path against a stubbed `fetch`.)
+process.env.TRUECOURSE_NO_PRICE_FETCH = '1'
+
 // Make git hermetic: hide the developer's global/system git config from every
 // git invocation in the suite (tests and the code under test alike). Otherwise
 // host settings leak in — e.g. `commit.gpgsign=true` makes commits in temp

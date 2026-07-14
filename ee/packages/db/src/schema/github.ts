@@ -89,3 +89,20 @@ export const ghRuns = pgTable(
   },
   (t) => [index('gh_runs_repo_created_idx').on(t.repoFullName, t.createdAt)],
 );
+
+// Open/closed/merged state per PR, tracked from every pull_request webhook so
+// the dashboard feed can filter (GitHub-style Open default + Closed toggle).
+// `state` is loosely typed text here (ee-db is a leaf); the gate store casts it
+// to 'open' | 'closed' | 'merged' at the boundary.
+export const ghPrs = pgTable(
+  'gh_prs',
+  {
+    repoFullName: text('repo_full_name').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    title: text('title'),
+    state: text('state').notNull(),
+    headSha: text('head_sha').notNull(),
+    updatedAt: ts('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.repoFullName, t.prNumber] })],
+);

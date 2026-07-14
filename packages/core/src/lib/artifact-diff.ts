@@ -32,14 +32,37 @@ export interface ContentDiff {
   modified: string[];
 }
 
-/** Diff two path→content maps → added / removed / modified. */
-export function diffContents(base: Map<string, string>, head: Map<string, string>): ContentDiff {
+/**
+ * A `.tc` `origin` line (`origin "src" "section" 11..15`) is provenance, not an
+ * obligation: its line range shifts whenever the source doc moves (or the model
+ * re-reports it), so it churns a contract diff with no real change. Strip origin
+ * lines before comparing so a contract counts as "modified" only when its actual
+ * content changed.
+ */
+export function stripOriginLines(tc: string): string {
+  return tc
+    .split('\n')
+    .filter((l) => !/^\s*origin\s/.test(l))
+    .join('\n');
+}
+
+/**
+ * Diff two path→content maps → added / removed / modified. `normalize` is applied
+ * to both sides before the content comparison (defaults to identity); pass
+ * {@link stripOriginLines} for `.tc` contracts so provenance-only changes don't
+ * read as modifications.
+ */
+export function diffContents(
+  base: Map<string, string>,
+  head: Map<string, string>,
+  normalize: (s: string) => string = (s) => s,
+): ContentDiff {
   const added: string[] = [];
   const removed: string[] = [];
   const modified: string[] = [];
   for (const [p, c] of head) {
     if (!base.has(p)) added.push(p);
-    else if (base.get(p) !== c) modified.push(p);
+    else if (normalize(base.get(p)!) !== normalize(c)) modified.push(p);
   }
   for (const p of base.keys()) if (!head.has(p)) removed.push(p);
   return { added, removed, modified };

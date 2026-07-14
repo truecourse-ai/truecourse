@@ -1,9 +1,9 @@
 /**
  * Enterprise repo chrome — replaces the OSS repo Header (logo + back +
- * Code-Analysis/BL-Drift section switcher + vertical rail) with a clean repo
- * title row, a ref label (default branch, or the PR being viewed), and a
- * horizontal BL-Drift tab bar. The console sidebar already owns the brand +
- * global nav, so this stays repo-scoped.
+ * section switcher + vertical rail) with a clean repo title row, a ref label
+ * (default branch, or the PR being viewed), and a horizontal tab bar. The
+ * console sidebar already owns the brand + global nav, so this stays
+ * repo-scoped.
  *
  * It reuses the same navigation state (leftTab) — only the chrome differs; the
  * panels behind each tab are unchanged. Which ref is shown is URL-driven
@@ -13,8 +13,7 @@
 import { ExternalLink, GitBranch } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { GithubRunSummary } from '@truecourse/shared';
-import type { DashboardSection, LeftTab, TabDescriptor } from '@/navigation/registry';
-import { EeSectionSwitch } from '@/ee/EeSectionSwitch';
+import type { LeftTab, TabDescriptor } from '@/navigation/registry';
 
 const PR_PILL: Record<GithubRunSummary['conclusion'], string> = {
   success: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/30',
@@ -81,8 +80,6 @@ export function EeRepoChrome({
   tabs,
   activeTab,
   onTabChange,
-  section,
-  onSectionChange,
   prNumber,
   prBranch,
   prConclusion,
@@ -93,16 +90,13 @@ export function EeRepoChrome({
   tabs: TabDescriptor[];
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab) => void;
-  /** Active lens (Code Quality / Verification) — drives the segmented switch. */
-  section?: DashboardSection;
-  onSectionChange?: (next: DashboardSection) => void;
   /** When set, the page is scoped to this pull request (`?pr=N`). */
   prNumber?: number | null;
   /** The PR's head branch (from its stored gate diff) — shown next to the pill. */
   prBranch?: string | null;
   /** The PR's gate conclusion — colours the pill. */
   prConclusion?: GithubRunSummary['conclusion'];
-  /** Per-tab header actions (e.g. Spec Apply, Verify Run) — reused as-is. */
+  /** Per-tab header actions — reused as-is. */
   actions?: ReactNode;
 }) {
   return (
@@ -121,11 +115,6 @@ export function EeRepoChrome({
             prConclusion={prConclusion}
           />
         ) : null}
-        {/* Mode switch — LEFT-anchored, so the per-tab actions (right-anchored
-            below) can appear/disappear without shoving it sideways. */}
-        {section && onSectionChange && (
-          <EeSectionSwitch section={section} onSectionChange={onSectionChange} />
-        )}
         {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
 

@@ -1,69 +1,62 @@
 /**
- * The in-process graphile-worker runner + the `knowledge.sync` task.
+ * The in-process graphile-worker runner + the background job definitions.
  *
  * `run()` installs graphile-worker's own schema and starts polling/LISTENing for
- * jobs. The `knowledge.sync` task IS the old inline `/sync` body, now off the
- * request path: it marks the `jobs` row running, drives the connector sync with
- * an `onProgress` callback (→ `jobs.progress` + a live SSE event), and on terminal
- * records a durable `notifications` row + SSE. Single-flight is already guaranteed
- * by the create-time partial-unique index, so the task needs no extra lock.
+ * jobs. Each job type is a {@link JobDefinition} (type + title + steps + run body
+ * + notification wording); the shared {@link executeJob} harness owns the whole
+ * lifecycle envelope identically for all of them — marking the `jobs` row
+ * running → succeeded/failed with live SSE progress, seeding + advancing the
+ * stepped checklist, posting the standardized success/failure notification, and
+ * capturing failures to Sentry. A job body only does the work and returns its
+ * result + success notification.
  *
- * Jobs are enqueued with `maxAttempts: 1` (see the /sync route): a sync failure
- * is terminal and surfaced to the user, who can re-run (idempotent; unchanged
- * pages cost 0 LLM). So a thrown task = a permanent fail, never a silent retry
- * that would double-run and fight the single-flight key.
+ * Jobs are enqueued with `maxAttempts: 1` (see index.ts): a failure is terminal
+ * and surfaced to the user, who can re-run. So a thrown body = a permanent fail,
+ * never a silent retry that would double-run and fight the single-flight key.
  */
 
 import { run, type Runner, type Task } from 'graphile-worker';
-import { and, eq } from 'drizzle-orm';
-import { workspaceContractSets, type EeDb } from '@truecourse/ee-db';
-import { JobStore, NotificationStore, PgKnowledgeStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
+import type { EeDb } from '@truecourse/ee-db';
+import { JobStore, NotificationStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { runWithTrace, type TraceContext } from '@truecourse/ee-llm';
 import { log } from '@truecourse/core/lib/logger';
 import {
   runBaseline,
   loadGithubAppConfig,
   createGithubAuth,
+  installationOctokit,
   selectGateStore,
   type BaselineResult,
 } from '@truecourse/ee-github-app';
 import type { NotificationLevel } from '@truecourse/shared';
-import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
-import { IntegrationStore } from '../integrations/store.js';
-import { CONNECTORS } from '../knowledge/connectors/registry.js';
-import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
-import { syncWorkspaceKnowledge, SYNC_MSG_CONSOLIDATE } from '../knowledge/sync.js';
-import {
-  regenerateRepoContractsFromDecisions,
-  generateWorkspaceContractsInProcess,
-  SCAN_STEPS,
-} from '@truecourse/core/commands/spec-in-process';
+import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
-import { publishEvent } from './events.js';
-import { JobStepTracker, type StepEmit } from './steps.js';
+import { JobStepTracker } from './steps.js';
+import { executeJob, type JobDefinition, type JobRuntime } from './harness.js';
+import {
+  REPO_BASELINE_TASK,
+  REPO_BASELINE_TITLE,
+  REPO_BASELINE_STEPS,
+  type BaselineJobPayload,
+} from './constants.js';
 
 /**
- * Bridge an OSS spec-scan StepTracker onto one EE job step: each SCAN_STEPS
- * transition (discover docs / extract blocks / resolve conflicts) is forwarded as
- * the EE step's inline detail, so the popup shows the same numbered sub-phases the
- * OSS popup does. Returns a StepTracker to hand to the spec scan.
+ * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
+ * transition is forwarded as the EE step's inline detail, so the popup shows the
+ * same numbered sub-phases the OSS popup does. `stepDefs` is the inner phase set
+ * to mirror — CURATE_STEPS (spec scan) by default. Returns a StepTracker to hand
+ * to the callee.
  */
-function specScanBridge(eeTracker: JobStepTracker, stepKey: string): StepTracker {
+function specScanBridge(
+  eeTracker: JobStepTracker,
+  stepKey: string,
+  stepDefs: ReadonlyArray<{ key: string; label: string }> = CURATE_STEPS,
+): StepTracker {
   return new StepTracker((p: AnalysisProgressPayload) => {
     const text = p.detail ? `${p.step} · ${p.detail}` : p.step;
     void eeTracker.detail(stepKey, text);
-  }, [...SCAN_STEPS]);
+  }, [...stepDefs]);
 }
-import {
-  KNOWLEDGE_SYNC_TASK,
-  REPO_BASELINE_TASK,
-  REPO_CONTRACTS_TASK,
-  WORKSPACE_CONTRACTS_TASK,
-  type SyncJobPayload,
-  type BaselineJobPayload,
-  type ContractsJobPayload,
-  type WorkspaceContractsJobPayload,
-} from './constants.js';
 
 export interface StartWorkerDeps {
   db: EeDb;
@@ -71,30 +64,11 @@ export interface StartWorkerDeps {
   masterSecret: string;
   jobStore: JobStore;
   /**
-   * Called after `repo.contracts` regenerates a repo's contracts, to chain a
-   * baseline refresh (the only path with a clone) so verify runs against the new
-   * contracts and the drift baseline is recomputed. Best-effort; a failure here
-   * never flips the (already-succeeded) contracts job.
+   * Called after a `repo.baseline` job goes terminal (success OR failure), once
+   * its single-flight key is free — replays any coalesced follow-up push for the
+   * repo (see pending-baseline.ts). Wired only onto the baseline definition.
    */
-  onContractsRegenerated?: (repoKey: string, workspaceOrgId: string) => Promise<void>;
-  /**
-   * Called when a workspace's contracts actually CHANGED (KB sync / workspace
-   * decision), to re-verify every connected repo against the new effective
-   * contracts. Returns the number of repos re-verified (for the sync notice).
-   */
-  onWorkspaceContractsChanged?: (workspaceOrgId: string) => Promise<number>;
-}
-
-/**
- * Wrap a worker task so every LLM call it makes runs inside an ambient trace
- * context (org / job / repo) the EE transport's recorder tags traces with. The
- * task bodies are unchanged — only the payload→context mapping lives here.
- */
-function withTrace<P>(ctxOf: (payload: P) => TraceContext, task: Task): Task {
-  return (payload, helpers) =>
-    runWithTrace(ctxOf(payload as P), async () => {
-      await task(payload, helpers);
-    });
+  onBaselineSettled?: (payload: BaselineJobPayload) => Promise<void>;
 }
 
 function jobTrace(
@@ -114,9 +88,9 @@ function jobTrace(
 
 /**
  * Word the repo-scan completion notification to match what the run actually
- * produced. Open conflicts mean contracts were NOT generated (the gate skips
- * generation until the spec is fully resolved), so we must not claim they're
- * ready — instead point the user at the conflicts to resolve.
+ * produced. Open conflicts mean a human should resolve them before the spec is
+ * canonical, so we point the user at the conflicts rather than claiming a clean
+ * scan.
  */
 function baselineNotice(
   repoFullName: string,
@@ -127,185 +101,40 @@ function baselineNotice(
     return {
       level: 'warning',
       title: 'Repository scanned — conflicts to resolve',
-      body: `${repoFullName} — spec is ready, but ${n} open conflict${n === 1 ? '' : 's'} must be resolved before contracts and the gate baseline are generated.`,
-    };
-  }
-  if (!result.hasContracts) {
-    return {
-      level: 'success',
-      title: 'Repository scan complete',
-      body: `${repoFullName} — spec is ready (no contracts generated — no spec docs found).`,
+      body: `${repoFullName} — spec is ready, but ${n} open conflict${n === 1 ? '' : 's'} must be resolved.`,
     };
   }
   return {
     level: 'success',
     title: 'Repository scan complete',
-    body: `${repoFullName} — spec, contracts & gate baseline are ready.`,
+    body: `${repoFullName} — spec & Code Quality baseline are ready.`,
   };
 }
 
-/**
- * Plain-language body for a contract-generation failure. The raw technical reason
- * is kept separately in `data.detail` (shown under "Details" in the feed) — we
- * never dump it into the headline. Recognizes the common resolver-hard error.
- */
-function contractFailureBody(message: string): string {
-  return /failed to resolve/i.test(message)
-    ? 'The contracts couldn’t be built — the resolved spec has conflicting or duplicate definitions. Re-resolve the conflict in Spec, then try again.'
-    : 'The contracts couldn’t be generated. Open Details for the technical reason.';
-}
+// --- Job definitions -------------------------------------------------
 
-export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
-  const { db, jobStore } = deps;
-  const notifications = new NotificationStore(db);
-  const knowledge = new PgKnowledgeStore(db);
-  const integrations = new IntegrationStore(db, deps.masterSecret);
-
-  // A StepTracker emit that persists coarse progress (current/total/message) on
-  // the jobs row and forwards the full stepped checklist on the LIVE SSE event —
-  // steps ride the event only, never the row (see JobProgress.steps).
-  const stepEmit = (jobId: string, org: string): StepEmit => async (snap) => {
-    const job = await jobStore.setProgress(jobId, {
-      current: snap.current,
-      total: snap.total,
-      message: snap.message,
-    });
-    if (job) {
-      await publishEvent(db, org, {
-        type: 'job.progress',
-        job: { ...job, progress: { ...job.progress, steps: snap.steps } },
-      });
-    }
-  };
-
-  // Fingerprint of a workspace's contract corpus — lets us detect whether a KB
-  // sync / workspace decision actually CHANGED the contracts (so we only re-verify
-  // repos when there's something new). Null = no workspace contracts stored.
-  const wsContractsHash = async (org: string): Promise<string | null> => {
-    const [row] = await db
-      .select({ h: workspaceContractSets.manifestHash })
-      .from(workspaceContractSets)
-      .where(and(eq(workspaceContractSets.workspaceOrgId, org), eq(workspaceContractSets.kind, 'contracts')))
-      .limit(1);
-    return row?.h ?? null;
-  };
-
-  // If the workspace contracts changed since `beforeHash`, re-verify every repo in
-  // the workspace against the new effective set. Returns the count re-verified
-  // (0 when unchanged). Best-effort — never throws into the calling job.
-  const reverifyReposIfWorkspaceChanged = async (
-    org: string,
-    beforeHash: string | null,
-  ): Promise<number> => {
-    try {
-      const afterHash = await wsContractsHash(org);
-      if (afterHash === beforeHash) return 0;
-      return (await deps.onWorkspaceContractsChanged?.(org)) ?? 0;
-    } catch (err) {
-      log.warn(`[ee-jobs] workspace→repos re-verify failed for ${org}: ${(err as Error).message}`);
-      return 0;
-    }
-  };
-
-  const knowledgeSync: Task = async (rawPayload) => {
-    const { jobId, org, kind } = rawPayload as SyncJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, org, { type: 'job.progress', job: running });
-
-    try {
-      const connector = CONNECTORS[kind as ConnectorKind];
-      if (!connector) throw new Error(`Unknown connector: ${kind}`);
-      const conn = await integrations.getConnection(org, kind);
-      if (!conn?.token) throw new Error(`No ${kind} connection.`);
-      const cfg = connectorConfig(connector, conn.config, conn.token);
-
-      const tracker = new JobStepTracker(
-        [
-          { key: 'fetch', label: 'Fetching documents' },
-          { key: 'consolidate', label: 'Consolidating spec & contracts' },
-        ],
-        stepEmit(jobId, org),
-      );
-      const beforeHash = await wsContractsHash(org);
-      const result = await syncWorkspaceKnowledge(org, knowledge, connector, cfg, {
-        onProgress: async (current, total, message) => {
-          if (message === SYNC_MSG_CONSOLIDATE) await tracker.advance('consolidate');
-          else await tracker.advance('fetch', total > 0 ? `${current}/${total} docs` : undefined);
-        },
-        // Spec sub-phases + contract slices both surface on the "consolidate" step.
-        tracker: specScanBridge(tracker, 'consolidate'),
-        onSliceProgress: (done, total) =>
-          void tracker.detail('consolidate', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('consolidate', `repairing ${done}/${total}`),
-      });
-
-      const reverified = await reverifyReposIfWorkspaceChanged(org, beforeHash);
-      const done = await jobStore.markSucceeded(jobId, { synced: result.synced });
-      const note = await notifications.add({
-        org,
-        kind: KNOWLEDGE_SYNC_TASK,
-        level: 'success',
-        title: 'Knowledge sync complete',
-        body: `Synced ${result.synced} document${result.synced === 1 ? '' : 's'}.${
-          reverified > 0
-            ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'} against the updated contracts.`
-            : ''
-        }`,
-        data: { jobId, synced: result.synced, reverified },
-      });
-      // Terminal job state first (clears the client's activeJobs), then the toast.
-      if (done) await publishEvent(db, org, { type: 'job.progress', job: done });
-      await publishEvent(db, org, { type: 'notification', notification: note, jobId });
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org,
-        kind: KNOWLEDGE_SYNC_TASK,
-        level: 'error',
-        title: 'Knowledge sync failed',
-        body: 'The sync didn’t finish. Open Details for the technical reason.',
-        data: { jobId, detail: message },
-      });
-      if (failed) await publishEvent(db, org, { type: 'job.progress', job: failed });
-      await publishEvent(db, org, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'knowledge',
-        orgId: org,
-        connector: kind,
-        upstreamStatus: upstreamStatusOf(err),
-        route: 'worker knowledge.sync',
-      });
-      throw err; // maxAttempts:1 ⇒ permanent fail (no retry), and graphile records it as failed.
-    }
-  };
-
-  // Initial / refresh scan of a connected repo: generate its spec + contracts, the
-  // gate drift baseline, AND the Code Quality analyze pass (architecture graph +
-  // violations) — all via runBaseline. Triggered on connect AND on default-branch
-  // push, off the request path. The gate store + GitHub auth are rebuilt from db +
-  // env config (cheap).
-  const repoBaseline: Task = async (rawPayload) => {
-    const { jobId, repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
-      rawPayload as BaselineJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [
-        { key: 'clone', label: 'Cloning repository' },
-        { key: 'spec', label: 'Extracting spec' },
-        { key: 'contracts', label: 'Generating contracts' },
-        { key: 'drift', label: 'Computing drift baseline' },
-        { key: 'analyze', label: 'Analyzing code' },
-      ],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
+/** Initial / refresh scan of a connected repo: spec (conflict detection) + the
+ *  Code Quality analyze pass — all via runBaseline. */
+function repoBaselineJob(
+  db: EeDb,
+  onSettled?: (payload: BaselineJobPayload) => Promise<void>,
+): JobDefinition<BaselineJobPayload> {
+  return {
+    type: REPO_BASELINE_TASK,
+    title: REPO_BASELINE_TITLE,
+    steps: REPO_BASELINE_STEPS,
+    org: (p) => p.workspaceOrgId,
+    traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
+    onSettled: onSettled ? (ctx) => onSettled(ctx.payload) : undefined,
+    sentry: (_err, p) => ({
+      component: 'github-gate',
+      orgId: p.workspaceOrgId,
+      repo: p.repoFullName,
+      route: 'worker repo.baseline',
+    }),
+    async run(ctx) {
+      const { repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId, force, quiet } =
+        ctx.payload;
       const cfg = loadGithubAppConfig();
       if (!cfg) throw new Error('the GitHub App is not configured');
       const auth = createGithubAuth(cfg);
@@ -318,184 +147,58 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
         {
           store,
           auth,
-          onPhase: (phase) => tracker.advance(phase),
-          specTracker: specScanBridge(tracker, 'spec'),
-          onSliceProgress: (done, total) =>
-            void tracker.detail('contracts', `${done}/${total} slices`),
-          onRepairProgress: (done, total) =>
-            void tracker.detail('contracts', `repairing ${done}/${total}`),
+          octokitFor: (id) => installationOctokit(cfg, id),
+          onPhase: (phase) => ctx.phase(phase),
+          specTracker: specScanBridge(ctx.tracker, 'spec'),
         },
         req,
       );
 
-      const done = await jobStore.markSucceeded(jobId, { repoFullName });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      // Quiet runs (the workspace→repos ripple) suppress the SUCCESS toast — one KB
-      // sync re-verifying N repos shouldn't fan out N notifications. The job still
-      // tracks (popup) and FAILURES still notify (the catch below, unconditionally).
-      if (!quiet) {
-        const notice = baselineNotice(repoFullName, result);
-        const note = await notifications.add({
-          org: workspaceOrgId,
-          kind: REPO_BASELINE_TASK,
+      // Quiet runs suppress the SUCCESS toast. The job still tracks (popup) and
+      // FAILURES still notify (onError, unconditionally).
+      if (quiet) return { result: { repoFullName }, notification: null };
+      const notice = baselineNotice(repoFullName, result);
+      return {
+        result: { repoFullName },
+        notification: {
           level: notice.level,
           title: notice.title,
           body: notice.body,
-          data: { jobId, repoFullName },
-        });
-        await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      }
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_BASELINE_TASK,
-        level: 'error',
-        title: `Repository scan failed — ${repoFullName}`,
-        body: 'The scan didn’t finish. Open Details for the technical reason.',
-        data: { jobId, repoFullName, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'github-gate',
-        orgId: workspaceOrgId,
-        repo: repoFullName,
-        route: 'worker repo.baseline',
-      });
-      throw err; // maxAttempts:1 ⇒ permanent fail.
-    }
+          data: { repoFullName },
+        },
+      };
+    },
+    onError: (err, p) => ({
+      level: 'error',
+      title: `Repository scan failed — ${p.repoFullName}`,
+      body: 'The scan didn’t finish. Open Details for the technical reason.',
+      data: { repoFullName: p.repoFullName, detail: err.message },
+    }),
   };
+}
 
-  // Debounced contract refresh after a decision, off the request path. Tracked: a
-  // jobs row + a stepped progress popup (the single-flight key coalesces a burst of
-  // decisions onto one row). Notifies on BOTH outcomes — every user-triggered
-  // background op confirms itself (success or failure). The job reads the latest
-  // persisted decisions when it runs (final state wins).
-  const repoContracts: Task = async (rawPayload) => {
-    const { jobId, repoKey, workspaceOrgId } = rawPayload as ContractsJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [
-        { key: 'spec', label: 'Re-merging spec' },
-        { key: 'contracts', label: 'Generating contracts' },
-      ],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
-      await regenerateRepoContractsFromDecisions(repoKey, {
-        onPhase: (phase) => tracker.advance(phase),
-        onSliceProgress: (done, total) =>
-          void tracker.detail('contracts', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('contracts', `repairing ${done}/${total}`),
-      });
-      const done = await jobStore.markSucceeded(jobId, { repoKey });
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_CONTRACTS_TASK,
-        level: 'success',
-        title: 'Contracts updated',
-        body: `${repoKey} — contracts regenerated from your resolved spec.`,
-        data: { jobId, repoKey },
-      });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      // Chain a drift-baseline refresh so verify runs against the freshly
-      // generated contracts (best-effort — never flips this succeeded job).
-      try {
-        await deps.onContractsRegenerated?.(repoKey, workspaceOrgId);
-      } catch (chainErr) {
-        log.warn(
-          `[ee-jobs] post-contracts baseline chain failed for ${repoKey}: ${(chainErr as Error).message}`,
-        );
-      }
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: REPO_CONTRACTS_TASK,
-        level: 'error',
-        title: `Contract generation failed — ${repoKey}`,
-        body: contractFailureBody(message),
-        data: { jobId, repoKey, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'github-gate',
-        orgId: workspaceOrgId,
-        repo: repoKey,
-        route: 'worker repo.contracts',
-      });
-      throw err;
-    }
+/**
+ * Wrap a job definition as a graphile task: resolve the payload → ambient trace
+ * context (org / job / repo) the EE transport tags LLM traces with, then run the
+ * shared lifecycle. A definition factory (vs a plain definition) is resolved
+ * per-invocation.
+ */
+function registerJob<P extends { jobId: string }>(
+  rt: JobRuntime,
+  defOrFactory: JobDefinition<P> | ((payload: P) => JobDefinition<P>),
+): Task {
+  return (rawPayload) => {
+    const payload = rawPayload as P;
+    const def = typeof defOrFactory === 'function' ? defOrFactory(payload) : defOrFactory;
+    const trace = jobTrace(def.org(payload), payload.jobId, def.traceMeta?.(payload));
+    return runWithTrace(trace, () => executeJob(rt, def, payload));
   };
+}
 
-  // The workspace analogue of repo.contracts: refresh the workspace `.tc` corpus
-  // after a Knowledge decision (the spec re-merge already ran synchronously, so the
-  // job is generate-only — one step). Same tracked model; notifies on success + failure.
-  const workspaceContracts: Task = async (rawPayload) => {
-    const { jobId, workspaceOrgId } = rawPayload as WorkspaceContractsJobPayload;
-
-    const running = await jobStore.markRunning(jobId);
-    if (running) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: running });
-
-    const tracker = new JobStepTracker(
-      [{ key: 'contracts', label: 'Generating contracts' }],
-      stepEmit(jobId, workspaceOrgId),
-    );
-
-    try {
-      await tracker.advance('contracts');
-      const beforeHash = await wsContractsHash(workspaceOrgId);
-      await generateWorkspaceContractsInProcess(workspaceOrgId, {
-        onSliceProgress: (done, total) =>
-          void tracker.detail('contracts', `${done}/${total} slices`),
-        onRepairProgress: (done, total) =>
-          void tracker.detail('contracts', `repairing ${done}/${total}`),
-      });
-      const reverified = await reverifyReposIfWorkspaceChanged(workspaceOrgId, beforeHash);
-      const done = await jobStore.markSucceeded(jobId, {});
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: WORKSPACE_CONTRACTS_TASK,
-        level: 'success',
-        title: 'Workspace contracts updated',
-        body: `Knowledge contracts regenerated from your resolved spec.${
-          reverified > 0 ? ` Re-verifying ${reverified} repo${reverified === 1 ? '' : 's'}.` : ''
-        }`,
-        data: { jobId, reverified },
-      });
-      if (done) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: done });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-    } catch (err) {
-      const message = (err as Error).message;
-      const failed = await jobStore.markFailed(jobId, message);
-      const note = await notifications.add({
-        org: workspaceOrgId,
-        kind: WORKSPACE_CONTRACTS_TASK,
-        level: 'error',
-        title: 'Contract generation failed — Workspace Knowledge',
-        body: contractFailureBody(message),
-        data: { jobId, detail: message },
-      });
-      if (failed) await publishEvent(db, workspaceOrgId, { type: 'job.progress', job: failed });
-      await publishEvent(db, workspaceOrgId, { type: 'notification', notification: note, jobId });
-      captureEeException(err, {
-        component: 'knowledge',
-        orgId: workspaceOrgId,
-        route: 'worker workspace.contracts',
-      });
-      throw err;
-    }
-  };
+export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
+  const { db, jobStore } = deps;
+  const notifications = new NotificationStore(db);
+  const rt: JobRuntime = { db, jobStore, notifications };
 
   const runner = await run({
     connectionString: deps.connectionString,
@@ -503,22 +206,7 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     // ee-server owns SIGTERM/SIGINT (sentry flush + runner.stop in registerJobs).
     noHandleSignals: true,
     taskList: {
-      [KNOWLEDGE_SYNC_TASK]: withTrace<SyncJobPayload>(
-        (p) => jobTrace(p.org, p.jobId),
-        knowledgeSync,
-      ),
-      [REPO_BASELINE_TASK]: withTrace<BaselineJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoFullName, commitSha: p.commitSha }),
-        repoBaseline,
-      ),
-      [REPO_CONTRACTS_TASK]: withTrace<ContractsJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId, { repoFullName: p.repoKey }),
-        repoContracts,
-      ),
-      [WORKSPACE_CONTRACTS_TASK]: withTrace<WorkspaceContractsJobPayload>(
-        (p) => jobTrace(p.workspaceOrgId, p.jobId),
-        workspaceContracts,
-      ),
+      [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
     },
   });
   log.info('[ee-jobs] worker runner started');

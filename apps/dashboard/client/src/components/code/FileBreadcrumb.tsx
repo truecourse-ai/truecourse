@@ -1,6 +1,6 @@
 /**
  * Breadcrumb-style title row shown above tabbed viewers (file
- * explorer, canonical spec, IL contracts). Path segments separated by
+ * explorer, spec corpus, IL contracts). Path segments separated by
  * "/" with the last segment emphasized. Optional `icon` and `trailing`
  * slots let callers add an inline icon or right-aligned actions while
  * keeping every viewer visually aligned.

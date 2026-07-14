@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   isSpecDoc,
   detectSpecDocChanges,
+  specScopeFromConfigJson,
   isCodeFile,
   hasCodeChanges,
 } from '../../ee/packages/github-app/src/index';
+import { buildSpecScope } from '../../packages/shared/src/index.js';
 
 describe('isSpecDoc', () => {
   it('accepts markdown outside build/output dirs', () => {
@@ -43,6 +45,56 @@ describe('detectSpecDocChanges', () => {
 
   it('returns empty when no spec docs changed', () => {
     expect(detectSpecDocChanges(['src/a.ts', 'src/b.ts'])).toEqual([]);
+  });
+});
+
+describe('detectSpecDocChanges — include-scope', () => {
+  it('narrows detection to the repo scope, mirroring discovery', () => {
+    const scope = buildSpecScope(['docs/**']);
+    expect(
+      detectSpecDocChanges(
+        ['docs/spec.md', 'reference/orders.md', 'README.md', 'src/app.ts'],
+        scope,
+      ),
+    ).toEqual(['docs/spec.md']);
+  });
+
+  it('an inactive scope is the same as no scope (everything)', () => {
+    const scope = buildSpecScope([]);
+    expect(detectSpecDocChanges(['docs/spec.md', 'README.md'], scope)).toEqual([
+      'docs/spec.md',
+      'README.md',
+    ]);
+  });
+
+  it('isSpecDoc still rejects skip-dir markdown even inside the scope', () => {
+    const scope = buildSpecScope(['**']);
+    expect(isSpecDoc('node_modules/pkg/readme.md', scope)).toBe(false);
+    expect(isSpecDoc('docs/spec.md', scope)).toBe(true);
+  });
+});
+
+describe('specScopeFromConfigJson', () => {
+  it('builds an active scope from a config with spec.include', () => {
+    const scope = specScopeFromConfigJson(JSON.stringify({ spec: { include: ['docs/**'] } }));
+    expect(scope.active).toBe(true);
+    expect(detectSpecDocChanges(['docs/a.md', 'other/b.md'], scope)).toEqual(['docs/a.md']);
+  });
+
+  it('degrades a null config to scan-everything (fetch failure)', () => {
+    const scope = specScopeFromConfigJson(null);
+    expect(scope.active).toBe(false);
+    expect(detectSpecDocChanges(['docs/a.md', 'other/b.md'], scope)).toEqual([
+      'docs/a.md',
+      'other/b.md',
+    ]);
+  });
+
+  it('degrades a malformed config to scan-everything, never throws', () => {
+    expect(() => specScopeFromConfigJson('{ not json')).not.toThrow();
+    expect(specScopeFromConfigJson('{ not json').active).toBe(false);
+    // Empty include array = absent = inactive.
+    expect(specScopeFromConfigJson(JSON.stringify({ spec: { include: [] } })).active).toBe(false);
   });
 });
 

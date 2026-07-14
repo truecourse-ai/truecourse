@@ -13,13 +13,14 @@ import type {
   RepoLinkRecord,
   BaselineRecord,
   GateRunRecord,
+  PrRecord,
 } from './types.js';
 import {
   ghInstallations,
   ghRepos,
   ghBaselines,
   ghRuns,
-  verifySnapshots,
+  ghPrs,
 } from '@truecourse/ee-db';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
@@ -34,6 +35,7 @@ type InstallationRow = typeof ghInstallations.$inferSelect;
 type RepoRow = typeof ghRepos.$inferSelect;
 type BaselineRow = typeof ghBaselines.$inferSelect;
 type RunRow = typeof ghRuns.$inferSelect;
+type PrRow = typeof ghPrs.$inferSelect;
 
 function toInstallation(r: InstallationRow): InstallationRecord {
   return {
@@ -74,6 +76,17 @@ function toRun(r: RunRow): GateRunRecord {
     addedCount: r.addedCount,
     resolvedCount: r.resolvedCount,
     createdAt: toIso(r.createdAt),
+  };
+}
+
+function toPr(r: PrRow): PrRecord {
+  return {
+    repoFullName: r.repoFullName,
+    prNumber: r.prNumber,
+    title: r.title,
+    state: r.state as PrRecord['state'],
+    headSha: r.headSha,
+    updatedAt: toIso(r.updatedAt),
   };
 }
 
@@ -127,6 +140,7 @@ export class PostgresGateStore implements GateStore {
           .delete(ghBaselines)
           .where(inArray(ghBaselines.repoFullName, names));
         await tx.delete(ghRuns).where(inArray(ghRuns.repoFullName, names));
+        await tx.delete(ghPrs).where(inArray(ghPrs.repoFullName, names));
       }
       await tx
         .delete(ghRepos)
@@ -213,9 +227,7 @@ export class PostgresGateStore implements GateStore {
   // --- baseline ---
 
   async saveBaseline(rec: BaselineRecord): Promise<void> {
-    // gh_baselines is just the pointer to the baseline commit; the drifts live in
-    // that commit's verify_snapshots row (written by the non-transient baseline
-    // verify, which marks it is_baseline). So we persist only the pointer here.
+    // gh_baselines is just the pointer to the last-scanned baseline commit.
     await this.db
       .insert(ghBaselines)
       .values({
@@ -239,21 +251,9 @@ export class PostgresGateStore implements GateStore {
       .where(eq(ghBaselines.repoFullName, repoFullName))
       .limit(1);
     if (!row) return null;
-    // Drifts come from the baseline commit's verify snapshot (the single home).
-    const [snap] = await this.db
-      .select({ snapshot: verifySnapshots.snapshot })
-      .from(verifySnapshots)
-      .where(
-        and(eq(verifySnapshots.repoKey, repoFullName), eq(verifySnapshots.commitSha, row.commitSha)),
-      )
-      .limit(1);
-    const drifts = snap
-      ? ((snap.snapshot as { drifts?: BaselineRecord['drifts'] }).drifts ?? null)
-      : null;
     return {
       repoFullName: row.repoFullName,
       commitSha: row.commitSha,
-      drifts,
       capturedAt: toIso(row.capturedAt),
     };
   }
@@ -287,6 +287,31 @@ export class PostgresGateStore implements GateStore {
       .orderBy(desc(ghRuns.createdAt))
       .limit(limit);
     return rows.map(toRun);
+  }
+
+  // --- PR state ---
+
+  async upsertPr(rec: PrRecord): Promise<void> {
+    await this.db
+      .insert(ghPrs)
+      .values(rec)
+      .onConflictDoUpdate({
+        target: [ghPrs.repoFullName, ghPrs.prNumber],
+        set: {
+          title: sql`excluded.title`,
+          state: sql`excluded.state`,
+          headSha: sql`excluded.head_sha`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+  }
+
+  async listPrs(repoFullName: string): Promise<PrRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(ghPrs)
+      .where(eq(ghPrs.repoFullName, repoFullName));
+    return rows.map(toPr);
   }
 
   async close(): Promise<void> {

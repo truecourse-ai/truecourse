@@ -49,6 +49,32 @@ export async function listPrFiles(
   return files.map((f) => f.filename);
 }
 
+/**
+ * Raw text of a repo file at `ref` (default branch when omitted), or null when
+ * it's missing / unreadable. Used to read `.truecourse/config.json` before any
+ * clone; the caller degrades a null to "no config".
+ */
+export async function getFileContent(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  filePath: string,
+  ref?: string,
+): Promise<string | null> {
+  try {
+    const res = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+      ...(ref ? { ref } : {}),
+      // `format: 'raw'` returns the file body directly as text.
+      mediaType: { format: 'raw' },
+    });
+    return typeof res.data === 'string' ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Our bot-authored comment carrying `marker` on the PR, or null. */
 export async function findComment(
   octokit: Octokit,
@@ -248,6 +274,31 @@ export async function listOpenPrs(
     headRepoIsFork: p.head.repo?.fork ?? false,
     baseSha: p.base.sha,
     baseRef: p.base.ref,
+  }));
+}
+
+/**
+ * Pull requests associated with a commit (GitHub's "list pull requests
+ * associated with a commit"), reduced to what identifies a merged PR: its number,
+ * whether it merged, the merge commit it produced, and its head sha. Used on a
+ * default-branch push to map the merge/squash commit back to the PR it landed.
+ */
+export async function listPrsForCommit(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  commitSha: string,
+): Promise<
+  Array<{ number: number; merged: boolean; mergeCommitSha: string | null; headSha: string }>
+> {
+  const prs = await octokit.paginate(
+    octokit.repos.listPullRequestsAssociatedWithCommit,
+    { owner, repo, commit_sha: commitSha, per_page: 100 },
+  );
+  return prs.map((p) => ({
+    number: p.number,
+    merged: p.merged_at != null,
+    mergeCommitSha: p.merge_commit_sha ?? null,
+    headSha: p.head.sha,
   }));
 }
 

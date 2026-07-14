@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
-import { jobs, notifications, type EeDb } from '@truecourse/ee-db';
+import { jobs, notifications, pendingBaselines, type EeDb } from '@truecourse/ee-db';
 import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
@@ -186,6 +186,98 @@ export class JobStore {
       .where(inArray(jobs.status, ['queued', 'running']))
       .returning({ id: jobs.id });
     return rows.length;
+  }
+}
+
+/** A deferred baseline enqueue (the full request, minus the added job id). */
+export interface PendingBaselineInput {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  commitSha: string;
+  workspaceOrgId: string;
+  force?: boolean;
+  quiet?: boolean;
+}
+
+/** A stored pending row — the request as recorded, plus when it was last set. */
+export interface PendingBaselineView {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  commitSha: string;
+  workspaceOrgId: string;
+  force: boolean;
+  quiet: boolean;
+  updatedAt: string;
+}
+
+type PendingBaselineRow = typeof pendingBaselines.$inferSelect;
+
+function toPendingView(r: PendingBaselineRow): PendingBaselineView {
+  return {
+    repoFullName: r.repoFullName,
+    installationId: r.installationId,
+    defaultBranch: r.defaultBranch,
+    commitSha: r.commitSha,
+    workspaceOrgId: r.workspaceOrgId,
+    force: r.force,
+    quiet: r.quiet,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * The coalesce-then-rerun buffer behind `enqueueBaseline`. One row per repo (the
+ * PK): when a scan is already in flight, the follow-up push is recorded here and
+ * replayed when the running scan settles — so a second quick merge is never lost.
+ * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
+ */
+export class PendingBaselineStore {
+  constructor(private readonly db: EeDb) {}
+
+  /** Record (or replace) the repo's pending follow-up baseline — latest wins. */
+  async upsert(input: PendingBaselineInput): Promise<void> {
+    const row = {
+      repoFullName: input.repoFullName,
+      installationId: input.installationId,
+      defaultBranch: input.defaultBranch,
+      commitSha: input.commitSha,
+      workspaceOrgId: input.workspaceOrgId,
+      force: input.force ?? false,
+      quiet: input.quiet ?? false,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.db
+      .insert(pendingBaselines)
+      .values(row)
+      .onConflictDoUpdate({
+        target: pendingBaselines.repoFullName,
+        set: {
+          installationId: row.installationId,
+          defaultBranch: row.defaultBranch,
+          commitSha: row.commitSha,
+          workspaceOrgId: row.workspaceOrgId,
+          force: row.force,
+          quiet: row.quiet,
+          updatedAt: row.updatedAt,
+        },
+      });
+  }
+
+  /** Read-and-delete the repo's pending row (atomic), or null if none. */
+  async take(repoFullName: string): Promise<PendingBaselineView | null> {
+    const [row] = await this.db
+      .delete(pendingBaselines)
+      .where(eq(pendingBaselines.repoFullName, repoFullName))
+      .returning();
+    return row ? toPendingView(row) : null;
+  }
+
+  /** Read-and-delete every pending row — boot recovery after a crash. */
+  async drain(): Promise<PendingBaselineView[]> {
+    const rows = await this.db.delete(pendingBaselines).returning();
+    return rows.map(toPendingView);
   }
 }
 

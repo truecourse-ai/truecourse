@@ -1,7 +1,7 @@
 /**
  * Navigation registry — the single source of truth for which
- * top-level sections (Code Analysis, BL Drift, …) and which left-rail
- * tabs (Files, Flows, Spec, …) the dashboard renders.
+ * top-level sections (Code Analysis, Guard, …) and which left-rail
+ * tabs (Files, Flows, Coverage, …) the dashboard renders.
  *
  * Why a registry rather than hard-coded arrays in <SectionSwitcher>
  * and <LeftSidebar>:
@@ -17,7 +17,7 @@
  *     the AppProvider's capability set so the gate lives in one place
  *     instead of being scattered across components.
  *   - Section/tab ids are plain `string`. The OSS ids ('codequality',
- *     'verification', 'home', 'spec', …) remain available as constants for
+ *     'guard', 'home', 'coverage', …) remain available as constants for
  *     ergonomic narrowing, but the type itself is open so contributed
  *     ids type-check without touching this file.
  */
@@ -29,15 +29,12 @@ import {
   FolderTree,
   Database,
   ClipboardList,
-  BookOpen,
   FileCode2,
-  ShieldCheck,
-  GitMerge,
-  GitPullRequest,
+  FlaskConical,
   Settings,
   BarChart3,
   TriangleAlert,
-  Lightbulb,
+  ListChecks,
 } from 'lucide-react';
 import type { Capability } from '@truecourse/shared';
 import { useMemo } from 'react';
@@ -110,44 +107,9 @@ export const SECTIONS: SectionDescriptor[] = [
       // them via `EE_ANALYSIS_TAB_ORDER`.
       { id: 'analytics', label: 'Analytics', icon: BarChart3, noPanel: true, requiredCapability: 'workspace' },
       { id: 'violations', label: 'Violations', icon: TriangleAlert, noPanel: true, requiredCapability: 'workspace' },
-    ],
-  },
-  {
-    id: 'verification',
-    label: 'BL Drift',
-    description: 'Spec consolidation, contracts, verification',
-    icon: ShieldCheck,
-    defaultTab: 'spec',
-    tabs: [
-      // EE-only: the PR gate's runs for this repo. OSS filters it out.
-      {
-        id: 'pulls',
-        label: 'Pull requests',
-        icon: GitPullRequest,
-        noPanel: true,
-        requiredCapability: 'github-gate',
-      },
-      { id: 'spec', label: 'Spec', icon: BookOpen },
-      { id: 'contracts', label: 'Contracts', icon: FileCode2 },
-      { id: 'verify', label: 'Verify', icon: ShieldCheck, noPanel: true },
-      // EE-only: the drift analytics (charts/hotspots/trend) as a standalone tab.
-      // In OSS the same `VerifyStatsColumn` stays as the Verify view's left aside.
-      {
-        // `driftanalytics` (not `analytics`) avoids colliding with the legacy
-        // `?tab=analytics → home` URL alias in NavigationContext.
-        id: 'driftanalytics',
-        label: 'Analytics',
-        icon: BarChart3,
-        noPanel: true,
-        requiredCapability: 'github-gate',
-      },
-      { id: 'runs', label: 'Runs', icon: ClipboardList, noPanel: true },
-      { id: 'decisions', label: 'Decisions', icon: GitMerge },
-      // Reverse-engineered undocumented decisions (OSS + EE). Sidebar list +
-      // main-pane detail tabs, like Contracts; Promote / Dismiss in the detail.
-      { id: 'inferred', label: 'Inferred', icon: Lightbulb },
       // EE-only: per-repo gate settings (notify emails, blocking, notification
-      // toggles). Rendered as a tab in the EE repo console; OSS filters it out.
+      // toggles). Rendered as a tab in the EE Code Quality bar (via
+      // `EE_ANALYSIS_TAB_ORDER`); OSS filters it out (github-gate capability).
       {
         id: 'settings',
         label: 'Settings',
@@ -155,6 +117,30 @@ export const SECTIONS: SectionDescriptor[] = [
         noPanel: true,
         requiredCapability: 'github-gate',
       },
+    ],
+  },
+  {
+    // Spec-section scenario coverage as a top-level module (OSS — never gated).
+    id: 'guard',
+    label: 'Guard',
+    description: 'Spec-section scenario coverage, generation, drifts',
+    icon: FlaskConical,
+    defaultTab: 'coverage',
+    tabs: [
+      // Coverage-over-doc surface — the doc-picker + conflict list sidebar (the
+      // reused SpecCorpusView) absorbs the spec curation surface; no separate Spec
+      // tab. Doc → coverage bands + section detail; conflict → resolution detail.
+      { id: 'coverage', label: 'Coverage', icon: ListChecks },
+      // Committed-scenario inventory (the Contracts-tab analog): the left panel
+      // lists every generated and hand-written guard grouped doc › section;
+      // selecting opens preview/pinned tabs in the main pane, whose overview
+      // (nothing selected) is the recipe card + "last generate" strip.
+      { id: 'scenarios', label: 'Scenarios', icon: FileCode2 },
+      // Run inspector (analyze-style list + evidence detail): full results —
+      // severity-led drifts, then the passed group; no panel. Shares BL Drift's
+      // Runs idiom (ClipboardList) — the two live in different sections, so a
+      // shared icon never crowds one rail.
+      { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },
     ],
   },
 ];
@@ -211,7 +197,9 @@ export function useVisibleSections(): SectionDescriptor[] {
   const { capabilities } = useCapabilityContext();
   return useMemo(
     () =>
-      SECTIONS.filter((s) => isEnabled(s.requiredCapability, capabilities)).map(
+      SECTIONS.filter(
+        (s) => isEnabled(s.requiredCapability, capabilities),
+      ).map(
         (s) => ({
           ...s,
           tabs: s.tabs.filter((t) =>

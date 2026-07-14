@@ -82,7 +82,6 @@ describe('FileGateStore', () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'abc',
-      drifts: [],
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     await store.recordRun({
@@ -97,13 +96,23 @@ describe('FileGateStore', () => {
       createdAt: '2026-01-02T00:00:00.000Z',
     });
 
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 1,
+      title: 'PR 1',
+      state: 'open',
+      headSha: 'sha',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
     await store.removeInstallation(1);
     expect(await store.getInstallation(1)).toBeNull();
     expect(await store.getRepo('acme/api')).toBeNull();
     expect(await store.getRepo('acme/web')).toBeNull();
-    // Cascade also clears baselines + run history for the removed repos.
+    // Cascade also clears baselines + run history + PR state for the removed repos.
     expect(await store.getBaseline('acme/api')).toBeNull();
     expect(await store.listRuns('acme/api')).toEqual([]);
+    expect(await store.listPrs('acme/api')).toEqual([]);
   });
 
   it('saveInstallation preserves an existing workspace link and createdAt', async () => {
@@ -124,11 +133,10 @@ describe('FileGateStore', () => {
     expect(rec?.accountLogin).toBe('acct-1-renamed');
   });
 
-  it('round-trips baselines including a neutral (null-drift) baseline', async () => {
+  it('round-trips the baseline pointer', async () => {
     await store.saveBaseline({
       repoFullName: 'acme/api',
       commitSha: 'abc123',
-      drifts: [],
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
     expect((await store.getBaseline('acme/api'))?.commitSha).toBe('abc123');
@@ -136,10 +144,9 @@ describe('FileGateStore', () => {
     await store.saveBaseline({
       repoFullName: 'acme/web',
       commitSha: 'def456',
-      drifts: null,
       capturedAt: '2026-01-02T00:00:00.000Z',
     });
-    expect((await store.getBaseline('acme/web'))?.drifts).toBeNull();
+    expect((await store.getBaseline('acme/web'))?.commitSha).toBe('def456');
     expect(await store.getBaseline('nope/none')).toBeNull();
   });
 
@@ -163,5 +170,52 @@ describe('FileGateStore', () => {
     expect(all.map((r) => r.id)).toEqual(['r3', 'r2', 'r1']);
     expect(await store.listRuns('acme/api', 1)).toHaveLength(1);
     expect(await store.listRuns('other/repo')).toEqual([]);
+  });
+
+  it('upserts PR state, refreshing on re-upsert, scoped per repo', async () => {
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 7,
+      title: 'Add widget',
+      state: 'open',
+      headSha: 'aaa',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 8,
+      title: 'Fix bug',
+      state: 'open',
+      headSha: 'bbb',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    await store.upsertPr({
+      repoFullName: 'other/web',
+      prNumber: 7,
+      title: 'Unrelated',
+      state: 'closed',
+      headSha: 'ccc',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    let prs = await store.listPrs('acme/api');
+    expect(prs.map((p) => p.prNumber).sort()).toEqual([7, 8]);
+    expect(await store.listPrs('nope/none')).toEqual([]);
+
+    // Re-upsert #7 as merged — same row updates in place (no duplicate).
+    await store.upsertPr({
+      repoFullName: 'acme/api',
+      prNumber: 7,
+      title: 'Add widget',
+      state: 'merged',
+      headSha: 'ddd',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    });
+    prs = await store.listPrs('acme/api');
+    expect(prs).toHaveLength(2);
+    expect(prs.find((p) => p.prNumber === 7)?.state).toBe('merged');
+    expect(prs.find((p) => p.prNumber === 7)?.headSha).toBe('ddd');
+    // Scoping is intact — the other repo's #7 is untouched.
+    expect((await store.listPrs('other/web'))[0].state).toBe('closed');
   });
 });

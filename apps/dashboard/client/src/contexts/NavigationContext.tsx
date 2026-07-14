@@ -1,5 +1,5 @@
 /**
- * Top-level navigation state: which section (Code Analysis / BL Drift /
+ * Top-level navigation state: which section (Code Analysis / Guard /
  * …) and which left-rail tab are active, kept in sync with the URL.
  *
  * Lifted out of RepoPage so the page body, the header's
@@ -34,10 +34,52 @@ import {
 // Query params that describe a tab's inner state. Cleared when the
 // active tab/section changes so a stale `?file=` doesn't leak across
 // tabs.
-const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'canonical', 'contract', 'drift'];
+const TAB_SCOPED_PARAMS = ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'guard', 'gsec', 'gconf', 'gdrift', 'gscn', 'gview'];
+
+/** Map the retired `?gview` sub-view onto the Guard section's tabs. */
+function guardTabForGview(gview: string | null): LeftTab {
+  if (gview === 'drifts') return 'guarddrifts';
+  // The Generate/Report sub-view folded into Scenarios (its "last generate" strip).
+  if (gview === 'report') return 'scenarios';
+  return 'coverage';
+}
+
+/**
+ * Derive the tab the URL implies WITHOUT needing the section: an explicit
+ * (still-registered) ?tab wins, then the legacy guard alias, then the deep-link
+ * shortcuts. Returns null when nothing is implied so the caller can fall back to
+ * the section default.
+ */
+function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
+  const tabParam = searchParams?.get('tab') ?? null;
+  if (tabParam && allTabIds().has(tabParam)) return tabParam;
+  // Legacy: the Guard tab was `?tab=guard` with a `?gview` sub-view — both retired,
+  // so re-point them at the Guard section's tabs.
+  if (tabParam === 'guard') return guardTabForGview(searchParams?.get('gview') ?? null);
+  // Retired: the Guard Generate/Report tab folded into Scenarios (the "last
+  // generate" strip) — re-point old `?tab=guardreport` links at it.
+  if (tabParam === 'guardreport') return 'scenarios';
+  // Retired: the Guard Spec tab merged into Coverage (which absorbed the spec
+  // surface) — re-point old `?tab=guardspec` links at it.
+  if (tabParam === 'guardspec') return 'coverage';
+  if (searchParams?.get('flow')) return 'flows';
+  if (searchParams?.get('file')) return 'files';
+  // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
+  // the Guard coverage tab.
+  if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
+  // A Guard scenario deep-link (`?gscn=<id>`) implies the Scenarios tab.
+  if (searchParams?.get('gscn')) return 'scenarios';
+  return null;
+}
 
 function resolveSection(searchParams: URLSearchParams | null): DashboardSection {
-  return searchParams?.get('section') === 'verification' ? 'verification' : 'codequality';
+  const explicit = searchParams?.get('section');
+  if (explicit === 'guard' || explicit === 'codequality') {
+    return explicit;
+  }
+  // No explicit section: infer it from whichever tab the URL implies.
+  const tab = tabFromParams(searchParams);
+  return (tab && sectionForTab(tab)) || 'codequality';
 }
 
 /**
@@ -45,14 +87,7 @@ function resolveSection(searchParams: URLSearchParams | null): DashboardSection 
  * shortcuts, falling back to the section default.
  */
 function resolveTab(searchParams: URLSearchParams | null): LeftTab {
-  const tabParam = searchParams?.get('tab') ?? null;
-  if (tabParam && allTabIds().has(tabParam)) return tabParam;
-  if (searchParams?.get('flow')) return 'flows';
-  if (searchParams?.get('file')) return 'files';
-  if (searchParams?.get('canonical')) return 'spec';
-  if (searchParams?.get('contract')) return 'contracts';
-  if (searchParams?.get('drift')) return 'verify';
-  return defaultTabForSection(resolveSection(searchParams));
+  return tabFromParams(searchParams) ?? defaultTabForSection(resolveSection(searchParams));
 }
 
 export interface NavigationContextValue {
@@ -60,8 +95,7 @@ export interface NavigationContextValue {
   leftTab: LeftTab | null;
   /**
    * Switch sections. Lands on `tab` when given, else the section's registry
-   * default. (EE passes its lens's first curated tab — the OSS default would
-   * open Spec for Verification instead of its Analytics tab.)
+   * default. (EE passes its lens's first curated tab.)
    */
   setSection: (next: DashboardSection, tab?: LeftTab) => void;
   /** Set (or clear, with null → home) the active left tab. */
@@ -89,15 +123,11 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
       const nextTab = tab ?? defaultTabForSection(next);
       setLeftTabState(nextTab);
       const url = new URL(window.location.href);
-      // Write the section explicitly (both values). EE's repo view defaults to
-      // Verification (drift) and must be able to tell "user picked Code Quality"
-      // (?section=codequality) apart from "no choice yet" (no param) — clearing the
-      // param for analysis would conflate them. The initial no-param load still
-      // resolves to the OSS default (analysis); EE redirects it to drift.
+      // Write the section explicitly so a reload restores the chosen lens.
       url.searchParams.set('section', next);
       for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
-      // Diff mode (?view=diff) is shared by analyze + verify but is
-      // section-specific in meaning, so don't carry it across sections.
+      // Diff mode (?view=diff) is section-specific in meaning, so don't carry
+      // it across sections.
       url.searchParams.delete('view');
       if (nextTab !== 'home') url.searchParams.set('tab', nextTab);
       navigate(url.pathname + url.search);

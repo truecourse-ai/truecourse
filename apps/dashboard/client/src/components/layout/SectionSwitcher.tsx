@@ -36,9 +36,9 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  // Fall back to the first visible section if the current value was
-  // gated off (e.g. a license was just revoked). Avoids rendering a
-  // dropdown stuck on an id that's no longer in the registry.
+  // For a `value` not in the visible list (e.g. a license was just revoked),
+  // fall back to the first visible section to avoid a dropdown stuck on an
+  // unregistered id.
   const current = sections.find((s) => s.id === value) ?? sections[0];
   if (!current) return null;
   const CurrentIcon = current.icon;

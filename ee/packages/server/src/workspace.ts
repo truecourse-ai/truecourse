@@ -19,7 +19,7 @@ import type {
 } from '@truecourse/shared';
 import { slugify } from '@truecourse/core/config/registry';
 import { listViolations } from '@truecourse/core/services/violation-query';
-import { readVerifyState } from '@truecourse/core/commands/spec-in-process';
+import { readLatest } from '@truecourse/core/lib/analysis-store';
 
 // A repo counts as stale if it was never analyzed/scanned or not within this window.
 const STALE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -28,12 +28,12 @@ const STALE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 // unit-testable without touching the real stores.
 export interface WorkspaceDataReaders {
   listViolations: typeof listViolations;
-  readVerifyState: typeof readVerifyState;
+  readLatest: typeof readLatest;
 }
 
 const defaultReaders: WorkspaceDataReaders = {
   listViolations,
-  readVerifyState,
+  readLatest,
 };
 
 /**
@@ -119,7 +119,6 @@ export function createWorkspaceRouter(
   router.get('/overview', async (req, res) => {
     const severity: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
     let violationCount = 0;
-    let driftCount = 0;
     let staleCount = 0;
     const now = Date.now();
 
@@ -130,7 +129,6 @@ export function createWorkspaceRouter(
     const repoKeys = organizationId ? await reposForWorkspace(organizationId) : [];
     const repos = await Promise.all(repoKeys.map(async (repoKey) => {
       let v = 0;
-      let d = 0;
       let lastAnalyzed: string | null = null;
       try {
         const { violations } = await readers.listViolations(repoKey, { status: 'active' });
@@ -140,17 +138,14 @@ export function createWorkspaceRouter(
         // unanalyzed / unreadable repo — counts stay 0
       }
       try {
-        const vstate = await readers.readVerifyState(repoKey);
-        d = vstate?.drifts.length ?? 0;
-        lastAnalyzed = vstate?.verifiedAt ?? null;
+        lastAnalyzed = (await readers.readLatest(repoKey))?.analysis.createdAt ?? null;
       } catch {
-        // no verify run recorded
+        // no analysis recorded
       }
       violationCount += v;
-      driftCount += d;
       const stale = !lastAnalyzed || now - Date.parse(lastAnalyzed) > STALE_WINDOW_MS;
       if (stale) staleCount += 1;
-      return { id: slugify(repoKey, []), name: repoKey, lastAnalyzed, violations: v, drift: d };
+      return { id: slugify(repoKey, []), name: repoKey, lastAnalyzed, violations: v };
     }));
 
     // Org name from WorkOS (best-effort — repo stats still render if
@@ -171,7 +166,6 @@ export function createWorkspaceRouter(
       stats: {
         repoCount: repoKeys.length,
         violationCount,
-        driftCount,
         staleCount,
         severity,
       },

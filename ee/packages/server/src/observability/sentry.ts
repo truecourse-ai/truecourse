@@ -33,7 +33,7 @@ export type EeComponent =
   | 'github-gate'
   | 'admin'
   // Generic bucket for errors that egress via the log transport (no explicit
-  // captureEeException call site) — e.g. the gate webhook's verify failure.
+  // captureEeException call site) — e.g. the gate webhook's analyze failure.
   | 'server';
 
 export interface EeErrorContext {

@@ -1,5 +1,5 @@
 /**
- * Spec store — the two consolidated spec JSON documents (`claims.json`,
+ * Spec store — the curated spec JSON documents (`corpus.json`,
  * `decisions.json`). File-backed by default (raw JSON under
  * `<repo>/.truecourse/specs/`, where the IL `spec-consolidator` writes them);
  * the enterprise edition injects a Postgres-backed impl via `setSpecStore`.
@@ -16,25 +16,14 @@ import type { RepoRef, WorkspaceRef } from './contract-store.js';
 export type { RepoRef, WorkspaceRef } from './contract-store.js';
 
 /**
- * Per-(repo, commit) JSON artifacts. `claims`/`decisions`/`scanState` are the
- * consolidated spec; `verifyState` is the verifier's drift snapshot for that
- * commit — persisted by the gate so the dashboard's ref switcher can show a PR's
- * drift (the verify-store's LATEST is per-repo, not per-commit). Written only in
- * EE (the gate passes a `ref`); OSS never stores it.
- *
- * `rawClaims`/`chains` are the pre-merge extracted claim set + detected version
- * chains. They are persisted under WORKSPACE scope only, so a decision can be
- * re-applied via a body-free `remerge()` without re-reading the source docs
- * (workspace Knowledge never stores the bodies). Repos re-derive these from the
- * working tree on each scan, so they don't persist them.
+ * Per-(repo, commit) JSON artifacts. `corpus`/`decisions` are the curated spec
+ * (areas + relations + overlaps, and the user's curation intent).
  */
 export type SpecArtifact =
-  | 'claims'
+  // The curated doc corpus (areas + relations + overlaps). File impl reads/writes
+  // `specs/corpus.json`.
+  | 'corpus'
   | 'decisions'
-  | 'scanState'
-  | 'verifyState'
-  | 'rawClaims'
-  | 'chains'
   // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
   // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
   // (file) and EE (Postgres).
@@ -46,6 +35,12 @@ export interface SpecStore {
   saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void>;
   /** Read one spec JSON artifact at a specific `ref`, or `null` when absent. */
   loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null>;
+  /**
+   * Delete one spec JSON artifact for `(ref)`. Idempotent — a no-op when absent.
+   * Used to drop a PR-scoped `decisions` overlay row on merge/close; the file
+   * default throws for a PR-scoped decisions ref (OSS has no overlays).
+   */
+  deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void>;
   /** Read the repo's CURRENT artifact (the latest stored, for the dashboard), or `null`. */
   loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact): Promise<T | null>;
   /**
@@ -70,16 +65,24 @@ export interface SpecStore {
 }
 
 /**
- * On-disk location per artifact. claims/decisions live under `specs/`;
- * scan-state lives under the consolidator's cache (`.cache/consolidator/`),
- * exactly where the IL writes them — so the file impl is byte-identical.
+ * On-disk location per artifact — `corpus.json` / `decisions.json` /
+ * `inferredDecisions.json` under `specs/`, exactly where the IL writers put
+ * them, so the file impl is byte-identical.
  */
 function specPath(repoKey: string, artifact: SpecArtifact): string {
-  if (artifact === 'scanState') {
-    return path.join(repoKey, '.truecourse', '.cache', 'consolidator', 'scan-state.json');
-  }
   return path.join(repoKey, '.truecourse', 'specs', `${artifact}.json`);
 }
+
+/**
+ * The core's PR-overlay sentinel commit for the `decisions` artifact
+ * (`_pr/<number>`, alongside the repo `_repo`). PR-scoped decisions live only in
+ * the enterprise store, so the file default fails loud if one reaches it.
+ */
+function isPrDecisionsRef(commitSha: string | undefined): boolean {
+  return /^_pr\/\d+$/.test(commitSha ?? '');
+}
+const PR_DECISIONS_FILE_ERROR =
+  '[spec-store] PR-scoped decisions require the enterprise store';
 
 // ---------------------------------------------------------------------------
 // File-backed default (OSS) — raw JSON at the same paths the IL writers use,
@@ -90,12 +93,18 @@ class FileSpecStore implements SpecStore {
   readonly materializesInPlace = true;
 
   async saveSpec(ref: RepoRef, artifact: SpecArtifact, json: unknown): Promise<void> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
     const file = specPath(ref.repoKey, artifact);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n', 'utf-8');
   }
 
   async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
     const file = specPath(ref.repoKey, artifact);
     if (!fs.existsSync(file)) return null;
     try {
@@ -103,6 +112,14 @@ class FileSpecStore implements SpecStore {
     } catch {
       return null;
     }
+  }
+
+  async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
+    if (artifact === 'decisions' && isPrDecisionsRef(ref.commitSha)) {
+      throw new Error(PR_DECISIONS_FILE_ERROR);
+    }
+    const file = specPath(ref.repoKey, artifact);
+    if (fs.existsSync(file)) fs.rmSync(file);
   }
 
   // The file impl is single-document-per-repo, so "latest" === read the file.
@@ -150,6 +167,8 @@ export const saveSpec = (ref: RepoRef, artifact: SpecArtifact, json: unknown): P
   active.saveSpec(ref, artifact, json);
 export const loadSpec = <T = unknown>(ref: RepoRef, artifact: SpecArtifact): Promise<T | null> =>
   active.loadSpec<T>(ref, artifact);
+export const deleteSpec = (ref: RepoRef, artifact: SpecArtifact): Promise<void> =>
+  active.deleteSpec(ref, artifact);
 export const loadLatestSpec = <T = unknown>(
   repoKey: string,
   artifact: SpecArtifact,

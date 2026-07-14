@@ -19,6 +19,13 @@
  */
 import type { Node } from 'ohm-js';
 import { tcGrammar } from './grammar.js';
+
+export {
+  deriveClosedKeywordSets,
+  renderClosedKeywordSets,
+  renderGrammarKeywordReference,
+} from './keyword-sets.js';
+export type { ClosedKeywordSet, KeywordAlternative } from './keyword-sets.js';
 import type {
   FileNode,
   HeadToken,

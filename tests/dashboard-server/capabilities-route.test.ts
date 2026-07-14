@@ -56,13 +56,18 @@ const EDITION_ENV = [
   'WORKOS_COOKIE_PASSWORD',
   'DATABASE_URL',
   'TRUECOURSE_SECRET_KEY',
+  'GITHUB_APP_ID',
+  'GITHUB_APP_PRIVATE_KEY',
+  'GITHUB_APP_WEBHOOK_SECRET',
+  'GITHUB_APP_SLUG',
 ] as const;
 let saved: Record<string, string | undefined>;
 
-// Fake WorkOS config + a DATABASE_URL + a TRUECOURSE_SECRET_KEY (the DB layer is
-// mocked above) so the ee plugin's register() succeeds. Without these, register
-// throws and — for the WorkOS/DB/secret *config* errors — the loader now FAILS
-// HARD (no community fallback).
+// Fake WorkOS config + a DATABASE_URL + a TRUECOURSE_SECRET_KEY + a GitHub App
+// (the DB layer is mocked above, and the GitHub App is only presence-checked at
+// register — its Octokit client is created lazily) so the ee plugin's register()
+// succeeds. Without these, register throws and — for the WorkOS/DB/secret/GitHub
+// *config* errors — the loader now FAILS HARD (no community fallback).
 function setEnterpriseEnv() {
   process.env.TRUECOURSE_EDITION = 'enterprise';
   process.env.WORKOS_API_KEY = 'sk_test_dummy';
@@ -70,6 +75,10 @@ function setEnterpriseEnv() {
   process.env.WORKOS_COOKIE_PASSWORD = 'x'.repeat(32);
   process.env.DATABASE_URL = 'postgres://stub';
   process.env.TRUECOURSE_SECRET_KEY = 'x'.repeat(32);
+  process.env.GITHUB_APP_ID = '123456';
+  process.env.GITHUB_APP_PRIVATE_KEY = 'test-private-key'; // never parsed here — Octokit is built lazily
+  process.env.GITHUB_APP_WEBHOOK_SECRET = 'test-webhook-secret';
+  process.env.GITHUB_APP_SLUG = 'truecourse-test';
 }
 
 beforeEach(() => {

@@ -67,6 +67,36 @@ export interface LlmEstimate {
   }[];
   uniqueFileCount?: number;
   uniqueRuleCount?: number;
+  /**
+   * Per-stage breakdown for the non-analyze pipelines (spec scan / contracts
+   * generate), where work is staged LLM calls rather than rules×files. When
+   * present, the CLI prompt + dashboard modal render this instead of `tiers`.
+   */
+  stages?: {
+    /** Internal stage id (e.g. `gapJudge`). */
+    stage: string;
+    /** Human-readable label for display (e.g. "Reviewing gaps"). */
+    label?: string;
+    model: string;
+    calls: number;
+    estimatedTokens: number;
+    /** Set when call count is a range (e.g. scan's overlap pairs). */
+    callsRange?: { low: number; high: number };
+    /** Ceiling USD cost for this stage (set only when a price table was supplied). */
+    estimatedCostUsd?: number;
+  }[];
+  /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
+  subjectLabel?: string;
+  /**
+   * Ceiling USD cost for the whole run (staged pipelines only). Prices the high
+   * end of every stage's call range and ignores prompt-caching discounts, so the
+   * real bill lands at or below it. Absent when no price table was available.
+   */
+  estimatedCostUsd?: number;
+  /** Provenance of the prices behind {@link estimatedCostUsd}. */
+  costSource?: 'live' | 'cache' | 'bundled';
+  /** True when some stage's model couldn't be priced (cost is a partial total). */
+  costPartial?: boolean;
 }
 
 export interface AnalyzeCoreOptions {

@@ -9,15 +9,32 @@
  * pointer, set at boot, read at call sites.
  */
 
-/** A unit of deferrable work. `type` selects the worker handler. */
-export interface BackgroundTask {
-  /** Task kind, e.g. `repo.contracts`. */
-  type: string;
-  /** Workspace org — scopes the job + any notification it emits. */
-  workspaceOrgId: string;
+/** Fields common to every deferrable task. `type` selects the worker handler. */
+interface BackgroundTaskBase {
+  /**
+   * Workspace org — scopes the job + any notification it emits. Optional: an OSS
+   * adapter (e.g. the shared spec routes) knows the `repoKey` but not the org, so
+   * the EE runner resolves the org from `repoKey` when this is omitted.
+   */
+  workspaceOrgId?: string;
   /** The repo the task acts on, when applicable (`owner/repo`). */
   repoKey?: string;
 }
+
+/** Regenerate a repo's contracts (re-baseline) after a repo-scope decision edit. */
+export interface RepoContractsTask extends BackgroundTaskBase {
+  type: 'repo.contracts';
+}
+
+/** Force re-gate a single PR after a PR-scoped decision cleared its last conflict. */
+export interface PrRegateTask extends BackgroundTaskBase {
+  type: 'pr.regate';
+  /** The PR to re-gate. */
+  prNumber: number;
+}
+
+/** A unit of deferrable work. `type` selects the worker handler. */
+export type BackgroundTask = RepoContractsTask | PrRegateTask;
 
 /** Enqueue a task onto the background queue. */
 export type BackgroundTaskRunner = (task: BackgroundTask) => Promise<void>;

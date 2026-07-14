@@ -206,8 +206,8 @@ describe('createAiSdkTransport — tracing', () => {
   it('uses JSON mode for an open `{}` schema and returns the JSON', async () => {
     buildModelMock.mockReturnValue(stubModel({ text: '{"claims":[{"content":{"x":1}}]}' }));
     const out = await createAiSdkTransport(cfg)({
-      id: 'spec.claimExtract:blk',
-      stage: 'spec.claimExtract',
+      id: 'spec.relevance:blk',
+      stage: 'spec.relevance',
       system: '',
       user: 'U',
       responseFormat: 'json',

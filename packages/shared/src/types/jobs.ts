@@ -45,6 +45,12 @@ export interface JobView {
   /** Owning workspace (WorkOS org). Surfaced for the cross-org Admin jobs view. */
   workspaceOrgId: string;
   type: JobType;
+  /**
+   * Human display title for the progress popup, carried on the live event so the
+   * client never hard-codes a type→label map. Optional: DB-fetched rows (initial
+   * load / reconnect) omit it, and the client falls back to its own label map.
+   */
+  title?: string;
   /** Single-flight / UI-mapping key, e.g. `knowledge.sync:confluence`. */
   key: string | null;
   status: JobStatus;

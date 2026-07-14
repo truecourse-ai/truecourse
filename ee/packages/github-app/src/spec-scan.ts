@@ -1,9 +1,9 @@
 /**
- * Spec-scan runner: clone a PR's head, run the (LLM-backed) scan + contract
- * generation, and persist the regenerated spec/contracts to the SERVER-SIDE
- * store keyed by `(owner/repo, head SHA)`. Nothing is committed back to the
- * customer's branch — the repo is read-only; the PR comment links to the
- * dashboard instead. The heavy pipeline is injectable so tests don't hit the LLM.
+ * Spec-scan runner: clone a PR's head, run the (LLM-backed) scan, and persist the
+ * regenerated corpus to the SERVER-SIDE store keyed by `(owner/repo, head SHA)`.
+ * Nothing is committed back to the customer's branch — the repo is read-only; the
+ * PR comment links to the dashboard instead. The heavy pipeline is injectable so
+ * tests don't hit the LLM.
  */
 
 import fs from 'node:fs';
@@ -11,9 +11,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import {
-  scanInProcess,
-  generateContractsInProcess,
+  curateInProcess,
+  getDecisions,
 } from '@truecourse/core/commands/spec-in-process';
+import { saveSpec } from '@truecourse/core/lib/spec-store';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
@@ -25,64 +26,43 @@ import {
   type GithubAuth,
 } from './github.js';
 
-/** The expensive spec→contract pipeline, abstracted for injection in tests. */
+/** The expensive spec-scan pipeline, abstracted for injection in tests. */
 export interface SpecScanPipeline {
   /**
-   * Consolidate spec docs and persist them under `ref` (`saveSpec`). Returns the
-   * number of OPEN conflicts the merge couldn't resolve — these were
-   * auto-defaulted to keep the pipeline moving, so a positive count means the
-   * generated contracts encode a guess that a human should confirm.
+   * Curate the repo's spec docs into a corpus and persist it under `ref`
+   * (`saveSpec(ref, 'corpus', …)`). Returns the number of within-area OVERLAPS
+   * the curation flagged but no relation resolved — the corpus-path analog of
+   * "open conflicts": a positive count means docs in an area may disagree and a
+   * human should pick a relation.
    */
   scan(
     repoRoot: string,
     ref: RepoRef,
     tracker?: StepTracker,
+    /** Fold the PR's decisions overlay (EE) — the PR-head scan sees its own
+     *  PR-scoped resolutions, not just the repo row. Omitted for base/baseline. */
+    opts?: { pr?: number },
   ): Promise<{ openConflicts: number }>;
-  /** Generate contracts and persist them under `ref` (`saveContracts`). Returns the
-   *  file count. `onSliceProgress(done, total)` reports per-slice progress for the
-   *  EE job popup (the same "N/M slices" the OSS popup shows). */
-  generate(
-    repoRoot: string,
-    ref: RepoRef,
-    onSliceProgress?: (done: number, total: number) => void,
-    onRepairProgress?: (done: number, total: number) => void,
-  ): Promise<{ fileCount: number }>;
 }
 
 export const defaultSpecScanPipeline: SpecScanPipeline = {
-  async scan(repoRoot, ref, tracker) {
+  async scan(repoRoot, ref, tracker, opts) {
     // Fail loudly BEFORE any LLM work when no provider is configured — otherwise
-    // the consolidator's fail-open handling swallows it and the gate "completes"
-    // with no contracts (and EE must never fall back to the `claude` CLI).
+    // the curate fail-open handling swallows it and the gate "completes" with no
+    // corpus (and EE must never fall back to the `claude` CLI).
     if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-    // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). The
-    // explicit `ref` makes scan/generate ingest into the server-side store.
-    const { scanState } = await scanInProcess(repoRoot, { skipGit: true, ref, tracker });
-    return { openConflicts: scanState.openConflicts.length };
-  },
-  async generate(repoRoot, ref, onSliceProgress, onRepairProgress) {
-    if (!isLlmConfigured()) throw new Error(NO_LLM_PROVIDER_MESSAGE);
-    const res = await generateContractsInProcess(repoRoot, {
-      skipGit: true,
-      ref,
-      onSliceProgress,
-      onRepairProgress,
-    });
-    if (res.il.kind === 'failed') throw res.il.error;
-    if (res.il.kind === 'extracted') {
-      // A resolver-hard corpus error wrote nothing — surface it as a failure
-      // (otherwise the gate saves a misleading "neutral, no contracts" baseline).
-      if (res.il.result.resolverHard) {
-        const reasons = res.il.result.validationIssues
-          .filter((i) => i.severity === 'hard')
-          .map((i) => i.message);
-        throw new Error(
-          `Contract corpus failed to resolve — ${reasons.slice(0, 3).join('; ') || 'duplicate or conflicting artifact identities'}`,
-        );
-      }
-      return { fileCount: res.il.result.write.written.length };
-    }
-    return { fileCount: 0 };
+    // The user's resolutions (relations / manual areas / includes) live in the
+    // server store (Postgres), keyed by repoKey — NOT in this fresh clone. Load
+    // them and fold them into curate, else the re-scan re-detects already-resolved
+    // conflicts (the dashboard resolve → re-scan loop). Empty on the first (connect)
+    // scan, so conflicts surface as expected. With `pr`, the effective decisions
+    // include that PR's overlay (overlay wins).
+    const decisions = await getDecisions(ref.repoKey, opts);
+    // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
+    // writes corpus.json into the clone; we persist it under `ref` for the store.
+    const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker, decisions });
+    await saveSpec(ref, 'corpus', curate.corpus);
+    return { openConflicts: curate.stats.overlapFlags };
   },
 };
 
@@ -95,16 +75,14 @@ export interface SpecScanRequest {
   repoFullName: string;
   installationId: number;
   headRef: string;
-  /** PR head commit — the set is keyed by it (content-addressed cache). */
+  /** PR head commit — the corpus is keyed by it (content-addressed cache). */
   headSha: string;
   prNumber: number;
 }
 
 export interface SpecScanResult {
-  /** The head SHA whose spec/contracts were ingested server-side. */
+  /** The head SHA whose corpus was ingested server-side. */
   commitSha: string;
-  /** Contract files generated and stored (0 ⇒ no spec docs to act on). */
-  savedFileCount: number;
   /** Spec conflicts the scan couldn't resolve (auto-defaulted; need a human). */
   openConflicts: number;
 }
@@ -129,12 +107,11 @@ export async function runSpecScan(
     // though we never write back.
     await stripEmbeddedAuth(simpleGit(tmp));
 
-    // spec docs → claims.json → contracts/*.tc, all persisted server-side under
-    // `ref`. The clone is read-only output; it is discarded below.
+    // spec docs → corpus.json, persisted server-side under `ref`. The clone is
+    // read-only output; it is discarded below.
     const { openConflicts } = await pipeline.scan(tmp, ref);
-    const { fileCount } = await pipeline.generate(tmp, ref);
 
-    return { commitSha: req.headSha, savedFileCount: fileCount, openConflicts };
+    return { commitSha: req.headSha, openConflicts };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

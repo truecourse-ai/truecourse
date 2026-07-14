@@ -151,13 +151,11 @@ export interface WorkspaceRepoSummary {
   name: string
   lastAnalyzed: string | null
   violations: number
-  drift: number
 }
 
 export interface WorkspaceStats {
   repoCount: number
   violationCount: number
-  driftCount: number
   /** Repos never analyzed or not analyzed within the freshness window. */
   staleCount: number
   severity: SeverityCounts
@@ -259,18 +257,15 @@ export interface GithubInstallationSummary {
  * returns a fully-resolved object.
  */
 export interface GithubNotificationPrefs {
-  /** A PR's gate failed on new drift. */
+  /** A PR's gate failed on new findings. */
   gateFailure: boolean
-  /** Inference captured undocumented decisions. */
-  inferResult: boolean
-  /** Spec conflicts need resolution before contracts can regenerate. */
+  /** Spec conflicts need resolution. */
   conflicts: boolean
 }
 
 /** All notification types on by default. */
 export const DEFAULT_NOTIFICATION_PREFS: GithubNotificationPrefs = {
   gateFailure: true,
-  inferResult: true,
   conflicts: true,
 }
 
@@ -293,11 +288,8 @@ export interface GithubRepoSummary {
   notifications: GithubNotificationPrefs
   /** Project slug for the repo's dashboard detail route (`/repos/:slug`); null until registered. */
   slug: string | null
-  /** Unresolved spec conflicts on the latest scan; `>0` ⇒ needs review (no contracts yet). */
+  /** Unresolved spec conflicts on the latest scan; `>0` ⇒ needs review. */
   openConflicts: number
-  /** Whether the repo has any generated contracts. Scanned + no conflicts + no
-   *  contracts ⇒ generation failed/empty (status "Failed"). */
-  hasContracts: boolean
 }
 
 /** Summary of one gate run on a PR. */

@@ -16,9 +16,9 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string
 export const extractionCache = pgTable(
   'extraction_cache',
   {
-    /** Cache namespace, e.g. `extractor/slices`, `consolidator/blocks`. */
+    /** Cache namespace, e.g. `extractor/slices`, `consolidator/area-tags`. */
     cacheName: text('cache_name').notNull(),
-    /** Content-hash key (slice/block id). */
+    /** Content-hash key (slice/doc id). */
     cacheKey: text('cache_key').notNull(),
     /** The cached entry (incl. its own prompt fingerprint for self-invalidation). */
     value: jsonb('value').$type<unknown>().notNull(),

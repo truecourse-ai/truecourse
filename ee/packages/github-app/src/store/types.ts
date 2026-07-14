@@ -6,11 +6,7 @@
  * when DATABASE_URL is set). Callers depend only on this interface.
  */
 
-import type { VerifyState } from '@truecourse/core/commands/spec-in-process';
 import type { GithubNotificationPrefs } from '@truecourse/shared';
-
-/** A single contract drift (re-typed from core's verify output). */
-export type GateDrift = VerifyState['drifts'][number];
 
 /** A GitHub App installation — an account that installed the App. */
 export interface InstallationRecord {
@@ -49,13 +45,28 @@ export interface RepoLinkRecord {
   updatedAt: string;
 }
 
-/** The saved baseline for a repo's default branch (refreshed on merge). */
+/**
+ * The saved baseline pointer for a repo's default branch (refreshed on merge).
+ * Records which commit was last scanned — the anchor for idempotency + re-scan.
+ */
 export interface BaselineRecord {
   repoFullName: string;
   commitSha: string;
-  /** null when the repo had no contracts to verify (neutral baseline). */
-  drifts: GateDrift[] | null;
   capturedAt: string;
+}
+
+/** Open/closed/merged lifecycle of a PR (`merged` = closed after merging). */
+export type PrState = 'open' | 'closed' | 'merged';
+
+/** A PR's tracked state, upserted from every pull_request webhook. */
+export interface PrRecord {
+  repoFullName: string;
+  prNumber: number;
+  /** PR title at the last webhook; null when the payload carried none. */
+  title: string | null;
+  state: PrState;
+  headSha: string;
+  updatedAt: string;
 }
 
 /** A recorded gate run on a PR (Phase 4 fills in inline-comment details). */
@@ -99,4 +110,10 @@ export interface GateStore {
   recordRun(rec: GateRunRecord): Promise<void>;
   /** Most-recent-first, capped at `limit` (default 50). */
   listRuns(repoFullName: string, limit?: number): Promise<GateRunRecord[]>;
+
+  // --- PR state ---
+  /** Insert or update a PR's tracked state (keyed by repo + number). */
+  upsertPr(rec: PrRecord): Promise<void>;
+  /** Every tracked PR for a repo (used to annotate the runs feed with state). */
+  listPrs(repoFullName: string): Promise<PrRecord[]>;
 }

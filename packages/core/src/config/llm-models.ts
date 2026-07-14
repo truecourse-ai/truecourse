@@ -28,14 +28,25 @@ import fs from 'node:fs';
 import { getRepoConfigPath, resolveRepoDir } from './paths.js';
 
 export type StageId =
-  | 'spec.chainDetect'
-  | 'spec.claimExtract'
-  | 'spec.chainRecheck'
-  | 'spec.conflictExplain'
-  | 'spec.conflictResolve'
+  // --- spec scan (corpus path) ---
   | 'spec.relevance'
+  | 'spec.areaTag'
+  | 'spec.vocab'
+  | 'spec.chainDetect'
+  | 'spec.overlap'
+  | 'spec.relation'
+  | 'contract.enumerate'
+  | 'contract.reconcile'
   | 'contract.extract'
   | 'contract.repair'
+  | 'contract.repairParse'
+  | 'contract.gapJudge'
+  // --- guard generate (scenario tests) ---
+  | 'guard.extract'
+  | 'guard.generate'
+  | 'guard.retry'
+  | 'guard.fidelity'
+  | 'guard.recipe'
   | 'rules.violationGen';
 
 /**
@@ -44,14 +55,41 @@ export type StageId =
  * difficulty. Tunable here without touching the runners.
  */
 export const STAGE_DEFAULTS: Record<StageId, string> = {
-  'spec.chainDetect': 'haiku',
-  'spec.claimExtract': 'sonnet',
-  'spec.chainRecheck': 'sonnet',
-  'spec.conflictExplain': 'haiku',
-  'spec.conflictResolve': 'opus',
   'spec.relevance': 'haiku',
+  // Area tagging is load-bearing (wrong tags → wrong generate inputs) and Haiku
+  // under-tagged terse docs like ADRs; Sonnet is worth the cost here.
+  'spec.areaTag': 'sonnet',
+  'spec.vocab': 'haiku',
+  'spec.chainDetect': 'haiku',
+  'spec.overlap': 'haiku',
+  'spec.relation': 'sonnet',
+  'contract.enumerate': 'sonnet',
+  'contract.reconcile': 'sonnet',
   'contract.extract': 'opus',
   'contract.repair': 'opus',
+  // Mechanical syntax fixing — cheap early attempts; the final attempt escalates
+  // to the opus `contract.repair` model in the repair loop.
+  'contract.repairParse': 'sonnet',
+  // Auditing already-written gaps is a judgement call, not generation — sonnet.
+  'contract.gapJudge': 'sonnet',
+  // Reading a whole document for its testable claims is a judgement call — sonnet.
+  'guard.extract': 'sonnet',
+  // Authoring an executable scenario faithful to a spec claim is the hard,
+  // load-bearing call (a weak scenario is false confidence) — opus.
+  'guard.generate': 'opus',
+  // The one evidence-retry per birth-failed claim — the same authoring task, so
+  // the same tier; a distinct stage so retry spend is attributed to the birth line.
+  'guard.retry': 'opus',
+  // Fidelity review: does a green scenario actually verify its claim, or is it
+  // weak/vacuous/miscast? A focused comprehension JUDGEMENT over one scenario + one
+  // section + one claim — the same family as `guard.extract` (read text, judge),
+  // NOT generation, so far cheaper than the opus authoring tier. Sonnet, not haiku:
+  // the success bar is zero false alarms on honest scenarios, and haiku under-
+  // reasons nuanced faithfulness comparisons (the same weakness that moved
+  // `spec.areaTag` off haiku).
+  'guard.fidelity': 'sonnet',
+  // Proposing a build/entry recipe is a modest structured task — sonnet.
+  'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',
 };
 

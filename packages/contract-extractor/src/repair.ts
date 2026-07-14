@@ -26,6 +26,9 @@ import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 
+/** Parse-repair attempts per malformed artifact: cheap model ×(N−1), then the strong model on the last. */
+const PARSE_REPAIR_ATTEMPTS = 3;
+
 export interface RepairIssue {
   artifactKey: string;
   kind: 'missing' | 'incomplete';
@@ -53,8 +56,10 @@ export interface RepairOptions {
    */
   transport?: LlmTransport;
   bin?: string;
-  /** Model passed to `claude --model`. */
+  /** Model passed to `claude --model` (the strong model; used for the FINAL parse-repair attempt + passes 1/2). */
   model?: string;
+  /** Cheaper model for the early parse-repair attempts; the last attempt escalates to `model`. */
+  parseModel?: string;
   /** Fallback model passed to `claude --fallback-model`. */
   fallbackModel?: string;
   timeoutMs?: number;
@@ -148,11 +153,16 @@ function detectUnparseable(
  *  actually resolves the parse error (never replace bad syntax with more bad
  *  syntax). */
 function parses(kindAndIdentity: string, tcSource: string): boolean {
+  return parsesWithError(kindAndIdentity, tcSource).ok;
+}
+
+/** Like {@link parses} but returns the parser error, to feed back into a repair re-prompt. */
+function parsesWithError(kindAndIdentity: string, tcSource: string): { ok: boolean; error?: string } {
   try {
     const node = parserOhm.parseTcFile(`<llm:${kindAndIdentity}>`, tcSource);
-    return node.statements.length > 0;
-  } catch {
-    return false;
+    return node.statements.length > 0 ? { ok: true } : { ok: false, error: 'tcSource produced zero statements' };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -225,8 +235,8 @@ function detectIncompleteArtifacts(resolution: resolver.ResolveResult): RepairIs
 
 function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSlice | null {
   const origin = artifact.winning.origin;
-  // Direct specPath match — works when slices are keyed by real spec
-  // file paths (legacy markdown-tree layout).
+  // Direct specPath match — the common case, where a slice is keyed by the
+  // doc file the artifact's origin points at.
   const direct = slices.find(
     (s) =>
       s.specPath === origin.source &&
@@ -235,12 +245,9 @@ function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSl
   );
   if (direct) return direct;
 
-  // Claims-driven slices: specPath is synthetic
-  // (`.truecourse/specs/claims.json#<module>/<topic>`) and never
-  // matches the artifact origin's source file. Fall back to text-based
-  // matching — every claims-rendered slice embeds the source file path
-  // and the claim subject, so a slice that mentions both is the one
-  // the LLM saw when emitting this artifact.
+  // Fall back to text-based matching when the specPath doesn't line up — a
+  // slice embeds its source file path and subject, so one that mentions both
+  // the origin's source and the artifact identity is the one the LLM saw.
   const sourceFile = origin.source.split(/[\\/]/).pop() ?? origin.source;
   const section = origin.section;
   let best: { slice: SpecSlice; score: number } | null = null;
@@ -250,9 +257,18 @@ function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSl
     else if (slice.text.includes(sourceFile)) score += 2;
     if (section && slice.text.includes(section)) score += 2;
     if (slice.text.includes(artifact.identity)) score += 1;
-    if (score > 0 && (!best || score > best.score)) best = { slice, score };
+    if (score > 0 && (!best || score > best.score || (score === best.score && sliceTieKey(slice) < sliceTieKey(best.slice)))) {
+      best = { slice, score };
+    }
   }
   return best?.slice ?? null;
+}
+
+/** Deterministic tiebreaker so two equal-scoring slices pick the SAME one every
+ *  run, independent of input order: lexicographically smallest specPath, then
+ *  start line. Keeps a repair re-prompt's `origin` from flipping on re-grouping. */
+function sliceTieKey(s: SpecSlice): string {
+  return `${s.specPath}:${String(s.lineRange?.[0] ?? 0).padStart(9, '0')}`;
 }
 
 const SLICE_HINT_KEYWORDS: Partial<Record<ArtifactKind, string[]>> = {
@@ -279,21 +295,23 @@ export function findSliceForMissing(missingKey: string, slices: SpecSlice[]): Sp
     // artifact's identity) wins decisively over one that merely mentions the
     // word — generic keyword density must not let a dense Customer slice
     // outscore the slice that actually declares Order. Keyword scoring stays
-    // as the fallback when no slice declares the subject (legacy md slices).
+    // as the fallback when no slice declares the subject.
     if (sliceDeclaresSubject(slice, id)) score += 100;
     for (const kw of keywords) if (lowered.includes(kw)) score++;
-    if (!best || score > best.score) best = { slice, score };
+    if (!best || score > best.score || (score === best.score && sliceTieKey(slice) < sliceTieKey(best.slice))) {
+      best = { slice, score };
+    }
   }
   return best && best.score > 0 ? best.slice : null;
 }
 
 /**
  * True when the slice carries a `## <Subject>` heading whose subject declares
- * `identity` — claims slices render each claim as `## <subject>` (optionally
- * `## <subject> / <aspect>`, e.g. `## Order / fields`), so the slice whose
- * subject is the artifact's identity is the one that defines it. Matches the
- * full identity or its last dotted segment (a namespaced entity such as
- * `core.customers` appears under its bare name in the subject heading).
+ * `identity` — a slice that defines an artifact heads it as `## <subject>`
+ * (optionally `## <subject> / <aspect>`, e.g. `## Order / fields`), so the
+ * slice whose subject is the artifact's identity is the one that defines it.
+ * Matches the full identity or its last dotted segment (a namespaced entity
+ * such as `core.customers` appears under its bare name in the subject heading).
  */
 function sliceDeclaresSubject(slice: SpecSlice, identity: string): boolean {
   const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]/g, '');
@@ -311,7 +329,7 @@ function sliceDeclaresSubject(slice: SpecSlice, identity: string): boolean {
 // Re-prompt
 // ---------------------------------------------------------------------------
 
-const FIX_SYSTEM_PROMPT = `You are the contract-extraction reviewer. Your job is to fix one previously-extracted contract artifact (or produce one that was missed entirely), given:
+export const FIX_SYSTEM_PROMPT = `You are the contract-extraction reviewer. Your job is to fix one previously-extracted contract artifact (or produce one that was missed entirely), given:
 
   - the source SPEC SLICE the artifact was extracted from,
   - the previous TC SOURCE the extractor produced (may be empty if the artifact was missing entirely),
@@ -325,7 +343,7 @@ Hard rules:
 
   1. Address every issue in the ISSUES list. Each issue is mandatory.
   2. Preserve fields the previous tcSource had correctly — don't drop unrelated structure while fixing the listed issues.
-  3. If the spec slice does NOT support a fix (e.g. asked to enumerate operations that the slice doesn't list), emit an UnenforceableObligation fragment with reason explaining what is missing from the spec.
+  3. If a fix is not possible — either the spec slice does NOT support it (e.g. asked to enumerate operations the slice doesn't list), or a clause simply has NO valid encoding in this kind's grammar — do not invent syntax. Emit an UnenforceableObligation fragment (keep the same identity) whose spec-text and rationale capture what could not be encoded, with a reason explaining why.
   4. Output ONLY the JSON object. No prose, no fences, no preamble.`;
 
 interface FixRequest {
@@ -341,6 +359,7 @@ async function runFixOne(
   timeoutMs: number,
   model?: string,
   fallbackModel?: string,
+  stage: string = 'contract.repair',
 ): Promise<Fragment[] | null> {
   const userPrompt = buildFixUserPrompt(req);
   // Prepend the main extraction system prompt so the repair pass has
@@ -354,8 +373,8 @@ async function runFixOne(
     : (req.missingKey ?? 'unknown');
   try {
     const raw = await transport({
-      id: `contract.repair:${id}`,
-      stage: 'contract.repair',
+      id: `${stage}:${id}`,
+      stage,
       model,
       fallbackModel,
       system: repairSystemPrompt,
@@ -410,12 +429,73 @@ export async function repair(
   let done = 0;
   let total = 0;
 
+  // Bounded re-prompt loop shared by every pass. Each round feeds the FRESH
+  // parser error back so the model learns from each failure; a fix is accepted
+  // only if its `tcSource` now parses (never swap one broken body for another).
+  // One progress step per artifact — every attempt reports the same `done`, so
+  // retries stay inside a single step. Returns the accepted (parsing) fragment
+  // or `null` plus the last parser error.
+  async function runRepairLoop(args: {
+    /** Key used for parse-error attribution and the "nothing usable" log. */
+    label: string;
+    previousArtifact: MergedArtifact | null;
+    missingKey?: string;
+    slice: SpecSlice;
+    stage: string;
+    /** Parser error seeded into the first attempt's issues (pass 0), else null. */
+    initialError: string | null;
+    /**
+     * Mechanical syntax fixing (pass 0) runs the cheap `parseModel` on the early
+     * attempts and the strong `model` on the last (a weaker retry after the
+     * strong model failed is pointless). The generation passes (missing /
+     * incomplete) leave this false — producing an artifact is strong-model work
+     * on EVERY attempt.
+     */
+    cheapEarlyAttempts?: boolean;
+    /** Builds the attempt's issue list; receives the latest parser error. */
+    buildIssues: (parserError: string | null) => string[];
+    message: (attempt: number) => string;
+    /** Picks the single fragment to accept this round (a broken pick is retried). */
+    select: (fragments: Fragment[]) => Fragment | undefined;
+  }): Promise<{ accepted: Fragment | null; lastError: string | null }> {
+    let lastError = args.initialError;
+    for (let attempt = 0; attempt < PARSE_REPAIR_ATTEMPTS; attempt++) {
+      const last = attempt === PARSE_REPAIR_ATTEMPTS - 1;
+      const model = args.cheapEarlyAttempts && !last ? (opts.parseModel ?? opts.model) : opts.model;
+      const message = args.message(attempt + 1);
+      log.push(`repair: ${message}.`);
+      opts.onProgress?.({ done, total, message });
+      const fragments = await runFixOne(
+        {
+          previousArtifact: args.previousArtifact,
+          missingKey: args.missingKey,
+          slice: args.slice,
+          issues: args.buildIssues(lastError),
+        },
+        transport,
+        timeoutMs,
+        model,
+        opts.fallbackModel,
+        args.stage,
+      );
+      const candidate = fragments ? args.select(fragments) : undefined;
+      if (!candidate) {
+        log.push(`repair: fix for ${args.label} returned nothing usable (attempt ${attempt + 1}).`);
+        continue;
+      }
+      const res = parsesWithError(args.label, candidate.tcSource);
+      if (res.ok) return { accepted: candidate, lastError };
+      lastError = res.error ?? lastError; // feed the fresh error into the next attempt
+    }
+    return { accepted: null, lastError };
+  }
+
   // Pass 0 — malformed artifacts. An artifact whose tcSource doesn't parse never
   // reaches the index: every reference to it would otherwise surface as a missing
   // artifact, and the artifact itself would be dropped by `validateMerged`. We
   // re-prompt with the parser's exact error so the model fixes the SYNTAX, and
-  // accept the result only if it now parses (never swap one broken body for
-  // another). Runs first so the corpus is clean before missing/incomplete passes.
+  // accept the result only if it now parses. Runs first so the corpus is clean
+  // before missing/incomplete passes.
   const malformed = detectUnparseable(artifacts);
   const malformedTasks = malformed.map((m) => ({ ...m, slice: sliceForArtifact(m.artifact, slices) }));
   total += malformedTasks.filter((t) => t.slice).length;
@@ -426,45 +506,74 @@ export async function repair(
       continue;
     }
     done += 1;
-    const message = `malformed ${k} — re-prompting to fix syntax`;
-    log.push(`repair: ${message}.`);
-    opts.onProgress?.({ done, total, message });
-    const fragments = await runFixOne(
-      {
-        previousArtifact: artifact,
-        slice,
-        issues: [
-          `The previous TC SOURCE failed to parse under the grammar. Fix ONLY the syntax so it ` +
-            `parses cleanly — preserve every field, clause, and value it expressed. Parser error:\n${error}`,
-        ],
-      },
-      transport,
-      timeoutMs,
-      opts.model,
-      opts.fallbackModel,
-    );
-    if (!fragments || fragments.length === 0) {
-      log.push(`repair: re-prompt failed for ${k}.`);
+    const { accepted, lastError } = await runRepairLoop({
+      label: k,
+      previousArtifact: artifact,
+      slice,
+      stage: 'contract.repairParse',
+      initialError: error,
+      cheapEarlyAttempts: true,
+      buildIssues: (err) => [
+        `The previous TC SOURCE failed to parse under the grammar. Fix ONLY the syntax so it ` +
+          `parses cleanly — preserve every field, clause, and value it expressed. If a clause is NOT ` +
+          `expressible in this kind's grammar at all, do not invent syntax — emit an ` +
+          `unenforceable-obligation fragment (same identity) whose spec-text and rationale capture what ` +
+          `could not be encoded. Parser error:\n${err ?? error}`,
+      ],
+      message: (attempt) => `malformed ${k} — fix attempt ${attempt}/${PARSE_REPAIR_ATTEMPTS}`,
+      // Prefer an in-kind syntax fix; only when the model returns none do we
+      // consider a deliberate downgrade to an unenforceable-obligation.
+      select: (fragments) =>
+        fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k) ??
+        fragments.find((f) => f.kind === 'UnenforceableObligation'),
+    });
+
+    if (!accepted) {
+      // Tag (don't drop): validateMerged drops it and reports the issue, now with WHY repair failed.
+      artifact.repairFailReason = lastError ?? error;
+      log.push(`repair: ${k} still unparseable after ${PARSE_REPAIR_ATTEMPTS} attempts — keeping for the validator.`);
       continue;
     }
-    // Accept only a fragment that IS this artifact AND now parses; otherwise keep
-    // the original (it'll be dropped downstream exactly as before — no regression).
-    const fixed = fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k);
-    if (!fixed) {
-      log.push(`repair: fix for ${k} returned a different artifact, keeping original.`);
+    const acceptedKind = topLevelKind(accepted.kind);
+    if (key(acceptedKind, accepted.identity) === k) {
+      // In-kind syntax fix — replace in place.
+      artifact.winning = { ...accepted, kind: acceptedKind };
+      log.push(`repair: ${k} re-parsed cleanly after fix.`);
       continue;
     }
-    if (!parses(k, fixed.tcSource)) {
-      log.push(`repair: fix for ${k} still doesn't parse, keeping original.`);
+    // Inexpressible downgrade: the clause has no encoding in this kind's grammar,
+    // so the model returned a parsing UnenforceableObligation instead. Re-key the
+    // artifact — the validator and writer key off `kind`/`identity`, not just
+    // `winning`. Collision guard: if the corpus already holds an artifact under the
+    // new key, keep the original tagged for the validator (never worse than today).
+    const downgradeKey = key('UnenforceableObligation', accepted.identity);
+    const collides = artifacts.some((a) => a !== artifact && key(a.kind, a.identity) === downgradeKey);
+    if (collides) {
+      artifact.repairFailReason = lastError ?? error;
+      log.push(`repair: ${k} → ${downgradeKey} downgrade collides with an existing artifact — keeping for the validator.`);
       continue;
     }
-    artifact.winning = { ...fixed, kind: topLevelKind(fixed.kind) };
-    log.push(`repair: ${k} re-parsed cleanly after fix.`);
+    artifact.kind = 'UnenforceableObligation';
+    artifact.identity = accepted.identity;
+    artifact.winning = { ...accepted, kind: 'UnenforceableObligation' };
+    log.push(`repair: ${k} not expressible in that kind — downgraded to ${downgradeKey}.`);
   }
 
   // Pass 1 — missing artifacts. Resolve the merged corpus once; the
   // resolver enumerates every unresolved cross-reference.
-  const missing = detectMissingArtifacts(resolveCorpus(artifacts));
+  const missingResolution = resolveCorpus(artifacts);
+  const missing = detectMissingArtifacts(missingResolution);
+  // The declared identities per kind, so the re-prompt can name them: a reference
+  // the deterministic snapper couldn't resolve (wrong kind, or ambiguous among
+  // same-kind candidates) may still be a mis-spelling of one of these — telling the
+  // model lets it fix the REFERRING side (decline to invent a duplicate) rather
+  // than fabricate the missing target.
+  const declaredByKind = new Map<string, string[]>();
+  for (const a of missingResolution.index.values()) {
+    const bucket = declaredByKind.get(a.ref.type) ?? [];
+    bucket.push(a.ref.identity);
+    declaredByKind.set(a.ref.type, bucket);
+  }
   allIssues.push(...missing);
   const missingTasks = missing.map((issue) => ({
     issue,
@@ -477,66 +586,76 @@ export async function repair(
       continue;
     }
     done += 1;
-    const message = `missing ${issue.artifactKey} — re-prompting "${slice.headingPath.join(' → ')}"`;
-    log.push(`repair: ${message}.`);
-    opts.onProgress?.({ done, total, message });
-    const fragments = await runFixOne(
-      { previousArtifact: null, missingKey: issue.artifactKey, slice, issues: [issue.detail] },
-      transport,
-      timeoutMs,
-      opts.model,
-      opts.fallbackModel,
-    );
-    if (!fragments) {
-      log.push(`repair: re-prompt failed for ${issue.artifactKey}.`);
+    const targetKey = issue.artifactKey;
+    // Declared identities of the referenced kind — appended to the re-prompt so the
+    // model can recognize a mis-referenced existing identity instead of inventing
+    // the missing target from whole cloth.
+    const declaredOfKind = declaredByKind.get(targetKey.slice(0, targetKey.indexOf(':'))) ?? [];
+    const declaredNote =
+      declaredOfKind.length > 0
+        ? `Already-declared ${targetKey.slice(0, targetKey.indexOf(':'))} identities in this corpus: ${declaredOfKind.join(', ')}. ` +
+          `If this reference is a mis-spelling of one of these, do NOT invent a new artifact — emit an ` +
+          `unenforceable-obligation (same identity) noting the reference should target the correct existing identity instead.`
+        : null;
+    // The repair LLM sees the full extraction system prompt, so a fix request can
+    // return fragments unrelated to the missing artifact (entities the slice
+    // mentions, peer effect-groups, …). Accept the target if produced, otherwise a
+    // single UnenforceableObligation explaining the gap — extras would duplicate
+    // existing artifacts or pollute the corpus with overlapping declarations. The
+    // accepted fragment must PARSE; otherwise the loop retries with the error fed
+    // back, and if nothing ever parses the reference is left unresolved (a soft
+    // issue, strictly better than adding a body validateMerged would hard-drop).
+    const { accepted } = await runRepairLoop({
+      label: targetKey,
+      previousArtifact: null,
+      missingKey: targetKey,
+      slice,
+      stage: 'contract.repair',
+      initialError: null,
+      buildIssues: (err) => {
+        const issues = err ? [issue.detail, `Your previous attempt failed to parse: ${err}`] : [issue.detail];
+        if (declaredNote) issues.push(declaredNote);
+        return issues;
+      },
+      message: (attempt) =>
+        `missing ${targetKey} — re-prompting "${slice.headingPath.join(' → ')}" (attempt ${attempt}/${PARSE_REPAIR_ATTEMPTS})`,
+      select: (fragments) =>
+        fragments.find((f) => key(topLevelKind(f.kind), f.identity) === targetKey) ??
+        fragments.find((f) => f.kind === 'UnenforceableObligation'),
+    });
+    if (!accepted) {
+      log.push(`repair: no parseable ${targetKey} after ${PARSE_REPAIR_ATTEMPTS} attempts — leaving the reference unresolved.`);
       continue;
     }
-    // The repair LLM now sees the full extraction system prompt, so a
-    // single fix request can return fragments unrelated to the missing
-    // artifact (entities the slice mentions, peer effect-groups, etc.).
-    // Only add fragments that match the missing key OR an
-    // UnenforceableObligation explaining the gap — extras would either
-    // duplicate existing artifacts (validator: duplicate-identity) or
-    // pollute the corpus with overlapping declarations (extra
-    // effect-groups for the same events, etc.).
-    const targetKey = issue.artifactKey;
-    let addedForMissing = false;
-    for (const fragment of fragments) {
-      // The model returns the PascalCase `ArtifactKind` it saw in the re-prompt
-      // ("Referenced as Entity:Order") — the same casing the merged corpus keys
-      // on. `topLevelKind` only collapses the `Effect`→`EffectGroup` alias; no
-      // casing conversion happens, so the produced artifact keys identically to
-      // the missing target and isn't silently discarded.
-      const fragKind = topLevelKind(fragment.kind);
-      const fragmentKey = key(fragKind, fragment.identity);
-      const isTarget = fragmentKey === targetKey;
-      const isFallback =
-        fragment.kind === 'UnenforceableObligation' && !addedForMissing && !isTarget;
-      if (!isTarget && !isFallback) continue;
-      const replacement: MergedArtifact = {
-        kind: fragKind,
-        identity: fragment.identity,
-        winning: { ...fragment, kind: fragKind },
-        winningRank: 0,
-        overridden: [],
-        sameRankConflicts: [],
-      };
-      const existingIdx = artifacts.findIndex((a) => key(a.kind, a.identity) === fragmentKey);
-      if (existingIdx >= 0) {
-        // The target already exists — but it was flagged MISSING, which means the
-        // existing copy never reached the resolved index (its tcSource failed to
-        // parse, e.g. one unrecognized field clause). Replace that broken artifact
-        // with the validated repair output. Skipping it (the old behaviour) left
-        // the unparseable copy to be dropped by `validateMerged` downstream, which
-        // re-opened every reference to it — a single bad clause then cascaded into
-        // many unresolved refs. A fallback obligation must never overwrite a real
-        // artifact, so it only fills a genuinely-absent slot.
-        if (!isTarget) continue;
-        artifacts[existingIdx] = replacement;
-      } else {
-        artifacts.push(replacement);
+    // The model returns the PascalCase `ArtifactKind` it saw in the re-prompt
+    // ("Referenced as Entity:Order") — the same casing the merged corpus keys on.
+    // `topLevelKind` only collapses the `Effect`→`EffectGroup` alias; no casing
+    // conversion happens, so the produced artifact keys identically to the target.
+    const fragKind = topLevelKind(accepted.kind);
+    const fragmentKey = key(fragKind, accepted.identity);
+    const isTarget = fragmentKey === targetKey;
+    const replacement: MergedArtifact = {
+      kind: fragKind,
+      identity: accepted.identity,
+      winning: { ...accepted, kind: fragKind },
+      winningRank: 0,
+      overridden: [],
+      sameRankConflicts: [],
+    };
+    const existingIdx = artifacts.findIndex((a) => key(a.kind, a.identity) === fragmentKey);
+    if (existingIdx >= 0) {
+      // The target already exists — but it was flagged MISSING, which means the
+      // existing copy never reached the resolved index (its tcSource failed to
+      // parse). Replace that broken artifact with the validated repair output; a
+      // fallback obligation must never overwrite a real artifact, so it only fills
+      // a genuinely-absent slot.
+      if (!isTarget) {
+        log.push(`repair: ${fragmentKey} already exists — not overwriting with a fallback obligation.`);
+        continue;
       }
-      if (isTarget) addedForMissing = true;
+      artifacts[existingIdx] = replacement;
+    } else {
+      artifacts.push(replacement);
     }
   }
 
@@ -565,26 +684,32 @@ export async function repair(
       continue;
     }
     done += 1;
-    const message = `incomplete ${k} (${issues.length} issue${issues.length === 1 ? '' : 's'}) — re-prompting`;
-    log.push(`repair: ${message}.`);
-    opts.onProgress?.({ done, total, message });
-    const fragments = await runFixOne(
-      { previousArtifact: artifact, slice, issues: issues.map((i) => i.detail) },
-      transport,
-      timeoutMs,
-      opts.model,
-      opts.fallbackModel,
-    );
-    if (!fragments || fragments.length === 0) {
-      log.push(`repair: re-prompt failed for ${k}.`);
+    // Replace `winning` only with a PARSING fix. On failure the loop retries with
+    // the parser error fed back; if nothing ever parses, keep the previous winning
+    // (incomplete beats dropped).
+    const { accepted } = await runRepairLoop({
+      label: k,
+      previousArtifact: artifact,
+      slice,
+      stage: 'contract.repair',
+      initialError: null,
+      buildIssues: (err) =>
+        err
+          ? [...issues.map((i) => i.detail), `Your previous attempt failed to parse: ${err}`]
+          : issues.map((i) => i.detail),
+      message: (attempt) =>
+        `incomplete ${k} (${issues.length} issue${issues.length === 1 ? '' : 's'}) — re-prompting (attempt ${attempt}/${PARSE_REPAIR_ATTEMPTS})`,
+      // Match the fix back by its canonical PascalCase key (only the
+      // Effect→EffectGroup alias applied); fall back to the first fragment if the
+      // model renamed it.
+      select: (fragments) =>
+        fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k) ?? fragments[0],
+    });
+    if (!accepted) {
+      log.push(`repair: incomplete ${k} — no parseable fix after ${PARSE_REPAIR_ATTEMPTS} attempts; keeping the previous winning.`);
       continue;
     }
-    // Match the fix back to the artifact by its canonical PascalCase key
-    // (only the Effect→EffectGroup alias is applied); fall back to the first
-    // returned fragment if the model renamed it.
-    const replacement =
-      fragments.find((f) => key(topLevelKind(f.kind), f.identity) === k) ?? fragments[0];
-    artifact.winning = { ...replacement, kind: topLevelKind(replacement.kind) };
+    artifact.winning = { ...accepted, kind: topLevelKind(accepted.kind) };
   }
 
   return { issues: allIssues, artifacts, log };

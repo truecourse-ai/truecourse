@@ -23,8 +23,7 @@ const NOTIFICATIONS: {
   desc: string;
 }[] = [
   { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new findings.' },
-  { key: 'inferResult', label: 'Undocumented decisions', desc: 'Inference captured new decisions on a PR.' },
-  { key: 'conflicts', label: 'Spec conflicts', desc: 'Conflicts need resolving before contracts can regenerate.' },
+  { key: 'conflicts', label: 'Spec conflicts', desc: 'Spec conflicts need resolving.' },
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {

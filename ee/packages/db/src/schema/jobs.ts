@@ -16,7 +16,17 @@
  * `.where()` on a unique index emits `WHERE …`).
  */
 
-import { pgTable, text, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  integer,
+  bigint,
+  boolean,
+  jsonb,
+  timestamp,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -51,6 +61,22 @@ export const jobs = pgTable(
       .where(sql`status in ('queued','running')`),
   ],
 );
+
+// Coalesced follow-up baseline requests. `enqueueBaseline` single-flights one
+// scan per repo; a default-branch push whose enqueue loses that race is recorded
+// here (latest commit wins — one row per repo) instead of being dropped, then
+// replayed when the running scan settles (or at next boot after a crash). Holds
+// the full enqueue request so the replay reconstructs it verbatim.
+export const pendingBaselines = pgTable('pending_baselines', {
+  repoFullName: text('repo_full_name').primaryKey(),
+  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
+  defaultBranch: text('default_branch').notNull(),
+  commitSha: text('commit_sha').notNull(),
+  workspaceOrgId: text('workspace_org_id').notNull(),
+  force: boolean('force').notNull().default(false),
+  quiet: boolean('quiet').notNull().default(false),
+  updatedAt: ts('updated_at').notNull(),
+});
 
 export const notifications = pgTable(
   'notifications',

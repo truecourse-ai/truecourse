@@ -14,12 +14,12 @@ import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
 import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { registerGithubApp, selectGateStore } from '@truecourse/ee-github-app';
+import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
+import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
-import { registerKnowledge } from './knowledge/index.js';
 import { registerIntegrations } from './integrations/index.js';
 import { registerJobs } from './jobs/index.js';
 import { registerAdmin } from './admin/index.js';
@@ -67,6 +67,18 @@ const plugin: EePlugin = {
         '[ee-server] DATABASE_URL is required: the enterprise edition stores all state in Postgres (no file fallback). Set DATABASE_URL to a Postgres instance.',
       );
     }
+
+    // The GitHub App PR gate is the enterprise edition's core loop — connect a
+    // repo, gate its pull requests — so EE cannot run without it. Validated up
+    // front (env-only, no deps) so a misconfigured deploy fails fast rather than
+    // booting half-wired. registerGithubApp below then always lights up.
+    const githubAppConfig = loadGithubAppConfig();
+    if (!githubAppConfig) {
+      throw new Error(
+        '[ee-server] GitHub App is required: the enterprise edition gates pull requests through a GitHub App (there is no SSO-only mode). Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_WEBHOOK_SECRET, and GITHUB_APP_SLUG.',
+      );
+    }
+
     const handle = await createEeDb(databaseUrl);
     const eeDb: EeDb = handle.db;
     log.info('[ee-server] ee-db ready (Postgres, migrations applied)');
@@ -99,29 +111,33 @@ const plugin: EePlugin = {
 
     // Background jobs + notifications: the in-process graphile-worker runner, the
     // LISTEN/NOTIFY event hub, and the SSE/jobs/notifications routers. Returns the
-    // queue API the Knowledge router enqueues sync jobs onto. Started before
-    // Knowledge so its `/sync` route has the queue; jobs only run on demand, by
-    // which point the LLM transport (below) is installed.
+    // queue API the gate enqueues repo-baseline scans onto. jobs only run on demand,
+    // by which point the LLM transport (below) is installed.
     const jobs = await registerJobs(registry, { db: eeDb, masterSecret, connectionString: databaseUrl });
     plugin.capabilities.push('jobs');
 
-    // Workspace Knowledge (Spec/Contracts/Decisions reads + connector sync) and
-    // Settings → Integrations (encrypted connector tokens). Both need the
-    // Postgres stores installed above + the master secret.
-    registerKnowledge(registry, { db: eeDb, masterSecret, jobs });
+    // Settings → Integrations (encrypted connector tokens). Needs the Postgres
+    // stores installed above + the master secret.
     registerIntegrations(registry, { db: eeDb, masterSecret });
     plugin.capabilities.push('knowledge');
 
-    // GitHub App PR gate — optional. Lights up `github-gate` only when the
-    // GITHUB_APP_* env is present, so SSO-only deploys are unaffected. The repo
-    // scan (connect + push) runs on the background job queue via enqueueBaseline.
-    const githubEnabled = await registerGithubApp(registry, {
+    // GitHub App PR gate — required (env validated at boot above, so this always
+    // lights up `github-gate`). The repo scan (connect + push) runs on the
+    // background job queue via enqueueBaseline.
+    await registerGithubApp(registry, {
       appUrl: cfg.appUrl,
       db: eeDb,
       enqueueBaseline: jobs.enqueueBaseline,
       codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
-    if (githubEnabled) plugin.capabilities.push('github-gate');
+    plugin.capabilities.push('github-gate');
+
+    // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
+    // working tree; EE has no checkout, so fetch them from GitHub via the App
+    // installation (at the repo's baseline commit). Reuses the gate store above.
+    setRepoDocReader((repoKey, docPath, opts) =>
+      readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath, opts),
+    );
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on
     // a CLI binary) + the Models settings API. Reuses the validated masterSecret.

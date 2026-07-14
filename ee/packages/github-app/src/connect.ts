@@ -8,9 +8,7 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
-import { getScanState } from '@truecourse/core/commands/spec-in-process';
-import { latestSpecCommit } from '@truecourse/core/lib/spec-store';
-import { listContractFiles } from '@truecourse/core/lib/contract-store';
+import { loadSpec } from '@truecourse/core/lib/spec-store';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -28,6 +26,8 @@ import type {
   InstallationRecord,
   RepoLinkRecord,
   GateRunRecord,
+  PrRecord,
+  PrState,
 } from './store/types.js';
 
 /** Conservative email shape: one `@`, non-empty local/domain, dotted domain. */
@@ -53,7 +53,6 @@ function toRepoSummary(
   r: RepoLinkRecord,
   slug: string | null,
   openConflicts: number,
-  hasContracts: boolean,
 ): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
@@ -67,9 +66,18 @@ function toRepoSummary(
     notifications: resolveNotificationPrefs(r),
     slug,
     openConflicts,
-    hasContracts,
   };
 }
+
+/**
+ * PR-state fields grafted onto every feed row. `prState` is null for PRs with no
+ * gh_prs row (history predating close-tracking); the client treats null as open.
+ * Defined locally rather than on the shared feed types (which the OSS dashboard
+ * also consumes) — the fields are additive, so those consumers simply ignore them.
+ */
+type PrFeedFields = { prState: PrState | null; title: string | null };
+type RunSummaryWithState = GithubRunSummary & PrFeedFields;
+type WorkspaceRunItemWithState = WorkspaceRunItem & PrFeedFields;
 
 function toRunSummary(r: GateRunRecord): GithubRunSummary {
   return {
@@ -81,6 +89,14 @@ function toRunSummary(r: GateRunRecord): GithubRunSummary {
     resolvedCount: r.resolvedCount,
     createdAt: r.createdAt,
   };
+}
+
+function prMapFor(prs: PrRecord[]): Map<number, PrRecord> {
+  return new Map(prs.map((p) => [p.prNumber, p]));
+}
+
+function prFieldsFor(pr: PrRecord | undefined): PrFeedFields {
+  return { prState: pr?.state ?? null, title: pr?.title ?? null };
 }
 
 export interface ConnectDeps {
@@ -126,25 +142,27 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       deps.store.listReposForWorkspace(orgId),
     ]);
     // Resolve each repo's dashboard slug (registered on link) so the UI can
-    // deep-link to `/repos/:slug`, plus its open-conflict count (re-merged from
-    // stored claims — no LLM) so the list can flag repos that need review.
+    // deep-link to `/repos/:slug`, plus its flagged-overlap count (within-area
+    // doc disagreements awaiting a relation) so the list can flag repos that need review.
     const repoSummaries = await Promise.all(
       repos.map(async (r) => {
-        const [project, scan, commit] = await Promise.all([
+        // Read the corpus at the BASELINE commit — the repo's default-branch view —
+        // never the newest scan, which may be an in-flight PR head (that spec is
+        // PR-scoped and must not leak into the repo overview).
+        const [project, baseline] = await Promise.all([
           getProjectByPath(r.repoFullName),
-          getScanState(r.repoFullName).catch(() => null),
-          latestSpecCommit(r.repoFullName).catch(() => null),
+          deps.store.getBaseline(r.repoFullName).catch(() => null),
         ]);
-        // hasContracts: any generated contract files at the latest scanned commit.
-        const files = commit
-          ? await listContractFiles(r.repoFullName, 'contracts', commit).catch(() => [])
-          : [];
-        return toRepoSummary(
-          r,
-          project?.slug ?? null,
-          scan?.openConflicts.length ?? 0,
-          files.length > 0,
-        );
+        const commit = baseline?.commitSha ?? null;
+        const corpus = commit
+          ? await loadSpec<{ areas?: Array<{ overlaps?: unknown[] }> }>(
+              { repoKey: r.repoFullName, commitSha: commit },
+              'corpus',
+            ).catch(() => null)
+          : null;
+        const overlapCount =
+          corpus?.areas?.reduce((n, a) => n + (a.overlaps?.length ?? 0), 0) ?? 0;
+        return toRepoSummary(r, project?.slug ?? null, overlapCount);
       }),
     );
     const body: GithubConnectStatusResponse = {
@@ -286,8 +304,8 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     await registerProject(repoFullName, repoFullName);
 
     // Kick off the INITIAL scan now (background job) rather than waiting for the
-    // next default-branch push — so the repo's spec/contracts (and the merge with
-    // workspace Knowledge) populate as soon as it's connected, in either order.
+    // next default-branch push — so the repo's spec + Code Quality baseline populate
+    // as soon as it's connected.
     // Best-effort: a failure to enqueue must not fail the link.
     if (deps.enqueueBaseline) {
       try {
@@ -427,8 +445,16 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.json({ runs: [] });
       return;
     }
-    const runs = await deps.store.listRuns(repoFullName);
-    res.json({ runs: runs.map(toRunSummary) });
+    const [runs, prs] = await Promise.all([
+      deps.store.listRuns(repoFullName),
+      deps.store.listPrs(repoFullName),
+    ]);
+    const byPr = prMapFor(prs);
+    const withState: RunSummaryWithState[] = runs.map((r) => ({
+      ...toRunSummary(r),
+      ...prFieldsFor(byPr.get(r.prNumber)),
+    }));
+    res.json({ runs: withState });
   });
 
   // Cross-repo gate activity for the workspace home — recent runs across every
@@ -442,14 +468,23 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
     const repos = await deps.store.listReposForWorkspace(orgId);
-    const all: WorkspaceRunItem[] = [];
+    const all: WorkspaceRunItemWithState[] = [];
     for (const repo of repos) {
       // The registered slug (lossy slugify with collision suffixes), so the feed
       // can deep-link each run to /repos/:slug?pr=N. Resolved once per repo.
       const slug = (await getProjectByPath(repo.repoFullName))?.slug ?? null;
-      const runs = await deps.store.listRuns(repo.repoFullName, limit);
+      const [runs, prs] = await Promise.all([
+        deps.store.listRuns(repo.repoFullName, limit),
+        deps.store.listPrs(repo.repoFullName),
+      ]);
+      const prByNumber = prMapFor(prs);
       for (const r of runs) {
-        all.push({ ...toRunSummary(r), repoFullName: repo.repoFullName, slug });
+        all.push({
+          ...toRunSummary(r),
+          repoFullName: repo.repoFullName,
+          slug,
+          ...prFieldsFor(prByNumber.get(r.prNumber)),
+        });
       }
     }
     all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -457,7 +492,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // gate runs (one per pushed commit) collapses to a single row. `all` is already
     // newest-first, so the first run seen per key is the latest — and the limit now
     // counts PRs, not commits.
-    const byPr = new Map<string, WorkspaceRunItem>();
+    const byPr = new Map<string, WorkspaceRunItemWithState>();
     for (const r of all) {
       const k = `${r.repoFullName}#${r.prNumber}`;
       if (!byPr.has(k)) byPr.set(k, r);

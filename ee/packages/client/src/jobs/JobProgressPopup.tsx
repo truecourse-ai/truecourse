@@ -12,15 +12,13 @@
 import { Check, CircleX, Loader2 } from 'lucide-react';
 import type { JobView } from '@truecourse/shared';
 
+// The server carries the display title on the live job.progress event; this map
+// is only a fallback for DB-fetched rows (initial load / reconnect) that omit it.
 function jobTitle(job: JobView): string {
+  if (job.title) return job.title;
   switch (job.type) {
-    case 'knowledge.sync':
-      return 'Syncing knowledge';
     case 'repo.baseline':
       return 'Scanning repository';
-    case 'repo.contracts':
-    case 'workspace.contracts':
-      return 'Updating contracts';
     default:
       return 'Working';
   }

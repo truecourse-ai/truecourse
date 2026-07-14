@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { minimatch } from '../../../comparator/minimatch.js';
+import { minimatch } from '../../shared/minimatch.js';
 import { loadTcIgnore } from '@truecourse/shared';
 import type { CodebaseScan, DetectionSignal } from '../types.js';
 

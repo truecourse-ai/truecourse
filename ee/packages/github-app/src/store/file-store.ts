@@ -16,6 +16,7 @@ import type {
   RepoLinkRecord,
   BaselineRecord,
   GateRunRecord,
+  PrRecord,
 } from './types.js';
 
 function atomicWriteJson(file: string, data: unknown): void {
@@ -90,12 +91,15 @@ export class FileGateStore implements GateStore {
 
     const baselines = this.readBaselines();
     const runs = this.readRuns();
+    const prs = this.readPrs();
     for (const name of removed) {
       delete baselines[name];
       delete runs[name];
+      delete prs[name];
     }
     atomicWriteJson(this.file('baselines.json'), baselines);
     atomicWriteJson(this.file('runs.json'), runs);
+    atomicWriteJson(this.file('prs.json'), prs);
   }
 
   async linkInstallationToWorkspace(
@@ -180,5 +184,23 @@ export class FileGateStore implements GateStore {
 
   async listRuns(repoFullName: string, limit = 50): Promise<GateRunRecord[]> {
     return (this.readRuns()[repoFullName] ?? []).slice(0, limit);
+  }
+
+  // --- PR state (keyed by repoFullName → { prNumber → PrRecord }) ---
+
+  private readPrs(): Record<string, Record<string, PrRecord>> {
+    return readJson(this.file('prs.json'), {});
+  }
+
+  async upsertPr(rec: PrRecord): Promise<void> {
+    const all = this.readPrs();
+    const byNumber = all[rec.repoFullName] ?? {};
+    byNumber[String(rec.prNumber)] = rec;
+    all[rec.repoFullName] = byNumber;
+    atomicWriteJson(this.file('prs.json'), all);
+  }
+
+  async listPrs(repoFullName: string): Promise<PrRecord[]> {
+    return Object.values(this.readPrs()[repoFullName] ?? {});
   }
 }
