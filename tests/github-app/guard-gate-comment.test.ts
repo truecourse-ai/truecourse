@@ -6,7 +6,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   GUARD_GATE_CHECK_NAME,
-  GATE_CHECK_NAME,
   GUARD_GATE_KILL_SWITCH_ENV,
   GUARD_GATE_MAX_ANNOTATIONS,
   guardGateCheckOutput,
@@ -46,9 +45,8 @@ function annotation(i: number): GuardStaleAnnotation {
 }
 
 describe('guardGateCheckOutput', () => {
-  it('the guard gate posts under the same Check name as the drift gate', () => {
-    expect(GUARD_GATE_CHECK_NAME).toBe(GATE_CHECK_NAME);
-    expect(GUARD_GATE_CHECK_NAME).toBe('TrueCourse / drift');
+  it('the guard gate posts under its own Check name', () => {
+    expect(GUARD_GATE_CHECK_NAME).toBe('TrueCourse / Guard');
   });
 
   it('success reads cleanly and counts resolved scenarios', () => {

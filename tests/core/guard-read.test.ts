@@ -2,7 +2,7 @@
  * Guard read-drivers over a HOSTED (PgGuardStore) store — the commit-aware,
  * de-filesystem behavior issue 07 adds. Exercises the driver functions directly
  * against a PGlite-backed guard store (+ Pg spec store for corpus presence, and a
- * File verify store for the baseline-commit fallback), with an injected repo-doc
+ * analyze LATEST for the baseline-commit fallback), with an injected repo-doc
  * reader so heading joins never touch a local working tree.
  *
  * OSS (FileGuardStore) behavior is regression-covered by tests/server/guard-routes
@@ -24,7 +24,7 @@ import {
   type RepoRef,
 } from '../../packages/core/src/lib/guard-store';
 import { setSpecStore, resetSpecStore } from '../../packages/core/src/lib/spec-store';
-import { writeVerifyLatest } from '../../packages/core/src/lib/verify-store';
+import { writeLatest } from '../../packages/core/src/lib/analysis-store';
 import { setRepoDocReader } from '../../packages/core/src/lib/repo-doc-reader';
 import {
   listGuardScenarios,
@@ -128,19 +128,34 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
     expect(b.scenarios.map((s) => s.id).sort()).toEqual(['b1', 'b2']);
   });
 
-  it('with no ref, resolves the verify baseline commit (never the newest stored set)', async () => {
-    // The verify baseline lives on the File verify store, keyed by a temp repo path.
+  it('with no ref, resolves the analyze baseline commit (never the newest stored set)', async () => {
+    // The baseline anchor is the analyze LATEST, keyed by a temp repo path.
     const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-baseline-'));
     try {
-      await writeVerifyLatest(tmpRepo, {
+      await writeLatest(tmpRepo, {
         head: 'run.json',
-        run: { id: 'r1', verifiedAt: '2026-07-01T00:00:00.000Z', branch: 'main', commitHash: 'baseline9999', contractsDir: '.', codeDir: '.' },
-        artifactCount: 0,
-        extractedOperationCount: 0,
-        drifts: [],
-        resolverErrors: [],
-        unresolvedRefs: [],
-        summary: { total: 0, bySeverity: { info: 0, low: 0, medium: 0, high: 0, critical: 0 } },
+        analysis: {
+          id: 'r1',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          branch: 'main',
+          commitHash: 'baseline9999',
+          architecture: 'monolith',
+          metadata: { isDiffAnalysis: false },
+          status: 'completed',
+        },
+        graph: {
+          services: [],
+          serviceDependencies: [],
+          layers: [],
+          modules: [],
+          methods: [],
+          moduleDeps: [],
+          methodDeps: [],
+          databases: [],
+          databaseConnections: [],
+          flows: [],
+        },
+        violations: [],
       });
       // A newest set at a PR head, and the real baseline set — no ref must pick baseline.
       const srcSave = async (commit: string, ids: Array<[string, string]>) => {
@@ -181,7 +196,7 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
 
 describe('hosted repo-level view with NO baseline — empty, never the newest set', () => {
   it('listGuardScenarios with no ref and no baseline returns empty (a PR set must not leak)', async () => {
-    // Only a PR head's set is stored; the repo has no verify baseline yet.
+    // Only a PR head's set is stored; the repo has no analyze baseline yet.
     await saveSet('prheadonly12', [['pr1', 'alpha']]);
     const inv = await listGuardScenarios(REPO);
     expect(inv).toEqual({ recipe: null, scenarios: [] });

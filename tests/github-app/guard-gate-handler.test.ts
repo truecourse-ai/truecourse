@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { FileGateStore, GATE_CHECK_NAME } from '../../ee/packages/github-app/src/index';
+import { FileGateStore, GUARD_GATE_CHECK_NAME } from '../../ee/packages/github-app/src/index';
 import {
   handlePullRequestGuardGate,
   type GuardGateHandlerDeps,
@@ -95,7 +95,7 @@ function depsWith(
 }
 
 describe('handlePullRequestGuardGate', () => {
-  it('opens an in-progress drift Check and enqueues the resolved gate request', async () => {
+  it('opens an in-progress guard Check and enqueues the resolved gate request', async () => {
     const { octokit, calls } = makeOctokit();
     const { deps, enqueued } = depsWith(octokit);
 
@@ -103,7 +103,7 @@ describe('handlePullRequestGuardGate', () => {
 
     expect(calls.checkStart).toHaveLength(1);
     expect(calls.checkStart[0]).toMatchObject({
-      name: GATE_CHECK_NAME,
+      name: GUARD_GATE_CHECK_NAME,
       head_sha: 'headsha',
       status: 'in_progress',
     });

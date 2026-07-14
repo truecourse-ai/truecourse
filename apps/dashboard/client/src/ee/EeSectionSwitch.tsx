@@ -7,7 +7,7 @@
  */
 
 import { FlaskConical, Network } from 'lucide-react';
-import { getSection, type DashboardSection, type NavIcon } from '@/navigation/registry';
+import type { DashboardSection, NavIcon } from '@/navigation/registry';
 
 const SEGMENTS: { id: DashboardSection; label: string; icon: NavIcon }[] = [
   { id: 'guard', label: 'Guard', icon: FlaskConical },
@@ -21,13 +21,7 @@ export function EeSectionSwitch({
   section: DashboardSection;
   onSectionChange: (next: DashboardSection) => void;
 }) {
-  // Registry-hidden lenses are offered only while active (a deep link can land
-  // there and needs a way out).
-  const segments = SEGMENTS.filter(
-    (seg) => !getSection(seg.id)?.hidden || seg.id === section,
-  );
-  // A single lens needs no switch.
-  if (segments.length < 2) return null;
+  const segments = SEGMENTS;
   return (
     <div
       role="tablist"

@@ -201,14 +201,15 @@ export async function registerGithubApp(
       return null;
     });
 
-  // The spec-change guard checkbox shares the in-flight sets with the gate/offer
-  // flows (distinct key namespaces) and enqueues onto the guard spec-regen queue.
+  // The spec-change guard checkbox keeps its own in-flight sets (offer path
+  // keyed per repo#pr, checkbox path per comment id) and enqueues onto the
+  // guard spec-regen queue.
   const specOfferDeps = {
     store,
     octokitFor: offerDeps.octokitFor,
     enqueueGuardSpecRegen,
-    offerInFlight: offerDeps.offerInFlight,
-    inFlight: offerDeps.inFlight,
+    offerInFlight: new Set<string>(),
+    inFlight: new Set<number>(),
   };
 
   // Public: GitHub posts here with no session; verified by HMAC signature.

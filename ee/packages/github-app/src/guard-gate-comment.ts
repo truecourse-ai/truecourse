@@ -7,12 +7,11 @@
  */
 
 import type { GuardScenarioResult } from '@truecourse/shared';
-import { GATE_CHECK_NAME } from './gate-comment.js';
 import type { CheckAnnotation } from './octokit.js';
 import type { GuardGateDecision } from './guard-gate.js';
 
-/** The guard gate completes the same Check as the drift gate — one verdict per PR. */
-export const GUARD_GATE_CHECK_NAME = GATE_CHECK_NAME;
+/** The guard gate's own Check — one verdict per PR, alongside Code Quality. */
+export const GUARD_GATE_CHECK_NAME = 'TrueCourse / Guard';
 
 /** Inline warning on a stale/orphaned scenario's bound doc section — a
  *  `CheckAnnotation` pinned to warning level (stale bindings never fail),

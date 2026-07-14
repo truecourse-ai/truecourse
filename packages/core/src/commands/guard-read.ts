@@ -73,10 +73,10 @@ import {
 } from '../lib/guard-store.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
-import { readVerifyState } from './spec-in-process.js'
+import { readLatest } from '../lib/analysis-store.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
-// the store directly), mirroring how verify routes read through spec-in-process.
+// the store directly), mirroring how spec routes read through spec-in-process.
 // These pass-through delegators are the file store in OSS, Postgres in EE.
 export {
   readGuardLatest,
@@ -92,12 +92,12 @@ export {
 // Commit resolution (EE) — the guard analogue of the BL-Drift diff base.
 // ---------------------------------------------------------------------------
 
-/** The verify baseline commit — the default-branch anchor guard reads fall back
- *  to when no explicit ref is given (EE). Mirrors `./diff-base` `baselineCommit`;
- *  the verify store is the only one with an `isBaseline` anchor a PR-head scan
- *  can't pollute. `undefined` when no baseline exists yet. */
+/** The baseline commit — the default-branch anchor guard reads fall back to
+ *  when no explicit ref is given (EE): the analyze LATEST's commit (the same
+ *  anchor spec-in-process uses for the baseline corpus). `undefined` when no
+ *  baseline exists yet. */
 async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
-  return (await readVerifyState(repoKey))?.commitHash ?? undefined
+  return (await readLatest(repoKey))?.analysis.commitHash ?? undefined
 }
 
 /**
