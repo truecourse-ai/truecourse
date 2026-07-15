@@ -48,6 +48,7 @@ import {
   type ValidationIssue,
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
+import { readProjectConfig, updateProjectConfig } from '../config/project-config.js';
 import { openConflicts } from '@truecourse/shared';
 import {
   agentTransport,
@@ -1666,4 +1667,29 @@ export async function removeConflictResolution(
   const next = applyRemoveConflictResolution(await loadDecisions(repoRoot, opts), input);
   await storeDecisions(repoRoot, next, opts);
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// Spec discovery scope (`spec.include` / `spec.exclude` in the per-repo config)
+//
+// Routed through the RepoConfigStore seam (file in OSS, Postgres in EE) so the
+// CLI and dashboard agree. Discovery reads these globs from disk itself
+// (`@truecourse/shared`'s loadSpecScope / loadSpecExclude), so writing them here
+// is all that's needed for the next curate to honor them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Append subtree-exclude globs to the repo's `spec.exclude` config — dedup,
+ * order-preserving, keeping any existing `spec.include`. Symmetric to
+ * `spec.include`: discovery subtracts these from the universe after include-scope,
+ * before relevance. Does NOT re-curate (the caller re-scans once). Returns the
+ * merged glob list.
+ */
+export async function addSpecExcludeGlobs(repoRoot: string, globs: string[]): Promise<string[]> {
+  const clean = globs.map((g) => g.trim()).filter(Boolean);
+  const current = await readProjectConfig(repoRoot);
+  const merged = [...(current.spec?.exclude ?? [])];
+  for (const g of clean) if (!merged.includes(g)) merged.push(g);
+  await updateProjectConfig(repoRoot, { spec: { ...current.spec, exclude: merged } });
+  return merged;
 }

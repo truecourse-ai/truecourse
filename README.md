@@ -277,19 +277,23 @@ the recipe fingerprint, so the dashboard flags runs made under an older recipe.
 ```bash
 # Spec consolidation (docs → curated corpus)
 truecourse spec scan                              # Curate docs into corpus.json (areas + overlap flags)
-truecourse spec status                            # Summary: docs, areas, open vs resolved overlaps
+truecourse spec status [--json]                   # Summary: docs, areas, open vs resolved overlaps
 
 # Conflict resolution — flagged within-area overlaps
 # (agent-friendly; also available in the dashboard Spec tab)
-truecourse spec conflicts list                    # List flagged within-area overlaps
-truecourse spec conflicts show <area>             # An area's overlapping docs with prose excerpts
+truecourse spec conflicts list [--json]           # List flagged within-area overlaps (numbered)
+truecourse spec conflicts show <n|area> [--json]  # A conflict's disputed section passages with path:line anchors
 truecourse spec conflicts resolve <n|area> \      # Pick a side or dismiss a detector false-positive
   --right <doc> | --dismiss [--note <text>]
+truecourse spec conflicts resolve 2 5 7 --dismiss # Bulk-dismiss several conflicts by index
+truecourse spec conflicts resolve --area core/x --dismiss   # Dismiss every conflict in an area
+truecourse spec conflicts resolve <n> --recommended # Apply the verify pass's recommendation (pick/dismiss; fix-doc prints guidance)
 truecourse spec docs list                         # List the kept (corpus) docs + area tags
-truecourse spec docs skipped                      # Docs the relevance filter excluded
+truecourse spec docs skipped                      # Docs the relevance filter excluded (incl. glob-excluded)
 truecourse spec docs include <path>               # Force-include a skipped doc (re-scans)
 truecourse spec docs uninclude <path>             # Remove a force-include override
 truecourse spec docs exclude <path>               # Force-exclude a kept doc (re-scans)
+truecourse spec docs exclude --glob '<pattern>'   # Exclude a whole subtree (config spec.exclude; repeatable)
 truecourse spec docs unexclude <path>             # Remove a force-exclude override
 
 # Guard — spec-section-bound scenario tests (author once, run deterministically)
@@ -434,6 +438,21 @@ scripts/ingest-epub.js
 ```
 
 Patterns are anchored to the file's location, so `src/generated/` matches the top-level directory only; use `**/generated/` to match at any depth.
+
+### Scoping the spec scan
+
+Doc discovery for `spec scan` has two additional per-repo knobs in `.truecourse/config.json` under `spec` (both gitignore-style glob lists), applied in order: **include-scope** selects the universe, then **exclude** subtracts a subtree from it, then `.truecourseignore` and the relevance filter run.
+
+```jsonc
+{
+  "spec": {
+    "include": ["docs/**", "SPEC.md"],   // opt-in: only these enter the scan (absent/[] = everything)
+    "exclude": ["docs/legacy/**"]         // subtract: drop these subtrees from the universe
+  }
+}
+```
+
+Write an exclude glob without editing the file with `truecourse spec docs exclude --glob '<pattern>'` (repeatable). Glob-excluded docs are reported by `spec scan` (an `exclude` summary line) and `spec docs skipped`. Per-doc `spec docs exclude <path>` (a `manualExcludes` decision) is unchanged and independent of the glob exclude.
 
 ## Telemetry
 

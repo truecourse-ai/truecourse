@@ -24,6 +24,11 @@
  * markdown matching one of its globs enters the universe. `.truecourseignore`
  * is still applied first, so it always subtracts — an include glob can never
  * resurrect an ignored path. Absent/empty scope → everything (unchanged).
+ *
+ * Subtree exclude: when `spec.exclude` is set, its globs SUBTRACT from the
+ * universe after include-scope (and `.truecourseignore`), before relevance — a
+ * matching doc is dropped and never becomes a candidate. Absent/empty → nothing
+ * dropped (unchanged).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -33,8 +38,10 @@ import path from 'node:path';
 import {
   loadTcIgnore,
   loadSpecScope,
+  loadSpecExclude,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
   type SpecScope,
+  type SpecExclude,
 } from '@truecourse/shared';
 import type { DocKind } from './types.js';
 
@@ -91,6 +98,14 @@ export interface DiscoveryOptions {
    * here so discovery and their own scope checks agree without re-reading.
    */
   scope?: SpecScope;
+  /**
+   * Subtree-exclude override. Defaults to the repo's `spec.exclude` read from
+   * `.truecourse/config.json`. Applied as a subtraction after include-scope,
+   * before relevance. Callers that already loaded it pass it here so discovery
+   * and their own checks agree without re-reading; pass an inactive exclude
+   * (`buildSpecExclude(undefined)`) to walk the pre-exclude universe.
+   */
+  exclude?: SpecExclude;
 }
 
 /**
@@ -107,6 +122,9 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
   // Opt-in include-scope (`spec.include`). Inactive ⇒ everything, and the guard
   // below is skipped, so a no-config repo walks byte-identically to before.
   const scope = opts.scope ?? loadSpecScope(rootDir);
+  // Subtree exclude (`spec.exclude`) — subtracts from the universe after the
+  // include-scope selects. Inactive ⇒ drops nothing (unchanged).
+  const exclude = opts.exclude ?? loadSpecExclude(rootDir);
 
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -146,13 +164,15 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
       }
       if (!entry.isFile()) continue;
       if (path.extname(entry.name).toLowerCase() !== '.md') continue;
-      // Include-scope: when configured, only markdown matching a scope glob
-      // enters the universe. `.truecourseignore` already subtracted above, so a
-      // scope glob can never resurrect an ignored path. Out-of-scope files are
+      // Include-scope + subtree exclude: when configured, only markdown matching
+      // a scope glob enters the universe, and any matching an exclude glob is then
+      // subtracted from it. `.truecourseignore` already subtracted above, so a
+      // scope glob can never resurrect an ignored path. Files dropped here are
       // never candidates — they don't appear in skippedDocs either.
-      if (scope.active) {
+      if (scope.active || exclude.active) {
         const rel = path.relative(rootDir, full).split(path.sep).join('/');
-        if (!scope.includes(rel)) continue;
+        if (scope.active && !scope.includes(rel)) continue;
+        if (exclude.active && exclude.excludes(rel)) continue;
       }
 
       const candidate = makeCandidate(full, rootDir, previewLines, opts);

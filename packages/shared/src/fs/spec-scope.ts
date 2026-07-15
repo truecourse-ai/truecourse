@@ -1,18 +1,25 @@
 /**
- * `spec.include` — an OPT-IN scope for spec-doc discovery, the inverse of
- * `.truecourseignore`. Configured per-repo in `.truecourse/config.json` under
- * `spec.include` (an array of gitignore-style globs). When present and non-empty,
- * only markdown files matching at least one glob enter the scan universe; when
- * absent or empty, discovery looks at everything (the default, today's behavior).
+ * `spec.include` / `spec.exclude` — the two per-repo scope knobs for spec-doc
+ * discovery, configured in `.truecourse/config.json` under `spec` (arrays of
+ * gitignore-style globs).
  *
- * `.truecourseignore` is ALWAYS applied on top — the ignore file SUBTRACTS after
- * the include selects, so an include glob can never resurrect an ignored path.
- * (Discovery enforces that ordering; this module only answers "is this path in
- * the include scope?".)
+ * `spec.include` is an OPT-IN scope, the inverse of `.truecourseignore`: when
+ * present and non-empty, only markdown matching at least one glob enters the scan
+ * universe; when absent or empty, discovery looks at everything (the default).
  *
- * The glob engine is the same `ignore` package `.truecourseignore` uses, so both
- * scopes share one consistent gitignore-glob semantics. Read the config once
- * (`loadSpecScope`) and reuse the matcher across the whole walk.
+ * `spec.exclude` is its symmetric subtraction: a subtree glob list that DROPS
+ * matching markdown from the universe. Discovery applies it after include-scope
+ * (and `.truecourseignore`), before relevance — so it removes docs the scope
+ * selected, never resurrects ignored ones.
+ *
+ * `.truecourseignore` is ALWAYS applied on top of the include select — the ignore
+ * file SUBTRACTS after the include selects, so an include glob can never resurrect
+ * an ignored path. (Discovery enforces that ordering; this module only answers "is
+ * this path in the include scope / dropped by the exclude?".)
+ *
+ * The glob engine is the same `ignore` package `.truecourseignore` uses, so every
+ * scope shares one consistent gitignore-glob semantics. Read the config once
+ * (`loadSpecScope` / `loadSpecExclude`) and reuse the matcher across the whole walk.
  */
 
 import fs from 'node:fs';
@@ -77,5 +84,58 @@ export function loadSpecScope(rootDir: string): SpecScope {
     return buildSpecScope(parsed?.spec?.include);
   } catch {
     return buildSpecScope(undefined);
+  }
+}
+
+export interface SpecExclude {
+  /**
+   * True when an exclude list is configured (at least one non-empty glob).
+   * False → the exclude drops nothing and `excludes()` is always false.
+   */
+  active: boolean;
+  /** The configured globs, cleaned. Empty when inactive. */
+  globs: string[];
+  /**
+   * True when repo-relative `relPath` is dropped by the exclude. Always false
+   * when inactive (no exclude configured).
+   */
+  excludes(relPath: string): boolean;
+}
+
+/**
+ * Build an exclude matcher from a list of subtree globs. An empty/absent list (or
+ * one that is all blanks) yields an INACTIVE exclude — nothing is dropped, exactly
+ * as if no `spec.exclude` were configured.
+ */
+export function buildSpecExclude(globs: unknown): SpecExclude {
+  const clean = normalizeGlobs(globs);
+  if (clean.length === 0) {
+    return { active: false, globs: [], excludes: () => false };
+  }
+  const ig: Ignore = ignore().add(clean);
+  return {
+    active: true,
+    globs: clean,
+    excludes(relPath: string): boolean {
+      const rel = relPath.split(path.sep).join('/');
+      // Empty (the root itself) or escaping the root → never dropped.
+      if (rel === '' || rel.startsWith('..')) return false;
+      return ig.ignores(rel);
+    },
+  };
+}
+
+/**
+ * Read `spec.exclude` from `<rootDir>/.truecourse/config.json` and build the
+ * exclude. A missing / unreadable / malformed config, or one without a non-empty
+ * `spec.exclude`, yields an inactive exclude (nothing is dropped).
+ */
+export function loadSpecExclude(rootDir: string): SpecExclude {
+  try {
+    const file = path.join(rootDir, '.truecourse', 'config.json');
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as { spec?: { exclude?: unknown } };
+    return buildSpecExclude(parsed?.spec?.exclude);
+  } catch {
+    return buildSpecExclude(undefined);
   }
 }
