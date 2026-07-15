@@ -27,6 +27,8 @@ import {
   filterByRelevance,
   tagDocs,
   curate,
+  OVERLAP_DETECTOR_SYSTEM_PROMPT,
+  OVERLAP_WINDOW_CHARS,
 } from '../../packages/spec-consolidator/src/index.js';
 
 // A fixed price table so cost assertions are deterministic (no network).
@@ -61,7 +63,7 @@ describe('estimateStageTokens', () => {
 
   it('drops zero-call stages', () => {
     const est = estimateStageTokens([
-      { stage: 'relation', model: 'sonnet', calls: 0, avgInputTokens: 50, avgOutputTokens: 10 },
+      { stage: 'vocab', model: 'sonnet', calls: 0, avgInputTokens: 50, avgOutputTokens: 10 },
     ]);
     expect(est.stages).toEqual([]);
     expect(est.totalEstimatedTokens).toBe(0);
@@ -157,6 +159,63 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
   });
 
+  it('scan estimate: overlap calls scale by the per-pair window factor', async () => {
+    // Small docs — a single OVERLAP_WINDOW_CHARS window each → per-pair factor 1.
+    const smallDir = path.join(repo, 'docs');
+    fs.mkdirSync(smallDir, { recursive: true });
+    fs.writeFileSync(path.join(smallDir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body against the schema. '.repeat(40));
+    fs.writeFileSync(path.join(smallDir, 'b.md'), '# Auth\n' + 'Every session token is signed and expires after one hour. '.repeat(40));
+    const smallEst = await estimateScanTokens(repo);
+    const smallOverlap = smallEst.stages!.find((s) => s.stage === 'overlap')!;
+    expect(smallOverlap.calls).toBeGreaterThan(0);
+
+    // Large docs — several OVERLAP_WINDOW_CHARS windows each → factor > 1.
+    const bigRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-big-'));
+    try {
+      const bigDir = path.join(bigRepo, 'docs');
+      fs.mkdirSync(bigDir, { recursive: true });
+      fs.writeFileSync(path.join(bigDir, 'a.md'), '# Endpoint Reference\n' + 'Each endpoint validates its request body against the schema. '.repeat(1300));
+      fs.writeFileSync(path.join(bigDir, 'b.md'), '# Auth Reference\n' + 'Every session token is signed and expires after one hour. '.repeat(1300));
+
+      const discovered = discoverDocs(bigRepo);
+      const avgDocChars = Math.round(discovered.reduce((n, d) => n + d.size, 0) / discovered.length);
+      // The FULL window matrix — the estimate prices complete coverage, uncapped.
+      const factor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
+      expect(factor).toBeGreaterThan(1); // the fixture must span multiple windows
+
+      const bigEst = await estimateScanTokens(bigRepo);
+      const bigOverlap = bigEst.stages!.find((s) => s.stage === 'overlap')!;
+
+      // Both repos hold the same 2-doc pair count; only the large run multiplies each
+      // pair by the window factor.
+      expect(bigOverlap.calls).toBe(smallOverlap.calls * factor);
+      // Each call's body is clamped to one OVERLAP_WINDOW_CHARS window, so per-call
+      // tokens stay well below what the full multi-window doc size would imply.
+      const perCallTokens = bigOverlap.estimatedTokens / bigOverlap.calls;
+      const unclampedInputTokens = tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, avgDocChars * 2);
+      expect(perCallTokens).toBeLessThan(unclampedInputTokens);
+    } finally {
+      fs.rmSync(bigRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('scan estimate: the verify stage scales with the flagged-pair heuristic', async () => {
+    const dir = path.join(repo, 'docs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body. '.repeat(40));
+    fs.writeFileSync(path.join(dir, 'b.md'), '# Auth\n' + 'Every session token is signed. '.repeat(40));
+
+    const est = await estimateScanTokens(repo);
+    const overlap = est.stages!.find((s) => s.stage === 'overlap')!;
+    const verify = est.stages!.find((s) => s.stage === 'verifyOverlap')!;
+    expect(verify).toBeTruthy();
+    // Small docs → per-pair window factor 1, so overlap.calls IS the pair count.
+    // Verify runs on a 0.15 fraction of the flagged pairs, capped at every pair.
+    expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
+    expect(verify.callsRange?.high).toBe(overlap.calls);
+    expect(verify.model).toBe('opus');
+  });
+
   it('scan estimate honors spec.include and agrees with discovery', async () => {
     // In-scope + out-of-scope markdown, plus a config that scopes to docs/**.
     const docsDir = path.join(repo, 'docs');
@@ -222,7 +281,6 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       decisions: decisions as any,
       disableVocabNormalization: true,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       relevanceRunner: async ({ doc }) => {
         rel++;
         return { path: doc.path, include: doc.path === 'docs/keep.md', reason: 'stub' };

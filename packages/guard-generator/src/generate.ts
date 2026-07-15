@@ -14,8 +14,9 @@
  *               evidence; still-failing candidates are birth findings, never kept.
  *   6. manifest rewrite the binding record with the settled outcomes.
  *
- * Unchanged sections are skipped entirely; api/web/tui/untestable and no-claim
- * sections land in the result + manifest as visible coverage gaps.
+ * Unchanged sections are skipped entirely; awaiting-driver (api/web/tui/library),
+ * untestable, and no-claim sections land in the result + manifest as visible
+ * coverage gaps.
  */
 
 import { createHash } from 'node:crypto'
@@ -829,10 +830,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (fidelityRunner && persistedHere.length > 0) {
       fidelityPlanned += persistedHere.length
       options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
+      // The green candidates are reviewed independently — fan them through the
+      // shared LLM pool (bounded by `TRUECOURSE_MAX_CONCURRENCY`) instead of one at
+      // a time; verdicts are consumed in candidate order so findings stay stable.
+      const reviews = await Promise.all(
+        persistedHere.map((c) =>
+          limit(async () => {
+            const review = await reviewFidelity(repoRoot, c, fidelityRunner)
+            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+            return { c, review }
+          }),
+        ),
+      )
       const faithful: BirthCandidate[] = []
-      for (const c of persistedHere) {
-        const review = await reviewFidelity(repoRoot, c, fidelityRunner)
-        options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+      for (const { c, review } of reviews) {
         if ('error' in review) {
           localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
         } else if (review.verdict === 'flagged') {

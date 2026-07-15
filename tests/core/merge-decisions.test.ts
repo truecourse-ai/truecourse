@@ -9,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   mergeDecisions,
-  addRelation,
   addManualInclude,
   getDecisions,
 } from '../../packages/core/src/commands/spec-in-process';
@@ -20,53 +19,10 @@ const empty: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
 };
 
 const decisions = (over: Partial<DecisionsFile>): DecisionsFile => ({ ...empty, ...over });
-
-describe('mergeDecisions — relations', () => {
-  it('overlay relation replaces the base one for the same pair + scope', () => {
-    const base = decisions({
-      relations: [{ type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/x', detectedFrom: 'llm' }],
-    });
-    const overlay = decisions({
-      relations: [{ type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'core/x', detectedFrom: 'manual' }],
-    });
-    const merged = mergeDecisions(base, overlay);
-    expect(merged.relations).toEqual([
-      { type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'core/x', detectedFrom: 'manual' },
-    ]);
-  });
-
-  it('replacement is order-insensitive on the doc pair', () => {
-    const base = decisions({ relations: [{ type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/x' }] });
-    const overlay = decisions({ relations: [{ type: 'keep-both', older: 'b.md', newer: 'a.md', scope: 'core/x' }] });
-    const merged = mergeDecisions(base, overlay);
-    expect(merged.relations).toHaveLength(1);
-    expect(merged.relations[0]).toMatchObject({ type: 'keep-both', older: 'b.md', newer: 'a.md' });
-  });
-
-  it('keeps base relations for other pairs and other scopes', () => {
-    const base = decisions({
-      relations: [
-        { type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/x' },
-        { type: 'replace', older: 'a.md', newer: 'b.md', scope: 'core/y' },
-        { type: 'replace', older: 'c.md', newer: 'd.md' },
-      ],
-    });
-    const overlay = decisions({ relations: [{ type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'core/x' }] });
-    const merged = mergeDecisions(base, overlay);
-    // core/x replaced; core/y and the c/d pair survive.
-    expect(merged.relations).toHaveLength(3);
-    expect(merged.relations.filter((r) => r.older === 'a.md' && r.scope === 'core/x')).toEqual([
-      { type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'core/x' },
-    ]);
-    expect(merged.relations.some((r) => r.scope === 'core/y')).toBe(true);
-    expect(merged.relations.some((r) => r.older === 'c.md')).toBe(true);
-  });
-});
 
 describe('mergeDecisions — includes/excludes (overlay verb wins per path)', () => {
   it('unions includes and excludes across scopes', () => {
@@ -121,13 +77,11 @@ describe('mergeDecisions — empty overlay is a no-op', () => {
     const base = decisions({
       manualIncludes: ['a.md'],
       manualExcludes: ['b.md'],
-      relations: [{ type: 'replace', older: 'a.md', newer: 'b.md' }],
       manualAreas: [{ doc: 'a.md', areas: ['core/x'] }],
     });
     const merged = mergeDecisions(base, empty);
     expect(merged.manualIncludes).toEqual(['a.md']);
     expect(merged.manualExcludes).toEqual(['b.md']);
-    expect(merged.relations).toHaveLength(1);
     expect(merged.manualAreas).toEqual([{ doc: 'a.md', areas: ['core/x'] }]);
   });
 });
@@ -145,9 +99,6 @@ describe('PR-scoped decisions are enterprise-only on the file store', () => {
   });
 
   it('a mutation helper with a PR opt rejects (no overlay dimension in OSS)', async () => {
-    await expect(
-      addRelation(repo, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 1 }),
-    ).rejects.toThrow(/enterprise store/);
     await expect(addManualInclude(repo, 'a.md', { pr: 1 })).rejects.toThrow(/enterprise store/);
   });
 
@@ -156,8 +107,8 @@ describe('PR-scoped decisions are enterprise-only on the file store', () => {
   });
 
   it('getDecisions without a PR opt is the repo row (unchanged OSS behavior)', async () => {
-    await addRelation(repo, { type: 'replace', older: 'a.md', newer: 'b.md' });
+    await addManualInclude(repo, 'a.md');
     const d = await getDecisions(repo);
-    expect(d.relations).toHaveLength(1);
+    expect(d.manualIncludes).toEqual(['a.md']);
   });
 });

@@ -224,7 +224,7 @@ function resolveSectionCoverage(
   }
 
   // 3. A coverage gap from the last generate. An awaiting-driver gap paints under
-  // its driver id (api/web/tui) so the drivers stay separate; other kinds paint as
+  // its driver id (api/web/tui/library) so the drivers stay separate; other kinds paint as
   // themselves. (Tolerant of an old-shape in-memory gap whose kind IS a driver id.)
   if (gap) {
     const status: GuardSectionCoverageStatus =

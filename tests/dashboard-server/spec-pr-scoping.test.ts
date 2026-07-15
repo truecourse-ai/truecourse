@@ -254,34 +254,11 @@ describe('mutation routes — PR scope', () => {
     expect(tasks).toEqual([]);
   });
 
-  it('POST /spec/relations?pr writes a PR-scoped relation and returns the corpus payload', async () => {
-    vi.mocked(recuratePrCorpus).mockResolvedValueOnce({
-      corpus: { docs: [{ ref: 'docs/v.md' }] } as never,
-      openConflicts: 0,
-    });
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .query({ pr: 7, ref: 'head1' })
-      .send({ type: 'precedence', older: 'a.md', newer: 'b.md', scope: 'p/c' })
-      .expect(200);
-    // PR-scoped relations return the full corpus payload (not the repo `{relations}`)
-    expect(res.body.userRelations).toHaveLength(1);
-    expect(res.body.corpusCommit).toBe('head1');
-    // repo row untouched
-    expect((await getDecisions(fixture.repoPath)).relations).toEqual([]);
-    expect((await getDecisions(fixture.repoPath, { pr: 7 })).relations).toHaveLength(1);
-  });
-
   it('?pr without ref → 400', async () => {
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/includes`)
       .query({ pr: 7 })
       .send({ ref: 'docs/v.md' })
-      .expect(400);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .query({ pr: 7 })
-      .send({ type: 'precedence', older: 'a.md', newer: 'b.md' })
       .expect(400);
     expect(vi.mocked(recuratePrCorpus)).not.toHaveBeenCalled();
   });

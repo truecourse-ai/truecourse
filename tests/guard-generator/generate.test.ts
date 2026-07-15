@@ -134,6 +134,30 @@ describe('generateGuards — extraction honesty + manifest', () => {
     // Settled with an api classification — a visible, recorded gap.
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.classification).toMatchObject({ driver: 'api' })
   })
+
+  it('records a library-driver claim (programmatic API) as a coverage gap, not a scenario', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: extractBy({
+        version: [{ driver: 'library', reason: 'register() hooks the loader when imported from user code' }],
+        background: { untestable: 'history' },
+      }),
+      generateRunner: authorBy({}),
+    })
+
+    // No scenario is authored for an import-by-name programmatic API until the
+    // library driver ships — the section surfaces as an honest awaiting gap.
+    expect(res.written).toEqual([])
+    const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
+    expect(gap.kind).toBe('awaiting-driver')
+    expect(gap.driver).toBe('library')
+    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.classification).toMatchObject({ driver: 'library' })
+  })
 })
 
 describe('generateGuards — blocked-on world-state gaps', () => {

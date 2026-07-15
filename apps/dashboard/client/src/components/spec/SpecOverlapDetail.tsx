@@ -5,10 +5,9 @@
  * verdict on the disagreement — "<docA> is right" / "<docB> is right" (the loser's
  * disputed claim is suppressed at guard generate) or "Not a real conflict"
  * (dismissal). Verdicts write to decisions.json instantly (OSS, no re-curate) and
- * render resolved-in-place with an Undo. Doc→doc relations never resolve a
- * conflict — they are `spec chains`' doc-lifecycle tool. The other resolution
- * path — fixing the doc itself in your editor — is a one-line hint: the
- * docsChanged staleness dot picks the edit up. Opened from the Spec tab's left nav.
+ * render resolved-in-place with an Undo. The other resolution path — fixing the
+ * doc itself in your editor — is a one-line hint: the docsChanged staleness dot
+ * picks the edit up. Opened from the Spec tab's left nav.
  */
 
 import { useEffect, useMemo, useState } from 'react';

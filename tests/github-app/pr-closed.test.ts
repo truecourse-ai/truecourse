@@ -21,7 +21,6 @@ import {
 // reads through (it imports core via `@truecourse/core/...`, not the src path).
 import {
   getDecisions,
-  addRelation,
   addManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import {
@@ -75,17 +74,17 @@ const guardClaim = (title: string): GuardDismissedClaim => ({
 
 describe('handlePullRequestClosed', () => {
   it('merged: promotes the spec + guard overlays onto the repo row and drops them', async () => {
-    await addRelation(REPO, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 7 });
+    await addManualInclude(REPO, 'a.md', { pr: 7 });
     await dismissGuardClaim(REPO, guardClaim('pr-dismissal'), { pr: 7 });
     // Repo rows are still empty before merge.
-    expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
     expect((await getGuardDecisions(REPO)).dismissedClaims).toEqual([]);
 
     await handlePullRequestClosed(closedPayload(7, true));
 
-    // Spec repo row now carries the promoted relation; the overlay is gone.
-    expect((await getDecisions(REPO)).relations).toHaveLength(1);
-    expect((await getDecisions(REPO, { pr: 7 })).relations).toHaveLength(1);
+    // Spec repo row now carries the promoted include; the overlay is gone.
+    expect((await getDecisions(REPO)).manualIncludes).toEqual(['a.md']);
+    expect((await getDecisions(REPO, { pr: 7 })).manualIncludes).toEqual(['a.md']);
     // Guard repo row now carries the promoted dismissal; the overlay is gone, so a
     // subsequent PR inherits it via the repo row.
     expect((await getGuardDecisions(REPO)).dismissedClaims.map((c) => c.title)).toEqual(['pr-dismissal']);
@@ -110,7 +109,7 @@ describe('handlePullRequestClosed', () => {
 
   it('merged with no overlay is a no-op (never throws)', async () => {
     await expect(handlePullRequestClosed(closedPayload(99, true))).resolves.toBeUndefined();
-    expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
   });
 
   it('cleans up the PR-scoped Code Quality diff on close', async () => {

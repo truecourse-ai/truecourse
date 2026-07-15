@@ -4,7 +4,7 @@
  * The engine reads docs (PRDs, ADRs, RFCs, READMEs, design notes,
  * anything markdown), tags each with the AREAS it covers, groups them,
  * flags within-area overlaps, and lets the user resolve overlaps into
- * doc→doc relations. These types are the shared contracts the corpus
+ * curation decisions. These types are the shared contracts the corpus
  * stages and the curated `decisions.json` talk through.
  */
 
@@ -48,51 +48,10 @@ export const DocKindSchema = z.enum([
 ]);
 export type DocKind = z.infer<typeof DocKindSchema>;
 
-// ---------------------------------------------------------------------------
-// Doc-level relations — the corpus redesign's resolution verbs
-// ---------------------------------------------------------------------------
-
-/**
- * The three doc→doc relations the curated-corpus pipeline resolves an
- * overlap into:
- *
- *   - "replace"    hard supersession — `newer` fully replaces `older`;
- *                  `older` is excluded from generate. Real version chains.
- *   - "precedence" soft / refine — both docs feed generate, `newer` wins
- *                  WHERE THEY OVERLAP, `older`'s unique content survives.
- *   - "keep-both"  peers — both current, combine. This is also the implicit
- *                  default when no relation is recorded, so it is rarely
- *                  stored; an explicit entry pins the intent.
- */
-export const RelationTypeSchema = z.enum(['replace', 'precedence', 'keep-both']);
-export type RelationType = z.infer<typeof RelationTypeSchema>;
-
-/**
- * A doc→doc relation. May be **area-scoped** so one doc can be
- * authoritative for one area without burying another.
- */
-export const RelationSchema = z.object({
-  type: RelationTypeSchema,
-  /** Repo-relative path / DocRef of the older / superseded doc. */
-  older: z.string(),
-  /** Repo-relative path / DocRef of the newer / authoritative doc. */
-  newer: z.string(),
-  /**
-   * Optional area id (`product/concern`) the relation is scoped to. Absent
-   * → the relation applies wherever both docs co-occur.
-   */
-  scope: z.string().optional(),
-  /** How the relation surfaced: deterministic filename, an LLM pass, or the user. */
-  detectedFrom: z.enum(['filename', 'llm', 'manual']).optional(),
-  /** Optional human-readable rationale. */
-  note: z.string().optional(),
-});
-export type Relation = z.infer<typeof RelationSchema>;
-
 /**
  * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
  * disagreement between two specific sections (plan item 31), as opposed to a
- * doc-level {@link RelationSchema} (which now lives in the chains world). Keyed by
+ * a doc-wide verdict. Keyed by
  * the *dispute identity*: the unordered doc pair plus each side's section anchor
  * and (when the detector captured one) its verbatim disputed-sentence quote. This
  * identity re-matches the same dispute across a rescan even though the corpus's
@@ -147,11 +106,14 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  * The decisions file — the user-authored curation intent the corpus
  * path reads:
  *
- *   - `relations[]`     doc→doc relations (replace/precedence/keep-both)
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
  *   - `conflictResolutions[]` section-scoped conflict verdicts (item 31)
+ *
+ * Unknown fields in an older decisions.json (e.g. a `relations` array from a
+ * version that had doc→doc relations) are dropped on parse — nothing consumes
+ * them and they are not rewritten.
  */
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
@@ -168,8 +130,6 @@ export const DecisionsFileSchema = z.object({
    * for the same path. Repo-relative paths.
    */
   manualExcludes: z.array(z.string()).default([]),
-  /** User-authored doc→doc relations (replace/precedence/keep-both). */
-  relations: z.array(RelationSchema).default([]),
   /** User overrides of a doc's auto-assigned area tags. */
   manualAreas: z.array(ManualAreaSchema).default([]),
   /**

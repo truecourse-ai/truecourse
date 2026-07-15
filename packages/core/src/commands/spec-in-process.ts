@@ -7,7 +7,7 @@
  * Same shape as `analyze-in-process.ts` — the caller passes a
  * `StepTracker` and we drive it through the high-level phases:
  *
- *   curate         discover → tag areas → group → detect relations → corpus.json
+ *   curate         discover → tag areas → group → flag overlaps → corpus.json
  *   generate       corpus.json → contracts/*.tc
  *
  * Step keys + labels are stable across CLI/dashboard so the progress
@@ -29,7 +29,6 @@ import {
   type ConflictResolution,
   type DecisionsFile,
   type DocCandidate,
-  type Relation,
 } from '@truecourse/spec-consolidator';
 import {
   generateContractsFromCorpus,
@@ -147,8 +146,8 @@ import {
 export const CURATE_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'tag', label: 'Tagging doc areas' },
-  { key: 'relate', label: 'Detecting relations' },
   { key: 'overlap', label: 'Flagging overlaps' },
+  { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
 
 export const CORPUS_GENERATE_STEPS = [
@@ -175,8 +174,8 @@ const STEP_STAGES: Record<string, StageId[]> = {
   // scan (curate)
   discover: ['spec.relevance'],
   tag: ['spec.areaTag', 'spec.vocab'],
-  relate: ['spec.relation', 'spec.chainDetect'],
   overlap: ['spec.overlap'],
+  verify: ['spec.verifyOverlap'],
   // generate (corpus)
   enumerate: ['contract.enumerate'],
   reconcile: ['contract.reconcile'],
@@ -424,7 +423,7 @@ function resolveCurateModels(repoRoot: string): CurateModels {
     areaTag: resolveModel('spec.areaTag', undefined, repoRoot),
     vocab: resolveModel('spec.vocab', undefined, repoRoot),
     overlap: resolveModel('spec.overlap', undefined, repoRoot),
-    relation: resolveModel('spec.relation', undefined, repoRoot),
+    verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
 }
@@ -445,7 +444,7 @@ function resolveCorpusGenerateModels(repoRoot: string): CorpusGenerateModels {
 // ---------------------------------------------------------------------------
 // Corpus path drivers — shared by the CLI (`spec scan`, `contracts generate`)
 // and the dashboard routes. `curateInProcess` builds corpus.json (discover →
-// tag → group → detect relations); `generateFromCorpusInProcess` turns it into
+// tag → group → flag overlaps); `generateFromCorpusInProcess` turns it into
 // the contracts/*.tc corpus.
 // ---------------------------------------------------------------------------
 
@@ -465,7 +464,7 @@ export interface CurateInProcessOptions {
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
-   * User resolutions (relations / manual areas / includes) to fold into curate.
+   * User resolutions (manual areas / includes / conflict verdicts) to fold into curate.
    * EE MUST pass the stored decisions here: its re-scan runs on a fresh clone with
    * no `.truecourse/specs/decisions.json` (resolutions live in Postgres), so
    * without this the re-scan re-detects already-resolved conflicts. Omit in OSS —
@@ -488,11 +487,10 @@ export interface CurateInProcessOptions {
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
-  relationChainRunner?: CurateOptions['relationChainRunner'];
+  verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
   disableOverlapDetection?: boolean;
-  disableLlmRelationDetection?: boolean;
 }
 
 /**
@@ -528,22 +526,27 @@ export async function curateInProcess(
 
   let tagStarted = false;
   let overlapStarted = false;
+  let verifyStarted = false;
   const ensureTag = (): void => {
     if (tagStarted) return;
     tracker?.done('discover', withUsage('discover'));
     tracker?.start('tag');
     tagStarted = true;
   };
-  // Relations are detected between tagging and overlap with no progress signal of
-  // their own, so the `relate` step is opened+closed at the overlap boundary.
   const ensureOverlap = (): void => {
     ensureTag();
     if (overlapStarted) return;
     tracker?.done('tag', withUsage('tag'));
-    tracker?.start('relate');
-    tracker?.done('relate', withUsage('relate'));
     tracker?.start('overlap');
     overlapStarted = true;
+  };
+  // The verify pass judges the flagged overlaps right after detection.
+  const ensureVerify = (): void => {
+    ensureOverlap();
+    if (verifyStarted) return;
+    tracker?.done('overlap', withUsage('overlap'));
+    tracker?.start('verify');
+    verifyStarted = true;
   };
 
   // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG, or on by default
@@ -566,11 +569,10 @@ export async function curateInProcess(
         relevanceRunner: options.relevanceRunner,
         areaTagRunner: options.areaTagRunner,
         overlapRunner: options.overlapRunner,
-        relationChainRunner: options.relationChainRunner,
+        verifyOverlapRunner: options.verifyOverlapRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
         disableOverlapDetection: options.disableOverlapDetection,
-        disableLlmRelationDetection: options.disableLlmRelationDetection,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
         },
@@ -582,15 +584,24 @@ export async function curateInProcess(
           ensureOverlap();
           tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
         },
+        onVerifyProgress: (done, total) => {
+          ensureVerify();
+          tracker?.detail('verify', withUsage('verify', total > 0 ? `${done}/${total} flagged` : 'no conflicts')!);
+        },
       });
     } catch (e) {
-      const active = overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
+      const active = verifyStarted ? 'verify' : overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
       tracker?.error(active, (e as Error).message);
       throw e;
     }
 
-    ensureOverlap();
-    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`));
+    ensureVerify();
+    const open = result.stats.overlapFlags;
+    const pruned = result.stats.overlapRefuted;
+    // The overlap step reports what it FLAGGED (open + pruned); verify reports the
+    // detector false positives it pruned, leaving `open` in the corpus.
+    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${open + pruned} overlaps`));
+    tracker?.done('verify', withUsage('verify', pruned > 0 ? `${pruned} pruned · ${open} kept` : 'no false positives'));
 
     if (options.source) {
       await trackEvent('spec_scan', {
@@ -1251,7 +1262,6 @@ export const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
   conflictResolutions: [],
 };
@@ -1314,20 +1324,12 @@ export async function getDecisions(
 /**
  * Merge a PR's decisions overlay over the repo row. Pure. The overlay wins on
  * every dimension:
- *   - relations: an overlay relation on the same doc pair (order-insensitive,
- *     same scope) replaces the base one; other base relations survive.
  *   - manualIncludes / manualExcludes: union by path, but the overlay's verb wins
  *     per path — a path the overlay excludes is dropped from includes and vice
  *     versa (never a contradictory pair).
  *   - manualAreas: the overlay's override replaces the base's for that doc.
  */
 export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): DecisionsFile {
-  const overlayRelKeys = new Set((overlay.relations ?? []).map(relationKey));
-  const relations = [
-    ...(base.relations ?? []).filter((r) => !overlayRelKeys.has(relationKey(r))),
-    ...(overlay.relations ?? []),
-  ];
-
   const overlayIncludes = new Set(overlay.manualIncludes ?? []);
   const overlayExcludes = new Set(overlay.manualExcludes ?? []);
   const manualIncludes = uniqueStrings([
@@ -1353,7 +1355,7 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
     ...(overlay.conflictResolutions ?? []),
   ];
 
-  return { version: 1, manualIncludes, manualExcludes, relations, manualAreas, conflictResolutions };
+  return { version: 1, manualIncludes, manualExcludes, manualAreas, conflictResolutions };
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -1385,8 +1387,7 @@ export async function discardDecisionsOverlay(repoKey: string, pr: number): Prom
 
 /**
  * The repo's current curated corpus (dashboard read), or null when no scan has
- * run. Corpus-path analog of {@link getScanState}; no remerge needed since user
- * relations are folded into corpus.json at curate time. OSS reads
+ * run. Corpus-path analog of {@link getScanState}. OSS reads
  * `specs/corpus.json`; EE reads the store (Phase 6).
  */
 export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
@@ -1523,18 +1524,13 @@ export async function recuratePrCorpus(
 //
 // Pure read-modify-write helpers around decisions. The dashboard server routes
 // and the CLI both call these so the two surfaces agree on update semantics.
-// None of these re-curate the corpus — callers who need the new relations
-// reflected (CLI write commands) run curateInProcess afterwards.
+// None of these re-curate the corpus.
 // ---------------------------------------------------------------------------
 
 // Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by
 // the repo (file/Postgres) and workspace (Postgres) helpers so both surfaces
 // agree on update semantics. An `apply*` that makes no change returns the SAME
 // object reference, letting callers skip a redundant store.
-
-/** Dedup key for a user relation — a pair is unique per scope (area). */
-const relationKey = (r: { older: string; newer: string; scope?: string }): string =>
-  `${[r.older, r.newer].sort().join(' ')} ${r.scope ?? ''}`;
 
 /**
  * Dispute-identity key for a section-scoped conflict verdict (item 31): the
@@ -1547,46 +1543,8 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
     `${r.docA}#${r.anchorA ?? ''}`,
     `${r.docB}#${r.anchorB ?? ''}`,
   ].sort();
-  return sides.join('   ');
+  return sides.join(' \x00 ');
 };
-
-function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
-  if (input.older === input.newer) {
-    throw new Error('addRelation: older and newer must be different docs');
-  }
-  const key = relationKey(input);
-  const dedup = (existing.relations ?? []).filter((r) => relationKey(r) !== key);
-  const relation: Relation = { ...input, detectedFrom: input.detectedFrom ?? 'manual' };
-  return {
-    version: 1,
-    manualIncludes: existing.manualIncludes ?? [],
-    manualExcludes: existing.manualExcludes ?? [],
-    relations: [...dedup, relation],
-    manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: existing.conflictResolutions ?? [],
-  };
-}
-
-function applyRemoveRelation(
-  existing: DecisionsFile,
-  input: { older: string; newer: string; scope?: string },
-): DecisionsFile {
-  // Scope omitted → drop every user relation for the pair (either order).
-  const matches = (r: Relation): boolean => {
-    const samePair =
-      (r.older === input.older && r.newer === input.newer) ||
-      (r.older === input.newer && r.newer === input.older);
-    return samePair && (input.scope === undefined || r.scope === input.scope);
-  };
-  return {
-    version: 1,
-    manualIncludes: existing.manualIncludes ?? [],
-    manualExcludes: existing.manualExcludes ?? [],
-    relations: (existing.relations ?? []).filter((r) => !matches(r)),
-    manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: existing.conflictResolutions ?? [],
-  };
-}
 
 // Include and exclude are mutually exclusive per doc: adding one clears the
 // other for that path, so decisions.json can never hold a contradictory pair.
@@ -1599,7 +1557,6 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
     version: 1,
     manualIncludes: includes.includes(docPath) ? includes : [...includes, docPath],
     manualExcludes: excludes.filter((p) => p !== docPath),
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1610,7 +1567,6 @@ function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): Dec
     version: 1,
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1624,7 +1580,6 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
     version: 1,
     manualIncludes: includes.filter((p) => p !== docPath),
     manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1635,7 +1590,6 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1655,7 +1609,6 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: [...dedup, input],
   };
@@ -1670,41 +1623,9 @@ function applyRemoveConflictResolution(
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key),
   };
-}
-
-/**
- * Add (or replace) a user-authored doc→doc relation (replace / precedence /
- * keep-both) — the doc-lifecycle/precedence tool (`spec chains`). A relation
- * never resolves a conflict; that takes a verdict, a dismissal, or an exclude.
- * When a relation for the same (older, newer, scope) already exists it's
- * replaced. Self-pairs are rejected. Re-run `spec scan` (curate) to apply.
- */
-export async function addRelation(
-  repoRoot: string,
-  input: Relation,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyAddRelation(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a user-authored relation by (older, newer) — either order, optionally
- * scoped to one area. Idempotent.
- */
-export async function removeRelation(
-  repoRoot: string,
-  input: { older: string; newer: string; scope?: string },
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveRelation(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
 }
 
 /**
@@ -1765,7 +1686,7 @@ export async function removeManualExclude(
 /**
  * Record a SECTION-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or
  * dismissal — for one flagged dispute. Replaces any prior verdict for the same
- * dispute identity. Unlike a doc-relation resolve, this does NOT re-curate: the
+ * dispute identity. This does NOT re-curate: the
  * corpus is unchanged (the overlap stays flagged), and the shared resolved-
  * derivation reads the verdict live, so a single later scan applies any batch.
  * Self-pairs are rejected.

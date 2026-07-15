@@ -13,7 +13,7 @@ import {
   hasCorpus,
   corpusFilePath,
 } from '../../packages/spec-consolidator/src/index.js';
-import type { Area, CorpusDoc, Relation } from '../../packages/spec-consolidator/src/index.js';
+import type { Area, CorpusDoc } from '../../packages/spec-consolidator/src/index.js';
 
 let repo: string;
 beforeEach(() => {
@@ -41,14 +41,10 @@ const areas: Area[] = [
     overlaps: [{ docs: ['docs/0003-users.md', 'docs/0008-users.md'], note: 'auth0_id vs auth0_sub', sections: [], areas: [] }],
   },
 ];
-const relations: Relation[] = [
-  { type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', detectedFrom: 'filename' },
-];
-
 describe('corpus-store', () => {
-  it('round-trips a corpus', () => {
+  it('round-trips a corpus (new writes carry no relations field)', () => {
     expect(hasCorpus(repo)).toBe(false);
-    writeCorpus(repo, { docs, areas, relations });
+    writeCorpus(repo, { docs, areas });
     expect(hasCorpus(repo)).toBe(true);
 
     const read = readCorpus(repo);
@@ -56,12 +52,30 @@ describe('corpus-store', () => {
     expect(read!.version).toBe(3);
     expect(read!.docs).toEqual(docs);
     expect(read!.areas).toEqual(areas);
-    expect(read!.relations).toEqual(relations);
+    // A written corpus carries no relations field.
+    expect(read!.relations).toBeUndefined();
     expect(typeof read!.generatedAt).toBe('string');
   });
 
+  it('an older corpus.json carrying a relations array still parses; the field is dropped', () => {
+    fs.mkdirSync(path.dirname(corpusFilePath(repo)), { recursive: true });
+    fs.writeFileSync(
+      corpusFilePath(repo),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs,
+        areas,
+        relations: [{ type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', detectedFrom: 'filename' }],
+      }),
+    );
+    const read = readCorpus(repo);
+    expect(read).not.toBeNull();
+    expect((read as Record<string, unknown>).relations).toBeUndefined();
+  });
+
   it('writes to .truecourse/specs/corpus.json', () => {
-    writeCorpus(repo, { docs, areas, relations });
+    writeCorpus(repo, { docs, areas });
     expect(corpusFilePath(repo)).toBe(path.join(repo, '.truecourse', 'specs', 'corpus.json'));
     expect(fs.existsSync(corpusFilePath(repo))).toBe(true);
   });

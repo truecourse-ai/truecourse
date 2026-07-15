@@ -1,8 +1,8 @@
 /**
- * The corpus-path `spec` CLI surface: conflicts list/show, chains list, and
- * status. Seeds corpus.json + decisions.json directly (no LLM, no re-scan) and
- * asserts the open-vs-resolved accounting (verdict/exclude only — a doc→doc
- * relation never resolves a conflict) + relation listing.
+ * The corpus-path `spec` CLI surface: conflicts list/show and status. Seeds
+ * corpus.json + decisions.json directly (no LLM, no re-scan) and asserts the
+ * open-vs-resolved accounting (verdict/exclude only — a legacy doc→doc relation
+ * never resolves a conflict).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
@@ -10,7 +10,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSpecConflictsList, runSpecConflictsShow } from '../../tools/cli/src/commands/spec-conflicts.js';
-import { runSpecChainsList } from '../../tools/cli/src/commands/spec-chains.js';
 import { runSpecStatus } from '../../tools/cli/src/commands/spec.js';
 
 let repo: string;
@@ -96,19 +95,6 @@ describe('spec conflicts show (corpus)', () => {
     expect(out).toContain('docs/v1.md');
     expect(out).toContain('24h');
     expect(out).toContain('48h');
-  });
-});
-
-describe('spec chains list (corpus relations)', () => {
-  it('lists user-authored relations', async () => {
-    writeCorpus([]);
-    writeDecisions([
-      { type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', detectedFrom: 'manual', note: 'superseded' },
-    ]);
-    const out = await capture(() => runSpecChainsList({ cwd: repo }));
-    expect(out).toContain('replace');
-    expect(out).toContain('docs/v1.md');
-    expect(out).toContain('docs/v2.md');
   });
 });
 

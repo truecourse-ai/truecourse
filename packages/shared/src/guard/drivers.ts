@@ -47,16 +47,18 @@ export interface GuardDriverDef {
  *
  * NOTE: the id ORDER here is load-bearing for prompt stability — `guardDriverIds`
  * feeds the extraction schema's `driver` enum, whose rendered JSON-schema hint is
- * fingerprinted. Keep `cli, api, web, tui` in this order.
+ * fingerprinted. Keep `cli, api, web, tui, library` in this order; new drivers
+ * append at the end.
  */
 export const GUARD_DRIVERS = [
   { id: 'cli', label: 'CLI', runnable: true },
   { id: 'api', label: 'API', runnable: false, waitingLabel: 'Needs API driver' },
   { id: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver' },
   { id: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver' },
+  { id: 'library', label: 'Library', runnable: false, waitingLabel: 'Needs library driver' },
 ] as const satisfies readonly GuardDriverDef[]
 
-/** Every driver id (`cli | api | web | tui`), derived from the registry rows. */
+/** Every driver id (`cli | api | web | tui | library`), derived from the registry rows. */
 export type GuardDriverId = (typeof GUARD_DRIVERS)[number]['id']
 
 /** The non-runnable ("awaiting") driver ids — sections wait on these. */
@@ -70,7 +72,7 @@ export const runnableDriverIds: readonly GuardDriverId[] = GUARD_DRIVERS.filter(
   (d) => d.id,
 )
 
-/** Ids of drivers recorded-only until they ship (`['api', 'web', 'tui']`). */
+/** Ids of drivers recorded-only until they ship (`['api', 'web', 'tui', 'library']`). */
 export const awaitingDriverIds: readonly GuardAwaitingDriverId[] = GUARD_DRIVERS.filter(
   (d) => !d.runnable,
 ).map((d) => d.id as GuardAwaitingDriverId)

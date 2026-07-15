@@ -2,16 +2,13 @@
  * Public surface of the spec-consolidator package (corpus path).
  *
  * The scan pipeline curates docs into a `CuratedCorpus` (areas +
- * relations + overlaps); this index re-exports the type contracts and
- * stage entry points the CLI, dashboard server, and contract-extractor
- * talk through.
+ * overlaps); this index re-exports the type contracts and stage entry
+ * points the CLI, dashboard server, and contract-extractor talk through.
  */
 
 export type {
   Status,
   DocKind,
-  Relation,
-  RelationType,
   ManualArea,
   ConflictResolution,
   DecisionsFile,
@@ -20,8 +17,6 @@ export type {
 export {
   StatusSchema,
   DocKindSchema,
-  RelationSchema,
-  RelationTypeSchema,
   ManualAreaSchema,
   ConflictResolutionSchema,
   DecisionsFileSchema,
@@ -77,23 +72,35 @@ export {
 } from './vocab-normalizer.js';
 export type { VocabRunner, VocabRunnerInput, VocabNormalizerOptions } from './vocab-normalizer.js';
 
-export { detectRelations, effectiveRelations } from './relation.js';
-export type { DetectRelationsOptions } from './relation.js';
-
 export {
   flagOverlaps,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   buildOverlapUserPrompt,
+  OVERLAP_WINDOW_CHARS,
 } from './overlap-detector.js';
 export type {
   OverlapRunner,
   OverlapRunnerInput,
   OverlapVerdict,
   OverlapDetectorOptions,
+  OverlapPart,
 } from './overlap-detector.js';
 
 export { verifyOverlapSections } from './pointer-verifier.js';
 export type { VerifyPointersInput } from './pointer-verifier.js';
+
+export {
+  verifyFlaggedOverlaps,
+  buildVerifyOverlapUserPrompt,
+  VERIFY_OVERLAP_SYSTEM_PROMPT,
+  VERIFY_DOC_BUDGET_CHARS,
+} from './overlap-verifier.js';
+export type {
+  OverlapVerification,
+  VerifyOverlapRunner,
+  VerifyFlaggedOverlapsOptions,
+  VerifyOverlapsResult,
+} from './overlap-verifier.js';
 
 export { curate, readCorpusDecisions } from './curate.js';
 export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
@@ -111,9 +118,6 @@ export {
   specRootPath,
 } from './orchestrator.js';
 
-export { detectVersionChains } from './version-chain.js';
-export type { VersionChain } from './version-chain.js';
-
 export {
   filterByRelevance,
   planRelevanceWork,
@@ -129,16 +133,3 @@ export type {
   RelevanceRunnerInput,
   RelevanceVerdict,
 } from './relevance-filter.js';
-
-export {
-  detectVersionChainsViaLlm,
-  CHAIN_DETECTION_SYSTEM_PROMPT,
-  buildChainDetectionUserPrompt,
-} from './version-chain-llm.js';
-export type {
-  ChainDetectionInput,
-  ChainRunner,
-  ChainRunnerOptions,
-  DetectChainsOptions,
-  DetectedChainOutput,
-} from './version-chain-llm.js';

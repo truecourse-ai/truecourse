@@ -424,7 +424,7 @@ function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
 function rollupSections(results: readonly GuardScenarioResult[]): GuardSectionRollup[] {
   const byKey = new Map<string, { doc: string; section: string; outcomes: GuardOutcome[]; ids: string[] }>()
   for (const r of results) {
-    const key = `${r.binds.doc} ${r.binds.section}`
+    const key = `${r.binds.doc}\x00${r.binds.section}`
     let entry = byKey.get(key)
     if (!entry) {
       entry = { doc: r.binds.doc, section: r.binds.section, outcomes: [], ids: [] }

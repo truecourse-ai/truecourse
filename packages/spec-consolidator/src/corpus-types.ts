@@ -2,9 +2,8 @@
  * Types for the **curated doc corpus** — the spec-scan pipeline's unit of
  * curation. The corpus never disassembles a
  * doc into claims; it annotates each doc with the AREAS it covers, groups docs
- * by area, flags within-area OVERLAPS, and records doc→doc RELATIONS. The only
- * structured artifact downstream is the contract, produced later at generate
- * time.
+ * by area, and flags within-area OVERLAPS. The only structured artifact
+ * downstream is the contract, produced later at generate time.
  *
  * Storage principle: the corpus stores NO prose — it references each doc by a
  * `DocRef` (where the .md lives). In OSS a DocRef is a repo-relative path; in EE
@@ -13,7 +12,7 @@
  */
 
 import { z } from 'zod';
-import { DocKindSchema, StatusSchema, RelationSchema } from './types.js';
+import { DocKindSchema, StatusSchema } from './types.js';
 
 // ---------------------------------------------------------------------------
 // DocRef — where a doc's .md lives (the corpus never embeds content)
@@ -240,7 +239,8 @@ export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 /**
  * A flagged within-area overlap — two docs in the same area that MAY disagree.
  * Carries refs only; the CLI/UI derive the prose passages at display time. The
- * user resolves it by recording a {@link RelationSchema}.
+ * user resolves it with a section-scoped conflict verdict (pick-a-side or
+ * dismissal) or a force-exclude.
  */
 /** A specific section (markdown heading) in one doc that participates in an overlap. */
 export const OverlapSectionSchema = z.object({
@@ -302,8 +302,7 @@ export type Area = z.infer<typeof AreaSchema>;
 /**
  * The curated corpus — `.truecourse/specs/corpus.json`. Committable (expensive
  * to regenerate, not purely deterministic), inherited from git like LATEST.json.
- * Holds docs + area tags + auto-detected relations; user-authored relations live
- * in `decisions.json`. The effective relation set at generate time is the union.
+ * Holds docs + area tags + within-area overlap flags.
  */
 /** A doc the relevance filter dropped, with the reason — surfaced so the user can force-include it. */
 export const SkippedDocSchema = z.object({
@@ -317,8 +316,6 @@ export const CuratedCorpusSchema = z.object({
   generatedAt: z.string(),
   docs: z.array(CorpusDocSchema),
   areas: z.array(AreaSchema),
-  /** Auto-detected doc→doc relations (filename / llm provenance). */
-  relations: z.array(RelationSchema).default([]),
   /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
   skippedDocs: z.array(SkippedDocSchema).default([]),
 });

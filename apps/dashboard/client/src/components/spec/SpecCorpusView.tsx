@@ -101,7 +101,7 @@ export interface SpecCorpusState {
   corpusCommit: string | null;
   /** Run a fresh corpus scan (curate) — wired to the page header's Scan/Rescan. */
   scan: () => Promise<void>;
-  /** Re-read corpus + relations after an inline resolution. */
+  /** Re-read the corpus after an inline resolution. */
   refetch: () => Promise<void>;
   /** Replace corpus data from a mutation response (PR-scoped re-curate, or a scan). */
   apply: (res: SpecCorpusResponse) => void;
@@ -115,7 +115,7 @@ export interface SpecCorpusState {
  * Owns the corpus fetch + scan for one repo. `enabled` gates the initial read so
  * the page doesn't fetch a corpus until the Spec tab is actually shown. `ref`
  * (EE PR view) reads the corpus at a PR head — a change re-fetches. `pr` folds
- * the PR's decisions overlay into the returned relations, so resolutions made
+ * the PR's decisions overlay into the returned corpus, so resolutions made
  * in the PR view render as resolved conflicts.
  */
 export function useSpecCorpus(
@@ -308,7 +308,7 @@ export function SpecCorpusView({
   // and light the Rescan dot. PR scope (EE) re-curates → the full corpus replaces state.
   const removeOrphan = useCallback(
     async (r: ConflictResolutionLike) => {
-      setBusyRef(`orphan:${r.docA} ${r.docB}`);
+      setBusyRef(`orphan:${r.docA}\x00${r.docB}`);
       try {
         const res = await source.deleteConflictResolution({
           docA: r.docA,
@@ -345,8 +345,8 @@ export function SpecCorpusView({
         title="No corpus yet"
         body={
           source.supportsScan
-            ? 'Click Scan in the header to curate the docs into areas, detect doc relations, and flag overlaps.'
-            : 'Sync a source in Integrations, then Process it to curate the docs into areas, detect relations, and flag conflicts.'
+            ? 'Click Scan in the header to curate the docs into areas and flag overlaps.'
+            : 'Sync a source in Integrations, then Process it to curate the docs into areas and flag conflicts.'
         }
       />
     );
@@ -408,8 +408,7 @@ export function SpecCorpusView({
 
   // Conflicts = the shared derivation (ONE copy in @truecourse/shared, the same
   // the guard-generate gate and CLI use): each flagged within-area overlap, open
-  // or resolved by a matching verdict/dismissal or a covering exclude. Doc→doc
-  // relations never resolve a conflict.
+  // or resolved by a matching verdict/dismissal or a covering exclude.
   const conflictResolutions = data.conflictResolutions ?? [];
   const decisions = { manualExcludes, conflictResolutions };
   const conflicts = buildCorpusConflicts(c, decisions).map((cf) => ({

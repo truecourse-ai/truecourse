@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   StatusSchema,
   DocKindSchema,
-  RelationSchema,
-  RelationTypeSchema,
   ManualAreaSchema,
   ConflictResolutionSchema,
   DecisionsFileSchema,
@@ -34,35 +32,6 @@ describe('DocKindSchema (signal, not gate)', () => {
     for (const k of ['prd', 'adr', 'rfc', 'spec', 'runbook', 'design-note', 'readme', 'unknown']) {
       expect(DocKindSchema.parse(k)).toBe(k);
     }
-  });
-});
-
-describe('RelationTypeSchema / RelationSchema (the three doc→doc verbs)', () => {
-  it('accepts the three relation verbs', () => {
-    for (const t of ['replace', 'precedence', 'keep-both']) {
-      expect(RelationTypeSchema.parse(t)).toBe(t);
-    }
-  });
-
-  it('rejects an unknown relation verb', () => {
-    expect(() => RelationTypeSchema.parse('supersede')).toThrow();
-  });
-
-  it('round-trips a scoped relation', () => {
-    const rel = {
-      type: 'precedence' as const,
-      older: 'docs/0003.md',
-      newer: 'docs/0008.md',
-      scope: 'core/users-entity',
-      detectedFrom: 'manual' as const,
-      note: '0008 refines the auth0 column',
-    };
-    expect(RelationSchema.parse(rel)).toEqual(rel);
-  });
-
-  it('allows a bare (unscoped) relation', () => {
-    const rel = { type: 'replace' as const, older: 'a-v1.md', newer: 'a-v2.md' };
-    expect(RelationSchema.parse(rel)).toEqual(rel);
   });
 });
 
@@ -113,12 +82,11 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
   it('defaults the optional arrays when absent', () => {
     const parsed = DecisionsFileSchema.parse({ version: 1 });
     expect(parsed.manualIncludes).toEqual([]);
-    expect(parsed.relations).toEqual([]);
     expect(parsed.manualAreas).toEqual([]);
     expect(parsed.conflictResolutions).toEqual([]);
   });
 
-  it('parses an OLD decisions file (no conflictResolutions field) — defaults to []', () => {
+  it('parses an OLD decisions file — missing arrays default, an unknown relations field is dropped', () => {
     const old = {
       version: 1 as const,
       manualIncludes: ['docs/keep.md'],
@@ -128,20 +96,19 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
     };
     const parsed = DecisionsFileSchema.parse(old);
     expect(parsed.conflictResolutions).toEqual([]);
+    expect((parsed as Record<string, unknown>).relations).toBeUndefined();
   });
 
-  it('round-trips relations + manualAreas + manualIncludes + conflictResolutions', () => {
+  it('round-trips manualAreas + manualIncludes + conflictResolutions', () => {
     const file = {
       version: 1 as const,
       manualIncludes: ['docs/keep.md'],
-      relations: [{ type: 'keep-both' as const, older: 'a.md', newer: 'b.md' }],
       manualAreas: [{ doc: 'a.md', areas: ['core/auth'] }],
       conflictResolutions: [
         { docA: 'a.md', anchorA: 'x', docB: 'b.md', anchorB: 'y', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
       ],
     };
     const parsed = DecisionsFileSchema.parse(file);
-    expect(parsed.relations).toHaveLength(1);
     expect(parsed.manualAreas).toHaveLength(1);
     expect(parsed.manualIncludes).toEqual(['docs/keep.md']);
     expect(parsed.conflictResolutions).toHaveLength(1);

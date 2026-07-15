@@ -20,11 +20,13 @@ import type {
   AreaTagRunner,
   OverlapRunner,
   RelevanceRunner,
+  VerifyOverlapRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 const relevance: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
 const areaTagger: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'orders' }], status: 'shipped' });
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
+const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
 
 // Injected runners never reach the transport, so NO stage usage is recorded —
 // exactly the state (EE / full cache) where stepUsageTag hits the model fallback.
@@ -55,7 +57,7 @@ async function runCapturingDetails(): Promise<string[]> {
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
-    disableLlmRelationDetection: true,
+    verifyOverlapRunner: confirmAll,
   });
   return details;
 }
