@@ -34,13 +34,19 @@ export type LlmEstimateData = {
     calls: number;
     estimatedTokens: number;
     callsRange?: { low: number; high: number };
+    /** Realistic (point) call count when the ceiling overstates likely spend. */
+    expectedCalls?: number;
     /** Ceiling USD cost for this stage (present only when prices were available). */
     estimatedCostUsd?: number;
+    /** Expected USD cost for this stage (present only when `expectedCalls` is). */
+    expectedCostUsd?: number;
   }>;
   /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
   subjectLabel?: string;
   /** Ceiling USD cost for the whole run (prices the high end, ignores caching). */
   estimatedCostUsd?: number;
+  /** Expected (likely) USD cost for the whole run, priced at realistic counts. */
+  expectedCostUsd?: number;
   /** Provenance of the prices behind the cost. */
   costSource?: 'live' | 'cache' | 'bundled';
   /** True when some stage's model couldn't be priced. */

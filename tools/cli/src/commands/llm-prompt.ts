@@ -50,9 +50,29 @@ export async function promptLlmEstimate(
     const subject = estimate.subjectLabel ?? `${stages.length} stages`;
     const verb = nouns?.verb ?? "This";
     const costStr =
-      estimate.estimatedCostUsd != null ? ` · up to ${fmtUsd(estimate.estimatedCostUsd)}` : "";
+      estimate.estimatedCostUsd != null
+        ? estimate.expectedCostUsd != null
+          ? ` · ~${fmtUsd(estimate.expectedCostUsd)} expected · up to ${fmtUsd(estimate.estimatedCostUsd)}`
+          : ` · up to ${fmtUsd(estimate.estimatedCostUsd)}`
+        : "";
     p.log.step(`${verb} will make ~${totalCalls} LLM calls over ${subject} (${tokenStr}${costStr})`);
     for (const st of stages) {
+      if (st.expectedCalls != null) {
+        // Ceiling overstates likely spend (e.g. verify's flagged fraction): lead
+        // with the expected count/cost, keep the ceiling in parens.
+        const ceilingCalls = st.callsRange?.high ?? st.calls;
+        const callsStr = `~${st.expectedCalls} calls expected (up to ${ceilingCalls})`;
+        const cost =
+          st.expectedCostUsd != null && st.estimatedCostUsd != null
+            ? ` · ~${fmtUsd(st.expectedCostUsd)} (max ${fmtUsd(st.estimatedCostUsd)})`
+            : st.estimatedCostUsd != null
+              ? ` · ${fmtUsd(st.estimatedCostUsd)}`
+              : "";
+        p.log.message(
+          `  ${(st.label ?? st.stage).padEnd(22)} ${callsStr.padEnd(32)} ${st.model}${cost}`,
+        );
+        continue;
+      }
       const calls =
         st.callsRange && st.callsRange.high !== st.calls
           ? `${st.callsRange.low}–${st.callsRange.high}`
@@ -64,9 +84,11 @@ export async function promptLlmEstimate(
     }
     if (estimate.estimatedCostUsd != null) {
       const approx = estimate.costSource === "bundled" ? " (approx prices)" : "";
-      p.log.message(
-        `  Ranges = fewest–most calls; cost is a ceiling — prompt caching may lower it.${approx}`,
-      );
+      const ceilingCopy =
+        estimate.expectedCostUsd != null
+          ? `Ranges = fewest–most calls; "expected" is the likely spend and the max a ceiling — prompt caching may lower it.${approx}`
+          : `Ranges = fewest–most calls; cost is a ceiling — prompt caching may lower it.${approx}`;
+      p.log.message(`  ${ceilingCopy}`);
     }
   } else {
     const totalRules =
