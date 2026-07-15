@@ -13,8 +13,10 @@ import { simpleGit } from 'simple-git';
 import {
   curateInProcess,
   getDecisions,
+  materializeWorkspaceInheritance,
 } from '@truecourse/core/commands/spec-in-process';
 import { saveSpec } from '@truecourse/core/lib/spec-store';
+import { writeDecisions } from '@truecourse/spec-consolidator';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
@@ -57,7 +59,18 @@ export const defaultSpecScanPipeline: SpecScanPipeline = {
     // conflicts (the dashboard resolve → re-scan loop). Empty on the first (connect)
     // scan, so conflicts surface as expected. With `pr`, the effective decisions
     // include that PR's overlay (overlay wins).
-    const decisions = await getDecisions(ref.repoKey, opts);
+    const repoDecisions = await getDecisions(ref.repoKey, opts);
+    // Fold the workspace Knowledge layer into the checkout BEFORE curate (hosted):
+    // materialize every workspace doc body at its `knowledge/<kind>/<id>.md` path so
+    // curate sees one doc universe (inherited docs are cache hits), and merge the
+    // workspace decisions UNDER the repo's own (repo wins). Inert in OSS / a repo
+    // with no workspace — the repo's own decisions pass through unchanged.
+    const { decisions } = await materializeWorkspaceInheritance(repoRoot, ref.repoKey, repoDecisions);
+    // Persist the effective (merged) decisions into the checkout so a generate over
+    // this same tree — the PR-head regen runs scan then generate in one clone — reads
+    // them from `decisions.json` (its conflict gate + losing-side suppression do), not
+    // just this curate. Transient: the clone is discarded after.
+    writeDecisions(repoRoot, decisions);
     // Fresh/shallow checkout → skipGit (fall back to filesystem mtime). curate
     // writes corpus.json into the clone; we persist it under `ref` for the store.
     const { curate } = await curateInProcess(repoRoot, { skipGit: true, tracker, decisions });

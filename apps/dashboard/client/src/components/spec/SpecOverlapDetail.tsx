@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
+import { WorkspaceBadge } from './WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from './spec-source';
 
 /** Shown on resolution actions while a PR is being viewed before its gate has run. */
@@ -78,6 +79,10 @@ export function SpecOverlapDetail({
   // the ref.
   const docMeta = new Map(data.corpus.docs.map((d) => [d.ref, d] as const));
   const titleOf = (ref: string): string => docMeta.get(ref)?.title ?? ref;
+  // Hosted repo view: a doc inherited from the workspace Knowledge corpus carries
+  // `layer: 'workspace'` — flags the workspace badge beside its title (repo-local
+  // side stays unbadged). Inert on OSS / repo-local corpora.
+  const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
   const overlap = data.corpus.areas
     .find((ar) => ar.id === area)
@@ -192,9 +197,15 @@ export function SpecOverlapDetail({
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <span>{titleOf(docA)}</span>
+          <span className="flex items-center gap-1.5">
+            {titleOf(docA)}
+            {isWorkspace(docA) && <WorkspaceBadge />}
+          </span>
           <span className="text-muted-foreground">↔</span>
-          <span>{titleOf(docB)}</span>
+          <span className="flex items-center gap-1.5">
+            {titleOf(docB)}
+            {isWorkspace(docB) && <WorkspaceBadge />}
+          </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
           {onClose && (
             <button

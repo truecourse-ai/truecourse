@@ -13,27 +13,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-// The Scenarios tab reads the org's live jobs (busy state) via the JobsContext.
-// Mock it to a controllable activeJobs list — the Spec/Sources tabs don't use it,
-// so the default (empty) leaves their tests unchanged.
-const { jobsState } = vi.hoisted(() => ({
-  jobsState: { activeJobs: [] as Array<{ type: string; id: string; key: string; status: string }> },
-}));
-vi.mock('../../ee/packages/client/src/jobs/JobsContext', () => ({
-  __esModule: true,
-  default: () => null,
-  useJobs: () => ({
-    activeJobs: jobsState.activeJobs,
-    onJobSettled: () => () => {},
-    notifications: [],
-    unreadCount: 0,
-    activeJobFor: () => undefined,
-    markAllRead: async () => {},
-    markRead: async () => {},
-    refresh: async () => {},
-  }),
-}));
-
 import KnowledgePage from '../../ee/packages/client/src/KnowledgePage';
 
 const json = (body: unknown, status = 200) =>
@@ -270,131 +249,23 @@ describe('KnowledgePage — Sources tab (paginated ledger)', () => {
   });
 });
 
-describe('KnowledgePage — Scenarios tab (workspace guard)', () => {
-  // A clean, conflict-free corpus (empty overlaps → the Generate flow is enabled).
-  const CLEAN_CORPUS = {
-    corpus: {
-      version: 1,
-      generatedAt: '2026-07-01T00:00:00Z',
-      docs: [{ ref: 'knowledge/confluence/1.md', kind: 'spec', lastTouched: '2026-06-01T00:00:00Z', areaTags: ['core/checkout'] }],
-      areas: [{ id: 'core/checkout', product: 'core', concern: 'checkout', docRefs: ['knowledge/confluence/1.md'], overlaps: [] }],
-      relations: [],
-    },
-    userRelations: [],
-    manualExcludes: [],
-    conflictResolutions: [],
-    skipped: { total: 0, byReason: [] },
-  };
+describe('KnowledgePage — tab strip (Scenarios retired)', () => {
+  afterEach(() => vi.unstubAllGlobals());
 
-  const REPORT = {
-    status: 'ok',
-    generatedAt: '2026-07-14T12:00:00Z',
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
-    noChanges: false,
-    written: [{ id: 's1', title: 'checkout totals in cents', doc: 'knowledge/confluence/1.md', anchor: 'intro', file: '.truecourse/scenarios/core/s1.yaml' }],
-    coverageGaps: [],
-    birthFindings: [],
-    errors: [],
-    extractionFailures: [],
-    orphaned: [],
-    birthPassed: 1,
-    heldSections: [],
-    orphanedDismissals: [],
-  };
-  const COVERAGE = {
-    report: REPORT,
-    recipe: null,
-    scenarios: [{ id: 's1', title: 'checkout totals in cents', doc: 'knowledge/confluence/1.md', anchor: 'intro', file: '.truecourse/scenarios/core/s1.yaml', handWritten: false }],
-    hasGenerated: true,
-    hasScenarios: true,
-  };
-  const EMPTY_COVERAGE = { report: null, recipe: null, scenarios: [], hasGenerated: false, hasScenarios: false };
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    jobsState.activeJobs = [];
-  });
-
-  async function openScenarios() {
-    const user = userEvent.setup();
+  it('shows only Spec + Sources tabs — no Scenarios tab', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/api/ee/knowledge/spec/corpus')) return json(WS_CORPUS);
+        if (u.includes('/api/ee/knowledge/documents')) return json({ documents: [], total: 0 });
+        return json({});
+      }),
+    );
     render(<KnowledgePage />);
-    await user.click(await screen.findByRole('button', { name: /Scenarios/ }));
-    return user;
-  }
-
-  it('renders the generated scenarios coverage (overview + inventory)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(COVERAGE);
-        if (u.includes('/spec/corpus')) return json(CLEAN_CORPUS);
-        return json({ documents: [], total: 0 });
-      }),
-    );
-    await openScenarios();
-    // The overview shows the last-generate strip; the inventory shows the scenario.
-    expect(await screen.findByText('Last generate')).toBeInTheDocument();
-    expect(screen.getAllByText('checkout totals in cents').length).toBeGreaterThan(0);
-  });
-
-  it('renders no Generate button and the auto-generation EmptyState before the first generate', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(EMPTY_COVERAGE);
-        if (u.includes('/spec/corpus')) return json(CLEAN_CORPUS);
-        return json({ documents: [], total: 0 });
-      }),
-    );
-    await openScenarios();
-
-    // Generation auto-chains off a conflict-free Process — the tab has no Generate
-    // action; the EmptyState tells the user scenarios generate automatically.
-    expect(await screen.findByText('No scenarios yet')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Scenarios are generated automatically when Knowledge is processed/),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Generate/ })).not.toBeInTheDocument();
-  });
-
-  it('shows the blocked panel while a spec conflict is open (no Generate button)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(EMPTY_COVERAGE);
-        if (u.includes('/spec/corpus')) return json(WS_CORPUS); // carries one unresolved overlap
-        return json({ documents: [], total: 0 });
-      }),
-    );
-    await openScenarios();
-    expect(await screen.findByText('Scenario generation is blocked')).toBeInTheDocument();
-    // The conflicting doc pair is listed for resolution.
-    expect(
-      screen.getByText('knowledge/confluence/1.md ↔ knowledge/jira/2.md'),
-    ).toBeInTheDocument();
-    // Generation is automatic — there is no Generate/Regenerate action on the tab.
-    expect(screen.queryByRole('button', { name: /Generate/ })).not.toBeInTheDocument();
-  });
-
-  it('shows the "Generating…" affordance while a workspace guard job is active', async () => {
-    jobsState.activeJobs = [{ type: 'knowledge.guard', id: 'j1', key: 'knowledge.guard:org', status: 'running' }];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(EMPTY_COVERAGE);
-        if (u.includes('/spec/corpus')) return json(CLEAN_CORPUS);
-        return json({ documents: [], total: 0 });
-      }),
-    );
-    await openScenarios();
-    // A non-button affordance — generation is automatic, there is no Generate action.
-    expect(await screen.findByText('Generating…')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Generat/ })).not.toBeInTheDocument();
+    // The tab strip carries Spec + Sources and nothing else.
+    expect(await screen.findByRole('button', { name: /Spec/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sources/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Scenarios/ })).not.toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
+import { WorkspaceBadge } from './WorkspaceBadge';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
@@ -385,6 +386,11 @@ export function SpecCorpusView({
   const docTitle = new Map(c.docs.map((d) => [d.ref, d.title] as const));
   const labelOf = (ref: string): string => docTitle.get(ref) ?? ref;
 
+  // Hosted repo view: docs inherited from the workspace Knowledge corpus carry
+  // `layer: 'workspace'`. The set drives the workspace badge on kept-doc + conflict
+  // rows (which know refs only). Empty on OSS / repo-local corpora ⇒ no badge.
+  const workspaceRefs = new Set(c.docs.filter((d) => d.layer === 'workspace').map((d) => d.ref));
+
   // Tag filter: the distinct area tags across docs; selecting some narrows the
   // Documents list to docs carrying ANY selected tag (OR).
   const allTags = [...new Set(keptDocs.flatMap((d) => d.areaTags.map(fmtArea)))].sort();
@@ -473,6 +479,7 @@ export function SpecCorpusView({
                 area={fmtArea(area)}
                 resolved={resolved}
                 resolvedLabel={summary}
+                workspace={workspaceRefs.has(a) || workspaceRefs.has(b)}
                 active={activeKey === overlapKey(area, a, b)}
                 onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
               />
@@ -493,6 +500,7 @@ export function SpecCorpusView({
               key={doc.ref}
               doc={doc}
               tags={doc.areaTags.map(fmtArea)}
+              workspace={doc.layer === 'workspace'}
               active={activeKey === doc.ref}
               busy={busyRef !== null}
               disabledReason={decisionsHint}
@@ -802,6 +810,7 @@ function DocLink({ url }: { url: string }) {
 function DocRow({
   doc,
   tags,
+  workspace = false,
   active,
   busy,
   disabledReason,
@@ -810,6 +819,8 @@ function DocRow({
 }: {
   doc: SpecCorpusDoc;
   tags: string[];
+  /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
+  workspace?: boolean;
   active: boolean;
   busy: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
@@ -830,7 +841,10 @@ function DocRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{doc.title ?? doc.ref}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">{doc.title ?? doc.ref}</span>
+          {workspace && <WorkspaceBadge />}
+        </span>
         {tags.length > 0 && (
           <span className="flex flex-wrap gap-1">
             {tags.slice(0, 2).map((t) => (
@@ -1087,6 +1101,7 @@ function OverlapRow({
   area,
   resolved,
   resolvedLabel,
+  workspace = false,
   active,
   onOpen,
 }: {
@@ -1095,6 +1110,8 @@ function OverlapRow({
   resolved: boolean;
   /** Rich resolved-badge text (the verdict); falls back to "resolved". */
   resolvedLabel?: string;
+  /** Hosted repo view: a workspace-inherited doc is one side of this conflict. */
+  workspace?: boolean;
   active: boolean;
   onOpen: (pinned: boolean) => void;
 }) {
@@ -1111,8 +1128,9 @@ function OverlapRow({
       <GitMerge className={`mt-0.5 h-3 w-3 shrink-0 ${resolved ? 'text-emerald-500' : 'text-amber-500'}`} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
-        <span className="flex flex-wrap gap-1">
+        <span className="flex flex-wrap items-center gap-1">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
+          {workspace && <WorkspaceBadge />}
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
               {resolvedLabel ?? 'resolved'}

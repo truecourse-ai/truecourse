@@ -121,6 +121,7 @@ import {
   specsMaterializeInPlace,
 } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
+import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
 import {
   reapplyPromoted,
   applyInferredActions,
@@ -968,6 +969,75 @@ export async function syncWorkspaceCorpusInProcess(options: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Workspace inheritance (enterprise) — a connected repo folds its workspace
+// Knowledge corpus into its own spec before curate/generate.
+//
+// Inheritance is a materialization problem, not a connector one: the workspace
+// layer is a set of STORED doc bodies (namespaced `knowledge/<kind>/<id>.md`) plus
+// the workspace decisions. `materializeWorkspaceInheritance` writes those bodies
+// into a checkout and folds the workspace decisions UNDER the repo's own (repo
+// wins), so the repo's curate sees one doc universe with the workspace layer
+// pre-resolved. The doc bodies are resolved through the `spec-inheritance-hook`
+// seam (EE installs it; OSS/tests leave it unset → the repo curates alone).
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold the workspace decisions layer UNDER a repo's own — the decisions analog of
+ * workspace doc-body inheritance. Pure. The repo overlay wins per identity on every
+ * dimension (the same {@link mergeDecisions} keying `buildCorpusConflicts` uses): a
+ * workspace-resolved conflict arrives pre-resolved, and a repo verdict on a
+ * cross-layer conflict — written at repo scope — supersedes it.
+ */
+export function mergeInheritedDecisions(workspace: DecisionsFile, repo: DecisionsFile): DecisionsFile {
+  return mergeDecisions(workspace, repo);
+}
+
+/**
+ * Materialize the workspace Knowledge layer into `repoRoot` before curate/generate:
+ * write every workspace doc body at its namespaced `knowledge/<kind>/<id>.md` path
+ * (the same paths the workspace ledger stores, so the repo's curate hits the caches
+ * the workspace already paid for) and return the effective decisions to curate with
+ * — the workspace decisions folded under `repoDecisions` (repo wins). Inert when no
+ * inheritance seam is installed (OSS) or the repo inherits nothing: the passed
+ * `repoDecisions` are returned unchanged and `inherited` is false. Best-effort reads
+ * only — never mutates repo state.
+ */
+export async function materializeWorkspaceInheritance(
+  repoRoot: string,
+  repoKey: string,
+  repoDecisions: DecisionsFile,
+): Promise<{ decisions: DecisionsFile; inherited: boolean }> {
+  const hook = getSpecInheritanceHook();
+  if (!hook) return { decisions: repoDecisions, inherited: false };
+  const layer = await hook(repoKey);
+  if (!layer) return { decisions: repoDecisions, inherited: false };
+  for (const doc of layer.docs) {
+    const dest = path.join(repoRoot, doc.docPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, doc.markdown, 'utf-8');
+  }
+  return { decisions: mergeInheritedDecisions(layer.decisions, repoDecisions), inherited: true };
+}
+
+/**
+ * A stable content signature of a curated corpus — the sha over its meaningful
+ * structure with the volatile fields zeroed (the top-level `generatedAt` and each
+ * doc's `lastTouched`, both of which move on every run/sync without any content
+ * change). Two corpora with the same signature curate to the same doc universe, so
+ * the workspace ripple compares it before/after a process to skip re-scanning the
+ * org's repos when nothing meaningful changed. Null corpus → the empty signature.
+ */
+export function corpusContentSha(corpus: CuratedCorpus | null): string {
+  if (!corpus) return '';
+  const stable = {
+    ...corpus,
+    generatedAt: '',
+    docs: corpus.docs.map((d) => ({ ...d, lastTouched: '' })),
+  };
+  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+}
+
 export interface InferInProcessOptions {
   tracker?: StepTracker;
   /** Where authored contracts live (the coverage baseline). Defaults to
@@ -1176,7 +1246,8 @@ function autodetectCodeDir(repoRoot: string): string {
 // document, not a per-commit snapshot. The dashboard read/edit routes use these.
 // ---------------------------------------------------------------------------
 
-const EMPTY_DECISIONS: DecisionsFile = {
+/** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
+export const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],

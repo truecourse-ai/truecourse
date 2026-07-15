@@ -768,6 +768,10 @@ export interface SpecCorpusDoc {
   status?: string;
   lastTouched: string;
   areaTags: string[];
+  /** Hosted only: `'workspace'` when this doc is inherited from the workspace
+   *  Knowledge corpus (folded into the repo scan before curate). Absent on
+   *  repo-local docs and in OSS — the UI shows no workspace badge then. */
+  layer?: 'workspace';
   /** Workspace only: the ledger's human title for this ref (synthetic docPath).
    *  Absent on repo corpora — the UI falls back to the ref. */
   title?: string;

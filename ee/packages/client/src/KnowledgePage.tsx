@@ -9,45 +9,31 @@
  * (content arrives from connector syncs) and pages the "Not included" listing for
  * scale.
  *
+ * The workspace level keeps ONLY specs + conflict resolution — repos generate their
+ * guard scenarios from the union of workspace + repo specs, so there is no
+ * workspace-level Scenarios tab.
+ *
  * Tabs:
  *   - Spec (default): areas → kept docs + conflicts; right pane = doc markdown /
  *     conflict resolution. Force-include / exclude + pick-a-side verdicts all hit
  *     the workspace decision endpoints.
  *   - Sources: the provenance ledger (server-paginated, searchable, kind-filtered).
- *   - Scenarios: the reused guard coverage view over the workspace scenario corpus.
- *     Generation is automatic — a conflict-free Process chains the scenario
- *     generate — so the tab only renders coverage, the blocked panel while a spec
- *     conflict is open, and a "Generating…" affordance while the job runs.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Database, FileText, FlaskConical, Loader2, Search, X } from 'lucide-react';
-import type {
-  GuardGenerateReport,
-  GuardRecipeCard as GuardRecipeCardData,
-  GuardScenarioListItem,
-  GuardScenarioSource,
-} from '@truecourse/shared';
+import { BookOpen, Database, FileText, Loader2, Search } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { SpecSourceProvider } from '@/components/spec/spec-source';
-import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
-import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
-import { GuardBlockedPanel, buildOpenConflictRows } from '@/components/guard/GuardBlockedPanel';
-import { buildListRows, buildFindingRows, buildHeldRows } from '@/lib/guard-list-rows';
-import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
-import type { SpecCorpusResponse } from '@/lib/api';
-import { getJson, getJsonAllow404 } from './api';
+import { getJson } from './api';
 import { createWorkspaceSpecSource } from './knowledge-spec-source';
-import { useJobs } from './jobs/JobsContext';
 
-type Tab = 'spec' | 'sources' | 'scenarios';
+type Tab = 'spec' | 'sources';
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof BookOpen }> = [
   { id: 'spec', label: 'Spec', icon: FileText },
-  { id: 'scenarios', label: 'Scenarios', icon: FlaskConical },
   { id: 'sources', label: 'Sources', icon: Database },
 ];
 
@@ -91,7 +77,6 @@ export default function KnowledgePage() {
             <KnowledgeSpecTab />
           </SpecSourceProvider>
         )}
-        {tab === 'scenarios' && <ScenariosTab onGoToSpec={() => setTab('spec')} />}
         {tab === 'sources' && <SourcesTab />}
       </div>
     </div>
@@ -146,211 +131,6 @@ function KnowledgeSpecTab() {
             title="Select a document or conflict"
             body="Choose a document to read it, or a conflict to resolve it."
           />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Scenarios — the reused guard coverage view over the WORKSPACE scenario corpus.
-// Generation is automatic: a conflict-free Process chains the org-scoped
-// `knowledge.guard` job server-side (no button here). While a spec conflict is open
-// the blocked panel shows instead — the same live-corpus derivation the repo
-// GuardBlockedPanel uses; resolving the last conflict re-processes and re-chains.
-// ---------------------------------------------------------------------------
-
-const GUARD_TASK = 'knowledge.guard';
-
-/** The workspace Scenarios-tab coverage payload (mirrors the repo guard reads). */
-interface WorkspaceGuardCoverage {
-  report: GuardGenerateReport | null;
-  recipe: GuardRecipeCardData | null;
-  scenarios: GuardScenarioListItem[];
-  hasGenerated: boolean;
-  hasScenarios: boolean;
-}
-
-function ScenariosTab({ onGoToSpec }: { onGoToSpec: () => void }) {
-  const { activeJobs, onJobSettled } = useJobs();
-  // Any active workspace guard job → "Generating…" (the jobs feed is org-scoped
-  // server-side, so its mere presence is this workspace's run — survives refresh).
-  const generating = activeJobs.some((j) => j.type === GUARD_TASK);
-
-  const [corpus, setCorpus] = useState<SpecCorpusResponse | null | undefined>(undefined);
-  const [coverage, setCoverage] = useState<WorkspaceGuardCoverage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [source, setSource] = useState<GuardScenarioSource | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [c, cov] = await Promise.all([
-        getJsonAllow404<SpecCorpusResponse>('/api/ee/knowledge/spec/corpus'),
-        getJson<WorkspaceGuardCoverage>('/api/ee/knowledge/guard/coverage'),
-      ]);
-      setCorpus(c);
-      setCoverage(cov);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // A settled guard job means scenarios just landed — refetch the coverage.
-  useEffect(
-    () =>
-      onJobSettled((job) => {
-        if (job.type === GUARD_TASK) void load();
-      }),
-    [onJobSettled, load],
-  );
-
-  // The LIVE open conflicts, derived from the workspace corpus (the same shared
-  // derivation the repo blocked panel uses); blocks generation while any is open.
-  const conflicts = useMemo(() => (corpus ? buildOpenConflictRows(corpus) : []), [corpus]);
-  const blocked = conflicts.length > 0;
-
-  // Workspace scenarios never run, so every row joins to a null last result.
-  const scenarioRows = useMemo<GuardScenarioRowData[]>(
-    () => (coverage?.scenarios ?? []).map((s) => ({ ...s, lastResult: null })),
-    [coverage],
-  );
-  const listRows = useMemo(
-    () =>
-      buildListRows(
-        scenarioRows,
-        buildFindingRows(coverage?.report ?? null, scenarioRows),
-        buildHeldRows(coverage?.report ?? null, scenarioRows),
-      ),
-    [scenarioRows, coverage],
-  );
-
-  const isEmpty = !!coverage && !coverage.hasGenerated && !coverage.hasScenarios;
-
-  const openScenario = useCallback((id: string) => {
-    setSelected(id);
-    setSource(null);
-    void getJson<GuardScenarioSource>(`/api/ee/knowledge/guard/scenario?id=${encodeURIComponent(id)}`)
-      .then(setSource)
-      .catch(() => setSource(null));
-  }, []);
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-3">
-        <p className="text-xs text-muted-foreground">
-          Scenarios test each spec section — generated automatically when Knowledge is processed.
-        </p>
-        {generating && (
-          <span className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Generating…
-          </span>
-        )}
-      </div>
-
-      {error && (
-        <div className="shrink-0 border-b border-border bg-red-500/10 px-6 py-2 text-xs text-red-500">{error}</div>
-      )}
-
-      <div className="min-h-0 flex-1">
-        {loading && !coverage ? (
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : blocked ? (
-          <GuardBlockedPanel conflicts={conflicts} onOpenConflict={onGoToSpec} />
-        ) : isEmpty ? (
-          <EmptyState
-            icon={FlaskConical}
-            title="No scenarios yet"
-            body="Scenarios are generated automatically when Knowledge is processed. Sync and process your sources to get started."
-          />
-        ) : (
-          <div className="flex h-full">
-            <div className="w-[340px] shrink-0 overflow-auto border-r border-border">
-              <GuardScenariosPanel
-                rows={listRows}
-                loading={loading}
-                error={error}
-                activeId={selected}
-                onOpen={(id) => openScenario(id)}
-              />
-            </div>
-            <div className="min-w-0 flex-1 overflow-auto">
-              {selected ? (
-                <ScenarioSourceView
-                  id={selected}
-                  source={source}
-                  onClose={() => {
-                    setSelected(null);
-                    setSource(null);
-                  }}
-                />
-              ) : (
-                <GuardScenariosOverview
-                  recipe={coverage?.recipe ?? null}
-                  report={coverage?.report ?? null}
-                  scenarioRows={scenarioRows}
-                  hasScenarios={!!coverage?.hasScenarios}
-                  loading={loading}
-                  error={error}
-                  onOpenSpec={() => onGoToSpec()}
-                  conflicts={conflicts}
-                  onOpenConflict={() => onGoToSpec()}
-                />
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** One committed scenario's YAML source (the row preview), with a close affordance. */
-function ScenarioSourceView({
-  id,
-  source,
-  onClose,
-}: {
-  id: string;
-  source: GuardScenarioSource | null;
-  onClose: () => void;
-}) {
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
-        <span className="min-w-0 truncate font-mono text-xs text-foreground" title={id}>
-          {source?.file ?? id}
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          title="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {source ? (
-          <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground">
-            {source.content}
-          </pre>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
         )}
       </div>
     </div>

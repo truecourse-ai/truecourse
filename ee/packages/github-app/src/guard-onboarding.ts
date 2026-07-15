@@ -35,10 +35,11 @@ import {
   OpenConflictsError,
   type GuardGenerateInProcessResult,
 } from '@truecourse/core/commands/guard-in-process';
+import { materializeWorkspaceInheritance, EMPTY_DECISIONS } from '@truecourse/core/commands/spec-in-process';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
-import { corpusFilePath, decisionsPath } from '@truecourse/spec-consolidator';
+import { corpusFilePath, decisionsPath, type DecisionsFile } from '@truecourse/spec-consolidator';
 import { scenariosDir, readGuardResult as readCloneGuardResult } from '@truecourse/guard-runner';
 import { hasGuardUniverse, type GuardGenerateResult } from '@truecourse/guard-generator';
 import {
@@ -118,9 +119,20 @@ export async function materializeStoredCorpus(ref: RepoRef, checkoutDir: string)
   // with the corpus it resolves, else the gate re-fires on the checkout), and the
   // generator's losing-side claim suppression reads the same file. Absent when the
   // repo has no stored resolutions — the checkout simply has none.
-  const decisions =
-    (await loadSpec(ref, 'decisions')) ?? (await loadLatestSpec(ref.repoKey, 'decisions'));
-  if (decisions != null) {
+  const storedDecisions =
+    (await loadSpec<DecisionsFile>(ref, 'decisions')) ??
+    (await loadLatestSpec<DecisionsFile>(ref.repoKey, 'decisions'));
+
+  // Fold the workspace Knowledge layer into the checkout too (hosted): the stored
+  // corpus references inherited `knowledge/<kind>/<id>.md` docs whose bodies the
+  // generator reads from disk, and the conflict gate must see the workspace
+  // decisions merged UNDER the repo's own (repo wins). Inert in OSS / no workspace.
+  const { decisions, inherited } = await materializeWorkspaceInheritance(
+    checkoutDir,
+    ref.repoKey,
+    storedDecisions ?? EMPTY_DECISIONS,
+  );
+  if (storedDecisions != null || inherited) {
     const decFile = decisionsPath(checkoutDir);
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, JSON.stringify(decisions, null, 2) + '\n');

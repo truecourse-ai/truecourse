@@ -62,14 +62,14 @@ import {
   SYNC_MSG_CONSOLIDATE,
   type WorkspaceSyncEstimate,
 } from '../knowledge/sync.js';
-import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
-import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import {
-  GUARD_GENERATE_STEPS,
-  generateWorkspaceGuardInProcess,
-  type WorkspaceGuardGenerateResult,
-} from '@truecourse/core/commands/guard-in-process';
-import { fetchWorkspaceGuardDocs } from '../knowledge/guard.js';
+  getWorkspaceDecisions,
+  corpusContentSha,
+  CURATE_STEPS,
+  type CuratedCorpus,
+} from '@truecourse/core/commands/spec-in-process';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import { GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process';
 import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
 import { JobStepTracker } from './steps.js';
 import {
@@ -86,9 +86,6 @@ import {
   KNOWLEDGE_ESTIMATE_TASK,
   KNOWLEDGE_ESTIMATE_TITLE,
   KNOWLEDGE_ESTIMATE_STEPS,
-  KNOWLEDGE_GUARD_TASK,
-  KNOWLEDGE_GUARD_TITLE,
-  KNOWLEDGE_GUARD_STEPS,
   REPO_BASELINE_TASK,
   REPO_BASELINE_TITLE,
   REPO_BASELINE_STEPS,
@@ -106,7 +103,6 @@ import {
   GUARD_BASELINE_STEPS,
   type SyncJobPayload,
   type EstimateJobPayload,
-  type GuardWorkspacePayload,
   type BaselineJobPayload,
   type GuardGenerateJobPayload,
   type GuardGateJobPayload,
@@ -148,11 +144,17 @@ export interface StartWorkerDeps {
   onBaselineSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
   /**
    * Called after a `knowledge.sync` (processing) job goes terminal. On SUCCESS with
-   * no open spec conflict, processing just re-consolidated the workspace corpus, so
-   * chain a `knowledge.guard` scenario generate (see knowledge-chain.ts). Wired only
-   * onto the processing definition.
+   * no open spec conflict AND a corpus that actually changed, processing just
+   * re-consolidated the workspace corpus, so ripple a baseline re-scan to the org's
+   * connected repos (they inherit the workspace layer — see knowledge-chain.ts). The
+   * run's `result` carries the `corpusChanged` flag. Wired only onto the processing
+   * definition.
    */
-  onKnowledgeSyncSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
+  onKnowledgeSyncSettled?: (
+    payload: SyncJobPayload,
+    outcome: JobOutcomeStatus,
+    result?: unknown,
+  ) => Promise<void>;
   /**
    * Called after a `repo.guard` (generate) job goes terminal. On SUCCESS, a fresh
    * generate just wrote scenarios — chain a guard-baseline refresh so the first PR
@@ -315,16 +317,17 @@ interface JobBodyDeps {
  */
 function knowledgeSyncJob(
   d: JobBodyDeps,
-  onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
+  onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus, result?: unknown) => Promise<void>,
 ): JobDefinition<SyncJobPayload> {
   return {
     type: KNOWLEDGE_SYNC_TASK,
     title: KNOWLEDGE_SYNC_TITLE,
     steps: KNOWLEDGE_SYNC_STEPS,
     org: (p) => p.org,
-    // On a successful, conflict-free process the settle chain enqueues the workspace
-    // scenario generate (knowledge-chain.ts) — best-effort, never throws.
-    onSettled: onSettled ? (ctx, outcome) => onSettled(ctx.payload, outcome) : undefined,
+    // On a successful, conflict-free process that CHANGED the corpus, the settle
+    // hook ripples a baseline re-scan to the org's connected repos (knowledge-
+    // chain.ts) — best-effort, never throws. `corpusChanged` rides the result.
+    onSettled: onSettled ? (ctx, outcome, result) => onSettled(ctx.payload, outcome, result) : undefined,
     sentry: (err, p) => ({
       component: 'knowledge',
       orgId: p.org,
@@ -337,6 +340,13 @@ function knowledgeSyncJob(
       // Fold the workspace decisions (force excludes/includes, verdicts) into curate.
       const decisions = await getWorkspaceDecisions(org);
 
+      // Content signature of the corpus BEFORE re-consolidating — compared with the
+      // after signature so the settle hook skips the repo ripple when this process
+      // changed nothing meaningful (volatile timestamps are excluded from the sha).
+      const before = corpusContentSha(
+        await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
+      );
+
       const result = await processWorkspaceKnowledge(org, d.knowledge, {
         decisions,
         onProgress: async (current, total, message) => {
@@ -347,13 +357,17 @@ function knowledgeSyncJob(
         tracker: stepBridge(ctx.tracker, 'consolidate', CURATE_STEPS),
       });
 
+      const after = corpusContentSha(
+        await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
+      );
+
       // Processing consumed the swept work for EVERY source — clear all pending
       // records so no source's Process button lingers until the next sweep.
       for (const connector of Object.values(CONNECTORS)) {
         if (connector) await d.integrations.setPending(org, connector.kind, null);
       }
       return {
-        result: { synced: result.synced },
+        result: { synced: result.synced, corpusChanged: before !== after },
         notification: {
           level: 'success',
           title: 'Processing complete',
@@ -420,114 +434,6 @@ function knowledgeEstimateJob(d: JobBodyDeps): JobDefinition<EstimateJobPayload>
       level: 'error',
       title: 'Sync failed',
       body: 'The sync didn’t finish. Open Details for the technical reason.',
-      data: { detail: err.message },
-    }),
-  };
-}
-
-/**
- * The workspace guard-generate step, injectable so the job body is unit-testable
- * without an LLM. Reads the corpus's kept docs' stored bodies + the workspace
- * decisions, then runs the shared in-process generate; the production default is
- * built from the job-body deps.
- */
-export interface WorkspaceGuardPipeline {
-  run(
-    org: string,
-    progress: { onPhase?: (phase: 'fetch' | 'generate') => void | Promise<void>; tracker?: StepTracker },
-  ): Promise<WorkspaceGuardGenerateResult>;
-}
-
-/** The production pipeline: read the corpus's kept docs' stored bodies, fold the
- *  workspace decisions, and run the shared in-process generate. */
-function defaultWorkspaceGuardPipeline(d: JobBodyDeps): WorkspaceGuardPipeline {
-  return {
-    async run(org, progress) {
-      await progress.onPhase?.('fetch');
-      const docs = await fetchWorkspaceGuardDocs({ knowledge: d.knowledge }, org);
-      const decisions = await getWorkspaceDecisions(org);
-      await progress.onPhase?.('generate');
-      return generateWorkspaceGuardInProcess({
-        workspaceOrgId: org,
-        docs,
-        decisions,
-        tracker: progress.tracker,
-      });
-    },
-  };
-}
-
-/**
- * Workspace guard-scenario generation (Knowledge → Scenarios "Generate"): fetch the
- * corpus's kept docs → run the shared in-process guard generate over the persisted
- * workspace corpus + decisions → persist the scenario set + report under workspace
- * scope. Org-scoped single-flight (like the processing job). A blocked
- * (open-conflicts) generate completes with a WARNING (a needs-attention outcome, not
- * a failure); a no-corpus workspace is a clean success with distinct wording.
- */
-function knowledgeGuardJob(pipeline: WorkspaceGuardPipeline): JobDefinition<GuardWorkspacePayload> {
-  return {
-    type: KNOWLEDGE_GUARD_TASK,
-    title: KNOWLEDGE_GUARD_TITLE,
-    steps: KNOWLEDGE_GUARD_STEPS,
-    org: (p) => p.org,
-    sentry: (err, p) => ({
-      component: 'knowledge',
-      orgId: p.org,
-      upstreamStatus: upstreamStatusOf(err),
-      route: 'worker knowledge.guard',
-    }),
-    async run(ctx) {
-      const { org } = ctx.payload;
-      const result = await pipeline.run(org, {
-        onPhase: async (phase) => {
-          if (phase === 'generate') await ctx.phase('generate');
-          else await ctx.phase('fetch');
-        },
-        // Guard generate sub-phases surface on the "generate" step (index → author).
-        tracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
-      });
-
-      // Blocked on unresolved spec conflicts: a blocked report persisted, NO scenario
-      // set. Complete (not fail) with a WARNING pointing at the Spec tab.
-      if (result.openConflicts > 0) {
-        const n = result.openConflicts;
-        return {
-          result: { scenariosWritten: 0, openConflicts: n },
-          notification: {
-            level: 'warning',
-            title: `Scenario generation blocked — ${n} spec conflict${n === 1 ? '' : 's'} to resolve`,
-            body: `Resolve the ${n} open spec conflict${n === 1 ? '' : 's'} in Knowledge → Spec, then generate again.`,
-            data: { openConflicts: n },
-          },
-        };
-      }
-      if (result.noCorpus) {
-        return {
-          result: { scenariosWritten: 0, noCorpus: true },
-          notification: {
-            level: 'success',
-            title: 'Scenarios — waiting for spec',
-            body: 'No workspace corpus yet — process a connected source first, then generate scenarios.',
-            data: { noCorpus: true },
-          },
-        };
-      }
-      const n = result.scenariosWritten;
-      return {
-        result: { scenariosWritten: n, noCorpus: false },
-        notification: {
-          level: 'success',
-          title: 'Scenarios generated',
-          body: `${n} guard scenario${n === 1 ? '' : 's'} generated.`,
-          data: { scenariosWritten: n },
-        },
-      };
-    },
-    onError: (err) => ({
-      level: 'error',
-      title: 'Scenario generation failed',
-      body: 'Scenario generation didn’t finish. Open Details for the technical reason.',
       data: { detail: err.message },
     }),
   };
@@ -1225,28 +1131,6 @@ export async function runKnowledgeSync(
   );
 }
 
-/** Deps the exported `runKnowledgeGuard` test seam needs — the harness stores plus
- *  the (faked in tests; `defaultWorkspaceGuardPipeline` in production) generate pipeline. */
-export interface RunKnowledgeGuardDeps {
-  db: EeDb;
-  jobStore: JobStore;
-  notifications: NotificationStore;
-  pipeline: WorkspaceGuardPipeline;
-}
-
-/** Run the `knowledge.guard` (workspace generate) body directly (unit-testable
- *  without graphile-worker). A thin wrapper over the harness. */
-export async function runKnowledgeGuard(
-  deps: RunKnowledgeGuardDeps,
-  payload: GuardWorkspacePayload,
-): Promise<void> {
-  await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
-    knowledgeGuardJob(deps.pipeline),
-    payload,
-  );
-}
-
 export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
   const { db, jobStore } = deps;
   const notifications = new NotificationStore(db);
@@ -1265,7 +1149,6 @@ export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
     taskList: {
       [KNOWLEDGE_SYNC_TASK]: registerJob(rt, knowledgeSyncJob(bodyDeps, deps.onKnowledgeSyncSettled)),
       [KNOWLEDGE_ESTIMATE_TASK]: registerJob(rt, knowledgeEstimateJob(bodyDeps)),
-      [KNOWLEDGE_GUARD_TASK]: registerJob(rt, knowledgeGuardJob(defaultWorkspaceGuardPipeline(bodyDeps))),
       [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
       [REPO_GUARD_TASK]: registerJob(
         rt,

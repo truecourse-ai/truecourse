@@ -48,34 +48,6 @@ export const KNOWLEDGE_ESTIMATE_STEPS: readonly JobStepDef[] = [
   { key: 'estimate', label: 'Checking for changes' },
 ];
 
-/** Workspace guard-scenario generation — generate scenarios over the workspace
- *  corpus (Knowledge → Scenarios "Generate"). Org-scoped single-flight, mirroring
- *  the workspace processing job (not repo-scoped like `repo.guard`). */
-export const KNOWLEDGE_GUARD_TASK = 'knowledge.guard';
-
-/** The `knowledge.guard` task payload — org-scoped, like the processing job. */
-export interface GuardWorkspacePayload {
-  jobId: string;
-  org: string;
-}
-
-/**
- * Single-flight key for a `knowledge.guard` job — ONE per workspace at a time: the
- * Scenarios tab's Generate dispatches the workspace-scoped generate, so a second
- * click while one runs is a no-op.
- */
-export function workspaceGuardJobKey(org: string): string {
-  return `${KNOWLEDGE_GUARD_TASK}:${org}`;
-}
-
-/** Display title + stepped checklist for the workspace guard-generate job popup.
- *  The `generate` step carries the OSS GUARD_GENERATE_STEPS sub-phases as detail. */
-export const KNOWLEDGE_GUARD_TITLE = 'Generating scenarios';
-export const KNOWLEDGE_GUARD_STEPS: readonly JobStepDef[] = [
-  { key: 'fetch', label: 'Fetching documents' },
-  { key: 'generate', label: 'Generating scenarios' },
-];
-
 export const REPO_BASELINE_TASK = 'repo.baseline';
 
 /** Display title + stepped checklist for the repo-scan job popup. */

@@ -12,13 +12,16 @@
 import { WorkOS } from '@workos-inc/node';
 import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
-import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
+import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
+import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
+import { setKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import { createSpecInheritanceHook, createKnowledgeLedgerReader } from './knowledge/inheritance.js';
 import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
@@ -174,6 +177,16 @@ const plugin: EePlugin = {
     setSpecConflictsResolvedHook(
       createSpecConflictsResolvedBaselineScan({ store: gateStore, enqueueBaseline: jobs.enqueueBaseline }),
     );
+
+    // Repo Knowledge inheritance: a connected repo folds its workspace's Knowledge
+    // corpus into its own spec. The spec pipeline materializes the workspace doc
+    // bodies + merges the workspace decisions (repo wins) into the checkout before
+    // curate/generate through this seam; the repo corpus GET enriches the inherited
+    // docs' title/url through the ledger reader seam. Both resolve the repo's
+    // workspace org from the gate store; a repo with no workspace inherits nothing.
+    const knowledgeStore = new PgKnowledgeStore(eeDb);
+    setSpecInheritanceHook(createSpecInheritanceHook({ store: gateStore, knowledge: knowledgeStore }));
+    setKnowledgeLedgerReader(createKnowledgeLedgerReader({ store: gateStore, knowledge: knowledgeStore }));
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App

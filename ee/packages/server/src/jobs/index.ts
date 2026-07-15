@@ -42,7 +42,7 @@ import {
   chainGuardBaselineRefresh,
   generateWasBlocked,
 } from './guard-chain.js';
-import { chainWorkspaceGuard } from './knowledge-chain.js';
+import { chainInheritanceRipple, type RippleRepo } from './knowledge-chain.js';
 import { settleOrphanedGuardGates } from './orphans.js';
 import {
   enqueueOrPendBaseline,
@@ -59,7 +59,6 @@ import { runGuardBackfill } from './guard-backfill.js';
 import {
   KNOWLEDGE_SYNC_TASK,
   KNOWLEDGE_ESTIMATE_TASK,
-  KNOWLEDGE_GUARD_TASK,
   REPO_BASELINE_TASK,
   REPO_GUARD_TASK,
   GUARD_GATE_TASK,
@@ -69,10 +68,8 @@ import {
   guardGateJobKey,
   guardSpecRegenJobKey,
   guardBaselineJobKey,
-  workspaceGuardJobKey,
   type SyncJobPayload,
   type EstimateJobPayload,
-  type GuardWorkspacePayload,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
   type GuardGenerateEnqueueRequest,
@@ -93,8 +90,6 @@ export interface JobsApi {
   enqueueSync(payload: SyncJobPayload, jobKey: string): Promise<void>;
   /** Enqueue Stage 1 of a sync — the cache-aware cost estimate (maxAttempts:1). */
   enqueueEstimate(payload: EstimateJobPayload, jobKey: string): Promise<void>;
-  /** Enqueue a workspace guard-scenario generate (Knowledge → Scenarios "Generate", maxAttempts:1). */
-  enqueueGuard(payload: GuardWorkspacePayload, jobKey: string): Promise<void>;
   /**
    * Enqueue an initial/refresh repo scan (connect + default-branch push). Single-
    * flight per repo: returns the new job id, or null when a scan is already
@@ -333,12 +328,6 @@ export async function registerJobs(
       ...req,
     });
 
-  // Single-flight workspace guard-generate enqueue — the post-process chain lands
-  // here (the Scenarios "Generate" route creates its own row for the 409-with-jobId
-  // path). Org-scoped, so a duplicate for the same workspace coalesces to null.
-  const enqueueWorkspaceGuard = (org: string): Promise<string | null> =>
-    singleFlightEnqueue(KNOWLEDGE_GUARD_TASK, org, workspaceGuardJobKey(org), { org });
-
   // Single-flight guard-gate enqueue — the pull-request webhook lands here.
   // Keyed per repo + head SHA: a redelivered webhook for the same head is a
   // no-op, while a new push (new head) queues a fresh gate.
@@ -409,8 +398,8 @@ export async function registerJobs(
     replayPendingGuardBaseline(pendingGuardBaselines, enqueueGuardBaseline, payload, settled);
 
   // The workspace's open spec conflicts (the shared `openConflicts` derivation the
-  // Scenarios gate uses) — 0 when there is no corpus yet. The post-process chain
-  // blocks scenario generation while any is open.
+  // repo gate uses) — 0 when there is no corpus yet. The ripple skips a workspace
+  // that still has any conflict open (repos stay on the last clean spec).
   const workspaceOpenConflicts = async (org: string): Promise<number> => {
     const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
     if (!corpus) return 0;
@@ -418,18 +407,39 @@ export async function registerJobs(
     return openConflicts(corpus, decisions).length;
   };
 
-  // After a knowledge.sync (processing) job succeeds with no open spec conflict,
-  // chain the workspace scenario generate — processing just re-consolidated the
-  // corpus, so this is the moment generation has its doc universe. Best-effort; the
-  // org-scoped single-flight key coalesces a duplicate.
+  // The org's connected repos that have a baseline to re-scan — the ripple targets.
+  // A repo with no baseline yet (never scanned) is skipped: there is nothing to
+  // re-inherit into and no commit to key by.
+  const listReposToRipple = async (org: string): Promise<RippleRepo[]> => {
+    const links = await gateStore.listReposForWorkspace(org);
+    const repos: RippleRepo[] = [];
+    for (const link of links) {
+      const baseline = await gateStore.getBaseline(link.repoFullName);
+      if (!baseline) continue;
+      repos.push({
+        repoFullName: link.repoFullName,
+        installationId: link.installationId,
+        defaultBranch: link.defaultBranch,
+        commitSha: baseline.commitSha,
+      });
+    }
+    return repos;
+  };
+
+  // After a knowledge.sync (processing) job succeeds WITH a corpus change and no open
+  // spec conflict, ripple a baseline re-scan to the org's connected repos — they fold
+  // the workspace layer into their own spec, so a changed corpus makes their inherited
+  // spec stale. Best-effort; single-flight losses coalesce onto pending-baseline.
   const onKnowledgeSyncSettled = async (
     payload: SyncJobPayload,
     outcome: JobOutcomeStatus,
+    result?: unknown,
   ): Promise<void> => {
-    await chainWorkspaceGuard(
-      { openConflicts: workspaceOpenConflicts, enqueueWorkspaceGuard },
+    await chainInheritanceRipple(
+      { openConflicts: workspaceOpenConflicts, listRepos: listReposToRipple, enqueueBaseline },
       payload,
       outcome,
+      result,
     );
   };
 
@@ -515,10 +525,6 @@ export async function registerJobs(
     enqueueEstimate: async (payload, jobKey) => {
       if (!runner) throw new Error('the background job worker is not running');
       await runner.addJob(KNOWLEDGE_ESTIMATE_TASK, payload, { jobKey, maxAttempts: 1 });
-    },
-    enqueueGuard: async (payload, jobKey) => {
-      if (!runner) throw new Error('the background job worker is not running');
-      await runner.addJob(KNOWLEDGE_GUARD_TASK, payload, { jobKey, maxAttempts: 1 });
     },
     enqueueBaseline,
     enqueueGuardGenerate,

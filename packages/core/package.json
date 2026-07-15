@@ -112,6 +112,14 @@
       "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
       "import": "./dist/lib/spec-conflicts-resolved-hook.js"
     },
+    "./lib/spec-inheritance-hook": {
+      "types": "./dist/lib/spec-inheritance-hook.d.ts",
+      "import": "./dist/lib/spec-inheritance-hook.js"
+    },
+    "./lib/knowledge-ledger-reader": {
+      "types": "./dist/lib/knowledge-ledger-reader.d.ts",
+      "import": "./dist/lib/knowledge-ledger-reader.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"
