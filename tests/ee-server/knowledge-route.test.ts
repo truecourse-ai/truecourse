@@ -116,3 +116,74 @@ describe('Knowledge route — LLM-provider gate differs by endpoint', () => {
     expect(unknown.body.error).toBe('Unknown connector: notion');
   });
 });
+
+describe('Knowledge route — the estimate single-flight key is per ORG', () => {
+  const ORG_B = 'org_B';
+  let client: PGlite;
+  let app: Express;
+  let db: EeDb;
+  /** Per-request org — the auth middleware stamps whatever this holds. */
+  let currentOrg: string;
+  /** Every graphile jobKey the router hands `enqueueEstimate`. */
+  let estimateKeys: string[];
+
+  beforeEach(async () => {
+    client = new PGlite();
+    db = drizzle(client, { schema }) as unknown as EeDb;
+    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    currentOrg = ORG;
+    estimateKeys = [];
+    // The same connector kind connected in BOTH workspaces.
+    for (const org of [ORG, ORG_B]) {
+      await new IntegrationStore(db, SECRET).save(org, 'confluence', { config: CONFIG, token: 'tok-abc' });
+    }
+
+    const jobs = {
+      jobStore: new JobStore(db),
+      enqueueSync: async () => {},
+      enqueueEstimate: async (_payload: unknown, jobKey: string) => void estimateKeys.push(jobKey),
+    } as unknown as JobsApi;
+
+    app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as Request & { eeUser?: AuthUser }).eeUser = {
+        id: 'u1',
+        email: 'u@acme.test',
+        organizationId: currentOrg,
+      };
+      next();
+    });
+    app.use('/api/ee/knowledge', createKnowledgeRouter(db, SECRET, jobs));
+  });
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it('two orgs sweeping the same connector kind get org-distinct graphile jobKeys', async () => {
+    // graphile-worker's job_key is GLOBALLY unique with replace semantics, so a
+    // kind-only key would let org B's sweep silently REPLACE org A's queued job.
+    const estA = await request(app).post('/api/ee/knowledge/estimate').send({ kind: 'confluence' });
+    expect(estA.status).toBe(202);
+
+    currentOrg = ORG_B;
+    const estB = await request(app).post('/api/ee/knowledge/estimate').send({ kind: 'confluence' });
+    expect(estB.status).toBe(202);
+
+    expect(estimateKeys).toEqual([
+      `knowledge.estimate:${ORG}:confluence`,
+      `knowledge.estimate:${ORG_B}:confluence`,
+    ]);
+  });
+
+  it('a duplicate sweep for the SAME org + kind still 409s (single-flight intact)', async () => {
+    const first = await request(app).post('/api/ee/knowledge/estimate').send({ kind: 'confluence' });
+    expect(first.status).toBe(202);
+
+    const second = await request(app).post('/api/ee/knowledge/estimate').send({ kind: 'confluence' });
+    expect(second.status).toBe(409);
+    expect(second.body.error).toMatch(/estimate is already in progress/i);
+    expect(second.body.jobId).toBe(first.body.jobId);
+    expect(estimateKeys).toHaveLength(1);
+  });
+});

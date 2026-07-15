@@ -147,7 +147,11 @@ export function createKnowledgeRouter(db: EeDb, masterSecret: string, jobs: Jobs
     // bundled prices, so it must run even with no provider configured. The provider
     // gate lives on `/sync` (Process), which is what actually calls the LLM.
 
-    const key = `${KNOWLEDGE_ESTIMATE_TASK}:${parsed.data.kind}`;
+    // The key is ALSO graphile-worker's jobKey, which is globally unique with
+    // replace semantics — it must embed the org (mirroring workspaceSyncJobKey)
+    // or org B's sweep would silently replace org A's queued job, stranding org
+    // A's tracked row as `queued` and wedging its single-flight key.
+    const key = `${KNOWLEDGE_ESTIMATE_TASK}:${org}:${parsed.data.kind}`;
     let job;
     try {
       job = await jobs.jobStore.create({ org, type: KNOWLEDGE_ESTIMATE_TASK, key });
