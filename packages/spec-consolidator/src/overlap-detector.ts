@@ -27,17 +27,30 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
-import { dedupeCrossAreaOverlaps } from '@truecourse/shared';
+import { dedupeCrossAreaOverlaps, planDocChunks, type DocChunk } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
 import { canonicalizeConcern, isProcessArea } from './corpus-types.js';
 import type { Area, Overlap, OverlapSection, VocabMap } from './corpus-types.js';
 import { defaultConcurrency } from './runner.js';
 import { verifyOverlapSections } from './pointer-verifier.js';
 
+/** Which window slice of a doc a runner call judges (1-based `index` within `count`). */
+export interface OverlapPart {
+  index: number;
+  count: number;
+  isFirst: boolean;
+}
+
 export interface OverlapRunnerInput {
   areaId: string;
+  /** Doc A — `content` carries the SHOWN window slice; path/contentHash are the real doc's. */
   a: DocCandidate;
+  /** Doc B — windowed the same way as A. */
   b: DocCandidate;
+  /** Set when doc A spans multiple windows; absent for a single-window doc. */
+  aPart?: OverlapPart;
+  /** Set when doc B spans multiple windows; absent for a single-window doc. */
+  bPart?: OverlapPart;
 }
 
 export interface OverlapVerdict {
@@ -47,9 +60,28 @@ export interface OverlapVerdict {
   note: string;
   /** The conflicting sections per doc (markdown headings), when identifiable. */
   sections?: OverlapSection[];
+  /**
+   * Set on an aggregated pair verdict whose window matrix exceeded the per-pair
+   * call cap. Persisted in the cache so a cache-hit re-run still reports the
+   * pair's coverage as truncated instead of silently reading as complete.
+   */
+  truncated?: { examinedCalls: number; totalCalls: number };
 }
 
 export type OverlapRunner = (input: OverlapRunnerInput) => Promise<OverlapVerdict>;
+
+/** Reported when a pair's window matrix exceeds {@link OVERLAP_MAX_CALLS_PER_PAIR}. */
+export interface OverlapTruncation {
+  areaId: string;
+  /** Doc A path. */
+  a: string;
+  /** Doc B path. */
+  b: string;
+  /** Window pairs actually judged (= the cap). */
+  examinedCalls: number;
+  /** Window pairs the full matrix held. */
+  totalCalls: number;
+}
 
 export interface OverlapDetectorOptions {
   /** Override the runner. Tests pass a stub. */
@@ -75,9 +107,17 @@ export interface OverlapDetectorOptions {
   onProgress?: (done: number, total: number) => void;
   /** Fired when an area's pair count exceeds the cap (areaId, examined, total). */
   onCapped?: (areaId: string, examined: number, total: number) => void;
+  /** Fired when a pair's window matrix exceeds the per-pair call cap. */
+  onPairTruncated?: (t: OverlapTruncation) => void;
 }
 
 const DEFAULT_MAX_PAIRS_PER_AREA = 60;
+
+/** Max chars of one doc shown to the judge per call; a larger doc splits into windows. */
+export const OVERLAP_WINDOW_CHARS = 24_000;
+
+/** Max judge calls per doc pair. A larger window matrix is truncated and reported. */
+export const OVERLAP_MAX_CALLS_PER_PAIR = 12;
 
 /**
  * Flag within-area overlaps. Returns a map keyed by area id → the overlaps
@@ -163,7 +203,7 @@ export async function flagOverlaps(
       while (active < concurrency && cursor < pairs.length) {
         const pair = pairs[cursor++];
         active++;
-        examineOne(repoRoot, pair.areaId, pair.a, pair.b, runner)
+        examineOne(repoRoot, pair.areaId, pair.a, pair.b, runner, opts.onPairTruncated)
           .then((verdict) => {
             if (verdict.overlap) {
               const list = result.get(pair.areaId) ?? [];
@@ -240,13 +280,92 @@ async function examineOne(
   a: DocCandidate,
   b: DocCandidate,
   runner: OverlapRunner,
+  onPairTruncated?: (t: OverlapTruncation) => void,
 ): Promise<OverlapVerdict> {
   const cacheKey = computeCacheKey(areaId, a, b);
   const cached = await readCache(repoRoot, cacheKey);
-  if (cached) return cached;
-  const verdict = await runner({ areaId, a, b });
-  await writeCache(repoRoot, cacheKey, verdict);
-  return verdict;
+  if (cached) {
+    // A truncated pair stays truncated on a cache hit — re-report it so the
+    // run's stats never read as full coverage when the judged matrix wasn't.
+    if (cached.truncated) {
+      onPairTruncated?.({ areaId, a: a.path, b: b.path, ...cached.truncated });
+    }
+    return cached;
+  }
+
+  // Each doc's FULL body is what detection sees; oversized docs split into
+  // windows by the shared heading-aware chunker (the views mechanism).
+  const aWindows = planDocChunks(a.path, docBody(a), OVERLAP_WINDOW_CHARS);
+  const bWindows = planDocChunks(b.path, docBody(b), OVERLAP_WINDOW_CHARS);
+
+  // Row-major window matrix: for each window of A, every window of B.
+  const cells: Array<{ aw: DocChunk; bw: DocChunk }> = [];
+  for (const aw of aWindows) for (const bw of bWindows) cells.push({ aw, bw });
+  const totalCalls = cells.length;
+  const examined = totalCalls > OVERLAP_MAX_CALLS_PER_PAIR ? cells.slice(0, OVERLAP_MAX_CALLS_PER_PAIR) : cells;
+  const truncated = examined.length < totalCalls ? { examinedCalls: examined.length, totalCalls } : undefined;
+  if (truncated) onPairTruncated?.({ areaId, a: a.path, b: b.path, ...truncated });
+
+  const verdicts: OverlapVerdict[] = [];
+  let anyFailed = false;
+  for (const { aw, bw } of examined) {
+    const input: OverlapRunnerInput = {
+      areaId,
+      a: windowDoc(a, aw.text),
+      b: windowDoc(b, bw.text),
+    };
+    if (aw.total > 1) input.aPart = { index: aw.index, count: aw.total, isFirst: aw.isFirst };
+    if (bw.total > 1) input.bPart = { index: bw.index, count: bw.total, isFirst: bw.isFirst };
+    try {
+      verdicts.push(await runner(input));
+    } catch {
+      anyFailed = true;
+    }
+  }
+
+  // Every call failed → flag nothing, cache nothing.
+  if (verdicts.length === 0) return { overlap: false, note: '', sections: [] };
+
+  const merged = { ...aggregateVerdicts(verdicts), ...(truncated ? { truncated } : {}) };
+  // A pair with FAILED calls must re-run, so it never enters the cache. A capped
+  // matrix is cached — with its truncation marker, so re-runs keep reporting it.
+  if (!anyFailed) await writeCache(repoRoot, cacheKey, merged);
+  return merged;
+}
+
+/** A doc candidate whose body is one window slice; path/hash stay the real doc's. */
+function windowDoc(doc: DocCandidate, window: string): DocCandidate {
+  return { ...doc, content: window };
+}
+
+/**
+ * Merge every successful window verdict for a pair into one. Overlap is true if any
+ * window flagged; the note joins the distinct non-empty flagged notes (cap 3, ' …'
+ * when more); sections union the flagged verdicts' sections, deduped by
+ * (doc, heading, quote).
+ */
+function aggregateVerdicts(verdicts: OverlapVerdict[]): OverlapVerdict {
+  const flagged = verdicts.filter((v) => v.overlap);
+  if (flagged.length === 0) return { overlap: false, note: '', sections: [] };
+
+  const notes: string[] = [];
+  for (const v of flagged) {
+    const n = v.note.trim();
+    if (n && !notes.includes(n)) notes.push(n);
+  }
+  const note = notes.length > 3 ? `${notes.slice(0, 3).join('; ')} …` : notes.join('; ');
+
+  const sections: OverlapSection[] = [];
+  const seen = new Set<string>();
+  for (const v of flagged) {
+    for (const s of v.sections ?? []) {
+      const key = JSON.stringify([s.doc, s.heading, s.quote ?? null]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sections.push(s);
+    }
+  }
+  return { overlap: true, note, sections };
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +394,10 @@ List one entry per side; omit a side only when it genuinely has no conflicting p
 
 PREAMBLE: use \`heading\`: \`null\` ONLY for that lead/preamble block; whenever the disputed passage is under a listed heading, select that heading verbatim.
 
+PARTS — a long doc is shown to you ONE SLICE at a time; a header reading "(part k/n)" means other parts of that doc EXIST but are NOT shown here. When either doc is labeled "part k/n":
+  - NEVER flag that it omits, lacks, is missing, or stops short of something — the rest may live in a part you cannot see.
+  - Flag ONLY when BOTH shown texts EXPLICITLY STATE things that differ (a different value, name, or rule). Silence in one part is never a disagreement.
+
 In the NOTE, refer to each doc by its FILENAME (the basename shown in the header, e.g. \`users.md\`) — NEVER "doc A" / "doc B", which mean nothing to the reader.
 
 Output ONLY a JSON object, no prose, no code fences:
@@ -296,9 +419,6 @@ Preamble example — doc A's disputed claim is a README tagline ABOVE its first 
   ] }
 
 Use { "overlap": false, "note": "", "sections": [] } when they are complementary or agree. The note is shown to the user — name the specific thing that differs.`;
-
-/** How many lines of each doc to show the comparator. */
-const OVERLAP_PREVIEW_LINES = 120;
 
 function docBody(doc: DocCandidate): string {
   if (doc.content !== undefined) return doc.content;
@@ -359,35 +479,54 @@ function sectionHeadings(body: string): string[] {
   return out;
 }
 
-/** The lead option plus one bullet per heading — the closed set for one side. */
-function sectionOptions(slice: string): string[] {
-  const lines = ['  - the lead (text above the first heading, or the opening title block) → use heading: null'];
-  for (const h of sectionHeadings(slice)) lines.push(`  - ${h}`);
+/**
+ * One side's closed section set: a lead option (offered ONLY when this window
+ * starts the doc) plus one bullet per heading in the SHOWN window text.
+ */
+function sectionOptions(shown: string, isFirst: boolean): string[] {
+  const lines: string[] = [];
+  if (isFirst) lines.push('  - the lead (text above the first heading, or the opening title block) → use heading: null');
+  for (const h of sectionHeadings(shown)) lines.push(`  - ${h}`);
   return lines;
 }
 
-export function buildOverlapUserPrompt(areaId: string, a: DocCandidate, b: DocCandidate): string {
-  const slice = (d: DocCandidate): string => docBody(d).split(/\r?\n/).slice(0, OVERLAP_PREVIEW_LINES).join('\n');
-  const sliceA = slice(a);
-  const sliceB = slice(b);
+export function buildOverlapUserPrompt(
+  areaId: string,
+  a: DocCandidate,
+  b: DocCandidate,
+  aPart?: OverlapPart,
+  bPart?: OverlapPart,
+): string {
+  const shownA = docBody(a);
+  const shownB = docBody(b);
+  const headerA =
+    aPart && aPart.count > 1
+      ? `--- doc A: ${a.path} (part ${aPart.index}/${aPart.count}) ---`
+      : `--- doc A: ${a.path} ---`;
+  const headerB =
+    bPart && bPart.count > 1
+      ? `--- doc B: ${b.path} (part ${bPart.index}/${bPart.count}) ---`
+      : `--- doc B: ${b.path} ---`;
+  const aIsFirst = aPart ? aPart.isFirst : true;
+  const bIsFirst = bPart ? bPart.isFirst : true;
   return [
     `Area: ${areaId}`,
     '',
-    `--- doc A: ${a.path} ---`,
-    sliceA,
+    headerA,
+    shownA,
     `--- end doc A ---`,
     '',
-    `--- doc B: ${b.path} ---`,
-    sliceB,
+    headerB,
+    shownB,
     `--- end doc B ---`,
     '',
     'SECTION OPTIONS — each side pointer MUST be one of these (verbatim), or the lead (heading: null):',
     '',
     `doc A (${a.path}):`,
-    ...sectionOptions(sliceA),
+    ...sectionOptions(shownA, aIsFirst),
     '',
     `doc B (${b.path}):`,
-    ...sectionOptions(sliceB),
+    ...sectionOptions(shownB, bIsFirst),
     '',
     'Return the JSON object as specified.',
   ].join('\n');
@@ -414,6 +553,7 @@ const OverlapVerdictSchema = z.object({
   sections: z
     .array(z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string().optional() }))
     .default([]),
+  truncated: z.object({ examinedCalls: z.number(), totalCalls: z.number() }).optional(),
 });
 
 function spawnOverlapRunner(
@@ -421,14 +561,15 @@ function spawnOverlapRunner(
 ): OverlapRunner {
   const transport = opts.transport ?? cliTransport({ bin: opts.bin });
   const timeoutMs = opts.timeoutMs ?? 90_000;
-  return async ({ areaId, a, b }) => {
+  return async ({ areaId, a, b, aPart, bPart }) => {
+    const part = aPart || bPart ? `:${aPart?.index ?? 1}-${bPart?.index ?? 1}` : '';
     const raw = await transport({
-      id: `spec.overlap:${areaId}:${a.path}:${b.path}`,
+      id: `spec.overlap:${areaId}:${a.path}:${b.path}${part}`,
       stage: 'spec.overlap',
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: OVERLAP_DETECTOR_SYSTEM_PROMPT,
-      user: buildOverlapUserPrompt(areaId, a, b),
+      user: buildOverlapUserPrompt(areaId, a, b, aPart, bPart),
       responseFormat: 'json',
       timeoutMs,
     });
@@ -451,7 +592,10 @@ function spawnOverlapRunner(
 
 const CACHE_NAME = 'consolidator/overlap';
 
-const PROMPT_FINGERPRINT = createHash('sha256').update(OVERLAP_DETECTOR_SYSTEM_PROMPT).digest('hex').slice(0, 16);
+// The version prefix retires cached verdicts whose COVERAGE semantics changed even
+// where the prompt text alone wouldn't: v2 ended the 120-line head slice; v3 moved
+// windowing onto the shared heading-aware chunker (different window boundaries).
+const PROMPT_FINGERPRINT = createHash('sha256').update(`v3::${OVERLAP_DETECTOR_SYSTEM_PROMPT}`).digest('hex').slice(0, 16);
 
 function computeCacheKey(areaId: string, a: DocCandidate, b: DocCandidate): string {
   // Order-insensitive on the two docs so (a,b) and (b,a) share a cache entry.

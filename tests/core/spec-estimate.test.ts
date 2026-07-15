@@ -27,6 +27,9 @@ import {
   filterByRelevance,
   tagDocs,
   curate,
+  OVERLAP_DETECTOR_SYSTEM_PROMPT,
+  OVERLAP_MAX_CALLS_PER_PAIR,
+  OVERLAP_WINDOW_CHARS,
 } from '../../packages/spec-consolidator/src/index.js';
 
 // A fixed price table so cost assertions are deterministic (no network).
@@ -155,6 +158,48 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(est.subjectLabel).toMatch(/docs?$/);
     // cold cache: relevance runs once per doc that survives the prefilter.
     expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
+  });
+
+  it('scan estimate: overlap calls scale by the per-pair window factor', async () => {
+    // Small docs — a single OVERLAP_WINDOW_CHARS window each → per-pair factor 1.
+    const smallDir = path.join(repo, 'docs');
+    fs.mkdirSync(smallDir, { recursive: true });
+    fs.writeFileSync(path.join(smallDir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body against the schema. '.repeat(40));
+    fs.writeFileSync(path.join(smallDir, 'b.md'), '# Auth\n' + 'Every session token is signed and expires after one hour. '.repeat(40));
+    const smallEst = await estimateScanTokens(repo);
+    const smallOverlap = smallEst.stages!.find((s) => s.stage === 'overlap')!;
+    expect(smallOverlap.calls).toBeGreaterThan(0);
+
+    // Large docs — several OVERLAP_WINDOW_CHARS windows each → factor > 1.
+    const bigRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-big-'));
+    try {
+      const bigDir = path.join(bigRepo, 'docs');
+      fs.mkdirSync(bigDir, { recursive: true });
+      fs.writeFileSync(path.join(bigDir, 'a.md'), '# Endpoint Reference\n' + 'Each endpoint validates its request body against the schema. '.repeat(1300));
+      fs.writeFileSync(path.join(bigDir, 'b.md'), '# Auth Reference\n' + 'Every session token is signed and expires after one hour. '.repeat(1300));
+
+      const discovered = discoverDocs(bigRepo);
+      const avgDocChars = Math.round(discovered.reduce((n, d) => n + d.size, 0) / discovered.length);
+      const factor = Math.min(
+        OVERLAP_MAX_CALLS_PER_PAIR,
+        Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2,
+      );
+      expect(factor).toBeGreaterThan(1); // the fixture must span multiple windows
+
+      const bigEst = await estimateScanTokens(bigRepo);
+      const bigOverlap = bigEst.stages!.find((s) => s.stage === 'overlap')!;
+
+      // Both repos hold the same 2-doc pair count; only the large run multiplies each
+      // pair by the window factor.
+      expect(bigOverlap.calls).toBe(smallOverlap.calls * factor);
+      // Each call's body is clamped to one OVERLAP_WINDOW_CHARS window, so per-call
+      // tokens stay well below what the full multi-window doc size would imply.
+      const perCallTokens = bigOverlap.estimatedTokens / bigOverlap.calls;
+      const unclampedInputTokens = tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, avgDocChars * 2);
+      expect(perCallTokens).toBeLessThan(unclampedInputTokens);
+    } finally {
+      fs.rmSync(bigRepo, { recursive: true, force: true });
+    }
   });
 
   it('scan estimate honors spec.include and agrees with discovery', async () => {

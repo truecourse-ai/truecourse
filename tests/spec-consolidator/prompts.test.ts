@@ -65,3 +65,17 @@ describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote (ite
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/"heading":\s*null,\s*"quote":/)
   })
 })
+
+describe('OVERLAP_DETECTOR_SYSTEM_PROMPT PARTS rule (windowed docs)', () => {
+  it('names the part k/n label and forbids flagging a partial doc for omission', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/PARTS/)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/part k\/n/)
+    // A doc slice must never be flagged for what it omits/lacks/is missing.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/NEVER flag that it omits/i)
+  })
+
+  it('requires BOTH shown texts to explicitly state a difference before flagging', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/both shown texts explicitly state/i)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/silence in one part is never a disagreement/i)
+  })
+})

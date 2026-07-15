@@ -215,6 +215,72 @@ describe('curate', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Overlap window truncation — a within-area doc pair whose full-doc window
+// matrix exceeds OVERLAP_MAX_CALLS_PER_PAIR is surfaced via stats.overlapTruncated.
+// ---------------------------------------------------------------------------
+
+describe('curate — overlap window truncation', () => {
+  // A realistic long configuration reference: many `## key` sections, well past a
+  // single OVERLAP_WINDOW_CHARS window, so the pair's window matrix overflows the cap.
+  function configReference(product: string, sections: number): string {
+    const out = [
+      `# ${product} Configuration Reference`,
+      '',
+      `Every runtime setting the ${product} service reads at boot, with its type, default, and reload semantics.`,
+      '',
+    ];
+    for (let i = 0; i < sections; i++) {
+      out.push(
+        `## ${product}.pipeline.stage-${i}`,
+        '',
+        `Controls how stage ${i} of the request pipeline behaves. Accepts a string; the default is "auto".`,
+        `When set to a non-default value the ${product} runtime applies policy ${i} to every inbound request and records the decision in the audit log.`,
+        `Type: string. Default: auto. Scope: runtime. Reloadable: yes. Since: 1.${i}. Related: ${product}.pipeline.stage-${(i + 1) % sections}.`,
+        '',
+      );
+    }
+    return out.join('\n');
+  }
+
+  // Distinct products so the relevance prefilter never treats them as near-duplicates.
+  const bigA = configReference('gateway', 300);
+  const bigB = configReference('ingress', 300);
+  const DOCS_BIG: DocCandidate[] = [
+    { path: 'docs/gateway-config-a.md', absPath: '', content: bigA, kind: 'prd', preview: bigA.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-a', size: bigA.length },
+    { path: 'docs/gateway-config-b.md', absPath: '', content: bigB, kind: 'prd', preview: bigB.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-b', size: bigB.length },
+  ];
+  // Both docs land in the same area, so they form one within-area pair.
+  const tagSame: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'config' }], status: 'shipped' });
+  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
+  const noOverlap: OverlapRunner = async () => ({ overlap: false, note: '' });
+
+  it('reports the pair in stats.overlapTruncated when its window matrix exceeds the cap', async () => {
+    const result = await curate(repo, {
+      docSource: () => DOCS_BIG,
+      decisions: EMPTY_DECISIONS,
+      relevanceRunner: keepAll,
+      areaTagRunner: tagSame,
+      overlapRunner: noOverlap,
+      disableLlmRelationDetection: true,
+      skipGit: true,
+    });
+
+    expect(result.stats.overlapTruncated.length).toBeGreaterThan(0);
+    const t = result.stats.overlapTruncated[0];
+    expect([t.a, t.b].sort()).toEqual(['docs/gateway-config-a.md', 'docs/gateway-config-b.md']);
+    expect(result.corpus.areas.map((a) => a.id)).toContain(t.areaId);
+    expect(t.examinedCalls).toBeGreaterThan(0);
+    expect(t.examinedCalls).toBeLessThan(t.totalCalls);
+    expect(t.totalCalls).toBeGreaterThan(12);
+  });
+
+  it('a normal run (small single-window docs) leaves overlapTruncated empty', async () => {
+    const result = await run();
+    expect(result.stats.overlapTruncated).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Include-scope — exercises the real filesystem discovery path (NOT docSource,
 // which bypasses scoping) so config `spec.include` actually applies.
 // ---------------------------------------------------------------------------

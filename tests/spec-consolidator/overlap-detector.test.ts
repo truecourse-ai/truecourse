@@ -9,8 +9,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { flagOverlaps, buildOverlapUserPrompt } from '../../packages/spec-consolidator/src/index.js';
-import type { Area, DocCandidate, OverlapRunner } from '../../packages/spec-consolidator/src/index.js';
+import {
+  flagOverlaps,
+  buildOverlapUserPrompt,
+  OVERLAP_WINDOW_CHARS,
+  OVERLAP_MAX_CALLS_PER_PAIR,
+} from '../../packages/spec-consolidator/src/index.js';
+import type {
+  Area,
+  DocCandidate,
+  OverlapRunner,
+  OverlapRunnerInput,
+  OverlapTruncation,
+} from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
@@ -452,5 +463,226 @@ describe('flagOverlaps — heading-widened cross-area candidates', () => {
     const out = await flagOverlaps(repo, [area('process/overview', ['docs/vision.md'])], [vision, prd], { runner });
     expect(calls).toBe(0);
     expect(out.size).toBe(0);
+  });
+});
+
+// Windowing: the judge sees each doc's FULL body (no 120-line head slice). Oversized
+// docs split into heading-bounded windows and the whole matrix is judged, bounded by
+// a per-pair call cap; per-window verdicts aggregate into one.
+
+// A large but realistic API-reference doc, sized to force window splitting. Each
+// section is a real heading + a few sentences of prose so cuts land on headings.
+function bigMarkdown(title: string, targetChars: number): string {
+  let body = `# ${title}\n\nThis document specifies the ${title} HTTP surface.\n\n`;
+  let i = 0;
+  while (body.length < targetChars) {
+    i++;
+    body +=
+      `## Endpoint ${i}\n\n` +
+      `The GET /resource/${i} endpoint returns a paginated list of records. ` +
+      `It requires a Bearer token in the Authorization header and responds with 200 on success. ` +
+      `The default page size is ${20 + (i % 7)} and callers may raise it to 100. ` +
+      `Errors use the standard envelope with a code and message field.\n\n`;
+  }
+  return body;
+}
+
+describe('flagOverlaps — full-body visibility (head-slice regression)', () => {
+  // A README whose lint-output example runs long, pushing the "## Rules" section and
+  // its "7 rules" claim past line 120 — exactly where the old head slice cut. The
+  // other doc states a different count (4), so the conflict lives entirely late.
+  const LATE_README = [
+    '# sqlfluff',
+    '',
+    'A dialect-flexible SQL linter and auto-formatter.',
+    '',
+    '## Example',
+    '',
+    'Running the linter prints a violation report:',
+    '',
+    '```',
+    ...Array.from({ length: 120 }, (_, i) => `L: ${i + 1} | P: 1 | LT02 | line ${i + 1} is not indented correctly.`),
+    '```',
+    '',
+    '## Rules',
+    '',
+    'sqlfluff ships with 7 rules enabled by default in the standard profile.',
+    '',
+  ].join('\n');
+
+  const RULES_DOC = ['# Rule Reference', '', '## Default profile', '', 'The default profile enables 4 rules out of the box.', ''].join('\n');
+
+  it('shows a conflict whose evidence sits PAST line 120 of a doc to the runner', async () => {
+    const readme = doc('README.md', LATE_README);
+    const rules = doc('docs/RULES.md', RULES_DOC);
+    let captured: OverlapRunnerInput | undefined;
+    const runner: OverlapRunner = async (i) => {
+      captured = i;
+      return { overlap: false, note: '' };
+    };
+    await flagOverlaps(repo, [area('core/rules', ['README.md', 'docs/RULES.md'])], [readme, rules], { runner });
+    // The runner receives the FULL body — the late heading + claim are present.
+    expect(LATE_README.split('\n').indexOf('## Rules')).toBeGreaterThan(120);
+    expect(captured!.a.content).toContain('## Rules');
+    expect(captured!.a.content).toContain('7 rules enabled by default');
+    // A single window (doc < the char budget) → no part descriptors.
+    expect(captured!.aPart).toBeUndefined();
+  });
+
+  it('surfaces the late lines and late heading in the real prompt SECTION OPTIONS', () => {
+    const readme = doc('README.md', LATE_README);
+    const rules = doc('docs/RULES.md', RULES_DOC);
+    const prompt = buildOverlapUserPrompt('core/rules', readme, rules);
+    expect(prompt).toContain('7 rules enabled by default');
+    // The late "## Rules" heading is enumerated as a closed section option.
+    expect(prompt).toContain('- Rules');
+  });
+});
+
+describe('flagOverlaps — window splitting', () => {
+  it('splits an oversized doc at heading boundaries into within-budget windows that reassemble to the body', async () => {
+    const bigBody = bigMarkdown('Payments API', 55_000);
+    const big = doc('docs/payments.md', bigBody);
+    const small = doc('docs/note.md', '# Note\n\nA short note about payment defaults.\n');
+    const seen: Array<{ index: number; count: number; isFirst: boolean; content: string }> = [];
+    const runner: OverlapRunner = async ({ a, aPart }) => {
+      seen.push({ index: aPart!.index, count: aPart!.count, isFirst: aPart!.isFirst, content: a.content! });
+      return { overlap: false, note: '' };
+    };
+    await flagOverlaps(repo, [area('core/payments', ['docs/payments.md', 'docs/note.md'])], [big, small], { runner });
+
+    // Side B is a single window, so each A window appears exactly once.
+    const count = seen[0].count;
+    expect(count).toBeGreaterThan(1);
+    expect(seen).toHaveLength(count);
+    // Every window respects the char budget.
+    for (const w of seen) expect(w.content.length).toBeLessThanOrEqual(OVERLAP_WINDOW_CHARS);
+    // Windows reassemble, in index order, to the exact body (the shared chunker
+    // packs line-sliced sections, so windows rejoin on the newline it split on).
+    const ordered = [...seen].sort((x, y) => x.index - y.index);
+    expect(ordered.map((w) => w.content).join('\n')).toBe(bigBody);
+    // Only the first window starts the doc; each later one begins at a heading.
+    expect(ordered[0].isFirst).toBe(true);
+    for (const w of ordered.slice(1)) {
+      expect(w.isFirst).toBe(false);
+      expect(w.content.startsWith('#')).toBe(true);
+    }
+  });
+
+  it('a small doc pair is a single window with no part descriptors', async () => {
+    const seen: OverlapRunnerInput[] = [];
+    const runner: OverlapRunner = async (i) => {
+      seen.push(i);
+      return { overlap: false, note: '' };
+    };
+    await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md'])], [doc('a.md'), doc('b.md')], { runner });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].aPart).toBeUndefined();
+    expect(seen[0].bPart).toBeUndefined();
+  });
+});
+
+describe('buildOverlapUserPrompt — part labels and lead option', () => {
+  const a = doc('a.md', '## Auth\ndetails\n\n## Errors\nmore\n');
+  const b = doc('b.md', '# B\n\n## Storage\nstuff\n');
+
+  it('labels a windowed side "(part k/n)" and leaves a single-window side unlabeled', () => {
+    const prompt = buildOverlapUserPrompt('core/auth', a, b, { index: 2, count: 3, isFirst: false }, undefined);
+    expect(prompt).toContain('--- doc A: a.md (part 2/3) ---');
+    expect(prompt).toContain('--- doc B: b.md ---');
+    expect(prompt).not.toContain('doc B: b.md (part');
+  });
+
+  it('offers the lead (heading: null) option ONLY for a window that starts the doc', () => {
+    // Doc A is a NON-first window → no lead; doc B is a single window → lead offered.
+    const nonFirst = buildOverlapUserPrompt('core/auth', a, b, { index: 2, count: 2, isFirst: false }, undefined);
+    expect(nonFirst.match(/use heading: null/g)?.length).toBe(1);
+    // The FIRST window of A does offer it, alongside B → two lead options.
+    const first = buildOverlapUserPrompt('core/auth', a, b, { index: 1, count: 2, isFirst: true }, undefined);
+    expect(first.match(/use heading: null/g)?.length).toBe(2);
+  });
+});
+
+describe('flagOverlaps — per-pair call cap', () => {
+  it('judges at most OVERLAP_MAX_CALLS_PER_PAIR window pairs and reports the truncation', async () => {
+    const a = doc('docs/a.md', bigMarkdown('Service A', 100_000));
+    const b = doc('docs/b.md', bigMarkdown('Service B', 100_000));
+    const truncations: OverlapTruncation[] = [];
+    let calls = 0;
+    const runner: OverlapRunner = async () => {
+      calls++;
+      return { overlap: false, note: '' };
+    };
+    await flagOverlaps(repo, [area('core/svc', ['docs/a.md', 'docs/b.md'])], [a, b], {
+      runner,
+      onPairTruncated: (t) => truncations.push(t),
+    });
+    expect(truncations).toHaveLength(1);
+    expect(truncations[0].areaId).toBe('core/svc');
+    expect(truncations[0].a).toBe('docs/a.md');
+    expect(truncations[0].b).toBe('docs/b.md');
+    expect(truncations[0].examinedCalls).toBe(OVERLAP_MAX_CALLS_PER_PAIR);
+    expect(truncations[0].totalCalls).toBeGreaterThan(OVERLAP_MAX_CALLS_PER_PAIR);
+    // Exactly the cap's worth of runner calls were made.
+    expect(calls).toBe(OVERLAP_MAX_CALLS_PER_PAIR);
+  });
+});
+
+describe('flagOverlaps — window-verdict aggregation', () => {
+  it('merges two windows flagging different disputes into one verdict (notes joined, sections unioned)', async () => {
+    const bigBody =
+      bigMarkdown('Catalog API', 30_000) +
+      '## Rate limits\n\nRate limits apply at 100 requests per minute per token.\n';
+    const big = doc('docs/catalog.md', bigBody);
+    const small = doc('docs/policy.md', '# Policy\n\nA brief policy note.\n');
+    // One verdict per A window: the first flags a page-size dispute, the rest a rate-limit one.
+    const runner: OverlapRunner = async ({ aPart }) =>
+      aPart!.index === 1
+        ? {
+            overlap: true,
+            note: 'catalog.md and policy.md disagree on default page size',
+            sections: [{ doc: 'docs/catalog.md', heading: 'Endpoint 1', quote: 'The default page size is 21' }],
+          }
+        : {
+            overlap: true,
+            note: 'catalog.md and policy.md disagree on the rate limit',
+            sections: [
+              { doc: 'docs/catalog.md', heading: 'Rate limits', quote: 'Rate limits apply at 100 requests per minute per token' },
+            ],
+          };
+    const out = await flagOverlaps(repo, [area('core/catalog', ['docs/catalog.md', 'docs/policy.md'])], [big, small], { runner });
+    const overlap = out.get('core/catalog')![0];
+    expect(overlap.note).toBe(
+      'catalog.md and policy.md disagree on default page size; catalog.md and policy.md disagree on the rate limit',
+    );
+    expect(overlap.sections.map((s) => s.heading).sort()).toEqual(['Endpoint 1', 'Rate limits']);
+  });
+
+  it('flags nothing when every window verdict is false', async () => {
+    const big = doc('docs/a.md', bigMarkdown('Svc', 30_000));
+    const small = doc('docs/b.md', '# B\n\nA note.\n');
+    const runner: OverlapRunner = async () => ({ overlap: false, note: '' });
+    const out = await flagOverlaps(repo, [area('core/svc', ['docs/a.md', 'docs/b.md'])], [big, small], { runner });
+    expect(out.size).toBe(0);
+  });
+
+  it('aggregates the successes on partial failure but does NOT cache (a re-run re-calls the runner)', async () => {
+    const big = doc('docs/a.md', bigMarkdown('Svc', 30_000));
+    const small = doc('docs/b.md', '# B\n\nA note.\n');
+    const areas = [area('core/svc', ['docs/a.md', 'docs/b.md'])];
+    let calls = 0;
+    // The first window flags; a later window throws → partial coverage.
+    const runner: OverlapRunner = async ({ aPart }) => {
+      calls++;
+      if (aPart!.index === 1) return { overlap: true, note: 'a.md and b.md disagree on defaults', sections: [] };
+      throw new Error('window judge failed');
+    };
+    const first = await flagOverlaps(repo, areas, [big, small], { runner });
+    expect(first.get('core/svc')).toHaveLength(1); // the success is aggregated despite the failure
+    const callsAfterFirst = calls;
+    const second = await flagOverlaps(repo, areas, [big, small], { runner });
+    expect(second.get('core/svc')).toHaveLength(1);
+    // Nothing was cached (partial coverage) → the second run re-invokes the runner.
+    expect(calls).toBe(callsAfterFirst * 2);
   });
 });

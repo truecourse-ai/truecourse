@@ -17,6 +17,13 @@
 
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
+
+// The heading scan, markdown check, and top-level section splitter live in
+// @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
+// guard generator's views and spec-scan's overlap windows. Re-exported here so
+// this module remains their canonical import site for runner consumers.
+export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
 
 export interface DocSection {
   /** Slugified heading path (parent/child chain); disambiguated to be unique. */
@@ -48,12 +55,6 @@ export type BindingResolution =
   | { kind: 'stale'; anchor: string; currentFingerprint: string }
   | { kind: 'orphaned'; anchor: string }
 
-const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdown', '.mkd'])
-
-export function isMarkdownDoc(docPath: string): boolean {
-  return MARKDOWN_EXTENSIONS.has(path.extname(docPath).toLowerCase())
-}
-
 /** Slugify a heading (or filename) segment. See the module note for the rule. */
 export function slugifyHeading(text: string): string {
   return text
@@ -78,57 +79,6 @@ export function normalizeSectionText(text: string): string {
 export function fingerprintText(text: string): string {
   const digest = crypto.createHash('sha256').update(normalizeSectionText(text), 'utf-8').digest('hex')
   return `sha256:${digest}`
-}
-
-interface RawHeading {
-  level: number
-  text: string
-  /** 0-based line index of the heading line. */
-  line: number
-}
-
-// ATX heading: up to 3 leading spaces, 1–6 `#`, then (optionally) space + text
-// with an optional trailing `#` run. A bare `#foo` (no space) is not a heading.
-const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$/
-// Fenced code delimiter: up to 3 leading spaces, then ≥3 backticks or tildes.
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
-
-/**
- * ATX headings from a markdown body, skipping any inside fenced code blocks so
- * that `#`-prefixed lines in shell/code examples are never mistaken for
- * headings. Setext (underline) headings are not recognized.
- */
-function parseHeadings(lines: readonly string[]): RawHeading[] {
-  const headings: RawHeading[] = []
-  let fenceChar: '`' | '~' | null = null
-  let fenceLen = 0
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const fence = FENCE.exec(line)
-
-    if (fenceChar) {
-      // Only a same-or-longer run of the opening char, with nothing after it,
-      // closes the fence (per CommonMark).
-      if (fence && fence[1][0] === fenceChar && fence[1].length >= fenceLen && fence[2].trim() === '') {
-        fenceChar = null
-        fenceLen = 0
-      }
-      continue
-    }
-    if (fence) {
-      fenceChar = fence[1][0] as '`' | '~'
-      fenceLen = fence[1].length
-      continue
-    }
-
-    const m = ATX_HEADING.exec(line)
-    if (!m) continue
-    const text = (m[2] ?? '').trim()
-    if (!text) continue // a bare `##` yields no anchor
-    headings.push({ level: m[1].length, text, line: i })
-  }
-  return headings
 }
 
 /** Line index where a section ends: the next heading of same-or-higher level. */
@@ -203,40 +153,6 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
     ancestors.push({ level: heading.level, anchor })
   }
   return out
-}
-
-/**
- * Split a document into its major section slices — the leading preamble (if any)
- * plus each split-level heading and everything under it. The split level is the
- * SHALLOWEST heading level that actually partitions the body into two or more
- * sections, so a doc with a single H1 title over many H2 sections splits at the
- * H2s (the title + front-matter become the preamble slice) rather than yielding
- * one whole-document slice. Fence-aware (a `#` line inside a code block is never a
- * boundary), so example CLI output and shell snippets don't fragment the split.
- * Non-markdown docs return `[content]`. The generator packs these slices into
- * within-budget extraction views.
- */
-export function splitTopLevelSections(doc: string, content: string): string[] {
-  if (!isMarkdownDoc(doc)) return [content]
-  const lines = content.split('\n')
-  const headings = parseHeadings(lines)
-  if (headings.length === 0) return [content]
-
-  const levels = [...new Set(headings.map((h) => h.level))].sort((a, b) => a - b)
-  const splitLevel =
-    levels.find((l) => headings.filter((h) => h.level === l).length >= 2) ?? levels[0]
-  const boundaries = headings.filter((h) => h.level === splitLevel).map((h) => h.line)
-
-  const slices: string[] = []
-  if (boundaries[0] > 0) {
-    const preamble = lines.slice(0, boundaries[0]).join('\n')
-    if (preamble.trim()) slices.push(preamble)
-  }
-  for (let i = 0; i < boundaries.length; i++) {
-    const end = i + 1 < boundaries.length ? boundaries[i + 1] : lines.length
-    slices.push(lines.slice(boundaries[i], end).join('\n'))
-  }
-  return slices
 }
 
 /** Anchor → section text (full + own) for a document. See {@link SectionText}. */
