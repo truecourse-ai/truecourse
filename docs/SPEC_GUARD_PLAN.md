@@ -326,9 +326,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    birth → retry → persist as each section's claims complete; recipe build kicked off parallel
    to authoring), so a straggler delays only its own section. Same design as the shelved
    incremental-settle (which also makes cancellation keep everything settled so far).
-5. **Birth concurrency.** Scenario sandboxes run at min(cpus,4) while authoring runs at 20 —
-   436 independent sandboxes through a 4-lane pipe, twice per run. Make it configurable
-   (`TRUECOURSE_MAX_CONCURRENCY` semantics) with a saner default.
+5. **Birth concurrency (BUILT).** Both knobs honor `TRUECOURSE_MAX_CONCURRENCY` when set:
+   scenario sandboxes default to min(cpus,8) (`defaultRunConcurrency`) and the shared LLM pool
+   that extraction, authoring, evidence-retries, and fidelity reviews all draw from defaults to
+   min(cpus,4) (`defaultConcurrency`) — an explicit `concurrency` option overrides either.
 6. **Cache retry outputs.** Round-1 authoring is cached per claim; retry outputs are NOT — a
    cancel during the retry round loses all retry work (tonight: 231 calls ≈ $58 would have
    evaporated). Cache per claim keyed on (prompt fingerprint, claim, section, retry-evidence

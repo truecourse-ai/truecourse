@@ -18,8 +18,8 @@
  * Doc→doc relations do NOT skip a pair — a relation is doc lifecycle/precedence,
  * not a conflict resolution; two docs that textually disagree stay flagged. The
  * pass is Haiku-tier and cached per pair by (area, both content hashes, prompt
- * fingerprint). It is bounded by `maxPairsPerArea`; when an area exceeds it the
- * extra pairs are reported via `onCapped` rather than silently dropped.
+ * fingerprint). Every pair is judged — nothing is capped or dropped; the
+ * pre-flight cost estimate the user approves is the only spend gate.
  */
 
 import { createHash } from 'node:crypto';
@@ -76,8 +76,6 @@ export interface OverlapDetectorOptions {
    * it, so heading-widened candidates line up with the grouper's canonical areas.
    */
   vocab?: VocabMap;
-  /** Cap on doc pairs examined per area. Default 60. */
-  maxPairsPerArea?: number;
   /** Cap on concurrent LLM calls. Default {@link defaultConcurrency}. */
   concurrency?: number;
   /** Model forwarded to the default spawn runner. */
@@ -86,11 +84,7 @@ export interface OverlapDetectorOptions {
   fallbackModel?: string;
   /** Fired once per pair examined, plus an initial `(0, total)`. */
   onProgress?: (done: number, total: number) => void;
-  /** Fired when an area's pair count exceeds the cap (areaId, examined, total). */
-  onCapped?: (areaId: string, examined: number, total: number) => void;
 }
-
-const DEFAULT_MAX_PAIRS_PER_AREA = 60;
 
 /** Max chars of one doc shown to the judge per call; a larger doc splits into windows. */
 export const OVERLAP_WINDOW_CHARS = 24_000;
@@ -109,15 +103,14 @@ export async function flagOverlaps(
   if (opts.enabled === false) return result;
 
   const byPath = new Map(docs.map((d) => [d.path, d]));
-  const maxPairs = opts.maxPairsPerArea ?? DEFAULT_MAX_PAIRS_PER_AREA;
   const vocab = opts.vocab;
 
   // Build the work list. Per area: its own doc pairs, PLUS the heading-widened
   // cross-area pairs — an outside doc whose markdown heading slug-matches the
   // area's concern is paired with each doc already in the area, so a subject the
   // tagger filed under a different concern per doc still gets compared. Pairs are
-  // deduped order-insensitively, and widened pairs count against the same
-  // per-area cap.
+  // deduped order-insensitively; every pair goes into the work list — nothing is
+  // capped, so no comparison is ever skipped.
   interface Pair { areaId: string; a: DocCandidate; b: DocCandidate }
   const pairs: Pair[] = [];
   for (const area of areas) {
@@ -152,12 +145,7 @@ export async function flagOverlaps(
     }
 
     if (areaPairs.length === 0) continue;
-    if (areaPairs.length > maxPairs) {
-      opts.onCapped?.(area.id, maxPairs, areaPairs.length);
-      pairs.push(...areaPairs.slice(0, maxPairs));
-    } else {
-      pairs.push(...areaPairs);
-    }
+    pairs.push(...areaPairs);
   }
 
   const total = pairs.length;

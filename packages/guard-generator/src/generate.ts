@@ -823,10 +823,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (fidelityRunner && persistedHere.length > 0) {
       fidelityPlanned += persistedHere.length
       options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
+      // The green candidates are reviewed independently — fan them through the
+      // shared LLM pool (bounded by `TRUECOURSE_MAX_CONCURRENCY`) instead of one at
+      // a time; verdicts are consumed in candidate order so findings stay stable.
+      const reviews = await Promise.all(
+        persistedHere.map((c) =>
+          limit(async () => {
+            const review = await reviewFidelity(repoRoot, c, fidelityRunner)
+            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+            return { c, review }
+          }),
+        ),
+      )
       const faithful: BirthCandidate[] = []
-      for (const c of persistedHere) {
-        const review = await reviewFidelity(repoRoot, c, fidelityRunner)
-        options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+      for (const { c, review } of reviews) {
         if ('error' in review) {
           localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
         } else if (review.verdict === 'flagged') {

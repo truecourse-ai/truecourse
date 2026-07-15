@@ -1,8 +1,8 @@
 /**
  * Overlap flagging examines within-area doc pairs and surfaces the disagreements
  * for the user. Doc→doc relations never skip a pair (they are lifecycle metadata,
- * not conflict resolution); the per-area pair count is capped (reported, never
- * silently dropped); and verdicts cache per pair.
+ * not conflict resolution); every pair is judged — nothing is capped or dropped
+ * (the pre-flight cost estimate is the only spend gate); and verdicts cache per pair.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -47,6 +47,77 @@ function area(id: string, refs: string[]): Area {
 }
 
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
+
+// A realistic API-conventions area with 13 docs — each a short standard covering
+// one facet of the platform's HTTP surface. 13 docs yield 13*12/2 = 78 within-area
+// pairs, past the retired 60-pair cap, so the suite can prove every pair is judged.
+const API_CONVENTION_DOCS: Array<{ path: string; content: string }> = [
+  {
+    path: 'docs/api/authentication.md',
+    content:
+      '# Authentication\n\nAll endpoints require a Bearer JWT in the `Authorization` header. Tokens are issued by the auth service and expire after 1 hour.\n',
+  },
+  {
+    path: 'docs/api/authorization.md',
+    content:
+      '# Authorization\n\nAccess is scoped by role claims embedded in the JWT. A missing scope returns `403 Forbidden` with an `insufficient_scope` error code.\n',
+  },
+  {
+    path: 'docs/api/errors.md',
+    content:
+      '# Error Envelope\n\nErrors return `{ code, message, details }`. The `code` is a stable machine-readable string; `message` is human-readable and may change.\n',
+  },
+  {
+    path: 'docs/api/pagination.md',
+    content:
+      '# Pagination\n\nList endpoints use cursor-based pagination. Pass `?cursor=` and `?limit=` (default 25, max 100). The response carries `next_cursor` when more pages remain.\n',
+  },
+  {
+    path: 'docs/api/rate-limiting.md',
+    content:
+      '# Rate Limiting\n\nClients are limited to 600 requests per minute per API key. Over the limit returns `429 Too Many Requests` with a `Retry-After` header in seconds.\n',
+  },
+  {
+    path: 'docs/api/idempotency.md',
+    content:
+      '# Idempotency\n\nWrite endpoints accept an `Idempotency-Key` header. Keys are retained for 24 hours; a replayed key returns the original response without re-executing the write.\n',
+  },
+  {
+    path: 'docs/api/versioning.md',
+    content:
+      '# Versioning\n\nThe API is versioned in the path (`/v1/...`). Breaking changes ship under a new major version; additive fields do not bump the version.\n',
+  },
+  {
+    path: 'docs/api/timestamps.md',
+    content:
+      '# Timestamps\n\nAll timestamps are RFC 3339 UTC strings ending in `Z`. Duration fields are expressed as integer seconds unless the field name ends in `_ms`.\n',
+  },
+  {
+    path: 'docs/api/webhooks.md',
+    content:
+      '# Webhooks\n\nEvents are delivered as signed POSTs. The `X-Signature` header carries an HMAC-SHA256 of the raw body. Delivery retries use exponential backoff for up to 24 hours.\n',
+  },
+  {
+    path: 'docs/api/status-codes.md',
+    content:
+      '# Status Codes\n\n`2xx` for success, `4xx` for client faults, `5xx` for server faults. Validation failures return `422 Unprocessable Entity` with per-field details.\n',
+  },
+  {
+    path: 'docs/api/content-negotiation.md',
+    content:
+      '# Content Negotiation\n\nRequests and responses are `application/json`. The server ignores an unsupported `Accept` header and always returns JSON.\n',
+  },
+  {
+    path: 'docs/api/filtering.md',
+    content:
+      '# Filtering & Sorting\n\nList endpoints accept `?filter[field]=value` and `?sort=field` (prefix `-` for descending). Unknown filter fields return `400 Bad Request`.\n',
+  },
+  {
+    path: 'docs/api/field-selection.md',
+    content:
+      '# Field Selection\n\nClients may request a subset of fields with `?fields=a,b,c`. Nested fields use dot notation. An empty or omitted `fields` returns the full resource.\n',
+  },
+];
 
 let repo: string;
 beforeEach(() => {
@@ -201,21 +272,19 @@ describe('flagOverlaps', () => {
     expect(out.has('svc/y')).toBe(true);
   });
 
-  it('caps pairs per area and reports the cap', async () => {
-    const docs = [doc('a.md'), doc('b.md'), doc('c.md')]; // 3 pairs
-    const capped: Array<[string, number, number]> = [];
+  it('judges every within-area pair even past the old 60-pair cap', async () => {
+    // 13 docs → 13*12/2 = 78 within-area pairs, well over the retired default of
+    // 60. Nothing is capped or dropped: the runner is called once per pair.
+    const refs = API_CONVENTION_DOCS.map((d) => d.path);
+    const docs = API_CONVENTION_DOCS.map((d) => doc(d.path, d.content));
     let calls = 0;
     const runner: OverlapRunner = async (i) => {
       calls++;
-      return flagAll(i);
+      return { overlap: false, note: '' };
     };
-    await flagOverlaps(repo, [area('core/auth', ['a.md', 'b.md', 'c.md'])], docs, {
-      runner,
-      maxPairsPerArea: 2,
-      onCapped: (areaId, examined, total) => capped.push([areaId, examined, total]),
-    });
-    expect(capped).toEqual([['core/auth', 2, 3]]);
-    expect(calls).toBe(2);
+    await flagOverlaps(repo, [area('core/api-conventions', refs)], docs, { runner });
+    expect(calls).toBe((refs.length * (refs.length - 1)) / 2);
+    expect(calls).toBe(78);
   });
 
   it('caches verdicts per pair', async () => {
@@ -398,24 +467,21 @@ describe('flagOverlaps — heading-widened cross-area candidates', () => {
     expect(out.get('core/pagination')).toHaveLength(1);
   });
 
-  it('counts widened pairs against the per-area cap', async () => {
+  it('judges every widened pair — no cap drops one', async () => {
     const note = doc('docs/pagination.md', PAGINATION_NOTE);
     const prd1 = doc('docs/prd-1.md', BROAD_PRD);
     const prd2 = doc('docs/prd-2.md', BROAD_PRD);
-    const capped: Array<[string, number, number]> = [];
     let calls = 0;
     const runner: OverlapRunner = async (i) => {
       calls++;
       return flagAll(i);
     };
-    await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [note, prd1, prd2], {
+    const out = await flagOverlaps(repo, [area('core/pagination', ['docs/pagination.md'])], [note, prd1, prd2], {
       runner,
-      maxPairsPerArea: 1,
-      onCapped: (areaId, examined, total) => capped.push([areaId, examined, total]),
     });
-    // Two widened pairs (prd-1,note) + (prd-2,note) — capped to 1.
-    expect(capped).toEqual([['core/pagination', 1, 2]]);
-    expect(calls).toBe(1);
+    // Two widened pairs (prd-1,note) + (prd-2,note) — both examined, none dropped.
+    expect(calls).toBe(2);
+    expect(out.get('core/pagination')).toHaveLength(2);
   });
 
   it('does not self-pair or double-count repeated matching headings', async () => {

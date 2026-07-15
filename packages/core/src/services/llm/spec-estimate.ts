@@ -65,7 +65,6 @@ import type { PriceTable } from './model-prices.js';
 // Heuristic assumptions, surfaced as ranges where they bite.
 const KEEP_RATE = 0.9; // fraction of prefiltered docs the relevance LLM keeps
 const AVG_AREA_SIZE = 4; // docs per area (drives overlap pair count)
-const OVERLAP_CAP = 60; // overlap-detector caps pairs per area
 const TARGET_DENSITY_PER_KB = 0.6; // heuristic enumerated targets per KB of area text
 const RETRY_AMP = 1.3; // extract retry-round amplification (1 + up to maxRetryRounds)
 const GAP_AREA_FRACTION = 0.4; // rough fraction of areas that end up with gaps to judge
@@ -150,10 +149,10 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
     : 0;
 
   // Overlap pairs: area sizes are mid-run only → estimate from kept docs grouped
-  // into mean-sized areas, capped per area. Reported as a range. Only when the
-  // kept set actually changed (otherwise overlap is a cache hit).
+  // into mean-sized areas, every pair judged (no cap). Reported as a range. Only
+  // when the kept set actually changed (otherwise overlap is a cache hit).
   const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
-  const pairsPerArea = Math.min(OVERLAP_CAP, (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2);
+  const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
   const overlapPairs = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
   // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
   // window matrix (never truncated), so calls scale with the square of doc size.
