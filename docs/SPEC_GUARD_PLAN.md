@@ -1586,6 +1586,27 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
     generate (core seam installed by the EE server, alongside the contracts refresh). OSS behavior
     unchanged (interactive hard-fail, nothing persisted). STATUS: BUILT 2026-07-14
     (sm/spec-guards-ee, awaiting review).
+  - **08.11 — Review-hardening pass (Check lifecycle + read anchoring + queue bounds).** Fixes
+    from the pre-merge review, each pinned by a test. Check lifecycle: a duplicate delivery
+    reuses the head's existing queued/in-progress Check run (`findActiveCheck`) instead of
+    opening a newer run that would shadow the verdict; the head run + evidence persist BEFORE
+    the verdict Check posts (a store failure becomes an infra-error Check, never flips a posted
+    verdict); a THROWN enqueue settles only a run the delivery itself created and marks the
+    tracked job row failed so the single-flight key frees; stored gate runs carry an optional
+    `corpusFingerprint` (sha256 over scenario ids + binds) and the redelivery fast path only
+    accepts a stored run whose fingerprint matches the committed corpus — a force spec-regen
+    run at the head can no longer flip a red PR green on reopen (untagged legacy runs stay
+    accepted). Read anchoring: no-ref hosted reads of the manifest/generate-result resolve
+    through the baseline scope like every other reader (a PR's regenerated corpus never leaks
+    into repo-level status/coverage), and the job-chain consumers (`hasGuardState`, the
+    conflict-resolution and last-dismissal regen hooks) read at the repo baseline commit — no
+    baseline means no state, never "newest row". Client: PR guard tabs hold behind
+    `GuardPrScopeGate` until the head SHA resolves (loading / explicit "gate hasn't run"
+    states), `useGuardRuns` drops selection+cache on scope change, and dismissals are inert
+    while the scope is unresolved (`guardReadsEnabled`). Queue bounds: onboarding + baseline
+    clones fold a 5-minute wall-clock bound with the job's abort signal (`boundedCloneSignal`;
+    `repo.guard` threads `ctx.signal`), so a hung clone can no longer occupy a worker slot
+    forever. STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
   - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
     credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 
