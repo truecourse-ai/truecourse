@@ -213,7 +213,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     // Verify runs on a 0.15 fraction of the flagged pairs, capped at every pair.
     expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
     expect(verify.callsRange?.high).toBe(overlap.calls);
-    expect(verify.model).toBe('sonnet');
+    expect(verify.model).toBe('opus');
   });
 
   it('scan estimate honors spec.include and agrees with discovery', async () => {

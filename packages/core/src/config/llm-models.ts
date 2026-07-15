@@ -63,7 +63,9 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // Detection is recall-biased Haiku; the verify pass is the precision judge that
   // prunes its false positives — a stricter comprehension call over one flagged
   // pair with full context, so sonnet (trivially A/B-able to opus via config).
-  'spec.verifyOverlap': 'sonnet',
+  // Owner's call (2026-07-14): the conflict judge runs on opus — verification
+  // reads full docs per flag and the flag count keeps the spend small.
+  'spec.verifyOverlap': 'opus',
   'contract.enumerate': 'sonnet',
   'contract.reconcile': 'sonnet',
   'contract.extract': 'opus',
