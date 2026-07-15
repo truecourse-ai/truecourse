@@ -37,8 +37,8 @@ scenario) model, and fixes the multi-connector union bug found in live testing.
      connector's stored pending: deltas listed per source, costs summed,
      `costPartial` OR-ed). Sync stays per-connector.
 2. **Workspace decisions ride the existing store, injected via the scratch
-   tree.** Decisions (manualIncludes/manualExcludes/relations/
-   conflictResolutions — the guard-era `decisions.json` shape) persist as the
+   tree.** Decisions (manualIncludes/manualExcludes/manualAreas/
+   conflictResolutions — the `decisions.json` shape) persist as the
    `workspace_spec_sets` artifact `'decisions'` (column already exists).
    `syncWorkspaceCorpusInProcess` gains an optional `decisions` input and
    materializes it as `.truecourse/specs/decisions.json` inside the scratch
@@ -57,7 +57,7 @@ scenario) model, and fixes the multi-connector union bug found in live testing.
 4. **UI reuse via a data-source seam, not forks.** Generalize the spec
    components' data access behind a small provider (a React context exposing
    the ~8 calls `SpecCorpusView`/`SpecOverlapDetail`/`SpecDocViewer` make:
-   corpus GET, doc GET, includes/excludes/relations/conflict-resolution
+   corpus GET, doc GET, includes/excludes/conflict-resolution
    POST+DELETE). Default implementation = the current repo `@/lib/api` calls
    (OSS pages unchanged); the EE Knowledge page provides a workspace
    implementation targeting `/api/ee/knowledge/spec/*`. This is the same
@@ -162,7 +162,7 @@ the risk:
 | `GET /spec/corpus` | Workspace corpus payload: areas + kept docs + conflicts (decisions folded, `buildCorpusConflicts`) + skipped summary. 404 before first process. |
 | `GET /spec/doc?ref=` | One doc's markdown — read from its STORED body via the ledger row (docPath → contentHash → content store). 404 for an unknown ref. (Superseded by EE_SYNC_STORE_PLAN: bodies are now stored at Sync time; no per-view connector re-fetch, no 410.) |
 | `GET /spec/skipped` | Paginated skipped docs (query/reason/limit/offset). |
-| `POST/DELETE /spec/includes`, `/spec/excludes`, `/spec/relations`, `/spec/conflict-resolution` | Decision writes mirroring the repo routes; write the `'decisions'` artifact + enqueue re-process. |
+| `POST/DELETE /spec/includes`, `/spec/excludes`, `/spec/conflict-resolution` | Decision writes mirroring the repo routes; write the `'decisions'` artifact + enqueue re-process. |
 | `GET /guard/coverage` · `GET /guard/scenario?…` | Scenario corpus reads for the Scenarios tab (shape mirrors the repo guard reads). |
 | `POST /guard/generate` · `POST /guard/estimate` | Explicit generation with pre-flight estimate; 409 while conflicts are open. |
 | existing `/sync`, `/estimate`, `/documents` (now paged) | unchanged flows from the connector plan. |
