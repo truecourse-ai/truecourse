@@ -1133,6 +1133,8 @@ function RepoPageInner() {
               error={guardScenarios.error}
               activeId={guardScenarioTabs.activeId}
               onOpen={guardScenarioTabs.open}
+              prRef={refForTabs}
+              scenariosCommit={guardScenarios.scenariosCommit}
             />
           )}
         </LeftSidebar>

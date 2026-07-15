@@ -94,6 +94,13 @@ export function GuardDriftList({
                 <span>{meta.label}</span>
                 <span>{g.rows.length}</span>
               </div>
+              {/* Stale/orphaned name their mechanism, not their meaning — one muted
+                  line says why these scenarios have no result (they never ran). */}
+              {meta.hint && (
+                <div className="border-b border-border/60 bg-muted/30 px-3 py-1 text-[10px] leading-snug text-muted-foreground">
+                  {meta.hint}
+                </div>
+              )}
             </div>
             {g.rows.map((d) => (
               <GuardScenarioRow

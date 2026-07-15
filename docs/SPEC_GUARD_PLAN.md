@@ -1046,6 +1046,26 @@ into `packages/core/src/services/llm/spec-estimate.ts` alongside the existing su
 SECTION** in the section switcher — a third module next to Code Analysis and BL Drift, never a
 tab inside BL Drift. Its tabs: Coverage (default), Drifts, Report.
 
+**PR-view baseline fallback for generate-side reads (user bug report 2026-07-15, hosted
+gate dogfood). STATUS: BUILT 2026-07-15.** A hosted PR-gate run persists ONLY the run at
+the PR head — the corpus/scenarios/manifest/generate-result it executed live at the
+BASELINE commit. The head-pinned guard reads returned nothing, so a PR showed a
+self-contradictory Spec Guard view: Coverage listed docs (the spec route already fell back
+to the baseline corpus, labelled `corpusCommit`) beside a "No spec corpus" empty state,
+Scenarios said "No scenarios yet" while Runs showed the 4 scenarios the gate just ran, and
+CLI copy (`spec scan` / `guard generate`) was meaningless for a hosted repo. Fix — the
+GENERATE-side reads fall back, per store, from a pinned PR head miss to the BASELINE
+commit (the set the gate actually executed; still never "newest by createdAt"):
+`storeGuardStaleness` (corpus/manifest/scenario-files/result — `hasRun` stays head-only),
+`listGuardScenarios` (whole-set fallback, labelled by the new
+`GuardScenarioInventory.scenariosCommit`, surfaced in the panel as "Showing the baseline
+scenarios — this PR didn't regenerate them."), `readGuardReport`, and the new
+`readManifestForView`/`readGuardResultForView` behind `/guard/status` + `/guard/coverage`
+(the RUN in those joins stays pinned to the head). Repo-level (no-ref) reads are
+untouched. Companion UX fix: stale/orphaned outcomes now carry a one-line explainer
+(`GuardStatusMeta.hint`) under the Runs-list group header and as the badge tooltip — the
+outcome name alone didn't tell users the scenario never executed.
+
 **First-run coverage fixes (user bug reports 2026-07-07, post-scan fresh store — eighth
 review pass).** Four defects found running the published build on a scan-only store (corpus
 present, generate never run):

@@ -23,10 +23,10 @@ import { resolveProjectForRequest } from '@truecourse/core/config/current-projec
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { composeGuardStatus } from '@truecourse/shared';
 import {
-  readManifest,
+  readManifestForView,
   readGuardRunForView,
   readGuardHistory,
-  readGuardResult,
+  readGuardResultForView,
   readGuardReport,
   readGuardRun,
   readGuardScenarioSource,
@@ -48,12 +48,14 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     const ref = refOf(req);
-    // PR view: paint status from the run stored at the PR head, never the baseline.
+    // PR view: the RUN comes from the PR head alone (never the baseline); the
+    // generate-side inputs (manifest / result) fall back to the baseline set —
+    // the one the gate executed — when the head persisted nothing.
     res.json(
       composeGuardStatus(
-        await readManifest(repo.path, ref),
+        await readManifestForView(repo.path, ref),
         await readGuardRunForView(repo.path, ref),
-        await readGuardResult(repo.path, ref),
+        await readGuardResultForView(repo.path, ref),
       ),
     );
   } catch (e) {
@@ -148,10 +150,11 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
       res.status(404).json({ error: `Doc not found: ${doc}` });
       return;
     }
-    // PR view: the run comes from the PR head's stored run, never the baseline.
+    // PR view: the run comes from the PR head's stored run, never the baseline;
+    // the manifest/result join falls back to the baseline set the gate executed.
     res.json(
       composeDocCoverage(doc, content, {
-        manifest: await readManifest(repo.path, commit),
+        manifest: await readManifestForView(repo.path, commit),
         latest: await readGuardRunForView(repo.path, commit),
         result: await readGuardReport(repo.path, commit),
       }),

@@ -371,6 +371,28 @@ describe('GuardDriftsView — detail', () => {
   });
 });
 
+describe('GuardDriftsView — stale/orphaned group explainers', () => {
+  beforeEach(() => stubFetch());
+
+  it('explains inline why stale and orphaned scenarios did not run', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    expect(
+      screen.getByText('The bound spec text changed since generation — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('The bound spec section no longer exists — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+  });
+
+  it('adds no explainer to the fail/error/pass groups', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    // Exactly the two drift explainers — never one under fail/error/pass headers.
+    expect(screen.getAllByText(/— not run\. Regenerate to re-anchor\.$/)).toHaveLength(2);
+  });
+});
+
 describe('GuardDriftsView — selected-run header', () => {
   beforeEach(() => stubFetch());
 

@@ -30,6 +30,8 @@ import {
   listGuardScenarios,
   readGuardScenarioSource,
   readGuardReport,
+  readManifestForView,
+  readGuardResultForView,
   computeGuardStaleness,
 } from '../../packages/core/src/commands/guard-read';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
@@ -78,7 +80,7 @@ let db: EeDb;
 let guardStore: PgGuardStore;
 
 /** Snapshot a scenario set (recipe + yaml + manifest) into the store at `commit`. */
-async function saveSet(commit: string, ids: Array<[string, string]>): Promise<void> {
+async function saveSetFor(repoKey: string, commit: string, ids: Array<[string, string]>): Promise<void> {
   const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
   try {
     fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(RECIPE));
@@ -89,11 +91,64 @@ async function saveSet(commit: string, ids: Array<[string, string]>): Promise<vo
       sections.push({ doc: DOC, anchor: section, fingerprint: 'sha256:x', scenarioIds: [id], generationInputsHash: null });
     }
     fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ guard: 1, sections }));
-    await guardStore.saveScenarios({ repoKey: REPO, commitSha: commit } satisfies RepoRef, src);
+    await guardStore.saveScenarios({ repoKey, commitSha: commit } satisfies RepoRef, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
   }
 }
+
+const saveSet = (commit: string, ids: Array<[string, string]>): Promise<void> =>
+  saveSetFor(REPO, commit, ids);
+
+/**
+ * A temp repo whose analyze LATEST anchors the guard baseline at `commit` —
+ * the shape a hosted repo has after its default-branch verify. Caller removes it.
+ */
+async function makeBaselineRepo(commit: string): Promise<string> {
+  const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-baseline-'));
+  await writeLatest(tmpRepo, {
+    head: 'run.json',
+    analysis: {
+      id: 'r1',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      branch: 'main',
+      commitHash: commit,
+      architecture: 'monolith',
+      metadata: { isDiffAnalysis: false },
+      status: 'completed',
+    },
+    graph: {
+      services: [],
+      serviceDependencies: [],
+      layers: [],
+      modules: [],
+      methods: [],
+      moduleDeps: [],
+      methodDeps: [],
+      databases: [],
+      databaseConnections: [],
+      flows: [],
+    },
+    violations: [],
+  });
+  return tmpRepo;
+}
+
+/** A stored run at `commit` with a single passing scenario. */
+const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') => ({
+  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 1 },
+  summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+  scenarios: [
+    {
+      id: 'a1',
+      title: 'alpha claim',
+      binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' },
+      outcome: 'pass' as const,
+      durationMs: 1,
+    },
+  ],
+  sections: [],
+});
 
 beforeEach(async () => {
   client = new PGlite();
@@ -177,6 +232,47 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
   });
 });
 
+describe('listGuardScenarios — PR-head baseline fallback (hosted)', () => {
+  it('a head with no stored set falls back to the baseline set, labelled by scenariosCommit', async () => {
+    // The PR-gate shape: the set lives at the baseline; the head persisted nothing.
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+
+      const inv = await listGuardScenarios(repo, 'prhead0000');
+      expect(inv.scenarios.map((s) => s.id)).toEqual(['a1']);
+      expect(inv.scenariosCommit).toBe('baseline9999');
+      // The recipe card rides the same fallback (one saved set).
+      expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('a head WITH its own set never falls back, and labels itself', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+      await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
+
+      const inv = await listGuardScenarios(repo, 'prhead0000');
+      expect(inv.scenarios.map((s) => s.id)).toEqual(['pr1']);
+      expect(inv.scenariosCommit).toBe('prhead0000');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('a head miss with NO baseline stays empty (no newest-set leak)', async () => {
+    // REPO has no analyze LATEST → no baseline anchor; another commit's set
+    // must not leak into an unknown ref's view.
+    await saveSet('shaA1234567', [['a1', 'alpha']]);
+    const inv = await listGuardScenarios(REPO, 'unknownsha12');
+    expect(inv.scenarios).toEqual([]);
+    expect(inv.recipe).toBeNull();
+  });
+});
+
 describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree)', () => {
   it('is never falsely stale: no tree to fingerprint → stale null, recipe read at the ref', async () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
@@ -233,6 +329,55 @@ describe('readGuardScenarioSource — commit-scoped (hosted)', () => {
     expect(src?.content).toContain('id: a1');
     // A ref with no such scenario → null (no cross-commit leak).
     expect(await readGuardScenarioSource(REPO, 'a1', 'othersha1234')).toBeNull();
+  });
+});
+
+describe('coverage/status view reads — PR-head baseline fallback (hosted)', () => {
+  it('readGuardReport at an unreported head falls back to the baseline report', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
+      const report = await readGuardReport(repo, 'prhead0000');
+      expect(report).not.toBeNull();
+      expect(report?.generatedAt).toBe('2026-07-06T00:00:00.000Z');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('readManifestForView falls back to the baseline manifest; a head hit wins', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+      // Head miss → the baseline's manifest.
+      const viaFallback = await readManifestForView(repo, 'prhead0000');
+      expect(viaFallback?.sections.map((s) => s.anchor)).toEqual(['alpha']);
+      // A head with its own set never falls back.
+      await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
+      const atHead = await readManifestForView(repo, 'prhead0000');
+      expect(atHead?.sections.map((s) => s.anchor)).toEqual(['beta']);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('readGuardResultForView falls back to the baseline result', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
+      const result = await readGuardResultForView(repo, 'prhead0000');
+      expect(result?.generatedAt).toBe('2026-07-06T00:00:00.000Z');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('none of the view reads leak across commits when no baseline exists', async () => {
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
+    await saveSet('shaA1234567', [['a1', 'alpha']]);
+    expect(await readGuardReport(REPO, 'unknownsha12')).toBeNull();
+    expect(await readManifestForView(REPO, 'unknownsha12')).toBeNull();
+    expect(await readGuardResultForView(REPO, 'unknownsha12')).toBeNull();
   });
 });
 
@@ -297,6 +442,59 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
     expect(s).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
+  });
+
+  it('a PR head with only a gate run falls back to the baseline for the generate-side stores', async () => {
+    // The PR-gate shape: corpus + scenarios + generate result live at the
+    // BASELINE commit; the head stores only the gate's run. The staleness gate
+    // must see the baseline inputs (per-store fallback) AND the head's run.
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+      await new PgSpecStore(db).saveSpec({ repoKey: repo, commitSha: 'baseline9999' }, 'corpus', { keptDocs: [] });
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
+      await guardStore.writeGuardRun(repo, RUN('run-pr', 'prhead0000'));
+
+      expect(await computeGuardStaleness(repo, 'prhead0000')).toEqual({
+        generateStale: false,
+        runStale: false,
+        hasCorpus: true,
+        hasScenarios: true,
+        hasGenerated: true,
+        hasRun: true,
+      });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back per store: a head-rescanned corpus wins while scenarios still come from the baseline', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      // The PR re-scanned specs (corpus stored at the head) but never regenerated
+      // scenarios — corpus reads at the head, scenarios fall back independently.
+      await new PgSpecStore(db).saveSpec({ repoKey: repo, commitSha: 'prhead0000' }, 'corpus', { keptDocs: [] });
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+
+      const s = await computeGuardStaleness(repo, 'prhead0000');
+      expect(s).toMatchObject({ hasCorpus: true, hasScenarios: true });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('the run NEVER falls back: baseline scenarios show, but an ungated head stays hasRun:false', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+      // A baseline run exists — it must not make the ungated PR head look run.
+      await guardStore.writeGuardLatest(repo, RUN('run-base', 'baseline9999', '2026-07-07T00:00:00.000Z'));
+
+      const s = await computeGuardStaleness(repo, 'prhead0000');
+      expect(s).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('run older than the generate → runStale (regenerated scenarios not yet re-run)', async () => {

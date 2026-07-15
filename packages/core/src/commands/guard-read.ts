@@ -351,9 +351,25 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
   // An unresolvable hosted scope (no ref, no baseline) is EMPTY for the same reason.
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return { recipe: null, scenarios: [] }
-  const commit = scope.commit
-  const { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })
-  const manifest = await readManifestStore(repoKey, commit)
+  let commit = scope.commit
+  let { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })
+  let manifest = await readManifestStore(repoKey, commit)
+  // A pinned PR head with NO stored set falls back to the baseline set — the set
+  // the gate actually executed against that head (a code-only PR persists nothing
+  // at its head). The set moves whole (scenarios + manifest + recipe are one
+  // snapshot); `scenariosCommit` labels where it came from. Never "newest".
+  if (ref !== undefined && scenarios.length === 0 && manifest == null) {
+    const base = await guardBaselineCommit(repoKey)
+    if (base !== undefined && base !== commit) {
+      const fromBase = await getGuardStore().loadScenarios({ repoKey, commitSha: base })
+      const baseManifest = await readManifestStore(repoKey, base)
+      if (fromBase.scenarios.length > 0 || baseManifest != null) {
+        commit = base
+        scenarios = fromBase.scenarios
+        manifest = baseManifest
+      }
+    }
+  }
   const manifestIds = new Set<string>()
   for (const sec of manifest?.sections ?? []) for (const id of sec.scenarioIds) manifestIds.add(id)
 
@@ -376,7 +392,11 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
       (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id),
     )
 
-  return { recipe: await readGuardRecipeCard(repoKey, commit), scenarios: items }
+  return {
+    recipe: await readGuardRecipeCard(repoKey, commit),
+    scenarios: items,
+    ...(commit !== undefined ? { scenariosCommit: commit } : {}),
+  }
 }
 
 /**
@@ -418,8 +438,22 @@ async function headingTextIndex(
 export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
-  const commit = scope.commit
-  const report = await readGuardResultStore(repoKey, commit)
+  let commit = scope.commit
+  let report = await readGuardResultStore(repoKey, commit)
+  // A pinned PR head that never generated falls back to the BASELINE report —
+  // the generate its gate-run scenarios came from (never "newest"; the PR-view
+  // analogue of the spec route's corpus fallback). Heading joins follow `commit`
+  // so they read the docs the report's sections actually live in.
+  if (!report && scope.kind === 'commit' && ref !== undefined) {
+    const base = await guardBaselineCommit(repoKey)
+    if (base !== undefined && base !== commit) {
+      const fromBase = await readGuardResultStore(repoKey, base)
+      if (fromBase) {
+        report = fromBase
+        commit = base
+      }
+    }
+  }
   if (!report) return report
   const held = report.heldSections ?? []
   // A held section is unsettled by definition, so — like a finding — no committed
@@ -444,6 +478,35 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
         }
       : {}),
   }
+}
+
+/**
+ * PR-view read policy for a GENERATE-side artifact (manifest / generate result):
+ * no ref → the caller's existing repo-level read, untouched; a pinned PR head →
+ * that commit's row, falling back — on a head miss — to the BASELINE commit's
+ * row (the set the gate actually executed against the head; never "newest by
+ * createdAt"). Run reads never route through this — a PR head's run is its own.
+ */
+async function readPinnedWithBaselineFallback<T>(
+  repoKey: string,
+  ref: string | undefined,
+  load: (commit?: string) => Promise<T | null>,
+): Promise<T | null> {
+  const value = await load(ref)
+  if (value != null || ref === undefined || guardsMaterializeInPlace()) return value
+  const base = await guardBaselineCommit(repoKey)
+  if (base === undefined || base === ref) return value
+  return load(base)
+}
+
+/** The manifest a (possibly PR-scoped) guard view joins classifications from. */
+export function readManifestForView(repoKey: string, ref?: string): Promise<GuardManifest | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, c))
+}
+
+/** The raw last-generate result a (possibly PR-scoped) guard view paints from. */
+export function readGuardResultForView(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, c))
 }
 
 /**
@@ -730,6 +793,12 @@ const EMPTY_STALENESS: GuardStaleness = {
  * (a never-run PR head must report hasRun:false, agreeing with `/latest?ref=`);
  * the repo-level view (baseline commit) may still fall back to the baseline row
  * (a guard run recorded at a different commit than the verify baseline).
+ *
+ * The GENERATE-side stores (corpus / manifest / scenario files / result) DO fall
+ * back — per store — from a pinned PR head to the baseline commit: a gate run
+ * executes the baseline's scenario set against the head, so those inputs ARE
+ * established for the PR view even though nothing re-persisted them at the head
+ * (a code-only PR). Never "newest by createdAt" — only the explicit baseline.
  */
 async function storeGuardStaleness(
   repoKey: string,
@@ -744,12 +813,20 @@ async function storeGuardStaleness(
     refPinned ? Promise.resolve(null) : readGuardLatestStore(repoKey),
     listScenarioFiles(repoKey, commit),
   ])
+  const base = refPinned ? await guardBaselineCommit(repoKey) : undefined
+  const fallback = base !== undefined && base !== commit
+  const [resultF, manifestF, corpusF, scenarioFilesF] = await Promise.all([
+    fallback && result == null ? readGuardResultStore(repoKey, base) : Promise.resolve(result),
+    fallback && manifest == null ? readManifestStore(repoKey, base) : Promise.resolve(manifest),
+    fallback && corpus == null ? loadSpec({ repoKey, commitSha: base }, 'corpus') : Promise.resolve(corpus),
+    fallback && scenarioFiles.length === 0 ? listScenarioFiles(repoKey, base) : Promise.resolve(scenarioFiles),
+  ])
   const run = runAtCommit ?? baseline
-  const hasCorpus = corpus != null
-  const hasScenarios = (manifest?.sections?.length ?? 0) > 0 || scenarioFiles.length > 0
-  const hasGenerated = result != null
+  const hasCorpus = corpusF != null
+  const hasScenarios = (manifestF?.sections?.length ?? 0) > 0 || scenarioFilesF.length > 0
+  const hasGenerated = resultF != null
   const hasRun = run != null
-  const generatedAt = result?.generatedAt ?? null
+  const generatedAt = resultF?.generatedAt ?? null
   const ranAt = run?.run.ranAt ?? null
   return {
     generateStale: hasCorpus && !hasGenerated,

@@ -211,4 +211,12 @@ export interface GuardRecipeCard {
 export interface GuardScenarioInventory {
   recipe: GuardRecipeCard | null
   scenarios: GuardScenarioListItem[]
+  /**
+   * The commit the inventory was read at (hosted only; absent on the OSS live
+   * store and on an empty hosted scope). Under a PR ref this can be the BASELINE
+   * commit — a PR-gate run executes the baseline set against the head without
+   * re-persisting it, so a head miss falls back (the `corpusCommit` convention);
+   * the client compares it to the viewed ref to label the fallback.
+   */
+  scenariosCommit?: string
 }

@@ -959,6 +959,68 @@ describe('GuardFindingDetail — program-output excerpts (Fix 1)', () => {
   });
 });
 
+describe('GuardScenariosPanel — PR baseline-fallback label', () => {
+  const FALLBACK_LABEL = "Showing the baseline scenarios — this PR didn't regenerate them.";
+  const rows = () =>
+    buildListRows(
+      [
+        {
+          id: 'a1',
+          title: 'alpha claim',
+          doc: 'docs/auth.md',
+          anchor: 'auth/alpha',
+          headingText: 'Alpha',
+          file: 'core/a1.yaml',
+          handWritten: false,
+          lastResult: null,
+        },
+      ],
+      [],
+    );
+
+  it('labels a PR view whose inventory fell back to the baseline set', () => {
+    render(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        prRef="headsha456"
+        scenariosCommit="basesha123"
+      />,
+    );
+    expect(screen.getByText(FALLBACK_LABEL)).toBeInTheDocument();
+  });
+
+  it('shows no label when the head stored its own set, or outside a PR view', () => {
+    const { rerender } = render(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        prRef="headsha456"
+        scenariosCommit="headsha456"
+      />,
+    );
+    expect(screen.queryByText(FALLBACK_LABEL)).not.toBeInTheDocument();
+    // Repo-level view (no PR ref): the baseline IS the view — never a label.
+    rerender(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        scenariosCommit="basesha123"
+      />,
+    );
+    expect(screen.queryByText(FALLBACK_LABEL)).not.toBeInTheDocument();
+  });
+});
+
 describe('Scenarios surface — title-first labels + long-id overflow', () => {
   const LONG_ID = '3-11-how-curateinprocess-drives-the-pipeline.1';
   const LONG_TITLE = 'How curate-in-process drives the pipeline';

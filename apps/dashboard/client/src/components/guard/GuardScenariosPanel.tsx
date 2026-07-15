@@ -323,6 +323,8 @@ export function GuardScenariosPanel({
   error,
   activeId,
   onOpen,
+  prRef,
+  scenariosCommit,
 }: {
   rows: GuardListRow[];
   loading: boolean;
@@ -330,6 +332,10 @@ export function GuardScenariosPanel({
   activeId: string | null;
   /** Single-click preview (transient tab), double-click pin — the shared tab model. */
   onOpen: (id: string, pinned: boolean) => void;
+  /** The PR head ref scoping this view (EE PR view); undefined at repo level. */
+  prRef?: string | null;
+  /** The commit the inventory was read at (hosted); the SpecCorpusView `corpusCommit` analog. */
+  scenariosCommit?: string | null;
 }) {
   const [docFilter, setDocFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -406,8 +412,18 @@ export function GuardScenariosPanel({
     );
   }
 
+  // PR view whose inventory fell back to the baseline set — the gate ran the
+  // baseline scenarios against the head without re-persisting them (the
+  // SpecCorpusView baseline-fallback idiom).
+  const baselineFallback = !!prRef && !!scenariosCommit && scenariosCommit !== prRef;
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {baselineFallback && (
+        <div className="shrink-0 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+          Showing the baseline scenarios — this PR didn&apos;t regenerate them.
+        </div>
+      )}
       {/* Filter bar */}
       <div className="shrink-0 space-y-2 border-b border-border p-2">
         <input
