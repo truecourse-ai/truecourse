@@ -17,7 +17,9 @@ import { isCSharpTestMethod, getCSharpDeclAttributeNames } from './_helpers.js'
  *  - framework handler methods bound by attribute — ASP.NET controller actions
  *    (`[HttpGet]`/`[Route]`/…), minimal-API/SignalR handlers — must NOT carry
  *    the `Async` suffix (the framework strips it from routing), so any method
- *    with a routing/handler attribute is exempt.
+ *    with a routing/handler attribute is exempt;
+ *  - ASP.NET Core middleware `Invoke(HttpContext …)` — bound by convention name,
+ *    not by attribute, so it cannot take the `Async` suffix either.
  * Anonymous async lambdas have no name and are never the subject of this rule.
  */
 const HANDLER_ATTRIBUTES = new Set([
@@ -34,6 +36,20 @@ const HANDLER_ATTRIBUTES = new Set([
  *  - a method subscribed to an event via `+=` somewhere in the same file
  *    (`source.Changed += OnChanged;`), which covers parameterless handlers.
  */
+/**
+ * ASP.NET Core middleware convention: the pipeline invokes a middleware component
+ * through a method named `Invoke` (or `InvokeAsync`) whose first parameter is the
+ * `HttpContext`. `UseMiddleware<T>` binds this method by that exact name, so the
+ * `Async` suffix cannot be added to `Invoke` without breaking the convention.
+ */
+function isMiddlewareInvoke(node: SyntaxNode, name: string): boolean {
+  if (name !== 'Invoke' && name !== 'InvokeAsync') return false
+  const params = node.childForFieldName('parameters')
+  const first = params?.namedChildren.find((c) => c?.type === 'parameter')
+  const type = (first?.childForFieldName('type')?.text ?? '').split('.').pop()
+  return type === 'HttpContext'
+}
+
 function isEventHandler(node: SyntaxNode, name: string, sourceCode: string): boolean {
   const params = node.childForFieldName('parameters')
   if (params) {
@@ -61,6 +77,7 @@ export const csharpAsyncMethodNamingVisitor: CodeRuleVisitor = {
     if (isCSharpTestMethod(node)) return null
     if (getCSharpDeclAttributeNames(node).some((a) => HANDLER_ATTRIBUTES.has(a))) return null
     if (isEventHandler(node, name, sourceCode)) return null
+    if (isMiddlewareInvoke(node, name)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
