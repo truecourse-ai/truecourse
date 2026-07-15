@@ -12,16 +12,31 @@
 import { WorkOS } from '@workos-inc/node';
 import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
-import { WorkspaceSettingsStore } from '@truecourse/ee-data-store';
+import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
+import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup, installationOctokit } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
+import { setGuardGatePendingLookup, setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
+import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
+import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
+import { setKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import { createSpecInheritanceHook, createKnowledgeLedgerReader } from './knowledge/inheritance.js';
+import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
+import { registerKnowledge } from './knowledge/index.js';
 import { registerJobs } from './jobs/index.js';
+import {
+  createGuardRouter,
+  createGuardGenerateEnqueue,
+  createGuardPrRegenEnqueue,
+  createSpecConflictsResolvedBaselineScan,
+} from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
 import { initSentry, flushSentry } from './observability/sentry.js';
@@ -119,6 +134,9 @@ const plugin: EePlugin = {
     // Settings → Integrations (encrypted connector tokens). Needs the Postgres
     // stores installed above + the master secret.
     registerIntegrations(registry, { db: eeDb, masterSecret });
+    // Workspace Knowledge (connector sweep/process + corpus reads) — rides the
+    // job queue for the sweep and processing stages.
+    registerKnowledge(registry, { db: eeDb, masterSecret, jobs });
     plugin.capabilities.push('knowledge');
 
     // GitHub App PR gate — required (env validated at boot above, so this always
@@ -128,9 +146,61 @@ const plugin: EePlugin = {
       appUrl: cfg.appUrl,
       db: eeDb,
       enqueueBaseline: jobs.enqueueBaseline,
+      enqueueGuardGate: jobs.enqueueGuardGate,
+      enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
       codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     plugin.capabilities.push('github-gate');
+
+    // Hosted guard-scenario generation. The `repo.guard` job is registered by the
+    // worker and chained onto the first successful baseline; this router is the
+    // manual "Generate" trigger. The router mounts unconditionally (same rule as
+    // the jobs routers — pure wiring), but the capability is advertised ONLY when
+    // the background worker actually started: jobs are best-effort background
+    // services, and a dead queue must not light up guard actions in the UI.
+    registry.registerRouter(
+      '/api/ee/guard',
+      createGuardRouter({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
+    if (jobs.workerStarted) plugin.capabilities.push('guard');
+
+    // A repo-scope spec decision that clears the last conflict (handled by the OSS
+    // dashboard spec routes) can unblock a guard generate that had stalled on it.
+    // Install the core seam the routes call — same repo→request resolution as the
+    // manual Generate router above, keyed by repoKey alone (no HTTP request).
+    setGuardGenerateEnqueue(
+      createGuardGenerateEnqueue({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
+
+    // The PR analog: a PR-scoped dismissal that clears the PR's last active
+    // finding regenerates that PR head's scenarios (honoring the dismissals
+    // overlay) through the same durable spec-regen job the PR checkbox uses —
+    // with no checkbox comment to settle.
+    setGuardPrRegenEnqueue(
+      createGuardPrRegenEnqueue({
+        store: gateStore,
+        octokitFor: (id) => installationOctokit(githubAppConfig, id),
+        enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
+      }),
+    );
+
+    // The same conflict-clearing decision also re-scans the repo baseline so the
+    // store corpus re-curates (force — the commit hasn't moved) and the conflict-
+    // free scan chains scenario generation. Install the core seam the spec routes
+    // call, resolving the repo the same way as the Generate seam above.
+    setSpecConflictsResolvedHook(
+      createSpecConflictsResolvedBaselineScan({ store: gateStore, enqueueBaseline: jobs.enqueueBaseline }),
+    );
+
+    // Repo Knowledge inheritance: a connected repo folds its workspace's Knowledge
+    // corpus into its own spec. The spec pipeline materializes the workspace doc
+    // bodies + merges the workspace decisions (repo wins) into the checkout before
+    // curate/generate through this seam; the repo corpus GET enriches the inherited
+    // docs' title/url through the ledger reader seam. Both resolve the repo's
+    // workspace org from the gate store; a repo with no workspace inherits nothing.
+    const knowledgeStore = new PgKnowledgeStore(eeDb);
+    setSpecInheritanceHook(createSpecInheritanceHook({ store: gateStore, knowledge: knowledgeStore }));
+    setKnowledgeLedgerReader(createKnowledgeLedgerReader({ store: gateStore, knowledge: knowledgeStore }));
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App
@@ -138,6 +208,33 @@ const plugin: EePlugin = {
     setRepoDocReader((repoKey, docPath, opts) =>
       readRepoDocFromGithub(githubAppConfig, gateStore, repoKey, docPath, opts),
     );
+
+    // The PR-scoped guard tab labels its empty state "queued/running" when a gate
+    // is still in flight for the head. Resolve the repo's workspace, then look up
+    // the single-flight `guard.gate` job for `(repo, headSha)`. Best-effort — any
+    // failure resolves to no pending gate (a plain empty state).
+    // The PR Runs picker lists the PR's OWN timeline (one run per pushed head).
+    // Core's `readGuardHistoryForPr` resolves the heads through this seam from
+    // the gate-run records; OSS leaves it unset (no timeline).
+    setGuardGateHeadsLookup(createGuardGateHeadsLookup(gateStore));
+
+    setGuardGatePendingLookup(async (repoKey, headSha) => {
+      try {
+        const link = await gateStore.getRepo(repoKey);
+        if (!link?.workspaceOrgId) return null;
+        const job = await jobs.jobStore.getActiveByKey(
+          link.workspaceOrgId,
+          guardGateJobKey(repoKey, headSha),
+        );
+        if (!job) return null;
+        return { status: job.status === 'running' ? 'running' : 'queued', jobId: job.id };
+      } catch (err) {
+        log.warn(
+          `[ee-server] guard gate pending lookup failed for ${repoKey}@${headSha}: ${(err as Error).message}`,
+        );
+        return null;
+      }
+    });
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on
     // a CLI binary) + the Models settings API. Reuses the validated masterSecret.

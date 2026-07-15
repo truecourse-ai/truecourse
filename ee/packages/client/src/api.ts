@@ -54,4 +54,5 @@ export const postJson = <T>(path: string, body?: unknown): Promise<T> =>
   send<T>('POST', path, body);
 export const patchJson = <T>(path: string, body?: unknown): Promise<T> =>
   send<T>('PATCH', path, body);
-export const delJson = <T>(path: string): Promise<T> => send<T>('DELETE', path);
+export const delJson = <T>(path: string, body?: unknown): Promise<T> =>
+  send<T>('DELETE', path, body);

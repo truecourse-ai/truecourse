@@ -5,8 +5,10 @@
 
 import type { ConnectorKind, KnowledgeConnector } from './types.js';
 import { confluenceConnector } from './confluence.js';
+import { jiraConnector } from './jira.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const CONNECTORS: Partial<Record<ConnectorKind, KnowledgeConnector<any>>> = {
   confluence: confluenceConnector,
+  jira: jiraConnector,
 };

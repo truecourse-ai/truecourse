@@ -31,6 +31,13 @@ export interface GuardStatusMeta {
   dot: string;
   /** Pill classes for the status badge. */
   badge: string;
+  /**
+   * One-line explainer for a status whose NAME alone doesn't say what happened
+   * (stale/orphaned: the scenario never executed). Rendered inline under the
+   * Runs-list group header and as the badge tooltip; absent for self-evident
+   * statuses (pass/fail/…).
+   */
+  hint?: string;
 }
 
 const GREY_BAND = 'border-slate-400/60 bg-muted/40';
@@ -77,6 +84,7 @@ export const GUARD_STATUS_META: Record<GuardSectionCoverageStatus, GuardStatusMe
     band: 'border-amber-500 bg-amber-500/10',
     dot: 'bg-amber-500',
     badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+    hint: 'The bound spec text changed since generation — not run. Regenerate to re-anchor.',
   },
   orphaned: {
     label: 'Orphaned',
@@ -84,6 +92,7 @@ export const GUARD_STATUS_META: Record<GuardSectionCoverageStatus, GuardStatusMe
     band: 'border-amber-500 bg-amber-500/10',
     dot: 'bg-amber-500',
     badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+    hint: 'The bound spec section no longer exists — not run. Regenerate to re-anchor.',
   },
   guarded: {
     label: 'Guarded (no run)',

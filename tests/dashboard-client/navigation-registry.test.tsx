@@ -50,7 +50,7 @@ describe('navigation registry — pure lookups', () => {
 
   it('getSection returns descriptor or undefined', () => {
     expect(getSection('codequality')?.label).toBe('Code Analysis');
-    expect(getSection('guard')?.label).toBe('Guard');
+    expect(getSection('guard')?.label).toBe('Spec Guard');
     expect(getSection('verification')).toBeUndefined();
     expect(getSection('nope')).toBeUndefined();
   });

@@ -6,8 +6,10 @@
  * (no per-connector page code). Everything downstream (consolidate, merge,
  * resolve, the provenance ledger) is source-agnostic and reused unchanged.
  *
- * Bodies are fetched TRANSIENTLY and held in RAM only for the duration of a
- * sync; they are never stored.
+ * The connector is the ONLY thing that talks to a source, and only at Sync time.
+ * The sync engine then PERSISTS each fetched body (content-addressed in the shared
+ * `content` table); Process and the doc viewer read those stored bodies back —
+ * never the connector.
  */
 
 export type ConnectorKind = 'confluence' | 'jira' | 'notion' | 'linear' | 'gdocs';
@@ -25,7 +27,7 @@ export interface DocRef {
   updatedAt: string;
 }
 
-/** One document's content, fetched transiently. */
+/** One document's content, as fetched from the source. */
 export interface DocContent {
   title: string;
   /** Markdown-ish body (headings preserved so the consolidator can slice it). */
@@ -56,6 +58,12 @@ export interface ConnectorField {
   placeholder?: string;
   /** The one secret field (encrypted at rest, masked in the UI). */
   secret?: boolean;
+  /**
+   * A field the user may leave blank. The settings page's configured-check skips
+   * it (a blank optional field never blocks "Connected"), and it's absent from
+   * the stored config when left empty.
+   */
+  optional?: boolean;
 }
 
 /**
@@ -75,8 +83,12 @@ export interface KnowledgeConnector<Cfg extends ConnectorConfig = ConnectorConfi
   test(cfg: Cfg): Promise<void>;
   /** Enumerate the source's docs (metadata only). */
   list(cfg: Cfg): Promise<DocRef[]>;
-  /** Fetch ONE doc's content, transiently. */
+  /** Fetch ONE doc's content from the source. */
   fetch(cfg: Cfg, id: string): Promise<DocContent>;
+  /** Max ids per fetchMany call. Present iff fetchMany is implemented. */
+  readonly fetchBatchLimit?: number;
+  /** Batched fetch. Missing ids (deleted upstream mid-sync) are simply absent. */
+  fetchMany?(cfg: Cfg, ids: string[]): Promise<Map<string, DocContent>>;
 }
 
 /** The key of a connector's secret field (used by the store to encrypt it). */

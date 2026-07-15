@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -319,8 +320,14 @@ every \`ref\` you were given exactly once. No prose — only the JSON array.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
-/** A birth-validation failure attached to a claim on a retry so the model can fix it. */
-export interface BirthRetryContext {
+/**
+ * A birth-validation failure attached to a claim on a retry so the model can fix
+ * it. Extends the shared excerpt pair: the failing run's RAW program output is the
+ * evidence the retry's doc-first language refers to — the usage error the program
+ * printed reveals the correct flags/subcommand. Absent when the stream was empty
+ * (or an infra failure produced no capture).
+ */
+export interface BirthRetryContext extends OutputExcerpts {
   scenarioTitle: string
   step: number
   expected: string
@@ -388,6 +395,14 @@ export interface AuthorUserContext {
   correction?: OutputCorrection
 }
 
+/** Indent every line of a program-output excerpt so it reads as one nested block. */
+function indentBlock(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n')
+}
+
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   const lines: string[] = [
     `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
@@ -440,6 +455,10 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         `  expected: ${c.retry.expected}`,
         `  actual:   ${c.retry.actual}`,
       )
+      // The failing run's raw program output — the evidence the rules above point
+      // at (a usage error reveals the real flags). Each stream omitted when absent.
+      if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
+      if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
     }
   }
   if (ctx.correction) {
@@ -473,16 +492,22 @@ this schema (CANONICAL — generated from the engine's Zod definition; your repl
 must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
-  { "build": "<shell command run once in the repo root to produce the entrypoint>",
+  { "install": "<optional shell command run once in the repo root, before the build, to fetch dependencies>",
+    "build": "<shell command run once in the repo root to produce the entrypoint>",
     "entry": ["<argv>", "..."] }
 
+- install (optional) fetches dependencies before the build runs — the tree may be
+  a fresh clone with no node_modules (e.g. "npm ci", "pnpm install --frozen-lockfile",
+  "yarn install --immutable"; match the lockfile present). Omit it when the tree
+  needs no dependency fetch to build.
 - build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
   no-op "true" when nothing needs building.
 - entry is the argv that invokes the built program; scenario arguments are
   appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
   the package's declared bin/main and its build script. Paths are repo-relative.
 
-Output exactly one JSON object with \`build\` and \`entry\`. No prose.`
+Output exactly one JSON object with \`build\` and \`entry\` (and \`install\` when
+dependencies must be fetched first). No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
@@ -510,8 +535,8 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
       'Return exactly one JSON object with a non-empty "build" string and a non-empty',
-      '"entry" argv array (and optional "env" object), and nothing else:',
-      '  { "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      '"entry" argv array (and optional "install" and "env"), and nothing else:',
+      '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."] }',
     )
   }
   return lines.join('\n')

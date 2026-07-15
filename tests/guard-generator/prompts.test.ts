@@ -8,6 +8,7 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
+  buildRecipeUserPrompt,
   type AuthorUserContext,
   type FidelityUserContext,
   type SectionInput,
@@ -143,6 +144,52 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('Do NOT change a')
   })
 
+  // Fix 1 (PR 1) — the RETRY prompt renders the failing run's raw program output
+  // as the evidence its doc-first language already refers to.
+  it('the RETRY prompt renders program stdout/stderr blocks after expected/actual', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## add',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [
+        {
+          ref: 'c0',
+          claim: '`add` records an expense',
+          section: SECTION,
+          retry: {
+            scenarioTitle: 'add records an expense',
+            step: 1,
+            expected: 'exit 3',
+            actual: 'exit 2',
+            stdout: 'usage: expense add --amount <n> --note <s>',
+            stderr: 'error: missing required flag --amount',
+          },
+        },
+      ],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    // The excerpts follow the expected/actual lines.
+    expect(p).toContain('expected: exit 3')
+    expect(p).toContain('actual:   exit 2')
+    expect(p).toContain('program stdout:')
+    expect(p).toContain('usage: expense add --amount <n>')
+    expect(p).toContain('program stderr:')
+    expect(p).toContain('error: missing required flag --amount')
+    expect(p.indexOf('actual:')).toBeLessThan(p.indexOf('program stdout:'))
+    // The doc-first rules are untouched.
+    expect(p).toContain("Do NOT change a")
+    expect(p).toContain('fix COMMANDS')
+  })
+
+  it('the RETRY prompt omits an absent program-output stream', () => {
+    // The default retryPrompt() carries no excerpts → neither block renders.
+    const p = retryPrompt()
+    expect(p).not.toContain('program stdout:')
+    expect(p).not.toContain('program stderr:')
+  })
+
   it('a non-retry authoring prompt carries no RETRY block', () => {
     const ctx: AuthorUserContext = {
       doc: 'docs/cli.md',
@@ -215,5 +262,21 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION —')
     expect(p).toContain('not json')
     expect(p).toContain('"faithful" or "flagged"')
+  })
+
+  it('RECIPE_SYSTEM_PROMPT documents the optional install step with examples', () => {
+    // The descriptive bullet, not just the rendered Zod schema key.
+    expect(RECIPE_SYSTEM_PROMPT).toContain('npm ci')
+    expect(RECIPE_SYSTEM_PROMPT).toContain('pnpm install --frozen-lockfile')
+    expect(RECIPE_SYSTEM_PROMPT).toMatch(/install.*before.*build/is)
+  })
+
+  it('buildRecipeUserPrompt correction text names the optional install field', () => {
+    const prompt = buildRecipeUserPrompt({
+      packageJson: '{}',
+      presentInputs: ['package.json'],
+      correction: { invalidOutput: '(not json)' },
+    })
+    expect(prompt).toContain('"install"')
   })
 })

@@ -143,6 +143,36 @@ export async function updateComment(
 }
 
 /**
+ * An existing queued/in-progress Check run for `(headSha, name)`, or null. Used to
+ * make the gate handler idempotent per head: GitHub evaluates the NEWEST run per
+ * name+sha, so a duplicate delivery that created a second run would shadow the
+ * verdict later posted to the first. Best-effort (a listing failure → null → the
+ * caller creates a fresh run, the pre-existing behavior).
+ */
+export async function findActiveCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+): Promise<number | null> {
+  try {
+    const { data } = await octokit.checks.listForRef({
+      owner,
+      repo,
+      ref: headSha,
+      check_name: name,
+      per_page: 100,
+    });
+    const active = data.check_runs.find(
+      (r) => r.status === 'queued' || r.status === 'in_progress',
+    );
+    return active?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Open an in-progress Check run for a head sha so the PR shows "running" while the
  * gate works; returns its id to complete later with {@link postCheck}. Best-effort:
  * a failure just means no live "running" pill (the completed Check is still posted).
@@ -168,6 +198,23 @@ export async function startCheck(
   }
 }
 
+export type CheckConclusion =
+  | 'success'
+  | 'failure'
+  | 'neutral'
+  | 'action_required'
+  | 'timed_out';
+
+/** One inline annotation on a completed Check. GitHub caps them at 50 per request. */
+export interface CheckAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: 'notice' | 'warning' | 'failure';
+  title?: string;
+  message: string;
+}
+
 /**
  * Post a Check run's result (the conclusion is authoritative). When `checkRunId` is
  * given, UPDATES that in-progress run (from {@link startCheck}) to completed instead
@@ -178,8 +225,8 @@ export async function postCheck(
   { owner, repo }: RepoCoords,
   name: string,
   headSha: string,
-  conclusion: 'success' | 'failure' | 'neutral',
-  output: { title: string; summary: string },
+  conclusion: CheckConclusion,
+  output: { title: string; summary: string; annotations?: CheckAnnotation[] },
   checkRunId?: number | null,
 ): Promise<void> {
   if (checkRunId != null) {
@@ -311,11 +358,15 @@ export async function getPullRequest(
   headSha: string;
   /** Head repo full name; differs from the base on a fork PR. */
   headRepoFullName: string | null;
+  baseRef: string;
+  baseSha: string;
 }> {
   const res = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
   return {
     headRef: res.data.head.ref,
     headSha: res.data.head.sha,
     headRepoFullName: res.data.head.repo?.full_name ?? null,
+    baseRef: res.data.base?.ref ?? '',
+    baseSha: res.data.base?.sha ?? '',
   };
 }

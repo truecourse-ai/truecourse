@@ -50,12 +50,19 @@ export interface JobContext<P> {
   payload: P;
   org: string;
   jobId: string;
-  /** The tracker, for bridging OSS StepTrackers onto a step (specScanBridge). */
+  /** The tracker, for bridging OSS StepTrackers onto a step (stepBridge). */
   tracker: JobStepTracker;
   /** Advance the checklist to `key` (earlier steps auto-complete). */
   phase(key: string, detail?: string): Promise<void>;
   /** Update the active step's inline detail (e.g. a `3/12` counter). */
   detail(key: string, detail: string): Promise<void>;
+  /**
+   * Cancellation for the body's long-running work (graphile's per-job
+   * `helpers.abortSignal` — fires when the worker is shutting down and the
+   * graceful-shutdown grace expires). Bodies that spawn children or run
+   * pipelines thread it down so a stop doesn't leave work running headless.
+   */
+  signal?: AbortSignal;
 }
 
 /** Everything a job type declares — nothing else lives per task body. */
@@ -77,12 +84,19 @@ export interface JobDefinition<P extends { jobId: string }> {
   /**
    * Optional side-effect run AFTER the row reaches its terminal state (succeeded
    * OR failed) and the notification is posted — so the single-flight key is now
-   * free. The repo-baseline uses it to replay a coalesced follow-up push. It must
-   * be best-effort and not throw (a throw would mask the job's own outcome); a
-   * failure still rethrows after it runs.
+   * free. The repo-baseline uses it to replay a coalesced follow-up push (both
+   * outcomes) and to chain the guard onboarding (success only — hence the
+   * `outcome` argument). `result` is what the run body returned on success
+   * (undefined when it threw), so a settle hook can key off the run's own outcome
+   * detail (e.g. the guard baseline's `no-verdict` status). It must be best-effort
+   * and not throw (a throw would mask the job's own outcome); a failure still
+   * rethrows after it runs.
    */
-  onSettled?(ctx: JobContext<P>): Promise<void>;
+  onSettled?(ctx: JobContext<P>, outcome: JobOutcomeStatus, result?: unknown): Promise<void>;
 }
+
+/** How a job settled — handed to `onSettled` so success-only chains can key off it. */
+export type JobOutcomeStatus = 'succeeded' | 'failed';
 
 /** The stores the envelope needs — the same for every job. */
 export interface JobRuntime {
@@ -100,6 +114,7 @@ export async function executeJob<P extends { jobId: string }>(
   rt: JobRuntime,
   def: JobDefinition<P>,
   payload: P,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
   const { jobId } = payload;
   const org = def.org(payload);
@@ -134,11 +149,14 @@ export async function executeJob<P extends { jobId: string }>(
     tracker,
     phase: (key, detail) => tracker.advance(key, detail),
     detail: (key, detail) => tracker.detail(key, detail),
+    signal: opts.signal,
   };
 
   let failure: unknown = null;
+  let runResult: unknown = undefined;
   try {
     const outcome = await def.run(ctx);
+    runResult = outcome.result;
     // Terminal job state first (clears the client's activeJobs), then the toast.
     const done = await rt.jobStore.markSucceeded(jobId, outcome.result ?? {});
     if (done) await publishProgress(done);
@@ -154,9 +172,10 @@ export async function executeJob<P extends { jobId: string }>(
 
   // After terminal bookkeeping (row + notification) in BOTH paths, run the
   // optional settled hook — the single-flight key is now free, so e.g. the
-  // baseline replays a coalesced follow-up push. A failure still rethrows after
-  // (maxAttempts:1 ⇒ permanent fail, and graphile records it).
-  await def.onSettled?.(ctx);
+  // baseline replays a coalesced follow-up push. It sees the run's own result
+  // (undefined on failure). A failure still rethrows after (maxAttempts:1 ⇒
+  // permanent fail, and graphile records it).
+  await def.onSettled?.(ctx, failure ? 'failed' : 'succeeded', runResult);
   if (failure) throw failure;
 }
 

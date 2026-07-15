@@ -22,3 +22,8 @@ export function selectGateStore(db: EeDb | null): GateStore {
 export * from './types.js';
 export { FileGateStore } from './file-store.js';
 export { PostgresGateStore, type GateDb } from './pg-store.js';
+export {
+  selectOperatorRepoEnumeration,
+  type OperatorRepoEnumeration,
+  type OperatorRepoRef,
+} from './operator-repos.js';

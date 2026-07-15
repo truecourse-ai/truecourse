@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
-export function useGuardReport(repoId: string | undefined, enabled: boolean, reloadKey = 0) {
+export function useGuardReport(repoId: string | undefined, enabled: boolean, reloadKey = 0, ref?: string) {
   const [report, setReport] = useState<GuardGenerateReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +19,14 @@ export function useGuardReport(repoId: string | undefined, enabled: boolean, rel
     setLoading(true);
     setError(null);
     api
-      .getGuardReport(repoId)
+      .getGuardReport(repoId, ref)
       .then((r) => !cancelled && setReport(r))
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Failed to load guard report'))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey]);
+  }, [repoId, enabled, reloadKey, ref]);
 
   return { report, loading, error };
 }

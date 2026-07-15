@@ -8,6 +8,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import { integrationConnections, type EeDb } from '@truecourse/ee-db';
+import type { IntegrationPendingView } from '@truecourse/shared';
 import { encryptSecret, decryptSecret, maskKey } from '../llm/crypto.js';
 
 /** Masked, secret-free view for the UI. */
@@ -16,6 +17,8 @@ export interface IntegrationView {
   hasToken: boolean;
   tokenMask: string | null;
   updatedAt: string;
+  /** Unprocessed sweep result awaiting Process; null when up to date. */
+  pending: IntegrationPendingView | null;
 }
 
 /** Full connection incl. the DECRYPTED token — for the connector at call time. */
@@ -67,6 +70,7 @@ export class IntegrationStore {
       hasToken: row.tokenEnc != null,
       tokenMask,
       updatedAt: row.updatedAt,
+      pending: row.pending ?? null,
     };
   }
 
@@ -102,6 +106,24 @@ export class IntegrationStore {
           updatedAt: sql`excluded.updated_at`,
         },
       });
+  }
+
+  /** Persist the sweep's unprocessed result (or clear it with `null`) without
+   *  touching config or the token. */
+  async setPending(
+    orgId: string,
+    provider: string,
+    pending: IntegrationPendingView | null,
+  ): Promise<void> {
+    await this.db
+      .update(integrationConnections)
+      .set({ pending })
+      .where(
+        and(
+          eq(integrationConnections.workspaceOrgId, orgId),
+          eq(integrationConnections.provider, provider),
+        ),
+      );
   }
 
   async delete(orgId: string, provider: string): Promise<void> {

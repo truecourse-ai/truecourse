@@ -12,6 +12,7 @@ import type { RepoLinkRecord } from './store/types.js';
 export const NOTIFICATION_KEYS: (keyof GithubNotificationPrefs)[] = [
   'gateFailure',
   'conflicts',
+  'specRegen',
 ];
 
 /** A repo's notification prefs with defaults applied for any unset type. */

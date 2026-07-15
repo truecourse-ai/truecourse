@@ -1,8 +1,8 @@
 /**
- * Shared helpers for the App's interactive checkbox comments (spec scan, infer).
- * Each flow is identified by a hidden marker and driven by a single task-list
- * checkbox; this factory yields the marker/checkbox predicates so both flows
- * share one implementation.
+ * Shared helpers for the App's interactive checkbox comments (spec scan and the
+ * guard spec-change regen). Each flow is identified by a hidden marker and driven
+ * by a single task-list checkbox; this factory yields the marker/checkbox
+ * predicates so both flows share one implementation.
  */
 
 export function escapeRegExp(s: string): string {

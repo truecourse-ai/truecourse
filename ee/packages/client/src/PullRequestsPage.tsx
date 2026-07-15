@@ -159,10 +159,25 @@ export default function PullRequestsPage() {
               return (
                 <li key={`${r.repoFullName}#${r.id}`}>
                   {r.slug ? (
-                    // Internal: open this PR on the Code Quality Analytics tab.
-                    <Link to={`/repos/${r.slug}?section=codequality&tab=analytics&pr=${r.prNumber}`} className={rowClass}>
-                      {body}
-                    </Link>
+                    // Internal: the row opens this PR on the Code Quality
+                    // Analytics tab; the trailing "Guard" link opens its Guard
+                    // runs instead. Sibling anchors (not nested) — the hover
+                    // wash moves to the shared wrapper.
+                    <div className="flex items-center hover:bg-muted/50">
+                      <Link
+                        to={`/repos/${r.slug}?section=codequality&tab=analytics&pr=${r.prNumber}`}
+                        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-sm"
+                      >
+                        {body}
+                      </Link>
+                      <Link
+                        to={`/repos/${r.slug}?section=guard&tab=guarddrifts&pr=${r.prNumber}`}
+                        title="Open this PR's Guard runs"
+                        className="inline-flex shrink-0 items-center self-stretch border-l border-border px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Guard
+                      </Link>
+                    </div>
                   ) : (
                     // Unregistered repo (no dashboard page yet) → fall back to GitHub.
                     <a

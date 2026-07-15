@@ -92,6 +92,42 @@
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
     },
+    "./lib/guard-store": {
+      "types": "./dist/lib/guard-store.d.ts",
+      "import": "./dist/lib/guard-store.js"
+    },
+    "./lib/guard-executor": {
+      "types": "./dist/lib/guard-executor.d.ts",
+      "import": "./dist/lib/guard-executor.js"
+    },
+    "./lib/guard-gate-pending": {
+      "types": "./dist/lib/guard-gate-pending.d.ts",
+      "import": "./dist/lib/guard-gate-pending.js"
+    },
+    "./lib/guard-generate-enqueue": {
+      "types": "./dist/lib/guard-generate-enqueue.d.ts",
+      "import": "./dist/lib/guard-generate-enqueue.js"
+    },
+    "./lib/guard-pr-regen-enqueue": {
+      "types": "./dist/lib/guard-pr-regen-enqueue.d.ts",
+      "import": "./dist/lib/guard-pr-regen-enqueue.js"
+    },
+    "./lib/repo-lifecycle": {
+      "types": "./dist/lib/repo-lifecycle.d.ts",
+      "import": "./dist/lib/repo-lifecycle.js"
+    },
+    "./lib/spec-conflicts-resolved-hook": {
+      "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
+      "import": "./dist/lib/spec-conflicts-resolved-hook.js"
+    },
+    "./lib/spec-inheritance-hook": {
+      "types": "./dist/lib/spec-inheritance-hook.d.ts",
+      "import": "./dist/lib/spec-inheritance-hook.js"
+    },
+    "./lib/knowledge-ledger-reader": {
+      "types": "./dist/lib/knowledge-ledger-reader.d.ts",
+      "import": "./dist/lib/knowledge-ledger-reader.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"
@@ -175,6 +211,14 @@
     "./services/llm/provider": {
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
+    },
+    "./services/llm/spec-estimate": {
+      "types": "./dist/services/llm/spec-estimate.d.ts",
+      "import": "./dist/services/llm/spec-estimate.js"
+    },
+    "./services/llm/model-prices": {
+      "types": "./dist/services/llm/model-prices.d.ts",
+      "import": "./dist/services/llm/model-prices.js"
     },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",

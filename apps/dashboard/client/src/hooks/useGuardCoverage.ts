@@ -9,7 +9,13 @@ import { useCallback, useEffect, useState } from 'react';
 import type { GuardDocCoverage } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
-export function useGuardCoverage(repoId: string | undefined, doc: string | null, enabled = true, reloadKey = 0) {
+export function useGuardCoverage(
+  repoId: string | undefined,
+  doc: string | null,
+  enabled = true,
+  reloadKey = 0,
+  ref?: string,
+) {
   const [coverage, setCoverage] = useState<GuardDocCoverage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +28,7 @@ export function useGuardCoverage(repoId: string | undefined, doc: string | null,
     setIsLoading(true);
     setError(null);
     try {
-      setCoverage(await api.getGuardCoverage(repoId, doc));
+      setCoverage(await api.getGuardCoverage(repoId, doc, ref));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load guard coverage');
       setCoverage(null);
@@ -32,7 +38,7 @@ export function useGuardCoverage(repoId: string | undefined, doc: string | null,
     // reloadKey is a refetch signal (a guard-generate/run completion): re-run the
     // effect below even though the fetch inputs (repo/doc) are unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoId, doc, enabled, reloadKey]);
+  }, [repoId, doc, enabled, reloadKey, ref]);
 
   useEffect(() => {
     refetch();

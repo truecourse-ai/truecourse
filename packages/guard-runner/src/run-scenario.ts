@@ -7,7 +7,7 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
+import type { GuardScenario, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -19,12 +19,38 @@ import { writeEvidence, type EvidenceStep } from './evidence.js'
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
 
+/**
+ * Per-stream cap on the RAW output excerpts attached to a mismatch `failure`.
+ * Mirrors the probe-transcript convention (`PROBE_OUTPUT_LIMIT` in the guard
+ * generator's `ground.ts`) so the retry/finding evidence stays a manageable size.
+ */
+export const FAILURE_OUTPUT_LIMIT = 1200
+
+/**
+ * The RAW (un-normalized) stdout/stderr excerpts to ride next to a mismatch — each
+ * head-truncated to {@link FAILURE_OUTPUT_LIMIT}, each stream omitted when it was
+ * empty (no empty-string noise). Spread onto the `failure` at the mismatch site so
+ * the birth-retry and the finding see the usage error the program actually printed.
+ */
+function outputExcerpts(capture: StepCapture): OutputExcerpts {
+  const out: OutputExcerpts = {}
+  if (capture.stdout) out.stdout = capture.stdout.slice(0, FAILURE_OUTPUT_LIMIT)
+  if (capture.stderr) out.stderr = capture.stderr.slice(0, FAILURE_OUTPUT_LIMIT)
+  return out
+}
+
 export interface RunScenarioContext {
   repoRoot: string
   runId: string
   resolvedEntry: string[]
   recipeEnv?: Record<string, string>
   stepTimeoutMs: number
+  /**
+   * Run-level cancellation (external abort or the overall run wall-clock). An
+   * in-flight step child is SIGKILLed and the scenario settles as an `error`
+   * WITHOUT writing evidence — the run discards these results anyway.
+   */
+  signal?: AbortSignal
   /**
    * Write the evidence transcript for a `pass` too (proof of what executed). A
    * fail/error always writes its bundle; this only gates the pass. Off for the
@@ -116,14 +142,18 @@ export async function runScenario(
 
       let lastCapture: StepCapture | null = null
       for (let iteration = 1; iteration <= repeat; iteration++) {
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
         const capture = await executeStep({
           argv,
           cwd: sandbox.cwd,
           env: sandbox.env,
           stdin: step.stdin,
           timeoutMs: ctx.stepTimeoutMs,
+          signal: ctx.signal,
         })
         lastCapture = capture
+        // A capture ended by cancellation is not a verdict — settle without evidence.
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
 
         // Infrastructure problem — never a scenario fail.
         if (capture.spawnError || capture.timedOut) {
@@ -187,6 +217,9 @@ export async function runScenario(
               step: stepIndex,
               expected: mismatch.expected,
               actual: mismatch.actual,
+              // The RAW child output that produced this mismatch (NOT the normalized
+              // text matched against) — head-truncated, empty streams omitted.
+              ...outputExcerpts(capture),
             },
             evidencePath,
           }
@@ -217,6 +250,20 @@ export async function runScenario(
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
     sandbox.cleanup()
+  }
+}
+
+/** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
+function abortedResult(
+  base: Pick<GuardScenarioResult, 'id' | 'title' | 'binds'>,
+  step: number,
+  start: number,
+): GuardScenarioResult {
+  return {
+    ...base,
+    outcome: 'error',
+    durationMs: Date.now() - start,
+    failure: { step, expected: 'the step to run', actual: 'run aborted' },
   }
 }
 

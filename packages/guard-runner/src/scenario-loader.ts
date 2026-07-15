@@ -34,6 +34,38 @@ function collectScenarioFiles(dir: string): string[] {
   return out.sort()
 }
 
+/**
+ * Posix-relative paths of every committable scenario-tree file under `root`
+ * (an on-disk `.truecourse/scenarios/` dir), sorted: every `*.yaml` / `*.yml`
+ * at any depth plus the top-level `recipe.json` / `manifest.json`. The
+ * user-authored `decisions.json` is NOT a scenario body — it routes to the
+ * decisions store — so it is excluded. This is the corpus-membership rule the
+ * file and Pg guard stores share.
+ */
+export function walkScenarioRelFiles(root: string): string[] {
+  const out: string[] = []
+  const walk = (rel: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) walk(childRel)
+      else if (e.isFile()) {
+        if (/\.ya?ml$/i.test(e.name)) out.push(childRel)
+        else if (rel === '' && (e.name === 'recipe.json' || e.name === 'manifest.json')) {
+          out.push(childRel)
+        }
+      }
+    }
+  }
+  walk('')
+  return out.sort()
+}
+
 export function loadScenarios(repoRoot: string): LoadedScenarios {
   const root = scenariosDir(repoRoot)
   const scenarios: GuardScenario[] = []

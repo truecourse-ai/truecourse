@@ -24,6 +24,7 @@ const NOTIFICATIONS: {
 }[] = [
   { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new findings.' },
   { key: 'conflicts', label: 'Spec conflicts', desc: 'Spec conflicts need resolving.' },
+  { key: 'specRegen', label: 'Spec changes', desc: 'A pull request changes spec documents and offers to regenerate guard scenarios.' },
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -166,15 +167,15 @@ export function RepoSettings({ repoFullName }: { repoFullName?: string }) {
         </div>
       )}
 
-      {/* Verification gate — one of two independent gate signals (drift). */}
+      {/* Spec Guard gate — one of two independent gate signals. */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Verification gate</h2>
+        <h2 className="text-sm font-semibold text-foreground">Spec Guard gate</h2>
         <div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
           <div>
-            <div className="text-sm font-medium text-foreground">Block merges on new drift</div>
+            <div className="text-sm font-medium text-foreground">Block merges on failing scenarios</div>
             <div className="text-xs text-muted-foreground">
               {repo.blocking
-                ? 'New drift fails a required Check.'
+                ? 'New scenario failures fail a required Check.'
                 : 'Advisory only — the Check reports but never blocks.'}
             </div>
           </div>

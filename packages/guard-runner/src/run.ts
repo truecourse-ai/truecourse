@@ -17,10 +17,10 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
-import { loadRecipe, resolveEntry, RecipeError } from './recipe.js'
+import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, type Recipe, type LoadedRecipe } from './recipe.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
-import { runBuild, type BuildResult } from './build.js'
-import { preflightEntry, type EntryPreflightResult } from './preflight.js'
+import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
+import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
@@ -39,9 +39,24 @@ export interface RunGuardOptions {
    * anything to the corpus. Omitted → the committed scenarios are loaded.
    */
   scenarios?: GuardScenario[]
+  /**
+   * Run against this recipe instead of loading `scenarios/recipe.json` from disk.
+   * The executor seam supplies it (a hosted store per-commit; birth validation the
+   * already-loaded recipe), skipping the `no-recipe`/`invalid-recipe` branches.
+   * Omitted → the committed recipe is loaded, exactly as before.
+   */
+  recipe?: Recipe
   branch?: string | null
   commit?: string | null
   stepTimeoutMs?: number
+  /** Overall run wall-clock; exceeding it aborts in-flight scenarios → `run-timed-out`. */
+  runTimeoutMs?: number
+  /** Build wall-clock, replacing the runner's default (10min) only when set. */
+  buildTimeoutMs?: number
+  /** Install wall-clock, replacing the runner's default (10min) only when set. */
+  installTimeoutMs?: number
+  /** External cancellation; SIGKILLs the build/scenario children → `aborted`. */
+  signal?: AbortSignal
   /** Parallel sandbox limit; default `TRUECOURSE_MAX_CONCURRENCY`, else min(cpus, 8). */
   concurrency?: number
   /** Suppress the build (tests that pre-build). Off by default. */
@@ -75,6 +90,22 @@ export type RunGuardResult =
       loadErrors: ScenarioLoadError[]
     }
   | {
+      /**
+       * The overall `runTimeoutMs` wall-clock elapsed before every scenario
+       * settled; in-flight children were SIGKILLed and nothing was persisted.
+       */
+      status: 'run-timed-out'
+      elapsedMs: number
+      /** Scenarios that settled before the deadline, of `total` selected. */
+      settled: number
+      total: number
+    }
+  | {
+      /** The external `signal` fired; children were killed, nothing persisted. */
+      status: 'aborted'
+      phase: 'build' | 'run'
+    }
+  | {
       status: 'ok'
       latest: GuardLatest
       latestPath: string
@@ -83,28 +114,112 @@ export type RunGuardResult =
       manifest: GuardManifest | null
     }
 
-export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
-  const { repoRoot } = opts
+/**
+ * The canonical human-readable reason for a non-ok run result (`null` for 'ok').
+ * Every adapter — the CLI command, the dashboard run route, birth validation —
+ * renders THIS wording and adds only its own framing (exit codes, prefixes,
+ * output tails), so the per-status phrasing can never drift between surfaces.
+ */
+export function runFailureMessage(result: Exclude<RunGuardResult, { status: 'ok' }>): string
+export function runFailureMessage(result: RunGuardResult): string | null
+export function runFailureMessage(result: RunGuardResult): string | null {
+  switch (result.status) {
+    case 'ok':
+      return null
+    case 'no-recipe':
+      return 'No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint.'
+    case 'invalid-recipe':
+      return `recipe.json is invalid: ${result.message}`
+    case 'no-scenarios':
+      return result.requestedId
+        ? `No scenario with id "${result.requestedId}".`
+        : 'No scenarios found under .truecourse/scenarios/.'
+    case 'build-failed':
+      return `Build failed (\`${result.build.command}\`)${result.build.timedOut ? ' — timed out' : ''}. No scenarios ran.`
+    case 'entry-preflight-failed':
+      return formatEntryPreflightError({
+        entry: result.preflight.entry,
+        buildCommand: result.buildCommand,
+        stderr: result.preflight.stderr,
+      })
+    case 'run-timed-out':
+      return `Guard run timed out after ${Math.round(result.elapsedMs / 1000)}s — ${result.settled}/${result.total} scenarios settled; in-flight scenarios were aborted.`
+    case 'aborted':
+      return `Guard run was aborted during the ${result.phase} phase.`
+  }
+}
 
-  let loaded
+/** Recipe + scenario sourcing outcome: an early result, or the inputs to execute. */
+export type GuardRunInputs =
+  | { early: RunGuardResult }
+  | { loaded: LoadedRecipe; selected: GuardScenario[]; loadErrors: ScenarioLoadError[] }
+
+/** Load the committed recipe, mapping load failures to their early results. */
+function sourceRecipe(repoRoot: string): { early: RunGuardResult } | { loaded: LoadedRecipe } {
+  let loaded: LoadedRecipe | null
   try {
     loaded = loadRecipe(repoRoot, recipePath(repoRoot))
   } catch (e) {
-    if (e instanceof RecipeError) return { status: 'invalid-recipe', message: e.message }
+    if (e instanceof RecipeError) return { early: { status: 'invalid-recipe', message: e.message } }
     throw e
   }
-  if (!loaded) return { status: 'no-recipe' }
+  if (!loaded) return { early: { status: 'no-recipe' } }
+  return { loaded }
+}
+
+/** Apply the optional id restriction, mapping an empty selection to no-scenarios. */
+function selectScenarios(
+  scenarios: GuardScenario[],
+  loadErrors: ScenarioLoadError[],
+  scenarioId?: string,
+): { early: RunGuardResult } | { selected: GuardScenario[] } {
+  const selected = scenarioId ? scenarios.filter((s) => s.id === scenarioId) : scenarios
+  if (selected.length === 0) {
+    return { early: { status: 'no-scenarios', loadErrors, requestedId: scenarioId } }
+  }
+  return { selected }
+}
+
+/**
+ * Source the committed recipe + scenarios exactly as `runGuard` itself would.
+ * External drivers that decide "is there anything to run" locally (the core run
+ * command keeps that decision on its side of the executor seam) call this instead
+ * of re-implementing the load shape, so their early-result semantics can never
+ * drift from the engine's.
+ */
+export function sourceGuardRunInputs(repoRoot: string, scenarioId?: string): GuardRunInputs {
+  const recipe = sourceRecipe(repoRoot)
+  if ('early' in recipe) return recipe
+  const { scenarios, errors: loadErrors } = loadScenarios(repoRoot)
+  const sel = selectScenarios(scenarios, loadErrors, scenarioId)
+  if ('early' in sel) return sel
+  return { loaded: recipe.loaded, selected: sel.selected, loadErrors }
+}
+
+export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
+  const { repoRoot } = opts
+
+  // A caller cancelled before anything started never reached the run phase.
+  if (opts.signal?.aborted) return { status: 'aborted', phase: 'build' }
+
+  let loaded: LoadedRecipe
+  if (opts.recipe) {
+    // Injected recipe: the fingerprint is still the on-disk discovery-input hash
+    // (identical to what loadRecipe would compute) so the persisted run envelope is
+    // unchanged; only the disk read of recipe.json is skipped.
+    loaded = { recipe: opts.recipe, fingerprint: computeRecipeFingerprint(repoRoot) }
+  } else {
+    const disk = sourceRecipe(repoRoot)
+    if ('early' in disk) return disk.early
+    loaded = disk.loaded
+  }
 
   const { scenarios, errors: loadErrors } = opts.scenarios
     ? { scenarios: opts.scenarios, errors: [] as ScenarioLoadError[] }
     : loadScenarios(repoRoot)
-  const selected = opts.scenarioId
-    ? scenarios.filter((s) => s.id === opts.scenarioId)
-    : scenarios
-
-  if (selected.length === 0) {
-    return { status: 'no-scenarios', loadErrors, requestedId: opts.scenarioId }
-  }
+  const sel = selectScenarios(scenarios, loadErrors, opts.scenarioId)
+  if ('early' in sel) return sel.early
+  const selected = sel.selected
 
   // Check each binding against the live section index before running anything.
   // A section that was edited (stale) or removed (orphaned) is not executed;
@@ -128,97 +243,164 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // We own the build (and thus the entry pre-flight) only on a real run; birth
   // validation reuses the generator's single build + pre-flight and passes skipBuild.
   const buildsOwnEntry = !opts.skipBuild && executable.length > 0
-  if (buildsOwnEntry) {
-    opts.onPhase?.('build')
-    const build = await runBuild(repoRoot, loaded.recipe.build, loaded.recipe.env)
-    if (!build.ok) return { status: 'build-failed', build, loadErrors }
-  }
 
-  const resolvedEntry = resolveEntry(repoRoot, loaded.recipe.entry)
-
-  // Pre-flight the built entry ONCE before any scenario touches it: if it can't even
-  // start, that is ONE loud entry-level error, not N indistinguishable scenario
-  // failures. Runs under the build phase (before the run counter is announced).
-  if (buildsOwnEntry) {
-    const preflight = await preflightEntry({
-      resolvedEntry,
-      displayEntry: loaded.recipe.entry,
-      recipeEnv: loaded.recipe.env,
-      repoRoot,
-    })
-    if (!preflight.ok) {
-      return { status: 'entry-preflight-failed', preflight, buildCommand: loaded.recipe.build, loadErrors }
-    }
-  }
-
-  opts.onPhase?.('run', selected.length)
-
-  const runId = buildRunId()
-  const ranAt = new Date().toISOString()
-  const stepTimeoutMs = opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
-  const concurrency = opts.concurrency ?? defaultRunConcurrency()
-
-  const results: GuardScenarioResult[] = []
+  // Run-level cancellation: children listen on ONE internal controller, tripped by
+  // either the external `signal` or the overall `runTimeoutMs` wall-clock —
+  // whichever fires, in-flight children are SIGKILLed and nothing is persisted.
+  const startedAt = Date.now()
+  const cancel = new AbortController()
+  let runTimedOut = false
   let settled = 0
+  const onExternalAbort = (): void => cancel.abort()
+  opts.signal?.addEventListener('abort', onExternalAbort, { once: true })
+  const runTimer =
+    opts.runTimeoutMs !== undefined
+      ? setTimeout(() => {
+          runTimedOut = true
+          cancel.abort()
+        }, opts.runTimeoutMs)
+      : null
 
-  // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
-  for (const { scenario, resolution } of nonExecutable) {
-    const result = nonExecutableResult(scenario, resolution)
-    results.push(result)
-    settled += 1
-    opts.onScenarioSettled?.(settled, selected.length, result)
+  /** The cancellation result to return from `phase`, or null when still live. */
+  const cancelled = (phase: 'build' | 'run'): RunGuardResult | null => {
+    if (runTimedOut) {
+      return { status: 'run-timed-out', elapsedMs: Date.now() - startedAt, settled, total: selected.length }
+    }
+    if (opts.signal?.aborted) return { status: 'aborted', phase }
+    return null
   }
 
-  // Pass evidence is part of the persisted run baseline; a non-persisted (birth
-  // validation) run captures none for its passing candidates — the next real run does.
-  const capturePassEvidence = opts.persist !== false
-  const executed = await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
-    const outcome = await runScenario(scenario, {
-      repoRoot,
-      runId,
-      resolvedEntry,
-      recipeEnv: loaded.recipe.env,
-      stepTimeoutMs,
-      capturePassEvidence,
-    })
-    const result: GuardScenarioResult =
-      resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
-    settled += 1
-    opts.onScenarioSettled?.(settled, selected.length, result)
-    return result
-  })
-  results.push(...executed)
-  results.sort((a, b) => a.id.localeCompare(b.id))
+  try {
+    if (buildsOwnEntry) {
+      opts.onPhase?.('build')
+      // The optional recipe install runs BEFORE the build, in the repo root, with
+      // the same hermetic env. A failed install is reported exactly like a failed
+      // build — its BuildResult carries the install command.
+      if (loaded.recipe.install) {
+        const install = await runInstall(
+          repoRoot,
+          loaded.recipe.install,
+          loaded.recipe.env,
+          opts.installTimeoutMs ?? DEFAULT_INSTALL_TIMEOUT_MS,
+          cancel.signal,
+        )
+        // A cancellation-killed install must never masquerade as a build failure.
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (!install.ok) return { status: 'build-failed', build: install, loadErrors }
+      }
+      const build = await runBuild(
+        repoRoot,
+        loaded.recipe.build,
+        loaded.recipe.env,
+        opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+        cancel.signal,
+      )
+      // A cancellation-killed build must never masquerade as a build failure.
+      const stop = cancelled('build')
+      if (stop) return stop
+      if (!build.ok) return { status: 'build-failed', build, loadErrors }
+    }
 
-  const latest: GuardLatest = {
-    run: {
-      runId,
-      ranAt,
-      branch: opts.branch ?? null,
-      commit: opts.commit ?? null,
-      recipeFingerprint: loaded.fingerprint,
-      scenarioFormat: GUARD_FORMAT_VERSION,
-    },
-    summary: summarize(results),
-    scenarios: results,
-    sections: rollupSections(results),
-  }
+    const resolvedEntry = resolveEntry(repoRoot, loaded.recipe.entry)
 
-  // Birth validation runs with `persist: false` and must write NOTHING to the
-  // store — no LATEST, no run snapshot, no history — so it never moves the baseline.
-  let latestPath = ''
-  if (opts.persist !== false) {
-    latestPath = writeGuardLatest(repoRoot, latest)
-    writeGuardRun(repoRoot, latest)
-    appendGuardHistory(repoRoot, {
-      runId: latest.run.runId,
-      ranAt: latest.run.ranAt,
-      branch: latest.run.branch,
-      commit: latest.run.commit,
-      summary: latest.summary,
-    })
+    // Pre-flight the built entry ONCE before any scenario touches it: if it can't even
+    // start, that is ONE loud entry-level error, not N indistinguishable scenario
+    // failures. Runs under the build phase (before the run counter is announced).
+    if (buildsOwnEntry) {
+      const preflight = await preflightEntry({
+        resolvedEntry,
+        displayEntry: loaded.recipe.entry,
+        recipeEnv: loaded.recipe.env,
+        repoRoot,
+      })
+      const stop = cancelled('build')
+      if (stop) return stop
+      if (!preflight.ok) {
+        return { status: 'entry-preflight-failed', preflight, buildCommand: loaded.recipe.build, loadErrors }
+      }
+    }
+
+    opts.onPhase?.('run', selected.length)
+
+    const runId = buildRunId()
+    const ranAt = new Date().toISOString()
+    const stepTimeoutMs = opts.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
+    const concurrency = opts.concurrency ?? defaultRunConcurrency()
+
+    const results: GuardScenarioResult[] = []
+
+    // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
+    for (const { scenario, resolution } of nonExecutable) {
+      const result = nonExecutableResult(scenario, resolution)
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
+    // Pass evidence is part of the persisted run baseline; a non-persisted (birth
+    // validation) run captures none for its passing candidates — the next real run does.
+    const capturePassEvidence = opts.persist !== false
+    const executed = (
+      await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
+        // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
+        // either — a run ending `aborted`/`run-timed-out` discards these results.
+        if (cancel.signal.aborted) return null
+        const outcome = await runScenario(scenario, {
+          repoRoot,
+          runId,
+          resolvedEntry,
+          recipeEnv: loaded.recipe.env,
+          stepTimeoutMs,
+          capturePassEvidence,
+          signal: cancel.signal,
+        })
+        if (cancel.signal.aborted) return null
+        const result: GuardScenarioResult =
+          resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
+        settled += 1
+        opts.onScenarioSettled?.(settled, selected.length, result)
+        return result
+      })
+    ).filter((r): r is GuardScenarioResult => r !== null)
+    const stop = cancelled('run')
+    if (stop) return stop
+    results.push(...executed)
+    results.sort((a, b) => a.id.localeCompare(b.id))
+
+    const latest: GuardLatest = {
+      run: {
+        runId,
+        ranAt,
+        branch: opts.branch ?? null,
+        commit: opts.commit ?? null,
+        recipeFingerprint: loaded.fingerprint,
+        scenarioFormat: GUARD_FORMAT_VERSION,
+      },
+      summary: summarize(results),
+      scenarios: results,
+      sections: rollupSections(results),
+    }
+
+    // Birth validation runs with `persist: false` and must write NOTHING to the
+    // store — no LATEST, no run snapshot, no history — so it never moves the baseline.
+    let latestPath = ''
+    if (opts.persist !== false) {
+      latestPath = writeGuardLatest(repoRoot, latest)
+      writeGuardRun(repoRoot, latest)
+      appendGuardHistory(repoRoot, {
+        runId: latest.run.runId,
+        ranAt: latest.run.ranAt,
+        branch: latest.run.branch,
+        commit: latest.run.commit,
+        summary: latest.summary,
+      })
+    }
+    return { status: 'ok', latest, latestPath, loadErrors, manifest: readManifest(repoRoot) }
+  } finally {
+    if (runTimer) clearTimeout(runTimer)
+    opts.signal?.removeEventListener('abort', onExternalAbort)
   }
-  return { status: 'ok', latest, latestPath, loadErrors, manifest: readManifest(repoRoot) }
 }
 
 /** Build the result for a scenario the binding check excluded from execution. */

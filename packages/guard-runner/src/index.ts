@@ -4,10 +4,13 @@
  * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, defaultRunConcurrency } from './run.js'
-export type { RunGuardOptions, RunGuardResult } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, runFailureMessage } from './run.js'
+export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
-export { loadScenarios } from './scenario-loader.js'
+export { defaultGuardExecutor } from './guard-executor.js'
+export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
+
+export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
 export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from './recipe.js'
@@ -25,6 +28,9 @@ export type { RunScenarioContext } from './run-scenario.js'
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
 
+export { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js'
+export type { ChildEnvOptions } from './child-env.js'
+
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
 export type { CapabilityContext } from './capabilities/index.js'
 export { materializeGit } from './capabilities/git.js'
@@ -38,7 +44,7 @@ export type { NormalizerContext } from './normalizers.js'
 export { evaluateExpect } from './expect.js'
 export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 
-export { runBuild, DEFAULT_BUILD_TIMEOUT_MS } from './build.js'
+export { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
 export type { BuildResult } from './build.js'
 
 export {
@@ -78,6 +84,7 @@ export {
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
+  sanitizeSegment,
   writeGuardLatest,
   readGuardLatest,
   writeGuardRun,

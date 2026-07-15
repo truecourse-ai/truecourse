@@ -5,6 +5,7 @@ import {
   generateGuards,
   birthValidate,
   spawnGenerateRunner,
+  retryCacheKey,
   type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
@@ -14,6 +15,7 @@ import {
   type AuthorUserContext,
   type AuthorClaim,
 } from '@truecourse/guard-generator'
+import type { GuardBirthFinding } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
@@ -21,6 +23,9 @@ import {
   writeManifest,
   scenariosDir,
   dismissGuardClaim,
+  defaultGuardExecutor,
+  loadRecipe,
+  recipePath,
 } from '@truecourse/guard-runner'
 import {
   GuardManifestSchema,
@@ -455,6 +460,88 @@ describe('generateGuards — birth validation', () => {
     // Nothing written to disk, and NOT recorded as settled → re-attempted next run.
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+  })
+})
+
+describe('generateGuards — failure output excerpts (Fix 1)', () => {
+  it('a birth finding carries the failing run raw stderr; the empty stdout is omitted', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // FAILING_STEPS runs `boom` → exit 7, stderr "fatal: intentional failure".
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
+    })
+    const finding = res.birthFindings[0]
+    expect(finding.stderr).toContain('fatal: intentional failure')
+    expect(finding.stdout).toBeUndefined()
+  })
+
+  it('threads the failing run output into the retry evidence the model sees', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let retryStderr: string | undefined
+    let retryStdout: unknown = 'SENTINEL'
+    const runner: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => {
+        if (c.retry) {
+          retryStderr = c.retry.stderr
+          retryStdout = c.retry.stdout
+          return { ref: c.ref, scenarios: [raw('fixed', PASSING_STEPS)] }
+        }
+        return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
+      })
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(res.written.map((w) => w.title)).toEqual(['fixed'])
+    expect(retryStderr).toContain('fatal: intentional failure')
+    // boom writes nothing to stdout → the retry evidence omits it.
+    expect(retryStdout).toBeUndefined()
+  })
+})
+
+describe('retryCacheKey — excerpt sensitivity (Fix 1)', () => {
+  const claim: ExtractedClaim = {
+    claim: 'add records an expense',
+    driver: 'cli',
+    sectionAnchor: 'add',
+    reason: 'exit code is observable',
+  }
+  const section: SectionInput = {
+    doc: 'docs/cli.md',
+    anchor: 'add',
+    fingerprint: 'sha256:s',
+    headingText: 'add',
+    level: 2,
+    ownText: '',
+    fullText: '',
+    areaTags: [],
+  }
+  const base: GuardBirthFinding = { doc: 'docs/cli.md', anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
+
+  it('moves when the evidence excerpts differ', () => {
+    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage B' })
+    expect(a).not.toBe(b)
+  })
+
+  it('is stable for identical evidence', () => {
+    const a = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    const b = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage A' })
+    expect(a).toBe(b)
+  })
+
+  it('a pre-change entry (no excerpts) never collides with one carrying excerpts', () => {
+    const without = retryCacheKey(claim, section, 'fp', base)
+    const withExcerpt = retryCacheKey(claim, section, 'fp', { ...base, stderr: 'usage' })
+    expect(without).not.toBe(withExcerpt)
   })
 })
 
@@ -960,6 +1047,51 @@ describe('generateGuards — universe + recipe discovery', () => {
     expect(fs.existsSync(path.join(scenariosDir(r), 'recipe.json'))).toBe(true)
     expect(res.written).toHaveLength(1)
   })
+
+  it('verifies a proposal with an install step (install runs before the build) and writes it', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      recipeRunner: async () => ({
+        install: 'touch install-marker',
+        // The verification build only succeeds when the install already ran.
+        build: 'test -f install-marker',
+        entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
+      }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.recipe?.status).toBe('discovered')
+    const written = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'recipe.json'), 'utf-8'))
+    expect(written.install).toBe('touch install-marker')
+    expect(written.build).toBe('test -f install-marker')
+  })
+
+  it('a failing proposal install is verify-failed against the install command; no recipe is written', async () => {
+    const r = repo()
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      recipeRunner: async () => ({
+        install: 'false',
+        build: 'true',
+        entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
+      }),
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('recipe-failed')
+    if (res.status === 'recipe-failed') expect(res.reason).toMatch(/^install `false` failed/)
+    expect(fs.existsSync(path.join(scenariosDir(r), 'recipe.json'))).toBe(false)
+  })
 })
 
 // A birth candidate whose scenario binds to the live `version` section and runs
@@ -996,6 +1128,8 @@ describe('birthValidate — progress forwarding', () => {
     const phases: string[] = []
     const settled: number[] = []
     const outcomes = await birthValidate(r, candidates, {
+      executor: defaultGuardExecutor,
+      recipe: loadRecipe(r, recipePath(r))!.recipe,
       skipBuild: false,
       onPhase: (phase) => phases.push(phase),
       onScenarioSettled: (done, total) => {
@@ -1216,6 +1350,43 @@ describe('generateGuards — grounded authoring', () => {
     expect(res.errors.length).toBeGreaterThan(0)
   })
 
+  it('runs the recipe install before the birth build (the build sees the install marker)', async () => {
+    const r = repo()
+    // The birth build only succeeds when the install already ran → order proven.
+    writeRecipe(r, { install: 'touch marker', build: 'test -f marker' })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+    expect(res.errors).toEqual([])
+  })
+
+  it('authors ungrounded and errors on birth when the recipe install fails (exactly like a failing build)', async () => {
+    const r = repo()
+    writeRecipe(r, { install: 'false', build: 'true' }) // install fails → no probing, birth errors
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let received: ProbeTranscript[] | undefined
+    const gen: GenerateRunner = async (ctx) => {
+      received = ctx.probes
+      return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
+    }
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+
+    expect(received).toEqual([])
+    expect(res.written).toEqual([])
+    expect(res.errors.length).toBeGreaterThan(0)
+  })
+
   it('fires onGroundProgress as probes are planned then captured', async () => {
     const r = repo()
     writeRecipe(r) // build 'true' → probing runs
@@ -1234,10 +1405,14 @@ describe('generateGuards — grounded authoring', () => {
     })
 
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-    // One probe (`--version`): planned announced (0/1) before capture, captured after (1/1).
+    // Phase 1 is the `--help` surface alone (0/1, 1/1); the exact `--version`
+    // fragment runs in phase 2 (1/2, 2/2). No expansion probes (the fixture's
+    // help surface names no subcommand the claim also mentions).
     expect(ground).toEqual([
       [0, 1],
       [1, 1],
+      [1, 2],
+      [2, 2],
     ])
   })
 

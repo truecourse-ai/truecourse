@@ -100,6 +100,7 @@ export function GuardCoveragePage({
     doc,
     hasGenerated,
     reloadKey,
+    prRef,
   );
 
   // The open conflict (if any) as its overlap parts — the spec curation surface

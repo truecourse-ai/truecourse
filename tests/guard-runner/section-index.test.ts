@@ -81,6 +81,50 @@ describe('buildDocSectionIndex — heading tree', () => {
   })
 })
 
+describe('buildDocSectionIndex — line ranges', () => {
+  it('spans each section from its heading line to the last line before the next same-or-higher heading', () => {
+    const doc = md([
+      '# Alpha', // line 1
+      'a body', // line 2
+      '', // line 3
+      '## Beta', // line 4
+      'b body', // line 5
+      '# Gamma', // line 6
+      'g body', // line 7
+    ])
+    const idx = buildDocSectionIndex('docs/spec.md', doc)
+    const lines = (anchor: string) => {
+      const s = idx.byAnchor.get(anchor)!
+      return [s.startLine, s.endLine]
+    }
+    // Alpha spans through Beta (its child) up to the line before Gamma.
+    expect(lines('alpha')).toEqual([1, 5])
+    expect(lines('alpha/beta')).toEqual([4, 5])
+    // The last section runs to the end of the file.
+    expect(lines('gamma')).toEqual([6, 7])
+  })
+
+  it('a trailing newline does not add a phantom line to the last section', () => {
+    const idx = buildDocSectionIndex('docs/spec.md', '# Only\nbody\n')
+    expect(idx.sections[0].startLine).toBe(1)
+    expect(idx.sections[0].endLine).toBe(2)
+  })
+
+  it('a heading immediately followed by a sibling spans exactly its own line', () => {
+    const idx = buildDocSectionIndex('docs/spec.md', md(['# A', '# B', 'b body']))
+    expect(idx.byAnchor.get('a')).toMatchObject({ startLine: 1, endLine: 1 })
+    expect(idx.byAnchor.get('b')).toMatchObject({ startLine: 2, endLine: 3 })
+  })
+
+  it('the whole-doc (non-markdown) fallback spans 1..lineCount', () => {
+    const idx = buildDocSectionIndex('notes/setup.txt', 'one\ntwo\nthree')
+    expect(idx.sections[0]).toMatchObject({ startLine: 1, endLine: 3 })
+    // Trailing newline excluded here too.
+    const withNl = buildDocSectionIndex('notes/setup.txt', 'one\ntwo\n')
+    expect(withNl.sections[0]).toMatchObject({ startLine: 1, endLine: 2 })
+  })
+})
+
 describe('buildDocSectionIndex — duplicate headings', () => {
   it('disambiguates repeated anchors with an ordinal suffix, in document order', () => {
     const idx = buildDocSectionIndex('docs/spec.md', md(['# Root', '## Dup', 'x', '## Dup', 'y', '## Dup', 'z']))

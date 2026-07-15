@@ -187,6 +187,36 @@ describe('runGuard — end to end', () => {
     expect(fs.readFileSync(path.join(r, 'build-count.txt'), 'utf-8')).toBe('x')
   })
 
+  it('runs the recipe install before the build (the build sees install output)', async () => {
+    const r = repo()
+    // The build only succeeds if the install's marker already exists → order proven.
+    writeRecipe(r, { install: 'touch install-marker', build: 'test -f install-marker' })
+    writeScenario(r, 's.yaml', scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+    const res = await runGuard({ repoRoot: r })
+    expect(res.status).toBe('ok')
+    expect(fs.existsSync(path.join(r, 'install-marker'))).toBe(true)
+  })
+
+  it('a failing install aborts the run as build-failed, reported against the install command', async () => {
+    const r = repo()
+    writeRecipe(r, { install: 'false', build: 'touch built-anyway' })
+    writeScenario(r, 's.yaml', scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+    const res = await runGuard({ repoRoot: r })
+    expect(res.status).toBe('build-failed')
+    if (res.status === 'build-failed') expect(res.build.command).toBe('false')
+    // The build never ran after the failed install.
+    expect(fs.existsSync(path.join(r, 'built-anyway'))).toBe(false)
+  })
+
+  it('a recipe without install runs the build directly (unchanged behavior)', async () => {
+    const r = repo()
+    writeRecipe(r, { build: 'touch build-only-marker' })
+    writeScenario(r, 's.yaml', scenario({ id: 's', steps: [{ run: ['--version'], expect: { exit: 0 } }] }))
+    const res = await runGuard({ repoRoot: r })
+    expect(res.status).toBe('ok')
+    expect(fs.existsSync(path.join(r, 'build-only-marker'))).toBe(true)
+  })
+
   it('aborts the run when the build fails', async () => {
     const r = repo()
     writeRecipe(r, { build: 'exit 1' })

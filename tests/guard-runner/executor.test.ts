@@ -62,3 +62,35 @@ describe('executeStep', () => {
     expect(cap.exitCode).toBeNull()
   })
 })
+
+describe('executeStep — abort signal', () => {
+  it('a pre-aborted signal short-circuits without spawning the command', async () => {
+    const marker = path.join(cwd, 'ran.txt')
+    const ac = new AbortController()
+    ac.abort()
+    const cap = await executeStep({
+      argv: ['node', '-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`],
+      cwd,
+      env: baseEnv,
+      signal: ac.signal,
+    })
+    expect(cap.exitCode).toBeNull()
+    expect(cap.timedOut).toBe(false)
+    expect(fs.existsSync(marker)).toBe(false)
+  })
+
+  it('a pre-aborted signal never attempts the spawn at all (no spawnError even for a missing binary)', async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const cap = await executeStep({
+      argv: ['this-binary-does-not-exist-xyz', 'arg'],
+      cwd,
+      env: baseEnv,
+      signal: ac.signal,
+    })
+    // Had the child been spawned, the ENOENT 'error' event would set spawnError.
+    expect(cap.spawnError).toBeUndefined()
+    expect(cap.exitCode).toBeNull()
+    expect(cap.timedOut).toBe(false)
+  })
+})

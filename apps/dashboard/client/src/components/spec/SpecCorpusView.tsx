@@ -11,14 +11,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink } from 'lucide-react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
-import * as api from '@/lib/api';
-import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck } from '@/lib/api';
+import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
+import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
+import { WorkspaceBadge } from './WorkspaceBadge';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
@@ -128,6 +129,12 @@ export function useSpecCorpus(
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A provided (workspace) source wins; otherwise the repo default keyed to this
+  // repo + PR scope. Recreated when the read scope changes so a ref change refetches.
+  const ctxSource = useSpecSource();
+  const repoSource = useMemo(() => createRepoSpecSource(repoId, { pr, ref }), [repoId, pr, ref]);
+  const source = ctxSource ?? repoSource;
+
   useEffect(() => {
     if (!enabled) {
       setHydrating(false);
@@ -135,23 +142,24 @@ export function useSpecCorpus(
     }
     let cancelled = false;
     setHydrating(true);
-    api
-      .getSpecCorpus(repoId, ref, pr)
+    source
+      .getCorpus()
       .then((r) => !cancelled && setData(r))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setHydrating(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, ref, pr]);
+  }, [source, enabled]);
 
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
     try {
-      const res = await api.getSpecCorpusScan(repoId);
-      // User dismissed the cost-estimate confirm — leave existing data untouched.
-      if ('cancelled' in res) return;
+      const res = await source.scan();
+      // Workspace has no on-demand scan, or the user dismissed the cost-estimate
+      // confirm — leave existing data untouched.
+      if (!res || 'cancelled' in res) return;
       setData(res);
       // Every doc was unchanged (no LLM calls) — toast it, mirroring generate.
       if (res.noChanges) {
@@ -164,15 +172,15 @@ export function useSpecCorpus(
     } finally {
       setScanning(false);
     }
-  }, [repoId]);
+  }, [source]);
 
   const refetch = useCallback(async () => {
     try {
-      setData(await api.getSpecCorpus(repoId, ref, pr));
+      setData(await source.getCorpus());
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [repoId, ref, pr]);
+  }, [source]);
 
   const apply = useCallback((res: SpecCorpusResponse) => setData(res), []);
 
@@ -247,6 +255,12 @@ export function SpecCorpusView({
   );
   const decisionsDisabled = prNumber != null && !prRef;
 
+  // A provided (workspace) source wins; otherwise the repo default. Mutations +
+  // the skipped listing route through it (repo behavior is byte-identical).
+  const ctxSource = useSpecSource();
+  const repoSource = useMemo(() => createRepoSpecSource(repoId, prScope), [repoId, prScope]);
+  const source = ctxSource ?? repoSource;
+
   // Force-include / exclude. Toggle the decision lists optimistically so the row
   // moves immediately (both directions — the presentation derives from the lists).
   // OSS records the decision without re-curating (a Scan later materializes the
@@ -277,17 +291,17 @@ export function SpecCorpusView({
   const setInclude = useCallback(
     (ref: string, include: boolean) =>
       runDecision(ref, include ? 'include' : 'uninclude', () =>
-        include ? api.addSpecInclude(repoId, ref, prScope) : api.removeSpecInclude(repoId, ref, prScope),
+        include ? source.addInclude(ref) : source.removeInclude(ref),
       ),
-    [repoId, runDecision, prScope],
+    [source, runDecision],
   );
 
   const setExclude = useCallback(
     (ref: string, exclude: boolean) =>
       runDecision(ref, exclude ? 'exclude' : 'unexclude', () =>
-        exclude ? api.addSpecExclude(repoId, ref, prScope) : api.removeSpecExclude(repoId, ref, prScope),
+        exclude ? source.addExclude(ref) : source.removeExclude(ref),
       ),
-    [repoId, runDecision, prScope],
+    [source, runDecision],
   );
 
   // Remove an orphaned verdict (no re-curate in OSS): reconcile the verdict list
@@ -296,11 +310,12 @@ export function SpecCorpusView({
     async (r: ConflictResolutionLike) => {
       setBusyRef(`orphan:${r.docA}\x00${r.docB}`);
       try {
-        const res = await api.deleteSpecConflictResolution(
-          repoId,
-          { docA: r.docA, anchorA: r.anchorA, docB: r.docB, anchorB: r.anchorB },
-          prScope,
-        );
+        const res = await source.deleteConflictResolution({
+          docA: r.docA,
+          anchorA: r.anchorA,
+          docB: r.docB,
+          anchorB: r.anchorB,
+        });
         if ('corpus' in res) corpus.apply(res);
         else {
           corpus.applyConflictResolutions(res.conflictResolutions);
@@ -312,7 +327,7 @@ export function SpecCorpusView({
         setBusyRef(null);
       }
     },
-    [repoId, prScope, corpus, onDecision],
+    [source, corpus, onDecision],
   );
 
   if (hydrating || (scanning && !data)) {
@@ -328,7 +343,11 @@ export function SpecCorpusView({
       <EmptyState
         icon={Play}
         title="No corpus yet"
-        body="Click Scan in the header to curate the docs into areas and flag overlaps."
+        body={
+          source.supportsScan
+            ? 'Click Scan in the header to curate the docs into areas and flag overlaps.'
+            : 'Sync a source in Integrations, then Process it to curate the docs into areas and flag conflicts.'
+        }
       />
     );
   }
@@ -346,7 +365,13 @@ export function SpecCorpusView({
   const excludedSet = new Set(manualExcludes);
   const includedSet = new Set(manualIncludes);
   const keptDocs = c.docs.filter((d) => !excludedSet.has(d.ref));
-  const skippedDocs = (c.skippedDocs ?? []).filter((s) => !includedSet.has(s.ref) && !excludedSet.has(s.ref));
+  // The relevance-dropped docs. A repo corpus carries the full array inline; a
+  // WORKSPACE corpus ships only a `skipped` SUMMARY (scale), so its rows load
+  // lazily + paged through the source (`SkippedSection`). Either way a force-
+  // included/excluded ref leaves this list (it moves to Force-*).
+  const decidedRefs = new Set([...includedSet, ...excludedSet]);
+  const skippedDocs = (c.skippedDocs ?? []).filter((s) => !decidedRefs.has(s.ref));
+  const skippedSummary = data.skipped ?? null;
   // PR view fell back to the base corpus because this PR changed no docs.
   const baselineFallback = !!prRef && !!data.corpusCommit && data.corpusCommit !== prRef;
   const decisionsHint = decisionsDisabled ? PR_GATE_HINT : null;
@@ -354,6 +379,17 @@ export function SpecCorpusView({
   // area/tag labels so they read as their concern (e.g. "auth", not "core/auth").
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
   const fmtArea = (id: string): string => (showProduct ? id : id.split('/').pop() ?? id);
+
+  // Workspace corpora carry the ledger's human title per doc ref (a synthetic stable
+  // docPath); repo corpora carry none. The display label prefers the title, falling
+  // back to the ref — used for conflict-row labels below (which know refs only).
+  const docTitle = new Map(c.docs.map((d) => [d.ref, d.title] as const));
+  const labelOf = (ref: string): string => docTitle.get(ref) ?? ref;
+
+  // Hosted repo view: docs inherited from the workspace Knowledge corpus carry
+  // `layer: 'workspace'`. The set drives the workspace badge on kept-doc + conflict
+  // rows (which know refs only). Empty on OSS / repo-local corpora ⇒ no badge.
+  const workspaceRefs = new Set(c.docs.filter((d) => d.layer === 'workspace').map((d) => d.ref));
 
   // Tag filter: the distinct area tags across docs; selecting some narrows the
   // Documents list to docs carrying ANY selected tag (OR).
@@ -438,10 +474,11 @@ export function SpecCorpusView({
             {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
-                label={`${a} ↔ ${b}`}
+                label={`${labelOf(a)} ↔ ${labelOf(b)}`}
                 area={fmtArea(area)}
                 resolved={resolved}
                 resolvedLabel={summary}
+                workspace={workspaceRefs.has(a) || workspaceRefs.has(b)}
                 active={activeKey === overlapKey(area, a, b)}
                 onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
               />
@@ -462,6 +499,7 @@ export function SpecCorpusView({
               key={doc.ref}
               doc={doc}
               tags={doc.areaTags.map(fmtArea)}
+              workspace={doc.layer === 'workspace'}
               active={activeKey === doc.ref}
               busy={busyRef !== null}
               disabledReason={decisionsHint}
@@ -470,28 +508,46 @@ export function SpecCorpusView({
             />
           ))}
         </Section>
-        {skippedDocs.length > 0 && (
-          <Section
-            title="Not included"
-            count={skippedDocs.length}
-            icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
-            defaultOpen={activeInSkipped}
-          >
-            {skippedDocs.map((doc) => (
-              <IncludeRow
-                key={doc.ref}
-                docRef={doc.ref}
-                reason={doc.reason}
-                active={activeKey === doc.ref}
-                actionLabel="include"
+        {skippedSummary
+          ? // Workspace: the skipped SUMMARY (thousands possible) → a lazy, paged,
+            // searchable expander that pulls rows from the source on demand.
+            skippedSummary.total - decidedRefs.size > 0 && (
+              <SkippedSection
+                source={source}
+                total={skippedSummary.total}
+                hiddenRefs={decidedRefs}
+                activeKey={activeKey}
                 busy={busyRef !== null}
                 disabledReason={decisionsHint}
-                onOpen={(pinned) => onOpen(doc.ref, pinned)}
-                onAction={() => setInclude(doc.ref, true)}
+                onOpen={onOpen}
+                onInclude={(ref) => setInclude(ref, true)}
               />
-            ))}
-          </Section>
-        )}
+            )
+          : // Repo: the full array inline (relevance-filtered → naturally small).
+            skippedDocs.length > 0 && (
+              <Section
+                title="Not included"
+                count={skippedDocs.length}
+                icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
+                defaultOpen={activeInSkipped}
+              >
+                {skippedDocs.map((doc) => (
+                  <IncludeRow
+                    key={doc.ref}
+                    docRef={doc.ref}
+                    title={doc.title}
+                    url={doc.url}
+                    reason={doc.reason}
+                    active={activeKey === doc.ref}
+                    actionLabel="include"
+                    busy={busyRef !== null}
+                    disabledReason={decisionsHint}
+                    onOpen={(pinned) => onOpen(doc.ref, pinned)}
+                    onAction={() => setInclude(doc.ref, true)}
+                  />
+                ))}
+              </Section>
+            )}
         {manualIncludes.length > 0 && (
           <Section
             title="Force-included"
@@ -723,6 +779,28 @@ function Section({
 }
 
 /**
+ * A deep link to a doc's source (Confluence / Jira / …), shown when the workspace
+ * ledger has a URL for the ref. An anchor that stops propagation so it opens the
+ * source without triggering the row's preview/pin. Hover help via HoverPopover.
+ */
+function DocLink({ url }: { url: string }) {
+  return (
+    <HoverPopover content="Open source" side="top" align="end">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        aria-label="Open source"
+        className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground"
+      >
+        <ExternalLink className="h-3 w-3" />
+      </a>
+    </HoverPopover>
+  );
+}
+
+/**
  * A kept-doc row (the "Documents" section). Previewable like every list row —
  * single-click previews, double-click pins. Carries an inline "skip" action
  * (force-exclude) revealed on hover; the action button stops propagation so it
@@ -731,6 +809,7 @@ function Section({
 function DocRow({
   doc,
   tags,
+  workspace = false,
   active,
   busy,
   disabledReason,
@@ -739,6 +818,8 @@ function DocRow({
 }: {
   doc: SpecCorpusDoc;
   tags: string[];
+  /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
+  workspace?: boolean;
   active: boolean;
   busy: boolean;
   /** When set, the inline action is disabled and the reason shows on hover. */
@@ -759,7 +840,10 @@ function DocRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{doc.ref}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">{doc.title ?? doc.ref}</span>
+          {workspace && <WorkspaceBadge />}
+        </span>
         {tags.length > 0 && (
           <span className="flex flex-wrap gap-1">
             {tags.slice(0, 2).map((t) => (
@@ -773,6 +857,7 @@ function DocRow({
           </span>
         )}
       </span>
+      {doc.url && <DocLink url={doc.url} />}
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
         <button
           type="button"
@@ -801,6 +886,8 @@ function DocRow({
  */
 function IncludeRow({
   docRef,
+  title,
+  url,
   reason,
   active,
   actionLabel,
@@ -811,6 +898,10 @@ function IncludeRow({
   onAction,
 }: {
   docRef: string;
+  /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
   reason?: string;
   active: boolean;
   actionLabel: string;
@@ -835,7 +926,7 @@ function IncludeRow({
     >
       <FileText className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate">{docRef}</span>
+        <span className="truncate">{title ?? docRef}</span>
         {reason && (
           <span className="truncate text-[10px] text-muted-foreground/70" title={reason}>
             {reason}
@@ -843,6 +934,7 @@ function IncludeRow({
         )}
         {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>
+      {url && <DocLink url={url} />}
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
         <button
           type="button"
@@ -860,11 +952,155 @@ function IncludeRow({
   );
 }
 
+/** One page of skipped rows pulled per expand / search / "load more". */
+const SKIPPED_PAGE_SIZE = 50;
+
+/**
+ * The workspace "Not included" expander. The corpus payload ships only a skipped
+ * COUNT (a source may have thousands), so the rows load lazily + paged from the
+ * source, with a search box and per-row force-include. Force-included/excluded
+ * refs (`hiddenRefs`) are filtered out client-side so an include moves the row
+ * out immediately, mirroring the repo section's optimistic behavior.
+ */
+function SkippedSection({
+  source,
+  total,
+  hiddenRefs,
+  activeKey,
+  busy,
+  disabledReason,
+  onOpen,
+  onInclude,
+}: {
+  source: SpecSource;
+  total: number;
+  hiddenRefs: Set<string>;
+  activeKey: string | null;
+  busy: boolean;
+  disabledReason?: string | null;
+  onOpen: (key: string, pinned: boolean) => void;
+  onInclude: (ref: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [rows, setRows] = useState<SpecSkippedDoc[]>([]);
+  const [matched, setMatched] = useState(total);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (nextOffset: number, q: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const page: SkippedPage = await source.listSkipped({
+          query: q || undefined,
+          limit: SKIPPED_PAGE_SIZE,
+          offset: nextOffset,
+        });
+        setMatched(page.total);
+        setRows((prev) => (nextOffset === 0 ? page.docs : [...prev, ...page.docs]));
+        setOffset(nextOffset + page.docs.length);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [source],
+  );
+
+  // First expand loads page 0; a search reloads from 0 (lightly debounced).
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    const t = setTimeout(() => void load(0, q), q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [open, query, load]);
+
+  const visible = rows.filter((d) => !hiddenRefs.has(d.ref));
+  const headerCount = Math.max(0, total - hiddenRefs.size);
+  const hasMore = offset < matched;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border bg-card px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+      >
+        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        <EyeOff className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1 truncate">Not included</span>
+        <span>{headerCount}</span>
+      </button>
+      {open && (
+        <div>
+          <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
+            <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search not-included docs…"
+              className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+            />
+          </div>
+          {error && (
+            <div className="px-3 py-2">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </div>
+          )}
+          {visible.map((doc) => (
+            <IncludeRow
+              key={doc.ref}
+              docRef={doc.ref}
+              title={doc.title}
+              url={doc.url}
+              reason={doc.reason}
+              active={activeKey === doc.ref}
+              actionLabel="include"
+              busy={busy}
+              disabledReason={disabledReason}
+              onOpen={(pinned) => onOpen(doc.ref, pinned)}
+              onAction={() => onInclude(doc.ref)}
+            />
+          ))}
+          {loading && (
+            <div className="flex items-center justify-center py-3">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {!loading && visible.length === 0 && (
+            <div className="px-3 py-2 text-[11px] text-muted-foreground/70">
+              {query.trim() ? `No not-included docs match “${query.trim()}”.` : 'No not-included docs.'}
+            </div>
+          )}
+          {hasMore && !loading && (
+            <button
+              type="button"
+              onClick={() => void load(offset, query.trim())}
+              className="w-full px-3 py-1.5 text-left text-[11px] text-primary hover:bg-primary/10"
+            >
+              Load more ({matched - offset} more)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OverlapRow({
   label,
   area,
   resolved,
   resolvedLabel,
+  workspace = false,
   active,
   onOpen,
 }: {
@@ -873,6 +1109,8 @@ function OverlapRow({
   resolved: boolean;
   /** Rich resolved-badge text (the verdict); falls back to "resolved". */
   resolvedLabel?: string;
+  /** Hosted repo view: a workspace-inherited doc is one side of this conflict. */
+  workspace?: boolean;
   active: boolean;
   onOpen: (pinned: boolean) => void;
 }) {
@@ -889,8 +1127,9 @@ function OverlapRow({
       <GitMerge className={`mt-0.5 h-3 w-3 shrink-0 ${resolved ? 'text-emerald-500' : 'text-amber-500'}`} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
-        <span className="flex flex-wrap gap-1">
+        <span className="flex flex-wrap items-center gap-1">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
+          {workspace && <WorkspaceBadge />}
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
               {resolvedLabel ?? 'resolved'}

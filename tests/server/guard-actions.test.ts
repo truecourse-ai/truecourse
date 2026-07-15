@@ -36,6 +36,11 @@ vi.mock('@truecourse/core/commands/guard-in-process', async (importOriginal) => 
   };
 });
 
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import {
@@ -44,6 +49,12 @@ import {
   guardRunInProcess,
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
+import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
+import { writeLatest } from '@truecourse/core/lib/analysis-store';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
+import { setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 const DOC = 'docs/cli.md';
@@ -176,5 +187,409 @@ describe('Guard action routes', () => {
     const res = await request(app).post(url('run')).expect(200);
     expect(res.body.status).toBe('no-recipe');
     expect(res.body.message).toMatch(/recipe/i);
+  });
+});
+
+// --- Dismiss / undismiss: PR overlay (hosted store) -------------------------
+//
+// `?pr=N` threads the PR overlay through to the write and the response is the MERGED
+// effective view; no `pr` behaves exactly as the OSS file-store path. Needs the
+// enterprise store installed (a PR scope is enterprise-only), so this block swaps in
+// a PgGuardStore rather than the OSS fixture's file store.
+describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let client: PGlite;
+
+  const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+  const repoClaim = { doc: 'docs/cli.md', anchor: 'a', title: 'repo claim' };
+  const prClaim = { doc: 'docs/cli.md', anchor: 'b', title: 'pr claim' };
+  const titles = (claims: Array<{ title: string }>) => claims.map((c) => c.title).sort();
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    app = createApp({ serveStatic: false });
+    client = new PGlite();
+    const db = drizzle(client, { schema }) as unknown as EeDb;
+    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    setGuardStore(new PgGuardStore(db));
+  });
+  afterEach(async () => {
+    resetGuardStore();
+    await client.close();
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('POST /guard/dismiss?pr=N writes the overlay and returns the merged effective view', async () => {
+    // A repo-scoped dismissal already exists (no pr).
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200);
+
+    // Dismiss a different claim from the PR view.
+    const res = await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+    // The response is the MERGED view: repo-level claim + the newly dismissed PR claim.
+    expect(titles(res.body.dismissedClaims)).toEqual(['pr claim', 'repo claim']);
+  });
+
+  it('POST /guard/dismiss?pr=N does not touch the repo row', async () => {
+    await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+    // The repo scope (no pr) never saw the PR dismissal.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(repo.body.dismissedClaims).toEqual([]);
+  });
+
+  it('POST /guard/dismiss without pr behaves as before (writes + returns the repo row)', async () => {
+    const res = await request(app).post(url('dismiss')).send(repoClaim).expect(200);
+    expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+    // The repo decisions read back the same single claim.
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  it('POST /guard/undismiss?pr=N removes only from the overlay (repo dismissal survives in the merged view)', async () => {
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
+    await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200); // overlay
+    const res = await request(app).post(url('undismiss?pr=7')).send(prClaim).expect(200);
+    // The PR claim is gone from the overlay; the repo claim still shows (merged view).
+    expect(titles(res.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  // A present-but-invalid `?pr=` must 400, never silently fall back to the repo
+  // scope: the repo row is the committable decisions file, and a PR-scoped judgment
+  // landing there would promote it for everyone (mirrors the spec routes' strict parse).
+  it.each(['abc', '0', '-1', '7.5'])(
+    'POST /guard/dismiss?pr=%s is a 400 and writes nothing',
+    async (bad) => {
+      const res = await request(app).post(url(`dismiss?pr=${bad}`)).send(prClaim).expect(400);
+      expect(res.body.error).toMatch(/positive integer/);
+      const repo = await request(app).get(url('decisions')).expect(200);
+      expect(repo.body.dismissedClaims).toEqual([]);
+    },
+  );
+
+  it('POST /guard/undismiss?pr=abc is a 400 and removes nothing', async () => {
+    await request(app).post(url('dismiss')).send(repoClaim).expect(200); // repo scope
+    await request(app).post(url('undismiss?pr=abc')).send(repoClaim).expect(400);
+    const repo = await request(app).get(url('decisions')).expect(200);
+    expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  // A PR-scoped dismissal regenerates through the PR's own flow, never the repo
+  // guard generate — the repo-scope auto-regen seam must stay untouched.
+  it('POST /guard/dismiss?pr=N never fires the hosted repo guard-generate seam', async () => {
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    setGuardGenerateEnqueue(enqueue);
+    try {
+      await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+      expect(enqueue).not.toHaveBeenCalled();
+    } finally {
+      setGuardGenerateEnqueue(null);
+    }
+  });
+});
+
+// --- Dismiss → hosted auto-regenerate (repo scope) -------------------------
+//
+// A repo-scope dismissal that suppresses the LAST active finding re-generates the
+// scenario corpus honoring the dismissal — the hosted analog of resolving the last
+// spec conflict. The write rides the established `setGuardGenerateEnqueue` seam
+// (EE installs it; OSS leaves it unset → the dismissal is a plain file write). The
+// findings live in the guard result store, so the OSS file fixture seeds one.
+describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let root: string;
+  let enqueue: ReturnType<typeof vi.fn>;
+
+  const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+
+  // Two birth findings, each carrying its dismissible claim; dismiss keys on the
+  // claim text (the same `dismissedClaimKey` the coverage view derives "active" from).
+  const findingA = { doc: 'docs/cli.md', anchor: 'a', title: 'A scenario', claim: 'claim A' };
+  const findingB = { doc: 'docs/cli.md', anchor: 'b', title: 'B scenario', claim: 'claim B' };
+
+  const report = (findings: Array<{ doc: string; anchor: string; title: string; claim?: string }>): GuardGenerateReport => ({
+    generatedAt: '2026-01-01T00:00:00Z',
+    status: 'ok',
+    sectionsTotal: 2,
+    sectionsChanged: 2,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: findings.map((f) => ({
+      doc: f.doc,
+      anchor: f.anchor,
+      title: f.title,
+      step: 1,
+      expected: 'x',
+      actual: 'y',
+      ...(f.claim ? { claim: f.claim } : {}),
+    })),
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  });
+
+  // Dismiss by the finding's CLAIM (dismiss's `title` is the extracted claim text).
+  const dismiss = (f: { doc: string; anchor: string; claim: string }) =>
+    request(app).post(url('dismiss')).send({ doc: f.doc, anchor: f.anchor, title: f.claim });
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    root = fixture.repoPath;
+    app = createApp({ serveStatic: false });
+    enqueue = vi.fn().mockResolvedValue(undefined);
+    setGuardGenerateEnqueue(enqueue);
+  });
+  afterEach(async () => {
+    setGuardGenerateEnqueue(null);
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('batches while findings remain active, then re-generates on the LAST dismissal', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, findingB]));
+
+    // One of two dismissed → one finding still active → NO regenerate.
+    await dismiss(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // The last active finding dismissed → exactly one hosted regenerate, keyed by repo.
+    await dismiss(findingB).expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root);
+  });
+
+  it('does not regenerate when a finding with no dismissible claim stays active', async () => {
+    // findingB has no `claim` → it can never be dismissed → always active.
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, { ...findingB, claim: undefined }]));
+    await dismiss(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not regenerate when the report has no findings at all', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([]));
+    await request(app).post(url('dismiss')).send({ doc: 'docs/cli.md', anchor: 'z', title: 'stray' }).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('swallows a seam failure — the dismissal still succeeds', async () => {
+    enqueue.mockRejectedValue(new Error('queue down'));
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
+    // The only finding is dismissed → the seam fires and throws, but the write is 200.
+    const res = await dismiss(findingA).expect(200);
+    expect(res.body.dismissedClaims.map((c: { title: string }) => c.title)).toEqual(['claim A']);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('never enqueues when the seam is unset (OSS)', async () => {
+    setGuardGenerateEnqueue(null);
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
+    await dismiss(findingA).expect(200); // plain file write, no throw
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  // HOSTED (Pg store): the auto-regen decision must read the REPO's report — the
+  // baseline commit's row — never the store's newest row by createdAt, which a PR
+  // head's regenerated report would shadow (masking the repo's active findings).
+  describe('hosted store — baseline-anchored report read', () => {
+    let client: PGlite;
+
+    beforeEach(async () => {
+      client = new PGlite();
+      const db = drizzle(client, { schema }) as unknown as EeDb;
+      await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+      setGuardStore(new PgGuardStore(db));
+      // Anchor the repo baseline (the analyze LATEST commit) at `basesha1111`.
+      await writeLatest(root, {
+        head: 'run.json',
+        analysis: {
+          id: 'r1',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          branch: 'main',
+          commitHash: 'basesha1111',
+          architecture: 'monolith',
+          metadata: { isDiffAnalysis: false },
+          status: 'completed',
+        },
+        graph: {
+          services: [],
+          serviceDependencies: [],
+          layers: [],
+          modules: [],
+          methods: [],
+          moduleDeps: [],
+          methodDeps: [],
+          databases: [],
+          databaseConnections: [],
+          flows: [],
+        },
+        violations: [],
+      });
+    });
+    afterEach(async () => {
+      resetGuardStore();
+      await client.close();
+    });
+
+    it("a newer PR-head report never masks the repo's findings — the last dismissal still regenerates", async () => {
+      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]));
+      // A PR regen persisted a findings-free report at its head — strictly newer
+      // createdAt, so a commit-less "newest" read would see zero findings and skip.
+      await new Promise((r) => setTimeout(r, 5));
+      await writeGuardResult({ repoKey: root, commitSha: 'prheadsha99' }, report([]));
+
+      await dismiss(findingA).expect(200);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledWith(root);
+    });
+  });
+});
+
+// --- Dismiss → hosted PR-head regenerate (PR scope) --------------------------
+//
+// The PR analog of the repo-scope auto-regen above: a PR-scoped dismissal that
+// suppresses the PR's LAST active finding regenerates the PR HEAD's scenarios
+// honoring the overlay. The PR's report is pinned at its latest GATED head (the
+// same gate-records resolution the PR view uses, via the heads-lookup seam), and
+// "active" derives from the MERGED decisions (repo row ∪ PR overlay). Rides the
+// new `setGuardPrRegenEnqueue` seam (EE installs it; OSS never has a PR scope).
+// PR overlays require the enterprise store, so this block runs on a PgGuardStore.
+describe('Guard dismiss → hosted PR-head regenerate (PR scope)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let root: string;
+  let client: PGlite;
+  let enqueue: ReturnType<typeof vi.fn>;
+
+  const PR = 7;
+  const HEAD = 'prheadsha42';
+  const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+
+  const findingA = { doc: 'docs/cli.md', anchor: 'a', title: 'A scenario', claim: 'claim A' };
+  const findingB = { doc: 'docs/cli.md', anchor: 'b', title: 'B scenario', claim: 'claim B' };
+
+  const report = (findings: Array<{ doc: string; anchor: string; title: string; claim?: string }>): GuardGenerateReport => ({
+    generatedAt: '2026-01-01T00:00:00Z',
+    status: 'ok',
+    sectionsTotal: 2,
+    sectionsChanged: 2,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: findings.map((f) => ({
+      doc: f.doc,
+      anchor: f.anchor,
+      title: f.title,
+      step: 1,
+      expected: 'x',
+      actual: 'y',
+      ...(f.claim ? { claim: f.claim } : {}),
+    })),
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  });
+
+  // Dismiss by the finding's CLAIM into the PR overlay.
+  const dismissPr = (f: { doc: string; anchor: string; claim: string }) =>
+    request(app).post(url(`dismiss?pr=${PR}`)).send({ doc: f.doc, anchor: f.anchor, title: f.claim });
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    root = fixture.repoPath;
+    app = createApp({ serveStatic: false });
+    client = new PGlite();
+    const db = drizzle(client, { schema }) as unknown as EeDb;
+    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+    setGuardStore(new PgGuardStore(db));
+    enqueue = vi.fn().mockResolvedValue(undefined);
+    setGuardPrRegenEnqueue(enqueue);
+    // The PR's latest gated head — how EE maps a PR number to its report commit.
+    setGuardGateHeadsLookup(vi.fn().mockResolvedValue([HEAD]));
+  });
+  afterEach(async () => {
+    setGuardPrRegenEnqueue(null);
+    setGuardGateHeadsLookup(null);
+    resetGuardStore();
+    await client.close();
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('batches while PR findings remain active, then regenerates the PR head on the LAST dismissal', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA, findingB]));
+
+    await dismissPr(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+
+    await dismissPr(findingB).expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root, PR);
+  });
+
+  it('"active" derives from the MERGED view — a repo-scope dismissal of the other claim counts', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA, findingB]));
+
+    // Claim A was dismissed at the REPO scope (e.g. before the PR existed).
+    await request(app)
+      .post(url('dismiss'))
+      .send({ doc: findingA.doc, anchor: findingA.anchor, title: findingA.claim })
+      .expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // Dismissing B on the PR leaves zero active in the merged view → regenerate.
+    await dismissPr(findingB).expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root, PR);
+  });
+
+  it("reads the PR head's report — repo-baseline findings never block the PR regen", async () => {
+    // The repo baseline still has an active finding; the PR head has only A.
+    await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingB]));
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA]));
+
+    await dismissPr(findingA).expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root, PR);
+  });
+
+  it('does not regenerate while a finding with no dismissible claim stays active', async () => {
+    await writeGuardResult(
+      { repoKey: root, commitSha: HEAD },
+      report([findingA, { ...findingB, claim: undefined }]),
+    );
+    await dismissPr(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not regenerate when no gated head resolves for the PR', async () => {
+    setGuardGateHeadsLookup(vi.fn().mockResolvedValue([]));
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA]));
+    await dismissPr(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('a repo-scope dismissal never fires the PR seam', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA]));
+    await request(app)
+      .post(url('dismiss'))
+      .send({ doc: findingA.doc, anchor: findingA.anchor, title: findingA.claim })
+      .expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('swallows a seam failure — the PR dismissal still succeeds', async () => {
+    enqueue.mockRejectedValue(new Error('queue down'));
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA]));
+    const res = await dismissPr(findingA).expect(200);
+    expect(res.body.dismissedClaims.map((c: { title: string }) => c.title)).toEqual(['claim A']);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('never enqueues when the seam is unset (OSS)', async () => {
+    setGuardPrRegenEnqueue(null);
+    await writeGuardResult({ repoKey: root, commitSha: HEAD }, report([findingA]));
+    await dismissPr(findingA).expect(200); // plain overlay write, no throw
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

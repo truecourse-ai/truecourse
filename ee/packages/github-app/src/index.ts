@@ -11,15 +11,28 @@ import type { EeDb } from '@truecourse/ee-db';
 import { log } from '@truecourse/core/lib/logger';
 import { loadGithubAppConfig } from './config.js';
 import { createGithubAuth } from './github.js';
+import { notifierFromConfig } from './email.js';
 import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
 import { createWebhookRouter } from './webhook.js';
 import { createConnectRouter } from './connect.js';
-import { installationOctokit } from './octokit.js';
+import { installationOctokit, splitRepo, updateComment } from './octokit.js';
+import {
+  handlePullRequestGuardSpecOffer,
+  handleCommentEditedGuardSpec,
+  type EnqueueGuardSpecRegen,
+} from './guard-spec-offer.js';
+import { renderGuardSpecComment } from './guard-spec-comment.js';
+import { defaultGuardHeadRegenPipeline } from './guard-head-regen.js';
+import { createGuardGatePipeline } from './guard-gate-runner.js';
 import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
 import { reportGithubError } from './observability.js';
+import { getGuardStore } from '@truecourse/core/lib/guard-store';
+import { getGuardExecutor } from '@truecourse/core/lib/guard-executor';
+import { handlePullRequestGuardGate, type EnqueueGuardGate } from './guard-gate-handler.js';
+import { defaultGuardGatePipeline } from './guard-gate-runner.js';
 
 /**
  * Enqueue an initial/refresh repo scan onto the background job queue. Returns the
@@ -42,6 +55,10 @@ export interface RegisterGithubAppOptions {
   db?: EeDb | null;
   /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
   enqueueBaseline?: EnqueueBaseline;
+  /** Background-queue enqueue for guard-gate runs (PR events). Inline fallback if omitted. */
+  enqueueGuardGate?: EnqueueGuardGate;
+  /** Background-queue enqueue for spec-change guard regens (checkbox tick). Inline fallback if omitted. */
+  enqueueGuardSpecRegen?: EnqueueGuardSpecRegen;
   /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
   codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
@@ -67,6 +84,7 @@ export async function registerGithubApp(
     opts.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
   const store = selectGateStore(opts.db ?? null);
   const auth = createGithubAuth(cfg);
+  const notifier = notifierFromConfig(cfg);
 
   // Shared deps for the Code Quality gate. The gate in-flight set is keyed by
   // `${repo}#${sha}` (concurrent deliveries of the same head).
@@ -77,6 +95,127 @@ export async function registerGithubApp(
     octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
     gateInFlight: new Set<string>(),
     codeAnalysisLlm: opts.codeAnalysisLlm,
+  };
+
+  // Guard-gate enqueue: prefer the durable background queue (ee-server); fall
+  // back to running the gate pipeline inline fire-and-forget so unit tests need
+  // no queue (mirrors enqueueBaseline's fallback). The inline path shares the
+  // process-global guard store/executor seams; without the jobs layer there is
+  // no shared limiter, so executor calls run unlimited.
+  const enqueueGuardGate: EnqueueGuardGate =
+    opts.enqueueGuardGate ??
+    (async (req) => {
+      void defaultGuardGatePipeline
+        .run(
+          {
+            store,
+            guardStore: getGuardStore(),
+            auth,
+            octokitFor: offerDeps.octokitFor,
+            execute: getGuardExecutor(),
+            limiter: { run: (fn) => fn() },
+            notifier,
+            appUrl,
+          },
+          req,
+        )
+        .catch((err) =>
+          reportGithubError(
+            store,
+            'guard gate failed',
+            { repo: req.repoFullName, pr: req.prNumber },
+            err,
+          ),
+        );
+      return null;
+    });
+
+  // Guard spec-regen enqueue: prefer the durable queue (ee-server); fall back to
+  // running the regen + re-gate inline fire-and-forget so unit tests need no queue
+  // (mirrors enqueueGuardGate). The inline path settles the checkbox comment and
+  // re-gates against the PR's freshly regenerated corpus.
+  const enqueueGuardSpecRegen: EnqueueGuardSpecRegen =
+    opts.enqueueGuardSpecRegen ??
+    (async (req) => {
+      const octokit = offerDeps.octokitFor(req.installationId);
+      const coords = splitRepo(req.repoFullName);
+      // A dashboard-triggered regen has no checkbox comment to settle.
+      const settleComment = async (body: string): Promise<void> => {
+        if (req.commentId == null) return;
+        await updateComment(octokit, coords, req.commentId, body);
+      };
+      void (async () => {
+        const regen = await defaultGuardHeadRegenPipeline.run(
+          { auth },
+          {
+            repoFullName: req.repoFullName,
+            installationId: req.installationId,
+            prNumber: req.prNumber,
+            baseBranch: req.baseBranch,
+            headSha: req.headSha,
+          },
+        );
+        if (regen.noCorpus || !regen.corpus) {
+          await settleComment(renderGuardSpecComment('nochange'));
+          return;
+        }
+        const corpus = regen.corpus;
+        await createGuardGatePipeline({ loadCorpus: async () => corpus }).run(
+          {
+            store,
+            guardStore: getGuardStore(),
+            auth,
+            octokitFor: offerDeps.octokitFor,
+            execute: getGuardExecutor(),
+            limiter: { run: (fn) => fn() },
+            notifier,
+            appUrl,
+          },
+          {
+            repoFullName: req.repoFullName,
+            installationId: req.installationId,
+            workspaceOrgId: req.workspaceOrgId,
+            prNumber: req.prNumber,
+            defaultBranch: req.defaultBranch,
+            baseBranch: req.baseBranch,
+            baseSha: req.baseSha,
+            headSha: req.headSha,
+            headRef: req.headRef,
+            isFork: req.isFork,
+            checkRunId: null,
+          },
+          { force: true },
+        );
+        await settleComment(
+          renderGuardSpecComment('done', {
+            scenariosWritten: regen.scenariosWritten,
+            commitSha: req.headSha,
+          }),
+        );
+      })().catch(async (err) => {
+        await settleComment(
+          renderGuardSpecComment('error', { error: (err as Error).message }),
+        ).catch(() => undefined);
+        reportGithubError(
+          store,
+          'guard spec-regen failed',
+          { repo: req.repoFullName, pr: req.prNumber },
+          err,
+        );
+      });
+      return null;
+    });
+
+  // The spec-change guard checkbox keeps its own in-flight sets (offer path
+  // keyed per repo#pr, checkbox path per comment id) and enqueues onto the
+  // guard spec-regen queue.
+  const specOfferDeps = {
+    store,
+    octokitFor: offerDeps.octokitFor,
+    enqueueGuardSpecRegen,
+    notifier,
+    offerInFlight: new Set<string>(),
+    inFlight: new Set<number>(),
   };
 
   // Public: GitHub posts here with no session; verified by HMAC signature.
@@ -119,10 +258,29 @@ export async function registerGithubApp(
           );
           return;
         }
-        // TODO(spec-guard): guard becomes the second gate check alongside Code
-        // Quality here — the spec→contract→infer PR check was removed.
-        void handlePullRequestGate(offerDeps, payload).catch((err) =>
-          reportGithubError(store, 'gate failed', ctx, err),
+        // Guard gate: open the in-progress Check + enqueue the durable job (fast —
+        // no clone here). Independent of the Code Quality gate below.
+        void handlePullRequestGuardGate(
+          { store, octokitFor: offerDeps.octokitFor, enqueueGuardGate },
+          payload,
+        ).catch((err) => reportGithubError(store, 'guard gate enqueue failed', ctx, err));
+        // Run the Code Quality gate, then offer the guard spec-change checkbox. A
+        // spec-changing PR gets a passive checkbox to regenerate its head's guard
+        // scenarios; the auto guard gate above keeps running the baseline corpus.
+        void (async () => {
+          await handlePullRequestGate(offerDeps, payload).catch((err) =>
+            reportGithubError(store, 'gate failed', ctx, err),
+          );
+          await handlePullRequestGuardSpecOffer(specOfferDeps, payload).catch((err) =>
+            reportGithubError(store, 'guard spec offer failed', ctx, err),
+          );
+        })();
+      },
+      // On comment edit: the matching handler (by marker) runs its checkbox flow.
+      onCommentEdited: (payload) => {
+        const ctx = { repo: payload.repository.full_name, pr: payload.issue.number };
+        void handleCommentEditedGuardSpec(specOfferDeps, payload).catch((err) =>
+          reportGithubError(store, 'comment-edited guard spec failed', ctx, err),
         );
       },
     }),
@@ -157,6 +315,16 @@ export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineRe
 export { handlePullRequestClosed } from './pr-closed.js';
 export { upsertPrState, prStateFromPayload } from './pr-state.js';
 export { loadGithubAppConfig } from './config.js';
+export {
+  createEmailNotifier,
+  notifierFromConfig,
+  type EmailNotifier,
+  type ResendLike,
+  type GuardGateFailureEmail,
+  type GuardConflictsBlockedEmail,
+} from './email.js';
+export { wantsNotification } from './notifications.js';
+export { repoGuardCoverageUrl } from './links.js';
 export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
 export * from './store/index.js';
 
@@ -173,11 +341,14 @@ export {
   installationOctokit,
   splitRepo,
   findComment,
+  updateComment,
   listPrsForCommit,
   getFileContent,
+  getPullRequest,
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';
+export { createGuardGateHeadsLookup } from './guard-gate-heads.js';
 
 // Code Quality gate
 export {
@@ -195,12 +366,123 @@ export {
   cqCheckOutput,
 } from './gate-comment.js';
 export {
-  runGateVerify,
-  type GateVerifyDeps,
-  type GateVerifyRequest,
-  type GateVerifyOutput,
+  runGateAnalyze,
+  type GateAnalyzeDeps,
+  type GateAnalyzeRequest,
+  type GateAnalyzeOutput,
 } from './gate-runner.js';
 export {
   handlePullRequestGate,
   type GateHandlerDeps,
 } from './gate-handler.js';
+
+// Guard gate: pure diff/decision + Check output for the PR guard run
+export {
+  diffGuardRuns,
+  decideGuardGate,
+  emptyGuardGateDiff,
+  type GuardGateInput,
+  type GuardGateDiff,
+  type GuardGateConclusion,
+  type GuardGateDecision,
+  type GuardGateOptions,
+} from './guard-gate.js';
+export {
+  GUARD_GATE_CHECK_NAME,
+  GUARD_GATE_MAX_ANNOTATIONS,
+  GUARD_GATE_KILL_SWITCH_ENV,
+  guardGateCheckOutput,
+  guardGateDisabled,
+  guardGateDisabledOutput,
+  capGuardAnnotations,
+  type GuardStaleAnnotation,
+  type GuardGateCheckOutput,
+} from './guard-gate-comment.js';
+
+// Guard gate: the durable `guard.gate` job's pipeline + webhook handler
+export {
+  createGuardGatePipeline,
+  defaultGuardGatePipeline,
+  postGuardGateErrorCheck,
+  defaultGuardColdGenerate,
+  defaultLoadCorpus,
+  InvalidGuardRecipeError,
+  GUARD_GATE_RUN_TIMEOUT_MS,
+  GUARD_GATE_BUILD_TIMEOUT_MS,
+  GUARD_GATE_CLONE_TIMEOUT_MS,
+  cloneAbortSignal,
+  type GuardGateCheckoutRequest,
+  type GuardGateClone,
+  type GuardGateCorpus,
+  type GuardGateLimiter,
+  type GuardGatePipeline,
+  type GuardGatePipelineDeps,
+  type GuardGatePipelineSeams,
+  type GuardGatePhase,
+  type GuardGateRunOptions,
+  type GuardGateRunRequest,
+} from './guard-gate-runner.js';
+export {
+  handlePullRequestGuardGate,
+  type EnqueueGuardGate,
+  type GuardGateHandlerDeps,
+} from './guard-gate-handler.js';
+
+// Guard spec-change checkbox: offer regeneration of the PR head's scenarios
+export {
+  GUARD_SPEC_MARKER,
+  GUARD_SPEC_CHECKBOX_LABEL,
+  renderGuardSpecComment,
+  isGuardSpecComment,
+  isGuardSpecCheckboxChecked,
+  type GuardSpecCommentStatus,
+  type GuardSpecCommentData,
+} from './guard-spec-comment.js';
+export {
+  handlePullRequestGuardSpecOffer,
+  handleCommentEditedGuardSpec,
+  buildGuardSpecRegenRequest,
+  type GuardSpecOfferDeps,
+  type GuardSpecRegenRequest,
+  type EnqueueGuardSpecRegen,
+} from './guard-spec-offer.js';
+export {
+  createGuardHeadRegenPipeline,
+  defaultGuardHeadRegenPipeline,
+  type GuardHeadRegenRequest,
+  type GuardHeadRegenResult,
+  type GuardHeadRegenDeps,
+  type GuardHeadRegenProgress,
+  type GuardHeadRegenPipeline,
+  type GuardHeadRegenSeams,
+} from './guard-head-regen.js';
+
+// Guard baseline refresh: the durable `guard.baseline` job's pipeline (issue 06)
+export {
+  createGuardBaselinePipeline,
+  defaultGuardBaselinePipeline,
+  type GuardBaselineRunRequest,
+  type GuardBaselinePipeline,
+  type GuardBaselinePipelineDeps,
+  type GuardBaselinePipelineSeams,
+  type GuardBaselinePhase,
+  type GuardBaselineRunOptions,
+  type GuardBaselineResult,
+} from './guard-baseline-runner.js';
+
+// Guard onboarding: hosted guard-scenario generation (the `repo.guard` job body)
+export {
+  materializeStoredCorpus,
+  materializeAndGenerateGuard,
+  cloneRepoAtCommit,
+  createGuardOnboardingPipeline,
+  defaultGuardOnboardingPipeline,
+  type GuardGenerateFn,
+  type GuardGeneratedCorpus,
+  type GuardOnboardingRequest,
+  type GuardOnboardingResult,
+  type GuardOnboardingDeps,
+  type GuardOnboardingProgress,
+  type GuardOnboardingPipeline,
+  type GuardOnboardingSeams,
+} from './guard-onboarding.js';

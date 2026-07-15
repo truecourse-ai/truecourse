@@ -36,9 +36,10 @@ export type TestabilityVerdict = z.infer<typeof TestabilityVerdictSchema>
  *  is fingerprinted — the registry keeps it stable). */
 export const CLAIM_DRIVERS = guardDriverIds
 
-/** The recipe discovery proposal — build command + entrypoint argv. */
+/** The recipe discovery proposal — optional install + build command + entrypoint argv. */
 export const RecipeProposalSchema = z
   .object({
+    install: z.string().min(1).optional(),
     build: z.string().min(1),
     entry: z.array(z.string()).min(1),
     env: z.record(z.string(), z.string()).optional(),

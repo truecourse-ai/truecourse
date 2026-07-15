@@ -3,6 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import type { IntegrationPendingView } from '@truecourse/shared';
 import { IntegrationStore } from '../../ee/packages/server/src/integrations/store';
 
 const SECRET = 'master-secret-at-least-32-characters!!';
@@ -74,5 +75,44 @@ describe('IntegrationStore (pglite)', () => {
 
     await store.delete(ORG_A, 'confluence');
     expect(await store.getView(ORG_A, 'confluence')).toBeNull();
+  });
+
+  describe('pending (sweep-awaiting-Process record)', () => {
+    const pending: IntegrationPendingView = {
+      delta: { new: 3, changed: 2, removed: 0, total: 40 },
+      estimate: {
+        totalEstimatedTokens: 1234,
+        tiers: [],
+        stages: [{ stage: 'scan', model: 'claude', calls: 2, estimatedTokens: 1234, estimatedCostUsd: 4.2 }],
+        subjectLabel: '3 new · 2 changed of 40 docs',
+        estimatedCostUsd: 4.2,
+        costPartial: true,
+      },
+      sweptAt: '2026-02-02T00:00:00Z',
+    };
+
+    it('is null on a fresh connection, round-trips through setPending, and clears with null', async () => {
+      await store.save(ORG_A, 'confluence', { config, token: 'tok-a' });
+      expect((await store.getView(ORG_A, 'confluence'))?.pending).toBeNull();
+
+      await store.setPending(ORG_A, 'confluence', pending);
+      expect((await store.getView(ORG_A, 'confluence'))?.pending).toEqual(pending);
+
+      await store.setPending(ORG_A, 'confluence', null);
+      expect((await store.getView(ORG_A, 'confluence'))?.pending).toBeNull();
+    });
+
+    it('save() does not clobber a stored pending record', async () => {
+      await store.save(ORG_A, 'confluence', { config, token: 'tok-a' });
+      await store.setPending(ORG_A, 'confluence', pending);
+
+      // A later save (e.g. rotating the token / editing config) must leave pending intact.
+      await store.save(ORG_A, 'confluence', { config: { ...config, spaceKey: 'DOCS' }, token: 'tok-b' });
+
+      const view = await store.getView(ORG_A, 'confluence');
+      expect(view?.pending).toEqual(pending);
+      expect(view?.config.spaceKey).toBe('DOCS'); // config still updated
+      expect((await store.getConnection(ORG_A, 'confluence'))?.token).toBe('tok-b'); // token rotated
+    });
   });
 });

@@ -10,7 +10,7 @@
  * event; when even that is absent the event is `null`.
  */
 
-import { readGuardLatest, readGuardResult } from '@truecourse/guard-runner';
+import { readGuardLatest, readGuardResult } from '../lib/guard-store.js';
 import { readLatest } from '../lib/analysis-store.js';
 import { loadLatestSpec } from '../lib/spec-store.js';
 
@@ -81,8 +81,8 @@ export async function resolveLatestEvent(
       kind: 'scanned',
       at: await safe(async () => (await loadLatestSpec<{ generatedAt?: string }>(repoPath, 'corpus'))?.generatedAt),
     },
-    { kind: 'generated', at: safeSync(() => readGuardResult(repoPath)?.generatedAt) },
-    { kind: 'guarded', at: safeSync(() => readGuardLatest(repoPath)?.run.ranAt) },
+    { kind: 'generated', at: await safe(async () => (await readGuardResult(repoPath))?.generatedAt) },
+    { kind: 'guarded', at: await safe(async () => (await readGuardLatest(repoPath))?.run.ranAt) },
   ];
   return pickLatestEvent(candidates, registryLastAnalyzed);
 }
@@ -90,14 +90,6 @@ export async function resolveLatestEvent(
 async function safe(fn: () => Promise<string | null | undefined>): Promise<string | null> {
   try {
     return (await fn()) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function safeSync(fn: () => string | null | undefined): string | null {
-  try {
-    return fn() ?? null;
   } catch {
     return null;
   }

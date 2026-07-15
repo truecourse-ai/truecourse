@@ -13,7 +13,12 @@ import * as api from '@/lib/api';
 
 const EMPTY: GuardDecisions = { version: 1, dismissedClaims: [] };
 
-export function useGuardDecisions(repoId: string | undefined, enabled: boolean, reloadKey = 0) {
+export function useGuardDecisions(
+  repoId: string | undefined,
+  enabled: boolean,
+  reloadKey = 0,
+  pr?: number,
+) {
   const [decisions, setDecisions] = useState<GuardDecisions>(EMPTY);
   const [localKey, setLocalKey] = useState(0);
   const refetch = useCallback(() => setLocalKey((k) => k + 1), []);
@@ -21,14 +26,15 @@ export function useGuardDecisions(repoId: string | undefined, enabled: boolean, 
   useEffect(() => {
     if (!repoId || !enabled) return;
     let cancelled = false;
+    // With `pr` (EE) the PR's dismissals overlay is merged over the repo row.
     api
-      .getGuardDecisions(repoId)
+      .getGuardDecisions(repoId, pr)
       .then((d) => !cancelled && setDecisions(d))
       .catch(() => !cancelled && setDecisions(EMPTY));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey, localKey]);
+  }, [repoId, enabled, reloadKey, localKey, pr]);
 
   return { decisions, refetch };
 }

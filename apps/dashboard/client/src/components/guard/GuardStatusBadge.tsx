@@ -17,6 +17,7 @@ export function GuardStatusBadge({
   const meta = guardStatusMeta(status);
   return (
     <span
+      title={meta.hint}
       className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.badge} ${className}`}
     >
       {meta.label}

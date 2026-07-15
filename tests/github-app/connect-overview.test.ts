@@ -90,11 +90,23 @@ describe('connect overview reads the baseline corpus', () => {
     });
     // Baseline corpus: 1 flagged overlap.
     await saveSpec({ repoKey: REPO, commitSha: 'base1' }, 'corpus', {
-      areas: [{ overlaps: [{ id: 'x' }] }, { overlaps: [] }],
+      areas: [
+        { id: 'core/a', overlaps: [{ docs: ['docs/x.md', 'docs/y.md'], note: 'disagree', sections: [] }] },
+        { id: 'core/b', overlaps: [] },
+      ],
     });
     // A NEWER PR-head scan with 3 overlaps — must NOT leak in.
     await saveSpec({ repoKey: REPO, commitSha: 'prhead' }, 'corpus', {
-      areas: [{ overlaps: [1, 2, 3] }],
+      areas: [
+        {
+          id: 'core/a',
+          overlaps: [
+            { docs: ['docs/x.md', 'docs/y.md'], note: 'one', sections: [] },
+            { docs: ['docs/x.md', 'docs/z.md'], note: 'two', sections: [] },
+            { docs: ['docs/y.md', 'docs/z.md'], note: 'three', sections: [] },
+          ],
+        },
+      ],
     });
 
     const res = await request(app).get('/api/ee/github/status').expect(200);
@@ -108,5 +120,42 @@ describe('connect overview reads the baseline corpus', () => {
     const res = await request(app).get('/api/ee/github/status').expect(200);
     const body = res.body as GithubConnectStatusResponse;
     expect(body.repos[0]!.openConflicts).toBe(0);
+  });
+
+  it('does not count RESOLVED conflicts — the badge derivation honors stored verdicts', async () => {
+    await connectRepo();
+    await store.saveBaseline({
+      repoFullName: REPO, commitSha: 'base1', capturedAt: '2026-01-02T00:00:00.000Z',
+    });
+    // Two flagged disputes; a stored pick-a-side verdict resolves the first.
+    await saveSpec({ repoKey: REPO, commitSha: 'base1' }, 'corpus', {
+      areas: [
+        {
+          id: 'core/read-command',
+          overlaps: [{ docs: ['README.md', 'docs/read-file.md'], note: 'invocation differs', sections: [] }],
+        },
+        {
+          id: 'core/write-command',
+          overlaps: [{ docs: ['README.md', 'docs/write-file.md'], note: 'invocation differs', sections: [] }],
+        },
+      ],
+    });
+    await saveSpec({ repoKey: REPO, commitSha: 'base1' }, 'decisions', {
+      version: 1,
+      conflictResolutions: [
+        {
+          docA: 'README.md',
+          anchorA: null,
+          docB: 'docs/read-file.md',
+          anchorB: null,
+          verdict: 'b',
+          resolvedAt: '2026-07-14T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const res = await request(app).get('/api/ee/github/status').expect(200);
+    const body = res.body as GithubConnectStatusResponse;
+    expect(body.repos[0]!.openConflicts).toBe(1); // only the unresolved write-command dispute
   });
 });

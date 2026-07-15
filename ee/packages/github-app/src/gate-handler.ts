@@ -28,14 +28,13 @@ import {
   cqCheckOutput,
 } from './gate-comment.js';
 import {
-  runGateVerify,
-  type GateVerifyDeps,
-  type GateVerifyRequest,
-  type GateVerifyOutput,
+  runGateAnalyze,
+  type GateAnalyzeDeps,
+  type GateAnalyzeRequest,
+  type GateAnalyzeOutput,
 } from './gate-runner.js';
+import { PR_TRIGGER_ACTIONS } from './pr-events.js';
 import { prCodeQualityUrl } from './links.js';
-
-const GATE_ACTIONS = ['opened', 'synchronize', 'reopened'];
 
 export interface GateHandlerDeps {
   store: GateStore;
@@ -44,10 +43,10 @@ export interface GateHandlerDeps {
   appUrl?: string;
   octokitFor: (installationId: number) => OctokitClient;
   /** Injectable check runner (defaults to the real clone+analyze). */
-  runVerify?: (
-    deps: GateVerifyDeps,
-    req: GateVerifyRequest,
-  ) => Promise<GateVerifyOutput>;
+  runAnalyze?: (
+    deps: GateAnalyzeDeps,
+    req: GateAnalyzeRequest,
+  ) => Promise<GateAnalyzeOutput>;
   /** Min severity that fails the Code Quality Check (defaults to the repo config). */
   minSeverity?: GateSeverity;
   /** In-flight guard keyed by `${repo}#${headSha}` (concurrent deliveries). */
@@ -60,7 +59,7 @@ export async function handlePullRequestGate(
   deps: GateHandlerDeps,
   payload: PullRequestPayload,
 ): Promise<void> {
-  if (!GATE_ACTIONS.includes(payload.action)) return;
+  if (!PR_TRIGGER_ACTIONS.includes(payload.action)) return;
   if (!payload.installation) return;
   const repoFullName = payload.repository.full_name;
   const link = await deps.store.getRepo(repoFullName);
@@ -92,10 +91,10 @@ export async function handlePullRequestGate(
       ? (await deps.codeAnalysisLlm?.(link.workspaceOrgId)) ?? false
       : false;
 
-    const runVerify = deps.runVerify ?? runGateVerify;
-    let output: GateVerifyOutput;
+    const runAnalyze = deps.runAnalyze ?? runGateAnalyze;
+    let output: GateAnalyzeOutput;
     try {
-      output = await runVerify(
+      output = await runAnalyze(
         { store: deps.store, auth: deps.auth },
         {
           repoFullName,

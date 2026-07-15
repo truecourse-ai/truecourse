@@ -1,11 +1,11 @@
 import { HoverPopover } from '@/components/ui/hover-popover';
 
-/** Domain wording for the toggle's hint — keeps analyze and verify identical
- * in structure, differing only in the noun/verb. */
+/** Domain wording for the toggle's hint — keeps the control's structure fixed,
+ * differing only in the noun/verb per surface. */
 export type DiffModeSubject = {
-  /** Third-person verb for the run, e.g. "analyzes" / "verifies". */
+  /** Third-person verb for the run, e.g. "analyzes". */
   verb: string;
-  /** Plural noun for the findings, e.g. "violations" / "drifts". */
+  /** Plural noun for the findings, e.g. "violations". */
   plural: string;
 };
 
@@ -31,10 +31,9 @@ function DiffModeHint({ subject }: { subject: DiffModeSubject }) {
 }
 
 /**
- * Normal / Git Diff segmented toggle, shared by analyze (page Header) and
- * verify (VerifyHeaderActions) so the control — and its hover explanation —
- * look and behave identically. The hint text is built from `subject` so the
- * two surfaces only differ in domain wording (violations vs drifts).
+ * Normal / Git Diff segmented toggle used in the page Header. The hint text is
+ * built from `subject` so the control's wording adapts to the surface's domain
+ * (e.g. violations).
  */
 export function DiffModeToggle({
   diffMode,

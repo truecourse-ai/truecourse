@@ -11,7 +11,8 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { readManifest, readGuardLatest, readGuardResult, guardResultPath } from "@truecourse/guard-runner";
+import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
+import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import type { GuardScenarioResult, GuardGenerateReport } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
@@ -75,20 +76,16 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
 
   switch (result.status) {
     case "no-recipe":
-      p.log.error("No .truecourse/scenarios/recipe.json found. Add a recipe describing how to build and invoke the entrypoint.");
-      p.outro("Aborted.");
-      process.exit(1);
-      return;
     case "invalid-recipe":
-      p.log.error(`recipe.json is invalid: ${result.message}`);
+      p.log.error(runFailureMessage(result));
       p.outro("Aborted.");
       process.exit(1);
       return;
     case "no-scenarios": {
       if (result.requestedId) {
-        p.log.error(`No scenario with id "${result.requestedId}".`);
+        p.log.error(runFailureMessage(result));
       } else {
-        p.log.info("No scenarios found under .truecourse/scenarios/.");
+        p.log.info(runFailureMessage(result));
       }
       printLoadErrors(result.loadErrors);
       p.outro("Nothing ran.");
@@ -96,7 +93,7 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
       return;
     }
     case "build-failed": {
-      p.log.error(`Build failed (\`${result.build.command}\`)${result.build.timedOut ? " — timed out" : ""}.`);
+      p.log.error(runFailureMessage(result));
       const tail = result.build.output.trimEnd().split("\n").slice(-15);
       for (const line of tail) console.log(`  ${line}`);
       printLoadErrors(result.loadErrors);
@@ -107,14 +104,18 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     case "entry-preflight-failed": {
       // The build succeeded but the entry can't start — ONE loud error with the FULL
       // (untruncated) startup stderr, never N identical scenario failures.
-      p.log.error(`The recipe entry \`${result.preflight.entry}\` failed to start — every scenario would fail identically.`);
-      for (const line of result.preflight.stderr.trimEnd().split("\n")) console.log(`  ${line}`);
-      p.log.step(`Rebuild it with \`${result.buildCommand}\` (its build output is likely stale or incomplete), then re-run \`truecourse guard run\`.`);
+      p.log.error(runFailureMessage(result));
       printLoadErrors(result.loadErrors);
       p.outro("Aborted — the entry could not start; no scenarios ran.");
       process.exit(1);
       return;
     }
+    case "run-timed-out":
+    case "aborted":
+      p.log.error(runFailureMessage(result));
+      p.outro("Aborted.");
+      process.exit(1);
+      return;
     case "ok":
       break;
   }
@@ -265,7 +266,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // The generate persisted its report at the end (usage + generatedAt); read it
   // back so the summary reuses the exact `guard status` composition. Fall back to
   // the in-memory result if the file is somehow absent.
-  const report: GuardGenerateReport = readGuardResult(repoRoot) ?? { ...guard, generatedAt: new Date().toISOString() };
+  const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)));
 
   if (guard.written.length === 0 && guard.birthFindings.length === 0 && guard.errors.length === 0) {
@@ -382,9 +383,9 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   p.intro("Guard status");
 
   const summary = composeGuardStatus(
-    readManifest(repoRoot),
-    readGuardLatest(repoRoot),
-    readGuardResult(repoRoot),
+    await readManifest(repoRoot),
+    await readGuardLatest(repoRoot),
+    await readGuardResult(repoRoot),
   );
 
   // Coverage — scenarios/manifest.json.
@@ -467,7 +468,7 @@ export interface RunGuardDriftsOptions {
 
 export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  const latest = readGuardLatest(repoRoot);
+  const latest = await readGuardLatest(repoRoot);
   const drifts = orderGuardDrifts(latest?.scenarios);
 
   if (opts.json) {

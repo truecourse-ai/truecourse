@@ -1,6 +1,6 @@
 /**
- * Workspace-scoped Knowledge for the hosted edition. Specs/contracts generated
- * from connected tools (or manual upload) are shared by every repo in the
+ * Workspace-scoped Knowledge for the hosted edition. Specs generated from
+ * connected tools (or manual upload) are shared by every repo in the
  * workspace, so they are keyed by the WorkOS organization id (`workspace_org_id`,
  * the same convention as `gh_repos`/`gh_installations`) rather than `repo_key`.
  *
@@ -10,15 +10,15 @@
  * keeps the repo PK and migration history untouched.
  *
  * `knowledge_documents` is a thin per-document provenance ledger: one row per
- * source doc the Knowledge was built from. We NEVER store the body — only its
- * identity + content hash (for incremental-sync diffing and UI click-through).
+ * source doc the Knowledge was built from — identity + content hash (for
+ * incremental-sync diffing and UI click-through). The body itself is stored
+ * separately, content-addressed in the shared `content` table under a per-org
+ * knowledge scope keyed by that same `contentHash`; the ledger row is the pointer.
  */
 
 import {
   pgTable,
   text,
-  integer,
-  jsonb,
   timestamp,
   primaryKey,
   index,
@@ -37,29 +37,6 @@ export const workspaceSpecSets = pgTable(
     updatedAt: ts('updated_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.workspaceOrgId, t.artifact] })],
-);
-
-/**
- * Workspace contracts: the `.tc` corpus generated from the workspace's canonical
- * claims, shared by every repo. Like the repo `contract_sets`, only the per-set
- * MANIFEST (`{relPath: sha}`) lives here; the `.tc` bodies are content-addressed
- * blobs in the `BlobStore`. Always-latest — one current set per `(org, kind)`,
- * no commit dimension (mirrors `workspace_spec_sets`).
- */
-export const workspaceContractSets = pgTable(
-  'workspace_contract_sets',
-  {
-    workspaceOrgId: text('workspace_org_id').notNull(),
-    kind: text('kind').notNull(), // 'contracts' | 'contracts_inferred'
-    /** `{ v: 1, files: { relPath: 'sha256-…' } }` — the set's content manifest. */
-    manifest: jsonb('manifest').$type<unknown>().notNull(),
-    /** sha256 over the canonical (sorted) manifest — stable set identity / GC mark. */
-    manifestHash: text('manifest_hash').notNull(),
-    fileCount: integer('file_count').notNull(),
-    createdAt: ts('created_at').notNull(),
-    updatedAt: ts('updated_at').notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.workspaceOrgId, t.kind] })],
 );
 
 export const knowledgeDocuments = pgTable(

@@ -212,6 +212,50 @@ export interface IntegrationFieldMeta {
   placeholder?: string
   /** The one secret field — encrypted at rest, shown masked. */
   secret?: boolean
+  /** A field the user may leave blank; the "Connected" check skips it. */
+  optional?: boolean
+}
+
+/**
+ * The processing cost estimate the sweep captures — structurally the OSS
+ * `LlmEstimate` (the shape `LlmEstimateModal` renders), so the Process confirm
+ * dialog opens instantly from the stored record, without re-sweeping.
+ */
+export interface IntegrationPendingEstimate {
+  totalEstimatedTokens: number
+  tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>
+  /** Per-stage breakdown; absent/empty ⇒ no LLM work (Process skips the modal). */
+  stages?: Array<{
+    stage: string
+    label?: string
+    model: string
+    calls: number
+    estimatedTokens: number
+    callsRange?: { low: number; high: number }
+    estimatedCostUsd?: number
+  }>
+  /** Short confirm copy, e.g. "3 new · 2 changed of 40 docs". */
+  subjectLabel?: string
+  /** Ceiling USD for the whole run; absent when no price table was available. */
+  estimatedCostUsd?: number
+  costSource?: 'live' | 'cache' | 'bundled'
+  /** True when some processing stages are unpriced (cost is "at least"). */
+  costPartial?: boolean
+}
+
+/**
+ * Synced-but-unprocessed work found by the last sync sweep, persisted per
+ * (workspace, connector) so the Process button — and its confirm dialog — is
+ * visible to the WHOLE workspace, across refreshes. Only delta metadata + the
+ * estimate: source bodies are never stored (Process re-fetches internally).
+ */
+export interface IntegrationPendingView {
+  /** Doc delta vs the provenance ledger, counted by content hash. */
+  delta: { new: number; changed: number; removed: number; total: number }
+  /** The full estimate captured at sweep time — the Process confirm dialog. */
+  estimate: IntegrationPendingEstimate
+  /** When the sweep ran (ISO). Advisory — Process works on current source truth. */
+  sweptAt: string
 }
 
 /** Masked, secret-free view of a stored connection (the token is never sent). */
@@ -221,6 +265,8 @@ export interface IntegrationConnectionView {
   hasToken: boolean
   tokenMask: string | null
   updatedAt: string
+  /** Unprocessed sweep result awaiting Process; null when up to date. */
+  pending: IntegrationPendingView | null
 }
 
 /** One connector: metadata + the current connection (or null when unconfigured). */
@@ -242,6 +288,75 @@ export interface IntegrationSaveRequest {
   values: Record<string, string>
 }
 
+// --- Workspace Knowledge page (spec corpus + provenance ledger) ------
+// The workspace analog of the repo Spec tab: the curated corpus + decisions
+// endpoints under /api/ee/knowledge. Corpus/decision object shapes are the same
+// as the repo `/spec/*` routes (the client reuses the corpus components); only
+// the raw-list surfaces differ — they are server-paginated because a Jira project
+// can carry thousands of tickets.
+
+/**
+ * The relevance-dropped docs as a SUMMARY only — never the full array. A corpus
+ * with thousands of skipped bug tickets ships this count, not the rows; the rows
+ * come paginated from `GET /spec/skipped`.
+ */
+export interface KnowledgeSkippedSummary {
+  total: number
+  /** Skipped-doc counts grouped by drop reason, most-common first. */
+  byReason: Array<{ reason: string; count: number }>
+}
+
+/** One relevance-dropped doc — the source ref + the reason it was dropped. */
+export interface KnowledgeSkippedDoc {
+  ref: string
+  reason: string
+  /** The ledger's human title for this ref (synthetic docPath), when a live row
+   *  matches — read-time display enrichment; absent when the row was pruned. */
+  title?: string
+  /** Deep link to the source doc, when the ledger has one. */
+  url?: string | null
+}
+
+/** A page of the corpus's skipped docs (`GET /spec/skipped`). */
+export interface KnowledgeSkippedPage {
+  skipped: KnowledgeSkippedDoc[]
+  /** Total matching the query/reason filter (before the limit/offset slice). */
+  total: number
+}
+
+/**
+ * One provenance-ledger row for the Sources tab — metadata only, no body. The
+ * body loads per-doc on selection via `GET /spec/doc?ref=<docPath>`.
+ */
+export interface KnowledgeDocumentView {
+  /** Connector kind the doc came from ('confluence' | 'jira' | …). */
+  sourceKind: string
+  /** Tool doc id (stable per source doc). */
+  externalId: string
+  /** Stable relative path — the ref for `GET /spec/doc` and corpus provenance. */
+  docPath: string
+  title: string
+  /** Deep link to the source doc (connector); null for manual docs. */
+  url: string | null
+  /** Source version string (connector); null when only a content hash is known. */
+  version: string | null
+  /** When the doc was last pulled from its source (ISO). */
+  lastSyncedAt: string
+}
+
+/** A page of the Sources ledger (`GET /documents?query=&kind=&limit=&offset=`). */
+export interface KnowledgeDocumentsPage {
+  documents: KnowledgeDocumentView[]
+  /** Total matching the query/kind filter (before the limit/offset slice). */
+  total: number
+}
+
+/** One doc's transiently re-fetched markdown (`GET /spec/doc?ref=`). */
+export interface KnowledgeDocContent {
+  ref: string
+  content: string
+}
+
 // --- GitHub App (PR gate) -------------------------------------------
 
 /** A GitHub App installation visible to the current workspace. */
@@ -261,12 +376,15 @@ export interface GithubNotificationPrefs {
   gateFailure: boolean
   /** Spec conflicts need resolution. */
   conflicts: boolean
+  /** A PR changes spec documents and offers to regenerate guard scenarios. */
+  specRegen: boolean
 }
 
 /** All notification types on by default. */
 export const DEFAULT_NOTIFICATION_PREFS: GithubNotificationPrefs = {
   gateFailure: true,
   conflicts: true,
+  specRegen: true,
 }
 
 /** A repository connected to the PR gate. */

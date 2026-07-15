@@ -33,14 +33,23 @@ export interface GuardScenariosState {
   rows: GuardScenarioRowData[];
   /** The run the outcomes were joined from (for evidence fetches); null when never run. */
   runId: string | null;
+  /** The commit the inventory was read at (hosted) — under a PR ref this can be
+   *  the baseline commit (gate fallback); null on OSS / before load. */
+  scenariosCommit: string | null;
   loading: boolean;
   error: string | null;
 }
 
-export function useGuardScenarios(repoId: string | undefined, enabled: boolean, reloadKey = 0): GuardScenariosState {
+export function useGuardScenarios(
+  repoId: string | undefined,
+  enabled: boolean,
+  reloadKey = 0,
+  ref?: string,
+): GuardScenariosState {
   const [recipe, setRecipe] = useState<GuardRecipeCard | null>(null);
   const [rows, setRows] = useState<GuardScenarioRowData[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
+  const [scenariosCommit, setScenariosCommit] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,13 +58,15 @@ export function useGuardScenarios(repoId: string | undefined, enabled: boolean, 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([api.getGuardScenarios(repoId), api.getGuardLatest(repoId)])
-      .then(([inventory, latest]) => {
+    // `ref` (a PR head) scopes both the committed inventory and the run it joins to.
+    Promise.all([api.getGuardScenarios(repoId, ref), api.getGuardLatest(repoId, ref)])
+      .then(([inventory, { latest }]) => {
         if (cancelled) return;
         const byId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s]));
         setRecipe(inventory.recipe);
         setRows(inventory.scenarios.map((s) => ({ ...s, lastResult: byId.get(s.id) ?? null })));
         setRunId(latest?.run.runId ?? null);
+        setScenariosCommit(inventory.scenariosCommit ?? null);
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load scenarios');
@@ -66,7 +77,7 @@ export function useGuardScenarios(repoId: string | undefined, enabled: boolean, 
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey]);
+  }, [repoId, enabled, reloadKey, ref]);
 
-  return { recipe, rows, runId, loading, error };
+  return { recipe, rows, runId, scenariosCommit, loading, error };
 }

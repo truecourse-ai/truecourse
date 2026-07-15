@@ -153,8 +153,9 @@ export async function runBaseline(
     // the scan folds them. Degrades to a no-op on any failure.
     await promoteMergedPrDecisions(deps, req);
 
-    // TODO(spec-guard): the spec→contract→infer baseline flow was removed here; the
-    // guard-EE migration (sm/spec-guards-ee) adds spec→guard (scenario generate + run).
+    // Note: the old spec→contract→infer baseline flow was retired here in favor of
+    // spec→guard (scenario generate + run). The contract subsystem is dormant, kept
+    // for a future spec→code linking layer; nothing runs it at baseline time.
     await deps.onPhase?.('spec');
     const { openConflicts } = await scanPipeline.scan(tmp, ref, deps.specTracker);
 

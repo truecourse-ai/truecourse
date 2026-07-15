@@ -16,6 +16,8 @@ import { z } from 'zod'
 
 export const RecipeSchema = z
   .object({
+    /** Optional shell command run once in the repo root, before every build, to fetch dependencies. */
+    install: z.string().min(1).optional(),
     /** Shell command run once in the repo root to produce the entrypoint. */
     build: z.string().min(1),
     /** Entrypoint argv; scenario `run` argv is appended to this. Repo-relative. */

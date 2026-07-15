@@ -27,8 +27,13 @@ const eeClientModule: EeClientModule = {
       load: () => import('./PullRequestsPage'),
       requiredCapability: 'github-gate',
     },
-    // TODO(spec-guard): Knowledge showed workspace contracts; migrate to guard
-    // coverage/scenarios (route + nav item removed with the contract subsystem).
+    // Workspace Knowledge — the cross-repo spec corpus curated from connected
+    // sources (Confluence / Jira). Spec + Sources tabs; Scenarios placeholder.
+    {
+      path: '/knowledge',
+      load: () => import('./KnowledgePage'),
+      requiredCapability: 'knowledge',
+    },
     {
       path: '/settings',
       load: () => import('./SettingsPage'),
@@ -84,6 +89,13 @@ const eeClientModule: EeClientModule = {
       to: '/pulls',
       iconName: 'GitPullRequest',
       requiredCapability: 'github-gate',
+    },
+    {
+      id: 'knowledge',
+      label: 'Knowledge',
+      to: '/knowledge',
+      iconName: 'BookOpen',
+      requiredCapability: 'knowledge',
     },
     {
       id: 'settings',

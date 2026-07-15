@@ -12,6 +12,10 @@ import {
   promoteDecisionsOverlay,
   discardDecisionsOverlay,
 } from '@truecourse/core/commands/spec-in-process';
+import {
+  promoteGuardDecisionsOverlay,
+  discardGuardDecisionsOverlay,
+} from '@truecourse/core/commands/guard-read';
 import { deleteDiff } from '@truecourse/core/lib/analysis-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { PullRequestPayload } from './webhook.js';
@@ -25,11 +29,22 @@ export async function handlePullRequestClosed(payload: PullRequestPayload): Prom
   const repoFullName = payload.repository.full_name;
   const prNumber = payload.number;
 
-  if (payload.pull_request.merged === true) {
-    await promoteDecisionsOverlay(repoFullName, prNumber);
-  } else {
-    await discardDecisionsOverlay(repoFullName, prNumber);
-  }
+  // The spec and guard overlays settle independently — one failing must not starve
+  // the other. A failure still propagates (after both ran) so webhook redelivery
+  // retries; promotion being idempotent makes the retry safe.
+  const settled = await Promise.allSettled(
+    payload.pull_request.merged === true
+      ? [
+          promoteDecisionsOverlay(repoFullName, prNumber),
+          promoteGuardDecisionsOverlay(repoFullName, prNumber),
+        ]
+      : [
+          discardDecisionsOverlay(repoFullName, prNumber),
+          discardGuardDecisionsOverlay(repoFullName, prNumber),
+        ],
+  );
+  const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+  if (failed) throw failed.reason;
 
   // The PR-scoped analyze diff is transient PR state — drop it once the PR closes.
   // Best-effort: a cleanup failure must not mask the (already-applied) promotion.

@@ -78,9 +78,10 @@ export function rmrf(dir: string): void {
 /** Write a recipe.json whose entry invokes the fixture CLI, plus the shared spec doc. */
 export function writeRecipe(
   repo: string,
-  overrides: { build?: string; entry?: string[]; env?: Record<string, string> } = {},
+  overrides: { install?: string; build?: string; entry?: string[]; env?: Record<string, string> } = {},
 ): void {
   const recipe = {
+    ...(overrides.install ? { install: overrides.install } : {}),
     build: overrides.build ?? 'true',
     entry: overrides.entry ?? ['node', FIXTURE_BIN],
     ...(overrides.env ? { env: overrides.env } : {}),
@@ -117,4 +118,34 @@ export function scenario(
 /** Write a scenario object into the repo as a `.yaml` file. */
 export function writeScenario(repo: string, relPath: string, s: GuardScenario): void {
   writeScenarioFile(repo, relPath, JSON.stringify(s, null, 2))
+}
+
+/**
+ * Host vars that must NEVER reach a guard child — secrets, platform config, and
+ * launch artifacts. Planted in process.env and asserted absent by the env tests.
+ */
+export const PLANTED_SECRETS: Record<string, string> = {
+  DATABASE_URL: 'postgres://user:pw@host/db',
+  TRUECOURSE_SECRET_KEY: 'master-secret-32-characters-longxx',
+  GITHUB_APP_PRIVATE_KEY: '-----BEGIN KEY-----',
+  ANTHROPIC_API_KEY: 'sk-ant-secret',
+  AWS_SECRET_ACCESS_KEY: 'aws-secret',
+  NODE_ENV: 'production',
+  npm_config_registry: 'https://registry.example.com',
+  CI: 'true',
+}
+
+/** Run `fn` with the planted vars set in process.env, restoring the prior state. */
+export async function withPlantedSecrets(fn: () => void | Promise<void>): Promise<void> {
+  const saved: Record<string, string | undefined> = {}
+  for (const key of Object.keys(PLANTED_SECRETS)) saved[key] = process.env[key]
+  Object.assign(process.env, PLANTED_SECRETS)
+  try {
+    await fn()
+  } finally {
+    for (const [key, prev] of Object.entries(saved)) {
+      if (prev === undefined) delete process.env[key]
+      else process.env[key] = prev
+    }
+  }
 }
