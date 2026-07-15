@@ -864,7 +864,7 @@ supplies real behavior on retry."
   and moves NO fingerprints (transport flag, caches stay valid). Verified live: envelope,
   usage, cost reporting intact.
 - **No-tools line scope**: guard prompts (generate/extract/recipe) AND spec-scan prompts
-  (relevance/area-tag/vocab/overlap/relation) via ONE shared constant. Deliberately EXCLUDED:
+  (relevance/area-tag/vocab/overlap; relation detection removed 2026-07-14, #760) via ONE shared constant. Deliberately EXCLUDED:
   contracts prompts (feature may be discontinued — no further investment) and analyze prompts
   (separate `LLMProvider` path, out of scope). Each inclusion moves that stage's fingerprint —
   spec re-scan + guard re-extract are the accepted one-time costs.

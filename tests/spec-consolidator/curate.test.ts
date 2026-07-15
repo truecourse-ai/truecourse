@@ -1,7 +1,6 @@
 /**
  * End-to-end curate(): discover → relevance keep/drop → area-tag → group →
- * relations → overlap-flag → assemble + persist corpus.json. All LLM stages are
- * stubbed; the filename relation detector runs for real (deterministic).
+ * overlap-flag → assemble + persist corpus.json. All LLM stages are stubbed.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -91,14 +90,13 @@ function run(extra: Parameters<typeof curate>[1] = {}) {
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
     verifyOverlapRunner: confirmAll,
-    disableLlmRelationDetection: true,
     skipGit: true,
     ...extra,
   });
 }
 
 describe('curate', () => {
-  it('curates docs into an area-grouped corpus with relations + overlaps', async () => {
+  it('curates docs into an area-grouped corpus with overlaps', async () => {
     const result = await run();
 
     // Relevance dropped the scratch note.
@@ -115,13 +113,10 @@ describe('curate', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/auth.md', 'docs/users-v1.md', 'docs/users-v2.md']);
 
-    // Filename relation: v1 → v2.
-    expect(result.corpus.relations).toEqual([
-      { type: 'replace', older: 'docs/users-v1.md', newer: 'docs/users-v2.md', detectedFrom: 'filename' },
-    ]);
+    // New corpora carry no relations field (relation detection retired, #760).
+    expect(result.corpus.relations).toBeUndefined();
 
-    // Every within-area pair is examined — the replace relation does NOT skip the
-    // (v1,v2) pair: relations are lifecycle metadata, never conflict resolution.
+    // Every within-area pair is examined.
     const overlapPairs = usersArea.overlaps.map((o) => o.docs);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
@@ -132,7 +127,6 @@ describe('curate', () => {
     expect(result.stats.docsKept).toBe(3);
     expect(result.stats.areaCount).toBe(2);
     expect(result.stats.overlapFlags).toBe(3);
-    expect(result.stats.resolvedRelations).toBe(1);
   });
 
   it('persists corpus.json (round-trips through readCorpus)', async () => {
@@ -152,7 +146,9 @@ describe('curate', () => {
     expect(readCorpus(repo)).toBeNull();
   });
 
-  it('applies injected user relations (folded in, user wins) and manualAreas', async () => {
+  it('applies manualAreas and tolerates legacy relations in decisions', async () => {
+    // A legacy `relations` entry is still parsed (back-compat) but inert — the
+    // scan neither consumes it nor lets it skip an overlap pair.
     const decisions: DecisionsFile = {
       ...EMPTY_DECISIONS,
       relations: [
@@ -166,13 +162,7 @@ describe('curate', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
 
-    // The user precedence relation wins the pair over the auto filename replace.
-    const eff = result.relations.find((r) => r.older === 'docs/users-v1.md' && r.newer === 'docs/users-v2.md');
-    expect(eff?.type).toBe('precedence');
-    expect(eff?.detectedFrom).toBe('manual');
-
-    // The relation does NOT skip the pair — the disagreement is still flagged
-    // (relations are lifecycle metadata, never conflict resolution).
+    // The legacy relation does NOT skip the pair — the disagreement is still flagged.
     expect(usersArea.overlaps).toHaveLength(1);
     expect(usersArea.overlaps[0].docs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
@@ -193,15 +183,13 @@ describe('curate', () => {
     expect(result.stats.docsKept).toBe(2);
   });
 
-  it('reads relations + manualAreas from decisions.json on disk when not injected', async () => {
+  it('reads manualAreas from decisions.json on disk when not injected', async () => {
     const specsDir = path.join(repo, '.truecourse', 'specs');
     fs.mkdirSync(specsDir, { recursive: true });
     fs.writeFileSync(
       path.join(specsDir, 'decisions.json'),
       JSON.stringify({
         version: 1,
-        decisions: [],
-        manualChains: [],
         manualIncludes: [],
         relations: [],
         manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
@@ -213,7 +201,6 @@ describe('curate', () => {
       areaTagRunner: areaTagger,
       overlapRunner: flagAll,
       verifyOverlapRunner: confirmAll,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
@@ -325,7 +312,6 @@ describe('curate — overlap full window matrix', () => {
       relevanceRunner: keepAll,
       areaTagRunner: tagSame,
       overlapRunner: counting,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
 
@@ -363,7 +349,6 @@ describe('curate — include-scope', () => {
       relevanceRunner: keepAll,
       areaTagRunner: tagOne,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
   }

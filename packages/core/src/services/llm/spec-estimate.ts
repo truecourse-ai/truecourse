@@ -28,7 +28,6 @@ import {
   RELEVANCE_SYSTEM_PROMPT,
   AREA_TAGGER_SYSTEM_PROMPT,
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  CHAIN_DETECTION_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   OVERLAP_WINDOW_CHARS,
   VERIFY_OVERLAP_SYSTEM_PROMPT,
@@ -80,7 +79,6 @@ const STAGE_LABELS: Record<string, string> = {
   relevance: 'Filtering docs',
   areaTag: 'Tagging areas',
   vocab: 'Normalizing vocabulary',
-  relation: 'Detecting relations',
   overlap: 'Flagging overlaps',
   verifyOverlap: 'Verifying conflicts',
   // generate
@@ -194,13 +192,6 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       model: resolveModel('spec.vocab', undefined, repoRoot),
       calls: hasWork && nKept > 0 ? 1 : 0,
       avgInputTokens: tokensFromChars(VOCAB_NORMALIZER_SYSTEM_PROMPT.length, 2000),
-      avgOutputTokens: 200,
-    },
-    {
-      stage: 'relation',
-      model: resolveModel('spec.relation', undefined, repoRoot),
-      calls: hasWork && nKept >= 2 ? 1 : 0,
-      avgInputTokens: tokensFromChars(CHAIN_DETECTION_SYSTEM_PROMPT.length, nKept * 200),
       avgOutputTokens: 200,
     },
     {

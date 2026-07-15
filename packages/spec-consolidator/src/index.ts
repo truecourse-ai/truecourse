@@ -2,9 +2,8 @@
  * Public surface of the spec-consolidator package (corpus path).
  *
  * The scan pipeline curates docs into a `CuratedCorpus` (areas +
- * relations + overlaps); this index re-exports the type contracts and
- * stage entry points the CLI, dashboard server, and contract-extractor
- * talk through.
+ * overlaps); this index re-exports the type contracts and stage entry
+ * points the CLI, dashboard server, and contract-extractor talk through.
  */
 
 export type {
@@ -77,9 +76,6 @@ export {
 } from './vocab-normalizer.js';
 export type { VocabRunner, VocabRunnerInput, VocabNormalizerOptions } from './vocab-normalizer.js';
 
-export { detectRelations, effectiveRelations } from './relation.js';
-export type { DetectRelationsOptions } from './relation.js';
-
 export {
   flagOverlaps,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
@@ -126,9 +122,6 @@ export {
   specRootPath,
 } from './orchestrator.js';
 
-export { detectVersionChains } from './version-chain.js';
-export type { VersionChain } from './version-chain.js';
-
 export {
   filterByRelevance,
   planRelevanceWork,
@@ -144,16 +137,3 @@ export type {
   RelevanceRunnerInput,
   RelevanceVerdict,
 } from './relevance-filter.js';
-
-export {
-  detectVersionChainsViaLlm,
-  CHAIN_DETECTION_SYSTEM_PROMPT,
-  buildChainDetectionUserPrompt,
-} from './version-chain-llm.js';
-export type {
-  ChainDetectionInput,
-  ChainRunner,
-  ChainRunnerOptions,
-  DetectChainsOptions,
-  DetectedChainOutput,
-} from './version-chain-llm.js';

@@ -58,7 +58,6 @@ async function runCapturingDetails(): Promise<string[]> {
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
     verifyOverlapRunner: confirmAll,
-    disableLlmRelationDetection: true,
   });
   return details;
 }

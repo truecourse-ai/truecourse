@@ -7,7 +7,7 @@
  * Same shape as `analyze-in-process.ts` — the caller passes a
  * `StepTracker` and we drive it through the high-level phases:
  *
- *   curate         discover → tag areas → group → detect relations → corpus.json
+ *   curate         discover → tag areas → group → flag overlaps → corpus.json
  *   generate       corpus.json → contracts/*.tc
  *
  * Step keys + labels are stable across CLI/dashboard so the progress
@@ -138,7 +138,6 @@ import {
 export const CURATE_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'tag', label: 'Tagging doc areas' },
-  { key: 'relate', label: 'Detecting relations' },
   { key: 'overlap', label: 'Flagging overlaps' },
   { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
@@ -167,7 +166,6 @@ const STEP_STAGES: Record<string, StageId[]> = {
   // scan (curate)
   discover: ['spec.relevance'],
   tag: ['spec.areaTag', 'spec.vocab'],
-  relate: ['spec.relation', 'spec.chainDetect'],
   overlap: ['spec.overlap'],
   verify: ['spec.verifyOverlap'],
   // generate (corpus)
@@ -418,7 +416,6 @@ function resolveCurateModels(repoRoot: string): CurateModels {
     vocab: resolveModel('spec.vocab', undefined, repoRoot),
     overlap: resolveModel('spec.overlap', undefined, repoRoot),
     verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot),
-    relation: resolveModel('spec.relation', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
 }
@@ -439,7 +436,7 @@ function resolveCorpusGenerateModels(repoRoot: string): CorpusGenerateModels {
 // ---------------------------------------------------------------------------
 // Corpus path drivers — shared by the CLI (`spec scan`, `contracts generate`)
 // and the dashboard routes. `curateInProcess` builds corpus.json (discover →
-// tag → group → detect relations); `generateFromCorpusInProcess` turns it into
+// tag → group → flag overlaps); `generateFromCorpusInProcess` turns it into
 // the contracts/*.tc corpus.
 // ---------------------------------------------------------------------------
 
@@ -483,11 +480,9 @@ export interface CurateInProcessOptions {
   areaTagRunner?: CurateOptions['areaTagRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
   verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
-  relationChainRunner?: CurateOptions['relationChainRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
   disableOverlapDetection?: boolean;
-  disableLlmRelationDetection?: boolean;
 }
 
 /**
@@ -530,14 +525,10 @@ export async function curateInProcess(
     tracker?.start('tag');
     tagStarted = true;
   };
-  // Relations are detected between tagging and overlap with no progress signal of
-  // their own, so the `relate` step is opened+closed at the overlap boundary.
   const ensureOverlap = (): void => {
     ensureTag();
     if (overlapStarted) return;
     tracker?.done('tag', withUsage('tag'));
-    tracker?.start('relate');
-    tracker?.done('relate', withUsage('relate'));
     tracker?.start('overlap');
     overlapStarted = true;
   };
@@ -571,11 +562,9 @@ export async function curateInProcess(
         areaTagRunner: options.areaTagRunner,
         overlapRunner: options.overlapRunner,
         verifyOverlapRunner: options.verifyOverlapRunner,
-        relationChainRunner: options.relationChainRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
         disableOverlapDetection: options.disableOverlapDetection,
-        disableLlmRelationDetection: options.disableLlmRelationDetection,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
         },
@@ -1499,8 +1488,7 @@ export async function recuratePrCorpus(
 //
 // Pure read-modify-write helpers around decisions. The dashboard server routes
 // and the CLI both call these so the two surfaces agree on update semantics.
-// None of these re-curate the corpus — callers who need the new relations
-// reflected (CLI write commands) run curateInProcess afterwards.
+// None of these re-curate the corpus.
 // ---------------------------------------------------------------------------
 
 // Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by
@@ -1654,10 +1642,10 @@ function applyRemoveConflictResolution(
 
 /**
  * Add (or replace) a user-authored doc→doc relation (replace / precedence /
- * keep-both) — the doc-lifecycle/precedence tool (`spec chains`). A relation
- * never resolves a conflict; that takes a verdict, a dismissal, or an exclude.
- * When a relation for the same (older, newer, scope) already exists it's
- * replaced. Self-pairs are rejected. Re-run `spec scan` (curate) to apply.
+ * keep-both) in decisions.json. LEGACY (retired #760): relations are inert —
+ * curate no longer applies them and no live stage consumes them — but the write
+ * verb is kept so decisions.json stays round-trippable. When a relation for the
+ * same (older, newer, scope) already exists it's replaced; self-pairs are rejected.
  */
 export async function addRelation(
   repoRoot: string,

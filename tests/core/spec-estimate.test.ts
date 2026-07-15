@@ -63,7 +63,7 @@ describe('estimateStageTokens', () => {
 
   it('drops zero-call stages', () => {
     const est = estimateStageTokens([
-      { stage: 'relation', model: 'sonnet', calls: 0, avgInputTokens: 50, avgOutputTokens: 10 },
+      { stage: 'vocab', model: 'sonnet', calls: 0, avgInputTokens: 50, avgOutputTokens: 10 },
     ]);
     expect(est.stages).toEqual([]);
     expect(est.totalEstimatedTokens).toBe(0);
@@ -281,7 +281,6 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       decisions: decisions as any,
       disableVocabNormalization: true,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       relevanceRunner: async ({ doc }) => {
         rel++;
         return { path: doc.path, include: doc.path === 'docs/keep.md', reason: 'stub' };

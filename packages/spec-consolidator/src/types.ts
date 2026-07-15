@@ -49,26 +49,25 @@ export const DocKindSchema = z.enum([
 export type DocKind = z.infer<typeof DocKindSchema>;
 
 // ---------------------------------------------------------------------------
-// Doc-level relations — the corpus redesign's resolution verbs
+// Doc-level relations — LEGACY (retired 2026-07-14, #760)
 // ---------------------------------------------------------------------------
 
 /**
- * The three doc→doc relations the curated-corpus pipeline resolves an
- * overlap into:
+ * The three doc→doc relation verbs. LEGACY: relation auto-detection was retired
+ * (#760) and nothing in the live pipeline consumes relations anymore. The schema
+ * is kept so a `decisions.json` (or pre-#760 corpus) carrying `relations` still
+ * parses, and so the deprecated contract-generate path can honor a relation
+ * present on an old corpus.
  *
- *   - "replace"    hard supersession — `newer` fully replaces `older`;
- *                  `older` is excluded from generate. Real version chains.
- *   - "precedence" soft / refine — both docs feed generate, `newer` wins
- *                  WHERE THEY OVERLAP, `older`'s unique content survives.
- *   - "keep-both"  peers — both current, combine. This is also the implicit
- *                  default when no relation is recorded, so it is rarely
- *                  stored; an explicit entry pins the intent.
+ *   - "replace"    hard supersession — `newer` fully replaces `older`.
+ *   - "precedence" soft / refine — `newer` wins where they overlap.
+ *   - "keep-both"  peers — both current, combine.
  */
 export const RelationTypeSchema = z.enum(['replace', 'precedence', 'keep-both']);
 export type RelationType = z.infer<typeof RelationTypeSchema>;
 
 /**
- * A doc→doc relation. May be **area-scoped** so one doc can be
+ * A doc→doc relation (legacy). May be **area-scoped** so one doc can be
  * authoritative for one area without burying another.
  */
 export const RelationSchema = z.object({
@@ -92,7 +91,7 @@ export type Relation = z.infer<typeof RelationSchema>;
 /**
  * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
  * disagreement between two specific sections (plan item 31), as opposed to a
- * doc-level {@link RelationSchema} (which now lives in the chains world). Keyed by
+ * doc-level {@link RelationSchema} (a legacy, now-inert relation). Keyed by
  * the *dispute identity*: the unordered doc pair plus each side's section anchor
  * and (when the detector captured one) its verbatim disputed-sentence quote. This
  * identity re-matches the same dispute across a rescan even though the corpus's
@@ -147,11 +146,12 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  * The decisions file — the user-authored curation intent the corpus
  * path reads:
  *
- *   - `relations[]`     doc→doc relations (replace/precedence/keep-both)
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
  *   - `conflictResolutions[]` section-scoped conflict verdicts (item 31)
+ *   - `relations[]`     LEGACY doc→doc relations (retired #760) — still parsed
+ *                       and preserved, but inert (nothing consumes them).
  */
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
@@ -168,7 +168,7 @@ export const DecisionsFileSchema = z.object({
    * for the same path. Repo-relative paths.
    */
   manualExcludes: z.array(z.string()).default([]),
-  /** User-authored doc→doc relations (replace/precedence/keep-both). */
+  /** LEGACY user-authored doc→doc relations (retired #760) — parsed and preserved, but inert. */
   relations: z.array(RelationSchema).default([]),
   /** User overrides of a doc's auto-assigned area tags. */
   manualAreas: z.array(ManualAreaSchema).default([]),

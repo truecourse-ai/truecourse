@@ -15,7 +15,6 @@ import path from 'node:path';
 import {
   readCorpus,
   readCorpusDecisions,
-  effectiveRelations,
   isProcessArea,
   splitArea,
   type CuratedCorpus,
@@ -74,7 +73,11 @@ export function readCorpusForGenerate(repoRoot: string, opts: CorpusReadOptions 
   const decisions = opts.decisions ?? readCorpusDecisions(repoRoot);
   const resolve = opts.resolveContent ?? ((ref: string) => defaultResolveContent(repoRoot, ref));
 
-  const relations = effectiveRelations(corpus.relations, decisions.relations ?? []);
+  // Relations are a retired feature (#760): new corpora carry none, so this is
+  // `[]` for anything scanned since. A pre-#760 corpus that still carries a
+  // `relations` array is honored exactly as before — the older doc of a `replace`
+  // is dropped and `precedence` orders the survivors.
+  const relations = effectiveRelations(corpus.relations ?? [], decisions.relations ?? []);
   const docByRef = new Map(corpus.docs.map((d) => [d.ref, d]));
 
   const out: AreaGenInput[] = [];
@@ -106,8 +109,38 @@ export function readCorpusForGenerate(repoRoot: string, opts: CorpusReadOptions 
 }
 
 // ---------------------------------------------------------------------------
-// Relation application
+// Relation application (legacy — only a pre-#760 corpus carries relations)
 // ---------------------------------------------------------------------------
+
+/**
+ * Merge a corpus's (legacy) relations with any user-authored relations in
+ * decisions. A user relation supersedes an auto relation on the same doc pair
+ * and gains `detectedFrom: 'manual'` when unset; user relations on one pair
+ * scoped to different areas coexist. Relocated from the retired relation stage
+ * so the deprecated contract-generate path still honors a relation present on an
+ * old corpus.
+ */
+function effectiveRelations(auto: Relation[], user: Relation[]): Relation[] {
+  const userMarked = user.map((r) => ({ ...r, detectedFrom: r.detectedFrom ?? ('manual' as const) }));
+  const userPairs = new Set(userMarked.map(pairKey));
+  const survivingAuto = auto.filter((a) => !userPairs.has(pairKey(a)));
+  return [...dedupeBy(userMarked, scopedKey), ...survivingAuto];
+}
+
+const pairKey = (r: Relation): string => [r.older, r.newer].sort().join(' ');
+const scopedKey = (r: Relation): string => `${pairKey(r)}::${r.scope ?? '*'}`;
+
+function dedupeBy(relations: Relation[], keyFn: (r: Relation) => string): Relation[] {
+  const seen = new Set<string>();
+  const out: Relation[] = [];
+  for (const r of relations) {
+    const key = keyFn(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
 
 /**
  * Refs dropped from an area because a `replace` relation supersedes them there.

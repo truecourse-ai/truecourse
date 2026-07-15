@@ -140,9 +140,7 @@ const CORPUS = {
       generatedAt: '',
       docs: [{ ref: 'docs/SPEC.md', kind: 'unknown', lastTouched: '', areaTags: [] }],
       areas: [],
-      relations: [],
     },
-    userRelations: [],
   },
   hydrating: false,
   scanning: false,
@@ -184,9 +182,7 @@ const CORPUS2 = {
           ],
         },
       ],
-      relations: [],
     },
-    userRelations: [],
   },
 } as unknown as SpecCorpusState;
 
@@ -206,7 +202,6 @@ function stubFetchCoverage(coverage: GuardDocCoverage) {
       const u = String(url);
       if (u.includes('/guard/coverage')) return json(coverage);
       if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
-      if (u.includes('/spec/relations')) return json({ relations: [] });
       if (u.includes('/guard/evidence')) return new Response('TRANSCRIPT-BODY-XYZ', { status: 200 });
       if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 1\nid: s1' });
       return json({});

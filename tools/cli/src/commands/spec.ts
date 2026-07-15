@@ -1,10 +1,10 @@
 /**
  * `truecourse spec <subcommand>` — Spec Consolidation Module surface.
  *
- *   scan      docs → curated corpus.json (areas + relations + overlap flags)
- *   status    summary: docs, areas, relations, open vs resolved overlaps
+ *   scan      docs → curated corpus.json (areas + overlap flags)
+ *   status    summary: docs, areas, open vs resolved overlaps
  *
- * Conflict/relation resolution lives in `spec conflicts` / `spec chains`.
+ * Conflict resolution lives in `spec conflicts`.
  * Every command delegates the heavy lifting to
  * `@truecourse/core/commands/spec-in-process` so the CLI and the
  * dashboard server execute the same code path. The only thing the
@@ -90,7 +90,6 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   }
   p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
   p.log.step(`areas       ${s.areaCount}`);
-  p.log.step(`relations   ${s.resolvedRelations}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
@@ -133,7 +132,6 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
     return;
   }
   const decisions = readCorpusDecisions(root);
-  const userRels = decisions.relations ?? [];
   const conflicts = buildCorpusConflicts(corpus, decisions);
   const open = conflicts.filter((c) => !c.resolved).length;
   const resolved = conflicts.length - open;
@@ -141,7 +139,6 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   const rows: Array<[string, string]> = [
     ["Docs (kept)", String(corpus.docs.length)],
     ["Areas", String(corpus.areas.length)],
-    ["Relations (auto + user)", `${corpus.relations.length} + ${userRels.length}`],
     ["Overlaps", `${open} open · ${resolved} resolved`],
     ["Manual includes", String((decisions.manualIncludes ?? []).length)],
   ];

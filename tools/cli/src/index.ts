@@ -30,11 +30,6 @@ import {
   runSpecConflictsResolve,
 } from "./commands/spec-conflicts.js";
 import {
-  runSpecChainsList,
-  runSpecChainsAdd,
-  runSpecChainsRemove,
-} from "./commands/spec-chains.js";
-import {
   runSpecDocsList,
   runSpecDocsSkipped,
   runSpecDocsInclude,
@@ -231,50 +226,6 @@ conflictsCmd
       right: opts.right,
       dismiss: opts.dismiss,
       note: opts.note,
-    });
-  });
-
-// -- Chains (doc→doc relations) ---------------------------------------------
-const chainsCmd = specCmd
-  .command("chains")
-  .description("Manage doc→doc relations (supersession / precedence overrides)");
-
-chainsCmd
-  .command("list")
-  .description("List effective relations (auto-detected + user-authored)")
-  .action(async () => {
-    await runSpecChainsList();
-  });
-
-chainsCmd
-  .command("add")
-  .description("Record a relation between two docs")
-  .requiredOption("--older <path>", "Repo-relative path of the older doc")
-  .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
-  .option("--type <type>", "replace (default) | precedence | keep-both", "replace")
-  .option("--scope <area>", "Confine the relation to one area id (product/concern)")
-  .option("--note <text>", "Optional rationale")
-  .action(async (opts) => {
-    await runSpecChainsAdd({
-      older: opts.older,
-      newer: opts.newer,
-      type: opts.type,
-      scope: opts.scope,
-      note: opts.note,
-    });
-  });
-
-chainsCmd
-  .command("remove")
-  .description("Remove a relation")
-  .requiredOption("--older <path>", "Repo-relative path of the older doc")
-  .requiredOption("--newer <path>", "Repo-relative path of the newer doc")
-  .option("--scope <area>", "Only the relation scoped to this area")
-  .action(async (opts) => {
-    await runSpecChainsRemove({
-      older: opts.older,
-      newer: opts.newer,
-      scope: opts.scope,
     });
   });
 

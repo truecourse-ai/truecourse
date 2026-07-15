@@ -2,7 +2,7 @@
  * The Spec / Guard-Coverage header action: Scan (first curate) or Rescan (re-curate
  * the docs into the corpus). Mirrors the other section header actions
  * (ContractsHeaderActions / GuardHeaderActions) — same outline variant — and carries
- * an amber staleness dot when there is queued work: include/exclude/relation/conflict
+ * an amber staleness dot when there is queued work: include/exclude/conflict
  * decisions recorded since the last scan (`decisionsPending`) OR a kept doc edited
  * since it (`docsChanged`), so one Rescan applies the batch.
  */
