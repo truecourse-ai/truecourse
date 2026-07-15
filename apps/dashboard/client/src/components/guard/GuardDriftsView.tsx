@@ -33,6 +33,7 @@ export function GuardDriftsView({
   enabled = true,
   reloadKey = 0,
   prRef,
+  prNumber,
   blockedOnConflicts = false,
 }: {
   repoId: string;
@@ -42,6 +43,9 @@ export function GuardDriftsView({
   /** The PR head SHA when viewing a pull request (EE) — scopes the run to that
    *  commit and switches the empty state to the gate-status card. */
   prRef?: string;
+  /** The PR number (EE) — scopes the run picker to the PR's own timeline
+   *  (one run per pushed head); without it a PR view lists no history. */
+  prNumber?: number;
   /**
    * The last guard generate ended `open-conflicts` — scenario generation is
    * blocked, so there can be no run. The no-run empty state says so and routes to
@@ -56,6 +60,7 @@ export function GuardDriftsView({
     enabled,
     reloadKey,
     prRef,
+    prNumber,
   );
   const { activeId, openTabs, open, close, selectOverview } = useGuardTabs('gdrift', repoId);
 

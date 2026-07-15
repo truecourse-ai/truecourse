@@ -1406,6 +1406,7 @@ function RepoPageInner() {
               repoId={repoId}
               reloadKey={guardReloadKey}
               prRef={refForTabs}
+              prNumber={prNumber ?? undefined}
               blockedOnConflicts={guardBlocked}
             />
           ) : leftTab === 'analyses' ? (

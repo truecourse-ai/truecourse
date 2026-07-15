@@ -29,6 +29,7 @@ import {
   readGuardResultForView,
   readGuardReport,
   readGuardRun,
+  readGuardHistoryForPr,
   readGuardScenarioSource,
   readGuardEvidence,
   readGuardEvidenceAt,
@@ -95,7 +96,10 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
 router.get('/:id/guard/history', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(await readGuardHistory(repo.path));
+    // `?pr=` (EE): the PR's own run timeline — one run per pushed head, via the
+    // gate-heads seam — never the repo baseline history under a PR view.
+    const pr = prOf(req);
+    res.json(pr !== undefined ? await readGuardHistoryForPr(repo.path, pr) : await readGuardHistory(repo.path));
   } catch (e) {
     next(e);
   }

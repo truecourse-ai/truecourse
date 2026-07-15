@@ -14,9 +14,9 @@ import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
 import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub } from '@truecourse/ee-github-app';
+import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
-import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
+import { setGuardGatePendingLookup, setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
@@ -199,6 +199,11 @@ const plugin: EePlugin = {
     // is still in flight for the head. Resolve the repo's workspace, then look up
     // the single-flight `guard.gate` job for `(repo, headSha)`. Best-effort — any
     // failure resolves to no pending gate (a plain empty state).
+    // The PR Runs picker lists the PR's OWN timeline (one run per pushed head).
+    // Core's `readGuardHistoryForPr` resolves the heads through this seam from
+    // the gate-run records; OSS leaves it unset (no timeline).
+    setGuardGateHeadsLookup(createGuardGateHeadsLookup(gateStore));
+
     setGuardGatePendingLookup(async (repoKey, headSha) => {
       try {
         const link = await gateStore.getRepo(repoKey);

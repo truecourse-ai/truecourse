@@ -28,3 +28,23 @@ export function setGuardGatePendingLookup(fn: GuardGatePendingLookup | null): vo
 export function getGuardGatePendingLookup(): GuardGatePendingLookup | null {
   return lookup;
 }
+
+/**
+ * The distinct head SHAs the guard gate has run for `(repoKey, prNumber)`,
+ * newest-first — the PR run timeline's spine. Same seam idiom as the pending
+ * lookup: EE registers it at boot (closing over its gate store); unset (OSS) →
+ * `readGuardHistoryForPr` reports no runs.
+ */
+export type GuardGateHeadsLookup = (repoKey: string, prNumber: number) => Promise<string[]>;
+
+let headsLookup: GuardGateHeadsLookup | null = null;
+
+/** Install the EE heads lookup (or clear it with null). Called once at boot. */
+export function setGuardGateHeadsLookup(fn: GuardGateHeadsLookup | null): void {
+  headsLookup = fn;
+}
+
+/** The active guard-gate-heads lookup, or null when none is registered (OSS). */
+export function getGuardGateHeadsLookup(): GuardGateHeadsLookup | null {
+  return headsLookup;
+}

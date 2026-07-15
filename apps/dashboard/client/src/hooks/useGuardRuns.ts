@@ -33,6 +33,7 @@ export function useGuardRuns(
   enabled: boolean,
   reloadKey = 0,
   ref?: string,
+  prNumber?: number,
 ): GuardRunsState {
   const [latest, setLatest] = useState<GuardLatest | null>(null);
   const [pending, setPending] = useState<GuardGatePending | null>(null);
@@ -49,11 +50,16 @@ export function useGuardRuns(
     setError(null);
     // `ref` (a PR head) scopes the run to that commit; the response carries the
     // pending gate (if any) so the view never shows baseline data under a PR.
-    // The run HISTORY is repo-level (baseline runs) — under a PR ref it is not
-    // fetched at all, so a baseline run can never be listed or selected there.
+    // The run HISTORY under a PR ref is the PR's OWN timeline (`?pr=`, one run
+    // per pushed head) — never the repo-level baseline history, so a baseline
+    // run can never be listed or selected there.
     Promise.all([
       api.getGuardLatest(repoId, ref),
-      ref ? Promise.resolve({ runs: [] }) : api.getGuardHistory(repoId),
+      ref
+        ? prNumber != null
+          ? api.getGuardHistory(repoId, prNumber)
+          : Promise.resolve({ runs: [] })
+        : api.getGuardHistory(repoId),
     ])
       .then(([{ latest: l, pending: p }, h]) => {
         if (cancelled) return;
@@ -70,7 +76,7 @@ export function useGuardRuns(
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey, ref]);
+  }, [repoId, enabled, reloadKey, ref, prNumber]);
 
   const selectRun = useCallback(
     (runId: string | null) => {

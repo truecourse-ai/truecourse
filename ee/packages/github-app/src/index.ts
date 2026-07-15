@@ -347,6 +347,7 @@ export {
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';
+export { createGuardGateHeadsLookup } from './guard-gate-heads.js';
 
 // Code Quality gate
 export {

@@ -1066,6 +1066,22 @@ untouched. Companion UX fix: stale/orphaned outcomes now carry a one-line explai
 (`GuardStatusMeta.hint`) under the Runs-list group header and as the badge tooltip — the
 outcome name alone didn't tell users the scenario never executed.
 
+**PR run timeline in the Runs picker (user bug report 2026-07-15, follow-up to the
+baseline-fallback batch). STATUS: BUILT 2026-07-15.** Under a PR ref the Runs picker
+skipped `/guard/history` entirely (correct: baseline runs must never be listable in a PR
+view — pinned by test) but that threw out the PR's OWN runs, so "Recent runs" sat empty
+next to a painted head run. There is no per-attempt history to list — `guard_runs` is
+keyed `(repoKey, commitSha)` and a same-head re-run replaces the row — so the PR timeline
+is one run per pushed head. Fix: `/guard/history?pr=N` → core `readGuardHistoryForPr`
+resolves the PR's distinct head SHAs through the new `GuardGateHeadsLookup` seam
+(`guard-gate-pending.ts`, same idiom as the pending lookup; EE installs
+`createGuardGateHeadsLookup(gateStore)` over the gate-run records at boot, OSS leaves it
+unset ⇒ empty) and joins each head to its stored run via `readGuardRunForCommit` — a head
+whose gate errored before storing a run is skipped (only selectable runs list). Client:
+`useGuardRuns`/`GuardDriftsView` take `prNumber` and fetch the pr-scoped history under a
+PR ref; selecting an older head's run loads it through the existing `/guard/runs/:runId`.
+Baseline runs stay unlistable.
+
 **First-run coverage fixes (user bug reports 2026-07-07, post-scan fresh store — eighth
 review pass).** Four defects found running the published build on a scan-only store (corpus
 present, generate never run):

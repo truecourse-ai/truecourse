@@ -32,8 +32,10 @@ import {
   readGuardReport,
   readManifestForView,
   readGuardResultForView,
+  readGuardHistoryForPr,
   computeGuardStaleness,
 } from '../../packages/core/src/commands/guard-read';
+import { setGuardGateHeadsLookup } from '../../packages/core/src/lib/guard-gate-pending';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
 
 const REPO = 'acme/api';
@@ -318,6 +320,31 @@ describe('hosted repo-level view with NO baseline — empty, never the newest se
       hasGenerated: false,
       hasRun: false,
     });
+  });
+});
+
+describe('readGuardHistoryForPr — the PR run timeline (hosted)', () => {
+  afterEach(() => setGuardGateHeadsLookup(null));
+
+  it('lists one run per pushed head (skipping unstored heads), never the baseline', async () => {
+    // The gate ran three heads for PR 22; the middle push errored before storing
+    // a run. A baseline run exists too — it must never appear in the PR timeline.
+    setGuardGateHeadsLookup(async (repoKey, pr) =>
+      repoKey === REPO && pr === 22 ? ['head2222alpha', 'headnorun999', 'head1111alpha'] : [],
+    );
+    await guardStore.writeGuardRun(REPO, RUN('run-h1', 'head1111alpha', '2026-07-08T00:00:00.000Z'));
+    await guardStore.writeGuardRun(REPO, RUN('run-h2', 'head2222alpha', '2026-07-09T00:00:00.000Z'));
+    await guardStore.writeGuardLatest(REPO, RUN('run-base', 'basesha11111', '2026-07-07T00:00:00.000Z'));
+
+    const h = await readGuardHistoryForPr(REPO, 22);
+    // Oldest-first, the GuardHistory convention (the panel orders for display).
+    expect(h.runs.map((r) => r.runId)).toEqual(['run-h1', 'run-h2']);
+    expect(h.runs.map((r) => r.commit)).toEqual(['head1111alpha', 'head2222alpha']);
+  });
+
+  it('no lookup installed (OSS) → empty, never a store-wide probe', async () => {
+    await guardStore.writeGuardRun(REPO, RUN('run-h1', 'head1111alpha', '2026-07-08T00:00:00.000Z'));
+    expect(await readGuardHistoryForPr(REPO, 22)).toEqual({ runs: [] });
   });
 });
 

@@ -188,6 +188,78 @@ describe('GuardDriftsView — PR-scoped empty / pending state', () => {
   });
 });
 
+describe('GuardDriftsView — PR run timeline (prNumber)', () => {
+  const PR_HISTORY = {
+    runs: [
+      {
+        runId: 'run-pr-head1',
+        ranAt: '2026-07-08T00:00:00.000Z',
+        branch: 'feat/x',
+        commit: 'head1111',
+        summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+      },
+      {
+        runId: 'run-pr-head2',
+        ranAt: '2026-07-09T00:00:00.000Z',
+        branch: 'feat/x',
+        commit: 'head2222',
+        summary: LATEST.summary,
+      },
+    ],
+  };
+  const HEAD_RUN: GuardLatest = { ...LATEST, run: { ...LATEST.run, runId: 'run-pr-head2', commit: 'head2222' } };
+  const OLDER_RUN: GuardLatest = {
+    ...LATEST,
+    run: { ...LATEST.run, runId: 'run-pr-head1', commit: 'head1111' },
+    summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+    scenarios: [{ id: 'old-pass', title: 'older head claim', binds: binds('auth/ok'), outcome: 'pass', durationMs: 1 }],
+  };
+
+  function stubPrTimeline() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/latest')) return json({ latest: HEAD_RUN, pending: null });
+        // The PR view must ask for the PR-scoped timeline — the pr-less answer
+        // is the repo baseline history, which must never render here.
+        if (u.includes('/guard/history'))
+          return new URL(u, 'http://x').searchParams.get('pr') === '7' ? json(PR_HISTORY) : json(HISTORY);
+        if (u.includes('/guard/runs/run-pr-head1')) return json(OLDER_RUN);
+        return json({});
+      }),
+    );
+  }
+
+  function renderPrTimeline() {
+    return render(
+      <MemoryRouter initialEntries={['/repos/r?section=guard&tab=guarddrifts&pr=7']}>
+        <GuardDriftsView repoId="r" prRef="head2222" prNumber={7} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("lists this PR's runs — one per pushed head — from the pr-scoped history", async () => {
+    stubPrTimeline();
+    renderPrTimeline();
+    await screen.findByText('login rate limits');
+    expect(screen.getByText('run-pr-head1')).toBeInTheDocument();
+    expect(screen.getByText('run-pr-head2')).toBeInTheDocument();
+    expect(screen.queryByText('No earlier runs recorded.')).toBeNull();
+    // The repo baseline history rows never leak in.
+    expect(screen.queryByText(/2026-07-06T00-00-00Z/)).toBeNull();
+  });
+
+  it("selecting an earlier head's run loads its snapshot", async () => {
+    stubPrTimeline();
+    renderPrTimeline();
+    const user = userEvent.setup();
+    await screen.findByText('login rate limits');
+    await user.click(screen.getByText('run-pr-head1'));
+    expect(await screen.findByText('older head claim')).toBeInTheDocument();
+  });
+});
+
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
 

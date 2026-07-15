@@ -51,6 +51,8 @@ import {
   type GuardScenarioSource,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
+  type GuardHistory,
+  type GuardHistoryEntry,
   type GuardSectionScenario,
   type GuardStaleness,
 } from '@truecourse/shared'
@@ -71,6 +73,7 @@ import {
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
+import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
 import { readLatest } from '../lib/analysis-store.js'
@@ -581,6 +584,33 @@ export function readGuardRun(repoRoot: string, runId: string): Promise<GuardLate
  */
 export function readGuardRunForView(repoKey: string, ref?: string): Promise<GuardLatest | null> {
   return ref ? readGuardRunForCommitStore(repoKey, ref) : readGuardLatestStore(repoKey)
+}
+
+/**
+ * The PR run timeline — one entry per pushed head the gate ran, oldest-first
+ * (the GuardHistory convention; the panel orders for display). Heads come from
+ * the gate-heads seam (EE installs it; unset ⇒ empty, the OSS answer) and join
+ * to the run stored at each head; a head whose gate never stored a run (errored
+ * before the run landed) is skipped — the list holds only selectable runs.
+ * Baseline runs never appear: they are not this PR's heads.
+ */
+export async function readGuardHistoryForPr(repoKey: string, pr: number): Promise<GuardHistory> {
+  const lookup = getGuardGateHeadsLookup()
+  if (!lookup) return { runs: [] }
+  const runs: GuardHistoryEntry[] = []
+  for (const head of new Set(await lookup(repoKey, pr))) {
+    const run = await readGuardRunForCommitStore(repoKey, head)
+    if (!run) continue
+    runs.push({
+      runId: run.run.runId,
+      ranAt: run.run.ranAt,
+      branch: run.run.branch,
+      commit: run.run.commit,
+      summary: run.summary,
+    })
+  }
+  runs.sort((a, b) => a.ranAt.localeCompare(b.ranAt))
+  return { runs }
 }
 
 /** Find a committed scenario by id and return its raw YAML source, or `null`. */
