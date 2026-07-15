@@ -19,6 +19,21 @@ import { writeEvidence, type EvidenceStep } from './evidence.js'
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
 
+/**
+ * A compact observation of ONE executed step invocation (each `repeat` iteration is
+ * one), the raw-capture fields the runner aggregates into per-run step stats for
+ * no-op anomaly detection. Emitted for every step that SPAWNED (a spawn failure is
+ * not an executed step); a timed-out step counts (it ran) but is never a no-op.
+ */
+export interface StepObservation {
+  exitCode: number | null
+  /** The raw stdout was empty (before normalization). */
+  stdoutEmpty: boolean
+  /** The raw stderr was empty (before normalization). */
+  stderrEmpty: boolean
+  durationMs: number
+}
+
 export interface RunScenarioContext {
   repoRoot: string
   runId: string
@@ -33,6 +48,22 @@ export interface RunScenarioContext {
    * evidence stays uncaptured, per the plan). Defaults on for a real run.
    */
   capturePassEvidence: boolean
+  /**
+   * Fired once per executed step invocation (each `repeat` iteration counts) with a
+   * compact capture observation. The runner aggregates these across the run into
+   * step stats; nothing is persisted. A step that could not spawn is not reported.
+   */
+  onStep?: (observation: StepObservation) => void
+}
+
+/** The observation the runner aggregates — raw emptiness + timing, no output kept. */
+function observeStep(capture: StepCapture): StepObservation {
+  return {
+    exitCode: capture.exitCode,
+    stdoutEmpty: capture.stdout.length === 0,
+    stderrEmpty: capture.stderr.length === 0,
+    durationMs: capture.durationMs,
+  }
 }
 
 /**
@@ -124,6 +155,9 @@ export async function runScenario(
           timeoutMs: ctx.stepTimeoutMs,
         })
         lastCapture = capture
+
+        // Aggregate every step that actually spawned (a spawn failure never ran).
+        if (!capture.spawnError) ctx.onStep?.(observeStep(capture))
 
         // Infrastructure problem — never a scenario fail.
         if (capture.spawnError || capture.timedOut) {

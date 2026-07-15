@@ -49,12 +49,18 @@ export {
   type ExtractResult,
 } from './extract.js'
 
-export { discoverRecipe, RECIPE_CACHE_NAME, type RecipeDiscoveryResult } from './recipe-discovery.js'
+export {
+  discoverRecipe,
+  collectDiscoveryInputs,
+  RECIPE_CACHE_NAME,
+  type RecipeDiscoveryResult,
+} from './recipe-discovery.js'
 
 export {
   deriveProbes,
   captureProbes,
   defaultProbeExecutor,
+  programNamesOf,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
   PROBE_OUTPUT_LIMIT,
@@ -64,19 +70,32 @@ export {
   type CaptureProbesOptions,
 } from './ground.js'
 
-export { birthValidate, type BirthCandidate, type BirthOutcome, type BirthOptions } from './birth.js'
+export { scenarioCompositionDefect, quoteInvalidOutput, flattenZodError } from './validate.js'
+
+export {
+  birthValidate,
+  type BirthCandidate,
+  type BirthOutcome,
+  type BirthOptions,
+  type BirthResult,
+} from './birth.js'
 
 export {
   EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
+  RECIPE_PROMPT_FINGERPRINT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorUserPrompt,
+  buildRecipeUserPrompt,
   buildFidelityUserPrompt,
   type AuthorUserContext,
   type AuthorClaim,
   type FidelityUserContext,
+  type RecipeDiscoveryInput,
+  type RecipeManifest,
+  type ManifestEcosystem,
 } from './prompts.js'
 
 export {

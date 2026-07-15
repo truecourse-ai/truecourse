@@ -4,13 +4,28 @@
  * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, defaultRunConcurrency } from './run.js'
-export type { RunGuardOptions, RunGuardResult } from './run.js'
+export {
+  runGuard,
+  defaultRunConcurrency,
+  detectNoOpAnomaly,
+  isNoOpStep,
+  NO_OP_STEP_THRESHOLD_MS,
+  ANOMALY_MIN_EXECUTED_STEPS,
+  ANOMALY_NOOP_FRACTION,
+} from './run.js'
+export type { RunGuardOptions, RunGuardResult, GuardRunStepStats, GuardNoOpAnomaly } from './run.js'
 
 export { loadScenarios } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
-export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from './recipe.js'
+export {
+  loadRecipe,
+  resolveEntry,
+  computeRecipeFingerprint,
+  discoverCsharpProjectFiles,
+  isNoOpEntry,
+  RecipeError,
+} from './recipe.js'
 export type { Recipe, LoadedRecipe } from './recipe.js'
 export { RecipeSchema } from './recipe.js'
 
@@ -20,7 +35,7 @@ export {
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
 } from './run-scenario.js'
-export type { RunScenarioContext } from './run-scenario.js'
+export type { RunScenarioContext, StepObservation } from './run-scenario.js'
 
 export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
@@ -44,8 +59,10 @@ export type { BuildResult } from './build.js'
 export {
   preflightEntry,
   entryStarts,
+  probesProducedOutput,
   defaultEntryProbeExecutor,
   entryPreflightHeadline,
+  entrySilentHeadline,
   formatEntryPreflightError,
   missingEntryScript,
   formatMissingEntryScript,

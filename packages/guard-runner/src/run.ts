@@ -21,7 +21,7 @@ import { loadRecipe, resolveEntry, RecipeError } from './recipe.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, type BuildResult } from './build.js'
 import { preflightEntry, type EntryPreflightResult } from './preflight.js'
-import { runScenario } from './run-scenario.js'
+import { runScenario, type StepObservation } from './run-scenario.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs } from './doc-index.js'
@@ -46,6 +46,12 @@ export interface RunGuardOptions {
   concurrency?: number
   /** Suppress the build (tests that pre-build). Off by default. */
   skipBuild?: boolean
+  /**
+   * The wall-clock below which an exit-0 empty-output step is classified a no-op for
+   * anomaly detection. Defaults to {@link NO_OP_STEP_THRESHOLD_MS}; a test seam that
+   * lets a run exercise the aggregation without relying on sub-10ms process timing.
+   */
+  noOpThresholdMs?: number
   /**
    * Write `LATEST.json` (default true). Birth validation sets it false so a
    * validation run never moves the repo's guard baseline.
@@ -81,6 +87,20 @@ export type RunGuardResult =
       loadErrors: ScenarioLoadError[]
       /** The binding record if `scenarios/manifest.json` exists (informational). */
       manifest: GuardManifest | null
+      /**
+       * Per-run step aggregate — executed vs no-op step invocations. NOT persisted
+       * to `LATEST.json` (whose schema is frozen); lives on the in-memory result so
+       * both a real run and birth validation compute it identically.
+       */
+      stepStats: GuardRunStepStats
+      /**
+       * A no-op anomaly the runner detected (>= {@link ANOMALY_MIN_EXECUTED_STEPS}
+       * executed steps, >= {@link ANOMALY_NOOP_FRACTION} of them instant-silent-zero)
+       * — the recipe entry behaves like a do-nothing binary. Null when nothing looked
+       * suspicious. A real `guard run` surfaces it as a loud warning (never aborts);
+       * `guard generate` ABORTS on it. See {@link detectNoOpAnomaly}.
+       */
+      anomaly: GuardNoOpAnomaly | null
     }
 
 export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
@@ -161,6 +181,16 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const results: GuardScenarioResult[] = []
   let settled = 0
 
+  // Per-run step aggregate — fed synchronously by each scenario's `onStep`. A step
+  // that spawned, exited 0, wrote nothing, and returned faster than the threshold is
+  // a no-op; a run made almost entirely of those is a do-nothing recipe entry.
+  const noOpThresholdMs = opts.noOpThresholdMs ?? NO_OP_STEP_THRESHOLD_MS
+  const stepStats: GuardRunStepStats = { executedSteps: 0, noOpSteps: 0, thresholdMs: noOpThresholdMs }
+  const recordStep = (obs: StepObservation): void => {
+    stepStats.executedSteps += 1
+    if (isNoOpStep(obs, noOpThresholdMs)) stepStats.noOpSteps += 1
+  }
+
   // Stale/orphaned scenarios settle immediately — they never touch a sandbox.
   for (const { scenario, resolution } of nonExecutable) {
     const result = nonExecutableResult(scenario, resolution)
@@ -180,6 +210,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       recipeEnv: loaded.recipe.env,
       stepTimeoutMs,
       capturePassEvidence,
+      onStep: recordStep,
     })
     const result: GuardScenarioResult =
       resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
@@ -218,7 +249,66 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       summary: latest.summary,
     })
   }
-  return { status: 'ok', latest, latestPath, loadErrors, manifest: readManifest(repoRoot) }
+  return {
+    status: 'ok',
+    latest,
+    latestPath,
+    loadErrors,
+    manifest: readManifest(repoRoot),
+    stepStats,
+    anomaly: detectNoOpAnomaly(stepStats),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// No-op anomaly detection — a do-nothing recipe entry runs every scenario as an
+// instant, silent, exit-0 step. That produces bogus passes and bogus birth findings
+// at scale; a real `guard run` surfaces the anomaly as a loud warning, and the guard
+// generator ABORTS on it. Purely structural (exit + emptiness + timing) — no string
+// matching, no tool-specific assumptions.
+// ---------------------------------------------------------------------------
+
+/** A step this fast, with exit 0 and no output at all, did nothing observable. */
+export const NO_OP_STEP_THRESHOLD_MS = 10
+/** Below this many executed steps the sample is too small to call an anomaly. */
+export const ANOMALY_MIN_EXECUTED_STEPS = 20
+/** At or above this no-op fraction the run is a do-nothing recipe. */
+export const ANOMALY_NOOP_FRACTION = 0.9
+
+/** Per-run step aggregate — executed invocations vs those that did nothing. */
+export interface GuardRunStepStats {
+  /** Executed step invocations across all scenarios (each `repeat` iteration counts). */
+  executedSteps: number
+  /** Of those, the ones that were exit 0, empty stdout, empty stderr, and instant. */
+  noOpSteps: number
+  /** The no-op wall-clock threshold this aggregate used. */
+  thresholdMs: number
+}
+
+/** The detected no-op anomaly — the counts and fraction that tripped it. */
+export interface GuardNoOpAnomaly {
+  executedSteps: number
+  noOpSteps: number
+  /** `noOpSteps / executedSteps`. */
+  fraction: number
+  thresholdMs: number
+}
+
+/** True when a step spawned, exited 0, wrote nothing, and returned under the threshold. */
+export function isNoOpStep(obs: StepObservation, thresholdMs: number): boolean {
+  return obs.exitCode === 0 && obs.stdoutEmpty && obs.stderrEmpty && obs.durationMs < thresholdMs
+}
+
+/**
+ * Judge an aggregate: an anomaly only when the sample is large enough (>=
+ * {@link ANOMALY_MIN_EXECUTED_STEPS}) AND the no-op fraction is overwhelming (>=
+ * {@link ANOMALY_NOOP_FRACTION}). Returns the tripping counts, or null.
+ */
+export function detectNoOpAnomaly(stats: GuardRunStepStats): GuardNoOpAnomaly | null {
+  if (stats.executedSteps < ANOMALY_MIN_EXECUTED_STEPS) return null
+  const fraction = stats.noOpSteps / stats.executedSteps
+  if (fraction < ANOMALY_NOOP_FRACTION) return null
+  return { executedSteps: stats.executedSteps, noOpSteps: stats.noOpSteps, fraction, thresholdMs: stats.thresholdMs }
 }
 
 /** Build the result for a scenario the binding check excluded from execution. */

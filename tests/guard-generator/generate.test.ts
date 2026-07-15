@@ -995,7 +995,7 @@ describe('birthValidate — progress forwarding', () => {
     ]
     const phases: string[] = []
     const settled: number[] = []
-    const outcomes = await birthValidate(r, candidates, {
+    const { outcomes } = await birthValidate(r, candidates, {
       skipBuild: false,
       onPhase: (phase) => phases.push(phase),
       onScenarioSettled: (done, total) => {

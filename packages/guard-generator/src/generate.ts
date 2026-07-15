@@ -35,9 +35,12 @@ import {
   preflightEntry,
   formatEntryPreflightError,
   isSetupDefectResult,
+  detectNoOpAnomaly,
   type Recipe,
   type BuildResult,
   type EntryPreflightResult,
+  type GuardRunStepStats,
+  type GuardNoOpAnomaly,
 } from '@truecourse/guard-runner'
 import {
   GUARD_FORMAT_VERSION,
@@ -90,7 +93,7 @@ import {
 } from './runners.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { deriveProbes, captureProbes, type ProbeTranscript } from './ground.js'
-import { flattenZodError, quoteInvalidOutput } from './validate.js'
+import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import { birthValidate, type BirthCandidate } from './birth.js'
 import {
@@ -237,6 +240,8 @@ export interface GenerateGuardsOptions {
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
   fidelityRunner?: FidelityRunner
+  /** Forwarded to birth validation — the no-op step threshold (a test seam). */
+  noOpThresholdMs?: number
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   onExtractProgress?: (done: number, total: number) => void
@@ -620,6 +625,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // then on every cli section short-circuits (no birth, unsettled) and the failure is
   // recorded ONCE, in `errors`, never as per-section findings.
   let entryPreflightFailure: GuardEntryPreflight | null = null
+  // Cumulative round-1 birth step aggregate across ALL sections. When it crosses the
+  // no-op anomaly threshold the recipe entry is a do-nothing binary (it ignores its
+  // arguments): set `noOpAnomaly`, from then on every section short-circuits before
+  // any retry/fidelity spend, and the whole generate aborts as `recipe-failed`.
+  const birthStepStats: GuardRunStepStats = { executedSteps: 0, noOpSteps: 0, thresholdMs: options.noOpThresholdMs ?? 0 }
+  let noOpAnomaly: GuardNoOpAnomaly | null = null
   let birthTotal = 0
   let birthSettled = 0
   let birthPassed = 0
@@ -702,6 +713,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // once, and persist green survivors — or record findings/errors and leave it
   // unsettled (its prior files/entry are cleared at run end for a clean re-attempt).
   async function settleCliSection(section: SectionInput, refs: string[]): Promise<void> {
+    // The recipe entry was already judged a do-nothing no-op — every remaining
+    // section short-circuits before spending any birth/retry/fidelity call; the run
+    // aborts as `recipe-failed` at the end.
+    if (noOpAnomaly) return
     const k = key(section)
     for (const id of priorIdsOf(k)) usedIds.delete(id)
 
@@ -747,8 +762,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         return
       } else {
         birthTotal += round1.length
-        const r1 = await birthValidate(repoRoot, round1, { skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+        const birth1 = await birthValidate(repoRoot, round1, {
+          skipBuild: true,
+          noOpThresholdMs: options.noOpThresholdMs,
+          onPhase: options.onBirthPhase,
+          onScenarioSettled: bumpBirth,
+        })
         reconcileBirth()
+
+        // No-op anomaly gate (item: birth anomaly detection). Fold THIS round's step
+        // stats into the cumulative aggregate; once enough steps have run and almost
+        // all did nothing, the recipe entry is a do-nothing binary. Abort NOW — before
+        // this section's retries/fidelity — leaving it (and every later section)
+        // unsettled; the run returns `recipe-failed` at the end.
+        birthStepStats.executedSteps += birth1.stepStats.executedSteps
+        birthStepStats.noOpSteps += birth1.stepStats.noOpSteps
+        birthStepStats.thresholdMs = birth1.stepStats.thresholdMs
+        const anomaly = detectNoOpAnomaly(birthStepStats)
+        if (anomaly) {
+          noOpAnomaly = anomaly
+          return
+        }
+
+        const r1 = birth1.outcomes
         birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
         const r1ByRef = new Map<string, typeof r1>()
         for (const o of r1) pushInto(r1ByRef, o.candidate.ref, o)
@@ -800,7 +836,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
           if (retryCandidates.length > 0) {
             birthTotal += retryCandidates.length
-            const r2 = await birthValidate(repoRoot, retryCandidates, { skipBuild: true, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
+            const birth2 = await birthValidate(repoRoot, retryCandidates, {
+              skipBuild: true,
+              noOpThresholdMs: options.noOpThresholdMs,
+              onPhase: options.onBirthPhase,
+              onScenarioSettled: bumpBirth,
+            })
+            const r2 = birth2.outcomes
             reconcileBirth()
             birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
             for (const o of r2) {
@@ -948,6 +990,22 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   await authoring
   await settleChain
 
+  // No-op anomaly abort: the recipe entry ran birth candidates as do-nothing steps,
+  // so nothing produced this run is trustworthy. Roll back — delete every scenario
+  // file written this run AND every work section's prior files, drop the work
+  // sections from the manifest (they re-generate once the recipe is fixed), and fail
+  // loudly. No scenarios written, no findings reported, no retries/fidelity spent.
+  if (noOpAnomaly) {
+    deleteScenarioFiles(repoRoot, written.map((w) => w.id))
+    for (const section of plan.work) {
+      const k = key(section)
+      deleteScenarioFiles(repoRoot, priorIdsOf(k))
+      workingManifest.delete(k)
+    }
+    writeWorkingManifest()
+    return emptyResult('recipe-failed', { reason: noOpAnomalyReason(noOpAnomaly, recipe.entry) })
+  }
+
   // 6. Run end — every work section still unsettled (extraction failure, authoring
   // error, birth finding, birth error) drops its prior files + manifest entry so the
   // next run re-attempts it. Final whole-manifest write.
@@ -1052,6 +1110,22 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
   }
 }
 
+/**
+ * The `recipe-failed` reason for a do-nothing recipe entry: names the suspicion, the
+ * entry argv, and the counts that tripped detection. The percentage rounds the
+ * anomaly fraction; the threshold explains why instant steps looked like no-ops.
+ */
+function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, entry: readonly string[]): string {
+  const pct = Math.round(anomaly.fraction * 100)
+  return (
+    `The recipe entry \`${entry.join(' ')}\` behaves like a do-nothing binary: ${anomaly.noOpSteps} of ` +
+    `${anomaly.executedSteps} birth steps (${pct}%) exited 0 with no output in under ${anomaly.thresholdMs}ms, ` +
+    `so it ignores its arguments. Every scenario validated against it would be a silent no-op, so generation ` +
+    `was aborted before writing any scenarios or spending retry/fidelity calls. Fix the recipe entry (it likely ` +
+    `names a stale build output or a placeholder such as \`true\`) and re-run \`truecourse guard generate\`.`
+  )
+}
+
 function readPriorManifest(repoRoot: string): GuardManifestSection[] {
   return readManifest(repoRoot)?.sections ?? []
 }
@@ -1086,10 +1160,34 @@ function buildAuthorCtxFor(gd: GuardDoc, claims: AuthorClaim[], recipe: Recipe, 
 
 type AuthorAttempt = { authored: AuthoredClaim[] } | { error: string }
 
+/** A validated reply, or the two pieces a corrective re-ask needs: the text to quote
+ *  back (a composition defect embeds its own explanation) and the final error. */
+type AuthoredValidation = { authored: AuthoredClaim[] } | { correction: string; reason: string }
+
 /**
- * Call the author runner and validate its batch output; on a schema failure
- * re-ask ONCE with the invalid output quoted back, then validate again. A thrown
- * call is not re-asked. Returns `{ error }` on a still-invalid or thrown call.
+ * Validate one authoring reply against BOTH the schema and the run[]-composition rule
+ * (a step's `run` must be argv-only — never the entrypoint or a foreign binary). A
+ * defect on either front yields the corrective text to quote back and the final error.
+ */
+function validateAuthored(raw: unknown, entry: readonly string[]): AuthoredValidation {
+  const parsed = AuthoredBatchSchema.safeParse(raw)
+  if (!parsed.success) {
+    return { correction: quoteInvalidOutput(raw), reason: `output invalid after re-ask: ${flattenZodError(parsed.error)}` }
+  }
+  const defect = scenarioCompositionDefect(parsed.data, entry)
+  if (defect) {
+    return {
+      correction: `${defect}\n\nYour previous output was:\n${quoteInvalidOutput(raw)}`,
+      reason: `scenario composition invalid after re-ask: ${defect}`,
+    }
+  }
+  return { authored: parsed.data }
+}
+
+/**
+ * Call the author runner and validate its batch output (schema + run[]-composition);
+ * on a defect re-ask ONCE with the corrective text quoted back, then validate again.
+ * A thrown call is not re-asked. Returns `{ error }` on a still-invalid or thrown call.
  */
 async function callAuthorWithReask(ctx: AuthorUserContext, runner: GenerateRunner): Promise<AuthorAttempt> {
   let raw: unknown
@@ -1098,18 +1196,18 @@ async function callAuthorWithReask(ctx: AuthorUserContext, runner: GenerateRunne
   } catch (e) {
     return { error: `call failed: ${(e as Error).message}` }
   }
-  const parsed = AuthoredBatchSchema.safeParse(raw)
-  if (parsed.success) return { authored: parsed.data }
+  const first = validateAuthored(raw, ctx.recipeEntry)
+  if ('authored' in first) return { authored: first.authored }
 
   let reRaw: unknown
   try {
-    reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
+    reRaw = await runner({ ...ctx, correction: { invalidOutput: first.correction } })
   } catch (e) {
     return { error: `re-ask failed: ${(e as Error).message}` }
   }
-  const reParsed = AuthoredBatchSchema.safeParse(reRaw)
-  if (reParsed.success) return { authored: reParsed.data }
-  return { error: `output invalid after re-ask: ${flattenZodError(reParsed.error)}` }
+  const second = validateAuthored(reRaw, ctx.recipeEntry)
+  if ('authored' in second) return { authored: second.authored }
+  return { error: second.reason }
 }
 
 async function readAuthorCache(

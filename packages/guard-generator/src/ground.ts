@@ -127,8 +127,13 @@ function isCommandToken(token: string): boolean {
   return /^[a-z0-9][a-z0-9-]*$/.test(token) || /^--?[A-Za-z0-9][\w-]*(=.*)?$/.test(token)
 }
 
-/** Program names a leading fragment token is stripped against. */
-function programNamesOf(entry: readonly string[]): Set<string> {
+/**
+ * Program names a leading token is stripped/compared against: `truecourse` plus the
+ * basename and extensionless stem of the entry's first and last args (a program named
+ * `cli.js` matches `cli`). Shared with the generator's run[]-composition check so both
+ * decide "is this token the program itself?" the same way.
+ */
+export function programNamesOf(entry: readonly string[]): Set<string> {
   const names = new Set<string>(['truecourse'])
   if (entry.length > 0) {
     addName(names, entry[0])
