@@ -311,7 +311,7 @@ describe('GuardCoveragePage — a selected conflict owns the whole main pane', (
   it('renders the overlap detail full-width and hides the doc coverage center', async () => {
     renderPage(ALL_TRUE, CONFLICT_URL);
     // The overlap detail takes over the pane…
-    expect(await screen.findByLabelText('Close conflict detail')).toBeInTheDocument();
+    expect(await screen.findByTestId('overlap-detail')).toBeInTheDocument();
     // …and the selected doc's coverage center (its totals strip) does NOT render beside it.
     expect(screen.queryByRole('group', { name: 'Coverage totals' })).not.toBeInTheDocument();
   });
@@ -319,10 +319,12 @@ describe('GuardCoveragePage — a selected conflict owns the whole main pane', (
   it('brings the doc coverage back when the conflict is closed', async () => {
     const user = userEvent.setup();
     renderPage(ALL_TRUE, CONFLICT_URL);
-    await user.click(await screen.findByLabelText('Close conflict detail'));
+    await screen.findByTestId('overlap-detail');
+    // The pane has no close of its own — the conflict closes through its TAB.
+    await user.click(screen.getByLabelText('Close overlap::area1::docs/SPEC.md::docs/OTHER.md'));
     // The doc (opened alongside by the deep link) survives the close → its coverage returns.
     expect(await screen.findByRole('group', { name: 'Coverage totals' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Close conflict detail')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('overlap-detail')).not.toBeInTheDocument();
   });
 
   // A preamble conflict points at the selected doc with a null heading. The
@@ -607,7 +609,7 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     await user.click(within(sidebar()).getByText('docs/SPEC.md ↔ docs/OTHER.md'));
     // The conflict tab carries the ↔ label; the overlap detail owns the pane.
     expect(tabLabel(OVERLAP_KEY, 'docs/SPEC.md ↔ docs/OTHER.md')).toBeInTheDocument();
-    expect(await screen.findByLabelText('Close conflict detail')).toBeInTheDocument();
+    expect(await screen.findByTestId('overlap-detail')).toBeInTheDocument();
     expect(search()).toContain('gconf=');
     expect(decodeURIComponent(search())).toContain(OVERLAP_KEY);
   });
