@@ -500,7 +500,7 @@ Concretely:
 - install (optional) fetches dependencies before the build runs — the tree may be
   a fresh clone with nothing installed. Match the ecosystem: js — "npm ci",
   "pnpm install --frozen-lockfile", "yarn install --immutable" (match the lockfile);
-  python — "python -m venv .venv && .venv/bin/pip install -e ." (an editable install
+  python — "python3 -m venv .venv && .venv/bin/pip install -e ." (an editable install
   makes [project.scripts] console scripts runnable at .venv/bin/<name>); csharp —
   "dotnet restore". Omit it when the tree needs no dependency fetch.
 - build produces the runnable program (e.g. "pnpm build", "npm run build",
