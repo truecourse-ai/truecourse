@@ -242,7 +242,6 @@ const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
   conflictResolutions: [],
 };

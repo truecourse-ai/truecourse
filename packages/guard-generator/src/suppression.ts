@@ -22,8 +22,8 @@ import { z } from 'zod'
 import { suppressedClaims, normalizeQuote, type SuppressedClaim } from '@truecourse/shared'
 
 // Tolerant corpus view: just the areas' overlaps (docs + note + section pointers +
-// spanned areas) and the auto-detected relations the derivation reads. Everything
-// else in corpus.json is ignored; `.passthrough()` keeps unknown keys harmless.
+// spanned areas). Everything else in corpus.json is ignored; `.passthrough()`
+// keeps unknown keys harmless.
 const OverlapSectionShape = z
   .object({ doc: z.string(), heading: z.string().nullable().optional(), quote: z.string().optional() })
   .passthrough()
@@ -35,13 +35,9 @@ const OverlapShape = z
     areas: z.array(z.string()).optional(),
   })
   .passthrough()
-const RelationShape = z
-  .object({ older: z.string(), newer: z.string(), scope: z.string().optional() })
-  .passthrough()
 const CorpusShape = z
   .object({
     areas: z.array(z.object({ id: z.string(), overlaps: z.array(OverlapShape).optional() }).passthrough()).optional(),
-    relations: z.array(RelationShape).optional(),
   })
   .passthrough()
 
@@ -60,7 +56,6 @@ const ConflictResolutionShape = z
   .passthrough()
 const DecisionsShape = z
   .object({
-    relations: z.array(RelationShape).optional(),
     manualExcludes: z.array(z.string()).optional(),
     conflictResolutions: z.array(ConflictResolutionShape).optional(),
   })
@@ -92,10 +87,8 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
         areas: o.areas,
       })),
     })),
-    relations: corpus.relations ?? [],
   }
   const decisionsLike = {
-    relations: decisions?.relations ?? [],
     manualExcludes: decisions?.manualExcludes ?? [],
     conflictResolutions: (decisions?.conflictResolutions ?? []).map((r) => ({
       docA: r.docA,

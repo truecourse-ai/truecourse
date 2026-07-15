@@ -20,7 +20,6 @@ import {
 // reads through (it imports core via `@truecourse/core/...`, not the src path).
 import {
   getDecisions,
-  addRelation,
   addManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import { handlePullRequestClosed } from '../../ee/packages/github-app/src/index';
@@ -60,15 +59,15 @@ afterEach(async () => {
 
 describe('handlePullRequestClosed', () => {
   it('merged: promotes the overlay onto the repo row and drops it', async () => {
-    await addRelation(REPO, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 7 });
+    await addManualInclude(REPO, 'a.md', { pr: 7 });
     // Repo row is still empty before merge.
-    expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
 
     await handlePullRequestClosed(closedPayload(7, true));
 
-    // Repo row now carries the promoted relation; the overlay is gone.
-    expect((await getDecisions(REPO)).relations).toHaveLength(1);
-    expect((await getDecisions(REPO, { pr: 7 })).relations).toHaveLength(1);
+    // Repo row now carries the promoted include; the overlay is gone.
+    expect((await getDecisions(REPO)).manualIncludes).toEqual(['a.md']);
+    expect((await getDecisions(REPO, { pr: 7 })).manualIncludes).toEqual(['a.md']);
   });
 
   it('unmerged: discards the overlay and leaves the repo row untouched', async () => {
@@ -84,7 +83,7 @@ describe('handlePullRequestClosed', () => {
 
   it('merged with no overlay is a no-op (never throws)', async () => {
     await expect(handlePullRequestClosed(closedPayload(99, true))).resolves.toBeUndefined();
-    expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
   });
 
   it('cleans up the PR-scoped Code Quality diff on close', async () => {

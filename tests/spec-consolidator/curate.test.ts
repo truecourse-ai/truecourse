@@ -113,7 +113,7 @@ describe('curate', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/auth.md', 'docs/users-v1.md', 'docs/users-v2.md']);
 
-    // New corpora carry no relations field (relation detection retired, #760).
+    // A corpus carries no relations field.
     expect(result.corpus.relations).toBeUndefined();
 
     // Every within-area pair is examined.

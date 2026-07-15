@@ -12,8 +12,7 @@
  *   - either doc is force-EXCLUDED (dropped from the corpus, so the disagreement
  *     is gone with it).
  * Two docs that textually disagree stay an open conflict until verdicted,
- * dismissed, or fixed. (Doc→doc relations were retired in #760 and never
- * resolved a conflict regardless.)
+ * dismissed, or fixed.
  */
 
 /**
@@ -310,8 +309,8 @@ function matchResolution(
 /**
  * Classify every flagged within-area overlap as open or resolved (with how).
  * This is the full list the conflict surfaces render; {@link openConflicts} is
- * the gate's unresolved subset. Doc→doc relations play no part — a conflict is
- * resolved only by a matching verdict/dismissal or a covering exclude.
+ * the gate's unresolved subset. A conflict is resolved only by a matching
+ * verdict/dismissal or a covering exclude.
  */
 export function buildCorpusConflicts(corpus: CorpusLike, decisions: DecisionsLike): CorpusConflict[] {
   const excludes = new Set(decisions.manualExcludes ?? []);

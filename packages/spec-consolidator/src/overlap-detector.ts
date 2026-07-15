@@ -15,10 +15,8 @@
  * each doc in the area. Widening is pure string work — no extra LLM stage — and
  * every widened candidate still goes through the same overlap judge.
  *
- * Doc→doc relations do NOT skip a pair — a relation is doc lifecycle/precedence,
- * not a conflict resolution; two docs that textually disagree stay flagged. The
- * pass is Haiku-tier and cached per pair by (area, both content hashes, prompt
- * fingerprint). Every pair is judged — nothing is capped or dropped; the
+ * The pass is Haiku-tier and cached per pair by (area, both content hashes,
+ * prompt fingerprint). Every pair is judged — nothing is capped or dropped; the
  * pre-flight cost estimate the user approves is the only spend gate.
  */
 

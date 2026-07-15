@@ -9,8 +9,6 @@
 export type {
   Status,
   DocKind,
-  Relation,
-  RelationType,
   ManualArea,
   ConflictResolution,
   DecisionsFile,
@@ -19,8 +17,6 @@ export type {
 export {
   StatusSchema,
   DocKindSchema,
-  RelationSchema,
-  RelationTypeSchema,
   ManualAreaSchema,
   ConflictResolutionSchema,
   DecisionsFileSchema,

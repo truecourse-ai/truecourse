@@ -13,7 +13,7 @@ import {
   hasCorpus,
   corpusFilePath,
 } from '../../packages/spec-consolidator/src/index.js';
-import type { Area, CorpusDoc, Relation } from '../../packages/spec-consolidator/src/index.js';
+import type { Area, CorpusDoc } from '../../packages/spec-consolidator/src/index.js';
 
 let repo: string;
 beforeEach(() => {
@@ -52,23 +52,26 @@ describe('corpus-store', () => {
     expect(read!.version).toBe(3);
     expect(read!.docs).toEqual(docs);
     expect(read!.areas).toEqual(areas);
-    // Relation detection was retired (#760) — new corpora omit the field entirely.
+    // A written corpus carries no relations field.
     expect(read!.relations).toBeUndefined();
     expect(typeof read!.generatedAt).toBe('string');
   });
 
-  it('back-compat: a pre-#760 corpus.json carrying a relations array still parses (preserved)', () => {
-    const legacyRelations: Relation[] = [
-      { type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', detectedFrom: 'filename' },
-    ];
+  it('an older corpus.json carrying a relations array still parses; the field is dropped', () => {
     fs.mkdirSync(path.dirname(corpusFilePath(repo)), { recursive: true });
     fs.writeFileSync(
       corpusFilePath(repo),
-      JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs, areas, relations: legacyRelations }),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs,
+        areas,
+        relations: [{ type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', detectedFrom: 'filename' }],
+      }),
     );
     const read = readCorpus(repo);
     expect(read).not.toBeNull();
-    expect(read!.relations).toEqual(legacyRelations);
+    expect((read as Record<string, unknown>).relations).toBeUndefined();
   });
 
   it('writes to .truecourse/specs/corpus.json', () => {

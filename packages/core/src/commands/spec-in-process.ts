@@ -29,7 +29,6 @@ import {
   type ConflictResolution,
   type DecisionsFile,
   type DocCandidate,
-  type Relation,
 } from '@truecourse/spec-consolidator';
 import {
   generateContractsFromCorpus,
@@ -456,7 +455,7 @@ export interface CurateInProcessOptions {
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
-   * User resolutions (relations / manual areas / includes) to fold into curate.
+   * User resolutions (manual areas / includes / conflict verdicts) to fold into curate.
    * EE MUST pass the stored decisions here: its re-scan runs on a fresh clone with
    * no `.truecourse/specs/decisions.json` (resolutions live in Postgres), so
    * without this the re-scan re-detects already-resolved conflicts. Omit in OSS —
@@ -1216,7 +1215,6 @@ const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
   conflictResolutions: [],
 };
@@ -1279,20 +1277,12 @@ export async function getDecisions(
 /**
  * Merge a PR's decisions overlay over the repo row. Pure. The overlay wins on
  * every dimension:
- *   - relations: an overlay relation on the same doc pair (order-insensitive,
- *     same scope) replaces the base one; other base relations survive.
  *   - manualIncludes / manualExcludes: union by path, but the overlay's verb wins
  *     per path — a path the overlay excludes is dropped from includes and vice
  *     versa (never a contradictory pair).
  *   - manualAreas: the overlay's override replaces the base's for that doc.
  */
 export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): DecisionsFile {
-  const overlayRelKeys = new Set((overlay.relations ?? []).map(relationKey));
-  const relations = [
-    ...(base.relations ?? []).filter((r) => !overlayRelKeys.has(relationKey(r))),
-    ...(overlay.relations ?? []),
-  ];
-
   const overlayIncludes = new Set(overlay.manualIncludes ?? []);
   const overlayExcludes = new Set(overlay.manualExcludes ?? []);
   const manualIncludes = uniqueStrings([
@@ -1318,7 +1308,7 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
     ...(overlay.conflictResolutions ?? []),
   ];
 
-  return { version: 1, manualIncludes, manualExcludes, relations, manualAreas, conflictResolutions };
+  return { version: 1, manualIncludes, manualExcludes, manualAreas, conflictResolutions };
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -1350,8 +1340,7 @@ export async function discardDecisionsOverlay(repoKey: string, pr: number): Prom
 
 /**
  * The repo's current curated corpus (dashboard read), or null when no scan has
- * run. Corpus-path analog of {@link getScanState}; no remerge needed since user
- * relations are folded into corpus.json at curate time. OSS reads
+ * run. Corpus-path analog of {@link getScanState}. OSS reads
  * `specs/corpus.json`; EE reads the store (Phase 6).
  */
 export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
@@ -1496,10 +1485,6 @@ export async function recuratePrCorpus(
 // agree on update semantics. An `apply*` that makes no change returns the SAME
 // object reference, letting callers skip a redundant store.
 
-/** Dedup key for a user relation — a pair is unique per scope (area). */
-const relationKey = (r: { older: string; newer: string; scope?: string }): string =>
-  `${[r.older, r.newer].sort().join(' ')} ${r.scope ?? ''}`;
-
 /**
  * Dispute-identity key for a section-scoped conflict verdict (item 31): the
  * unordered doc pair plus each side's section anchor, oriented by doc so the same
@@ -1514,44 +1499,6 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
   return sides.join(' \x00 ');
 };
 
-function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
-  if (input.older === input.newer) {
-    throw new Error('addRelation: older and newer must be different docs');
-  }
-  const key = relationKey(input);
-  const dedup = (existing.relations ?? []).filter((r) => relationKey(r) !== key);
-  const relation: Relation = { ...input, detectedFrom: input.detectedFrom ?? 'manual' };
-  return {
-    version: 1,
-    manualIncludes: existing.manualIncludes ?? [],
-    manualExcludes: existing.manualExcludes ?? [],
-    relations: [...dedup, relation],
-    manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: existing.conflictResolutions ?? [],
-  };
-}
-
-function applyRemoveRelation(
-  existing: DecisionsFile,
-  input: { older: string; newer: string; scope?: string },
-): DecisionsFile {
-  // Scope omitted → drop every user relation for the pair (either order).
-  const matches = (r: Relation): boolean => {
-    const samePair =
-      (r.older === input.older && r.newer === input.newer) ||
-      (r.older === input.newer && r.newer === input.older);
-    return samePair && (input.scope === undefined || r.scope === input.scope);
-  };
-  return {
-    version: 1,
-    manualIncludes: existing.manualIncludes ?? [],
-    manualExcludes: existing.manualExcludes ?? [],
-    relations: (existing.relations ?? []).filter((r) => !matches(r)),
-    manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: existing.conflictResolutions ?? [],
-  };
-}
-
 // Include and exclude are mutually exclusive per doc: adding one clears the
 // other for that path, so decisions.json can never hold a contradictory pair.
 
@@ -1563,7 +1510,6 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
     version: 1,
     manualIncludes: includes.includes(docPath) ? includes : [...includes, docPath],
     manualExcludes: excludes.filter((p) => p !== docPath),
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1574,7 +1520,6 @@ function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): Dec
     version: 1,
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1588,7 +1533,6 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
     version: 1,
     manualIncludes: includes.filter((p) => p !== docPath),
     manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1599,7 +1543,6 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
   };
@@ -1619,7 +1562,6 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: [...dedup, input],
   };
@@ -1634,41 +1576,9 @@ function applyRemoveConflictResolution(
     version: 1,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
-    relations: existing.relations ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key),
   };
-}
-
-/**
- * Add (or replace) a user-authored doc→doc relation (replace / precedence /
- * keep-both) in decisions.json. LEGACY (retired #760): relations are inert —
- * curate no longer applies them and no live stage consumes them — but the write
- * verb is kept so decisions.json stays round-trippable. When a relation for the
- * same (older, newer, scope) already exists it's replaced; self-pairs are rejected.
- */
-export async function addRelation(
-  repoRoot: string,
-  input: Relation,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyAddRelation(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a user-authored relation by (older, newer) — either order, optionally
- * scoped to one area. Idempotent.
- */
-export async function removeRelation(
-  repoRoot: string,
-  input: { older: string; newer: string; scope?: string },
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveRelation(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
 }
 
 /**
@@ -1729,7 +1639,7 @@ export async function removeManualExclude(
 /**
  * Record a SECTION-scoped conflict verdict (item 31) — pick-a-side ('a'/'b') or
  * dismissal — for one flagged dispute. Replaces any prior verdict for the same
- * dispute identity. Unlike a doc-relation resolve, this does NOT re-curate: the
+ * dispute identity. This does NOT re-curate: the
  * corpus is unchanged (the overlap stays flagged), and the shared resolved-
  * derivation reads the verdict live, so a single later scan applies any batch.
  * Self-pairs are rejected.

@@ -2,10 +2,10 @@
  * Decisions-file persistence for the spec-consolidator.
  *
  * `decisions.json` holds the user-authored curation intent the corpus
- * path reads: doc→doc `relations[]`, `manualAreas[]` (area-tag
- * overrides), and `manualIncludes[]` (relevance force-includes). Both
- * the CLI (`spec` subcommands) and the dashboard server write through
- * these helpers, and `curate()` reads them to apply effective relations.
+ * path reads: `manualAreas[]` (area-tag overrides), `manualIncludes[]` /
+ * `manualExcludes[]` (relevance overrides), and `conflictResolutions[]`.
+ * Both the CLI (`spec` subcommands) and the dashboard server write through
+ * these helpers, and `curate()` reads them.
  */
 
 import fs from 'node:fs';
@@ -16,7 +16,6 @@ const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
   conflictResolutions: [],
 };

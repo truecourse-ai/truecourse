@@ -1,8 +1,7 @@
 /**
  * Overlap flagging examines within-area doc pairs and surfaces the disagreements
- * for the user. Doc→doc relations never skip a pair (they are lifecycle metadata,
- * not conflict resolution); every pair is judged — nothing is capped or dropped
- * (the pre-flight cost estimate is the only spend gate); and verdicts cache per pair.
+ * for the user. Every pair is judged — nothing is capped or dropped (the
+ * pre-flight cost estimate is the only spend gate) — and verdicts cache per pair.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -50,7 +49,7 @@ const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.
 
 // A realistic API-conventions area with 13 docs — each a short standard covering
 // one facet of the platform's HTTP surface. 13 docs yield 13*12/2 = 78 within-area
-// pairs, past the retired 60-pair cap, so the suite can prove every pair is judged.
+// pairs, so the suite can prove every pair is judged.
 const API_CONVENTION_DOCS: Array<{ path: string; content: string }> = [
   {
     path: 'docs/api/authentication.md',
@@ -273,8 +272,8 @@ describe('flagOverlaps', () => {
   });
 
   it('judges every within-area pair even past the old 60-pair cap', async () => {
-    // 13 docs → 13*12/2 = 78 within-area pairs, well over the retired default of
-    // 60. Nothing is capped or dropped: the runner is called once per pair.
+    // 13 docs → 13*12/2 = 78 within-area pairs. Nothing is capped or dropped:
+    // the runner is called once per pair.
     const refs = API_CONVENTION_DOCS.map((d) => d.path);
     const docs = API_CONVENTION_DOCS.map((d) => doc(d.path, d.content));
     let calls = 0;

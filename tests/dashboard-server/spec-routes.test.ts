@@ -151,7 +151,7 @@ describe('corpus routes (spec-scan redesign)', () => {
     await request(app).get(`/api/repos/${fixture.project.slug}/spec/doc`).query({ ref: '../../etc/passwd' }).expect(400);
   });
 
-  it('the retired /spec/relations routes are gone (relation detection removed, #760)', async () => {
+  it('has no /spec/relations routes — unknown spec mutations 404', async () => {
     seedCorpus([]);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/relations`)

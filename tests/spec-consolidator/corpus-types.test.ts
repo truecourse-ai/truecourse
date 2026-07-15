@@ -124,7 +124,7 @@ describe('splitArea / isProcessArea', () => {
 });
 
 describe('CuratedCorpusSchema', () => {
-  it('parses a minimal corpus with no relations field (relation detection retired, #760)', () => {
+  it('parses a minimal corpus (no relations field exists)', () => {
     const parsed = CuratedCorpusSchema.parse({
       version: 3,
       generatedAt: '2026-06-26T00:00:00Z',
@@ -134,7 +134,7 @@ describe('CuratedCorpusSchema', () => {
     expect(parsed.relations).toBeUndefined();
   });
 
-  it('back-compat: preserves a relations array on a pre-#760 corpus', () => {
+  it('an older corpus carrying a relations array still parses; the field is dropped', () => {
     const parsed = CuratedCorpusSchema.parse({
       version: 3,
       generatedAt: '2026-06-26T00:00:00Z',
@@ -142,7 +142,7 @@ describe('CuratedCorpusSchema', () => {
       areas: [],
       relations: [{ type: 'replace', older: 'a.md', newer: 'b.md', detectedFrom: 'filename' }],
     });
-    expect(parsed.relations).toEqual([{ type: 'replace', older: 'a.md', newer: 'b.md', detectedFrom: 'filename' }]);
+    expect((parsed as Record<string, unknown>).relations).toBeUndefined();
   });
 
   it('parses an overlap whose section pointer is a preamble marker (null heading)', () => {

@@ -12,7 +12,7 @@
  */
 
 import { z } from 'zod';
-import { DocKindSchema, StatusSchema, RelationSchema } from './types.js';
+import { DocKindSchema, StatusSchema } from './types.js';
 
 // ---------------------------------------------------------------------------
 // DocRef — where a doc's .md lives (the corpus never embeds content)
@@ -316,12 +316,6 @@ export const CuratedCorpusSchema = z.object({
   generatedAt: z.string(),
   docs: z.array(CorpusDocSchema),
   areas: z.array(AreaSchema),
-  /**
-   * LEGACY doc→doc relations (retired 2026-07-14, #760). No longer written; a
-   * relations array on a pre-#760 corpus still parses and is preserved so the
-   * deprecated contract-generate path can honor it. New scans omit the field.
-   */
-  relations: z.array(RelationSchema).optional(),
   /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
   skippedDocs: z.array(SkippedDocSchema).default([]),
 });
