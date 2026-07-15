@@ -468,50 +468,92 @@ commands — the engine verifies your proposal by building and probing it.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
-Given the repository's manifest files, return exactly one JSON object matching
-this schema (CANONICAL — generated from the engine's Zod definition; your reply
-must validate against it exactly):
+You are given the repository's recognized manifests, each LABELED with its path and
+ecosystem (js | python | csharp). Read them and return exactly one JSON object
+matching this schema (CANONICAL — generated from the engine's Zod definition; your
+reply must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
   { "build": "<shell command run once in the repo root to produce the entrypoint>",
     "entry": ["<argv>", "..."] }
 
-- build produces the runnable program (e.g. "pnpm build", "npm run build"), or a
-  no-op "true" when nothing needs building.
-- entry is the argv that invokes the built program; scenario arguments are
-  appended to it (e.g. ["node","dist/cli.js"] or ["node","bin/tool.js"]). Prefer
-  the package's declared bin/main and its build script. Paths are repo-relative.
+- build produces the runnable program (e.g. "pnpm build", "npm run build",
+  "pip install -e .", "dotnet build -c Release"). It MAY be the no-op "true" when
+  the repo needs no build step — "true" is valid for build ONLY, never for entry.
+- entry is the argv that invokes the ACTUAL program under test; scenario arguments
+  are appended to it. Read it from whichever manifest DECLARES the CLI:
+  - js — package.json "bin" or "main", or a workspace script (e.g. ["node","dist/cli.js"]).
+  - python — the [project.scripts] / console_scripts entry point names the command
+    (e.g. [project.scripts] sqlfluff = "sqlfluff.cli.commands:cli" ⇒
+    ["python","-m","sqlfluff"] or the installed "sqlfluff" console script).
+  - csharp — a project with <OutputType>Exe</OutputType> or a <ToolCommandName>
+    (e.g. ["dotnet","run","--project","src/Tool/Tool.csproj"]).
+  Paths are repo-relative.
+- entry must NEVER be a shell no-op that runs no program. true, false, :, test, [,
+  and noop are FORBIDDEN as entry[0]: an entry built on one "passes" every scenario
+  while testing nothing, and the engine rejects it.
 
-Output exactly one JSON object with \`build\` and \`entry\`. No prose.`
+# Choosing among ecosystems
+When manifests from more than one ecosystem are present (say a Python CLI alongside
+a docs-site package.json), choose the entrypoint from WHICHEVER MANIFEST DECLARES
+THE CLI ENTRY POINT — never a fixed language precedence. A package.json's presence
+does not make the program a Node program when the CLI is declared in pyproject.toml.
+If NO manifest declares a runnable CLI, or two declare rival CLIs and you cannot
+tell which is the program under test, DO NOT GUESS: return exactly
+  { "ambiguous": "<one sentence: what is unclear and which manifests conflict>" }
+instead of a proposal. The engine treats that as a discovery failure and surfaces
+your explanation to the user.
+
+Output exactly one JSON object — either the { "build", "entry" } proposal or the
+{ "ambiguous" } signal. No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
+/** The ecosystem a discovered manifest belongs to. */
+export type ManifestEcosystem = 'js' | 'python' | 'csharp'
+
+/** One recognized manifest, labeled by path + ecosystem, its contents inlined. */
+export interface RecipeManifest {
+  /** Repo-relative path. */
+  path: string
+  /** The ecosystem this manifest belongs to. */
+  ecosystem: ManifestEcosystem
+  /** The manifest's (size-capped) contents. */
+  content: string
+}
+
 export interface RecipeDiscoveryInput {
-  /** package.json contents (or a note that it's absent). */
-  packageJson: string
-  /** Names of the lockfiles / build-config files present in the repo root. */
+  /** The recognized manifests found in the repo, labeled by path + ecosystem. */
+  manifests: RecipeManifest[]
+  /** Lockfile / build-config files surfaced by presence only (no contents). */
   presentInputs: string[]
+  /** When more C# project files exist than were inlined, a note naming the rest. */
+  extraProjectNote?: string
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
 
 export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
-  const lines = [
-    `Files present in the repo root: ${input.presentInputs.join(', ') || '(none of the usual manifests)'}`,
-    '',
-    'package.json:',
-    '"""',
-    input.packageJson,
-    '"""',
+  const lines: string[] = [
+    'RECOGNIZED MANIFESTS — choose the entrypoint from whichever DECLARES the CLI:',
   ]
+  for (const m of input.manifests) {
+    lines.push('', `--- [${m.ecosystem}] ${m.path}`, '"""', m.content, '"""')
+  }
+  if (input.extraProjectNote) lines.push('', input.extraProjectNote)
+  lines.push(
+    '',
+    `Other files present (presence only, no contents): ${input.presentInputs.join(', ') || '(none)'}`,
+  )
   if (input.correction) {
     lines.push(
       '',
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
-      'Return exactly one JSON object with a non-empty "build" string and a non-empty',
-      '"entry" argv array (and optional "env" object), and nothing else:',
-      '  { "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      'Return exactly one JSON object: either a proposal with a non-empty "build" string',
+      'and a non-empty "entry" argv that invokes the program under test (never a shell',
+      'no-op like "true"), or { "ambiguous": "<why>" } when no manifest declares a',
+      'runnable CLI. Nothing else.',
     )
   }
   return lines.join('\n')

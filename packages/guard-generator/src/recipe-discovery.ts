@@ -16,21 +16,41 @@ import {
   resolveEntry,
   runBuild,
   computeRecipeFingerprint,
+  discoverCsharpProjectFiles,
   recipePath,
   executeStep,
   missingEntryScript,
   formatMissingEntryScript,
+  RecipeSchema,
   type Recipe,
 } from '@truecourse/guard-runner'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
-import { RECIPE_PROMPT_FINGERPRINT, type RecipeDiscoveryInput } from './prompts.js'
+import {
+  RECIPE_PROMPT_FINGERPRINT,
+  type RecipeDiscoveryInput,
+  type RecipeManifest,
+} from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import type { RecipeRunner } from './runners.js'
 
 export const RECIPE_CACHE_NAME = 'guard/recipe'
 
-/** Files whose presence + content inform recipe discovery (mirrors the runner's set). */
-const DISCOVERY_INPUTS = ['package.json', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'turbo.json']
+/** Lockfile / build-config markers surfaced to the model by presence only. */
+const JS_PRESENCE_MARKERS = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'turbo.json']
+/** Python manifests inlined in full — they carry the console-script entry points. */
+const PYTHON_MANIFESTS = ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt']
+/** Max chars of any single manifest inlined into the discovery prompt. */
+const MANIFEST_INLINE_LIMIT = 8_000
+/** Max C# project files inlined (largest first); any remainder is named, not inlined. */
+const MAX_CSHARP_PROJECT_FILES = 6
+
+/**
+ * Surfaced when NO recognized manifest exists: the model has nothing to reason
+ * from, so discovery fails LOUDLY without a single call rather than guess a no-op
+ * recipe. Flows through the same recipe-failure path as a verification failure.
+ */
+const NO_MANIFEST_REASON =
+  "cannot determine how to build or invoke this repo's CLI — no JS/TS, Python, or C# manifest found; write .truecourse/scenarios/recipe.json by hand"
 
 /** How long the engine's verification build and entrypoint probe may take. */
 const BUILD_TIMEOUT_MS = 600_000
@@ -59,6 +79,13 @@ export async function discoverRecipe(
   const existing = loadRecipe(repoRoot, recipePath(repoRoot))
   if (existing) return { status: 'exists', recipe: existing.recipe, fingerprint: existing.fingerprint }
 
+  // No recognized manifest ⇒ the model has nothing to reason from; fail without a
+  // single call rather than let it invent a no-op recipe against an empty repo.
+  const inputs = collectDiscoveryInputs(repoRoot)
+  if (inputs.manifests.length === 0) {
+    return { status: 'verify-failed', reason: NO_MANIFEST_REASON }
+  }
+
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
 
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
@@ -70,10 +97,19 @@ export async function discoverRecipe(
     if (parsed.success) proposal = parsed.data
   }
   if (!proposal) {
-    const attempt = await proposeRecipeWithReask(readDiscoveryInputs(repoRoot), runner)
+    const attempt = await proposeRecipeWithReask(inputs, runner)
     if ('error' in attempt) return { status: 'verify-failed', reason: attempt.error }
     proposal = attempt.proposal
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
+  }
+
+  // Belt against the no-op entry class before the build even runs: `true`/`false`/`:`
+  // would sail through the probe (they exit 0) and mint bogus findings, so reuse the
+  // recipe schema's no-op rejection as the single source of truth for both cached
+  // and fresh proposals.
+  const guarded = RecipeSchema.safeParse(proposal)
+  if (!guarded.success) {
+    return { status: 'verify-failed', reason: `recipe proposal rejected: ${flattenZodError(guarded.error)}`, proposal }
   }
 
   const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
@@ -120,9 +156,11 @@ export async function discoverRecipe(
 
 /**
  * Ask for a recipe proposal and validate it; on a schema failure re-ask ONCE with
- * the invalid output quoted back, then validate again. A thrown call is not
- * re-asked. Returns `{ error }` on a still-invalid or thrown call — the caller
- * turns it into `verify-failed`, never a crash.
+ * the invalid output quoted back, then validate again. A reply that declares the
+ * repo genuinely ambiguous (`{ "ambiguous": "…" }`) is a deliberate discovery
+ * failure carrying the model's explanation, not a re-ask. A thrown call is not
+ * re-asked. Returns `{ error }` on any failure — the caller turns it into
+ * `verify-failed`, never a crash.
  */
 async function proposeRecipeWithReask(
   input: RecipeDiscoveryInput,
@@ -134,6 +172,8 @@ async function proposeRecipeWithReask(
   } catch (e) {
     return { error: `recipe proposal call failed: ${(e as Error).message}` }
   }
+  const ambiguous = ambiguousReply(raw)
+  if (ambiguous) return { error: `recipe discovery ambiguous: ${ambiguous}` }
   const parsed = RecipeProposalSchema.safeParse(raw)
   if (parsed.success) return { proposal: parsed.data }
 
@@ -143,16 +183,83 @@ async function proposeRecipeWithReask(
   } catch (e) {
     return { error: `recipe proposal re-ask failed: ${(e as Error).message}` }
   }
+  const reAmbiguous = ambiguousReply(reRaw)
+  if (reAmbiguous) return { error: `recipe discovery ambiguous: ${reAmbiguous}` }
   const reParsed = RecipeProposalSchema.safeParse(reRaw)
   if (reParsed.success) return { proposal: reParsed.data }
   return { error: `recipe proposal invalid after re-ask: ${flattenZodError(reParsed.error)}` }
 }
 
-function readDiscoveryInputs(repoRoot: string): { packageJson: string; presentInputs: string[] } {
-  const pkgPath = path.join(repoRoot, 'package.json')
-  const packageJson = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf-8') : '(no package.json)'
-  const presentInputs = DISCOVERY_INPUTS.filter((f) => fs.existsSync(path.join(repoRoot, f)))
-  return { packageJson, presentInputs }
+/** The model's ambiguity explanation when it declined to guess, else `null`. */
+function ambiguousReply(raw: unknown): string | null {
+  if (raw && typeof raw === 'object' && 'ambiguous' in raw) {
+    const value = (raw as { ambiguous: unknown }).ambiguous
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim()
+  }
+  return null
+}
+
+/**
+ * Collect the recognized manifests that inform discovery, across every ecosystem
+ * guard supports, each labeled by path + ecosystem. JS/TS inlines package.json and
+ * marks lockfiles/turbo.json by presence; Python inlines pyproject/setup/
+ * requirements; C# inlines global.json plus the discovered `*.sln`/`*.csproj`
+ * (largest first, capped, with a note naming any that overflow the cap). An empty
+ * `manifests` array is the fail-loud signal — nothing recognized to build from.
+ */
+export function collectDiscoveryInputs(repoRoot: string): Omit<RecipeDiscoveryInput, 'correction'> {
+  const manifests: RecipeManifest[] = []
+  const presentInputs: string[] = []
+
+  const pkg = path.join(repoRoot, 'package.json')
+  if (isFile(pkg)) manifests.push({ path: 'package.json', ecosystem: 'js', content: readCappedManifest(pkg) })
+  for (const marker of JS_PRESENCE_MARKERS) {
+    if (fs.existsSync(path.join(repoRoot, marker))) presentInputs.push(marker)
+  }
+
+  for (const rel of PYTHON_MANIFESTS) {
+    const abs = path.join(repoRoot, rel)
+    if (isFile(abs)) manifests.push({ path: rel, ecosystem: 'python', content: readCappedManifest(abs) })
+  }
+
+  const global = path.join(repoRoot, 'global.json')
+  if (isFile(global)) manifests.push({ path: 'global.json', ecosystem: 'csharp', content: readCappedManifest(global) })
+  // Largest project files first — a bigger .csproj/.sln carries more of the
+  // OutputType / ToolCommandName entry story; ties break by path for determinism.
+  const projects = discoverCsharpProjectFiles(repoRoot)
+    .map((rel) => ({ rel, size: fileSize(path.join(repoRoot, rel)) }))
+    .sort((a, b) => b.size - a.size || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  for (const { rel } of projects.slice(0, MAX_CSHARP_PROJECT_FILES)) {
+    manifests.push({ path: rel, ecosystem: 'csharp', content: readCappedManifest(path.join(repoRoot, rel)) })
+  }
+  const overflow = projects.slice(MAX_CSHARP_PROJECT_FILES)
+  const extraProjectNote =
+    overflow.length > 0
+      ? `${overflow.length} more C# project file(s) present, not inlined: ${overflow.map((p) => p.rel).join(', ')}`
+      : undefined
+
+  return { manifests, presentInputs, ...(extraProjectNote ? { extraProjectNote } : {}) }
+}
+
+function isFile(abs: string): boolean {
+  try {
+    return fs.statSync(abs).isFile()
+  } catch {
+    return false
+  }
+}
+
+function fileSize(abs: string): number {
+  try {
+    return fs.statSync(abs).size
+  } catch {
+    return 0
+  }
+}
+
+function readCappedManifest(abs: string): string {
+  const raw = fs.readFileSync(abs, 'utf-8')
+  return raw.length > MANIFEST_INLINE_LIMIT ? `${raw.slice(0, MANIFEST_INLINE_LIMIT)}…(truncated)` : raw
 }
 
 /**
