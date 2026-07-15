@@ -63,9 +63,7 @@ function reviewForPair(c: SpecCorpus, a: string, b: string): SpecOverlapReview |
  *  plain "resolved" fallback (an exclude-resolved row). */
 function conflictBadge(cf: { resolution?: ConflictResolutionLike }): string | undefined {
   if (cf.resolution) {
-    if (cf.resolution.verdict === 'dismissed') return 'dismissed';
-    const winner = cf.resolution.verdict === 'a' ? cf.resolution.docA : cf.resolution.docB;
-    return `resolved — ${winner} is right`;
+    return cf.resolution.verdict === 'dismissed' ? 'dismissed' : 'resolved';
   }
   return undefined;
 }
@@ -492,8 +490,6 @@ export function SpecCorpusView({
                 area={fmtArea(area)}
                 resolved={resolved}
                 resolvedLabel={summary}
-                description={review?.explanation || note}
-                verified={!!review}
                 workspace={workspaceRefs.has(a) || workspaceRefs.has(b)}
                 active={activeKey === overlapKey(area, a, b)}
                 onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
@@ -1116,8 +1112,6 @@ function OverlapRow({
   area,
   resolved,
   resolvedLabel,
-  description,
-  verified,
   workspace = false,
   active,
   onOpen,
@@ -1127,10 +1121,6 @@ function OverlapRow({
   resolved: boolean;
   /** Rich resolved-badge text (the verdict); falls back to "resolved". */
   resolvedLabel?: string;
-  /** The row's descriptive line — the reviewer's explanation, else the detector note. */
-  description?: string;
-  /** True when the verify judge confirmed this flag — shows the verified affordance. */
-  verified?: boolean;
   /** Hosted repo view: a workspace-inherited doc is one side of this conflict. */
   workspace?: boolean;
   active: boolean;
@@ -1149,20 +1139,9 @@ function OverlapRow({
       <GitMerge className={`mt-0.5 h-3 w-3 shrink-0 ${resolved ? 'text-emerald-500' : 'text-amber-500'}`} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
-        {description && (
-          <span className="line-clamp-2 text-[10px] leading-snug text-muted-foreground/80">{description}</span>
-        )}
         <span className="flex flex-wrap items-center gap-1">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
           {workspace && <WorkspaceBadge />}
-          {verified && (
-            <HoverPopover content="Confirmed by the verify reviewer" side="top">
-              <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-                <BadgeCheck className="h-3 w-3" />
-                verified
-              </span>
-            </HoverPopover>
-          )}
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
               {resolvedLabel ?? 'resolved'}

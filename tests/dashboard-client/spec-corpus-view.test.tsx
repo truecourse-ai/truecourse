@@ -349,7 +349,7 @@ describe('SpecCorpusView — section default collapse states', () => {
     // The manual toggle still works — expanding shows the resolved row.
     await user.click(screen.getByText('Conflicts'));
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('resolved')).toBeInTheDocument();
   });
 
   it('"Conflicts" starts OPEN when an open conflict exists at load', () => {
@@ -378,7 +378,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       />,
     );
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('resolved')).toBeInTheDocument();
   });
 
   it('a manual expand of "Not included" survives a data refetch', async () => {
@@ -415,13 +415,13 @@ describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
     verdict: v,
   });
 
-  it('a pick-a-side verdict shows the "resolved — <winner> is right" badge on the conflict row', async () => {
+  it('a pick-a-side verdict shows the plain "resolved" badge on the conflict row', async () => {
     const data: SpecCorpusResponse = { ...RESP, conflictResolutions: [verdict('a')] };
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
     // All conflicts resolved → the section starts collapsed; expand to see the badge.
     await userEvent.setup().click(screen.getByText('Conflicts'));
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
-    expect(screen.getByText('resolved — docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('resolved')).toBeInTheDocument();
   });
 
   it('a dismissal shows the "dismissed" badge on the conflict row', async () => {
@@ -431,24 +431,16 @@ describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
     expect(screen.getByText('dismissed')).toBeInTheDocument();
   });
 
-  it('a reviewed conflict row shows the reviewer explanation + a verified affordance', () => {
+  it('a conflict row stays quiet — no conflict message and no verified chip, reviewed or not', () => {
     const data = withReview({
       explanation: 'Both docs specify a cancellation window and they disagree.',
       recommendation: { action: 'pick-a', rationale: 'v1 is the current source of truth.' },
     });
     render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
-    // An open conflict → the Conflicts section is expanded; the row carries the
-    // reviewer's explanation (not the thin note) and the verified affordance.
-    expect(screen.getByText('Both docs specify a cancellation window and they disagree.')).toBeInTheDocument();
-    expect(screen.getByText('verified')).toBeInTheDocument();
-    // The thin detector note is superseded, not shown.
+    // The message lives in the detail pane; the row shows neither the explanation
+    // nor the detector note, and no verified affordance.
+    expect(screen.queryByText('Both docs specify a cancellation window and they disagree.')).not.toBeInTheDocument();
     expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
-  });
-
-  it('an unreviewed conflict row falls back to the detector note and shows no verified affordance', () => {
-    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
-    // No review → the row's descriptive line is the note, and nothing verified.
-    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
     expect(screen.queryByText('verified')).not.toBeInTheDocument();
   });
 
@@ -781,8 +773,10 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         recommendation: { action: 'pick-a', rationale: 'v1 is the newer, authoritative policy.' },
       }),
     );
-    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
     expect(screen.getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
+    expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
+    // The brief REPLACES the detector note — never both.
+    expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
     expect(screen.getByText('Recommendation')).toBeInTheDocument();
     expect(screen.getByText('docs/v1.md is right')).toBeInTheDocument();
     expect(screen.getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
@@ -855,7 +849,7 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       ],
     };
     renderDetail(resolved);
-    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
+    expect(screen.getByText('They disagree.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 

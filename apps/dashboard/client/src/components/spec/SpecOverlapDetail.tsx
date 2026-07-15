@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { BadgeCheck, Check, Copy, Loader2, X } from 'lucide-react';
+import { Check, Copy, Loader2, X } from 'lucide-react';
 import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -232,15 +232,9 @@ export function SpecOverlapDetail({
             </button>
           )}
         </div>
-        {note && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{note}</p>}
-
-        {review && (
+        {(review?.explanation || note) && (
           <div className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
-              Resolution brief
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-foreground">{review.explanation}</p>
+            <p className="text-xs leading-relaxed text-foreground">{review?.explanation || note}</p>
           </div>
         )}
 
