@@ -1,20 +1,21 @@
 /**
  * End-to-end curate(): discover → relevance keep/drop → area-tag → group →
- * relations → overlap-flag → assemble + persist corpus.json. All LLM stages are
- * stubbed; the filename relation detector runs for real (deterministic).
+ * overlap-flag → assemble + persist corpus.json. All LLM stages are stubbed.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { curate, readCorpus } from '../../packages/spec-consolidator/src/index.js';
+import { planDocChunks } from '@truecourse/shared';
+import { curate, readCorpus, OVERLAP_WINDOW_CHARS } from '../../packages/spec-consolidator/src/index.js';
 import type {
   AreaTagRunner,
   DecisionsFile,
   DocCandidate,
   OverlapRunner,
   RelevanceRunner,
+  VerifyOverlapRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
@@ -60,6 +61,9 @@ const areaTagger: AreaTagRunner = async ({ doc }) => {
 
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
 
+// Verify keeps every flag by default; individual tests override to refute.
+const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
+
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   decisions: [],
@@ -85,14 +89,14 @@ function run(extra: Parameters<typeof curate>[1] = {}) {
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
-    disableLlmRelationDetection: true,
+    verifyOverlapRunner: confirmAll,
     skipGit: true,
     ...extra,
   });
 }
 
 describe('curate', () => {
-  it('curates docs into an area-grouped corpus with relations + overlaps', async () => {
+  it('curates docs into an area-grouped corpus with overlaps', async () => {
     const result = await run();
 
     // Relevance dropped the scratch note.
@@ -109,13 +113,10 @@ describe('curate', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/auth.md', 'docs/users-v1.md', 'docs/users-v2.md']);
 
-    // Filename relation: v1 → v2.
-    expect(result.corpus.relations).toEqual([
-      { type: 'replace', older: 'docs/users-v1.md', newer: 'docs/users-v2.md', detectedFrom: 'filename' },
-    ]);
+    // A corpus carries no relations field.
+    expect(result.corpus.relations).toBeUndefined();
 
-    // Every within-area pair is examined — the replace relation does NOT skip the
-    // (v1,v2) pair: relations are lifecycle metadata, never conflict resolution.
+    // Every within-area pair is examined.
     const overlapPairs = usersArea.overlaps.map((o) => o.docs);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
@@ -126,7 +127,6 @@ describe('curate', () => {
     expect(result.stats.docsKept).toBe(3);
     expect(result.stats.areaCount).toBe(2);
     expect(result.stats.overlapFlags).toBe(3);
-    expect(result.stats.resolvedRelations).toBe(1);
   });
 
   it('persists corpus.json (round-trips through readCorpus)', async () => {
@@ -146,7 +146,9 @@ describe('curate', () => {
     expect(readCorpus(repo)).toBeNull();
   });
 
-  it('applies injected user relations (folded in, user wins) and manualAreas', async () => {
+  it('applies manualAreas and tolerates legacy relations in decisions', async () => {
+    // A legacy `relations` entry is still parsed (back-compat) but inert — the
+    // scan neither consumes it nor lets it skip an overlap pair.
     const decisions: DecisionsFile = {
       ...EMPTY_DECISIONS,
       relations: [
@@ -160,13 +162,7 @@ describe('curate', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
 
-    // The user precedence relation wins the pair over the auto filename replace.
-    const eff = result.relations.find((r) => r.older === 'docs/users-v1.md' && r.newer === 'docs/users-v2.md');
-    expect(eff?.type).toBe('precedence');
-    expect(eff?.detectedFrom).toBe('manual');
-
-    // The relation does NOT skip the pair — the disagreement is still flagged
-    // (relations are lifecycle metadata, never conflict resolution).
+    // The legacy relation does NOT skip the pair — the disagreement is still flagged.
     expect(usersArea.overlaps).toHaveLength(1);
     expect(usersArea.overlaps[0].docs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
@@ -187,15 +183,13 @@ describe('curate', () => {
     expect(result.stats.docsKept).toBe(2);
   });
 
-  it('reads relations + manualAreas from decisions.json on disk when not injected', async () => {
+  it('reads manualAreas from decisions.json on disk when not injected', async () => {
     const specsDir = path.join(repo, '.truecourse', 'specs');
     fs.mkdirSync(specsDir, { recursive: true });
     fs.writeFileSync(
       path.join(specsDir, 'decisions.json'),
       JSON.stringify({
         version: 1,
-        decisions: [],
-        manualChains: [],
         manualIncludes: [],
         relations: [],
         manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
@@ -206,11 +200,129 @@ describe('curate', () => {
       relevanceRunner: relevance,
       areaTagRunner: areaTagger,
       overlapRunner: flagAll,
-      disableLlmRelationDetection: true,
+      verifyOverlapRunner: confirmAll,
       skipGit: true,
     });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overlap verification (precision pass) — the recall-biased detector over-flags;
+// an explicit `refuted` verdict prunes a flag before the corpus is assembled, so
+// a refuted flag never reaches corpus.json. Confirmed + error-path flags stay.
+// ---------------------------------------------------------------------------
+
+describe('curate — overlap verification', () => {
+  it('a refuted flag is pruned from the corpus, excluded from openOverlaps, counted in overlapRefuted', async () => {
+    // Refute exactly the (v1,v2) pair; keep every other flag.
+    const verify: VerifyOverlapRunner = async ({ a, b }) => {
+      const pair = [a.path, b.path].sort().join('|');
+      return pair === 'docs/users-v1.md|docs/users-v2.md'
+        ? { verdict: 'refuted', reason: 'complementary detail' }
+        : { verdict: 'confirmed', reason: 'genuine' };
+    };
+    const result = await run({ verifyOverlapRunner: verify });
+
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    const pairs = usersArea.overlaps.map((o) => o.docs);
+    // The refuted (v1,v2) pair is GONE from the corpus; the other two survive.
+    expect(pairs).not.toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
+    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
+
+    // Stats: openOverlaps excludes the refuted flag; overlapRefuted counts it.
+    expect(result.stats.overlapRefuted).toBe(1);
+    expect(result.stats.overlapFlags).toBe(2);
+    expect(result.stats.openOverlaps.map((o) => [o.a, o.b])).not.toContainEqual([
+      'docs/users-v1.md',
+      'docs/users-v2.md',
+    ]);
+  });
+
+  it('confirmed flags stay exactly as before (nothing refuted)', async () => {
+    const result = await run(); // confirmAll
+    expect(result.stats.overlapRefuted).toBe(0);
+    expect(result.stats.overlapFlags).toBe(3);
+  });
+
+  it('fail-open: a verifier that throws leaves every flag in the corpus', async () => {
+    const throwing: VerifyOverlapRunner = async () => {
+      throw new Error('judge unavailable');
+    };
+    const result = await run({ verifyOverlapRunner: throwing });
+    // No verdict = no prune: all three flags survive.
+    expect(result.stats.overlapRefuted).toBe(0);
+    expect(result.stats.overlapFlags).toBe(3);
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    expect(usersArea.overlaps).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overlap full-matrix coverage — a within-area doc pair is judged across its
+// COMPLETE window matrix; nothing is truncated no matter how large the docs.
+// ---------------------------------------------------------------------------
+
+describe('curate — overlap full window matrix', () => {
+  // A realistic long configuration reference: many `## key` sections, well past a
+  // single OVERLAP_WINDOW_CHARS window, so both docs split into several windows.
+  function configReference(product: string, sections: number): string {
+    const out = [
+      `# ${product} Configuration Reference`,
+      '',
+      `Every runtime setting the ${product} service reads at boot, with its type, default, and reload semantics.`,
+      '',
+    ];
+    for (let i = 0; i < sections; i++) {
+      out.push(
+        `## ${product}.pipeline.stage-${i}`,
+        '',
+        `Controls how stage ${i} of the request pipeline behaves. Accepts a string; the default is "auto".`,
+        `When set to a non-default value the ${product} runtime applies policy ${i} to every inbound request and records the decision in the audit log.`,
+        `Type: string. Default: auto. Scope: runtime. Reloadable: yes. Since: 1.${i}. Related: ${product}.pipeline.stage-${(i + 1) % sections}.`,
+        '',
+      );
+    }
+    return out.join('\n');
+  }
+
+  // Distinct products so the relevance prefilter never treats them as near-duplicates.
+  const bigA = configReference('gateway', 300);
+  const bigB = configReference('ingress', 300);
+  const DOCS_BIG: DocCandidate[] = [
+    { path: 'docs/gateway-config-a.md', absPath: '', content: bigA, kind: 'prd', preview: bigA.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-a', size: bigA.length },
+    { path: 'docs/gateway-config-b.md', absPath: '', content: bigB, kind: 'prd', preview: bigB.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-b', size: bigB.length },
+  ];
+  // Both docs land in the same area, so they form one within-area pair.
+  const tagSame: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'config' }], status: 'shipped' });
+  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
+  const noOverlap: OverlapRunner = async () => ({ overlap: false, note: '' });
+
+  it('judges the pair across every window combination of both oversized docs', async () => {
+    let calls = 0;
+    const counting: OverlapRunner = async (i) => {
+      calls++;
+      return noOverlap(i);
+    };
+    const result = await curate(repo, {
+      docSource: () => DOCS_BIG,
+      decisions: EMPTY_DECISIONS,
+      relevanceRunner: keepAll,
+      areaTagRunner: tagSame,
+      overlapRunner: counting,
+      skipGit: true,
+    });
+
+    // The pair formed (both docs share the one area) and the judge saw the FULL
+    // matrix: every window of A against every window of B, no truncation.
+    expect(result.corpus.areas.some((a) => a.docRefs.length === 2)).toBe(true);
+    const nA = planDocChunks('docs/gateway-config-a.md', bigA, OVERLAP_WINDOW_CHARS).length;
+    const nB = planDocChunks('docs/gateway-config-b.md', bigB, OVERLAP_WINDOW_CHARS).length;
+    expect(nA).toBeGreaterThan(3);
+    expect(nB).toBeGreaterThan(3);
+    expect(calls).toBe(nA * nB);
   });
 });
 
@@ -237,7 +349,6 @@ describe('curate — include-scope', () => {
       relevanceRunner: keepAll,
       areaTagRunner: tagOne,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
   }

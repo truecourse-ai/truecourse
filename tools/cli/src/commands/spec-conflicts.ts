@@ -8,9 +8,7 @@
  *                  suppressed at guard generate; the winner stands.
  *   - dismiss      (`--dismiss`)          — a detector false-positive; resolves
  *                  the gate, suppresses nothing.
- * Doc-LEVEL relations (replace / precedence / keep-both) are a different tool —
- * document lifecycle/precedence, owned by `spec chains` — and never resolve a
- * conflict.
+ * A conflict resolves ONLY via a verdict, a dismissal, or a force-exclude.
  *
  *   list                         flagged overlaps + their resolved/dismissed state
  *   show <area>                  the overlapping docs' prose excerpts for one area
@@ -198,7 +196,7 @@ export async function runSpecConflictsResolve(
   const decisions = readCorpusDecisions(repoRoot);
 
   if (!opts.right && !opts.dismiss) {
-    return fail('Pass --right <docPath> (pick a side) or --dismiss. Doc-level relations live in `spec chains add` and never resolve a conflict.');
+    return fail('Pass --right <docPath> (pick a side) or --dismiss.');
   }
   if (opts.right && opts.dismiss) return fail('Pass either --right <docPath> or --dismiss, not both.');
   const conflicts = buildCorpusConflicts(corpus, decisions);

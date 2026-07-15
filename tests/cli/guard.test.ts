@@ -515,7 +515,7 @@ describe('composeGuardStatus', () => {
     expect(s.coverage).toEqual({
       totalSections: 4,
       withScenarios: 2,
-      classification: { cli: 1, api: 1, web: 0, tui: 0, untestable: 1, unclassified: 1 },
+      classification: { cli: 1, api: 1, web: 0, tui: 0, library: 0, untestable: 1, unclassified: 1 },
     })
     expect(s.lastRun).toBeNull()
     expect(s.lastGenerate).toBeNull()

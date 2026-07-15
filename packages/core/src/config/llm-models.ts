@@ -2,7 +2,7 @@
  * Per-stage LLM model configuration.
  *
  * Every pipeline stage that shells out to the Claude CLI has a stable
- * stage ID (e.g. `spec.chainDetect`, `contract.extract`). Defaults are
+ * stage ID (e.g. `spec.overlap`, `contract.extract`). Defaults are
  * baked into each runner; users override on a per-stage basis via
  * env vars or `.truecourse/config.json`.
  *
@@ -32,9 +32,8 @@ export type StageId =
   | 'spec.relevance'
   | 'spec.areaTag'
   | 'spec.vocab'
-  | 'spec.chainDetect'
   | 'spec.overlap'
-  | 'spec.relation'
+  | 'spec.verifyOverlap'
   | 'contract.enumerate'
   | 'contract.reconcile'
   | 'contract.extract'
@@ -60,9 +59,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // under-tagged terse docs like ADRs; Sonnet is worth the cost here.
   'spec.areaTag': 'sonnet',
   'spec.vocab': 'haiku',
-  'spec.chainDetect': 'haiku',
   'spec.overlap': 'haiku',
-  'spec.relation': 'sonnet',
+  // Detection is recall-biased Haiku; the verify pass is the precision judge that
+  // prunes its false positives — a stricter comprehension call over one flagged
+  // pair with full context, so sonnet (trivially A/B-able to opus via config).
+  // The conflict judge runs on opus: it reads full docs per flag, and the flag
+  // count keeps the spend small.
+  'spec.verifyOverlap': 'opus',
   'contract.enumerate': 'sonnet',
   'contract.reconcile': 'sonnet',
   'contract.extract': 'opus',
@@ -118,7 +121,7 @@ function maybeWarnLegacy(): void {
 }
 
 function stageEnvVar(stageId: StageId): string {
-  // spec.chainDetect → SPEC_CHAIN_DETECT
+  // spec.areaTag → SPEC_AREA_TAG
   // contract.extract → CONTRACT_EXTRACT
   const upper = stageId
     .replace(/\./g, '_')

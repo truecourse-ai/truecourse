@@ -186,6 +186,75 @@ describe('generateGuards — fidelity review (item 33)', () => {
     expect(res.birthFindings).toEqual([])
   })
 
+  it('reviews fan out through the shared pool, bounded by the concurrency option', async () => {
+    const r = seed()
+    // One claim → four green scenarios → four independent fidelity reviews. A tracking
+    // reviewer records the peak in-flight count; with the bound at 2 it must never spike
+    // past 2, and all four still complete (all faithful → all persist).
+    let inFlight = 0
+    let maxInFlight = 0
+    const tracking: FidelityRunner = async () => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((res) => setTimeout(res, 20))
+      inFlight--
+      return { verdict: 'faithful' }
+    }
+    const res = await generateGuards({
+      repoRoot: r,
+      concurrency: 2,
+      extractRunner: versionExtract,
+      generateRunner: authorBy({
+        version: [
+          raw('a', PASSING_STEPS),
+          raw('b', PASSING_STEPS),
+          raw('c', PASSING_STEPS),
+          raw('d', PASSING_STEPS),
+        ],
+      }),
+      fidelityRunner: tracking,
+    })
+
+    expect(res.written).toHaveLength(4)
+    expect(maxInFlight).toBeGreaterThan(1) // actually ran in parallel, not serial
+    expect(maxInFlight).toBeLessThanOrEqual(2)
+  })
+
+  it('TRUECOURSE_MAX_CONCURRENCY caps the fidelity reviews when no option is passed', async () => {
+    const r = seed()
+    let inFlight = 0
+    let maxInFlight = 0
+    const tracking: FidelityRunner = async () => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((res) => setTimeout(res, 20))
+      inFlight--
+      return { verdict: 'faithful' }
+    }
+    const saved = process.env.TRUECOURSE_MAX_CONCURRENCY
+    process.env.TRUECOURSE_MAX_CONCURRENCY = '2'
+    try {
+      const res = await generateGuards({
+        repoRoot: r,
+        extractRunner: versionExtract,
+        generateRunner: authorBy({
+          version: [
+            raw('a', PASSING_STEPS),
+            raw('b', PASSING_STEPS),
+            raw('c', PASSING_STEPS),
+            raw('d', PASSING_STEPS),
+          ],
+        }),
+        fidelityRunner: tracking,
+      })
+      expect(res.written).toHaveLength(4)
+      expect(maxInFlight).toBeLessThanOrEqual(2)
+    } finally {
+      if (saved === undefined) delete process.env.TRUECOURSE_MAX_CONCURRENCY
+      else process.env.TRUECOURSE_MAX_CONCURRENCY = saved
+    }
+  })
+
   it('a fidelity finding round-trips through the report schema (kind: fidelity)', () => {
     const rep = {
       generatedAt: '2026-07-10T00:00:00.000Z',

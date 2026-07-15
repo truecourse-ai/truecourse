@@ -129,9 +129,9 @@ describe('guard status treatments', () => {
     for (const status of GUARD_STATUS_ORDER) {
       expect(guardStatusMeta(status).label).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + api/web/tui + blocked-on/untestable/
-    // no-claim/dismissed + unguarded.
-    expect(GUARD_STATUS_ORDER).toHaveLength(14);
+    // fail/error/stale/orphaned/pass/guarded + api/web/tui/library + blocked-on/
+    // untestable/no-claim/dismissed + unguarded.
+    expect(GUARD_STATUS_ORDER).toHaveLength(15);
   });
 
   it('maps each status group to its own colour treatment', () => {

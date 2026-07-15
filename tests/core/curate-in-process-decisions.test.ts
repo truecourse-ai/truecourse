@@ -16,29 +16,20 @@ import type {
   DecisionsFile,
   OverlapRunner,
   RelevanceRunner,
+  VerifyOverlapRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 // Keep every doc; no LLM.
 const relevance: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
-// Both docs land in the same area so a relation between them is meaningful.
 const areaTagger: AreaTagRunner = async () => ({
   tags: [{ product: 'core', concern: 'orders' }],
   status: 'shipped',
 });
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
+const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
 
-// Non-versioned names so the deterministic filename chain detector adds nothing —
-// any relation in the result therefore came from the injected decisions.
-const USER_RELATION = {
-  type: 'precedence' as const,
-  older: 'docs/alpha.md',
-  newer: 'docs/beta.md',
-  scope: 'core/orders',
-  detectedFrom: 'manual' as const,
-};
-
-function decisionsWith(relations: DecisionsFile['relations']): DecisionsFile {
-  return { version: 1, decisions: [], manualChains: [], manualIncludes: [], relations, manualAreas: [] };
+function decisionsWith(manualExcludes: string[]): DecisionsFile {
+  return { version: 1, manualIncludes: [], manualExcludes, relations: [], manualAreas: [], conflictResolutions: [] };
 }
 
 let repo: string;
@@ -61,20 +52,20 @@ function run(decisions: DecisionsFile) {
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
-    disableLlmRelationDetection: true,
+    verifyOverlapRunner: confirmAll,
   });
 }
 
 describe('curateInProcess — decisions forwarding', () => {
-  it('folds an injected user relation into the corpus (not read from the tree)', async () => {
-    // No decisions.json was written to `repo`, so the relation can only appear if
-    // the injected `decisions` reached curate().
-    const { curate } = await run(decisionsWith([USER_RELATION]));
-    expect(curate.relations).toContainEqual(expect.objectContaining(USER_RELATION));
+  it('applies an injected force-exclude (not read from the tree)', async () => {
+    // No decisions.json was written to `repo`, so beta.md drops from the corpus
+    // only if the injected `decisions` reached curate().
+    const { curate } = await run(decisionsWith(['docs/beta.md']));
+    expect(curate.corpus.docs.map((d) => d.ref)).toEqual(['docs/alpha.md']);
   });
 
-  it('has no user relation when none is injected', async () => {
+  it('keeps both docs when nothing is excluded', async () => {
     const { curate } = await run(decisionsWith([]));
-    expect(curate.relations).toEqual([]);
+    expect(curate.corpus.docs.map((d) => d.ref).sort()).toEqual(['docs/alpha.md', 'docs/beta.md']);
   });
 });

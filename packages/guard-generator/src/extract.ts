@@ -14,7 +14,8 @@
 
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { slugifyHeading, splitTopLevelSections } from '@truecourse/guard-runner'
+import { slugifyHeading } from '@truecourse/guard-runner'
+import { planDocChunks } from '@truecourse/shared'
 import {
   DocExtractionSchema,
   type DocExtraction,
@@ -90,45 +91,16 @@ function outlineOf(sections: SectionInput[]): OutlineEntry[] {
 }
 
 /**
- * Recursively split a slice at its headings until every piece fits the budget:
- * split at the shallowest level that partitions it, and re-split any piece still
- * over budget at its next level down. A piece with no further heading structure is
- * emitted as-is (an unavoidable over-budget view). The full outline still travels
- * with every view, so a claim can always resolve its anchor regardless of which
- * piece the section's text landed in.
- */
-function shrinkToBudget(doc: string, content: string): string[] {
-  if (content.length <= EXTRACT_VIEW_BUDGET) return [content]
-  const parts = splitTopLevelSections(doc, content)
-  if (parts.length <= 1) return [content] // no finer heading structure — accept it
-  return parts.flatMap((p) => shrinkToBudget(doc, p))
-}
-
-/**
- * Plan a doc's extraction views: shrink it to within-budget pieces along its
- * headings, then greedily pack adjacent pieces back up to the budget so calls stay
- * few but bounded. One view when the whole doc fits.
+ * Plan a doc's extraction views via the shared heading-aware chunker
+ * (`planDocChunks` — the same mechanism behind spec-scan's overlap windows).
+ * One view when the whole doc fits; the full outline still travels with every
+ * view, so a claim can always resolve its anchor regardless of which piece the
+ * section's text landed in.
  */
 function planViews(doc: GuardDoc): ExtractView[] {
-  if (doc.content.length <= EXTRACT_VIEW_BUDGET) return [{ text: doc.content }]
-
-  const pieces = shrinkToBudget(doc.doc, doc.content)
-  const chunks: string[] = []
-  let cur: string[] = []
-  let curLen = 0
-  const flush = (): void => {
-    if (cur.length) chunks.push(cur.join('\n'))
-    cur = []
-    curLen = 0
-  }
-  for (const piece of pieces) {
-    if (curLen > 0 && curLen + piece.length > EXTRACT_VIEW_BUDGET) flush()
-    cur.push(piece)
-    curLen += piece.length + 1
-  }
-  flush()
-  if (chunks.length <= 1) return [{ text: doc.content }]
-  return chunks.map((text, i) => ({ text, view: { index: i + 1, total: chunks.length } }))
+  const chunks = planDocChunks(doc.doc, doc.content, EXTRACT_VIEW_BUDGET)
+  if (chunks.length === 1) return [{ text: chunks[0].text }]
+  return chunks.map((c) => ({ text: c.text, view: { index: c.index, total: c.total } }))
 }
 
 /** How many extraction views a doc splits into (for the pre-flight estimate). */

@@ -38,7 +38,7 @@ const DRIVER_BAND = 'border-dashed border-slate-400/50 bg-muted/25';
 const GREY_BADGE = 'bg-muted text-muted-foreground';
 
 /**
- * The "awaiting driver" rows (api/web/tui today), one per non-runnable driver in
+ * The "awaiting driver" rows (api/web/tui/library today), one per non-runnable driver in
  * the registry — its `waitingLabel` is the copy. A new driver adds its row by
  * appearing in the registry; nothing here is hand-maintained.
  */

@@ -28,8 +28,10 @@ import {
   RELEVANCE_SYSTEM_PROMPT,
   AREA_TAGGER_SYSTEM_PROMPT,
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  CHAIN_DETECTION_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
+  OVERLAP_WINDOW_CHARS,
+  VERIFY_OVERLAP_SYSTEM_PROMPT,
+  VERIFY_DOC_BUDGET_CHARS,
 } from '@truecourse/spec-consolidator';
 import {
   readCorpusForGenerate,
@@ -64,11 +66,11 @@ import type { PriceTable } from './model-prices.js';
 // Heuristic assumptions, surfaced as ranges where they bite.
 const KEEP_RATE = 0.9; // fraction of prefiltered docs the relevance LLM keeps
 const AVG_AREA_SIZE = 4; // docs per area (drives overlap pair count)
-const OVERLAP_CAP = 60; // overlap-detector caps pairs per area
 const TARGET_DENSITY_PER_KB = 0.6; // heuristic enumerated targets per KB of area text
 const RETRY_AMP = 1.3; // extract retry-round amplification (1 + up to maxRetryRounds)
 const GAP_AREA_FRACTION = 0.4; // rough fraction of areas that end up with gaps to judge
 const MALFORMED_RATE = 0.15; // rough fraction of extract calls whose output needs parse-repair
+const FLAG_RATE = 0.15; // rough fraction of overlap PAIRS the detector flags (→ verify calls)
 const PARSE_REPAIR_ATTEMPTS = 3; // retries per malformed artifact (matches repair.ts)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
@@ -77,8 +79,8 @@ const STAGE_LABELS: Record<string, string> = {
   relevance: 'Filtering docs',
   areaTag: 'Tagging areas',
   vocab: 'Normalizing vocabulary',
-  relation: 'Detecting relations',
   overlap: 'Flagging overlaps',
+  verifyOverlap: 'Verifying conflicts',
   // generate
   enumerate: 'Planning contracts',
   reconcile: 'De-duplicating targets',
@@ -149,11 +151,21 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
     : 0;
 
   // Overlap pairs: area sizes are mid-run only → estimate from kept docs grouped
-  // into mean-sized areas, capped per area. Reported as a range. Only when the
-  // kept set actually changed (otherwise overlap is a cache hit).
+  // into mean-sized areas, every pair judged (no cap). Reported as a range. Only
+  // when the kept set actually changed (otherwise overlap is a cache hit).
   const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
-  const pairsPerArea = Math.min(OVERLAP_CAP, (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2);
-  const overlapCalls = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
+  const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
+  const overlapPairs = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
+  // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
+  // window matrix (never truncated), so calls scale with the square of doc size.
+  // This estimate IS the cost gate for that completeness — the user approves it.
+  const callsPerPairFactor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
+  const overlapCalls = overlapPairs * callsPerPairFactor;
+
+  // Verify pass: one call per FLAGGED pair (not per window call) — the detector
+  // flags only a fraction of the pairs it examines, so scale by the flag rate.
+  // Bounded above by every pair being flagged and verified.
+  const verifyCalls = Math.round(FLAG_RATE * overlapPairs);
 
   const stages: StageCallEstimate[] = [
     {
@@ -183,20 +195,28 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       avgOutputTokens: 200,
     },
     {
-      stage: 'relation',
-      model: resolveModel('spec.relation', undefined, repoRoot),
-      calls: hasWork && nKept >= 2 ? 1 : 0,
-      avgInputTokens: tokensFromChars(CHAIN_DETECTION_SYSTEM_PROMPT.length, nKept * 200),
-      avgOutputTokens: 200,
-    },
-    {
       stage: 'overlap',
       model: resolveModel('spec.overlap', undefined, repoRoot),
       calls: overlapCalls,
       minCalls: 0,
       maxCalls: overlapCalls * 2,
-      avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, avgDocChars * 2),
+      avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, Math.min(avgDocChars, OVERLAP_WINDOW_CHARS) * 2),
       avgOutputTokens: 120,
+    },
+    {
+      // Verify each flagged pair — a heuristic fraction of the overlap pairs (the
+      // exact count isn't known until detection runs). Each call carries both
+      // sides' context, each clamped to VERIFY_DOC_BUDGET_CHARS.
+      stage: 'verifyOverlap',
+      model: resolveModel('spec.verifyOverlap', undefined, repoRoot),
+      calls: verifyCalls,
+      minCalls: 0,
+      maxCalls: overlapPairs,
+      avgInputTokens: tokensFromChars(
+        VERIFY_OVERLAP_SYSTEM_PROMPT.length,
+        Math.min(avgDocChars, VERIFY_DOC_BUDGET_CHARS) * 2,
+      ),
+      avgOutputTokens: 80,
     },
   ];
 

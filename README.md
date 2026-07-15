@@ -197,7 +197,7 @@ TrueCourse builds a curated spec corpus from your docs, then **guards** it: an L
 
 ```bash
 cd <your-repo>
-truecourse spec scan                    # Curate docs → corpus (areas + relations + overlap flags)
+truecourse spec scan                    # Curate docs → corpus (areas + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
 truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
@@ -211,9 +211,9 @@ Resolve conflicts and review section coverage, scenarios, and run results visual
 
 Stages run in order, each producing committable artifacts the next consumes:
 
-**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`), auto-detects doc→doc **relations** (version chains, supersession), and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, relations, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: doc→doc `relations`, `manualAreas`, `manualIncludes`, and `manualExcludes` — committable).
+**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts). For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
 
-Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. Version chains (e.g. `v1`→`v2`) are auto-detected; you resolve the rest with doc→doc relations, in the dashboard's Guard → Coverage tab or via `spec conflicts` / `spec chains`.
+Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
 **2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (today's driver runs your project's CLI; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — a scenario that fails at birth is reported as a finding (the spec and the code already disagree) instead of being silently committed. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
 
@@ -232,8 +232,8 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 ```
 .truecourse/
 ├── specs/                  ← curated corpus (committable)
-│   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, relations, dropped docs
-│   └── decisions.json       ← user resolutions: doc→doc relations + manual areas + manual includes/excludes
+│   ├── corpus.json          ← kept docs + area tags, docs-by-area, overlap flags, dropped docs
+│   └── decisions.json       ← user resolutions: conflict verdicts + manual areas + manual includes/excludes
 ├── scenarios/               ← the guard scenario corpus (committable)
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
@@ -276,18 +276,15 @@ the recipe fingerprint, so the dashboard flags runs made under an older recipe.
 
 ```bash
 # Spec consolidation (docs → curated corpus)
-truecourse spec scan                              # Curate docs into corpus.json (areas + doc relations + overlap flags)
-truecourse spec status                            # Summary: docs, areas, relations, open vs resolved overlaps
+truecourse spec scan                              # Curate docs into corpus.json (areas + overlap flags)
+truecourse spec status                            # Summary: docs, areas, open vs resolved overlaps
 
-# Conflict resolution — flagged within-area overlaps → doc→doc relations
+# Conflict resolution — flagged within-area overlaps
 # (agent-friendly; also available in the dashboard Spec tab)
 truecourse spec conflicts list                    # List flagged within-area overlaps
 truecourse spec conflicts show <area>             # An area's overlapping docs with prose excerpts
-truecourse spec conflicts resolve <area> \        # Resolve one by recording a relation
-  --older <doc> --newer <doc> --replace|--precedence|--keep-both
-truecourse spec chains list                       # List doc→doc relations
-truecourse spec chains add --older A --newer B [--type replace|precedence|keep-both]
-truecourse spec chains remove --older A --newer B
+truecourse spec conflicts resolve <n|area> \      # Pick a side or dismiss a detector false-positive
+  --right <doc> | --dismiss [--note <text>]
 truecourse spec docs list                         # List the kept (corpus) docs + area tags
 truecourse spec docs skipped                      # Docs the relevance filter excluded
 truecourse spec docs include <path>               # Force-include a skipped doc (re-scans)
@@ -415,7 +412,6 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | doc relevance keep/drop | `TRUECOURSE_MODEL_SPEC_RELEVANCE` | haiku |
 | area tagging | `TRUECOURSE_MODEL_SPEC_AREA_TAG` | sonnet |
 | overlap flagging | `TRUECOURSE_MODEL_SPEC_OVERLAP` | haiku |
-| relation detection | `TRUECOURSE_MODEL_SPEC_RELATION` | sonnet |
 | guard section classify/extract | `TRUECOURSE_MODEL_GUARD_EXTRACT` | sonnet |
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |

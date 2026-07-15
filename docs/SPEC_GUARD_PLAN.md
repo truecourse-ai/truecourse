@@ -127,6 +127,15 @@ Driver verb sets (each closed; later drivers add vocabulary, never change the en
 - **api (later)**: environment boot + `request` / `expect` status, body, resulting datastore state.
 - **web (later)**: api environment + browser verbs (`navigate`, `click`, `fill`,
   `expect visible`) — Playwright underneath, scenario stays declarative.
+- **library (later)**: the package's programmatic API consumed by importing it from
+  user code (`import 'tsx'`, `require('pkg/sub')`, calling exports). Registered as a
+  recorded-only driver (2026-07-14): extraction classifies import-by-name claims as
+  `library` and their sections surface as "Needs library driver" gaps instead of
+  being authored as cli scenarios. When this driver ships, its sandbox must make the
+  package-under-test resolvable by name (npm-link semantics — issue #754; a tested
+  implementation was built and closed unmerged in PR #755, revive it as the
+  execution floor). Open design question: value-level assertions (in-process) vs
+  the cli driver's process-level observables.
 
 **The driver contract (how api/web/tui land additively).** The scenario **envelope is frozen** —
 `guard`, `id`, `title`, `binds`, `driver`, `setup`, `steps`, `normalize`, and the run-outcome set
@@ -317,9 +326,10 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    birth → retry → persist as each section's claims complete; recipe build kicked off parallel
    to authoring), so a straggler delays only its own section. Same design as the shelved
    incremental-settle (which also makes cancellation keep everything settled so far).
-5. **Birth concurrency.** Scenario sandboxes run at min(cpus,4) while authoring runs at 20 —
-   436 independent sandboxes through a 4-lane pipe, twice per run. Make it configurable
-   (`TRUECOURSE_MAX_CONCURRENCY` semantics) with a saner default.
+5. **Birth concurrency (BUILT).** Both knobs honor `TRUECOURSE_MAX_CONCURRENCY` when set:
+   scenario sandboxes default to min(cpus,8) (`defaultRunConcurrency`) and the shared LLM pool
+   that extraction, authoring, evidence-retries, and fidelity reviews all draw from defaults to
+   min(cpus,4) (`defaultConcurrency`) — an explicit `concurrency` option overrides either.
 6. **Cache retry outputs.** Round-1 authoring is cached per claim; retry outputs are NOT — a
    cancel during the retry round loses all retry work (tonight: 231 calls ≈ $58 would have
    evaporated). Cache per claim keyed on (prompt fingerprint, claim, section, retry-evidence
@@ -854,7 +864,7 @@ supplies real behavior on retry."
   and moves NO fingerprints (transport flag, caches stay valid). Verified live: envelope,
   usage, cost reporting intact.
 - **No-tools line scope**: guard prompts (generate/extract/recipe) AND spec-scan prompts
-  (relevance/area-tag/vocab/overlap/relation) via ONE shared constant. Deliberately EXCLUDED:
+  (relevance/area-tag/vocab/overlap; relation detection removed 2026-07-14, #760) via ONE shared constant. Deliberately EXCLUDED:
   contracts prompts (feature may be discontinued — no further investment) and analyze prompts
   (separate `LLMProvider` path, out of scope). Each inclusion moves that stage's fingerprint —
   spec re-scan + guard re-extract are the accepted one-time costs.
@@ -1388,7 +1398,10 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   client and CLI import one copy (client currently mirrors them).
 - **Phase 6 — api driver.** Environment recipe v2 (compose), ephemeral datastores, network-
   boundary fakes, egress control. STATUS: NOT STARTED (post-v1)
-- **Phase 7 — tui / web drivers.** PTY tier; Playwright tier. STATUS: NOT STARTED (post-v1)
+- **Phase 7 — tui / web / library drivers.** PTY tier; Playwright tier; in-process
+  programmatic-API tier (sections already classified; sandbox package-link mechanism
+  prototyped in PR #755, closed unmerged — revive on driver start). STATUS: NOT
+  STARTED (post-v1)
 - **Phase 8 — EE adaptation.** Only after the OSS loop (Phases 0–5) is proven on real repos:
   guard store behind the EE storage adapters (Postgres/blob, repo read-only), PR-scoped guard
   runs (baseline anchored to PR-head, per-PR overlay — same pattern as spec PR-scoping), an

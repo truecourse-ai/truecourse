@@ -752,7 +752,7 @@ export type ContractsFile = {
 };
 
 export type SpecStalenessResponse = {
-  /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
+  /** Recorded include/exclude/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
   /** A kept doc changed on disk since the last scan (edited in the dashboard or outside it). */
   docsChanged: boolean;
@@ -767,20 +767,8 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
 // ---------------------------------------------------------------------------
 // Corpus path (spec-scan redesign) — the curated doc corpus. Areas group docs;
 // an overlap is two same-area docs that may disagree, resolved by a
-// section-scoped verdict (pick-a-side / dismissal) or a force-exclude. Doc→doc
-// relations are lifecycle/precedence metadata and never resolve a conflict.
+// section-scoped verdict (pick-a-side / dismissal) or a force-exclude.
 // ---------------------------------------------------------------------------
-
-export type SpecRelationType = 'replace' | 'precedence' | 'keep-both';
-
-export interface SpecRelation {
-  type: SpecRelationType;
-  older: string;
-  newer: string;
-  scope?: string;
-  detectedFrom?: 'filename' | 'llm' | 'manual';
-  note?: string;
-}
 
 export interface SpecOverlapSection {
   doc: string;
@@ -845,15 +833,12 @@ export interface SpecCorpus {
   generatedAt: string;
   docs: SpecCorpusDoc[];
   areas: SpecCorpusArea[];
-  /** Auto-detected relations (corpus-side). User relations come separately. */
-  relations: SpecRelation[];
   /** Docs the relevance filter dropped (path + reason). */
   skippedDocs?: SpecSkippedDoc[];
 }
 
 export interface SpecCorpusResponse {
   corpus: SpecCorpus;
-  userRelations: SpecRelation[];
   /** Doc refs the user force-included (bypass the relevance filter). */
   manualIncludes?: string[];
   /** Doc refs the user force-excluded (dropped from the corpus). */
@@ -903,7 +888,7 @@ function prScopeQuery(opts?: { pr?: number; ref?: string }): string {
   return opts?.pr != null && opts.ref ? `?pr=${opts.pr}&ref=${encodeURIComponent(opts.ref)}` : '';
 }
 
-/** Read the persisted corpus + user relations, or null on 404 (no scan yet). */
+/** Read the persisted corpus, or null on 404 (no scan yet). */
 export async function getSpecCorpus(
   repoId: string,
   ref?: string,

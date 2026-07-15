@@ -4,14 +4,12 @@ import {
   AREA_TAGGER_SYSTEM_PROMPT,
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  CHAIN_DETECTION_SYSTEM_PROMPT,
 } from '../../packages/spec-consolidator/src/index.js'
 import { OUTPUT_ONLY_GUARDRAIL } from '../../packages/shared/src/llm/transport.js'
 
 /**
  * Every spec-scan LLM system prompt closes the action space with the ONE shared
- * output-only guardrail (relevance, area-tag, vocab, overlap, and chain/relation
- * detection — chain detection is the single prompt relation.ts reuses).
+ * output-only guardrail (relevance, area-tag, vocab, overlap).
  */
 describe('spec-consolidator prompts carry the output-only guardrail', () => {
   const prompts: Array<[string, string]> = [
@@ -19,7 +17,6 @@ describe('spec-consolidator prompts carry the output-only guardrail', () => {
     ['AREA_TAGGER_SYSTEM_PROMPT', AREA_TAGGER_SYSTEM_PROMPT],
     ['VOCAB_NORMALIZER_SYSTEM_PROMPT', VOCAB_NORMALIZER_SYSTEM_PROMPT],
     ['OVERLAP_DETECTOR_SYSTEM_PROMPT', OVERLAP_DETECTOR_SYSTEM_PROMPT],
-    ['CHAIN_DETECTION_SYSTEM_PROMPT', CHAIN_DETECTION_SYSTEM_PROMPT],
   ]
 
   it.each(prompts)('%s contains the guardrail', (_name, prompt) => {
@@ -63,5 +60,19 @@ describe('OVERLAP_DETECTOR_SYSTEM_PROMPT closed choice set + verbatim quote (ite
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/"heading":\s*"User model",\s*"quote":/)
     // The preamble example is UPDATED to the null-heading + quote shape, not duplicated.
     expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/"heading":\s*null,\s*"quote":/)
+  })
+})
+
+describe('OVERLAP_DETECTOR_SYSTEM_PROMPT PARTS rule (windowed docs)', () => {
+  it('names the part k/n label and forbids flagging a partial doc for omission', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/PARTS/)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/part k\/n/)
+    // A doc slice must never be flagged for what it omits/lacks/is missing.
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/NEVER flag that it omits/i)
+  })
+
+  it('requires BOTH shown texts to explicitly state a difference before flagging', () => {
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/both shown texts explicitly state/i)
+    expect(OVERLAP_DETECTOR_SYSTEM_PROMPT).toMatch(/silence in one part is never a disagreement/i)
   })
 })

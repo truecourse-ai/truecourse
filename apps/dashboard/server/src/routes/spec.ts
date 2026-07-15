@@ -2,11 +2,9 @@
  * Spec Consolidation routes — the dashboard surface for the curated-corpus
  * spec scan (Module 1).
  *
- *   GET    /api/repos/:id/spec/corpus       read corpus.json (+ user relations). 404 if no scan.
+ *   GET    /api/repos/:id/spec/corpus       read corpus.json. 404 if no scan.
  *   GET    /api/repos/:id/spec/corpus/scan  run curate(), persist corpus.json, return it (socket).
  *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
- *   POST   /api/repos/:id/spec/relations    add a user relation; follow up with /spec/corpus/scan.
- *   DELETE /api/repos/:id/spec/relations    remove a user relation.
  *   GET    /api/repos/:id/spec/staleness    cheap mtime probe powering the amber dots.
  */
 
@@ -19,8 +17,6 @@ import {
   type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
-  type Relation,
-  type RelationType,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
@@ -36,7 +32,6 @@ import {
   addConflictResolution,
   addManualExclude,
   addManualInclude,
-  addRelation,
   curateInProcess,
   CURATE_STEPS,
   EstimateDeclined,
@@ -48,7 +43,6 @@ import {
   removeConflictResolution,
   removeManualExclude,
   removeManualInclude,
-  removeRelation,
 } from '@truecourse/core/commands/spec-in-process';
 import { baselineCommit } from './diff-base.js';
 import {
@@ -61,14 +55,11 @@ import {
 const router: Router = Router();
 
 // ---------------------------------------------------------------------------
-// Corpus path (spec-scan redesign) — corpus.json + doc→doc relations.
+// Corpus path (spec-scan redesign) — corpus.json.
 // ---------------------------------------------------------------------------
-
-const RELATION_TYPES: RelationType[] = ['replace', 'precedence', 'keep-both'];
 
 interface SpecCorpusPayload {
   corpus: CuratedCorpus | null;
-  userRelations: Relation[];
   manualIncludes: string[];
   manualExcludes: string[];
   /** Section-scoped conflict verdicts (item 31) — the client re-derives resolved/
@@ -113,7 +104,6 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
   );
   return {
     corpus,
-    userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -131,7 +121,6 @@ function prCorpusPayload(
 ): Promise<SpecCorpusPayload> {
   return getDecisions(repoPath, { pr }).then((decisions) => ({
     corpus,
-    userRelations: decisions.relations ?? [],
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -308,83 +297,6 @@ async function mutateSpecDecisionPr(
   }
   res.json(await prCorpusPayload(repoPath, scope.pr, scope.ref, result?.corpus ?? null));
 }
-
-router.post(
-  '/:id/spec/relations',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { type?: RelationType; older?: string; newer?: string; scope?: string; note?: string };
-      if (!body.type || !body.older || !body.newer) {
-        res.status(400).json({ error: 'Missing type, older, or newer.' });
-        return;
-      }
-      if (!RELATION_TYPES.includes(body.type)) {
-        res.status(400).json({ error: `type must be one of ${RELATION_TYPES.join(', ')}.` });
-        return;
-      }
-      if (body.older === body.newer) {
-        res.status(400).json({ error: 'older and newer must differ.' });
-        return;
-      }
-      const relation = {
-        type: body.type,
-        older: body.older,
-        newer: body.newer,
-        scope: body.scope,
-        detectedFrom: 'manual' as const,
-        note: body.note,
-      };
-      const parsed = parsePrScope(req);
-      if ('error' in parsed) {
-        res.status(400).json({ error: parsed.error });
-        return;
-      }
-      if (parsed.scope) {
-        await mutateSpecDecisionPr(repo.path, parsed.scope, res, (opts) =>
-          addRelation(repo.path, relation, opts),
-        );
-        return;
-      }
-      const decisions = await addRelation(repo.path, relation);
-      await recurateAndRegenIfResolved(repo.path);
-      res.json({ relations: decisions.relations ?? [] });
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-router.delete(
-  '/:id/spec/relations',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { older?: string; newer?: string; scope?: string };
-      if (!body.older || !body.newer) {
-        res.status(400).json({ error: 'Missing older or newer.' });
-        return;
-      }
-      const input = { older: body.older, newer: body.newer, scope: body.scope };
-      const parsed = parsePrScope(req);
-      if ('error' in parsed) {
-        res.status(400).json({ error: parsed.error });
-        return;
-      }
-      if (parsed.scope) {
-        await mutateSpecDecisionPr(repo.path, parsed.scope, res, (opts) =>
-          removeRelation(repo.path, input, opts),
-        );
-        return;
-      }
-      const decisions = await removeRelation(repo.path, input);
-      await recurateAndRegenIfResolved(repo.path);
-      res.json({ relations: decisions.relations ?? [] });
-    } catch (e) {
-      next(e);
-    }
-  },
-);
 
 // A doc include/exclude mutation, edition-aware.
 //
@@ -633,7 +545,7 @@ router.delete(
 //
 // Cheap mtime probe powering the amber dots on Scan.
 //
-//   decisionsPending recorded include/exclude/relation/conflict decisions are
+//   decisionsPending recorded include/exclude/conflict decisions are
 //                   newer than the curated corpus — a Scan would materialize them.
 //   docsChanged     any corpus KEPT doc's mtime is newer than the corpus
 //                   `generatedAt` — a doc was edited on disk since the last
@@ -694,8 +606,8 @@ function mtimeIfExists(file: string): number | null {
 }
 
 // The decisions half of the scan-staleness signal: true when decisions.json is newer
-// than the curated corpus, so a Scan would materialize the recorded include/exclude/
-// relation decisions. Compared against the corpus's own `generatedAt` (the curate
+// than the curated corpus, so a Scan would materialize the recorded include/exclude
+// decisions. Compared against the corpus's own `generatedAt` (the curate
 // timestamp) rather than corpus.json's mtime, which lies on the committable
 // LATEST-convention file. Tolerant — any missing/unreadable file → false.
 function hasPendingDecisions(repoPath: string): boolean {

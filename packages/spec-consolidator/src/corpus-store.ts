@@ -1,7 +1,7 @@
 /**
  * Persistence for the curated corpus: a single
  * `.truecourse/specs/corpus.json` snapshot of every kept doc, its area tags,
- * the area groups, and the auto-detected doc→doc relations.
+ * and the area groups.
  *
  * Committable (LATEST.json convention): expensive to regenerate (LLM tagging)
  * and not purely deterministic, so teammates inherit it from git. The per-doc
@@ -16,7 +16,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CuratedCorpusSchema, type Area, type CorpusDoc, type CuratedCorpus, type SkippedDoc } from './corpus-types.js';
-import type { Relation } from './types.js';
 
 const CORPUS_FILE = 'corpus.json';
 
@@ -44,7 +43,6 @@ export function writeCorpus(
   input: {
     docs: CorpusDoc[];
     areas: Area[];
-    relations: Relation[];
     skippedDocs?: SkippedDoc[];
     generatedAt?: string;
   },
@@ -58,7 +56,6 @@ export function writeCorpus(
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     docs: input.docs,
     areas: input.areas,
-    relations: input.relations,
     skippedDocs: input.skippedDocs ?? [],
   };
   fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');

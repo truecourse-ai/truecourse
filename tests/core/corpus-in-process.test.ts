@@ -51,7 +51,6 @@ describe('curateInProcess', () => {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
     expect(curate.stats.docsKept).toBe(2);
@@ -71,7 +70,6 @@ describe('curateInProcess', () => {
       }),
       areaTagRunner: tagByPath,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
     expect(curate.skippedDocs.some((s) => s.path.includes('auth'))).toBe(true);
@@ -92,7 +90,6 @@ describe('generateFromCorpusInProcess', () => {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
 
@@ -122,7 +119,6 @@ describe('generateFromCorpusInProcess', () => {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
     const { corpus } = await generateFromCorpusInProcess(repo, {
@@ -147,7 +143,6 @@ describe('generateFromCorpusInProcess', () => {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
       skipGit: true,
     });
     // Enumerate a target the generate runner never emits → a coverage gap.

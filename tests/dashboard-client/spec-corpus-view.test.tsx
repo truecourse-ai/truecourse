@@ -3,8 +3,8 @@
  *  - SpecCorpusView = the LEFT NAV (areas → docs + overlaps); selecting a row
  *    calls onOpen(key) so the page opens it in the right pane (?spec=).
  *  - SpecDocViewer = right-pane markdown for a doc.
- *  - SpecOverlapDetail = right-pane resolution; recording a relation calls
- *    postSpecRelation then onResolved.
+ *  - SpecOverlapDetail = right-pane resolution; recording a section verdict
+ *    calls postSpecConflictResolution then onResolved.
  * Backend stubbed at the fetch boundary.
  */
 
@@ -47,9 +47,7 @@ const RESP: SpecCorpusResponse = {
       },
       { id: 'booking/auth', product: 'booking', concern: 'auth', docRefs: ['docs/auth.md'], overlaps: [] },
     ],
-    relations: [],
   },
-  userRelations: [],
 };
 
 const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
@@ -100,9 +98,7 @@ describe('SpecCorpusView (left nav)', () => {
             overlaps: [{ docs: ['a/README.md', 'b/README.md'], note: 'both claim setup', sections: [] }],
           },
         ],
-        relations: [],
       },
-      userRelations: [],
     };
     render(<SpecCorpusView corpus={state({ data: collision })} activeKey={null} onOpen={vi.fn()} />);
     // Each README is labelled by its full path, so the two rows are distinct.
@@ -155,31 +151,26 @@ describe('SpecCorpusView (left nav)', () => {
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
   });
 
-  it('a covering user relation leaves the conflict row OPEN — relations never resolve', () => {
-    // RESP carries an OPEN overlap for (v1,v2); a covering user relation must not
-    // resolve it (relations are lifecycle metadata) nor add a second row.
-    const covered: SpecCorpusResponse = {
+  it('renders a corpus carrying a legacy `relations` field without displaying it or crashing', () => {
+    // Corpora scanned before relation-detection was removed may still carry a
+    // `relations` array. The view must ignore it entirely — render normally, no
+    // relation surface.
+    const legacy = {
       ...RESP,
-      userRelations: [
-        { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
-      ],
-    };
-    render(<SpecCorpusView corpus={state({ data: covered })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.getAllByText('docs/v1.md ↔ docs/v2.md')).toHaveLength(1);
-    expect(screen.queryByText('resolved')).not.toBeInTheDocument();
-    expect(screen.queryByText(/resolved — /)).not.toBeInTheDocument();
-  });
-
-  it('does NOT fabricate a conflict row from a user relation with no flagged overlap', () => {
-    const noOverlap: SpecCorpusResponse = {
-      corpus: { ...RESP.corpus, areas: RESP.corpus.areas.map((a) => ({ ...a, overlaps: [] })) },
-      userRelations: [
-        { type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
-      ],
-    };
-    render(<SpecCorpusView corpus={state({ data: noOverlap })} activeKey={null} onOpen={vi.fn()} />);
-    expect(screen.queryByText('Conflicts')).not.toBeInTheDocument();
-    expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
+      corpus: {
+        ...RESP.corpus,
+        relations: [
+          { type: 'replace', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' },
+        ],
+      },
+    } as unknown as SpecCorpusResponse;
+    render(<SpecCorpusView corpus={state({ data: legacy })} activeKey={null} onOpen={vi.fn()} />);
+    // The corpus still renders its docs + conflicts.
+    expect(screen.getByText('Documents')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
+    // Nothing from the legacy relation leaks into the UI.
+    expect(screen.queryByText(/replace/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/relation/i)).not.toBeInTheDocument();
   });
 });
 
@@ -712,20 +703,6 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
     expect(within(banner).getAllByText('docs/v2.md').length).toBeGreaterThan(0); // docB won (verdict 'b')
     expect(within(banner).queryByText('docs/v1.md')).toBeNull();
     expect(screen.queryByRole('button', { name: 'docs/v1.md is right' })).not.toBeInTheDocument();
-  });
-
-  it('a covering doc-relation does NOT resolve — the verdict buttons still render', () => {
-    // Relations are lifecycle metadata; the disagreement stays open until
-    // verdicted/dismissed (or a doc is excluded / fixed).
-    const covered: SpecCorpusResponse = {
-      ...RESP,
-      userRelations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments', detectedFrom: 'manual' }],
-    };
-    renderDetail({ data: covered });
-    expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
-    expect(screen.queryByText(/Resolved →/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
   });
 });
 

@@ -874,8 +874,8 @@ function RepoPageInner() {
   const sectionActionsNode =
     leftTab === 'coverage' ? (
       // The Guard Coverage tab owns the curated corpus: the header owns
-      // Scan/Rescan, which curates the docs into areas, detects relations, and
-      // flags overlaps. Hidden in EE — hosted repos have no working tree and
+      // Scan/Rescan, which curates the docs into areas and flags overlaps.
+      // Hidden in EE — hosted repos have no working tree and
       // re-scan automatically on merge / when a PR is opened.
       !isEe && repo?.isGitRepo !== false ? (
         <SpecScanButton

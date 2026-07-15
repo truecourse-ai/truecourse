@@ -137,12 +137,11 @@ describe('corpus routes (spec-scan redesign)', () => {
     await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(404);
   });
 
-  it('GET /spec/corpus → the corpus + user relations', async () => {
+  it('GET /spec/corpus → the corpus', async () => {
     seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
     expect(res.body.corpus.areas).toHaveLength(1);
     expect(res.body.corpus.areas[0].overlaps).toHaveLength(1);
-    expect(res.body.userRelations).toEqual([]);
   });
 
   it('GET /spec/doc → the markdown content; rejects traversal', async () => {
@@ -152,28 +151,16 @@ describe('corpus routes (spec-scan redesign)', () => {
     await request(app).get(`/api/repos/${fixture.project.slug}/spec/doc`).query({ ref: '../../etc/passwd' }).expect(400);
   });
 
-  it('POST then DELETE /spec/relations round-trips a user relation', async () => {
-    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
-    const add = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
-      .expect(200);
-    expect(add.body.relations).toHaveLength(1);
-    expect(add.body.relations[0]).toMatchObject({ type: 'precedence', detectedFrom: 'manual' });
-
-    const del = await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ older: 'docs/v1.md', newer: 'docs/v2.md' })
-      .expect(200);
-    expect(del.body.relations).toEqual([]);
-  });
-
-  it('POST /spec/relations rejects a bad type', async () => {
+  it('has no /spec/relations routes — unknown spec mutations 404', async () => {
     seedCorpus([]);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ type: 'bogus', older: 'a.md', newer: 'b.md' })
-      .expect(400);
+      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md' })
+      .expect(404);
+    await request(app)
+      .delete(`/api/repos/${fixture.project.slug}/spec/relations`)
+      .send({ older: 'docs/v1.md', newer: 'docs/v2.md' })
+      .expect(404);
   });
 
   // OSS batches decisions: an include/exclude persists to decisions.json and returns
@@ -264,27 +251,6 @@ describe('corpus routes (spec-scan redesign)', () => {
     expect(res.body.corpus.skippedDocs).toContainEqual({ ref: 'docs/archived.md', reason: 'archived directory' });
   });
 
-  // Resolving a conflict must regenerate contracts. The shared route defers to the
-  // OSS never auto-regenerates: contracts regenerate via the manual "Generate" step,
-  // so a relation edit records the decision and does NOT enqueue anything, even with
-  // a runner installed. (The EE auto-regenerate-when-conflict-free path is covered in
-  // the EE describe below.)
-  it('POST/DELETE /spec/relations record the decision without triggering regeneration (OSS)', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
-      .expect(200);
-    await request(app)
-      .delete(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ older: 'docs/v1.md', newer: 'docs/v2.md' })
-      .expect(200);
-    expect(tasks).toEqual([]);
-  });
 });
 
 // EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there
@@ -387,20 +353,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
   });
 
-  it('POST /spec/relations that resolves the last conflict enqueues regeneration', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus();
-    stubRecurate(0);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/relations`)
-      .send({ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/appointments' })
-      .expect(200);
-    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
-    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
-  });
 });
 
 // ---------------------------------------------------------------------------

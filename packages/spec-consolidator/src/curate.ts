@@ -1,14 +1,12 @@
 /**
  * The curated-corpus pipeline — `spec scan`'s engine. It curates whole docs
- * into a corpus of areas, doc relations, and overlap flags:
+ * into a corpus of areas and overlap flags:
  *
  *   discover → relevance keep/drop → tag each DOC with its AREAS →
- *   group docs by area → detect doc→doc RELATIONS (filename + one LLM pass) →
- *   flag within-area OVERLAPS (relations never skip a pair) →
+ *   group docs by area → flag within-area OVERLAPS →
  *   assemble + persist a CuratedCorpus (corpus.json).
  *
- * Stages: discovery, the relevance filter, the deterministic filename
- * detector + LLM chain pass (relations), and the corpus stages
+ * Stages: discovery, the relevance filter, and the corpus stages
  * (area-tagger, area-grouper, overlap-detector).
  */
 
@@ -21,12 +19,11 @@ import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import { tagDocs, type AreaTagRunner } from './area-tagger.js';
 import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
 import { groupByArea } from './area-grouper.js';
-import { detectRelations, effectiveRelations } from './relation.js';
 import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
+import { verifyFlaggedOverlaps, type VerifyOverlapRunner } from './overlap-verifier.js';
 import { writeCorpus } from './corpus-store.js';
-import { DecisionsFileSchema, type DecisionsFile, type Relation } from './types.js';
+import { DecisionsFileSchema, type DecisionsFile } from './types.js';
 import { type Area, type CuratedCorpus } from './corpus-types.js';
-import type { ChainRunner } from './version-chain-llm.js';
 
 /** Per-stage model overrides for the curate pipeline. */
 export interface CurateModels {
@@ -34,7 +31,7 @@ export interface CurateModels {
   areaTag?: string;
   vocab?: string;
   overlap?: string;
-  relation?: string;
+  verifyOverlap?: string;
   /** Forwarded as `--fallback-model` to every stage. */
   fallback?: string;
 }
@@ -60,15 +57,15 @@ export interface CurateOptions {
   disableAreaTagging?: boolean;
   vocabRunner?: VocabRunner;
   disableVocabNormalization?: boolean;
-  relationChainRunner?: ChainRunner;
-  disableLlmRelationDetection?: boolean;
   overlapRunner?: OverlapRunner;
   disableOverlapDetection?: boolean;
+  verifyOverlapRunner?: VerifyOverlapRunner;
 
   // --- progress hooks -------------------------------------------------------
   onRelevanceProgress?: (done: number, total: number) => void;
   onTagProgress?: (done: number, total: number) => void;
   onOverlapProgress?: (done: number, total: number) => void;
+  onVerifyProgress?: (done: number, total: number) => void;
 }
 
 export interface CurateStats {
@@ -76,8 +73,8 @@ export interface CurateStats {
   docsKept: number;
   areaCount: number;
   overlapFlags: number;
-  /** Effective relations (auto ∪ user) — doc lifecycle/precedence, never conflict resolution. */
-  resolvedRelations: number;
+  /** Flagged overlaps the verify pass pruned as detector false positives (never reach the corpus). */
+  overlapRefuted: number;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
   skippedDocs: Array<{ path: string; reason: string }>;
@@ -95,8 +92,6 @@ export interface CurateStats {
 export interface CurateResult {
   /** The assembled corpus (whether or not it was written to disk). */
   corpus: CuratedCorpus;
-  /** Effective relations = auto-detected ∪ user-authored. */
-  relations: Relation[];
   /** Docs the relevance filter dropped, with reasons. */
   skippedDocs: Array<{ path: string; reason: string }>;
   /** The decisions file that informed the run. */
@@ -173,17 +168,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   // ---- Group docs by area ---------------------------------------------
   const grouped = groupByArea(docs, tagsByPath, decisions.manualAreas ?? [], vocab);
 
-  // ---- Detect relations (auto) + fold in user relations ---------------
-  const autoRelations = await detectRelations(repoRoot, docs, {
-    chainRunner: opts.relationChainRunner,
-    disableLlm: opts.disableLlmRelationDetection,
-    transport: opts.transport,
-    model: models.relation,
-    fallbackModel,
-  });
-  const relations = effectiveRelations(autoRelations, decisions.relations ?? []);
-
-  // ---- Flag within-area overlaps (relations never skip a pair) --------
+  // ---- Flag within-area overlaps --------------------------------------
   const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, docs, {
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
@@ -193,7 +178,21 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     fallbackModel,
     onProgress: opts.onOverlapProgress,
   });
-  const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: overlapsByArea.get(a.id) ?? [] }));
+
+  // ---- Verify the flagged overlaps (precision pass) -------------------
+  // The detector is recall-biased and over-flags; an independent judge re-reads
+  // each flag with full context and rules strictly. Only an explicit `refuted`
+  // verdict prunes a flag (a detector false positive) — it is dropped here and
+  // never reaches the corpus. A confirmed verdict, a verifier error, or a missing
+  // verdict all KEEP the flag (fail-open).
+  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, docs, {
+    runner: opts.verifyOverlapRunner,
+    transport: opts.transport,
+    model: models.verifyOverlap,
+    fallbackModel,
+    onProgress: opts.onVerifyProgress,
+  });
+  const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: verified.overlaps.get(a.id) ?? [] }));
 
   // ---- Assemble + persist --------------------------------------------
   const corpus: CuratedCorpus = {
@@ -201,7 +200,6 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     generatedAt: new Date().toISOString(),
     docs: grouped.docs,
     areas,
-    relations: autoRelations,
     // Persist the dropped docs so the dashboard can surface them (force-include)
     // without re-running the scan. Map the candidate path to a DocRef.
     skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason })),
@@ -211,7 +209,6 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     writeCorpus(repoRoot, {
       docs: corpus.docs,
       areas: corpus.areas,
-      relations: corpus.relations,
       skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
     });
@@ -225,27 +222,26 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     docsKept: docs.length,
     areaCount: areas.length,
     overlapFlags: openOverlaps.length,
-    resolvedRelations: relations.length,
+    overlapRefuted: verified.refuted,
     openOverlaps,
     skippedDocs,
     scopeGlobs,
     outOfScopeManualIncludes,
   };
 
-  return { corpus, relations, skippedDocs, decisions, stats };
+  return { corpus, skippedDocs, decisions, stats };
 }
 
 // ---------------------------------------------------------------------------
-// Decisions I/O — curate() reads decisions.json for the user's relations and
-// manualAreas; kept here so the pipeline is self-contained. Writes stay the
-// caller's job (CLI / dashboard).
+// Decisions I/O — curate() reads decisions.json for the user's manualAreas and
+// include/exclude overrides; kept here so the pipeline is self-contained. Writes
+// stay the caller's job (CLI / dashboard).
 // ---------------------------------------------------------------------------
 
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
-  relations: [],
   manualAreas: [],
   conflictResolutions: [],
 };

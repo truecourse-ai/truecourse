@@ -16,7 +16,6 @@ import {
 } from '../../packages/core/src/lib/spec-store';
 import {
   getDecisions,
-  addRelation,
   addManualInclude,
   addManualExclude,
   promoteDecisionsOverlay,
@@ -98,11 +97,11 @@ describe('core decisions overlay API (over the installed PgSpecStore)', () => {
   });
 
   it('a PR-scoped mutation writes the overlay, never the repo row', async () => {
-    await addRelation(REPO, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 7 });
+    await addManualInclude(REPO, 'a.md', { pr: 7 });
     // repo row untouched
-    expect((await getDecisions(REPO)).relations).toEqual([]);
+    expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
     // effective (repo ∪ overlay) sees it
-    expect((await getDecisions(REPO, { pr: 7 })).relations).toHaveLength(1);
+    expect((await getDecisions(REPO, { pr: 7 })).manualIncludes).toEqual(['a.md']);
   });
 
   it('getDecisions with pr merges repo + overlay (overlay verb wins)', async () => {
@@ -116,13 +115,13 @@ describe('core decisions overlay API (over the installed PgSpecStore)', () => {
   });
 
   it('promoteDecisionsOverlay merges the overlay onto the repo row, drops it, and is idempotent', async () => {
-    await addRelation(REPO, { type: 'replace', older: 'a.md', newer: 'b.md' }, { pr: 7 });
+    await addManualInclude(REPO, 'a.md', { pr: 7 });
     const first = await promoteDecisionsOverlay(REPO, 7);
     expect(first).toBe(true);
-    // repo row now carries the promoted relation
-    expect((await getDecisions(REPO)).relations).toHaveLength(1);
+    // repo row now carries the promoted include
+    expect((await getDecisions(REPO)).manualIncludes).toEqual(['a.md']);
     // overlay row is gone → effective == repo row
-    expect((await getDecisions(REPO, { pr: 7 })).relations).toHaveLength(1);
+    expect((await getDecisions(REPO, { pr: 7 })).manualIncludes).toEqual(['a.md']);
     // a second promotion is a no-op
     expect(await promoteDecisionsOverlay(REPO, 7)).toBe(false);
   });

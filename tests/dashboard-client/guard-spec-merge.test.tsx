@@ -67,17 +67,8 @@ const CORPUS_RESP: SpecCorpusResponse = {
         ],
       },
     ],
-    relations: [],
     skippedDocs: [{ ref: 'docs/DROPPED.md', reason: 'low relevance' }],
   },
-  userRelations: [],
-};
-
-const RESOLVED_RESP: SpecCorpusResponse = {
-  ...CORPUS_RESP,
-  userRelations: [
-    { type: 'precedence', older: 'docs/OTHER.md', newer: 'docs/SPEC.md', scope: 'core/auth', detectedFrom: 'manual' },
-  ],
 };
 
 function corpusState(over: Partial<SpecCorpusState> = {}): SpecCorpusState {
@@ -254,7 +245,6 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
           if (opts?.method === 'POST') lastConflictPost = JSON.parse(String(opts.body));
           return json({ conflictResolutions: [] });
         }
-        if (u.includes('/spec/relations')) return json({ relations: [] });
         if (u.includes('/guard/coverage')) return json(COVERAGE);
         if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
         return json({});
@@ -298,14 +288,6 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
     // OSS ack → the page updates the verdict list in place (no re-curate/refetch).
     await waitFor(() => expect(applyConflictResolutions).toHaveBeenCalled());
     expect(lastConflictPost).toMatchObject({ docA: 'docs/SPEC.md', docB: 'docs/OTHER.md', verdict: 'a' });
-  });
-
-  it('a covering doc-relation does NOT resolve — the verdict actions still render', async () => {
-    renderCoverage(corpusState({ data: RESOLVED_RESP }), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
-    expect(await screen.findByRole('button', { name: 'docs/SPEC.md is right' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeInTheDocument();
-    expect(screen.queryByText(/Resolved →/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
   });
 
   it('closing the overlap detail clears ?gconf', async () => {
