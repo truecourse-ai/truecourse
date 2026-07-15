@@ -37,7 +37,7 @@ import {
   runSpecDocsExclude,
   runSpecDocsUnexclude,
 } from "./commands/spec-docs.js";
-import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts } from "./commands/guard.js";
+import { runGuardRun, runGuardGenerate, runGuardStatus, runGuardDrifts, runGuardFindings } from "./commands/guard.js";
 import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -337,6 +337,24 @@ guardCmd
     await runGuardDrifts({
       limit: options.all ? Infinity : (options.limit ?? 20),
       offset: options.offset ?? 0,
+      json: !!options.json,
+    });
+  });
+
+guardCmd
+  .command("findings")
+  .description("List the last generate's birth/fidelity findings, grouped by spec section")
+  .option("--kind <kind>", "Filter by finding kind: birth or fidelity")
+  .option("--doc <path>", "Filter to findings bound to this doc (exact repo-relative path)")
+  .option("--json", "Emit the filtered findings array as JSON")
+  .action(async (options) => {
+    if (options.kind && options.kind !== "birth" && options.kind !== "fidelity") {
+      console.error("error: --kind must be 'birth' or 'fidelity'");
+      process.exit(1);
+    }
+    await runGuardFindings({
+      kind: options.kind,
+      doc: options.doc,
       json: !!options.json,
     });
   });

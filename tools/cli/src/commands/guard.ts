@@ -12,7 +12,7 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { readManifest, readGuardLatest, readGuardResult, guardResultPath } from "@truecourse/guard-runner";
-import type { GuardScenarioResult, GuardGenerateReport } from "@truecourse/shared";
+import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -529,6 +529,116 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   }
 
   p.outro(`Showing ${shownFrom}–${shownTo} of ${total} drift${total === 1 ? "" : "s"}.`);
+}
+
+// ---------------------------------------------------------------------------
+// `truecourse guard findings` — the last generate's birth/fidelity findings,
+// grouped by doc+anchor and numbered for review. A read view over
+// guard/result.json: `guard generate` already surfaced these, so it exits 0
+// whether findings exist or not, and nonzero only when no generate report
+// exists at all. `--kind`/`--doc` filter (composable); `--json` emits the
+// filtered findings array straight from the report, no decoration.
+// ---------------------------------------------------------------------------
+
+export interface RunGuardFindingsOptions {
+  cwd?: string;
+  /** Restrict to one finding kind (`--kind birth|fidelity`). */
+  kind?: "birth" | "fidelity";
+  /** Restrict to findings bound to one doc (exact repo-relative path, `--doc`). */
+  doc?: string;
+  /** Emit the filtered findings array as JSON instead of the formatted list. */
+  json?: boolean;
+}
+
+/** A finding's effective kind — `birth` is the default when the field is unset. */
+function findingKind(f: GuardBirthFinding): "birth" | "fidelity" {
+  return f.kind ?? "birth";
+}
+
+/** Human description of the active `--kind`/`--doc` filters, for the close/empty copy. */
+function describeFindingsFilter(opts: { kind?: string; doc?: string }): string {
+  const parts: string[] = [];
+  if (opts.kind) parts.push(`kind ${opts.kind}`);
+  if (opts.doc) parts.push(`doc ${opts.doc}`);
+  return parts.join(" · ") || "the filter";
+}
+
+export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Promise<void> {
+  const repoRoot = opts.cwd ?? process.cwd();
+  const report = readGuardResult(repoRoot);
+
+  // The only nonzero exit: no generate has run, so there is nothing to read.
+  if (!report) {
+    if (opts.json) {
+      console.error("No guard generate report. Run `truecourse guard generate` first.");
+    } else {
+      p.intro("Guard findings");
+      p.log.error("No guard generate report yet — run `truecourse guard generate` first.");
+      p.outro("Nothing to show.");
+    }
+    process.exit(1);
+    return;
+  }
+
+  const filtered = report.birthFindings.filter(
+    (f) => (!opts.kind || findingKind(f) === opts.kind) && (!opts.doc || f.doc === opts.doc),
+  );
+
+  if (opts.json) {
+    // The filtered findings array, verbatim from the report — no TUI decoration.
+    console.log(JSON.stringify(filtered, null, 2));
+    return;
+  }
+
+  p.intro("Guard findings");
+
+  // Header — the report's identity and headline counts, straight from the store.
+  const birth = report.birthPassed !== undefined ? ` · ${report.birthPassed} passed birth` : "";
+  const filterActive = !!opts.kind || !!opts.doc;
+  const matchNote = filterActive ? ` · ${filtered.length} match filter` : "";
+  p.log.step(`generated   ${report.generatedAt}`);
+  p.log.step(`sections    ${report.sectionsTotal} total · ${report.sectionsChanged} changed`);
+  p.log.step(`scenarios   ${report.written.length} written${birth}`);
+  p.log.step(`findings    ${report.birthFindings.length} total${matchNote}`);
+
+  // Empty states: nothing to review at all, vs. filters excluded everything.
+  if (report.birthFindings.length === 0) {
+    p.log.success(
+      `No findings in the last generate — ${report.written.length} scenario${report.written.length === 1 ? "" : "s"} written.`,
+    );
+    p.outro("Nothing to review.");
+    return;
+  }
+  if (filtered.length === 0) {
+    p.log.info(`No findings match ${describeFindingsFilter(opts)}.`);
+    p.outro("Nothing to review.");
+    return;
+  }
+
+  // Group by doc+anchor in first-appearance order; findings numbered globally
+  // 1..N so a review can reference "finding 42" across the whole list.
+  const groups = new Map<string, GuardBirthFinding[]>();
+  for (const f of filtered) {
+    const key = `${f.doc}\0${f.anchor}`;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(f);
+    else groups.set(key, [f]);
+  }
+
+  let n = 0;
+  for (const bucket of groups.values()) {
+    p.log.message("");
+    p.log.message(`${bucket[0].doc} › ${bucket[0].anchor}`);
+    for (const f of bucket) {
+      n += 1;
+      p.log.message(`  ${n}. [${findingKind(f)}] ${f.title}`);
+      p.log.message(`     ${oneLine(f.expected)} → ${oneLine(f.actual)}`);
+      if (f.evidencePath) p.log.message(`     evidence: ${f.evidencePath}`);
+    }
+  }
+
+  const suffix = filterActive ? ` (${describeFindingsFilter(opts)})` : "";
+  p.outro(`${filtered.length} finding${filtered.length === 1 ? "" : "s"}${suffix}.`);
 }
 
 /** ` (git 9, db 3, … 12 more)` — top blocked-on capabilities; the full tally lives

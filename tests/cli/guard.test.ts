@@ -20,7 +20,7 @@ import {
   type GuardOutcome,
   type GuardGenerateReport,
 } from '@truecourse/shared'
-import { runGuardRun, runGuardStatus, runGuardDrifts, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
+import { runGuardRun, runGuardStatus, runGuardDrifts, runGuardFindings, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
   rmrf,
@@ -939,5 +939,149 @@ describe('printGuardGenerateSummary', () => {
     printGuardGenerateSummary(rep, 'p')
     // 3 held (2 + 1); blocked by 1 finding (auth/login) and 1 error (auth/logout).
     expect(out).toContain('3 ready but held (1 finding · 1 error)')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// `truecourse guard findings` — grouped/numbered review list over result.json,
+// with `--kind`/`--doc` filters and a raw `--json` array.
+// ---------------------------------------------------------------------------
+
+const WRITTEN = [{ id: 'v.1', title: 't', doc: DOC, anchor: 'cli/version', file: 'x.yaml' }]
+
+/** Three findings across two sections: two under docs/cli.md › cli/version
+ *  (one birth, one fidelity), one birth under docs/api.md › api/auth. */
+function findingsReport(): GuardGenerateReport {
+  return report({
+    sectionsTotal: 12,
+    sectionsChanged: 3,
+    written: WRITTEN,
+    birthPassed: 5,
+    birthFindings: [
+      {
+        doc: DOC,
+        anchor: 'cli/version',
+        kind: 'birth',
+        title: 'prints semver',
+        step: 1,
+        expected: 'exit 0',
+        actual: 'exit 7',
+        evidencePath: '.truecourse/guard/evidence/run/f1',
+      },
+      { doc: DOC, anchor: 'cli/version', kind: 'fidelity', title: 'weak assertion', step: 1, expected: 'n/a', actual: 'reviewer: vacuous' },
+      { doc: 'docs/api.md', anchor: 'api/auth', kind: 'birth', title: 'rejects bad token', step: 2, expected: '401', actual: '200' },
+    ],
+  })
+}
+
+describe('runGuardFindings (printer)', () => {
+  let out: string
+  let spy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    out = ''
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    })
+  })
+  afterEach(() => spy.mockRestore())
+
+  it('groups findings by doc+anchor, numbers them globally, and shows the header + evidence', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r })
+
+    // Header — generatedAt + counts straight from the report.
+    expect(out).toContain('2026-01-02T03:04:05.000Z')
+    expect(out).toContain('12 total · 3 changed')
+    expect(out).toContain('1 written · 5 passed birth')
+    expect(out).toContain('3 total')
+
+    // Section group headers.
+    expect(out).toContain(`${DOC} › cli/version`)
+    expect(out).toContain('docs/api.md › api/auth')
+
+    // Numbered, kinded lines with a compact expected→actual + evidence pointer.
+    expect(out).toContain('1. [birth] prints semver')
+    expect(out).toContain('exit 0 → exit 7')
+    expect(out).toContain('evidence: .truecourse/guard/evidence/run/f1')
+    expect(out).toContain('2. [fidelity] weak assertion')
+    // Numbering continues across groups (third finding is in the second group).
+    expect(out).toContain('3. [birth] rejects bad token')
+  })
+
+  it('--kind filters to one kind', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r, kind: 'fidelity' })
+
+    expect(out).toContain('1. [fidelity] weak assertion')
+    expect(out).not.toContain('prints semver')
+    expect(out).not.toContain('rejects bad token')
+    expect(out).toContain('1 match filter')
+  })
+
+  it('--doc filters to one doc, composable with --kind', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+
+    await runGuardFindings({ cwd: r, doc: 'docs/api.md' })
+    expect(out).toContain('rejects bad token')
+    expect(out).not.toContain('prints semver')
+    expect(out).not.toContain('weak assertion')
+
+    // Composed: docs/cli.md + birth → only the version birth finding survives.
+    out = ''
+    await runGuardFindings({ cwd: r, doc: DOC, kind: 'birth' })
+    expect(out).toContain('prints semver')
+    expect(out).not.toContain('weak assertion')
+    expect(out).not.toContain('rejects bad token')
+  })
+
+  it('--json emits the exact filtered findings array with no decoration', async () => {
+    const r = repo()
+    const rep = findingsReport()
+    writeGuardResult(r, rep)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await runGuardFindings({ cwd: r, json: true })
+    const unfiltered = JSON.parse(logSpy.mock.calls.map((c) => c.join(' ')).join('\n'))
+    expect(unfiltered).toEqual(rep.birthFindings)
+
+    logSpy.mockClear()
+    await runGuardFindings({ cwd: r, json: true, kind: 'fidelity' })
+    const filtered = JSON.parse(logSpy.mock.calls.map((c) => c.join(' ')).join('\n'))
+    logSpy.mockRestore()
+    expect(filtered).toEqual([rep.birthFindings[1]])
+
+    // JSON mode prints no clack intro/outro decoration to stdout.
+    expect(out).toBe('')
+  })
+
+  it('prints the empty state when the report has no findings', async () => {
+    const r = repo()
+    writeGuardResult(r, report({ sectionsChanged: 2, written: WRITTEN, birthPassed: 1 }))
+    await runGuardFindings({ cwd: r })
+
+    expect(out).toContain('No findings in the last generate')
+    expect(out).toContain('1 scenario written')
+  })
+
+  it('exits nonzero with a run-generate message when no report exists', async () => {
+    const r = repo()
+    let exitCode: number | null = null
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCode = code ?? 0
+      throw new Error(`process.exit(${code})`)
+    }) as never)
+    try {
+      await runGuardFindings({ cwd: r })
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith('process.exit(')) throw e
+    } finally {
+      exitSpy.mockRestore()
+    }
+    expect(exitCode).toBe(1)
+    expect(out).toContain('guard generate')
   })
 })

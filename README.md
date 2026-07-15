@@ -303,6 +303,7 @@ truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
 truecourse guard status                           # Compact summary: section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
+truecourse guard findings                         # List the last generate's birth/fidelity findings, grouped by spec section (--kind / --doc / --json)
 ```
 
 ---
