@@ -323,7 +323,7 @@ function identityTokens(identity: string): string[] {
 
 /** Order-insensitive token multiset key (rule 2). */
 function tokenMultisetKey(identity: string): string {
-  return identityTokens(identity).slice().sort().join(' ');
+  return identityTokens(identity).slice().sort().join('\x00');
 }
 
 /** Strict subset test over token SETS (rule 3). */

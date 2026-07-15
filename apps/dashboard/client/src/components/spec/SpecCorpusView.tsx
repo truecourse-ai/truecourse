@@ -294,7 +294,7 @@ export function SpecCorpusView({
   // and light the Rescan dot. PR scope (EE) re-curates → the full corpus replaces state.
   const removeOrphan = useCallback(
     async (r: ConflictResolutionLike) => {
-      setBusyRef(`orphan:${r.docA} ${r.docB}`);
+      setBusyRef(`orphan:${r.docA}\x00${r.docB}`);
       try {
         const res = await api.deleteSpecConflictResolution(
           repoId,

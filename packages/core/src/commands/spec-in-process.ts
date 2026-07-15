@@ -1511,7 +1511,7 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
     `${r.docA}#${r.anchorA ?? ''}`,
     `${r.docB}#${r.anchorB ?? ''}`,
   ].sort();
-  return sides.join('   ');
+  return sides.join(' \x00 ');
 };
 
 function applyAddRelation(existing: DecisionsFile, input: Relation): DecisionsFile {
