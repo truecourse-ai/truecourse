@@ -25,6 +25,7 @@ import {
   saveScenarios,
   writeGuardResult,
   getGuardStore,
+  readGuardDecisions as readStoredGuardDecisions,
   type GuardStore,
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
@@ -40,7 +41,11 @@ import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm
 import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
 import { corpusFilePath, decisionsPath, type DecisionsFile } from '@truecourse/spec-consolidator';
-import { scenariosDir, readGuardResult as readCloneGuardResult } from '@truecourse/guard-runner';
+import {
+  scenariosDir,
+  guardDecisionsPath,
+  readGuardResult as readCloneGuardResult,
+} from '@truecourse/guard-runner';
 import { hasGuardUniverse, type GuardGenerateResult } from '@truecourse/guard-generator';
 import {
   getInstallationToken,
@@ -186,6 +191,21 @@ export async function materializeAndGenerateGuard(
     if (!materialized && !hasGuardUniverse(checkoutDir)) return null;
   } else if (!hasGuardUniverse(checkoutDir)) {
     return null;
+  }
+
+  // Materialize the stored GUARD decisions (dismissedClaims) too — on every
+  // path, including `skipMaterialize` (a dismissal applies regardless of where
+  // the corpus came from). The dashboard dismisses claims into the hosted guard
+  // store, but the generator reads the checkout's `scenarios/decisions.json`
+  // (file-based by design — it is committable), so without this a hosted
+  // regenerate re-authors every dismissed claim and its section stays held.
+  // Stored decisions win over a (stale) committed file; a repo with none stored
+  // keeps whatever the clone carries.
+  const guardDecisions = await readStoredGuardDecisions(ref.repoKey);
+  if (guardDecisions.dismissedClaims.length > 0) {
+    const decFile = guardDecisionsPath(checkoutDir);
+    fs.mkdirSync(path.dirname(decFile), { recursive: true });
+    fs.writeFileSync(decFile, JSON.stringify(guardDecisions, null, 2) + '\n');
   }
 
   // Fail loudly BEFORE any LLM work when no provider is configured — EE must never

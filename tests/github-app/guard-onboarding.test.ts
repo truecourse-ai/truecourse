@@ -25,6 +25,7 @@ import {
   readGuardEvidenceAt,
   readManifest,
   readRecipeRaw,
+  writeGuardDecisions,
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
@@ -43,6 +44,7 @@ import {
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
+  materializeAndGenerateGuard,
   createGuardOnboardingPipeline,
   type GuardOnboardingRequest,
 } from '../../ee/packages/github-app/src/guard-onboarding';
@@ -264,6 +266,97 @@ describe('guard onboarding pipeline', () => {
     expect(fs.existsSync(cloneDir)).toBe(false);
     expect(await readGuardEvidenceAt(REPO, evidencePath, 'transcript.txt')).toBe('birth transcript');
     expect(await readGuardEvidenceAt(REPO, evidencePath, 'diff.txt')).toBe('expected exit 0, got 1');
+  });
+
+  // ------------------------------------------------------------------
+  // Guard decisions (dismissedClaims) — the dashboard writes them to the Pg
+  // guard store, but the generator reads the CHECKOUT's
+  // `scenarios/decisions.json` (file-based, by design: it is committable).
+  // The pipeline must materialize the stored decisions into the clone, else a
+  // hosted regenerate re-authors every dismissed claim and its section stays
+  // held forever.
+  // ------------------------------------------------------------------
+
+  const GUARD_DECISIONS = {
+    version: 1 as const,
+    dismissedClaims: [
+      {
+        doc: 'README.md',
+        anchor: 'intro',
+        title: 'shows help on --help',
+        dismissedAt: '2026-07-14T17:40:19.614Z',
+      },
+    ],
+  };
+
+  it('materializes the Pg-stored guard decisions into the checkout before generate runs', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    await writeGuardDecisions(REPO, GUARD_DECISIONS);
+
+    let decisionsSeenByGenerate: unknown = null;
+    const cloneRepo = vi.fn(async () => {});
+    const inner = fakeGenerateWriting(makeGuardResult());
+    const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+      const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+      if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      return inner(dir, tracker as never);
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    await pipeline.run(deps, request);
+
+    expect(decisionsSeenByGenerate).toEqual(GUARD_DECISIONS);
+  });
+
+  it('preserves a committed decisions.json in the clone when none are stored', async () => {
+    await saveSpec(ref, 'corpus', CORPUS);
+    const committed = {
+      version: 1,
+      dismissedClaims: [
+        { doc: 'README.md', anchor: 'intro', title: 'committed dismissal', dismissedAt: '2026-07-01T00:00:00Z' },
+      ],
+    };
+    const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
+      // The decisions file is committable — this repo carries one in git.
+      writeFile(dir, '.truecourse/scenarios/decisions.json', JSON.stringify(committed));
+    });
+    let decisionsSeenByGenerate: unknown = null;
+    const inner = fakeGenerateWriting(makeGuardResult());
+    const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+      const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+      decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      return inner(dir, tracker as never);
+    });
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    await pipeline.run(deps, request);
+
+    expect(decisionsSeenByGenerate).toEqual(committed);
+  });
+
+  it('materializes guard decisions on the skipMaterialize path too (head-regen keeps dismissals)', async () => {
+    await writeGuardDecisions(REPO, GUARD_DECISIONS);
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    try {
+      // skipMaterialize callers curated the checkout's own corpus already.
+      writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
+      let decisionsSeenByGenerate: unknown = null;
+      const inner = fakeGenerateWriting(makeGuardResult());
+      const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+        const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+        if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        return inner(dir, tracker as never);
+      });
+
+      const generated = await materializeAndGenerateGuard(ref, checkout, generate as never, {
+        skipMaterialize: true,
+      });
+
+      expect(generated).not.toBeNull();
+      expect(decisionsSeenByGenerate).toEqual(GUARD_DECISIONS);
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true });
+    }
   });
 
   it('a committed corpus in the clone suffices when none is stored (no false noCorpus)', async () => {

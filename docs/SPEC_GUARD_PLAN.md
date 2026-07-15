@@ -904,7 +904,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    no longer matches a live claim is surfaced as orphaned, not silently honored. UI:
    dismiss action on the finding detail (inline actions stopPropagation per house rule),
    dismissed entries visible somewhere honest (coverage status + a way to review/undo).
-   STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count.
+   STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count. EE fix (2026-07-15): hosted generates now materialize the Pg-stored guard decisions into the ephemeral checkout (`materializeAndGenerateGuard`, every path including `skipMaterialize`) — before this the fresh clone had no `scenarios/decisions.json`, so a hosted regenerate re-authored every dismissed claim and held sections never released.
 
 
 
