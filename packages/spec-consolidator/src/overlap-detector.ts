@@ -60,28 +60,9 @@ export interface OverlapVerdict {
   note: string;
   /** The conflicting sections per doc (markdown headings), when identifiable. */
   sections?: OverlapSection[];
-  /**
-   * Set on an aggregated pair verdict whose window matrix exceeded the per-pair
-   * call cap. Persisted in the cache so a cache-hit re-run still reports the
-   * pair's coverage as truncated instead of silently reading as complete.
-   */
-  truncated?: { examinedCalls: number; totalCalls: number };
 }
 
 export type OverlapRunner = (input: OverlapRunnerInput) => Promise<OverlapVerdict>;
-
-/** Reported when a pair's window matrix exceeds {@link OVERLAP_MAX_CALLS_PER_PAIR}. */
-export interface OverlapTruncation {
-  areaId: string;
-  /** Doc A path. */
-  a: string;
-  /** Doc B path. */
-  b: string;
-  /** Window pairs actually judged (= the cap). */
-  examinedCalls: number;
-  /** Window pairs the full matrix held. */
-  totalCalls: number;
-}
 
 export interface OverlapDetectorOptions {
   /** Override the runner. Tests pass a stub. */
@@ -107,17 +88,12 @@ export interface OverlapDetectorOptions {
   onProgress?: (done: number, total: number) => void;
   /** Fired when an area's pair count exceeds the cap (areaId, examined, total). */
   onCapped?: (areaId: string, examined: number, total: number) => void;
-  /** Fired when a pair's window matrix exceeds the per-pair call cap. */
-  onPairTruncated?: (t: OverlapTruncation) => void;
 }
 
 const DEFAULT_MAX_PAIRS_PER_AREA = 60;
 
 /** Max chars of one doc shown to the judge per call; a larger doc splits into windows. */
 export const OVERLAP_WINDOW_CHARS = 24_000;
-
-/** Max judge calls per doc pair. A larger window matrix is truncated and reported. */
-export const OVERLAP_MAX_CALLS_PER_PAIR = 12;
 
 /**
  * Flag within-area overlaps. Returns a map keyed by area id → the overlaps
@@ -196,37 +172,103 @@ export async function flagOverlaps(
   // Clamp to >=1: a 0/negative value would stall the hand-rolled limiter.
   const concurrency = Math.max(1, opts.concurrency ?? defaultConcurrency());
 
+  // A flagged verdict lands in the per-area result list; every settled pair ticks.
+  const applyVerdict = (pair: Pair, verdict: OverlapVerdict): void => {
+    if (verdict.overlap) {
+      const list = result.get(pair.areaId) ?? [];
+      // `areas` is set by the cross-area merge below (the single area here
+      // for an unmerged flag, every spanned area for a merged one).
+      list.push({ docs: [pair.a.path, pair.b.path], note: verdict.note, sections: verdict.sections ?? [], areas: [] });
+      result.set(pair.areaId, list);
+    }
+    markDone();
+  };
+
+  // Expand every non-cached pair into its FULL window matrix — every window of A
+  // against every window of B, judged completely: coverage is never truncated.
+  // The pre-flight estimate (which models this exact matrix) is the cost gate,
+  // not a silent cap. Cache hits settle their pair without any call.
+  interface PairState {
+    pair: Pair;
+    cacheKey: string;
+    cells: OverlapRunnerInput[];
+    /** Per-cell verdicts in matrix order, so aggregation is deterministic. */
+    verdicts: Array<OverlapVerdict | null>;
+    anyFailed: boolean;
+    remaining: number;
+  }
+  const states: PairState[] = [];
+  for (const pair of pairs) {
+    const cacheKey = computeCacheKey(pair.areaId, pair.a, pair.b);
+    const cached = await readCache(repoRoot, cacheKey);
+    if (cached) {
+      applyVerdict(pair, cached);
+      continue;
+    }
+    const aWindows = planDocChunks(pair.a.path, docBody(pair.a), OVERLAP_WINDOW_CHARS);
+    const bWindows = planDocChunks(pair.b.path, docBody(pair.b), OVERLAP_WINDOW_CHARS);
+    const cells: OverlapRunnerInput[] = [];
+    for (const aw of aWindows) {
+      for (const bw of bWindows) {
+        const input: OverlapRunnerInput = {
+          areaId: pair.areaId,
+          a: windowDoc(pair.a, aw.text),
+          b: windowDoc(pair.b, bw.text),
+        };
+        if (aw.total > 1) input.aPart = { index: aw.index, count: aw.total, isFirst: aw.isFirst };
+        if (bw.total > 1) input.bPart = { index: bw.index, count: bw.total, isFirst: bw.isFirst };
+        cells.push(input);
+      }
+    }
+    states.push({ pair, cacheKey, cells, verdicts: new Array<OverlapVerdict | null>(cells.length).fill(null), anyFailed: false, remaining: cells.length });
+  }
+
+  // One window-pair judgement. When its pair's last cell settles: aggregate in
+  // matrix order, cache only a fully-successful pass (a pair with failed calls
+  // must re-run; an all-failed pair flags nothing), and deliver the verdict.
+  const runCell = async (state: PairState, idx: number): Promise<void> => {
+    try {
+      state.verdicts[idx] = await runner(state.cells[idx]);
+    } catch {
+      state.anyFailed = true;
+    }
+    state.remaining -= 1;
+    if (state.remaining > 0) return;
+    const got = state.verdicts.filter((v): v is OverlapVerdict => v !== null);
+    if (got.length === 0) {
+      markDone();
+      return;
+    }
+    const merged = aggregateVerdicts(got);
+    if (!state.anyFailed) await writeCache(repoRoot, state.cacheKey, merged);
+    applyVerdict(state.pair, merged);
+  };
+
+  // All cells across all pairs share the ONE concurrency pool, so a many-window
+  // pair parallelizes instead of serializing behind a single pair slot.
+  const work: Array<{ state: PairState; idx: number }> = [];
+  for (const state of states) {
+    for (let idx = 0; idx < state.cells.length; idx++) work.push({ state, idx });
+  }
   let cursor = 0;
   let active = 0;
-  await new Promise<void>((resolve) => {
-    const launch = (): void => {
-      while (active < concurrency && cursor < pairs.length) {
-        const pair = pairs[cursor++];
-        active++;
-        examineOne(repoRoot, pair.areaId, pair.a, pair.b, runner, opts.onPairTruncated)
-          .then((verdict) => {
-            if (verdict.overlap) {
-              const list = result.get(pair.areaId) ?? [];
-              // `areas` is set by the cross-area merge below (the single area here
-              // for an unmerged flag, every spanned area for a merged one).
-              list.push({ docs: [pair.a.path, pair.b.path], note: verdict.note, sections: verdict.sections ?? [], areas: [] });
-              result.set(pair.areaId, list);
-            }
-          })
-          .catch(() => {
-            // A failed pair flags nothing — better than a spurious flag.
-          })
-          .finally(() => {
-            markDone();
+  if (work.length > 0) {
+    await new Promise<void>((resolve) => {
+      const launch = (): void => {
+        while (active < concurrency && cursor < work.length) {
+          const { state, idx } = work[cursor++];
+          active++;
+          runCell(state, idx).finally(() => {
             active--;
-            if (cursor >= pairs.length && active === 0) resolve();
+            if (cursor >= work.length && active === 0) resolve();
             else launch();
           });
-      }
-      if (cursor >= pairs.length && active === 0) resolve();
-    };
-    launch();
-  });
+        }
+        if (cursor >= work.length && active === 0) resolve();
+      };
+      launch();
+    });
+  }
 
   // Pointer verification (item 29): the overlap judge names section pointers but
   // nothing validates them, and it can mis-anchor (taskline's README `rm` dispute
@@ -272,65 +314,6 @@ export async function flagOverlaps(
     result.set(areaId, list);
   }
   return result;
-}
-
-async function examineOne(
-  repoRoot: string,
-  areaId: string,
-  a: DocCandidate,
-  b: DocCandidate,
-  runner: OverlapRunner,
-  onPairTruncated?: (t: OverlapTruncation) => void,
-): Promise<OverlapVerdict> {
-  const cacheKey = computeCacheKey(areaId, a, b);
-  const cached = await readCache(repoRoot, cacheKey);
-  if (cached) {
-    // A truncated pair stays truncated on a cache hit — re-report it so the
-    // run's stats never read as full coverage when the judged matrix wasn't.
-    if (cached.truncated) {
-      onPairTruncated?.({ areaId, a: a.path, b: b.path, ...cached.truncated });
-    }
-    return cached;
-  }
-
-  // Each doc's FULL body is what detection sees; oversized docs split into
-  // windows by the shared heading-aware chunker (the views mechanism).
-  const aWindows = planDocChunks(a.path, docBody(a), OVERLAP_WINDOW_CHARS);
-  const bWindows = planDocChunks(b.path, docBody(b), OVERLAP_WINDOW_CHARS);
-
-  // Row-major window matrix: for each window of A, every window of B.
-  const cells: Array<{ aw: DocChunk; bw: DocChunk }> = [];
-  for (const aw of aWindows) for (const bw of bWindows) cells.push({ aw, bw });
-  const totalCalls = cells.length;
-  const examined = totalCalls > OVERLAP_MAX_CALLS_PER_PAIR ? cells.slice(0, OVERLAP_MAX_CALLS_PER_PAIR) : cells;
-  const truncated = examined.length < totalCalls ? { examinedCalls: examined.length, totalCalls } : undefined;
-  if (truncated) onPairTruncated?.({ areaId, a: a.path, b: b.path, ...truncated });
-
-  const verdicts: OverlapVerdict[] = [];
-  let anyFailed = false;
-  for (const { aw, bw } of examined) {
-    const input: OverlapRunnerInput = {
-      areaId,
-      a: windowDoc(a, aw.text),
-      b: windowDoc(b, bw.text),
-    };
-    if (aw.total > 1) input.aPart = { index: aw.index, count: aw.total, isFirst: aw.isFirst };
-    if (bw.total > 1) input.bPart = { index: bw.index, count: bw.total, isFirst: bw.isFirst };
-    try {
-      verdicts.push(await runner(input));
-    } catch {
-      anyFailed = true;
-    }
-  }
-
-  // Every call failed → flag nothing, cache nothing.
-  if (verdicts.length === 0) return { overlap: false, note: '', sections: [] };
-
-  const merged = { ...aggregateVerdicts(verdicts), ...(truncated ? { truncated } : {}) };
-  // A pair with FAILED calls must re-run, so it never enters the cache. A capped
-  // matrix is cached — with its truncation marker, so re-runs keep reporting it.
-  if (!anyFailed) await writeCache(repoRoot, cacheKey, merged);
-  return merged;
 }
 
 /** A doc candidate whose body is one window slice; path/hash stay the real doc's. */
@@ -553,7 +536,6 @@ const OverlapVerdictSchema = z.object({
   sections: z
     .array(z.object({ doc: z.string(), heading: z.string().nullable(), quote: z.string().optional() }))
     .default([]),
-  truncated: z.object({ examinedCalls: z.number(), totalCalls: z.number() }).optional(),
 });
 
 function spawnOverlapRunner(

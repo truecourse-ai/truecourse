@@ -92,11 +92,6 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`relations   ${s.resolvedRelations}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
-  for (const t of s.overlapTruncated) {
-    p.log.warn(
-      `overlap check truncated: ${t.a} ↔ ${t.b} (${t.areaId}) — examined ${t.examinedCalls} of ${t.totalCalls} window comparisons`,
-    );
-  }
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
     for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);

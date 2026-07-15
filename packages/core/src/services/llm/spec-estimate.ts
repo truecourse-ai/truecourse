@@ -30,7 +30,6 @@ import {
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
   CHAIN_DETECTION_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_MAX_CALLS_PER_PAIR,
   OVERLAP_WINDOW_CHARS,
 } from '@truecourse/spec-consolidator';
 import {
@@ -156,12 +155,10 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
   const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
   const pairsPerArea = Math.min(OVERLAP_CAP, (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2);
   const overlapPairs = hasWork && nKept >= 2 ? areaCount * pairsPerArea : 0;
-  // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: up to
-  // OVERLAP_MAX_CALLS_PER_PAIR judge calls per pair (the window matrix, squared, capped).
-  const callsPerPairFactor = Math.min(
-    OVERLAP_MAX_CALLS_PER_PAIR,
-    Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2,
-  );
+  // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
+  // window matrix (never truncated), so calls scale with the square of doc size.
+  // This estimate IS the cost gate for that completeness — the user approves it.
+  const callsPerPairFactor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
   const overlapCalls = overlapPairs * callsPerPairFactor;
 
   const stages: StageCallEstimate[] = [

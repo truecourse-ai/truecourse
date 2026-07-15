@@ -13,15 +13,14 @@ import {
   flagOverlaps,
   buildOverlapUserPrompt,
   OVERLAP_WINDOW_CHARS,
-  OVERLAP_MAX_CALLS_PER_PAIR,
 } from '../../packages/spec-consolidator/src/index.js';
 import type {
   Area,
   DocCandidate,
   OverlapRunner,
   OverlapRunnerInput,
-  OverlapTruncation,
 } from '../../packages/spec-consolidator/src/index.js';
+import { planDocChunks } from '@truecourse/shared';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
@@ -603,28 +602,25 @@ describe('buildOverlapUserPrompt — part labels and lead option', () => {
   });
 });
 
-describe('flagOverlaps — per-pair call cap', () => {
-  it('judges at most OVERLAP_MAX_CALLS_PER_PAIR window pairs and reports the truncation', async () => {
-    const a = doc('docs/a.md', bigMarkdown('Service A', 100_000));
-    const b = doc('docs/b.md', bigMarkdown('Service B', 100_000));
-    const truncations: OverlapTruncation[] = [];
-    let calls = 0;
-    const runner: OverlapRunner = async () => {
-      calls++;
+describe('flagOverlaps — full window matrix', () => {
+  it('judges EVERY window pair of two oversized docs — coverage is never truncated', async () => {
+    const bodyA = bigMarkdown('Service A', 100_000);
+    const bodyB = bigMarkdown('Service B', 100_000);
+    const a = doc('docs/a.md', bodyA);
+    const b = doc('docs/b.md', bodyB);
+    const seen = new Set<string>();
+    const runner: OverlapRunner = async ({ aPart, bPart }) => {
+      seen.add(`${aPart!.index}-${bPart!.index}`);
       return { overlap: false, note: '' };
     };
-    await flagOverlaps(repo, [area('core/svc', ['docs/a.md', 'docs/b.md'])], [a, b], {
-      runner,
-      onPairTruncated: (t) => truncations.push(t),
-    });
-    expect(truncations).toHaveLength(1);
-    expect(truncations[0].areaId).toBe('core/svc');
-    expect(truncations[0].a).toBe('docs/a.md');
-    expect(truncations[0].b).toBe('docs/b.md');
-    expect(truncations[0].examinedCalls).toBe(OVERLAP_MAX_CALLS_PER_PAIR);
-    expect(truncations[0].totalCalls).toBeGreaterThan(OVERLAP_MAX_CALLS_PER_PAIR);
-    // Exactly the cap's worth of runner calls were made.
-    expect(calls).toBe(OVERLAP_MAX_CALLS_PER_PAIR);
+    await flagOverlaps(repo, [area('core/svc', ['docs/a.md', 'docs/b.md'])], [a, b], { runner });
+
+    const nA = planDocChunks('docs/a.md', bodyA, OVERLAP_WINDOW_CHARS).length;
+    const nB = planDocChunks('docs/b.md', bodyB, OVERLAP_WINDOW_CHARS).length;
+    // Both docs split into several windows and every combination was judged once.
+    expect(nA).toBeGreaterThan(1);
+    expect(nB).toBeGreaterThan(1);
+    expect(seen.size).toBe(nA * nB);
   });
 });
 

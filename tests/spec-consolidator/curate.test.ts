@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { curate, readCorpus } from '../../packages/spec-consolidator/src/index.js';
+import { planDocChunks } from '@truecourse/shared';
+import { curate, readCorpus, OVERLAP_WINDOW_CHARS } from '../../packages/spec-consolidator/src/index.js';
 import type {
   AreaTagRunner,
   DecisionsFile,
@@ -215,13 +216,13 @@ describe('curate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Overlap window truncation — a within-area doc pair whose full-doc window
-// matrix exceeds OVERLAP_MAX_CALLS_PER_PAIR is surfaced via stats.overlapTruncated.
+// Overlap full-matrix coverage — a within-area doc pair is judged across its
+// COMPLETE window matrix; nothing is truncated no matter how large the docs.
 // ---------------------------------------------------------------------------
 
-describe('curate — overlap window truncation', () => {
+describe('curate — overlap full window matrix', () => {
   // A realistic long configuration reference: many `## key` sections, well past a
-  // single OVERLAP_WINDOW_CHARS window, so the pair's window matrix overflows the cap.
+  // single OVERLAP_WINDOW_CHARS window, so both docs split into several windows.
   function configReference(product: string, sections: number): string {
     const out = [
       `# ${product} Configuration Reference`,
@@ -254,29 +255,30 @@ describe('curate — overlap window truncation', () => {
   const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
   const noOverlap: OverlapRunner = async () => ({ overlap: false, note: '' });
 
-  it('reports the pair in stats.overlapTruncated when its window matrix exceeds the cap', async () => {
+  it('judges the pair across every window combination of both oversized docs', async () => {
+    let calls = 0;
+    const counting: OverlapRunner = async (i) => {
+      calls++;
+      return noOverlap(i);
+    };
     const result = await curate(repo, {
       docSource: () => DOCS_BIG,
       decisions: EMPTY_DECISIONS,
       relevanceRunner: keepAll,
       areaTagRunner: tagSame,
-      overlapRunner: noOverlap,
+      overlapRunner: counting,
       disableLlmRelationDetection: true,
       skipGit: true,
     });
 
-    expect(result.stats.overlapTruncated.length).toBeGreaterThan(0);
-    const t = result.stats.overlapTruncated[0];
-    expect([t.a, t.b].sort()).toEqual(['docs/gateway-config-a.md', 'docs/gateway-config-b.md']);
-    expect(result.corpus.areas.map((a) => a.id)).toContain(t.areaId);
-    expect(t.examinedCalls).toBeGreaterThan(0);
-    expect(t.examinedCalls).toBeLessThan(t.totalCalls);
-    expect(t.totalCalls).toBeGreaterThan(12);
-  });
-
-  it('a normal run (small single-window docs) leaves overlapTruncated empty', async () => {
-    const result = await run();
-    expect(result.stats.overlapTruncated).toEqual([]);
+    // The pair formed (both docs share the one area) and the judge saw the FULL
+    // matrix: every window of A against every window of B, no truncation.
+    expect(result.corpus.areas.some((a) => a.docRefs.length === 2)).toBe(true);
+    const nA = planDocChunks('docs/gateway-config-a.md', bigA, OVERLAP_WINDOW_CHARS).length;
+    const nB = planDocChunks('docs/gateway-config-b.md', bigB, OVERLAP_WINDOW_CHARS).length;
+    expect(nA).toBeGreaterThan(3);
+    expect(nB).toBeGreaterThan(3);
+    expect(calls).toBe(nA * nB);
   });
 });
 

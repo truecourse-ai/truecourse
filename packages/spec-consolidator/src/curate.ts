@@ -22,7 +22,7 @@ import { tagDocs, type AreaTagRunner } from './area-tagger.js';
 import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
 import { groupByArea } from './area-grouper.js';
 import { detectRelations, effectiveRelations } from './relation.js';
-import { flagOverlaps, type OverlapRunner, type OverlapTruncation } from './overlap-detector.js';
+import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
 import { writeCorpus } from './corpus-store.js';
 import { DecisionsFileSchema, type DecisionsFile, type Relation } from './types.js';
 import { type Area, type CuratedCorpus } from './corpus-types.js';
@@ -80,8 +80,6 @@ export interface CurateStats {
   resolvedRelations: number;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
-  /** Doc pairs whose window-comparison matrix exceeded the per-pair cap (empty when none). */
-  overlapTruncated: OverlapTruncation[];
   skippedDocs: Array<{ path: string; reason: string }>;
   /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
   scopeGlobs: string[];
@@ -186,7 +184,6 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const relations = effectiveRelations(autoRelations, decisions.relations ?? []);
 
   // ---- Flag within-area overlaps (relations never skip a pair) --------
-  const overlapTruncated: OverlapTruncation[] = [];
   const overlapsByArea = await flagOverlaps(repoRoot, grouped.areas, docs, {
     runner: opts.overlapRunner,
     enabled: opts.disableOverlapDetection !== true,
@@ -195,7 +192,6 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     model: models.overlap,
     fallbackModel,
     onProgress: opts.onOverlapProgress,
-    onPairTruncated: (t) => overlapTruncated.push(t),
   });
   const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: overlapsByArea.get(a.id) ?? [] }));
 
@@ -231,7 +227,6 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     overlapFlags: openOverlaps.length,
     resolvedRelations: relations.length,
     openOverlaps,
-    overlapTruncated,
     skippedDocs,
     scopeGlobs,
     outOfScopeManualIncludes,

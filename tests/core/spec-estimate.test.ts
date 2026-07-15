@@ -28,7 +28,6 @@ import {
   tagDocs,
   curate,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_MAX_CALLS_PER_PAIR,
   OVERLAP_WINDOW_CHARS,
 } from '../../packages/spec-consolidator/src/index.js';
 
@@ -180,10 +179,8 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
 
       const discovered = discoverDocs(bigRepo);
       const avgDocChars = Math.round(discovered.reduce((n, d) => n + d.size, 0) / discovered.length);
-      const factor = Math.min(
-        OVERLAP_MAX_CALLS_PER_PAIR,
-        Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2,
-      );
+      // The FULL window matrix — the estimate prices complete coverage, uncapped.
+      const factor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
       expect(factor).toBeGreaterThan(1); // the fixture must span multiple windows
 
       const bigEst = await estimateScanTokens(bigRepo);

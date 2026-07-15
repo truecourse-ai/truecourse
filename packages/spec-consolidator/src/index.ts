@@ -85,14 +85,12 @@ export {
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   buildOverlapUserPrompt,
   OVERLAP_WINDOW_CHARS,
-  OVERLAP_MAX_CALLS_PER_PAIR,
 } from './overlap-detector.js';
 export type {
   OverlapRunner,
   OverlapRunnerInput,
   OverlapVerdict,
   OverlapDetectorOptions,
-  OverlapTruncation,
   OverlapPart,
 } from './overlap-detector.js';
 
