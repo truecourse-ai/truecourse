@@ -16,7 +16,7 @@ import {
   EMPTY_DECISIONS,
 } from '@truecourse/core/commands/spec-in-process';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
-import type { CuratedCorpus, DecisionsFile, ConflictResolution, Relation } from '@truecourse/spec-consolidator';
+import type { CuratedCorpus, DecisionsFile, ConflictResolution } from '@truecourse/spec-consolidator';
 import { tagDocs, isAreaTagCached } from '../../packages/spec-consolidator/src/index.js';
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 import { setKvCacheStore, resetKvCacheStore, type KvCacheStore } from '@truecourse/llm';
@@ -65,27 +65,23 @@ describe('mergeInheritedDecisions', () => {
     expect(merged.conflictResolutions[0].verdict).toBe('b');
   });
 
-  it('a repo relation on the same doc pair replaces the workspace one; other workspace relations survive; excludes union', async () => {
-    const rel = (older: string, newer: string, type: Relation['type']): Relation => ({
-      older,
-      newer,
-      type,
-      detectedFrom: 'manual',
-    });
+  it('unions includes/excludes across layers and lets a repo area override win for the same doc', async () => {
     const workspace = decisions({
-      relations: [rel('a.md', 'b.md', 'replace'), rel('c.md', 'd.md', 'precedence')],
+      manualIncludes: ['ws-inc.md'],
       manualExcludes: ['ws-only.md'],
+      manualAreas: [{ doc: 'shared.md', areas: ['ws/x'] }],
     });
     const repo = decisions({
-      relations: [rel('a.md', 'b.md', 'keep-both')],
       manualExcludes: ['repo-only.md'],
+      manualAreas: [{ doc: 'shared.md', areas: ['repo/y'] }],
     });
     const merged = mergeInheritedDecisions(workspace, repo);
 
-    const ab = merged.relations.find((r) => r.older === 'a.md' && r.newer === 'b.md')!;
-    expect(ab.type).toBe('keep-both'); // repo won
-    expect(merged.relations.find((r) => r.older === 'c.md')).toBeTruthy(); // ws survived
     expect(new Set(merged.manualExcludes)).toEqual(new Set(['ws-only.md', 'repo-only.md']));
+    expect(merged.manualIncludes).toContain('ws-inc.md'); // workspace include survives
+    // The repo's area override for a doc replaces the workspace's.
+    const area = merged.manualAreas.find((a) => a.doc === 'shared.md')!;
+    expect(area.areas).toEqual(['repo/y']);
   });
 });
 
@@ -157,7 +153,6 @@ function corpus(over: Partial<CuratedCorpus> = {}): CuratedCorpus {
       { ref: 'knowledge/jira/KAN-5.md', kind: 'spec', lastTouched: '2026-07-01T00:00:00.000Z', areaTags: ['product/auth'] },
     ],
     areas: [{ id: 'product/auth', product: 'product', concern: 'auth', docRefs: ['knowledge/jira/KAN-5.md'], overlaps: [] }],
-    relations: [],
     skippedDocs: [],
     ...over,
   };

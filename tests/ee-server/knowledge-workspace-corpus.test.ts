@@ -107,7 +107,6 @@ describe('syncWorkspaceCorpusInProcess — decisions injection', () => {
         manualIncludes: [],
         // Force-exclude A — the doc relevance keeps below.
         manualExcludes: ['knowledge/jira/a.md'],
-        relations: [],
         manualAreas: [],
         conflictResolutions: [],
       },
@@ -121,7 +120,6 @@ describe('syncWorkspaceCorpusInProcess — decisions injection', () => {
       }),
       areaTagRunner: async () => ({ tags: [{ product: 'core', concern: 'cart' }], status: 'shipped' }),
       disableOverlapDetection: true,
-      disableLlmRelationDetection: true,
     });
 
     const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: ORG }, 'corpus');
@@ -140,7 +138,7 @@ describe('syncWorkspaceCorpusInProcess — decisions injection', () => {
 describe('processWorkspaceKnowledge — store-backed union (no contract store installed)', () => {
   it('consolidates from stored bodies with the throwing file contract store, leaving the ledger untouched', async () => {
     // A canned transport answering the two curate stages a single kept doc reaches
-    // (relevance keep + area tag); overlap/vocab/relation don't fire for one doc.
+    // (relevance keep + area tag); overlap/vocab/verify don't fire for one doc.
     // Overrides the throwing default the setup installed.
     const transport: LlmTransport = async (req) => {
       if (req.stage === 'spec.relevance') return JSON.stringify({ include: true, reason: 'spec' });

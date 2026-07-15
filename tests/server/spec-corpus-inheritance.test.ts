@@ -38,7 +38,6 @@ function corpusFixture(): CuratedCorpus {
     areas: [
       { id: 'product/auth', product: 'product', concern: 'auth', docRefs: ['docs/adr-001.md', 'knowledge/confluence/KAN-5.md'], overlaps: [] },
     ],
-    relations: [],
     skippedDocs: [],
   };
 }

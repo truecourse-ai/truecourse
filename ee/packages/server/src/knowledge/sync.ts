@@ -187,7 +187,7 @@ async function persistSyncedSource(
 }
 
 export interface ProcessOptions extends SyncOptions {
-  /** Workspace curation decisions, folded into curate (force excludes/includes, verdicts, relations). */
+  /** Workspace curation decisions, folded into curate (force excludes/includes, conflict verdicts). */
   decisions?: DecisionsFile;
 }
 

@@ -52,8 +52,6 @@ import { openConflicts } from '@truecourse/shared';
 
 export type {
   DecisionsFile,
-  Relation,
-  RelationType,
   ConflictResolution,
   CuratedCorpus,
 } from '@truecourse/spec-consolidator';
@@ -934,10 +932,10 @@ export async function syncWorkspaceCorpusInProcess(options: {
   workspaceOrgId: string;
   docs: WorkspaceDocInput[];
   /**
-   * The workspace's curation decisions (force includes/excludes, relations,
-   * conflict verdicts). Materialized as `decisions.json` in the scratch tree so
-   * curate folds them exactly as it does for a repo — a force-exclude drops its
-   * doc, a verdict marks its conflict resolved. Omit for an un-curated sync.
+   * The workspace's curation decisions (force includes/excludes, conflict
+   * verdicts). Materialized as `decisions.json` in the scratch tree so curate
+   * folds them exactly as it does for a repo — a force-exclude drops its doc, a
+   * verdict marks its conflict resolved. Omit for an un-curated sync.
    */
   decisions?: DecisionsFile;
   tracker?: StepTracker;
@@ -947,7 +945,6 @@ export async function syncWorkspaceCorpusInProcess(options: {
   relevanceRunner?: CurateInProcessOptions['relevanceRunner'];
   areaTagRunner?: CurateInProcessOptions['areaTagRunner'];
   disableOverlapDetection?: boolean;
-  disableLlmRelationDetection?: boolean;
 }): Promise<WorkspaceCorpusSyncResult> {
   const ref: WorkspaceRef = { workspaceOrgId: options.workspaceOrgId };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-corpus-'));
@@ -970,7 +967,6 @@ export async function syncWorkspaceCorpusInProcess(options: {
       relevanceRunner: options.relevanceRunner,
       areaTagRunner: options.areaTagRunner,
       disableOverlapDetection: options.disableOverlapDetection,
-      disableLlmRelationDetection: options.disableLlmRelationDetection,
     });
     // Persist the curated corpus under workspace scope (the dashboard reads it).
     await saveWorkspaceSpec(ref, 'corpus', curateResult.corpus);
@@ -1735,21 +1731,6 @@ async function storeWorkspaceDecisions(org: string, next: DecisionsFile): Promis
 /** The workspace's current decisions (the Knowledge page read), or empty when none. */
 export function getWorkspaceDecisions(org: string): Promise<DecisionsFile> {
   return loadWorkspaceDecisions(org);
-}
-
-export async function addWorkspaceRelation(org: string, input: Relation): Promise<DecisionsFile> {
-  const next = applyAddRelation(await loadWorkspaceDecisions(org), input);
-  await storeWorkspaceDecisions(org, next);
-  return next;
-}
-
-export async function removeWorkspaceRelation(
-  org: string,
-  input: { older: string; newer: string; scope?: string },
-): Promise<DecisionsFile> {
-  const next = applyRemoveRelation(await loadWorkspaceDecisions(org), input);
-  await storeWorkspaceDecisions(org, next);
-  return next;
 }
 
 export async function addWorkspaceManualInclude(org: string, docPath: string): Promise<DecisionsFile> {

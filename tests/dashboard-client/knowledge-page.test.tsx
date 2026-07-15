@@ -48,9 +48,7 @@ const WS_CORPUS = {
         ],
       },
     ],
-    relations: [],
   },
-  userRelations: [],
   skipped: { total: 120, byReason: [{ reason: 'low relevance', count: 120 }] },
 };
 

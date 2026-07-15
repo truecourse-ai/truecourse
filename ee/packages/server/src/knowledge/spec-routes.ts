@@ -10,7 +10,7 @@
  *     expander, with search + reason filter.
  *   - `GET /spec/doc` reads one doc's STORED body via the ledger row (the body
  *     Sync persisted, content-addressed); 404 for an unknown ref.
- *   - the decision writes (includes / excludes / relations / conflict verdicts)
+ *   - the decision writes (includes / excludes / conflict verdicts)
  *     persist the `'decisions'` artifact, then — ONLY once no conflicts remain
  *     open — enqueue the workspace processing job (best-effort — a full queue
  *     never fails the write). Resolving a batch of conflicts one by one thus
@@ -25,8 +25,6 @@ import { openConflicts, type AuthUser, type KnowledgeSkippedSummary } from '@tru
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import {
   getWorkspaceDecisions,
-  addWorkspaceRelation,
-  removeWorkspaceRelation,
   addWorkspaceManualInclude,
   removeWorkspaceManualInclude,
   addWorkspaceManualExclude,
@@ -36,7 +34,6 @@ import {
   type ConflictResolution,
   type CuratedCorpus,
   type DecisionsFile,
-  type RelationType,
 } from '@truecourse/core/commands/spec-in-process';
 import { PgKnowledgeStore, ActiveJobExistsError } from '@truecourse/ee-data-store';
 import { isLlmConfigured } from '../llm/index.js';
@@ -47,7 +44,6 @@ function orgIdOf(req: Request): string | null {
   return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
 }
 
-const RELATION_TYPES: RelationType[] = ['replace', 'precedence', 'keep-both'];
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
 /** Default page size / hard cap for the raw-list surfaces (skipped, documents). */
@@ -161,7 +157,6 @@ export function registerKnowledgeSpecRoutes(router: Router, deps: SpecRouteDeps)
         // replace it. Keep it a valid CuratedCorpus for the client's parser.
         corpus: { ...corpus, docs, skippedDocs: [] },
         skipped: skippedSummary(corpus),
-        userRelations: decisions.relations ?? [],
         manualIncludes: decisions.manualIncludes ?? [],
         manualExcludes: decisions.manualExcludes ?? [],
         conflictResolutions: decisions.conflictResolutions ?? [],
@@ -225,51 +220,6 @@ export function registerKnowledgeSpecRoutes(router: Router, deps: SpecRouteDeps)
   // Each write persists the `'decisions'` artifact, then enqueues a re-process
   // (best-effort). The response mirrors the repo route's non-recurate shape (the
   // updated decision arrays); the client re-derives conflict state from them.
-
-  router.post('/spec/relations', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const org = orgIdOf(req);
-      if (!org) return res.status(401).json({ error: 'no workspace' });
-      const body = req.body as { type?: RelationType; older?: string; newer?: string; scope?: string; note?: string };
-      if (!body.type || !body.older || !body.newer) {
-        return res.status(400).json({ error: 'Missing type, older, or newer.' });
-      }
-      if (!RELATION_TYPES.includes(body.type)) {
-        return res.status(400).json({ error: `type must be one of ${RELATION_TYPES.join(', ')}.` });
-      }
-      if (body.older === body.newer) return res.status(400).json({ error: 'older and newer must differ.' });
-      const decisions = await addWorkspaceRelation(org, {
-        type: body.type,
-        older: body.older,
-        newer: body.newer,
-        scope: body.scope,
-        detectedFrom: 'manual',
-        note: body.note,
-      });
-      await enqueueWorkspaceProcess(jobs, org, '');
-      res.json({ relations: decisions.relations ?? [] });
-    } catch (e) {
-      next(e);
-    }
-  });
-
-  router.delete('/spec/relations', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const org = orgIdOf(req);
-      if (!org) return res.status(401).json({ error: 'no workspace' });
-      const body = req.body as { older?: string; newer?: string; scope?: string };
-      if (!body.older || !body.newer) return res.status(400).json({ error: 'Missing older or newer.' });
-      const decisions = await removeWorkspaceRelation(org, {
-        older: body.older,
-        newer: body.newer,
-        scope: body.scope,
-      });
-      await enqueueWorkspaceProcess(jobs, org, '');
-      res.json({ relations: decisions.relations ?? [] });
-    } catch (e) {
-      next(e);
-    }
-  });
 
   router.post('/spec/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {

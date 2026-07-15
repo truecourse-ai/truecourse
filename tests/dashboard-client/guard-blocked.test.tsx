@@ -81,10 +81,8 @@ const corpusResponse = (
         ],
       },
     ],
-    relations: [],
     skippedDocs: [],
   },
-  userRelations: [],
   manualExcludes: [],
   conflictResolutions,
 });

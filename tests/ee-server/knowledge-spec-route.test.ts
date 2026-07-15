@@ -69,7 +69,6 @@ function corpusFixture(skippedCount: number) {
     areas: [
       { id: 'core/checkout', product: 'core', concern: 'checkout', docRefs: ['knowledge/confluence/1.md'], overlaps: [] },
     ],
-    relations: [],
     // Numbered bug tickets — the realistic Jira noise the relevance filter drops.
     skippedDocs: Array.from({ length: skippedCount }, (_, i) => ({
       ref: `knowledge/jira/${1000 + i}.md`,
@@ -146,7 +145,6 @@ describe('Knowledge spec routes', () => {
       version: 1,
       manualIncludes: ['knowledge/jira/1005.md'],
       manualExcludes: ['knowledge/confluence/1.md'],
-      relations: [],
       manualAreas: [],
       conflictResolutions: [
         { docA: 'a.md', anchorA: null, docB: 'b.md', anchorB: null, verdict: 'a', resolvedAt: '2026-02-02T00:00:00Z' },
@@ -168,7 +166,6 @@ describe('Knowledge spec routes', () => {
     expect(res.body.manualIncludes).toEqual(['knowledge/jira/1005.md']);
     expect(res.body.manualExcludes).toEqual(['knowledge/confluence/1.md']);
     expect(res.body.conflictResolutions).toHaveLength(1);
-    expect(res.body.userRelations).toEqual([]);
   });
 
   it('GET /spec/corpus enriches each kept doc ref with the ledger title + url', async () => {
@@ -365,16 +362,13 @@ describe('Knowledge spec routes', () => {
     expect(enqueueSync).not.toHaveBeenCalled(); // the first process is user-dispatched
   });
 
-  it('POST /spec/relations validates + persists a doc→doc relation', async () => {
-    const bad = await request(app).post('/api/ee/knowledge/spec/relations').send({ type: 'nope', older: 'a', newer: 'b' });
-    expect(bad.status).toBe(400);
-
-    const ok = await request(app)
-      .post('/api/ee/knowledge/spec/relations')
-      .send({ type: 'replace', older: 'old.md', newer: 'new.md' });
-    expect(ok.status).toBe(200);
-    expect(ok.body.relations).toHaveLength(1);
-    expect(ok.body.relations[0]).toMatchObject({ type: 'replace', older: 'old.md', newer: 'new.md' });
+  it('has no /spec/relations routes — the relation surface was retired', async () => {
+    expect(
+      (await request(app).post('/api/ee/knowledge/spec/relations').send({ type: 'replace', older: 'a', newer: 'b' })).status,
+    ).toBe(404);
+    expect(
+      (await request(app).delete('/api/ee/knowledge/spec/relations').send({ older: 'a', newer: 'b' })).status,
+    ).toBe(404);
   });
 
   it('a decision write still persists but does NOT enqueue when no LLM provider is configured', async () => {

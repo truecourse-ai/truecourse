@@ -299,7 +299,6 @@ describe('processWorkspaceKnowledge — union of every synced source (from the s
       version: 1 as const,
       manualIncludes: [],
       manualExcludes: ['knowledge/jira/10.md'],
-      relations: [],
       manualAreas: [],
       conflictResolutions: [],
     };

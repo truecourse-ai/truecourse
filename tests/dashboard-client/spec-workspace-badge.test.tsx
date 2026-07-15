@@ -50,9 +50,7 @@ const MIXED: SpecCorpusResponse = {
         ],
       },
     ],
-    relations: [],
   },
-  userRelations: [],
 };
 
 // A repo-local corpus with no workspace layer at all (the OSS / repo-local shape).
@@ -73,9 +71,7 @@ const LOCAL_ONLY: SpecCorpusResponse = {
         overlaps: [{ docs: ['docs/a.md', 'docs/b.md'], note: 'x', sections: [] }],
       },
     ],
-    relations: [],
   },
-  userRelations: [],
 };
 
 const state = (data: SpecCorpusResponse): SpecCorpusState => ({
