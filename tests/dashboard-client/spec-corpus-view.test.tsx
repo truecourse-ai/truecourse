@@ -17,7 +17,7 @@ import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '../../apps/dashboard/client/src/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '../../apps/dashboard/client/src/components/spec/DocMarkdown';
-import type { SpecCorpusResponse } from '../../apps/dashboard/client/src/lib/api';
+import type { SpecCorpusResponse, SpecOverlapReview } from '../../apps/dashboard/client/src/lib/api';
 
 const RESP: SpecCorpusResponse = {
   corpus: {
@@ -66,6 +66,17 @@ const state = (over: Partial<SpecCorpusState> = {}): SpecCorpusState => ({
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+/** RESP with a verify-judge review attached to the appointments overlap. */
+const withReview = (review: SpecOverlapReview): SpecCorpusResponse => ({
+  ...RESP,
+  corpus: {
+    ...RESP.corpus,
+    areas: RESP.corpus.areas.map((ar) =>
+      ar.overlaps.length ? { ...ar, overlaps: ar.overlaps.map((o) => ({ ...o, review })) } : ar,
+    ),
+  },
+});
 
 describe('SpecCorpusView (left nav)', () => {
   it('lists docs once (flat) with area-tag badges + a Conflicts section', () => {
@@ -420,6 +431,27 @@ describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
     expect(screen.getByText('dismissed')).toBeInTheDocument();
   });
 
+  it('a reviewed conflict row shows the reviewer explanation + a verified affordance', () => {
+    const data = withReview({
+      explanation: 'Both docs specify a cancellation window and they disagree.',
+      recommendation: { action: 'pick-a', rationale: 'v1 is the current source of truth.' },
+    });
+    render(<SpecCorpusView repoId="r1" corpus={state({ data })} activeKey={null} onOpen={vi.fn()} />);
+    // An open conflict → the Conflicts section is expanded; the row carries the
+    // reviewer's explanation (not the thin note) and the verified affordance.
+    expect(screen.getByText('Both docs specify a cancellation window and they disagree.')).toBeInTheDocument();
+    expect(screen.getByText('verified')).toBeInTheDocument();
+    // The thin detector note is superseded, not shown.
+    expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
+  });
+
+  it('an unreviewed conflict row falls back to the detector note and shows no verified affordance', () => {
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+    // No review → the row's descriptive line is the note, and nothing verified.
+    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
+    expect(screen.queryByText('verified')).not.toBeInTheDocument();
+  });
+
   it('surfaces an orphaned verdict (no matching conflict) with a remove action that DELETEs', async () => {
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal(
@@ -703,6 +735,137 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
     expect(within(banner).getAllByText('docs/v2.md').length).toBeGreaterThan(0); // docB won (verdict 'b')
     expect(within(banner).queryByText('docs/v1.md')).toBeNull();
     expect(screen.queryByRole('button', { name: 'docs/v1.md is right' })).not.toBeInTheDocument();
+  });
+});
+
+// The verify judge's resolution brief (issue: reviewed conflicts). The detail
+// pane surfaces the explanation as a labelled brief above the excerpts and the
+// recommendation below them; the "Apply recommendation" shortcut runs the SAME
+// verdict action as the manual controls. `fix-doc` gets no apply button — only
+// the copyable fix text. Absent `review` renders byte-identically to before.
+describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
+  let lastPost: Record<string, unknown> | null;
+  beforeEach(() => {
+    lastPost = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, opts?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/spec/conflict-resolution') && opts?.method === 'POST') {
+          lastPost = JSON.parse(String(opts.body));
+          return json({ conflictResolutions: [{ ...lastPost, resolvedAt: '2026-07-10T00:00:00Z' }] });
+        }
+        return json({ ref: 'docs/x.md', content: 'body' });
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const renderDetail = (data: SpecCorpusResponse, props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) =>
+    render(
+      <SpecOverlapDetail
+        repoId="r1"
+        area="booking/appointments"
+        docA="docs/v1.md"
+        docB="docs/v2.md"
+        data={data}
+        onResolved={vi.fn()}
+        {...props}
+      />,
+    );
+
+  it('renders the brief explanation + the recommendation label and rationale', () => {
+    renderDetail(
+      withReview({
+        explanation: 'The two docs disagree on the cancellation window (24h vs 48h).',
+        recommendation: { action: 'pick-a', rationale: 'v1 is the newer, authoritative policy.' },
+      }),
+    );
+    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
+    expect(screen.getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
+    expect(screen.getByText('Recommendation')).toBeInTheDocument();
+    expect(screen.getByText('docs/v1.md is right')).toBeInTheDocument();
+    expect(screen.getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
+  });
+
+  it('the Apply recommendation button routes through the SAME verdict mutation as the manual control', async () => {
+    const onConflictChange = vi.fn();
+    const user = userEvent.setup();
+    // pick-a backs the overlap's first doc (docs/v1.md) → verdict 'a' (docA wins).
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
+      }),
+      { onConflictChange },
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply recommendation' }));
+    // The identical POST the manual "docs/v1.md is right" button would send.
+    await waitFor(() => expect(lastPost).not.toBeNull());
+    expect(lastPost).toMatchObject({
+      docA: 'docs/v1.md',
+      anchorA: 'Cancellation',
+      docB: 'docs/v2.md',
+      anchorB: 'Cancellation policy',
+      verdict: 'a',
+    });
+    // Same post-resolution path as a manual verdict: the pair resolves in place.
+    expect(onConflictChange).toHaveBeenCalledWith([expect.objectContaining({ verdict: 'a' })]);
+    expect(screen.getByTestId('conflict-verdict')).toBeInTheDocument();
+  });
+
+  it('maps pick-b to the second doc regardless of the props doc order', async () => {
+    const user = userEvent.setup();
+    // Props swapped (docA=v2, docB=v1); pick-b still backs the overlap's 2nd doc (v2).
+    renderDetail(
+      withReview({
+        explanation: 'They disagree.',
+        recommendation: { action: 'pick-b', rationale: 'v2 wins.' },
+      }),
+      { docA: 'docs/v2.md', docB: 'docs/v1.md' },
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply recommendation' }));
+    await waitFor(() => expect(lastPost).not.toBeNull());
+    // overlap.docs[1] is docs/v2.md, which is docA here → verdict 'a'.
+    expect(lastPost).toMatchObject({ docA: 'docs/v2.md', docB: 'docs/v1.md', verdict: 'a' });
+  });
+
+  it('a fix-doc recommendation shows the copyable fix text and NO apply button', () => {
+    renderDetail(
+      withReview({
+        explanation: 'The window differs; the docs should be reconciled by hand.',
+        recommendation: { action: 'fix-doc', rationale: 'Neither wins outright.', fix: 'Change 24h to 48h in docs/v1.md.' },
+      }),
+    );
+    expect(screen.getByText('Suggested fix')).toBeInTheDocument();
+    expect(screen.getByText('Change 24h to 48h in docs/v1.md.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
+  });
+
+  it('an already-resolved reviewed conflict shows the brief but no apply shortcut', () => {
+    const data = withReview({
+      explanation: 'They disagree.',
+      recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
+    });
+    const resolved: SpecCorpusResponse = {
+      ...data,
+      conflictResolutions: [
+        { docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy', verdict: 'b' },
+      ],
+    };
+    renderDetail(resolved);
+    expect(screen.getByText('Resolution brief')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
+  });
+
+  it('an unreviewed conflict renders no brief, recommendation, or apply button (regression)', () => {
+    renderDetail(RESP);
+    expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommendation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
+    // The plain-text detector note still renders exactly as before.
+    expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
   });
 });
 

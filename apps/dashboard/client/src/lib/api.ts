@@ -793,9 +793,27 @@ export interface SpecConflictResolution {
   note?: string;
 }
 
+/**
+ * The verify judge's resolution brief for a confirmed conflict — advisory only.
+ * `explanation` is a human-readable account of the disagreement; `recommendation`
+ * is a suggested action the user may apply. Absent on unverified/legacy flags.
+ */
+export interface SpecOverlapReview {
+  explanation: string;
+  recommendation: {
+    /** 'pick-a' backs the overlap's first doc, 'pick-b' the second. */
+    action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
+    rationale: string;
+    /** For `fix-doc`: the suggested doc edit the user applies themselves. */
+    fix?: string;
+  };
+}
+
 export interface SpecOverlap {
   docs: [string, string];
   note: string;
+  /** The verify judge's resolution brief, when this flag was reviewed. */
+  review?: SpecOverlapReview;
   /** Conflicting sections per doc (markdown headings), when known. */
   sections?: SpecOverlapSection[];
   /**

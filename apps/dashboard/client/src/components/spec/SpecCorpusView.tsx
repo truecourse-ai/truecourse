@@ -11,14 +11,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink } from 'lucide-react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink, BadgeCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
 import * as api from '@/lib/api';
-import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck } from '@/lib/api';
+import type { SpecCorpusResponse, SpecCorpus, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecOverlapReview } from '@/lib/api';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
@@ -44,6 +44,18 @@ export function parseSpecKey(key: string): SpecKey {
     return { kind: 'doc', ref: sep >= 0 ? rest.slice(sep + 2) : rest };
   }
   return { kind: 'doc', ref: key };
+}
+
+/** The verify judge's review for a conflict's doc pair, read from the raw overlap
+ *  (matched unordered across areas — detection may flag the pair under any). */
+function reviewForPair(c: SpecCorpus, a: string, b: string): SpecOverlapReview | undefined {
+  for (const ar of c.areas) {
+    const ov = ar.overlaps.find(
+      (o) => (o.docs[0] === a && o.docs[1] === b) || (o.docs[0] === b && o.docs[1] === a),
+    );
+    if (ov?.review) return ov.review;
+  }
+  return undefined;
 }
 
 /** The resolved-badge text for a conflict — the verdict when one matched, else the
@@ -381,6 +393,8 @@ export function SpecCorpusView({
     b: cf.b,
     resolved: cf.resolved,
     summary: conflictBadge(cf),
+    note: cf.note,
+    review: reviewForPair(c, cf.a, cf.b),
   }));
   // Stored verdicts that no longer match any flagged conflict (the docs changed) —
   // surfaced honestly for housekeeping rather than silently honored.
@@ -435,13 +449,15 @@ export function SpecCorpusView({
             icon={<GitMerge className="h-3.5 w-3.5 shrink-0" />}
             defaultOpen={hasOpenConflicts || activeInConflicts}
           >
-            {visibleConflicts.map(({ area, a, b, resolved, summary }, i) => (
+            {visibleConflicts.map(({ area, a, b, resolved, summary, note, review }, i) => (
               <OverlapRow
                 key={`ov-${i}`}
                 label={`${a} ↔ ${b}`}
                 area={fmtArea(area)}
                 resolved={resolved}
                 resolvedLabel={summary}
+                description={review?.explanation || note}
+                verified={!!review}
                 active={activeKey === overlapKey(area, a, b)}
                 onOpen={(pinned) => onOpen(overlapKey(area, a, b), pinned)}
               />
@@ -865,6 +881,8 @@ function OverlapRow({
   area,
   resolved,
   resolvedLabel,
+  description,
+  verified,
   active,
   onOpen,
 }: {
@@ -873,6 +891,10 @@ function OverlapRow({
   resolved: boolean;
   /** Rich resolved-badge text (the verdict); falls back to "resolved". */
   resolvedLabel?: string;
+  /** The row's descriptive line — the reviewer's explanation, else the detector note. */
+  description?: string;
+  /** True when the verify judge confirmed this flag — shows the verified affordance. */
+  verified?: boolean;
   active: boolean;
   onOpen: (pinned: boolean) => void;
 }) {
@@ -889,8 +911,19 @@ function OverlapRow({
       <GitMerge className={`mt-0.5 h-3 w-3 shrink-0 ${resolved ? 'text-emerald-500' : 'text-amber-500'}`} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
-        <span className="flex flex-wrap gap-1">
+        {description && (
+          <span className="line-clamp-2 text-[10px] leading-snug text-muted-foreground/80">{description}</span>
+        )}
+        <span className="flex flex-wrap items-center gap-1">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
+          {verified && (
+            <HoverPopover content="Confirmed by the verify reviewer" side="top">
+              <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+                <BadgeCheck className="h-3 w-3" />
+                verified
+              </span>
+            </HoverPopover>
+          )}
           {resolved && (
             <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
               {resolvedLabel ?? 'resolved'}
