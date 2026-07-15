@@ -408,6 +408,54 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
   });
 });
 
+describe('repo-level view reads (no ref) — baseline-anchored, never newest (hosted)', () => {
+  // Force distinct createdAt rows: the Pg store orders commit-less reads by
+  // createdAt DESC, so the second write must be strictly newer to reproduce
+  // the "a PR's regen shadows the repo view" failure deterministically.
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it('readManifestForView with no ref reads the baseline manifest, not a newer PR set', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
+      await tick();
+      // A PR regen persisted a NEWER set at its head — it must not shadow the repo view.
+      await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
+
+      const manifest = await readManifestForView(repo);
+      expect(manifest?.sections.map((s) => s.anchor)).toEqual(['alpha']);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('readGuardResultForView with no ref reads the baseline report, not a newer PR report', async () => {
+    const repo = await makeBaselineRepo('baseline9999');
+    try {
+      await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT());
+      await tick();
+      await guardStore.writeGuardResult(
+        { repoKey: repo, commitSha: 'prhead0000' },
+        REPORT({ generatedAt: '2026-07-10T00:00:00.000Z' }),
+      );
+
+      const result = await readGuardResultForView(repo);
+      expect(result?.generatedAt).toBe('2026-07-06T00:00:00.000Z');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('with no ref and NO baseline, both view reads are absent (a PR row must not leak)', async () => {
+    // Only PR-head rows are stored; REPO has no analyze LATEST → no baseline anchor.
+    await saveSet('prheadonly12', [['pr1', 'alpha']]);
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'prheadonly12' }, REPORT());
+
+    expect(await readManifestForView(REPO)).toBeNull();
+    expect(await readGuardResultForView(REPO)).toBeNull();
+  });
+});
+
 describe('readGuardReport — commit-scoped (hosted)', () => {
   it('reads the generate report at the ref and joins live section headings', async () => {
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({

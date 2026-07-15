@@ -39,8 +39,8 @@ import {
   dismissGuardClaim,
   undismissGuardClaim,
   getGuardDecisions,
+  readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
-import { readGuardResult } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
@@ -79,12 +79,14 @@ async function mutateGuardDecisions(
 // dismissed when its `dismissedClaimKey(doc, anchor, claim)` is recorded; a finding
 // with no extracted claim can never be dismissed, so it keeps the set non-empty.
 // EE installs the seam; OSS/tests leave it unset → no-op. Best-effort: a failed
-// enqueue never fails the decision save.
+// enqueue never fails the decision save. The report is the REPO-level view read
+// (the baseline commit's row) — never the store's newest row, which a PR head's
+// regenerated (findings-free) report would shadow, masking the repo's findings.
 async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void> {
   const enqueue = getGuardGenerateEnqueue();
   if (!enqueue) return;
   try {
-    const report = await readGuardResult(repoPath);
+    const report = await readGuardResultForView(repoPath);
     if (!report || report.birthFindings.length === 0) return;
     const decisions = await getGuardDecisions(repoPath);
     const dismissed = new Set(

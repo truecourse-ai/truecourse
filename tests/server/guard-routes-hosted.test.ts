@@ -25,6 +25,7 @@ import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { createApp } from '../../apps/dashboard/server/src/app';
+import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import type { GuardLatest } from '../../packages/shared/src/index';
 
@@ -143,6 +144,62 @@ describe('Guard routes — hosted, PR-scoped', () => {
     await saveSet(HEAD, [['a1', 'alpha']]);
     const res = await request(app).get(url(`staleness?ref=${HEAD}`)).expect(200);
     expect(res.body).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
+  });
+
+  it('status without ref reads the baseline set — a newer PR regen never shadows the repo view', async () => {
+    // Anchor the repo baseline (the analyze LATEST commit) at `baselinesha`.
+    await writeLatest(repoKey, {
+      head: 'run.json',
+      analysis: {
+        id: 'r1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        branch: 'main',
+        commitHash: 'baselinesha',
+        architecture: 'monolith',
+        metadata: { isDiffAnalysis: false },
+        status: 'completed',
+      },
+      graph: {
+        services: [],
+        serviceDependencies: [],
+        layers: [],
+        modules: [],
+        methods: [],
+        moduleDeps: [],
+        methodDeps: [],
+        databases: [],
+        databaseConnections: [],
+        flows: [],
+      },
+      violations: [],
+    });
+    await saveSet('baselinesha', [['a1', 'alpha']]);
+    await new Promise((r) => setTimeout(r, 5)); // strictly newer createdAt for the PR row
+    // A PR regen persisted a NEWER, larger set + a report at its head.
+    await saveSet(HEAD, [['z1', 'alpha'], ['z2', 'beta']]);
+    await guardStore.writeGuardResult(
+      { repoKey, commitSha: HEAD },
+      {
+        generatedAt: '2026-07-09T00:00:00.000Z',
+        status: 'ok',
+        sectionsTotal: 2,
+        sectionsChanged: 2,
+        skippedUnchanged: 0,
+        noChanges: false,
+        written: [],
+        coverageGaps: [],
+        birthFindings: [],
+        errors: [],
+        extractionFailures: [],
+        orphaned: [],
+      },
+    );
+
+    const res = await request(app).get(url('status')).expect(200);
+    // The baseline manifest (1 section), not the PR head's newer 2-section set.
+    expect(res.body.coverage).toMatchObject({ totalSections: 1 });
+    // No generate report exists at the baseline — the PR head's must not leak.
+    expect(res.body.lastGenerate).toBeNull();
   });
 
   it('coverage?ref= paints sections from the PR head run (not the baseline)', async () => {

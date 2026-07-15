@@ -67,6 +67,7 @@ import {
   type SpecArtifact,
 } from '@truecourse/core/lib/spec-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import {
@@ -353,6 +354,35 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     } as unknown as GuardStore);
   };
 
+  // Anchor the hosted repo's baseline (the analyze LATEST commit) at `commit` —
+  // the anchor the repo-level guard-report read resolves, never "newest".
+  const seedAnalyzeBaseline = (commit: string): Promise<void> =>
+    writeLatest(fixture.repoPath, {
+      head: 'run.json',
+      analysis: {
+        id: 'r1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        branch: 'main',
+        commitHash: commit,
+        architecture: 'monolith',
+        metadata: { isDiffAnalysis: false },
+        status: 'completed',
+      },
+      graph: {
+        services: [],
+        serviceDependencies: [],
+        layers: [],
+        modules: [],
+        methods: [],
+        moduleDeps: [],
+        methodDeps: [],
+        databases: [],
+        databaseConnections: [],
+        flows: [],
+      },
+      violations: [],
+    });
+
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
     // Live EE wiring: a hosted SPEC store installed, NO contract store (the
@@ -383,6 +413,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
     stubRecurate(0);
     await request(app)
@@ -453,7 +484,33 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([fixture.repoPath]);
+  });
+
+  it("a newer PR-head 'ok' report never masks the baseline's BLOCKED report — generate still fires", async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    // Commit-aware guard stub: the BASELINE row is the blocked open-conflicts
+    // report; any commit-less ("newest by createdAt") read sees a PR regen's ok
+    // report instead — which would wrongly skip the unblock generate forever.
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async (_repoKey: string, commitSha?: string) =>
+        ({
+          status: commitSha === 'basesha1111' ? 'open-conflicts' : 'ok',
+        }) as unknown as GuardGenerateReport,
+    } as unknown as GuardStore);
     stubRecurate(0);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
@@ -468,6 +525,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('ok');
     stubRecurate(0);
     await request(app)
@@ -508,6 +566,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       tasks.push(t);
     });
     seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
     stubRecurate(0);
     await request(app)

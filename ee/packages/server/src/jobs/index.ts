@@ -368,9 +368,16 @@ export async function registerJobs(
   // definition's `onSettled` hook, which runs once the single-flight key is free.
   // Whether a repo already has hosted guard state (a stored generate report) —
   // shared by the onboarding chain (fires when absent) and the baseline-refresh
-  // chain (fires when present); they are exact complements.
-  const hasGuardState = async (repoKey: string): Promise<boolean> =>
-    (await readGuardResult(repoKey)) !== null;
+  // chain (fires when present); they are exact complements. Anchored at the
+  // repo's scanned default-branch baseline (gh_baselines): a commit-less read
+  // returns the NEWEST row by createdAt, which can be a PR head's regenerated
+  // report — that must never make an un-onboarded repo look onboarded. No
+  // baseline → no repo-level guard state (absent is safer than "newest").
+  const hasGuardState = async (repoKey: string): Promise<boolean> => {
+    const baseline = await gateStore.getBaseline(repoKey);
+    if (!baseline) return false;
+    return (await readGuardResult(repoKey, baseline.commitSha)) !== null;
+  };
 
   const onBaselineSettled = async (
     payload: BaselineJobPayload,

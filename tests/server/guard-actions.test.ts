@@ -50,6 +50,7 @@ import {
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
 import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
+import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
@@ -383,5 +384,61 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
     await dismiss(findingA).expect(200); // plain file write, no throw
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  // HOSTED (Pg store): the auto-regen decision must read the REPO's report — the
+  // baseline commit's row — never the store's newest row by createdAt, which a PR
+  // head's regenerated report would shadow (masking the repo's active findings).
+  describe('hosted store — baseline-anchored report read', () => {
+    let client: PGlite;
+
+    beforeEach(async () => {
+      client = new PGlite();
+      const db = drizzle(client, { schema }) as unknown as EeDb;
+      await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+      setGuardStore(new PgGuardStore(db));
+      // Anchor the repo baseline (the analyze LATEST commit) at `basesha1111`.
+      await writeLatest(root, {
+        head: 'run.json',
+        analysis: {
+          id: 'r1',
+          createdAt: '2026-07-01T00:00:00.000Z',
+          branch: 'main',
+          commitHash: 'basesha1111',
+          architecture: 'monolith',
+          metadata: { isDiffAnalysis: false },
+          status: 'completed',
+        },
+        graph: {
+          services: [],
+          serviceDependencies: [],
+          layers: [],
+          modules: [],
+          methods: [],
+          moduleDeps: [],
+          methodDeps: [],
+          databases: [],
+          databaseConnections: [],
+          flows: [],
+        },
+        violations: [],
+      });
+    });
+    afterEach(async () => {
+      resetGuardStore();
+      await client.close();
+    });
+
+    it("a newer PR-head report never masks the repo's findings — the last dismissal still regenerates", async () => {
+      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]));
+      // A PR regen persisted a findings-free report at its head — strictly newer
+      // createdAt, so a commit-less "newest" read would see zero findings and skip.
+      await new Promise((r) => setTimeout(r, 5));
+      await writeGuardResult({ repoKey: root, commitSha: 'prheadsha99' }, report([]));
+
+      await dismiss(findingA).expect(200);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledWith(root);
+    });
   });
 });

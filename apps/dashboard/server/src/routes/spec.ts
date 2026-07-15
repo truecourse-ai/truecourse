@@ -30,7 +30,7 @@ import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { getKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
-import { readGuardResult } from '@truecourse/core/lib/guard-store';
+import { readGuardResultForView } from '@truecourse/core/commands/guard-read';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addConflictResolution,
@@ -311,14 +311,16 @@ async function enqueueBaselineScanRefresh(repoKey: string): Promise<void> {
 // authoring any scenarios) — enqueues a hosted guard generate so scenarios are
 // authored even when the scan's onboarding chain sees an existing (blocked) report.
 // The guard-store read is gated on `openConflicts === 0` so the hot path (conflicts
-// still remain) never touches it.
+// still remain) never touches it. The report is the REPO-level view read (the
+// baseline commit's row) — never the store's newest row, which a PR head's
+// regenerated `ok` report would shadow, silently skipping the unblock generate.
 async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
   if (specsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
   if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
     await enqueueContractsRefresh(repoKey);
     await enqueueBaselineScanRefresh(repoKey);
-    const report = await readGuardResult(repoKey);
+    const report = await readGuardResultForView(repoKey);
     if (report?.status === 'open-conflicts') {
       await enqueueGuardGenerateRefresh(repoKey);
     }

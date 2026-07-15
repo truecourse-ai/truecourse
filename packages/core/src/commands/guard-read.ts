@@ -485,18 +485,26 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
 
 /**
  * PR-view read policy for a GENERATE-side artifact (manifest / generate result):
- * no ref → the caller's existing repo-level read, untouched; a pinned PR head →
- * that commit's row, falling back — on a head miss — to the BASELINE commit's
- * row (the set the gate actually executed against the head; never "newest by
- * createdAt"). Run reads never route through this — a PR head's run is its own.
+ * no ref → the repo-level view, resolved through `resolveGuardScope` like every
+ * other reader (OSS reads the live store; hosted reads the baseline commit's row,
+ * or absent when no baseline exists yet — never the store's newest row, which a
+ * PR's regenerated corpus would shadow); a pinned PR head → that commit's row,
+ * falling back — on a head miss — to the BASELINE commit's row (the set the gate
+ * actually executed against the head; never "newest by createdAt"). Run reads
+ * never route through this — a PR head's run is its own.
  */
 async function readPinnedWithBaselineFallback<T>(
   repoKey: string,
   ref: string | undefined,
   load: (commit?: string) => Promise<T | null>,
 ): Promise<T | null> {
+  if (ref === undefined) {
+    const scope = await resolveGuardScope(repoKey)
+    if (scope.kind === 'empty') return null
+    return load(scope.commit)
+  }
   const value = await load(ref)
-  if (value != null || ref === undefined || guardsMaterializeInPlace()) return value
+  if (value != null || guardsMaterializeInPlace()) return value
   const base = await guardBaselineCommit(repoKey)
   if (base === undefined || base === ref) return value
   return load(base)

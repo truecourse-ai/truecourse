@@ -38,6 +38,7 @@ vi.mock('../../ee/packages/server/src/jobs/events', () => ({
   publishEvent: async () => {},
 }));
 
+import { selectGateStore } from '@truecourse/ee-github-app';
 import { registerJobs } from '../../ee/packages/server/src/jobs/index';
 import {
   REPO_GUARD_TASK,
@@ -120,6 +121,15 @@ const enqueueReq = {
 
 const baselinePayload = { ...enqueueReq, jobId: 'job_b1' };
 
+/** Record the repo's scanned default-branch baseline (gh_baselines) at `commitSha`
+ *  — the anchor `hasGuardState` reads the repo's generate report at. */
+const seedGhBaseline = (commitSha: string) =>
+  selectGateStore(db).saveBaseline({
+    repoFullName: REPO,
+    commitSha,
+    capturedAt: '2026-07-09T00:00:00.000Z',
+  });
+
 describe('registerJobs — enqueueGuardGenerate', () => {
   it('creates the single-flight job row, enqueues on the runner, and dedupes', async () => {
     const jobs = await reg();
@@ -179,8 +189,10 @@ describe('registerJobs — baseline→guard onboarding chain', () => {
   });
 
   it('a repo with stored guard state refreshes its baseline instead of onboarding (issue 06)', async () => {
-    // Guard state exists → onboarding is skipped, but the complementary
-    // baseline-refresh chain fires: re-run the committed corpus against current main.
+    // Guard state exists AT THE REPO BASELINE → onboarding is skipped, but the
+    // complementary baseline-refresh chain fires: re-run the committed corpus
+    // against current main.
+    await seedGhBaseline('earlier00');
     await writeGuardResult({ repoKey: REPO, commitSha: 'earlier00' }, makeReport());
     const onBaselineSettled = await settledHook();
 
@@ -191,6 +203,32 @@ describe('registerJobs — baseline→guard onboarding chain', () => {
     expect(task).toBe(GUARD_BASELINE_TASK);
     expect(payload).toMatchObject(enqueueReq);
     expect(opts_).toEqual({ jobKey: guardBaselineJobKey(REPO), maxAttempts: 1 });
+  });
+
+  it("a PR head's regenerated report never fakes repo guard state — onboarding still fires", async () => {
+    // The repo's baseline commit has NO stored report; a PR regen persisted one at
+    // its head (the newest row by createdAt). Reading "newest" would skip
+    // onboarding forever — the chain must anchor at the gh_baselines commit.
+    await seedGhBaseline('abc1234567');
+    await writeGuardResult({ repoKey: REPO, commitSha: 'prheadsha99' }, makeReport());
+    const onBaselineSettled = await settledHook();
+
+    await onBaselineSettled(baselinePayload, 'succeeded');
+
+    expect(addJobMock).toHaveBeenCalledTimes(1);
+    expect(addJobMock.mock.calls[0]![0]).toBe(REPO_GUARD_TASK);
+  });
+
+  it('with no resolvable baseline, a stored report reads as NO guard state (never "newest")', async () => {
+    // No gh_baselines row at all: nothing anchors the repo's guard state, so a
+    // stray stored report (e.g. a PR head's) must read as absent → onboarding.
+    await writeGuardResult({ repoKey: REPO, commitSha: 'strayhead00' }, makeReport());
+    const onBaselineSettled = await settledHook();
+
+    await onBaselineSettled(baselinePayload, 'succeeded');
+
+    expect(addJobMock).toHaveBeenCalledTimes(1);
+    expect(addJobMock.mock.calls[0]![0]).toBe(REPO_GUARD_TASK);
   });
 });
 
@@ -203,6 +241,7 @@ describe('registerJobs — generate→baseline chain', () => {
   }
 
   it('a successful generate (scenarios now stored) chains a guard-baseline refresh', async () => {
+    await seedGhBaseline('abc1234567');
     await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
     const onGuardGenerateSettled = await generateSettledHook();
 
