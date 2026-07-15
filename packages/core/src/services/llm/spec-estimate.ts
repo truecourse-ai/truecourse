@@ -31,6 +31,8 @@ import {
   CHAIN_DETECTION_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   OVERLAP_WINDOW_CHARS,
+  VERIFY_OVERLAP_SYSTEM_PROMPT,
+  VERIFY_DOC_BUDGET_CHARS,
 } from '@truecourse/spec-consolidator';
 import {
   readCorpusForGenerate,
@@ -69,6 +71,7 @@ const TARGET_DENSITY_PER_KB = 0.6; // heuristic enumerated targets per KB of are
 const RETRY_AMP = 1.3; // extract retry-round amplification (1 + up to maxRetryRounds)
 const GAP_AREA_FRACTION = 0.4; // rough fraction of areas that end up with gaps to judge
 const MALFORMED_RATE = 0.15; // rough fraction of extract calls whose output needs parse-repair
+const FLAG_RATE = 0.15; // rough fraction of overlap PAIRS the detector flags (→ verify calls)
 const PARSE_REPAIR_ATTEMPTS = 3; // retries per malformed artifact (matches repair.ts)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
@@ -79,6 +82,7 @@ const STAGE_LABELS: Record<string, string> = {
   vocab: 'Normalizing vocabulary',
   relation: 'Detecting relations',
   overlap: 'Flagging overlaps',
+  verifyOverlap: 'Verifying conflicts',
   // generate
   enumerate: 'Planning contracts',
   reconcile: 'De-duplicating targets',
@@ -160,6 +164,11 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
   const callsPerPairFactor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
   const overlapCalls = overlapPairs * callsPerPairFactor;
 
+  // Verify pass: one call per FLAGGED pair (not per window call) — the detector
+  // flags only a fraction of the pairs it examines, so scale by the flag rate.
+  // Bounded above by every pair being flagged and verified.
+  const verifyCalls = Math.round(FLAG_RATE * overlapPairs);
+
   const stages: StageCallEstimate[] = [
     {
       // Exact: one call per doc whose relevance verdict isn't cached.
@@ -202,6 +211,21 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
       maxCalls: overlapCalls * 2,
       avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, Math.min(avgDocChars, OVERLAP_WINDOW_CHARS) * 2),
       avgOutputTokens: 120,
+    },
+    {
+      // Verify each flagged pair — a heuristic fraction of the overlap pairs (the
+      // exact count isn't known until detection runs). Each call carries both
+      // sides' context, each clamped to VERIFY_DOC_BUDGET_CHARS.
+      stage: 'verifyOverlap',
+      model: resolveModel('spec.verifyOverlap', undefined, repoRoot),
+      calls: verifyCalls,
+      minCalls: 0,
+      maxCalls: overlapPairs,
+      avgInputTokens: tokensFromChars(
+        VERIFY_OVERLAP_SYSTEM_PROMPT.length,
+        Math.min(avgDocChars, VERIFY_DOC_BUDGET_CHARS) * 2,
+      ),
+      avgOutputTokens: 80,
     },
   ];
 

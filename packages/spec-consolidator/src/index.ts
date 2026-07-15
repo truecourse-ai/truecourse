@@ -97,6 +97,19 @@ export type {
 export { verifyOverlapSections } from './pointer-verifier.js';
 export type { VerifyPointersInput } from './pointer-verifier.js';
 
+export {
+  verifyFlaggedOverlaps,
+  buildVerifyOverlapUserPrompt,
+  VERIFY_OVERLAP_SYSTEM_PROMPT,
+  VERIFY_DOC_BUDGET_CHARS,
+} from './overlap-verifier.js';
+export type {
+  OverlapVerification,
+  VerifyOverlapRunner,
+  VerifyFlaggedOverlapsOptions,
+  VerifyOverlapsResult,
+} from './overlap-verifier.js';
+
 export { curate, readCorpusDecisions } from './curate.js';
 export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
 

@@ -34,6 +34,7 @@ export type StageId =
   | 'spec.vocab'
   | 'spec.chainDetect'
   | 'spec.overlap'
+  | 'spec.verifyOverlap'
   | 'spec.relation'
   | 'contract.enumerate'
   | 'contract.reconcile'
@@ -62,6 +63,10 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'spec.vocab': 'haiku',
   'spec.chainDetect': 'haiku',
   'spec.overlap': 'haiku',
+  // Detection is recall-biased Haiku; the verify pass is the precision judge that
+  // prunes its false positives — a stricter comprehension call over one flagged
+  // pair with full context, so sonnet (trivially A/B-able to opus via config).
+  'spec.verifyOverlap': 'sonnet',
   'spec.relation': 'sonnet',
   'contract.enumerate': 'sonnet',
   'contract.reconcile': 'sonnet',

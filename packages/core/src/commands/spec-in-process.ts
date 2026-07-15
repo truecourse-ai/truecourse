@@ -140,6 +140,7 @@ export const CURATE_STEPS = [
   { key: 'tag', label: 'Tagging doc areas' },
   { key: 'relate', label: 'Detecting relations' },
   { key: 'overlap', label: 'Flagging overlaps' },
+  { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
 
 export const CORPUS_GENERATE_STEPS = [
@@ -168,6 +169,7 @@ const STEP_STAGES: Record<string, StageId[]> = {
   tag: ['spec.areaTag', 'spec.vocab'],
   relate: ['spec.relation', 'spec.chainDetect'],
   overlap: ['spec.overlap'],
+  verify: ['spec.verifyOverlap'],
   // generate (corpus)
   enumerate: ['contract.enumerate'],
   reconcile: ['contract.reconcile'],
@@ -415,6 +417,7 @@ function resolveCurateModels(repoRoot: string): CurateModels {
     areaTag: resolveModel('spec.areaTag', undefined, repoRoot),
     vocab: resolveModel('spec.vocab', undefined, repoRoot),
     overlap: resolveModel('spec.overlap', undefined, repoRoot),
+    verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot),
     relation: resolveModel('spec.relation', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -479,6 +482,7 @@ export interface CurateInProcessOptions {
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
+  verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
   relationChainRunner?: CurateOptions['relationChainRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
@@ -519,6 +523,7 @@ export async function curateInProcess(
 
   let tagStarted = false;
   let overlapStarted = false;
+  let verifyStarted = false;
   const ensureTag = (): void => {
     if (tagStarted) return;
     tracker?.done('discover', withUsage('discover'));
@@ -535,6 +540,14 @@ export async function curateInProcess(
     tracker?.done('relate', withUsage('relate'));
     tracker?.start('overlap');
     overlapStarted = true;
+  };
+  // The verify pass judges the flagged overlaps right after detection.
+  const ensureVerify = (): void => {
+    ensureOverlap();
+    if (verifyStarted) return;
+    tracker?.done('overlap', withUsage('overlap'));
+    tracker?.start('verify');
+    verifyStarted = true;
   };
 
   // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG, or on by default
@@ -557,6 +570,7 @@ export async function curateInProcess(
         relevanceRunner: options.relevanceRunner,
         areaTagRunner: options.areaTagRunner,
         overlapRunner: options.overlapRunner,
+        verifyOverlapRunner: options.verifyOverlapRunner,
         relationChainRunner: options.relationChainRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
@@ -573,15 +587,24 @@ export async function curateInProcess(
           ensureOverlap();
           tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
         },
+        onVerifyProgress: (done, total) => {
+          ensureVerify();
+          tracker?.detail('verify', withUsage('verify', total > 0 ? `${done}/${total} flagged` : 'no conflicts')!);
+        },
       });
     } catch (e) {
-      const active = overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
+      const active = verifyStarted ? 'verify' : overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
       tracker?.error(active, (e as Error).message);
       throw e;
     }
 
-    ensureOverlap();
-    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`));
+    ensureVerify();
+    const open = result.stats.overlapFlags;
+    const pruned = result.stats.overlapRefuted;
+    // The overlap step reports what it FLAGGED (open + pruned); verify reports the
+    // detector false positives it pruned, leaving `open` in the corpus.
+    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${open + pruned} overlaps`));
+    tracker?.done('verify', withUsage('verify', pruned > 0 ? `${pruned} pruned · ${open} kept` : 'no false positives'));
 
     if (options.source) {
       await trackEvent('spec_scan', {

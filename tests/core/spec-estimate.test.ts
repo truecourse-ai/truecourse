@@ -199,6 +199,23 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     }
   });
 
+  it('scan estimate: the verify stage scales with the flagged-pair heuristic', async () => {
+    const dir = path.join(repo, 'docs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body. '.repeat(40));
+    fs.writeFileSync(path.join(dir, 'b.md'), '# Auth\n' + 'Every session token is signed. '.repeat(40));
+
+    const est = await estimateScanTokens(repo);
+    const overlap = est.stages!.find((s) => s.stage === 'overlap')!;
+    const verify = est.stages!.find((s) => s.stage === 'verifyOverlap')!;
+    expect(verify).toBeTruthy();
+    // Small docs → per-pair window factor 1, so overlap.calls IS the pair count.
+    // Verify runs on a 0.15 fraction of the flagged pairs, capped at every pair.
+    expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
+    expect(verify.callsRange?.high).toBe(overlap.calls);
+    expect(verify.model).toBe('sonnet');
+  });
+
   it('scan estimate honors spec.include and agrees with discovery', async () => {
     // In-scope + out-of-scope markdown, plus a config that scopes to docs/**.
     const docsDir = path.join(repo, 'docs');

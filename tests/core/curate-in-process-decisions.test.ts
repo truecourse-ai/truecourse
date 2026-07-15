@@ -16,6 +16,7 @@ import type {
   DecisionsFile,
   OverlapRunner,
   RelevanceRunner,
+  VerifyOverlapRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 // Keep every doc; no LLM.
@@ -26,6 +27,7 @@ const areaTagger: AreaTagRunner = async () => ({
   status: 'shipped',
 });
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
+const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
 
 // Non-versioned names so the deterministic filename chain detector adds nothing —
 // any relation in the result therefore came from the injected decisions.
@@ -61,6 +63,7 @@ function run(decisions: DecisionsFile) {
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
+    verifyOverlapRunner: confirmAll,
     disableLlmRelationDetection: true,
   });
 }

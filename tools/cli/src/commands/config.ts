@@ -26,6 +26,7 @@ const STAGE_LABEL: Record<StageId, string> = {
   "spec.vocab": "Spec   · vocab reconcile",
   "spec.chainDetect": "Spec   · chain detect",
   "spec.overlap": "Spec   · overlap flag",
+  "spec.verifyOverlap": "Spec   · overlap verify",
   "spec.relation": "Spec   · relation detect",
   "contract.enumerate": "Contract · enumerate",
   "contract.reconcile": "Contract · reconcile",

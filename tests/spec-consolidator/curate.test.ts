@@ -16,6 +16,7 @@ import type {
   DocCandidate,
   OverlapRunner,
   RelevanceRunner,
+  VerifyOverlapRunner,
 } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
@@ -61,6 +62,9 @@ const areaTagger: AreaTagRunner = async ({ doc }) => {
 
 const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
 
+// Verify keeps every flag by default; individual tests override to refute.
+const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
+
 const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   decisions: [],
@@ -86,6 +90,7 @@ function run(extra: Parameters<typeof curate>[1] = {}) {
     relevanceRunner: relevance,
     areaTagRunner: areaTagger,
     overlapRunner: flagAll,
+    verifyOverlapRunner: confirmAll,
     disableLlmRelationDetection: true,
     skipGit: true,
     ...extra,
@@ -207,11 +212,64 @@ describe('curate', () => {
       relevanceRunner: relevance,
       areaTagRunner: areaTagger,
       overlapRunner: flagAll,
+      verifyOverlapRunner: confirmAll,
       disableLlmRelationDetection: true,
       skipGit: true,
     });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Overlap verification (precision pass) — the recall-biased detector over-flags;
+// an explicit `refuted` verdict prunes a flag before the corpus is assembled, so
+// a refuted flag never reaches corpus.json. Confirmed + error-path flags stay.
+// ---------------------------------------------------------------------------
+
+describe('curate — overlap verification', () => {
+  it('a refuted flag is pruned from the corpus, excluded from openOverlaps, counted in overlapRefuted', async () => {
+    // Refute exactly the (v1,v2) pair; keep every other flag.
+    const verify: VerifyOverlapRunner = async ({ a, b }) => {
+      const pair = [a.path, b.path].sort().join('|');
+      return pair === 'docs/users-v1.md|docs/users-v2.md'
+        ? { verdict: 'refuted', reason: 'complementary detail' }
+        : { verdict: 'confirmed', reason: 'genuine' };
+    };
+    const result = await run({ verifyOverlapRunner: verify });
+
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    const pairs = usersArea.overlaps.map((o) => o.docs);
+    // The refuted (v1,v2) pair is GONE from the corpus; the other two survive.
+    expect(pairs).not.toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
+    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
+
+    // Stats: openOverlaps excludes the refuted flag; overlapRefuted counts it.
+    expect(result.stats.overlapRefuted).toBe(1);
+    expect(result.stats.overlapFlags).toBe(2);
+    expect(result.stats.openOverlaps.map((o) => [o.a, o.b])).not.toContainEqual([
+      'docs/users-v1.md',
+      'docs/users-v2.md',
+    ]);
+  });
+
+  it('confirmed flags stay exactly as before (nothing refuted)', async () => {
+    const result = await run(); // confirmAll
+    expect(result.stats.overlapRefuted).toBe(0);
+    expect(result.stats.overlapFlags).toBe(3);
+  });
+
+  it('fail-open: a verifier that throws leaves every flag in the corpus', async () => {
+    const throwing: VerifyOverlapRunner = async () => {
+      throw new Error('judge unavailable');
+    };
+    const result = await run({ verifyOverlapRunner: throwing });
+    // No verdict = no prune: all three flags survive.
+    expect(result.stats.overlapRefuted).toBe(0);
+    expect(result.stats.overlapFlags).toBe(3);
+    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
+    expect(usersArea.overlaps).toHaveLength(3);
   });
 });
 

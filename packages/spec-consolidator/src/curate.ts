@@ -23,6 +23,7 @@ import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
 import { groupByArea } from './area-grouper.js';
 import { detectRelations, effectiveRelations } from './relation.js';
 import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
+import { verifyFlaggedOverlaps, type VerifyOverlapRunner } from './overlap-verifier.js';
 import { writeCorpus } from './corpus-store.js';
 import { DecisionsFileSchema, type DecisionsFile, type Relation } from './types.js';
 import { type Area, type CuratedCorpus } from './corpus-types.js';
@@ -34,6 +35,7 @@ export interface CurateModels {
   areaTag?: string;
   vocab?: string;
   overlap?: string;
+  verifyOverlap?: string;
   relation?: string;
   /** Forwarded as `--fallback-model` to every stage. */
   fallback?: string;
@@ -64,11 +66,13 @@ export interface CurateOptions {
   disableLlmRelationDetection?: boolean;
   overlapRunner?: OverlapRunner;
   disableOverlapDetection?: boolean;
+  verifyOverlapRunner?: VerifyOverlapRunner;
 
   // --- progress hooks -------------------------------------------------------
   onRelevanceProgress?: (done: number, total: number) => void;
   onTagProgress?: (done: number, total: number) => void;
   onOverlapProgress?: (done: number, total: number) => void;
+  onVerifyProgress?: (done: number, total: number) => void;
 }
 
 export interface CurateStats {
@@ -76,6 +80,8 @@ export interface CurateStats {
   docsKept: number;
   areaCount: number;
   overlapFlags: number;
+  /** Flagged overlaps the verify pass pruned as detector false positives (never reach the corpus). */
+  overlapRefuted: number;
   /** Effective relations (auto ∪ user) — doc lifecycle/precedence, never conflict resolution. */
   resolvedRelations: number;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
@@ -193,7 +199,21 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     fallbackModel,
     onProgress: opts.onOverlapProgress,
   });
-  const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: overlapsByArea.get(a.id) ?? [] }));
+
+  // ---- Verify the flagged overlaps (precision pass) -------------------
+  // The detector is recall-biased and over-flags; an independent judge re-reads
+  // each flag with full context and rules strictly. Only an explicit `refuted`
+  // verdict prunes a flag (a detector false positive) — it is dropped here and
+  // never reaches the corpus. A confirmed verdict, a verifier error, or a missing
+  // verdict all KEEP the flag (fail-open).
+  const verified = await verifyFlaggedOverlaps(repoRoot, overlapsByArea, docs, {
+    runner: opts.verifyOverlapRunner,
+    transport: opts.transport,
+    model: models.verifyOverlap,
+    fallbackModel,
+    onProgress: opts.onVerifyProgress,
+  });
+  const areas: Area[] = grouped.areas.map((a) => ({ ...a, overlaps: verified.overlaps.get(a.id) ?? [] }));
 
   // ---- Assemble + persist --------------------------------------------
   const corpus: CuratedCorpus = {
@@ -225,6 +245,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     docsKept: docs.length,
     areaCount: areas.length,
     overlapFlags: openOverlaps.length,
+    overlapRefuted: verified.refuted,
     resolvedRelations: relations.length,
     openOverlaps,
     skippedDocs,
