@@ -270,16 +270,10 @@ docsCmd
   });
 
 docsCmd
-  .command("exclude [path...]")
-  .description("Force-exclude kept docs and/or add subtree exclude globs (--glob), then re-scan once")
-  .option(
-    "--glob <pattern>",
-    "Subtree exclude glob written to config.json#spec.exclude (repeatable)",
-    (val: string, prev: string[]) => [...prev, val],
-    [] as string[],
-  )
-  .action(async (docPaths, options) => {
-    await runSpecDocsExclude(docPaths ?? [], { glob: options.glob });
+  .command("exclude <path...>")
+  .description("Force-exclude one or more kept docs from the corpus and re-scan once")
+  .action(async (docPaths) => {
+    await runSpecDocsExclude(docPaths);
   });
 
 docsCmd

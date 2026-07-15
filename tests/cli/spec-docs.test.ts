@@ -55,30 +55,6 @@ describe('spec docs exclude (batch)', () => {
   });
 });
 
-describe('spec docs exclude --glob (subtree exclude)', () => {
-  const readConfig = (): { spec?: { exclude?: string[] } } =>
-    JSON.parse(fs.readFileSync(path.join(repo, '.truecourse', 'config.json'), 'utf8'));
-
-  it('writes spec.exclude to config.json and re-curates once', async () => {
-    await silence(() => runSpecDocsExclude([], { cwd: repo, glob: ['legacy/**', 'archive/**'] }));
-    expect(readConfig().spec?.exclude).toEqual(['legacy/**', 'archive/**']);
-    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
-  });
-
-  it('merges into an existing spec.exclude, deduping', async () => {
-    await silence(() => runSpecDocsExclude([], { cwd: repo, glob: ['legacy/**'] }));
-    await silence(() => runSpecDocsExclude([], { cwd: repo, glob: ['legacy/**', 'tmp/**'] }));
-    expect(readConfig().spec?.exclude).toEqual(['legacy/**', 'tmp/**']);
-  });
-
-  it('combines per-doc excludes and --glob in one call (one re-scan)', async () => {
-    await silence(() => runSpecDocsExclude(['docs/v1.md'], { cwd: repo, glob: ['legacy/**'] }));
-    expect(readDecisions().manualExcludes).toEqual(['docs/v1.md']);
-    expect(readConfig().spec?.exclude).toEqual(['legacy/**']);
-    expect(vi.mocked(curateInProcess)).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('spec docs include (batch)', () => {
   it('records every path and re-curates exactly once', async () => {
     await silence(() => runSpecDocsInclude(['docs/a.md', 'docs/b.md', 'docs/c.md'], { cwd: repo }));

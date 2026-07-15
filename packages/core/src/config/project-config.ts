@@ -31,15 +31,6 @@ export interface SpecConfig {
    * through every caller.
    */
   include?: string[];
-  /**
-   * Subtree exclude for spec-doc discovery — gitignore-style globs subtracted
-   * from the universe after include-scope, before relevance. Drops matching
-   * markdown wholesale (the symmetric partner of `include`); absent or empty
-   * (`[]`) drops nothing. Read from disk by the discovery walk (see
-   * `@truecourse/shared`'s `loadSpecExclude`). Written by
-   * `truecourse spec docs exclude --glob`.
-   */
-  exclude?: string[];
 }
 
 const EMPTY: ProjectConfig = {};

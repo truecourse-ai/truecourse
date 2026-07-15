@@ -5,37 +5,28 @@
  *   skipped                               list docs the LLM filter dropped
  *   include     <path...>                 force-include skipped docs + one re-scan
  *   uninclude   <path>                    remove a force-include override + re-scan
- *   exclude     <path...> [--glob <g>…]   force-exclude kept docs and/or add a
- *                                         subtree exclude glob + one re-scan
+ *   exclude     <path...>                 force-exclude kept docs + one re-scan
  *   unexclude   <path>                    remove a force-exclude override + re-scan
  *
  * Force-includes (decisions.json#manualIncludes) bypass the relevance filter;
  * force-excludes (decisions.json#manualExcludes) drop an otherwise-kept doc from
- * the corpus. `--glob` writes a subtree exclude (config.json#spec.exclude) that
- * drops a whole subtree from discovery. All apply on the next curate; a
- * force-exclude wins over a force-include for the same path.
+ * the corpus. Both apply on the next curate; a force-exclude wins over a
+ * force-include for the same path.
  */
 
 import * as p from '@clack/prompts';
-import { readCorpusDecisions, discoverDocs } from '@truecourse/spec-consolidator';
-import { loadSpecExclude, buildSpecExclude } from '@truecourse/shared';
+import { readCorpusDecisions } from '@truecourse/spec-consolidator';
 import {
   addManualInclude,
   removeManualInclude,
   addManualExclude,
   removeManualExclude,
-  addSpecExcludeGlobs,
   curateInProcess,
   getCorpus,
 } from '@truecourse/core/commands/spec-in-process';
 
 export interface RunSpecDocsOptions {
   cwd?: string;
-}
-
-export interface RunSpecDocsExcludeOptions extends RunSpecDocsOptions {
-  /** Subtree exclude globs (repeatable `--glob`) written to config.json#spec.exclude. */
-  glob?: string[];
 }
 
 const repoRoot = (opts: RunSpecDocsOptions): string => opts.cwd ?? process.cwd();
@@ -87,20 +78,8 @@ export async function runSpecDocsSkipped(opts: RunSpecDocsOptions = {}): Promise
     p.log.step(`Manual excludes (${manualExcludes.length})`);
     for (const ex of manualExcludes) p.log.message(`  ${ex}`);
   }
-  // Subtree exclude (`spec.exclude`): the docs its globs dropped from discovery —
-  // the pre-exclude universe minus what discovery kept. Only walks when configured.
-  const exclude = loadSpecExclude(root);
-  if (exclude.active) {
-    const keptPaths = new Set(discoverDocs(root, { skipGit: true }).map((d) => d.path));
-    const excludedByGlob = discoverDocs(root, { skipGit: true, exclude: buildSpecExclude(undefined) })
-      .map((d) => d.path)
-      .filter((rel) => !keptPaths.has(rel));
-    p.log.message('');
-    p.log.step(`Excluded by glob (${excludedByGlob.length}) · ${exclude.globs.join(', ')}`);
-    for (const rel of excludedByGlob) p.log.message(`  ${rel}`);
-  }
   p.outro(
-    'Force-include a skipped doc with `spec docs include <path>`; force-exclude a kept doc with `spec docs exclude <path>` (or a subtree with `--glob`).',
+    'Force-include a skipped doc with `spec docs include <path>`; force-exclude a kept doc with `spec docs exclude <path>`.',
   );
 }
 
@@ -131,31 +110,22 @@ export async function runSpecDocsUninclude(docPath: string, opts: RunSpecDocsOpt
   p.outro(`Removed force-include for ${docPath} — re-scanned.`);
 }
 
-// Force-exclude one or more kept docs and/or add subtree exclude globs, then
-// re-curate ONCE. Per-doc excludes persist to decisions.json#manualExcludes;
-// `--glob` persists to config.json#spec.exclude. Everything is recorded first
-// (idempotent), so any batch costs one scan.
-export async function runSpecDocsExclude(
-  docPaths: string[],
-  opts: RunSpecDocsExcludeOptions = {},
-): Promise<void> {
+// Force-exclude one or more kept docs, then re-curate ONCE. Each path is validated +
+// persisted first (idempotent), so excluding five docs costs one scan instead of five.
+export async function runSpecDocsExclude(docPaths: string[], opts: RunSpecDocsOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   const paths = docPaths.filter(Boolean);
-  const globs = (opts.glob ?? []).map((g) => g.trim()).filter(Boolean);
-  if (paths.length === 0 && globs.length === 0) return fail('Missing doc path or --glob <pattern>');
+  if (paths.length === 0) return fail('Missing doc path');
   for (const docPath of paths) {
     await addManualExclude(root, docPath);
     p.log.step(`Force-excluded ${docPath}`);
   }
-  if (globs.length > 0) {
-    await addSpecExcludeGlobs(root, globs);
-    for (const g of globs) p.log.step(`Excluding subtree ${g} (spec.exclude)`);
-  }
   await reScan(root);
-  const parts: string[] = [];
-  if (paths.length > 0) parts.push(`${paths.length} doc${paths.length === 1 ? '' : 's'}`);
-  if (globs.length > 0) parts.push(`${globs.length} subtree glob${globs.length === 1 ? '' : 's'}`);
-  p.outro(`Excluded ${parts.join(' + ')} — re-scanned once. Review \`truecourse spec conflicts list\`.`);
+  p.outro(
+    paths.length === 1
+      ? `Force-exclude ${paths[0]} — re-scanned. Review \`truecourse spec conflicts list\`.`
+      : `Force-excluded ${paths.length} docs — re-scanned once. Review \`truecourse spec conflicts list\`.`,
+  );
 }
 
 export async function runSpecDocsUnexclude(docPath: string, opts: RunSpecDocsOptions = {}): Promise<void> {

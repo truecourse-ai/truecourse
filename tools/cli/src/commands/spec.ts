@@ -13,14 +13,8 @@
  */
 
 import * as p from "@clack/prompts";
-import { readCorpus, readCorpusDecisions, discoverDocs } from "@truecourse/spec-consolidator";
-import {
-  buildCorpusConflicts,
-  openConflicts,
-  orphanedConflictResolutions,
-  loadSpecExclude,
-  buildSpecExclude,
-} from "@truecourse/shared";
+import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
+import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
@@ -99,15 +93,6 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const s = curate.stats;
   if (s.scopeGlobs.length > 0) {
     p.log.step(`scope       ${s.scopeGlobs.join(", ")} (config)`);
-  }
-  // Subtree exclude (`spec.exclude`): report the globs + how many docs they
-  // dropped (the pre-exclude universe minus what discovery kept). Cheap — a
-  // single extra filesystem walk, only when an exclude is configured.
-  const exclude = loadSpecExclude(root);
-  if (exclude.active) {
-    const preExclude = discoverDocs(root, { skipGit: true, exclude: buildSpecExclude(undefined) }).length;
-    const dropped = Math.max(0, preExclude - s.docsScanned);
-    p.log.step(`exclude     ${exclude.globs.join(", ")} (config) · ${dropped} doc${dropped === 1 ? "" : "s"} dropped`);
   }
   p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
   p.log.step(`areas       ${s.areaCount}`);

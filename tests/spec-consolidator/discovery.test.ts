@@ -6,7 +6,6 @@ import {
   classifyDoc,
   discoverDocs,
 } from '../../packages/spec-consolidator/src/index.js';
-import { buildSpecExclude } from '@truecourse/shared';
 
 /**
  * Discovery tests for the spec consolidator. The classifier is the
@@ -374,52 +373,5 @@ describe('discoverDocs — include-scope', () => {
 
     const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
     expect(paths).toEqual(['SPEC.md', 'docs/a.md']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Subtree exclude (`spec.exclude` in .truecourse/config.json)
-// ---------------------------------------------------------------------------
-
-describe('discoverDocs — subtree exclude', () => {
-  const excludeConfig = (exclude: string[]): void =>
-    place('.truecourse/config.json', JSON.stringify({ spec: { exclude } }));
-
-  it('drops every markdown under an exclude glob, keeps the rest', () => {
-    excludeConfig(['legacy/**']);
-    place('docs/spec.md', '# kept');
-    place('legacy/old.md', '# dropped');
-    place('legacy/nested/older.md', '# dropped');
-
-    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
-    expect(paths).toEqual(['docs/spec.md']);
-  });
-
-  it('an empty exclude array is inactive — same as no config (everything kept)', () => {
-    excludeConfig([]);
-    place('docs/spec.md', '# a');
-    place('legacy/old.md', '# b');
-
-    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
-    expect(paths).toEqual(['docs/spec.md', 'legacy/old.md']);
-  });
-
-  it('subtracts AFTER include-scope — an excluded file inside the scope is dropped', () => {
-    place('.truecourse/config.json', JSON.stringify({ spec: { include: ['docs/**'], exclude: ['docs/legacy/**'] } }));
-    place('docs/spec.md', '# kept');
-    place('docs/legacy/old.md', '# dropped');
-    place('other/x.md', '# out of scope');
-
-    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
-    expect(paths).toEqual(['docs/spec.md']);
-  });
-
-  it('an inactive exclude override walks the pre-exclude universe despite config', () => {
-    excludeConfig(['legacy/**']);
-    place('docs/spec.md', '# a');
-    place('legacy/old.md', '# b');
-
-    const paths = discoverDocs(root, { skipGit: true, exclude: buildSpecExclude(undefined) }).map((d) => d.path);
-    expect(paths).toEqual(['docs/spec.md', 'legacy/old.md']);
   });
 });
