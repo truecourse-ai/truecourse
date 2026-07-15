@@ -732,8 +732,9 @@ export async function undismissGuardClaim(
   return next
 }
 
-/** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only). */
-const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
+/** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
+ *  Exported so the EE gate/regen paths read the same overlay the writes target. */
+export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
 
 /** PR-scoped decisions live only in EE — a live-tree (OSS) store can't hold them. */
 function assertNoGuardPrInPlace(pr?: number): void {

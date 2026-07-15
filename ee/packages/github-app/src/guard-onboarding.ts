@@ -37,6 +37,7 @@ import {
   type GuardGenerateInProcessResult,
 } from '@truecourse/core/commands/guard-in-process';
 import { materializeWorkspaceInheritance, EMPTY_DECISIONS } from '@truecourse/core/commands/spec-in-process';
+import { mergeGuardDecisions, prGuardDecisionsRef } from '@truecourse/core/commands/guard-read';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import type { StepTracker } from '@truecourse/core/progress';
@@ -184,6 +185,14 @@ export async function materializeAndGenerateGuard(
      * no-ops when the checkout has no doc universe.
      */
     skipMaterialize?: boolean;
+    /**
+     * Regenerating a PR head: merge that PR's guard-decisions overlay
+     * (`_pr/<n>`) over the repo row when materializing dismissals — the
+     * generate-side analog of the gate's `foldDismissals`. Without it a
+     * PR-scoped dismissal never suppresses its claim in the regenerated corpus
+     * and the held section stays held. Absent on repo-scope generates.
+     */
+    pr?: number;
   } = {},
 ): Promise<GuardGeneratedCorpus | null> {
   // The corpus is generation's only doc authority. Prefer the one stored for this
@@ -203,8 +212,17 @@ export async function materializeAndGenerateGuard(
   // (file-based by design — it is committable), so without this a hosted
   // regenerate re-authors every dismissed claim and its section stays held.
   // Stored decisions win over a (stale) committed file; a repo with none stored
-  // keeps whatever the clone carries.
-  const guardDecisions = await readStoredGuardDecisions(ref.repoKey);
+  // keeps whatever the clone carries. A PR-head regen (`opts.pr`) folds the PR's
+  // dismissals overlay over the repo row — same merge the gate's foldDismissals
+  // applies — so PR-scoped dismissals suppress their claims too.
+  const repoGuardDecisions = await readStoredGuardDecisions(ref.repoKey);
+  const guardDecisions =
+    opts.pr === undefined
+      ? repoGuardDecisions
+      : mergeGuardDecisions(
+          repoGuardDecisions,
+          await readStoredGuardDecisions(ref.repoKey, prGuardDecisionsRef(opts.pr)),
+        );
   if (guardDecisions.dismissedClaims.length > 0) {
     const decFile = guardDecisionsPath(checkoutDir);
     fs.mkdirSync(path.dirname(decFile), { recursive: true });

@@ -197,6 +197,41 @@ describe('guard head-regen pipeline', () => {
     expect(await guardStore.readGuardEvidenceAt(REPO, evidencePath, 'transcript.txt')).toBe('head birth transcript');
   });
 
+  it("merges the PR's dismissals overlay into the checkout decisions (regen honors PR dismissals)", async () => {
+    // The dashboard dismisses claims into the Pg guard store: repo row + PR overlay.
+    const repoRow = {
+      version: 1 as const,
+      dismissedClaims: [
+        { doc: 'README.md', anchor: 'intro', title: 'repo claim', dismissedAt: '2026-07-14T00:00:00Z' },
+      ],
+    };
+    const overlay = {
+      version: 1 as const,
+      dismissedClaims: [
+        { doc: 'README.md', anchor: 'errors', title: 'pr claim', dismissedAt: '2026-07-15T00:00:00Z' },
+      ],
+    };
+    await guardStore.writeGuardDecisions(REPO, repoRow);
+    // request.prNumber is 7 — the overlay the regen must fold in.
+    await guardStore.writeGuardDecisions(REPO, overlay, '_pr/7');
+
+    let decisionsSeenByGenerate: unknown = null;
+    const inner = fakeGenerateWriting(okGenerateResult());
+    const generate = vi.fn(async (dir: string, t?: unknown) => {
+      const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+      if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      return inner(dir, t as never);
+    });
+    const pipeline = createGuardHeadRegenPipeline({ clone: vi.fn(async () => {}), scan: fakeScan(), generate });
+
+    await pipeline.run(deps, request);
+
+    expect(decisionsSeenByGenerate).toEqual({
+      version: 1,
+      dismissedClaims: [...repoRow.dismissedClaims, ...overlay.dismissedClaims],
+    });
+  });
+
   it('a head with no doc universe after scan is a clean noCorpus no-op (no generate, no persist)', async () => {
     const clone = vi.fn(async () => {});
     // A scan that finds no docs writes no corpus.json.

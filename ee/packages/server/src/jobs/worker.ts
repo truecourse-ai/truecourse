@@ -847,6 +847,13 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
       const octokitFor = deps.octokitFor ?? ((id: number) => installationOctokit(cfg, id));
       const octokit = octokitFor(p.installationId);
       const coords = splitRepo(p.repoFullName);
+      // Settle the checkbox comment — a dashboard-triggered regen (a PR dismissal
+      // cleared the last active finding) has none, so a null commentId skips every
+      // update. Best-effort either way: the job outcome is authoritative.
+      const settleComment = async (body: string): Promise<void> => {
+        if (p.commentId == null) return;
+        await updateComment(octokit, coords, p.commentId, body).catch(() => undefined);
+      };
       try {
         const regen = await deps.headRegenPipeline.run(
           { auth: createGithubAuth(cfg) },
@@ -872,12 +879,7 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
         // (blocked has corpus === null).
         if (regen.openConflicts && regen.openConflicts > 0) {
           const n = regen.openConflicts;
-          await updateComment(
-            octokit,
-            coords,
-            p.commentId,
-            renderGuardSpecComment('blocked', { conflicts: n }),
-          ).catch(() => undefined);
+          await settleComment(renderGuardSpecComment('blocked', { conflicts: n }));
           await emailConflictsBlocked(deps.db, p.repoFullName, n, deps, cfg);
           return {
             result: { repoFullName: p.repoFullName, prNumber: p.prNumber, openConflicts: n },
@@ -887,9 +889,7 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
 
         // No doc universe after the head scan → nothing to regenerate or re-gate.
         if (regen.noCorpus || !regen.corpus) {
-          await updateComment(octokit, coords, p.commentId, renderGuardSpecComment('nochange')).catch(
-            () => undefined,
-          );
+          await settleComment(renderGuardSpecComment('nochange'));
           return {
             result: { repoFullName: p.repoFullName, prNumber: p.prNumber, noCorpus: true },
             notification: null,
@@ -913,12 +913,7 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
         await regate(regen.corpus, gateReq, ctx.signal);
 
         const n = regen.scenariosWritten;
-        await updateComment(
-          octokit,
-          coords,
-          p.commentId,
-          renderGuardSpecComment('done', { scenariosWritten: n, commitSha: p.headSha }),
-        ).catch(() => undefined);
+        await settleComment(renderGuardSpecComment('done', { scenariosWritten: n, commitSha: p.headSha }));
         return {
           result: { repoFullName: p.repoFullName, prNumber: p.prNumber, scenariosWritten: n },
           notification: {
@@ -931,12 +926,7 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
       } catch (err) {
         // Settle the checkbox comment as an error before the job fails (the writer
         // ticked the box — they must see it failed, with a retry). Best-effort.
-        await updateComment(
-          octokit,
-          coords,
-          p.commentId,
-          renderGuardSpecComment('error', { error: (err as Error).message }),
-        ).catch(() => undefined);
+        await settleComment(renderGuardSpecComment('error', { error: (err as Error).message }));
         throw err;
       }
     },

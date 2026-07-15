@@ -53,8 +53,10 @@ export interface GuardSpecRegenRequest {
   headSha: string;
   /** Head lives in a different repo — the regen fetches the base's pull ref. */
   isFork: boolean;
-  /** The checkbox comment the job updates to done/error when it settles. */
-  commentId: number;
+  /** The checkbox comment the job updates to done/error when it settles — null
+   *  for a dashboard-triggered regen (a PR dismissal cleared the last active
+   *  finding; there is no comment to settle). */
+  commentId: number | null;
 }
 
 /**
@@ -63,6 +65,43 @@ export interface GuardSpecRegenRequest {
  * ee-server; the registration fallback runs it inline so unit tests need no queue.
  */
 export type EnqueueGuardSpecRegen = (req: GuardSpecRegenRequest) => Promise<string | null>;
+
+/**
+ * Assemble the spec-regen request from the stored repo link + the LIVE pull
+ * request — the ONE place the base-branch fallback and fork detection live, so
+ * the checkbox trigger and the dashboard's last-PR-dismissal trigger
+ * (`createGuardPrRegenEnqueue`) can never drift apart.
+ */
+export function buildGuardSpecRegenRequest(args: {
+  repoFullName: string;
+  link: { installationId: number; workspaceOrgId: string; defaultBranch: string };
+  prNumber: number;
+  /** The live PR, as `getPullRequest` returns it. */
+  pr: {
+    baseRef: string;
+    baseSha: string;
+    headRef: string;
+    headSha: string;
+    headRepoFullName: string | null;
+  };
+  /** The checkbox comment to settle, or null for a dashboard-triggered regen. */
+  commentId: number | null;
+}): GuardSpecRegenRequest {
+  const { repoFullName, link, prNumber, pr, commentId } = args;
+  return {
+    repoFullName,
+    installationId: link.installationId,
+    workspaceOrgId: link.workspaceOrgId,
+    prNumber,
+    defaultBranch: link.defaultBranch,
+    baseBranch: pr.baseRef || link.defaultBranch,
+    baseSha: pr.baseSha,
+    headRef: pr.headRef,
+    headSha: pr.headSha,
+    isFork: !!pr.headRepoFullName && pr.headRepoFullName !== repoFullName,
+    commentId,
+  };
+}
 
 export interface GuardSpecOfferDeps {
   store: GateStore;
@@ -180,22 +219,19 @@ export async function handleCommentEditedGuardSpec(
     // scenarios regenerate for the CURRENT head. Fork PRs are fetched via the
     // base repo's pull ref (read-only), so they are offered + regenerated too.
     const pr = await getPullRequest(octokit, coords, prNumber);
-    const isFork = !!pr.headRepoFullName && pr.headRepoFullName !== repoFullName;
 
     await updateComment(octokit, coords, commentId, renderGuardSpecComment('running'));
-    await deps.enqueueGuardSpecRegen({
-      repoFullName,
-      installationId,
-      workspaceOrgId: link.workspaceOrgId,
-      prNumber,
-      defaultBranch: link.defaultBranch,
-      baseBranch: pr.baseRef || link.defaultBranch,
-      baseSha: pr.baseSha,
-      headRef: pr.headRef,
-      headSha: pr.headSha,
-      isFork,
-      commentId,
-    });
+    await deps.enqueueGuardSpecRegen(
+      buildGuardSpecRegenRequest({
+        repoFullName,
+        // The webhook's live installation id (the same octokit that resolved the
+        // PR above), not the stored link's — they only differ across a reinstall.
+        link: { installationId, workspaceOrgId: link.workspaceOrgId, defaultBranch: link.defaultBranch },
+        prNumber,
+        pr,
+        commentId,
+      }),
+    );
   } catch (err) {
     log.error(
       `[github-app] guard spec-regen enqueue failed for ${repoFullName} PR#${prNumber}: ${(err as Error).message}`,

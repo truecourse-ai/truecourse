@@ -12,8 +12,18 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser } from '@truecourse/shared';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
-import type { GateStore } from '@truecourse/ee-github-app';
-import type { GuardGenerateEnqueueRequest, BaselineEnqueueRequest } from '../jobs/constants.js';
+import {
+  splitRepo,
+  getPullRequest,
+  buildGuardSpecRegenRequest,
+  type GateStore,
+  type OctokitClient,
+} from '@truecourse/ee-github-app';
+import type {
+  GuardGenerateEnqueueRequest,
+  GuardSpecRegenEnqueueRequest,
+  BaselineEnqueueRequest,
+} from '../jobs/constants.js';
 
 function orgIdOf(req: Request): string | null {
   return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
@@ -125,6 +135,45 @@ export function createGuardGenerateEnqueue(deps: GuardRouterDeps): (repoKey: str
       commitSha: baseline.commitSha,
       workspaceOrgId: link.workspaceOrgId,
     });
+  };
+}
+
+export interface GuardPrRegenDeps {
+  /** The gate store — resolves the connected repo link (installation + org). */
+  store: Pick<GateStore, 'getRepo'>;
+  /** Installation-scoped GitHub client — resolves the LIVE pull request. */
+  octokitFor: (installationId: number) => OctokitClient;
+  /** Single-flight spec-regen enqueue (null = one already running for that head). */
+  enqueueGuardSpecRegen(req: GuardSpecRegenEnqueueRequest): Promise<string | null>;
+}
+
+/**
+ * Build the `(repoKey, pr) → enqueue` seam the dashboard installs via
+ * `setGuardPrRegenEnqueue` — the PR analog of {@link createGuardGenerateEnqueue}.
+ * A PR-scoped dismissal that suppresses the PR's last active finding fires this
+ * so the PR head's scenarios regenerate honoring the dismissals overlay.
+ *
+ * The job is the SAME durable `guard.spec-regen` the PR's spec-change checkbox
+ * enqueues, minus the checkbox comment to settle (`commentId: null`) — assembled
+ * by the shared `buildGuardSpecRegenRequest` so the two triggers can't drift. The
+ * live PR (base/head/fork) is resolved from GitHub — the same resolution the
+ * checkbox handler uses — so the regen targets the CURRENT head even when the
+ * gate records lag a push. Best-effort: silently no-ops when the repo isn't
+ * connected or its gate is disabled (the checkbox path's rule — this job
+ * re-gates the PR); the single-flight key makes a redundant enqueue (a regen
+ * already running for that head) a harmless null.
+ */
+export function createGuardPrRegenEnqueue(
+  deps: GuardPrRegenDeps,
+): (repoKey: string, pr: number) => Promise<void> {
+  return async (repoKey: string, prNumber: number): Promise<void> => {
+    const link = await deps.store.getRepo(repoKey);
+    if (!link?.enabled || !link.workspaceOrgId) return;
+    const octokit = deps.octokitFor(link.installationId);
+    const pr = await getPullRequest(octokit, splitRepo(repoKey), prNumber);
+    await deps.enqueueGuardSpecRegen(
+      buildGuardSpecRegenRequest({ repoFullName: repoKey, link, prNumber, pr, commentId: null }),
+    );
   };
 }
 

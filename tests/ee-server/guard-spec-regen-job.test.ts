@@ -192,6 +192,57 @@ describe('runGuardSpecRegen — worker body', () => {
     expect(notes[0]).toMatchObject({ kind: GUARD_SPEC_REGEN_TASK, level: 'success' });
   });
 
+  // A dashboard-triggered regen (a PR dismissal cleared the last active finding)
+  // has NO checkbox comment to settle — commentId is null and every comment
+  // update is skipped, on the success path and the error path alike.
+  it('a null commentId skips all comment updates (dashboard-triggered regen)', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({
+      org: ORG,
+      type: GUARD_SPEC_REGEN_TASK,
+      key: guardSpecRegenJobKey(REPO, HEAD_SHA),
+    });
+    const { octokit, calls } = makeOctokit();
+    const headRegenPipeline: GuardHeadRegenPipeline = {
+      run: async () => ({ scenariosWritten: 3, noCorpus: false, corpus: CORPUS }),
+    };
+
+    await runGuardSpecRegen(
+      { db, jobStore, notifications, headRegenPipeline, regate: vi.fn(), octokitFor: () => octokit },
+      payloadFor(job.id, { commentId: null }),
+    );
+
+    expect(calls.update).toHaveLength(0);
+    expect((await jobStore.get(job.id))?.status).toBe('succeeded');
+  });
+
+  it('a null commentId skips the comment update on a failed regen too (the job still fails)', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({
+      org: ORG,
+      type: GUARD_SPEC_REGEN_TASK,
+      key: guardSpecRegenJobKey(REPO, HEAD_SHA),
+    });
+    const { octokit, calls } = makeOctokit();
+    const headRegenPipeline: GuardHeadRegenPipeline = {
+      run: async () => {
+        throw new Error('clone exploded');
+      },
+    };
+
+    await expect(
+      runGuardSpecRegen(
+        { db, jobStore, notifications, headRegenPipeline, regate: vi.fn(), octokitFor: () => octokit },
+        payloadFor(job.id, { commentId: null }),
+      ),
+    ).rejects.toThrow('clone exploded');
+
+    expect(calls.update).toHaveLength(0);
+    expect((await jobStore.get(job.id))?.status).toBe('failed');
+  });
+
   it('a no-corpus head settles the comment to nochange, does NOT re-gate, and succeeds', async () => {
     const jobStore = new JobStore(db);
     const notifications = new NotificationStore(db);

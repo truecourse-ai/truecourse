@@ -42,6 +42,8 @@ import {
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
+import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
@@ -87,19 +89,50 @@ async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void>
   if (!enqueue) return;
   try {
     const report = await readGuardResultForView(repoPath);
-    if (!report || report.birthFindings.length === 0) return;
-    const decisions = await getGuardDecisions(repoPath);
-    const dismissed = new Set(
-      decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
-    );
-    const anyActive = report.birthFindings.some(
-      (f) => !(f.claim && dismissed.has(dismissedClaimKey(f.doc, f.anchor, f.claim))),
-    );
-    if (anyActive) return;
+    if (!allFindingsDismissed(report, await getGuardDecisions(repoPath))) return;
     await enqueue(repoPath);
   } catch {
     /* best-effort — the decision is already saved */
   }
+}
+
+// The PR analog of regenerateIfLastFindingDismissed: a PR-scoped dismissal that
+// suppresses the PR's LAST active finding enqueues a hosted regenerate of the PR
+// HEAD's scenarios (the durable spec-regen job, honoring the overlay). The PR's
+// report is pinned at its latest GATED head — the same gate-records resolution
+// (heads lookup seam) the PR view reads through — and "active" derives from the
+// MERGED decisions (repo row ∪ PR overlay), matching what the Scenarios tab
+// shows. EE installs both seams; OSS never has a PR scope. Best-effort: a failed
+// resolution or enqueue never fails the decision save.
+async function regenerateIfLastPrFindingDismissed(repoPath: string, pr: number): Promise<void> {
+  const enqueue = getGuardPrRegenEnqueue();
+  if (!enqueue) return;
+  try {
+    const head = (await getGuardGateHeadsLookup()?.(repoPath, pr))?.[0];
+    if (!head) return;
+    const report = await readGuardResultForView(repoPath, head);
+    if (!allFindingsDismissed(report, await getGuardDecisions(repoPath, { pr }))) return;
+    await enqueue(repoPath, pr);
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
+}
+
+// The "this write left zero active findings" gate both regen hooks share: true
+// when the report exists, has findings, and every finding's claim is dismissed —
+// i.e. the dismissal that just landed was the last active one. A finding with no
+// extracted claim can never be dismissed, so it keeps the result false.
+function allFindingsDismissed(
+  report: Awaited<ReturnType<typeof readGuardResultForView>>,
+  decisions: GuardDecisions,
+): boolean {
+  if (!report || report.birthFindings.length === 0) return false;
+  const dismissed = new Set(
+    decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  );
+  return report.birthFindings.every(
+    (f) => f.claim != null && dismissed.has(dismissedClaimKey(f.doc, f.anchor, f.claim)),
+  );
 }
 
 // A guard generate/run is in flight for this repo id. Both actions share the set:
@@ -238,9 +271,10 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
+    const pr = parsed.pr;
     await mutateGuardDecisions(
       repo.path,
-      parsed.pr,
+      pr,
       res,
       (opts) =>
         dismissGuardClaim(
@@ -248,8 +282,12 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
           { doc, anchor, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
           opts,
         ),
-      // Repo scope only — a PR-scoped dismissal regenerates through the PR's own flow.
-      parsed.pr === undefined ? () => regenerateIfLastFindingDismissed(repo.path) : undefined,
+      // Each scope regenerates its own corpus: a repo-scope last dismissal fires
+      // the hosted repo generate, a PR-scope last dismissal fires the PR head's
+      // spec-regen (both best-effort, both only when zero findings stay active).
+      pr === undefined
+        ? () => regenerateIfLastFindingDismissed(repo.path)
+        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
     );
   } catch (e) {
     next(e);

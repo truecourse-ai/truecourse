@@ -171,6 +171,7 @@ export function createGuardHeadRegenPipeline(seams: GuardHeadRegenSeams = {}): G
         try {
           generated = await materializeAndGenerateGuard(ref, tmp, generate, {
             skipMaterialize: true, // the scan just wrote the head's fresh corpus.json
+            pr: req.prNumber, // fold the PR's dismissals overlay into the checkout decisions
             onGenerateStart: () => progress.onPhase?.('generate'),
             tracker: progress.generateTracker,
           });

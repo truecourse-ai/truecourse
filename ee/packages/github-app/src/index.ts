@@ -139,6 +139,11 @@ export async function registerGithubApp(
     (async (req) => {
       const octokit = offerDeps.octokitFor(req.installationId);
       const coords = splitRepo(req.repoFullName);
+      // A dashboard-triggered regen has no checkbox comment to settle.
+      const settleComment = async (body: string): Promise<void> => {
+        if (req.commentId == null) return;
+        await updateComment(octokit, coords, req.commentId, body);
+      };
       void (async () => {
         const regen = await defaultGuardHeadRegenPipeline.run(
           { auth },
@@ -151,7 +156,7 @@ export async function registerGithubApp(
           },
         );
         if (regen.noCorpus || !regen.corpus) {
-          await updateComment(octokit, coords, req.commentId, renderGuardSpecComment('nochange'));
+          await settleComment(renderGuardSpecComment('nochange'));
           return;
         }
         const corpus = regen.corpus;
@@ -181,20 +186,14 @@ export async function registerGithubApp(
           },
           { force: true },
         );
-        await updateComment(
-          octokit,
-          coords,
-          req.commentId,
+        await settleComment(
           renderGuardSpecComment('done', {
             scenariosWritten: regen.scenariosWritten,
             commitSha: req.headSha,
           }),
         );
       })().catch(async (err) => {
-        await updateComment(
-          octokit,
-          coords,
-          req.commentId,
+        await settleComment(
           renderGuardSpecComment('error', { error: (err as Error).message }),
         ).catch(() => undefined);
         reportGithubError(
@@ -345,6 +344,7 @@ export {
   updateComment,
   listPrsForCommit,
   getFileContent,
+  getPullRequest,
   type OctokitClient,
 } from './octokit.js';
 export { readRepoDocFromGithub } from './repo-doc.js';
@@ -441,6 +441,7 @@ export {
 export {
   handlePullRequestGuardSpecOffer,
   handleCommentEditedGuardSpec,
+  buildGuardSpecRegenRequest,
   type GuardSpecOfferDeps,
   type GuardSpecRegenRequest,
   type EnqueueGuardSpecRegen,

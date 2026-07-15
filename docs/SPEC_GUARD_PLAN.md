@@ -1617,6 +1617,24 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
     Resend configured + non-empty `notifyEmails` + the new `specRegen` notification pref (third
     key in `GithubNotificationPrefs`, default on, PATCHable like its siblings, settings toggle
     "Spec changes"). STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
+  - **08.13 — PR-scoped dismissals regenerate the PR head.** Two gaps found dogfooding PR
+    dismissals (a PR dismissal wrote the overlay but nothing ever regenerated, so the held
+    section and its findings were zombies): (1) `materializeAndGenerateGuard` gains a `pr`
+    option — a PR-head regen merges the PR's `_pr/<n>` decisions overlay over the repo row
+    (via the now-exported `prGuardDecisionsRef` + `mergeGuardDecisions`) before materializing
+    `scenarios/decisions.json`, the generate-side analog of the gate's `foldDismissals`;
+    the head-regen pipeline passes its `prNumber`. (2) A PR-scoped dismissal that leaves the
+    PR with ZERO active findings enqueues the durable `guard.spec-regen` job for that PR head
+    — the PR analog of the repo-scope last-dismissal regen, riding the new core
+    `setGuardPrRegenEnqueue` seam. The route pins the PR's report at its latest gated head
+    (heads-lookup seam) and derives "active" from the MERGED decisions (repo ∪ overlay); the
+    EE installer (`createGuardPrRegenEnqueue`) resolves the live PR (base/head/fork) from
+    GitHub and assembles the request through the checkbox handler's shared
+    `buildGuardSpecRegenRequest` (one place for the base-branch fallback + fork detection),
+    no-ops when the repo's gate is disabled (the job re-gates), and enqueues with
+    `commentId: null` — the spec-regen job's checkbox-comment updates are skipped when there
+    is no comment to settle (`commentId` is now nullable). STATUS: BUILT 2026-07-15
+    (sm/spec-guards-ee, awaiting review).
   - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
     credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 

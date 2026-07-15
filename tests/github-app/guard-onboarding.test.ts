@@ -361,6 +361,97 @@ describe('guard onboarding pipeline', () => {
     }
   });
 
+  // A PR-head regen must honor the PR's dismissals overlay (`_pr/<n>`) too — the
+  // generate-side analog of the gate's foldDismissals. Without the merge, a
+  // PR-scoped dismissal never suppresses its claim in the regenerated corpus and
+  // the held section stays held forever.
+  const PR_OVERLAY = {
+    version: 1 as const,
+    dismissedClaims: [
+      {
+        doc: 'README.md',
+        anchor: 'errors',
+        title: 'pr-dismissed claim',
+        dismissedAt: '2026-07-15T16:51:08.968Z',
+      },
+    ],
+  };
+
+  it('merges the PR dismissals overlay over the repo row when `pr` is set (PR-head regen)', async () => {
+    await writeGuardDecisions(REPO, GUARD_DECISIONS);
+    await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    try {
+      writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
+      let decisionsSeenByGenerate: unknown = null;
+      const inner = fakeGenerateWriting(makeGuardResult());
+      const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+        const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+        if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        return inner(dir, tracker as never);
+      });
+
+      const generated = await materializeAndGenerateGuard(ref, checkout, generate as never, {
+        skipMaterialize: true,
+        pr: 25,
+      });
+
+      expect(generated).not.toBeNull();
+      expect(decisionsSeenByGenerate).toEqual({
+        version: 1,
+        dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
+      });
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
+  it('a PR overlay alone (no repo dismissals) still materializes when `pr` is set', async () => {
+    await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    try {
+      writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
+      let decisionsSeenByGenerate: unknown = null;
+      const inner = fakeGenerateWriting(makeGuardResult());
+      const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+        const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+        if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        return inner(dir, tracker as never);
+      });
+
+      await materializeAndGenerateGuard(ref, checkout, generate as never, {
+        skipMaterialize: true,
+        pr: 25,
+      });
+
+      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims });
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores PR overlays when `pr` is unset (repo-scope generate)', async () => {
+    await writeGuardDecisions(REPO, GUARD_DECISIONS);
+    await writeGuardDecisions(REPO, PR_OVERLAY, '_pr/25');
+    const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-onb-'));
+    try {
+      writeFile(checkout, '.truecourse/specs/corpus.json', JSON.stringify(CORPUS));
+      let decisionsSeenByGenerate: unknown = null;
+      const inner = fakeGenerateWriting(makeGuardResult());
+      const generate = vi.fn(async (dir: string, tracker?: unknown) => {
+        const file = path.join(dir, '.truecourse', 'scenarios', 'decisions.json');
+        if (fs.existsSync(file)) decisionsSeenByGenerate = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        return inner(dir, tracker as never);
+      });
+
+      await materializeAndGenerateGuard(ref, checkout, generate as never, { skipMaterialize: true });
+
+      expect(decisionsSeenByGenerate).toEqual(GUARD_DECISIONS);
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
   it('a committed corpus in the clone suffices when none is stored (no false noCorpus)', async () => {
     const cloneRepo = vi.fn(async (_deps: unknown, _req: unknown, dir: string) => {
       // The repo commits its corpus (it is committable) — the clone carries it.

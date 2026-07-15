@@ -14,10 +14,11 @@ import type { EePlugin } from '@truecourse/shared';
 import { createEeDb, type EeDb } from '@truecourse/ee-db';
 import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
-import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup } from '@truecourse/ee-github-app';
+import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup, installationOctokit } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup, setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
 import { setKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
@@ -33,6 +34,7 @@ import { registerJobs } from './jobs/index.js';
 import {
   createGuardRouter,
   createGuardGenerateEnqueue,
+  createGuardPrRegenEnqueue,
   createSpecConflictsResolvedBaselineScan,
 } from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
@@ -168,6 +170,18 @@ const plugin: EePlugin = {
     // manual Generate router above, keyed by repoKey alone (no HTTP request).
     setGuardGenerateEnqueue(
       createGuardGenerateEnqueue({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
+
+    // The PR analog: a PR-scoped dismissal that clears the PR's last active
+    // finding regenerates that PR head's scenarios (honoring the dismissals
+    // overlay) through the same durable spec-regen job the PR checkbox uses —
+    // with no checkbox comment to settle.
+    setGuardPrRegenEnqueue(
+      createGuardPrRegenEnqueue({
+        store: gateStore,
+        octokitFor: (id) => installationOctokit(githubAppConfig, id),
+        enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
+      }),
     );
 
     // The same conflict-clearing decision also re-scans the repo baseline so the

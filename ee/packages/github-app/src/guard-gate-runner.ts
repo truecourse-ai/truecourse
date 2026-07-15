@@ -43,6 +43,7 @@ import {
   guardGenerateInProcess,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
+import { prGuardDecisionsRef } from '@truecourse/core/commands/guard-read';
 import {
   materializeAndGenerateGuard,
   collectEvidenceFiles,
@@ -367,7 +368,7 @@ async function foldDismissals(
   };
   const dismissed = fold(new Set<string>(), await guardStore.readGuardDecisions(repoKey));
   if (!guardStore.materializesInPlace) {
-    fold(dismissed, await guardStore.readGuardDecisions(repoKey, `_pr/${prNumber}`));
+    fold(dismissed, await guardStore.readGuardDecisions(repoKey, prGuardDecisionsRef(prNumber)));
   }
   return dismissed;
 }
