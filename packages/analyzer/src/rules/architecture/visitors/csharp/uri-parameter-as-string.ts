@@ -16,6 +16,20 @@ function enclosingPublicMethod(param: SyntaxNode): boolean {
   return hasCSharpModifier(method, 'public')
 }
 
+/**
+ * An extension method (its first parameter carries the `this` modifier) mirrors
+ * the API surface of the type it extends — a `this string url` receiver adapts
+ * the string itself, and later string parameters follow the extended type's own
+ * overloads (e.g. `LocalRedirect(this ControllerBase, string localUrl)` mirrors
+ * `ControllerBase.LocalRedirect(string)`). These follow framework convention,
+ * not the "accept System.Uri at your boundary" guidance, so they are exempt.
+ */
+function isExtensionMethod(param: SyntaxNode): boolean {
+  const paramList = param.parent
+  const firstParam = paramList?.namedChildren.find((c) => c?.type === 'parameter')
+  return firstParam ? hasCSharpModifier(firstParam, 'this') : false
+}
+
 export const csharpUriParameterAsStringVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/uri-parameter-as-string',
   languages: ['csharp'],
@@ -25,6 +39,7 @@ export const csharpUriParameterAsStringVisitor: CodeRuleVisitor = {
     const name = node.childForFieldName('name')?.text
     if (!name || !nameLooksLikeUri(name)) return null
     if (!enclosingPublicMethod(node)) return null
+    if (isExtensionMethod(node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
