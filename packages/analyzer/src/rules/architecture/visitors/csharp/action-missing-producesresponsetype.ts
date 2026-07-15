@@ -7,11 +7,16 @@ const VERB_ATTRS = new Set([
 ])
 
 /**
- * An MVC/Web-API controller action — a method on a <c>*Controller</c> carrying an
+ * An API controller action — a method on a <c>*Controller</c> carrying an
  * HTTP-verb attribute — with no <c>[ProducesResponseType]</c>. Without it the
  * generated OpenAPI document cannot describe the response shapes or status codes the
- * action returns, so clients and codegen see an untyped <c>200</c> only. Matched by
- * name (ASP.NET types are not in scope at this analysis layer); a class-level
+ * action returns, so clients and codegen see an untyped <c>200</c> only.
+ * Server-rendered MVC view controllers — those deriving from <c>Controller</c> (the
+ * view-supporting base) without an explicit <c>[ApiController]</c> — are excluded:
+ * their actions return rendered views, not an API surface, so [ProducesResponseType]
+ * is not meaningful for them. Controllers on <c>ControllerBase</c> (the API base) or
+ * marked <c>[ApiController]</c> are still checked. Matched by name (ASP.NET types are
+ * not in scope at this analysis layer); a class-level
  * <c>[ProducesResponseType]</c>/<c>[ProducesDefaultResponseType]</c> that covers
  * every action clears it.
  */
@@ -24,11 +29,19 @@ export const csharpActionMissingProducesResponseTypeVisitor: CodeRuleVisitor = {
     if (cls?.type !== 'class_declaration') return null
     if (!(cls.childForFieldName('name')?.text ?? '').endsWith('Controller')) return null
 
+    // [ProducesResponseType] only shapes the generated OpenAPI/API description, which
+    // covers the API surface. A server-rendered MVC view controller — one deriving
+    // from `Controller` (the view-supporting base) without an explicit [ApiController]
+    // — returns rendered views and never appears in the API description, so requiring
+    // [ProducesResponseType] on its actions is a false positive. Controllers on
+    // `ControllerBase` (the API base) or marked [ApiController] stay in scope.
+    const classAttrs = attributeNames(cls)
+    if (!classAttrs.includes('ApiController') && baseClassName(cls) === 'Controller') return null
+
     const attrs = attributeNames(node)
     if (!attrs.some((a) => VERB_ATTRS.has(a))) return null
     if (attrs.some((a) => a.startsWith('ProducesResponseType'))) return null
 
-    const classAttrs = attributeNames(cls)
     if (classAttrs.some((a) => a.startsWith('ProducesResponseType') || a === 'ProducesDefaultResponseType')) return null
 
     // An action (or whole controller) marked [ApiExplorerSettings(IgnoreApi = true)]
@@ -64,6 +77,26 @@ function excludedFromApiExplorer(node: SyntaxNode): boolean {
     }
   }
   return false
+}
+
+/**
+ * The last-segment name of a class's base *type* (the first entry in the
+ * <c>base_list</c>, which in C# is the base class when one is present), or null when
+ * the class has no base list. Used to tell an MVC view controller (<c>Controller</c>)
+ * from an API controller (<c>ControllerBase</c>). Name-based: ASP.NET types are not
+ * resolved at this layer.
+ */
+function baseClassName(cls: SyntaxNode): string | null {
+  for (const child of cls.children) {
+    if (child?.type !== 'base_list') continue
+    const first = child.namedChildren[0]
+    if (!first) return null
+    const text = first.type === 'generic_name'
+      ? (first.childForFieldName('name')?.text ?? first.text)
+      : first.text
+    return text.split('.').pop() ?? text
+  }
+  return null
 }
 
 /** Attribute names (last segment) applied directly to a declaration node. */
