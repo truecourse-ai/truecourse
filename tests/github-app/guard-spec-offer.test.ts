@@ -117,6 +117,22 @@ function offerDeps(
   return { deps, enqueued };
 }
 
+/** EmailNotifier fake capturing spec-regen offer sends; `reject` makes them fail. */
+function fakeNotifier(opts: { reject?: boolean } = {}) {
+  const sent: Array<{ to: string[]; email: any }> = [];
+  return {
+    sent,
+    notifier: {
+      sendGuardGateFailure: async () => {},
+      sendGuardConflictsBlocked: async () => {},
+      sendGuardSpecRegenOffer: async (to: string[], email: any) => {
+        if (opts.reject) throw new Error('resend down');
+        sent.push({ to, email });
+      },
+    },
+  };
+}
+
 describe('handlePullRequestGuardSpecOffer (passive offer)', () => {
   it('posts the checkbox offer when the PR changes spec docs — and never runs anything', async () => {
     const { octokit, calls } = makeOctokit({ files: ['docs/spec.md', 'src/app.ts'] });
@@ -176,6 +192,83 @@ describe('handlePullRequestGuardSpecOffer (passive offer)', () => {
     await handlePullRequestGuardSpecOffer(deps, prPayload());
 
     expect(calls.create).toHaveLength(0);
+  });
+
+  it('emails the notify list a pointer to the newly posted offer comment', async () => {
+    const link = (await store.getRepo('acme/api'))!;
+    await store.linkRepo({ ...link, notifyEmails: ['lead@x.com', 'dev@x.com'] });
+    const { octokit } = makeOctokit({ files: ['docs/spec.md', 'docs/api.md'] });
+    const { notifier, sent } = fakeNotifier();
+    const { deps } = offerDeps(octokit, { notifier });
+
+    await handlePullRequestGuardSpecOffer(deps, prPayload());
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toEqual(['lead@x.com', 'dev@x.com']);
+    expect(sent[0].email).toEqual({
+      repoFullName: 'acme/api',
+      prNumber: 7,
+      // The fake octokit's createComment returns id 8000.
+      commentUrl: 'https://github.com/acme/api/pull/7#issuecomment-8000',
+      specDocs: ['docs/spec.md', 'docs/api.md'],
+    });
+  });
+
+  it('does not email on a re-arm of an existing offer comment', async () => {
+    const link = (await store.getRepo('acme/api'))!;
+    await store.linkRepo({ ...link, notifyEmails: ['lead@x.com'] });
+    const { octokit, calls } = makeOctokit({
+      files: ['docs/spec.md'],
+      comments: [{ id: 42, body: renderGuardSpecComment('offered'), user: { type: 'Bot' } }],
+    });
+    const { notifier, sent } = fakeNotifier();
+    const { deps } = offerDeps(octokit, { notifier });
+
+    await handlePullRequestGuardSpecOffer(deps, prPayload({ action: 'synchronize' }));
+
+    expect(calls.update).toHaveLength(1);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('skips the email when the specRegen pref is off, notifyEmails is empty, or no notifier — the comment still posts', async () => {
+    const { notifier, sent } = fakeNotifier();
+    const link = (await store.getRepo('acme/api'))!;
+
+    // Pref off.
+    await store.linkRepo({
+      ...link,
+      notifyEmails: ['lead@x.com'],
+      notifications: { gateFailure: true, conflicts: true, specRegen: false },
+    });
+    let made = makeOctokit({ files: ['docs/spec.md'] });
+    await handlePullRequestGuardSpecOffer(offerDeps(made.octokit, { notifier }).deps, prPayload());
+    expect(made.calls.create).toHaveLength(1);
+
+    // No notify addresses.
+    await store.linkRepo({ ...link, notifyEmails: [], notifications: undefined });
+    made = makeOctokit({ files: ['docs/spec.md'] });
+    await handlePullRequestGuardSpecOffer(offerDeps(made.octokit, { notifier }).deps, prPayload());
+    expect(made.calls.create).toHaveLength(1);
+
+    // No notifier (Resend unconfigured).
+    await store.linkRepo({ ...link, notifyEmails: ['lead@x.com'], notifications: undefined });
+    made = makeOctokit({ files: ['docs/spec.md'] });
+    await handlePullRequestGuardSpecOffer(offerDeps(made.octokit).deps, prPayload());
+    expect(made.calls.create).toHaveLength(1);
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('a rejecting notifier does not break the offer (comment still posts)', async () => {
+    const link = (await store.getRepo('acme/api'))!;
+    await store.linkRepo({ ...link, notifyEmails: ['lead@x.com'] });
+    const { octokit, calls } = makeOctokit({ files: ['docs/spec.md'] });
+    const { notifier } = fakeNotifier({ reject: true });
+    const { deps } = offerDeps(octokit, { notifier });
+
+    await expect(handlePullRequestGuardSpecOffer(deps, prPayload())).resolves.toBeUndefined();
+
+    expect(calls.create).toHaveLength(1);
   });
 
   it('no-ops for unconnected / disabled / installation-less payloads', async () => {

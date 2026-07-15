@@ -118,16 +118,22 @@ half-working. Job-backed hosted generate/run and the gate surfaces gate on
 `guard`; local-only guard actions gate on the community `local-filesystem`
 capability and are hidden in hosted mode.
 
-### Guard-failure emails
+### Guard emails
 
 Configured per-repo addresses (`notifyEmails`) are emailed via
-[Resend](https://resend.com) when the **Spec Guard Check fails** on a blocking PR
-(one message per recipient, so addresses aren't disclosed to each other and one
-bad address can't fail the batch). Emails are **failure-only**: no email for
-error Checks (infra/build/timeout — operator noise, visible in the jobs UI),
-neutral Checks, or stale/held-only outcomes. Gated on the per-repo `gateFailure`
-notification preference. Requires `RESEND_API_KEY` + `RESEND_FROM`; absent, the
-gate runs without email.
+[Resend](https://resend.com) — one message per recipient, so addresses aren't
+disclosed to each other and one bad address can't fail the batch. Requires
+`RESEND_API_KEY` + `RESEND_FROM`; absent, everything runs without email. Three
+triggers, each gated on its own per-repo notification preference (all default on):
+
+- **Gate failure** (`gateFailure`) — the **Spec Guard Check fails** on a blocking
+  PR. Failure-only: no email for error Checks (infra/build/timeout — operator
+  noise, visible in the jobs UI), neutral Checks, or stale/held-only outcomes.
+- **Conflicts blocked** (`conflicts`) — scenario generation is blocked on open
+  spec conflicts; links the Spec Guard → Coverage resolver.
+- **Spec-regen offer** (`specRegen`) — a PR changed spec docs and the "regenerate
+  guard scenarios" checkbox offer was posted; links the checkbox comment. Sent on
+  the FIRST offer per PR only — re-arms on later pushes stay silent.
 
 ### Kill-switch and rollback (operators)
 

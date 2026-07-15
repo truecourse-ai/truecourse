@@ -214,6 +214,7 @@ export async function registerGithubApp(
     store,
     octokitFor: offerDeps.octokitFor,
     enqueueGuardSpecRegen,
+    notifier,
     offerInFlight: new Set<string>(),
     inFlight: new Set<number>(),
   };

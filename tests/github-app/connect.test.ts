@@ -225,6 +225,7 @@ describe('connect router', () => {
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: true,
       conflicts: true,
+      specRegen: true,
     });
 
     // Partial PATCH only flips gateFailure; the rest stay on.
@@ -237,6 +238,20 @@ describe('connect router', () => {
     expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
       gateFailure: false,
       conflicts: true,
+      specRegen: true,
+    });
+
+    // specRegen is PATCHable like its siblings.
+    await request(app)
+      .patch('/api/ee/github/repos/config')
+      .send({ repoFullName: 'acme/api', notifications: { specRegen: false } })
+      .expect(200);
+
+    res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
+      gateFailure: false,
+      conflicts: true,
+      specRegen: false,
     });
   });
 

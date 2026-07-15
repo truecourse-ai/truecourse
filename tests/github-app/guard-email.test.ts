@@ -168,6 +168,57 @@ describe('guard email notifier — sendGuardGateFailure', () => {
   });
 });
 
+describe('guard email notifier — sendGuardSpecRegenOffer', () => {
+  const offer = {
+    repoFullName: 'acme/api',
+    prNumber: 7,
+    commentUrl: 'https://github.com/acme/api/pull/7#issuecomment-8000',
+    specDocs: ['docs/spec.md', 'docs/api.md'],
+  };
+
+  it('sends one message per recipient with the spec-changed subject', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardSpecRegenOffer(['a@x.com', 'b@x.com'], offer);
+
+    expect(sends).toHaveLength(2);
+    expect(sends.map((s) => s.to)).toEqual([['a@x.com'], ['b@x.com']]);
+    for (const s of sends) {
+      expect(s.from).toBe(FROM);
+      expect(s.subject).toBe(
+        'TrueCourse: spec docs changed on acme/api #7 — regenerate guard scenarios?',
+      );
+    }
+  });
+
+  it('lists the changed docs and links the checkbox comment as the single CTA', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+
+    await notifier.sendGuardSpecRegenOffer(['a@x.com'], offer);
+
+    const html = sends[0].html;
+    expect(html).toContain('docs/spec.md');
+    expect(html).toContain('docs/api.md');
+    expect(html).toContain('https://github.com/acme/api/pull/7#issuecomment-8000');
+    // Regeneration is server-side; the email must not imply a branch write.
+    expect(html.toLowerCase()).toContain('nothing is committed');
+  });
+
+  it('caps the doc list at 10 with an overflow line', async () => {
+    const { client, sends } = fakeResend();
+    const notifier = createEmailNotifier('key', FROM, client);
+    const many = Array.from({ length: 13 }, (_, i) => `docs/spec-${i}.md`);
+
+    await notifier.sendGuardSpecRegenOffer(['a@x.com'], { ...offer, specDocs: many });
+
+    const html = sends[0].html;
+    expect((html.match(/<li>/g) ?? []).length).toBe(10);
+    expect(html).toContain('…and 3 more');
+  });
+});
+
 describe('guard email notifier — sendGuardConflictsBlocked', () => {
   it('sends one message per recipient with the blocked-count subject', async () => {
     const { client, sends } = fakeResend();

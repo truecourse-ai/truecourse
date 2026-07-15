@@ -1607,6 +1607,16 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
     clones fold a 5-minute wall-clock bound with the job's abort signal (`boundedCloneSignal`;
     `repo.guard` threads `ctx.signal`), so a hung clone can no longer occupy a worker slot
     forever. STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
+  - **08.12 — Spec-regen offer email.** When the spec-change checkbox offer is FIRST posted on a
+    PR, the repo's `notifyEmails` also get an email pointer to it (`sendGuardSpecRegenOffer`:
+    changed-doc list capped at 10, single CTA deep-linking the checkbox comment via its
+    `#issuecomment-<id>` anchor — no dashboard link, the action lives on GitHub). First offer per
+    PR only: re-arms on later spec-touching pushes stay silent (the existing comment is the dedup,
+    no new state). Fire-and-forget after `createComment` succeeds — an email failure never fails
+    or slows the offer; forks included (the email follows wherever the offer goes). Gated on
+    Resend configured + non-empty `notifyEmails` + the new `specRegen` notification pref (third
+    key in `GithubNotificationPrefs`, default on, PATCHable like its siblings, settings toggle
+    "Spec changes"). STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
   - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
     credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 

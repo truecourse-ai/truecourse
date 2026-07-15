@@ -129,6 +129,7 @@ function fakeNotifier() {
   const notifier: EmailNotifier = {
     sendGuardGateFailure: async (to, email) => void calls.push({ to, email }),
     sendGuardConflictsBlocked: async () => {},
+    sendGuardSpecRegenOffer: async () => {},
   };
   return { notifier, calls };
 }

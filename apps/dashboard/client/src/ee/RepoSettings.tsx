@@ -24,6 +24,7 @@ const NOTIFICATIONS: {
 }[] = [
   { key: 'gateFailure', label: 'Gate failures', desc: 'A pull request’s gate blocks on new findings.' },
   { key: 'conflicts', label: 'Spec conflicts', desc: 'Spec conflicts need resolving.' },
+  { key: 'specRegen', label: 'Spec changes', desc: 'A pull request changes spec documents and offers to regenerate guard scenarios.' },
 ];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {

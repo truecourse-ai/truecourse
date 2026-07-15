@@ -376,12 +376,15 @@ export interface GithubNotificationPrefs {
   gateFailure: boolean
   /** Spec conflicts need resolution. */
   conflicts: boolean
+  /** A PR changes spec documents and offers to regenerate guard scenarios. */
+  specRegen: boolean
 }
 
 /** All notification types on by default. */
 export const DEFAULT_NOTIFICATION_PREFS: GithubNotificationPrefs = {
   gateFailure: true,
   conflicts: true,
+  specRegen: true,
 }
 
 /** A repository connected to the PR gate. */

@@ -1,7 +1,8 @@
 /**
  * Email notifications via Resend (resend.com), sent to a repo's per-repo notify
- * addresses. One trigger today: the guard gate fails on a PR with new failing
- * scenarios vs. its base. WorkOS provides auth, not transactional email, so
+ * addresses. Three triggers: the guard gate fails on a PR, scenario generation
+ * blocks on open spec conflicts, and a spec-changing PR first receives the
+ * regenerate-checkbox offer. WorkOS provides auth, not transactional email, so
  * delivery goes through Resend.
  */
 
@@ -32,9 +33,21 @@ export interface GuardConflictsBlockedEmail {
   dashboardUrl?: string;
 }
 
+/** The "this PR changed spec docs — come tick the regenerate checkbox" pointer,
+ *  sent once per PR when the checkbox offer comment is first posted. */
+export interface GuardSpecRegenOfferEmail {
+  repoFullName: string;
+  prNumber: number;
+  /** Deep link to the checkbox offer comment on the PR — where the action is. */
+  commentUrl: string;
+  /** Spec documents the PR changed. */
+  specDocs: string[];
+}
+
 export interface EmailNotifier {
   sendGuardGateFailure(to: string[], email: GuardGateFailureEmail): Promise<void>;
   sendGuardConflictsBlocked(to: string[], email: GuardConflictsBlockedEmail): Promise<void>;
+  sendGuardSpecRegenOffer(to: string[], email: GuardSpecRegenOfferEmail): Promise<void>;
 }
 
 /** The slice of the Resend client we use — injectable for tests. */
@@ -136,6 +149,24 @@ export function createEmailNotifier(
         `${n} open spec conflict${plural(n)} must be resolved first.</p>` +
         `<p>Extracting both sides of an unresolved overlap births a red finding that is really the dispute, ` +
         `so generation is paused until the conflicts are resolved.</p>${link}`;
+      await sendEach(to, subject, html);
+    },
+
+    async sendGuardSpecRegenOffer(to, email) {
+      const subject = `TrueCourse: spec docs changed on ${email.repoFullName} #${email.prNumber} — regenerate guard scenarios?`;
+      const docs = email.specDocs;
+      const items = docs
+        .slice(0, 10)
+        .map((d) => `<li><code>${escapeHtml(d)}</code></li>`)
+        .join('');
+      const more = docs.length > 10 ? `<p>…and ${docs.length - 10} more.</p>` : '';
+      const html =
+        `<p><strong>${escapeHtml(email.repoFullName)} #${email.prNumber}</strong> edits spec documents, ` +
+        `so the guard scenarios generated from them may be out of date:</p>` +
+        `<ul>${items}</ul>${more}` +
+        `<p><a href="${escapeHtml(email.commentUrl)}">Tick the checkbox on the pull request</a> ` +
+        `to regenerate scenarios for the PR head server-side and re-gate. ` +
+        `Scenarios are stored in TrueCourse — nothing is committed to the branch.</p>`;
       await sendEach(to, subject, html);
     },
   };

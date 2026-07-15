@@ -26,6 +26,8 @@ import {
   type OctokitClient,
 } from './octokit.js';
 import { detectSpecDocChanges, specScopeFromConfigJson } from './spec-detect.js';
+import type { EmailNotifier } from './email.js';
+import { wantsNotification } from './notifications.js';
 import { PR_TRIGGER_ACTIONS, WRITE_PERMISSIONS } from './pr-events.js';
 import {
   GUARD_SPEC_MARKER,
@@ -66,6 +68,8 @@ export interface GuardSpecOfferDeps {
   store: GateStore;
   octokitFor: (installationId: number) => OctokitClient;
   enqueueGuardSpecRegen: EnqueueGuardSpecRegen;
+  /** Emails the notify list a pointer to a FIRST offer (absent = never email). */
+  notifier?: EmailNotifier;
   /** Offer-path collapse, keyed `${repo}#${pr}#guard-spec` (concurrent deliveries). */
   offerInFlight?: Set<string>;
   /** Checkbox-path collapse, keyed by comment id (concurrent edits). */
@@ -106,8 +110,29 @@ export async function handlePullRequestGuardSpecOffer(
     // Re-arm the offer for the current head (unticked) on each spec-changing event.
     const body = renderGuardSpecComment('offered', { specDocs: changed });
     const existing = await findComment(octokit, coords, payload.number, GUARD_SPEC_MARKER);
-    if (existing) await updateComment(octokit, coords, existing.id, body);
-    else await createComment(octokit, coords, payload.number, body);
+    if (existing) {
+      await updateComment(octokit, coords, existing.id, body);
+    } else {
+      const commentId = await createComment(octokit, coords, payload.number, body);
+      // Email the notify list a pointer to the offer — FIRST offer per PR only
+      // (re-arms are already known to the recipients). Best-effort: gated on the
+      // repo's specRegen pref, fire-and-forget, never fails the offer.
+      const notifyEmails = link.notifyEmails ?? [];
+      if (deps.notifier && notifyEmails.length > 0 && wantsNotification(link, 'specRegen')) {
+        void deps.notifier
+          .sendGuardSpecRegenOffer(notifyEmails, {
+            repoFullName,
+            prNumber: payload.number,
+            commentUrl: `https://github.com/${repoFullName}/pull/${payload.number}#issuecomment-${commentId}`,
+            specDocs: changed,
+          })
+          .catch((err) =>
+            log.warn(
+              `[github-app] guard spec-regen offer email failed for ${repoFullName} PR#${payload.number}: ${(err as Error).message}`,
+            ),
+          );
+      }
+    }
   } finally {
     deps.offerInFlight?.delete(flightKey);
   }
