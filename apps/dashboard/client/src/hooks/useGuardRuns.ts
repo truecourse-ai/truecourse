@@ -43,6 +43,15 @@ export function useGuardRuns(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A ref/PR scope switch invalidates the run selection and the per-run cache:
+  // a run selected under the previous scope (e.g. a baseline run picked in the
+  // transient window before a PR head SHA resolved) must not keep rendering
+  // from cache once the new scope's runs arrive.
+  useEffect(() => {
+    setSelectedRunId(null);
+    setCache({});
+  }, [ref, prNumber]);
+
   useEffect(() => {
     if (!repoId || !enabled) return;
     let cancelled = false;

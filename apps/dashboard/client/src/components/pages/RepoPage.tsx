@@ -72,6 +72,8 @@ import { buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from 
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
+import { resolvePrGuardScope, guardReadsEnabled as canReadGuard } from '@/ee/pr-guard-scope';
+import { GuardPrScopeGate } from '@/ee/GuardPrScopeGate';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
@@ -173,10 +175,20 @@ function RepoPageInner() {
   const [searchParams] = useSearchParams();
   const prParam = searchParams.get('pr');
   const prNumber = isEe && prParam && /^\d+$/.test(prParam) ? Number(prParam) : null;
-  const gateRuns = useRepoGateRuns(isEe ? repo?.name : undefined);
+  const { runs: gateRuns, loaded: gateRunsLoaded } = useRepoGateRuns(isEe ? repo?.name : undefined);
   const activePrRun = prNumber != null ? gateRuns.find((r) => r.prNumber === prNumber) ?? null : null;
   // Re-keys the PR-scoped views to the PR head (undefined → default branch).
   const refForTabs = prNumber != null ? activePrRun?.headSha : undefined;
+  // What a PR-scoped GUARD view may read. While the head SHA is unknown (`?pr=N`
+  // with the gate-runs fetch in flight, or a PR with no recorded gate run) every
+  // guard read must HOLD: a ref-less guard fetch answers with repo-BASELINE data,
+  // which must never render (nor accept dismissals) under a PR header.
+  const prGuardScope = resolvePrGuardScope({
+    prNumber,
+    headSha: activePrRun?.headSha,
+    gateRunsLoaded,
+  });
+  const guardReadsEnabled = canReadGuard(prGuardScope);
   // Code Quality (analysis) tabs — capability gating already drops Flows/Files/
   // Databases in EE (no `local-filesystem`). Curate order + relabel for EE.
   const analysisVisible = useVisibleTabsForSection('codequality');
@@ -316,7 +328,7 @@ function RepoPageInner() {
     staleness: guardStaleness,
     loaded: guardStaleLoaded,
     refetch: refetchGuardStaleness,
-  } = useGuardStaleness(repoId, refForTabs);
+  } = useGuardStaleness(repoId, refForTabs, guardReadsEnabled);
   // Bumped on a guard-generate / guard-run completion so the page-level report and
   // the child views (coverage / scenarios / runs) refetch — the guard analog of the
   // spec:complete refresh (the views own their own data hooks, so they take this as
@@ -324,7 +336,12 @@ function RepoPageInner() {
   const [guardReloadKey, setGuardReloadKey] = useState(0);
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
-  const { report: guardReport } = useGuardReport(repoId, dashboardSection === 'guard', guardReloadKey, refForTabs);
+  const { report: guardReport } = useGuardReport(
+    repoId,
+    dashboardSection === 'guard' && guardReadsEnabled,
+    guardReloadKey,
+    refForTabs,
+  );
   // Birth generation ended `open-conflicts`: the spec corpus still carries
   // unresolved disagreements, so no scenarios/runs exist. The Scenarios tab shows
   // the blocked panel (live conflict list) and the Runs tab a blocked note.
@@ -344,7 +361,12 @@ function RepoPageInner() {
   const guardCoverageTabs = useGuardCoverageTabs(repoId);
   // Scenarios-tab data, hoisted here (like contractsTree/verifyState) so the left
   // panel and the main pane read ONE fetch and the guard reload key refreshes both.
-  const guardScenarios = useGuardScenarios(repoId, leftTab === 'scenarios', guardReloadKey, refForTabs);
+  const guardScenarios = useGuardScenarios(
+    repoId,
+    leftTab === 'scenarios' && guardReadsEnabled,
+    guardReloadKey,
+    refForTabs,
+  );
   // Guard's OWN scenario tab set (`?gscn=`) — the Spec-doc transient/pinned tab
   // model (single-click preview, double-click pin), guard-scoped so nothing
   // bleeds into BL Drift's DriftViewContext tab sets.
@@ -354,7 +376,7 @@ function RepoPageInner() {
   // so the rows/detail derive their "dismissed" state from this, not the report.
   const { decisions: guardDecisions, refetch: refetchGuardDecisions } = useGuardDecisions(
     repoId,
-    leftTab === 'scenarios',
+    leftTab === 'scenarios' && guardReadsEnabled,
     guardReloadKey,
     prNumber ?? undefined,
   );
@@ -881,7 +903,7 @@ function RepoPageInner() {
   // conflicts LIVE. No extra call in the common (not-blocked) case.
   const specCorpus = useSpecCorpus(
     repoId,
-    leftTab === 'coverage' || (leftTab === 'scenarios' && guardBlocked),
+    (leftTab === 'coverage' || (leftTab === 'scenarios' && guardBlocked)) && guardReadsEnabled,
     refForTabs,
     prNumber ?? undefined,
   );
@@ -1115,27 +1137,31 @@ function RepoPageInner() {
             // open/resolved conflicts + skipped/force-in/excluded docs): a doc
             // opens the coverage surface (`?guard`), a conflict opens the
             // resolution detail (`?gconf`).
-            <SpecCorpusView
-              repoId={repoId}
-              corpus={specCorpus}
-              activeKey={guardCoverageTabs.activeId}
-              onOpen={guardCoverageTabs.open}
-              onDecision={refetchStaleness}
-            />
+            <GuardPrScopeGate scope={prGuardScope}>
+              <SpecCorpusView
+                repoId={repoId}
+                corpus={specCorpus}
+                activeKey={guardCoverageTabs.activeId}
+                onOpen={guardCoverageTabs.open}
+                onDecision={refetchStaleness}
+              />
+            </GuardPrScopeGate>
           )}
           {leftTab === 'scenarios' && (
             // The committed-scenario inventory as a doc › section grouped list
             // with the search/doc/status filters on top. Single-click previews a
             // scenario in the main pane (transient tab), double-click pins it.
-            <GuardScenariosPanel
-              rows={guardListRows}
-              loading={guardScenarios.loading}
-              error={guardScenarios.error}
-              activeId={guardScenarioTabs.activeId}
-              onOpen={guardScenarioTabs.open}
-              prRef={refForTabs}
-              scenariosCommit={guardScenarios.scenariosCommit}
-            />
+            <GuardPrScopeGate scope={prGuardScope}>
+              <GuardScenariosPanel
+                rows={guardListRows}
+                loading={guardScenarios.loading}
+                error={guardScenarios.error}
+                activeId={guardScenarioTabs.activeId}
+                onOpen={guardScenarioTabs.open}
+                prRef={refForTabs}
+                scenariosCommit={guardScenarios.scenariosCommit}
+              />
+            </GuardPrScopeGate>
           )}
         </LeftSidebar>
 
@@ -1266,149 +1292,160 @@ function RepoPageInner() {
               isTab
             />
           ) : leftTab === 'coverage' ? (
-            <GuardCoveragePage
-              repoId={repoId}
-              corpus={specCorpus}
-              staleness={guardStaleness}
-              staleLoaded={guardStaleLoaded}
-              prNumber={prNumber}
-              prRef={refForTabs}
-              reloadKey={guardReloadKey}
-              tabs={guardCoverageTabs}
-              onDecision={refetchStaleness}
-            />
+            <GuardPrScopeGate scope={prGuardScope}>
+              <GuardCoveragePage
+                repoId={repoId}
+                corpus={specCorpus}
+                staleness={guardStaleness}
+                staleLoaded={guardStaleLoaded}
+                prNumber={prNumber}
+                prRef={refForTabs}
+                reloadKey={guardReloadKey}
+                tabs={guardCoverageTabs}
+                onDecision={refetchStaleness}
+              />
+            </GuardPrScopeGate>
           ) : leftTab === 'scenarios' ? (
             // Guard Scenarios: the shared GuardTabStrip (permanent Overview tab +
             // any opened scenarios, `?gscn=`) over the scenario detail / overview.
-            <div className="flex h-full flex-col overflow-hidden">
-              <GuardTabStrip
-                tabs={guardScenarioTabs.openTabs.map((t) => {
-                  // Tabs label by HUMAN title (truncated); the machine handle (a
-                  // scenario id, a finding's binding) rides the hover. Findings take
-                  // a distinct glyph so a tab reads as a finding, not a scenario.
-                  const scenario = guardScenarios.rows.find((r) => r.id === t.id);
-                  if (scenario) return { ...t, label: scenario.title, title: scenario.id };
-                  const finding = guardFindingRows.find((r) => r.id === t.id);
-                  if (finding) {
-                    return {
-                      ...t,
-                      label: finding.title,
-                      title: `${finding.doc} · ${finding.headingText ?? sectionLeaf(finding.anchor)}`,
-                      icon: FlaskConicalOff,
-                    };
-                  }
-                  const held = guardHeldRows.find((r) => r.id === t.id);
-                  if (held) {
-                    return {
-                      ...t,
-                      label: held.title,
-                      title: `${held.doc} · ${held.headingText ?? sectionLeaf(held.anchor)}`,
-                      icon: PauseCircle,
-                    };
-                  }
-                  return { ...t, label: t.id, title: t.id };
-                })}
-                activeId={guardScenarioTabs.activeId}
-                onSelect={(t) => guardScenarioTabs.open(t.id, t.pinned)}
-                onSelectOverview={guardScenarioTabs.selectOverview}
-                onClose={guardScenarioTabs.close}
-              />
-              <div className="relative min-h-0 flex-1 overflow-hidden">
-                {(() => {
-                  // A scenario tab shows the full detail; a finding tab shows the
-                  // finding detail; nothing open → the overview (recipe + last generate).
-                  const activeScenario = guardScenarioTabs.activeId
-                    ? guardScenarios.rows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
-                    : null;
-                  if (activeScenario) {
+            <GuardPrScopeGate scope={prGuardScope}>
+              <div className="flex h-full flex-col overflow-hidden">
+                <GuardTabStrip
+                  tabs={guardScenarioTabs.openTabs.map((t) => {
+                    // Tabs label by HUMAN title (truncated); the machine handle (a
+                    // scenario id, a finding's binding) rides the hover. Findings take
+                    // a distinct glyph so a tab reads as a finding, not a scenario.
+                    const scenario = guardScenarios.rows.find((r) => r.id === t.id);
+                    if (scenario) return { ...t, label: scenario.title, title: scenario.id };
+                    const finding = guardFindingRows.find((r) => r.id === t.id);
+                    if (finding) {
+                      return {
+                        ...t,
+                        label: finding.title,
+                        title: `${finding.doc} · ${finding.headingText ?? sectionLeaf(finding.anchor)}`,
+                        icon: FlaskConicalOff,
+                      };
+                    }
+                    const held = guardHeldRows.find((r) => r.id === t.id);
+                    if (held) {
+                      return {
+                        ...t,
+                        label: held.title,
+                        title: `${held.doc} · ${held.headingText ?? sectionLeaf(held.anchor)}`,
+                        icon: PauseCircle,
+                      };
+                    }
+                    return { ...t, label: t.id, title: t.id };
+                  })}
+                  activeId={guardScenarioTabs.activeId}
+                  onSelect={(t) => guardScenarioTabs.open(t.id, t.pinned)}
+                  onSelectOverview={guardScenarioTabs.selectOverview}
+                  onClose={guardScenarioTabs.close}
+                />
+                <div className="relative min-h-0 flex-1 overflow-hidden">
+                  {(() => {
+                    // A scenario tab shows the full detail; a finding tab shows the
+                    // finding detail; nothing open → the overview (recipe + last generate).
+                    const activeScenario = guardScenarioTabs.activeId
+                      ? guardScenarios.rows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                      : null;
+                    if (activeScenario) {
+                      return (
+                        <GuardScenarioDetail
+                          key={activeScenario.id}
+                          repoId={repoId}
+                          row={activeScenario}
+                          runId={guardScenarios.runId}
+                          onClose={() => guardScenarioTabs.close(activeScenario.id)}
+                          onOpenSpec={openSpecSection}
+                        />
+                      );
+                    }
+                    const activeFinding = guardScenarioTabs.activeId
+                      ? guardFindingRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                      : null;
+                    if (activeFinding) {
+                      return (
+                        <GuardFindingDetail
+                          key={activeFinding.id}
+                          repoId={repoId}
+                          row={activeFinding}
+                          onClose={() => guardScenarioTabs.close(activeFinding.id)}
+                          onOpenSpec={openSpecSection}
+                          onDismiss={async (claim) => {
+                            // Unreachable while the PR scope is unresolved (the pane is
+                            // gated), but never write a PR-overlay decision against
+                            // findings the user could only have seen on the baseline.
+                            if (!guardReadsEnabled) return;
+                            await api.dismissGuardClaim(repoId, claim, prNumber ?? undefined);
+                            refetchGuardDecisions();
+                          }}
+                          onUndismiss={async (claim) => {
+                            if (!guardReadsEnabled) return;
+                            await api.undismissGuardClaim(repoId, claim, prNumber ?? undefined);
+                            refetchGuardDecisions();
+                          }}
+                        />
+                      );
+                    }
+                    const activeHeld = guardScenarioTabs.activeId
+                      ? guardHeldRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
+                      : null;
+                    if (activeHeld) {
+                      return (
+                        <GuardHeldDetail
+                          key={activeHeld.id}
+                          row={activeHeld}
+                          onClose={() => guardScenarioTabs.close(activeHeld.id)}
+                          onOpenSpec={openSpecSection}
+                          onOpenFinding={(findingId) => guardScenarioTabs.open(findingId, false)}
+                        />
+                      );
+                    }
+                    if (guardScenarioTabs.activeId) {
+                      // A deep link / stale tab pointing at an id the committed corpus
+                      // no longer has (or that is still loading).
+                      return guardScenarios.loading ? (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : (
+                        <EmptyState
+                          icon={FlaskConical}
+                          title="Scenario not found"
+                          body="This scenario is not in the committed corpus — it may have been removed or regenerated under a new id."
+                        />
+                      );
+                    }
                     return (
-                      <GuardScenarioDetail
-                        key={activeScenario.id}
-                        repoId={repoId}
-                        row={activeScenario}
-                        runId={guardScenarios.runId}
-                        onClose={() => guardScenarioTabs.close(activeScenario.id)}
+                      <GuardScenariosOverview
+                        recipe={guardScenarios.recipe}
+                        report={guardReport}
+                        scenarioRows={guardScenarios.rows}
+                        hasScenarios={guardScenarios.rows.length > 0}
+                        loading={guardScenarios.loading}
+                        error={guardScenarios.error}
                         onOpenSpec={openSpecSection}
+                        // When the report is `open-conflicts`, the overview renders
+                        // the blocked panel over these live conflicts instead.
+                        conflicts={guardOpenConflicts}
+                        onOpenConflict={openSpecConflict}
                       />
                     );
-                  }
-                  const activeFinding = guardScenarioTabs.activeId
-                    ? guardFindingRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
-                    : null;
-                  if (activeFinding) {
-                    return (
-                      <GuardFindingDetail
-                        key={activeFinding.id}
-                        repoId={repoId}
-                        row={activeFinding}
-                        onClose={() => guardScenarioTabs.close(activeFinding.id)}
-                        onOpenSpec={openSpecSection}
-                        onDismiss={async (claim) => {
-                          await api.dismissGuardClaim(repoId, claim, prNumber ?? undefined);
-                          refetchGuardDecisions();
-                        }}
-                        onUndismiss={async (claim) => {
-                          await api.undismissGuardClaim(repoId, claim, prNumber ?? undefined);
-                          refetchGuardDecisions();
-                        }}
-                      />
-                    );
-                  }
-                  const activeHeld = guardScenarioTabs.activeId
-                    ? guardHeldRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
-                    : null;
-                  if (activeHeld) {
-                    return (
-                      <GuardHeldDetail
-                        key={activeHeld.id}
-                        row={activeHeld}
-                        onClose={() => guardScenarioTabs.close(activeHeld.id)}
-                        onOpenSpec={openSpecSection}
-                        onOpenFinding={(findingId) => guardScenarioTabs.open(findingId, false)}
-                      />
-                    );
-                  }
-                  if (guardScenarioTabs.activeId) {
-                    // A deep link / stale tab pointing at an id the committed corpus
-                    // no longer has (or that is still loading).
-                    return guardScenarios.loading ? (
-                      <div className="flex h-full w-full items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : (
-                      <EmptyState
-                        icon={FlaskConical}
-                        title="Scenario not found"
-                        body="This scenario is not in the committed corpus — it may have been removed or regenerated under a new id."
-                      />
-                    );
-                  }
-                  return (
-                    <GuardScenariosOverview
-                      recipe={guardScenarios.recipe}
-                      report={guardReport}
-                      scenarioRows={guardScenarios.rows}
-                      hasScenarios={guardScenarios.rows.length > 0}
-                      loading={guardScenarios.loading}
-                      error={guardScenarios.error}
-                      onOpenSpec={openSpecSection}
-                      // When the report is `open-conflicts`, the overview renders
-                      // the blocked panel over these live conflicts instead.
-                      conflicts={guardOpenConflicts}
-                      onOpenConflict={openSpecConflict}
-                    />
-                  );
-                })()}
+                  })()}
+                </div>
               </div>
-            </div>
+            </GuardPrScopeGate>
           ) : leftTab === 'guarddrifts' ? (
-            <GuardDriftsView
-              repoId={repoId}
-              reloadKey={guardReloadKey}
-              prRef={refForTabs}
-              prNumber={prNumber ?? undefined}
-              blockedOnConflicts={guardBlocked}
-            />
+            <GuardPrScopeGate scope={prGuardScope}>
+              <GuardDriftsView
+                repoId={repoId}
+                reloadKey={guardReloadKey}
+                prRef={refForTabs}
+                prNumber={prNumber ?? undefined}
+                blockedOnConflicts={guardBlocked}
+              />
+            </GuardPrScopeGate>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}

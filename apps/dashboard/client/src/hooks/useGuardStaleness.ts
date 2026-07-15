@@ -19,12 +19,14 @@ const EMPTY: GuardStaleness = {
   hasRun: false,
 };
 
-export function useGuardStaleness(repoId: string | undefined, ref?: string) {
+export function useGuardStaleness(repoId: string | undefined, ref?: string, enabled = true) {
   const [staleness, setStaleness] = useState<GuardStaleness>(EMPTY);
   const [loaded, setLoaded] = useState(false);
 
   const refetch = useCallback(async () => {
-    if (!repoId) return;
+    // `enabled` gates an unresolved PR scope: with no head SHA a ref-less probe
+    // would answer with repo-BASELINE staleness, which must not surface there.
+    if (!repoId || !enabled) return;
     try {
       setStaleness(await api.getGuardStaleness(repoId, ref));
     } catch {
@@ -32,7 +34,7 @@ export function useGuardStaleness(repoId: string | undefined, ref?: string) {
     } finally {
       setLoaded(true);
     }
-  }, [repoId, ref]);
+  }, [repoId, ref, enabled]);
 
   useEffect(() => {
     refetch();
