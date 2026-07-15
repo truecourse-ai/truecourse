@@ -53,7 +53,7 @@ export interface GuardLastRunSummary {
 /** Last-generate rollup from `guard/result.json`. */
 export interface GuardLastGenerateSummary {
   generatedAt: string
-  status: 'ok' | 'no-docs' | 'recipe-failed'
+  status: 'ok' | 'no-docs' | 'recipe-failed' | 'open-conflicts'
   noChanges: boolean
   written: number
   /** Null on older reports written before birth counting existed. */

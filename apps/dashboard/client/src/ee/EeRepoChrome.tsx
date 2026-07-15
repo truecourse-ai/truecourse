@@ -13,7 +13,8 @@
 import { ExternalLink, GitBranch } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { GithubRunSummary } from '@truecourse/shared';
-import type { LeftTab, TabDescriptor } from '@/navigation/registry';
+import type { DashboardSection, LeftTab, TabDescriptor } from '@/navigation/registry';
+import { EeSectionSwitch } from '@/ee/EeSectionSwitch';
 
 const PR_PILL: Record<GithubRunSummary['conclusion'], string> = {
   success: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/30',
@@ -80,6 +81,8 @@ export function EeRepoChrome({
   tabs,
   activeTab,
   onTabChange,
+  section,
+  onSectionChange,
   prNumber,
   prBranch,
   prConclusion,
@@ -90,6 +93,9 @@ export function EeRepoChrome({
   tabs: TabDescriptor[];
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab) => void;
+  /** Active lens (Guard / Code Quality) — drives the segmented switch. */
+  section?: DashboardSection;
+  onSectionChange?: (next: DashboardSection) => void;
   /** When set, the page is scoped to this pull request (`?pr=N`). */
   prNumber?: number | null;
   /** The PR's head branch (from its stored gate diff) — shown next to the pill. */
@@ -115,6 +121,11 @@ export function EeRepoChrome({
             prConclusion={prConclusion}
           />
         ) : null}
+        {/* Mode switch — LEFT-anchored, so the per-tab actions (right-anchored
+            below) can appear/disappear without shoving it sideways. */}
+        {section && onSectionChange && (
+          <EeSectionSwitch section={section} onSectionChange={onSectionChange} />
+        )}
         {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
       </div>
 

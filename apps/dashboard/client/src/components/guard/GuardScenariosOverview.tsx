@@ -21,6 +21,7 @@ import { deferredSectionCount, groupErrorsByPattern, settledCounts } from '@/lib
 import { makeHeadingResolver, type HeadingResolver } from '@/lib/guard-list-rows';
 import type { GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 import { GuardRecipeCard } from './GuardRecipeCard';
+import { GuardBlockedPanel, type BlockedConflictRow } from './GuardBlockedPanel';
 
 const LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground';
 
@@ -171,6 +172,8 @@ export function GuardScenariosOverview({
   loading,
   error,
   onOpenSpec,
+  conflicts = null,
+  onOpenConflict,
 }: {
   recipe: GuardRecipeCardData | null;
   report: GuardGenerateReport | null;
@@ -181,7 +184,22 @@ export function GuardScenariosOverview({
   loading: boolean;
   error: string | null;
   onOpenSpec: (doc: string, section: string) => void;
+  /**
+   * The LIVE open conflicts, only meaningful when the report is `open-conflicts`.
+   * `null` while the spec corpus is still loading (the blocked panel spins).
+   */
+  conflicts?: BlockedConflictRow[] | null;
+  /** Route to the Coverage tab with a conflict's resolution detail open. */
+  onOpenConflict?: (key: string) => void;
 }) {
+  // Birth generation refused to author scenarios while the spec corpus still
+  // carries unresolved disagreements — the blocked panel replaces the whole
+  // overview (no recipe, no last-generate strip, no OSS empty state) and lists the
+  // conflicts LIVE from the corpus so resolving one drops it on the next read.
+  if (report?.status === 'open-conflicts') {
+    return <GuardBlockedPanel conflicts={conflicts} onOpenConflict={onOpenConflict ?? (() => {})} />;
+  }
+
   const empty = !hasScenarios && !recipe && !report;
 
   if (loading && empty) {

@@ -17,19 +17,10 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS } from './child-env.js'
 
-/**
- * Determinism pins applied to every sandbox — the single source for both the
- * constructed child env and the evidence `envPins` record. Fixed, host-independent
- * values so output comparison is stable: UTC clock, C locale, colour off, fixed
- * terminal width.
- */
-export const DETERMINISM_PINS: Readonly<Record<string, string>> = {
-  TZ: 'UTC',
-  LANG: 'C',
-  NO_COLOR: '1',
-  COLUMNS: '80',
-}
+// Re-exported for existing importers (evidence `envPins`, index barrel).
+export { DETERMINISM_PINS }
 
 export interface Sandbox {
   /** Working directory the entrypoint is invoked in. */
@@ -58,30 +49,15 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   fs.mkdirSync(home, { recursive: true })
   fs.mkdirSync(tmp, { recursive: true })
 
-  const xdg = {
-    XDG_CONFIG_HOME: path.join(home, '.config'),
-    XDG_CACHE_HOME: path.join(home, '.cache'),
-    XDG_DATA_HOME: path.join(home, '.local', 'share'),
-    XDG_STATE_HOME: path.join(home, '.local', 'state'),
-    XDG_RUNTIME_DIR: path.join(home, 'run'),
-  }
+  const xdg = sandboxXdgDirs(home)
   for (const dir of Object.values(xdg)) fs.mkdirSync(dir, { recursive: true })
 
   // Allowlist, built from scratch — nothing else from the host reaches the child.
-  const env: NodeJS.ProcessEnv = {
-    // PATH: programs must resolve node/git; the only host value that passes through.
-    PATH: process.env.PATH ?? '',
-    // Filesystem isolation: HOME + XDG + TMPDIR all redirected inside the sandbox
-    // so no user config is read and no temp file lands on the real machine.
-    HOME: home,
-    USERPROFILE: home,
-    TMPDIR: tmp,
-    ...xdg,
-    ...DETERMINISM_PINS,
-  }
-  // Recipe env, then scenario env (scenario wins) — the only declared additions.
-  if (opts.recipeEnv) Object.assign(env, opts.recipeEnv)
-  if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)
+  const env = constructChildEnv({
+    sandbox: { home, tmp },
+    recipeEnv: opts.recipeEnv,
+    scenarioEnv: opts.scenarioEnv,
+  })
 
   if (opts.setupFiles) seedFiles(cwd, opts.setupFiles)
 

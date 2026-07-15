@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { resolveEntry } from '@truecourse/guard-runner'
 import {
-  deriveProbes,
   captureProbes,
   defaultProbeExecutor,
   buildAuthorUserPrompt,
@@ -23,63 +22,8 @@ function repo(): string {
 }
 
 // The recipe entry the fixture repos use: `node <relkit bin>`.
+// (Probe derivation is covered by ground-probes.test.ts.)
 const ENTRY = ['node', FIXTURE_BIN]
-
-describe('deriveProbes', () => {
-  it('extracts backtick command fragments and strips the "truecourse" program name', () => {
-    expect(deriveProbes(['Running `truecourse infer` reports drift.'], ['node', 'dist/index.js'])).toEqual([
-      ['infer'],
-    ])
-  })
-
-  it('strips a leading token matching the entrypoint basename (or its stem)', () => {
-    expect(deriveProbes(['`bin.mjs report` builds a bundle.'], ['node', 'bin.mjs'])).toEqual([['report']])
-    // `cli.js` → basename `cli.js`, stem `cli`; a claim naming the stem is stripped.
-    expect(deriveProbes(['`cli check --strict` validates.'], ['node', 'dist/cli.js'])).toEqual([
-      ['check', '--strict'],
-    ])
-  })
-
-  it('keeps flag-bearing fragments as-is', () => {
-    expect(deriveProbes(['`verify --diff` shows the delta.'], ENTRY)).toEqual([['verify', '--diff']])
-  })
-
-  it('dedupes identical probes across the batch', () => {
-    expect(
-      deriveProbes(['first `spec scan` here', 'again `spec scan` and `hooks run`'], ENTRY),
-    ).toEqual([
-      ['spec', 'scan'],
-      ['hooks', 'run'],
-    ])
-  })
-
-  it('ignores non-command fragments (filenames, fields, paths) and falls back to bare', () => {
-    // None of these are commands → the claim yields no fragment → the bare probe.
-    const probes = deriveProbes(
-      ['writes `config.json`, sets `blockedOn`, reads `.truecourse/specs/corpus.json`.'],
-      ENTRY,
-    )
-    expect(probes).toEqual([[]])
-  })
-
-  it('adds the bare invocation when any claim named no command, listed first', () => {
-    // claim 1 has a command, claim 2 has none → bare (first) + the command.
-    expect(deriveProbes(['`report` runs', 'this section states no command'], ENTRY)).toEqual([
-      [],
-      ['report'],
-    ])
-  })
-
-  it('caps at 6 probes, keeping the bare probe when present', () => {
-    const probes = deriveProbes(
-      ['prose with no command', 'commands `a` `b` `c` `d` `e` `f` `g`'],
-      ENTRY,
-    )
-    expect(probes).toHaveLength(6)
-    expect(probes[0]).toEqual([]) // bare survived the cap
-    expect(probes.slice(1)).toEqual([['a'], ['b'], ['c'], ['d'], ['e']])
-  })
-})
 
 describe('captureProbes — real fixture CLI', () => {
   it('captures exit code + stdout/stderr per probe against relkit', async () => {

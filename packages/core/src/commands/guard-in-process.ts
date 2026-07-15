@@ -19,7 +19,12 @@ import {
   type RecipeRunner,
   type FidelityRunner,
 } from '@truecourse/guard-generator';
-import { writeGuardResult, runGuard, type RunGuardResult } from '@truecourse/guard-runner';
+import {
+  writeGuardResult,
+  sourceGuardRunInputs,
+  type RunGuardResult,
+  type ScenarioLoadError,
+} from '@truecourse/guard-runner';
 import {
   openConflicts,
   type GuardGenerateReport,
@@ -28,6 +33,7 @@ import {
   type CorpusConflict,
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
+import { getGuardExecutor } from '../lib/guard-executor.js';
 import {
   agentTransport,
   getDefaultTransport,
@@ -40,8 +46,9 @@ import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
+import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
-import { EstimateDeclined, stageUsageTag, getCorpus, getDecisions } from './spec-in-process.js';
+import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
@@ -85,11 +92,18 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
  * really the dispute. Read the corpus + decisions and fail before any LLM/build
  * work (and before the estimate) when any overlap is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
+ *
+ * Reads the ON-DISK `.truecourse/specs/{corpus,decisions}.json` the generator
+ * itself reads (via the spec-consolidator file readers) — NOT the active spec
+ * store. OSS is byte-identical (the store was these files). EE materializes both
+ * artifacts into the checkout before generate, so the gate and the generator see
+ * the same corpus + resolutions; a store keyed by `owner/repo` would miss under
+ * the ephemeral checkout path and silently skip the gate.
  */
-async function assertNoOpenConflicts(repoRoot: string): Promise<void> {
-  const corpus = await getCorpus(repoRoot);
+function assertNoOpenConflicts(repoRoot: string): void {
+  const corpus = readCorpus(repoRoot);
   if (!corpus) return;
-  const decisions = await getDecisions(repoRoot);
+  const decisions = readDecisions(repoRoot);
   const open = openConflicts(corpus, decisions);
   if (open.length > 0) throw new OpenConflictsError(open);
 }
@@ -180,7 +194,7 @@ export async function guardGenerateInProcess(
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.
-  await assertNoOpenConflicts(repoRoot);
+  assertNoOpenConflicts(repoRoot);
 
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
@@ -273,6 +287,7 @@ export async function guardGenerateInProcess(
       repoRoot,
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
+      executor: getGuardExecutor(),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
@@ -429,6 +444,35 @@ export function buildGuardReport(
   return { ...result, generatedAt, ...(usage ? { usage } : {}) };
 }
 
+/**
+ * The blocked report an unresolved-conflict generate persists: `status:
+ * 'open-conflicts'` with the error's formatted multi-line message as `reason`,
+ * and every list field empty (nothing generated). The conflict list is NOT
+ * snapshotted — surfaces render it live from the corpus. Used by EE onboarding to
+ * record a needs-attention outcome without saving a scenario set; OSS never
+ * persists it (the CLI throws the error and writes no report).
+ */
+export function buildOpenConflictsReport(
+  error: OpenConflictsError,
+  generatedAt: string,
+): GuardGenerateReport {
+  return {
+    generatedAt,
+    status: 'open-conflicts',
+    reason: error.message,
+    sectionsTotal: 0,
+    sectionsChanged: 0,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // guard run — the deterministic, LLM-free verification pass.
 // ---------------------------------------------------------------------------
@@ -461,23 +505,38 @@ export async function guardRunInProcess(
 ): Promise<RunGuardResult> {
   const { tracker } = options;
   const { branch, commit } = await resolveGuardRepoRef(repoRoot);
-  const result = await runGuard({
-    repoRoot,
-    scenarioId: options.scenario,
-    branch,
-    commit,
-    onPhase: (phase, total) => {
-      if (phase === 'build') tracker?.start('build');
-      else {
-        tracker?.done('build');
-        tracker?.start('run', `0/${total} scenarios`);
-      }
-    },
-    onScenarioSettled: (done, total, scenarioResult) => {
-      tracker?.detail('run', `${done}/${total} scenarios`);
-      options.onScenarioResult?.(scenarioResult);
-    },
-  });
+
+  // The "is there anything to run" decision stays local — a hosted executor should
+  // never be invoked just to discover a missing recipe or an empty corpus. Source
+  // the recipe + scenarios through the runner's own helper, map the no-recipe /
+  // invalid-recipe / no-scenarios results WITHOUT crossing the seam, then hand the
+  // resolved recipe + selected scenarios to the executor for actual execution.
+  const sourced = sourceGuardRunInputs(repoRoot, options.scenario);
+  if ('early' in sourced) return sourced.early;
+  const { loaded, selected, loadErrors } = sourced;
+
+  const result = mergeLoadErrors(
+    await getGuardExecutor()({
+      checkoutDir: repoRoot,
+      recipe: loaded.recipe,
+      scenarios: selected,
+      branch,
+      commit,
+      persist: true,
+      onPhase: (phase, total) => {
+        if (phase === 'build') tracker?.start('build');
+        else {
+          tracker?.done('build');
+          tracker?.start('run', `0/${total} scenarios`);
+        }
+      },
+      onScenarioSettled: (done, total, scenarioResult) => {
+        tracker?.detail('run', `${done}/${total} scenarios`);
+        options.onScenarioResult?.(scenarioResult);
+      },
+    }),
+    loadErrors,
+  );
   if (result.status === 'ok') {
     const n = result.latest.summary.total;
     tracker?.done('run', `${n} scenario${n === 1 ? '' : 's'}`);
@@ -489,6 +548,18 @@ export async function guardRunInProcess(
     tracker?.error('build', `Entry failed to start: \`${result.preflight.entry}\` (rebuild via \`${result.buildCommand}\`)`);
   }
   return result;
+}
+
+/**
+ * Re-attach the scenario load errors this driver computed to the executor's result.
+ * The executor ran the pre-filtered corpus we passed in, so `runGuard` never loaded
+ * scenarios and its own `loadErrors` is empty — the malformed-file errors are a
+ * local concern we surface, keeping the result bit-identical to a disk-loading run.
+ */
+function mergeLoadErrors(result: RunGuardResult, loadErrors: ScenarioLoadError[]): RunGuardResult {
+  // Shape-based so a future result variant that carries loadErrors is covered
+  // automatically instead of silently dropping them.
+  return 'loadErrors' in result ? { ...result, loadErrors } : result;
 }
 
 /** Current branch + commit for a run's envelope; both null outside a git repo. */

@@ -29,6 +29,30 @@ describe('loadRecipe', () => {
     expect(loaded?.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
   })
 
+  it('loads a recipe with an install step', () => {
+    const r = repo()
+    writeRecipe(r, { install: 'npm ci' })
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.install).toBe('npm ci')
+  })
+
+  it('a recipe without install loads with install undefined (back-compat)', () => {
+    const r = repo()
+    writeRecipe(r, { build: 'pnpm build', entry: ['node', 'dist/cli.js'] })
+    const loaded = loadRecipe(r, recipePath(r))
+    expect(loaded?.recipe.install).toBeUndefined()
+  })
+
+  it('throws RecipeError on an empty install command', () => {
+    const r = repo()
+    fs.mkdirSync(path.dirname(recipePath(r)), { recursive: true })
+    fs.writeFileSync(
+      recipePath(r),
+      JSON.stringify({ install: '', build: 'true', entry: ['node', 'x.js'] }),
+    )
+    expect(() => loadRecipe(r, recipePath(r))).toThrow(RecipeError)
+  })
+
   it('throws RecipeError on invalid JSON', () => {
     const r = repo()
     fs.mkdirSync(path.dirname(recipePath(r)), { recursive: true })

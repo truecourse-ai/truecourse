@@ -16,9 +16,15 @@ interface LlmEstimateModalProps {
   onConfirm: () => void;
   /** Dismiss without running (overlay click / X / Cancel / Escape). */
   onCancel: () => void;
+  /**
+   * Optional per-source delta breakdown (the workspace combined-Process dialog):
+   * one line per connected source whose pending work is folded into this run.
+   * Absent for single-source estimates (spec scan / guard generate / one connector).
+   */
+  sources?: { name: string; summary: string }[];
 }
 
-export function LlmEstimateModal({ estimate: est, onConfirm, onCancel }: LlmEstimateModalProps) {
+export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }: LlmEstimateModalProps) {
   // Escape dismisses — the same affordance as the overlay click and the X.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,6 +62,21 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel }: LlmEsti
             <X className="h-4 w-4" />
           </button>
         </div>
+        {sources && sources.length > 0 && (
+          <div className="mb-4 overflow-hidden rounded-md border border-border/60 text-xs">
+            {sources.map((s, i) => (
+              <div
+                key={s.name}
+                className={`flex items-center justify-between gap-3 px-3 py-1.5 ${
+                  i > 0 ? 'border-t border-border/40' : ''
+                }`}
+              >
+                <span className="font-medium text-foreground">{s.name}</span>
+                <span className="text-right text-muted-foreground">{s.summary}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {staged ? (
           <div className="mb-5 text-xs text-muted-foreground">
             <p className="mb-3 leading-relaxed">
@@ -70,6 +91,7 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel }: LlmEsti
                       {fmtUsd(est.expectedCostUsd)}
                     </span>{' '}
                     expected · up to {fmtUsd(est.estimatedCostUsd)}
+                    {est.costPartial ? '+' : ''}
                   </>
                 ) : (
                   <>
@@ -77,6 +99,7 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel }: LlmEsti
                     · up to{' '}
                     <span className="font-semibold text-foreground">
                       {fmtUsd(est.estimatedCostUsd)}
+                      {est.costPartial ? '+' : ''}
                     </span>
                   </>
                 ))}
@@ -123,7 +146,10 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel }: LlmEsti
                     {' '}
                     "Expected" is the likely spend; the max is a ceiling and prompt caching may lower
                     it{est.costSource === 'bundled' ? ' (prices approximate)' : ''}.
+                    {est.costPartial ? ' Cost covers the priced stages only — unpriced stages may add more.' : ''}
                   </>
+                ) : est.costPartial ? (
+                  <> Cost covers the priced stages only — unpriced stages may add more.</>
                 ) : (
                   <>
                     {' '}

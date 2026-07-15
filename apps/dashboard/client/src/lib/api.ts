@@ -1,11 +1,13 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  GuardClaimIdentity,
   GuardDecisions,
   GuardDocCoverage,
   GuardGenerateReport,
   GuardHistory,
   GuardLatest,
+  GuardLatestResponse,
   GuardScenarioInventory,
   GuardScenarioSource,
   GuardStaleness,
@@ -692,65 +694,6 @@ export function getAnalyticsResolution(
 // Spec Consolidation (Module 1)
 // ---------------------------------------------------------------------------
 
-export type IlValidationIssue = {
-  artifactKey: string;
-  message: string;
-  severity: 'hard' | 'soft';
-  tcSource?: string;
-  /** Repair tried and failed to fix this artifact's syntax. */
-  repairAttempted?: boolean;
-  /** The last parser error after repair gave up. */
-  repairFailReason?: string;
-};
-
-/** An enumerated target that never got a contract written (a genuine miss after the gap judge). */
-export type IlCoverageGap = {
-  areaId: string;
-  kind: string;
-  identity: string;
-  /** The enumerator's hint for this target. */
-  hint?: string;
-  /** The gap judge's reason for keeping it as a genuine miss. */
-  reason?: string;
-};
-
-// ---------------------------------------------------------------------------
-// Contracts (Module 2) — types only. The `.tc` corpus browser is reused by the
-// enterprise Workspace Knowledge page (`ee/packages/client`), which reads its
-// own `/api/ee/knowledge/contracts/*` routes; the OSS repo Contracts tab and
-// its `/api/repos/:id/contracts/*` routes are retired.
-// ---------------------------------------------------------------------------
-
-export type ContractsTree = {
-  hasContracts: boolean;
-  modules: Array<{
-    name: string;
-    files: Array<{
-      name: string;
-      path: string;
-      /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
-      provenance?: 'workspace' | 'repo';
-      /** True when this authored contract was promoted from an inferred decision. */
-      inferred?: boolean;
-    }>;
-  }>;
-  /**
-   * The last `contracts generate` run's outcome, persisted so it survives a
-   * reload. Null when never generated (or EE, where generate runs server-side).
-   */
-  lastGenerate?: {
-    generatedAt: string;
-    written: number;
-    gaps: IlCoverageGap[];
-    validationIssues: IlValidationIssue[];
-  } | null;
-};
-
-export type ContractsFile = {
-  path: string;
-  content: string;
-};
-
 export type SpecStalenessResponse = {
   /** Recorded include/exclude/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
@@ -831,6 +774,15 @@ export interface SpecCorpusDoc {
   status?: string;
   lastTouched: string;
   areaTags: string[];
+  /** Hosted only: `'workspace'` when this doc is inherited from the workspace
+   *  Knowledge corpus (folded into the repo scan before curate). Absent on
+   *  repo-local docs and in OSS — the UI shows no workspace badge then. */
+  layer?: 'workspace';
+  /** Workspace only: the ledger's human title for this ref (synthetic docPath).
+   *  Absent on repo corpora — the UI falls back to the ref. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
 }
 
 export interface SpecCorpusArea {
@@ -844,6 +796,22 @@ export interface SpecCorpusArea {
 export interface SpecSkippedDoc {
   ref: string;
   reason: string;
+  /** Workspace only: the ledger's human title for this ref. Absent on repo corpora. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
+}
+
+/**
+ * A skipped-docs SUMMARY (counts only), returned by the workspace corpus GET in
+ * place of the full `skippedDocs` array — a source with thousands of dropped docs
+ * must not ship every row into the corpus payload (the individual rows load lazily
+ * via the paged skipped listing). Absent on the repo corpus, which carries the
+ * full array inline.
+ */
+export interface SpecSkippedSummary {
+  total: number;
+  byReason: { reason: string; count: number }[];
 }
 
 export interface SpecCorpus {
@@ -863,6 +831,12 @@ export interface SpecCorpusResponse {
   manualExcludes?: string[];
   /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
   conflictResolutions?: SpecConflictResolution[];
+  /**
+   * Workspace corpus only: a skipped-docs summary in place of `corpus.skippedDocs`
+   * (which the workspace payload omits for scale). The individual rows load lazily
+   * via the paged skipped listing (the data-source seam's `listSkipped`).
+   */
+  skipped?: SpecSkippedSummary;
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
   /**
@@ -946,24 +920,42 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
 // Guard — spec-section scenario coverage (read-only, diff-free).
 // ---------------------------------------------------------------------------
 
-/** The two amber-dot signals for the Guard tab (generate / run staleness). */
-export function getGuardStaleness(repoId: string): Promise<GuardStaleness> {
-  return fetchApi<GuardStaleness>(`/api/repos/${repoId}/guard/staleness`);
+/** Append `?ref=`/`&ref=` when a PR head is being viewed (EE); a no-op otherwise. */
+function withRef(base: string, ref?: string): string {
+  if (!ref) return base;
+  return `${base}${base.includes('?') ? '&' : '?'}ref=${encodeURIComponent(ref)}`;
 }
 
-/** The last guard run's materialized state; null on 404 (never run). */
-export async function getGuardLatest(repoId: string): Promise<GuardLatest | null> {
+/** The two amber-dot signals for the Guard tab (generate / run staleness). `ref`
+ *  scopes to a PR head (EE). */
+export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardStaleness> {
+  return fetchApi<GuardStaleness>(withRef(`/api/repos/${repoId}/guard/staleness`, ref));
+}
+
+/**
+ * The guard run for the view. No `ref` → the repo baseline (or null when never
+ * run). With `ref` (a PR head, EE) → the run stored at that commit, else an
+ * explicit pending/empty envelope — never the baseline under a PR header. Always
+ * resolves to a `{ latest, pending }` envelope so callers handle both uniformly.
+ */
+export async function getGuardLatest(repoId: string, ref?: string): Promise<GuardLatestResponse> {
   try {
-    return await fetchApi<GuardLatest>(`/api/repos/${repoId}/guard/latest`);
+    const body = await fetchApi<GuardLatest | GuardLatestResponse>(
+      withRef(`/api/repos/${repoId}/guard/latest`, ref),
+    );
+    // With a ref the server returns the envelope; without one, a raw run.
+    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatest, pending: null };
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
+    if (e instanceof ApiError && e.status === 404) return { latest: null, pending: null };
     throw e;
   }
 }
 
-/** The append-only run-summary history (empty `{ runs: [] }` until a run exists). */
-export function getGuardHistory(repoId: string): Promise<GuardHistory> {
-  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history`);
+/** The append-only run-summary history (empty `{ runs: [] }` until a run exists).
+ *  With `pr` (EE), the PR's own run timeline — one run per pushed head. */
+export function getGuardHistory(repoId: string, pr?: number): Promise<GuardHistory> {
+  const qs = pr !== undefined ? `?pr=${pr}` : '';
+  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history${qs}`);
 }
 
 /** One past run's materialized state by id; null on 404 (unknown run). */
@@ -976,21 +968,21 @@ export async function getGuardRun(repoId: string, runId: string): Promise<GuardL
   }
 }
 
-/** The last `guard generate` report; null on 404 (never generated). */
-export async function getGuardReport(repoId: string): Promise<GuardGenerateReport | null> {
+/** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
+export async function getGuardReport(repoId: string, ref?: string): Promise<GuardGenerateReport | null> {
   try {
-    return await fetchApi<GuardGenerateReport>(`/api/repos/${repoId}/guard/report`);
+    return await fetchApi<GuardGenerateReport>(withRef(`/api/repos/${repoId}/guard/report`, ref));
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
 }
 
-/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). */
-export async function getGuardCoverage(repoId: string, doc: string): Promise<GuardDocCoverage | null> {
+/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` scopes to a PR head (EE). */
+export async function getGuardCoverage(repoId: string, doc: string, ref?: string): Promise<GuardDocCoverage | null> {
   try {
     return await fetchApi<GuardDocCoverage>(
-      `/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`,
+      withRef(`/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -998,16 +990,16 @@ export async function getGuardCoverage(repoId: string, doc: string): Promise<Gua
   }
 }
 
-/** The committed-scenario inventory + recipe card for the Scenarios tab. */
-export function getGuardScenarios(repoId: string): Promise<GuardScenarioInventory> {
-  return fetchApi<GuardScenarioInventory>(`/api/repos/${repoId}/guard/scenarios`);
+/** The committed-scenario inventory + recipe card for the Scenarios tab. `ref` scopes to a PR head (EE). */
+export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardScenarioInventory> {
+  return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
 }
 
-/** A scenario's raw YAML source; null on 404 (unknown id). */
-export async function getGuardScenarioSource(repoId: string, id: string): Promise<GuardScenarioSource | null> {
+/** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
+export async function getGuardScenarioSource(repoId: string, id: string, ref?: string): Promise<GuardScenarioSource | null> {
   try {
     return await fetchApi<GuardScenarioSource>(
-      `/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`,
+      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -1054,35 +1046,45 @@ export async function getGuardFindingEvidence(
   return res.text();
 }
 
+/** EE PR scope for the guard decisions routes: `?pr=<n>` (no ref — decisions are
+ *  keyed by PR alone). Empty outside a PR view, so OSS URLs are unchanged. */
+function guardPrQuery(pr?: number): string {
+  return pr !== undefined ? `?pr=${pr}` : '';
+}
+
 /** The committable guard decisions (dismissed claims) — always 200 (empty until
  *  the user dismisses anything). */
-export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
+export function getGuardDecisions(repoId: string, pr?: number): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions${guardPrQuery(pr)}`);
 }
 
 /** The identity a dismissal keys on: doc + section anchor + the extracted claim's
- *  stable text (a finding's `claim`). */
-export interface GuardClaimIdentity {
-  doc: string;
-  anchor: string;
-  title: string;
-}
+ *  stable text (a finding's `claim`). Re-exported for the guard components. */
+export type { GuardClaimIdentity };
 
 /** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
- *  updated decisions so the caller re-derives dismissed state without a GET. */
+ *  updated decisions so the caller re-derives dismissed state without a GET. With
+ *  `pr` the write targets that PR's overlay and the response is the merged effective
+ *  view (EE) — mirrors {@link getGuardDecisions}. */
 export function dismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity & { note?: string },
+  pr?: number,
 ): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss`, {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });
 }
 
-/** Reverse a dismissal by its identity; returns the updated decisions. */
-export function undismissGuardClaim(repoId: string, claim: GuardClaimIdentity): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
+/** Reverse a dismissal by its identity; returns the updated decisions. With `pr`
+ *  the write targets that PR's overlay and the response is the merged effective view. */
+export function undismissGuardClaim(
+  repoId: string,
+  claim: GuardClaimIdentity,
+  pr?: number,
+): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss${guardPrQuery(pr)}`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });

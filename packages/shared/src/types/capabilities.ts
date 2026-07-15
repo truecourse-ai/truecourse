@@ -14,6 +14,14 @@
 
 export type Edition = 'community' | 'enterprise'
 
+/**
+ * Deliberately a plain string (see module doc). Identifiers currently in use:
+ * OSS advertises `local-filesystem` (below); the enterprise plugin advertises
+ * `sso`, `workspace`, `jobs`, `knowledge`, `github-gate`, `llm-config`, and
+ * `guard` — the last one only when the guard subsystem is wired AND the
+ * background job worker actually started (hosted guard generation runs on the
+ * job queue, so a dead queue must not light up guard actions).
+ */
 export type Capability = string
 
 export interface CapabilitiesResponse {

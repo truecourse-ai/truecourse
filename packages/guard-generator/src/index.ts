@@ -10,6 +10,7 @@
 export {
   generateGuards,
   defaultGenerateBatch,
+  retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
@@ -57,8 +58,10 @@ export {
 } from './recipe-discovery.js'
 
 export {
-  deriveProbes,
+  deriveStaticProbes,
+  deriveExpansionProbes,
   captureProbes,
+  groundProbes,
   defaultProbeExecutor,
   programNamesOf,
   GROUND_CACHE_NAME,
@@ -68,6 +71,8 @@ export {
   type ProbeTranscript,
   type ProbeExecutor,
   type CaptureProbesOptions,
+  type GroundProbesOptions,
+  type StaticProbes,
 } from './ground.js'
 
 export { scenarioCompositionDefect, quoteInvalidOutput, flattenZodError } from './validate.js'

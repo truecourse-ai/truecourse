@@ -37,6 +37,10 @@ export const GuardDismissedClaimSchema = z.object({
 })
 export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
 
+/** Just the identity fields a dismissal keys on (doc + anchor + title) — what the
+ *  dismiss/undismiss surfaces pass around; `dismissedClaimKey` hashes the same trio. */
+export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 'title'>
+
 /** The whole decisions file. `dismissedClaims` defaults to `[]` so a partial or
  *  freshly-created file still parses. */
 export const GuardDecisionsSchema = z.object({

@@ -6,15 +6,18 @@
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
-import { useEffect, useRef, useState } from 'react';
-import { Loader2, AlertCircle, EyeOff } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import * as api from '@/lib/api';
+import { HoverPopover } from '@/components/ui/hover-popover';
 import { DocMarkdown } from './DocMarkdown';
+import { createRepoSpecSource, useSpecSource } from './spec-source';
 
 export function SpecDocViewer({
   repoId,
   docRef,
+  title,
+  url,
   commit,
   badge,
   scrollTo,
@@ -25,6 +28,10 @@ export function SpecDocViewer({
 }: {
   repoId: string;
   docRef: string;
+  /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
   /** EE PR view: read the doc's markdown at this commit (the PR head). */
   commit?: string;
   /** Optional role label shown before the doc name (e.g. "Older" / "Newer"). */
@@ -47,19 +54,28 @@ export function SpecDocViewer({
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // A provided (workspace) source wins; otherwise the repo default reading at the
+  // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
+  const ctxSource = useSpecSource();
+  const repoSource = useMemo(
+    () => createRepoSpecSource(repoId, commit ? { ref: commit } : undefined),
+    [repoId, commit],
+  );
+  const source = ctxSource ?? repoSource;
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api
-      .getSpecDoc(repoId, docRef, commit)
+    source
+      .getDoc(docRef)
       .then((r) => !cancelled && setContent(r.content))
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [repoId, docRef, commit]);
+  }, [source, docRef]);
 
   // Scroll to a conflicting section: match a rendered heading by text.
   useEffect(() => {
@@ -82,7 +98,20 @@ export function SpecDocViewer({
               {badge}
             </span>
           )}
-          <span className="truncate text-xs font-medium text-foreground">{docRef}</span>
+          <span className="truncate text-xs font-medium text-foreground">{title ?? docRef}</span>
+          {url && (
+            <HoverPopover content="Open source" side="top">
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open source"
+                className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </HoverPopover>
+          )}
         </div>
         {tags && tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">

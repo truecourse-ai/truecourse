@@ -16,9 +16,9 @@ import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
 import { guardRowStatus, type GuardScenarioRowData } from '@/hooks/useGuardScenarios';
 import { GuardStatusBadge } from './GuardStatusBadge';
+import { GuardProgramOutput } from './GuardProgramOutput';
+import { PRE } from './detail-styles';
 
-const PRE =
-  'mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
 export function GuardScenarioDetail({
@@ -144,6 +144,8 @@ export function GuardScenarioDetail({
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
               <pre className={PRE}>{result.failure.actual}</pre>
             </div>
+            {/* The failing run's raw program output (Fix 1) — render-if-present. */}
+            <GuardProgramOutput stdout={result.failure.stdout} stderr={result.failure.stderr} />
           </div>
         )}
         {result?.outcome === 'orphaned' && (

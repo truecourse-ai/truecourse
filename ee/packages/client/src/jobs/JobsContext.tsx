@@ -41,6 +41,12 @@ interface JobsContextValue {
   activeJobs: JobView[];
   /** The active job holding (type, key), if any — e.g. ('repo.baseline', 'repo.baseline:owner/repo'). */
   activeJobFor: (type: string, key: string) => JobView | undefined;
+  /**
+   * Subscribe to a job's terminal `job.progress` event (succeeded/failed),
+   * carrying the full `JobView` incl. its `result`. The estimate stage's result
+   * rides here (no success toast), so "Sync now" reads its cost estimate off it.
+   */
+  onJobSettled: (fn: (job: JobView) => void) => () => void;
   markAllRead: () => Promise<void>;
   markRead: (ids: string[]) => Promise<void>;
   refresh: () => Promise<void>;
@@ -52,6 +58,7 @@ const JobsContext = createContext<JobsContextValue>({
   unreadCount: 0,
   activeJobs: [],
   activeJobFor: () => undefined,
+  onJobSettled: () => () => {},
   markAllRead: noop,
   markRead: noop,
   refresh: noop,
@@ -66,6 +73,7 @@ export default function JobsProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeJobs, setActiveJobs] = useState<JobView[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const settledListeners = useRef(new Set<(job: JobView) => void>());
 
   const refresh = useCallback(async () => {
     try {
@@ -91,6 +99,9 @@ export default function JobsProvider({ children }: { children: ReactNode }) {
         const rest = prev.filter((j) => j.id !== job.id);
         return isActiveJob(job.status) ? [job, ...rest] : rest;
       });
+      // A terminal event carries the job's `result`; hand it to subscribers (the
+      // estimate stage rides here — its result never surfaces as a notification).
+      if (!isActiveJob(job.status)) settledListeners.current.forEach((fn) => fn(job));
     } else if (ev.type === 'notification') {
       const n = ev.notification;
       setNotifications((prev) => [n, ...prev]);
@@ -131,6 +142,11 @@ export default function JobsProvider({ children }: { children: ReactNode }) {
     [activeJobs],
   );
 
+  const onJobSettled = useCallback((fn: (job: JobView) => void) => {
+    settledListeners.current.add(fn);
+    return () => settledListeners.current.delete(fn);
+  }, []);
+
   const markRead = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     const { unreadCount: count } = await postJson<{ unreadCount: number }>(
@@ -154,7 +170,7 @@ export default function JobsProvider({ children }: { children: ReactNode }) {
 
   return (
     <JobsContext.Provider
-      value={{ notifications, unreadCount, activeJobs, activeJobFor, markAllRead, markRead, refresh }}
+      value={{ notifications, unreadCount, activeJobs, activeJobFor, onJobSettled, markAllRead, markRead, refresh }}
     >
       {children}
       <JobProgressPopup jobs={activeJobs} />

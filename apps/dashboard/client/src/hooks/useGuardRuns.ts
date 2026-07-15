@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { GuardHistoryEntry, GuardLatest } from '@truecourse/shared';
+import type { GuardGatePending, GuardHistoryEntry, GuardLatest } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 export interface GuardRunsState {
@@ -19,28 +19,61 @@ export interface GuardRunsState {
   run: GuardLatest | null;
   /** The displayed run's id, for highlighting the history row. */
   selectedRunId: string | null;
+  /** When viewing a PR head (`ref`) with no run yet, the in-flight gate (queued/
+   *  running) if any — the view shows a "gate hasn't run at this commit" card
+   *  instead of baseline data. Null in the repo view or when nothing is in flight. */
+  pending: GuardGatePending | null;
   selectRun: (runId: string | null) => void;
   loading: boolean;
   error: string | null;
 }
 
-export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloadKey = 0): GuardRunsState {
+export function useGuardRuns(
+  repoId: string | undefined,
+  enabled: boolean,
+  reloadKey = 0,
+  ref?: string,
+  prNumber?: number,
+): GuardRunsState {
   const [latest, setLatest] = useState<GuardLatest | null>(null);
+  const [pending, setPending] = useState<GuardGatePending | null>(null);
   const [history, setHistory] = useState<GuardHistoryEntry[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [cache, setCache] = useState<Record<string, GuardLatest>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A ref/PR scope switch invalidates the run selection and the per-run cache:
+  // a run selected under the previous scope (e.g. a baseline run picked in the
+  // transient window before a PR head SHA resolved) must not keep rendering
+  // from cache once the new scope's runs arrive.
+  useEffect(() => {
+    setSelectedRunId(null);
+    setCache({});
+  }, [ref, prNumber]);
+
   useEffect(() => {
     if (!repoId || !enabled) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([api.getGuardLatest(repoId), api.getGuardHistory(repoId)])
-      .then(([l, h]) => {
+    // `ref` (a PR head) scopes the run to that commit; the response carries the
+    // pending gate (if any) so the view never shows baseline data under a PR.
+    // The run HISTORY under a PR ref is the PR's OWN timeline (`?pr=`, one run
+    // per pushed head) — never the repo-level baseline history, so a baseline
+    // run can never be listed or selected there.
+    Promise.all([
+      api.getGuardLatest(repoId, ref),
+      ref
+        ? prNumber != null
+          ? api.getGuardHistory(repoId, prNumber)
+          : Promise.resolve({ runs: [] })
+        : api.getGuardHistory(repoId),
+    ])
+      .then(([{ latest: l, pending: p }, h]) => {
         if (cancelled) return;
         setLatest(l);
+        setPending(p);
         setHistory(h.runs);
       })
       .catch((e) => {
@@ -52,7 +85,7 @@ export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloa
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey]);
+  }, [repoId, enabled, reloadKey, ref, prNumber]);
 
   const selectRun = useCallback(
     (runId: string | null) => {
@@ -81,6 +114,7 @@ export function useGuardRuns(repoId: string | undefined, enabled: boolean, reloa
     history,
     run,
     selectedRunId: run?.run.runId ?? null,
+    pending,
     selectRun,
     loading,
     error,

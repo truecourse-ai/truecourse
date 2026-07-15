@@ -16,6 +16,7 @@ export * from './integrations.js';
 export * from './jobs.js';
 export * from './traces.js';
 export * from './settings.js';
+export * from './guard.js';
 
 import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions, ghPrs } from './github.js';
 import { llmProviderConfig } from './llm.js';
@@ -23,13 +24,20 @@ import { content } from './content.js';
 import { analyses, analysisCurrent, analysisHistory } from './analyses.js';
 import { decisions } from './decisions.js';
 import { repoConfig, repoUiState, registry } from './config.js';
-import { contractSets, specSets } from './contracts.js';
+import { specSets } from './contracts.js';
 import { extractionCache } from './cache.js';
-import { workspaceSpecSets, workspaceContractSets, knowledgeDocuments } from './knowledge.js';
+import { workspaceSpecSets, knowledgeDocuments } from './knowledge.js';
 import { integrationConnections } from './integrations.js';
-import { jobs, notifications, pendingBaselines } from './jobs.js';
+import {
+  jobs,
+  notifications,
+  pendingBaselines,
+  pendingGuardBaselines,
+  guardBackfillMarkers,
+} from './jobs.js';
 import { llmTraces } from './traces.js';
 import { workspaceSettings } from './settings.js';
+import { guardRuns, guardResults, guardScenarioSets } from './guard.js';
 
 export const schema = {
   ghInstallations,
@@ -47,16 +55,19 @@ export const schema = {
   repoConfig,
   repoUiState,
   registry,
-  contractSets,
   specSets,
   extractionCache,
   workspaceSpecSets,
-  workspaceContractSets,
   knowledgeDocuments,
   integrationConnections,
   jobs,
   notifications,
   pendingBaselines,
+  pendingGuardBaselines,
+  guardBackfillMarkers,
   llmTraces,
   workspaceSettings,
+  guardRuns,
+  guardResults,
+  guardScenarioSets,
 };

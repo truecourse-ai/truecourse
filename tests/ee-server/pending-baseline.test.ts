@@ -118,6 +118,30 @@ describe('enqueueOrPendBaseline — coalesce on single-flight loss', () => {
       defaultBranch: 'main',
     });
   });
+
+  it('marks the tracked row failed (freeing the key) and rethrows when addJob throws', async () => {
+    const jobStore = new JobStore(db);
+    const pending = new PendingBaselineStore(db);
+    const addJob = vi.fn(async () => {
+      throw new Error('graphile down');
+    });
+    const deps = { jobStore, pendingBaselines: pending, addJob };
+
+    await expect(enqueueOrPendBaseline(deps, req('c1'))).rejects.toThrow('graphile down');
+
+    // The row must not sit 'queued' holding the single-flight key: no graphile
+    // job exists to run or settle it, so until a restart every later push
+    // would coalesce onto the pending buffer with no running job to replay it.
+    const rows = await jobStore.listForOrg(ORG);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe('failed');
+    expect(await pending.take(REPO)).toBeNull(); // the failed enqueue was not pended either
+
+    // The key is free — the next push enqueues normally.
+    addJob.mockImplementationOnce(async () => {});
+    const id = await enqueueOrPendBaseline(deps, req('c2'));
+    expect(id).toBeTruthy();
+  });
 });
 
 describe('replayPendingBaseline — replay when the running scan settles', () => {

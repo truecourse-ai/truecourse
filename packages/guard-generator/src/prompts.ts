@@ -19,6 +19,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { OutputExcerpts } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -319,8 +320,14 @@ every \`ref\` you were given exactly once. No prose — only the JSON array.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
-/** A birth-validation failure attached to a claim on a retry so the model can fix it. */
-export interface BirthRetryContext {
+/**
+ * A birth-validation failure attached to a claim on a retry so the model can fix
+ * it. Extends the shared excerpt pair: the failing run's RAW program output is the
+ * evidence the retry's doc-first language refers to — the usage error the program
+ * printed reveals the correct flags/subcommand. Absent when the stream was empty
+ * (or an infra failure produced no capture).
+ */
+export interface BirthRetryContext extends OutputExcerpts {
   scenarioTitle: string
   step: number
   expected: string
@@ -388,6 +395,14 @@ export interface AuthorUserContext {
   correction?: OutputCorrection
 }
 
+/** Indent every line of a program-output excerpt so it reads as one nested block. */
+function indentBlock(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n')
+}
+
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   const lines: string[] = [
     `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
@@ -440,6 +455,10 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         `  expected: ${c.retry.expected}`,
         `  actual:   ${c.retry.actual}`,
       )
+      // The failing run's raw program output — the evidence the rules above point
+      // at (a usage error reveals the real flags). Each stream omitted when absent.
+      if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
+      if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
     }
   }
   if (ctx.correction) {
@@ -474,18 +493,25 @@ matching this schema (CANONICAL — generated from the engine's Zod definition; 
 reply must validate against it exactly):
 ${RECIPE_JSON_SCHEMA}
 Concretely:
-  { "build": "<shell command run once in the repo root to produce the entrypoint>",
+  { "install": "<optional shell command run once in the repo root, before the build, to fetch dependencies>",
+    "build": "<shell command run once in the repo root to produce the entrypoint>",
     "entry": ["<argv>", "..."] }
 
+- install (optional) fetches dependencies before the build runs — the tree may be
+  a fresh clone with nothing installed. Match the ecosystem: js — "npm ci",
+  "pnpm install --frozen-lockfile", "yarn install --immutable" (match the lockfile);
+  python — "python -m venv .venv && .venv/bin/pip install -e ." (an editable install
+  makes [project.scripts] console scripts runnable at .venv/bin/<name>); csharp —
+  "dotnet restore". Omit it when the tree needs no dependency fetch.
 - build produces the runnable program (e.g. "pnpm build", "npm run build",
-  "pip install -e .", "dotnet build -c Release"). It MAY be the no-op "true" when
-  the repo needs no build step — "true" is valid for build ONLY, never for entry.
+  "dotnet build -c Release"). It MAY be the no-op "true" when the repo needs no
+  compile step — "true" is valid for build ONLY, never for entry.
 - entry is the argv that invokes the ACTUAL program under test; scenario arguments
   are appended to it. Read it from whichever manifest DECLARES the CLI:
   - js — package.json "bin" or "main", or a workspace script (e.g. ["node","dist/cli.js"]).
   - python — the [project.scripts] / console_scripts entry point names the command
     (e.g. [project.scripts] sqlfluff = "sqlfluff.cli.commands:cli" ⇒
-    ["python","-m","sqlfluff"] or the installed "sqlfluff" console script).
+    [".venv/bin/sqlfluff"] after the editable install, or ["python","-m","sqlfluff"]).
   - csharp — a project with <OutputType>Exe</OutputType> or a <ToolCommandName>
     (e.g. ["dotnet","run","--project","src/Tool/Tool.csproj"]).
   Paths are repo-relative.
@@ -504,8 +530,8 @@ tell which is the program under test, DO NOT GUESS: return exactly
 instead of a proposal. The engine treats that as a discovery failure and surfaces
 your explanation to the user.
 
-Output exactly one JSON object — either the { "build", "entry" } proposal or the
-{ "ambiguous" } signal. No prose.`
+Output exactly one JSON object — either the { "build", "entry" } proposal (with
+optional "install" and "env" when needed) or the { "ambiguous" } signal. No prose.`
 
 export const RECIPE_PROMPT_FINGERPRINT = fingerprint(RECIPE_SYSTEM_PROMPT)
 
@@ -550,10 +576,11 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       '',
       'CORRECTION — your previous response was NOT a valid recipe proposal. You returned:',
       input.correction.invalidOutput,
-      'Return exactly one JSON object: either a proposal with a non-empty "build" string',
-      'and a non-empty "entry" argv that invokes the program under test (never a shell',
-      'no-op like "true"), or { "ambiguous": "<why>" } when no manifest declares a',
-      'runnable CLI. Nothing else.',
+      'Return exactly one JSON object: either a proposal with a non-empty "build"',
+      'string and a non-empty "entry" argv that invokes the program under test (never',
+      'a shell no-op like "true"), plus optional "install" and "env" —',
+      '  { "install": "<optional shell command>", "build": "<shell command>", "entry": ["<argv>", "..."] }',
+      '— or { "ambiguous": "<why>" } when no manifest declares a runnable CLI. Nothing else.',
     )
   }
   return lines.join('\n')

@@ -211,6 +211,10 @@ describe('executeJob — onSettled hook', () => {
 
     expect(settled).toHaveBeenCalledTimes(1);
     expect(statusAtSettle).toBe('succeeded'); // terminal bookkeeping already done
+    // The hook is told HOW the job settled AND what the run returned, so chains can
+    // key off the outcome (e.g. guard onboarding) or the run's own result detail
+    // (e.g. the guard baseline's no-verdict status). A success passes the result.
+    expect(settled).toHaveBeenCalledWith(expect.anything(), 'succeeded', {});
   });
 
   it('fires on failure, and the original error still rethrows', async () => {
@@ -235,6 +239,8 @@ describe('executeJob — onSettled hook', () => {
 
     expect(settled).toHaveBeenCalledTimes(1);
     expect(statusAtSettle).toBe('failed');
+    // A thrown run has no result, so the hook sees the outcome + undefined.
+    expect(settled).toHaveBeenCalledWith(expect.anything(), 'failed', undefined);
   });
 
   it('is optional — a definition without onSettled still completes', async () => {

@@ -1,9 +1,12 @@
 # Spec Guard — Section-Bound Scenario Tests Replace Contract Verify
 
 STATUS: OSS v1 BUILT (Phases 0–5, 2026-07-07) — design agreed 2026-07-03; open work: the
-follow-ups and decided-not-built items in the body (fidelity review v1.5, stub/http
-capabilities, OSS AI-SDK transport, scan-staleness signal) and Phases 6–8 (api/tui/web
-drivers, EE). This plan adds **generated, spec-section-bound
+follow-ups and decided-not-built items in the body (stub/http/clock capabilities, OSS
+AI-SDK transport, the generate batch-size dial, cross-area overlap dedup, section-level
+precedence in extraction, the guard-helpers-to-shared move) and Phases 6–7 (api/tui/web
+drivers). Phase 8 (EE adaptation) is IN PROGRESS on `sm/spec-guards-ee` — see its entry
+below. (Fidelity review and the scan-staleness signal, once listed here as open, are BUILT
+— items 33 and 31a.) This plan adds **generated, spec-section-bound
 scenario tests** ("guards") as the new verification artifact, built alongside the existing
 contract system. The spec side (scan → curated corpus → areas → decisions) is untouched.
 
@@ -15,6 +18,15 @@ four CLI commands, the BL Drift dashboard, and EE's verify-drift gate usage were
 EE gate ran on verify drifts until this cleanup removed it, and guard's EE phase re-adds
 gating on a separate branch. The reusable contract MATCHING ENGINE (extractor + verifier
 matching half + in-process generate/infer/curate) is KEPT for that branch — see item 24.
+
+Retirement is strictly gate-CONSUMERS; contract GENERATION code and stores are **dormant,
+not dead** — they are the planned **spec→code** half of the linking story. Guard links
+spec→test today (a section to the scenarios that guard it); contracts will later link
+spec→code, connecting a failed guard scenario to the code that caused it. Nothing that
+generates or stores contracts is deleted in any cleanup. The EE PR gate posts **two** Checks:
+`TrueCourse / Code Quality` (the `analyzeCore` violations gate — a distinct signal, kept) and
+`TrueCourse / Spec Guard` (the guard gate — renamed from `TrueCourse / Guard`, safe because no
+clients depend on the old name yet). Guard is the only spec-gating engine; verify never returns.
 
 **Scope: OSS first.** Everything in this plan lands in the OSS surface — core packages, CLI,
 local dashboard, file-based store. EE adaptation (hosted store adapters, PR-scoped guard runs,
@@ -243,7 +255,10 @@ Sections are the binding unit. Anchors must survive spec edits without lying.
 
 - **Recipe** (`.truecourse/scenarios/recipe.json`, committed, human-reviewed at first generate):
   how to produce a runnable entrypoint from the working tree — e.g.
-  `{ build: "pnpm build", entry: ["node", "dist/index.js"] }`. Discovered once (LLM-assisted),
+  `{ install: "pnpm install --frozen-lockfile", build: "pnpm build", entry: ["node", "dist/index.js"] }`.
+  `install` is optional: one shell command run once in the repo root BEFORE every build to fetch
+  dependencies — required wherever the tree is a fresh checkout with no `node_modules` (the hosted
+  gate/baseline shallow-clones), omitted when the tree needs none. Discovered once (LLM-assisted),
   reviewed once, then mechanical. `run:` argv in scenarios is appended to `entry`. Full
   lifecycle — what preparation covers, storage, reuse, and when it refreshes — in
   "Preparation (the recipe layer)" below.
@@ -282,7 +297,9 @@ the lifecycle below is driver-generic.
   files that informed discovery (`package.json` scripts/bin, the lockfile, build config). It is
   committable and human-reviewed on purpose — the manifest convention: a clone inherits the
   approved preparation, and generate/run never re-discover what a teammate already reviewed.
-- **How it's reused.** Build runs once per `guard run`; every sandbox gets the same built
+- **How it's reused.** The optional `install` and the build each run once per `guard run`
+  (install first, then build, both in the repo root under the same hermetic
+  `BUILD_PASSTHROUGH`-allowlisted env); every sandbox gets the same built
   entrypoint read-only. Scenarios never repeat preparation — they carry only per-scenario deltas
   (declarative `setup.files`/`env`). If per-scenario seeding grows repetitive within an area,
   that becomes a recipe-level shared `fixtures` extension (v1.1) — never scenario copy-paste.
@@ -293,8 +310,10 @@ the lifecycle below is driver-generic.
   never drift, and never a silent automatic re-discovery. `guard recipe` shows the current
   recipe + staleness; `guard recipe --refresh` re-runs discovery explicitly.
 - **What the LLM does and doesn't do here.** Discovery is proposal-only: the model returns
-  candidate build/entry JSON through the transport; the ENGINE runs the verification build and
-  the entrypoint probe deterministically, and the user reviews before anything is committed.
+  candidate install/build/entry JSON through the transport; the ENGINE runs the verification
+  install + build and the entrypoint probe deterministically, and the user reviews before
+  anything is committed. A proposal whose install fails is `verify-failed`
+  (``install `cmd` failed: …``) and never written.
 
 ## Speed program (URGENT — from the 2026-07-07 dogfood runs)
 
@@ -591,6 +610,68 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    / report round-trip); usage totalled under `guard.fidelity` + `· fidelity N` on the
    validate detail. Full gate green (1268 tests).
 
+35. **Birth-retry blindness + help-surface probes (findings analysis 2026-07-13, PR 1 of
+   2).** Diagnosed on a real expense CLI: the generator authored positional args
+   (`add 0.00 test food`) for a tool that takes named flags, so birth failed twice with
+   only "expected exit 3 / actual exit 2" as feedback — the retry never saw the program's
+   usage error, and probe grounding could never reveal a subcommand's flag signature. Two
+   root-cause fixes:
+   - **Failure output excerpts.** On EVERY expect-mismatch, `runScenario` attaches the
+     failing step's RAW (un-normalized) stdout/stderr, head-truncated to 1200 chars per
+     stream (empty streams omitted), to the returned `failure`. New optional
+     `stdout`/`stderr` on `GuardFailureDetailSchema` + `GuardBirthFindingSchema` (optional
+     ⇒ old snapshots parse, NO format-version bump; a `fidelity` finding has no run so they
+     stay absent). `toFinding` copies them; the RETRY authoring prompt renders them as
+     indented `program stdout:`/`program stderr:` blocks after `expected:`/`actual:` (the
+     evidence its doc-first language already refers to — that language is unchanged); the
+     retry cache key folds them so a pre-change cached retry can't shadow the richer re-ask.
+     The dashboards (OSS Scenario/Drift/Finding details + the EE Guard lens, which reuses
+     them) render a "Program output" section beneath EXPECTED/ACTUAL when present. The local
+     `GuardBirthFinding` interface was deleted in favour of the shared type.
+   - **Help-surface probes.** `MAX_PROBES_PER_BATCH` 6 → 10; probe derivation split into
+     pure `deriveStaticProbes` + `deriveExpansionProbes` (unit-testable, no subprocess),
+     composed by a two-phase `groundProbes(exec)`. Always probe a bare `--help`; SALVAGE a
+     subcommand prefix from a value-carrying fragment (`` `add 12.50 lunch` `` → `add --help`,
+     `` `config set currency EUR` `` → `config set --help`); then EXPAND by scanning the
+     bare/`--help` transcripts for subcommand tokens that also appear in the claim texts and
+     probing `<token> --help` into leftover slots. Priority under the cap: bare → `--help` →
+     subcommand `--help`s → exact fragments. Cache keys unchanged `(recipeFingerprint, argv)`;
+     the retry path re-grounds through the same two phases. `GENERATE_SYSTEM_PROMPT`
+     unchanged. STATUS: BUILT (PR 1). PR 2 (EE evidence persistence) is a separate change.
+
+36. **EE birth-finding evidence persistence (findings analysis 2026-07-13, PR 2 of 2).**
+   The full-transcript layer behind item 35's inline excerpts. In the hosted edition
+   `guard generate` runs in an EPHEMERAL job checkout; a birth finding's `evidencePath`
+   points into `guard/evidence/<runId>/<scenarioSeg>` inside that checkout, which nothing
+   copied out before the checkout was removed — the gate's `persistFailureEvidence` only
+   covered real (persisted) runs, and the store couldn't accept birth evidence: a birth run
+   is `persist: false`, so it never creates a `guard_runs` row for `writeGuardEvidence` to
+   attach to. The dashboard finding-evidence view therefore 404'd (`{"error":"Evidence not
+   found."}`). Root-cause fix, three parts:
+   - **Store.** New `evidence` jsonb column on `guard_results` (default `{}`, migration
+     `0006_zippy_nomad`), the same manifest shape as `guard_runs.evidence`
+     (`{ "<scenarioSeg>/<file>": contentSha }`) with bodies in the content pool under scope
+     `guard-evidence`. New `writeGuardResultEvidence(ref, scenarioSeg, files)` on the
+     `GuardStore` interface merges entries onto the `(repoKey, commitSha)` report row via the
+     same atomic jsonb `||` UPDATE runs use (throws when no report row exists). The OSS file
+     store no-ops — its birth evidence already sits in the working tree where the reader
+     looks. `readGuardEvidenceAt` gains a fallback: ONLY when the runId embedded in the
+     evidence path matches no `guard_runs` row (a matching run row is authoritative — a key
+     missing there is a miss), it resolves `<scenarioSeg>/<file>` against the repo's
+     `guard_results` evidence manifests (newest report holding the key, filtered in SQL via
+     `jsonb_exists`).
+   - **Write path.** Every ephemeral-checkout generate — onboarding, head-regen, and the
+     gate's cold generate — persists via a shared `persistBirthEvidence(store, ref,
+     checkoutDir, report)` helper — the `persistFailureEvidence` analogue (both share a
+     `collectEvidenceFiles` dir-reader) — that reads each birth finding's evidence dir out of
+     the checkout BEFORE cleanup and `putText`s + merges it onto the report row. Head-regen
+     and cold generate get it from `persistGeneratedGuardCorpus`; onboarding calls it after
+     its own `writeGuardResult`. The worker wiring is unchanged (both jobs use the default
+     pipelines).
+   - **Read path.** The dashboard `/guard/finding-evidence` route and the finding UI need NO
+     change — the fallback slots in beneath the existing `readGuardEvidenceAt` surface.
+   STATUS: BUILT (PR 2).
+
 31. **Conflict resolution redesign — SECTION-scoped, not doc-scoped (user decision
    2026-07-10).** Doc-level verdicts are the wrong tool for what conflicts actually are
    (one disagreement between two specific sections): "Use X only" amputates a whole good
@@ -823,7 +904,7 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    no longer matches a live claim is surfaced as orphaned, not silently honored. UI:
    dismiss action on the finding detail (inline actions stopPropagation per house rule),
    dismissed entries visible somewhere honest (coverage status + a way to review/undo).
-   STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count.
+   STATUS: BUILT — committable `scenarios/decisions.json` (`dismissedClaims`, identity = doc+anchor+extracted-claim-text); generate skips a dismissed claim before authoring, records a `dismissed` coverage gap (settles the section, releases held siblings), and reports `orphanedDismissals`; dashboard Dismiss/Un-dismiss on the finding detail + a `dismissed` coverage status; `guard status` shows the dismissed count. EE fix (2026-07-15): hosted generates now materialize the Pg-stored guard decisions into the ephemeral checkout (`materializeAndGenerateGuard`, every path including `skipMaterialize`) — before this the fresh clone had no `scenarios/decisions.json`, so a hosted regenerate re-authored every dismissed claim and held sections never released. Hosted live refresh (2026-07-15): background jobs announce settled work through the core `repo-lifecycle` seam (`repo.baseline`→`scan`, `repo.guard`→`guard-generate`, `guard.baseline`→`guard-run`); the dashboard server's socket layer installs the emitter (repoKey → registry slug → `spec:complete` into the `repo:<slug>` room), so an open Spec/Scenarios/Runs tab refreshes live when the auto-regen or a chained run lands — the hosted analog of the OSS routes' own `spec:complete`.
 
 
 
@@ -964,6 +1045,42 @@ into `packages/core/src/services/llm/spec-estimate.ts` alongside the existing su
 **Placement (user directive, 2026-07-03, made explicit 2026-07-07): Guard is a TOP-LEVEL
 SECTION** in the section switcher — a third module next to Code Analysis and BL Drift, never a
 tab inside BL Drift. Its tabs: Coverage (default), Drifts, Report.
+
+**PR-view baseline fallback for generate-side reads (user bug report 2026-07-15, hosted
+gate dogfood). STATUS: BUILT 2026-07-15.** A hosted PR-gate run persists ONLY the run at
+the PR head — the corpus/scenarios/manifest/generate-result it executed live at the
+BASELINE commit. The head-pinned guard reads returned nothing, so a PR showed a
+self-contradictory Spec Guard view: Coverage listed docs (the spec route already fell back
+to the baseline corpus, labelled `corpusCommit`) beside a "No spec corpus" empty state,
+Scenarios said "No scenarios yet" while Runs showed the 4 scenarios the gate just ran, and
+CLI copy (`spec scan` / `guard generate`) was meaningless for a hosted repo. Fix — the
+GENERATE-side reads fall back, per store, from a pinned PR head miss to the BASELINE
+commit (the set the gate actually executed; still never "newest by createdAt"):
+`storeGuardStaleness` (corpus/manifest/scenario-files/result — `hasRun` stays head-only),
+`listGuardScenarios` (whole-set fallback, labelled by the new
+`GuardScenarioInventory.scenariosCommit`, surfaced in the panel as "Showing the baseline
+scenarios — this PR didn't regenerate them."), `readGuardReport`, and the new
+`readManifestForView`/`readGuardResultForView` behind `/guard/status` + `/guard/coverage`
+(the RUN in those joins stays pinned to the head). Repo-level (no-ref) reads are
+untouched. Companion UX fix: stale/orphaned outcomes now carry a one-line explainer
+(`GuardStatusMeta.hint`) under the Runs-list group header and as the badge tooltip — the
+outcome name alone didn't tell users the scenario never executed.
+
+**PR run timeline in the Runs picker (user bug report 2026-07-15, follow-up to the
+baseline-fallback batch). STATUS: BUILT 2026-07-15.** Under a PR ref the Runs picker
+skipped `/guard/history` entirely (correct: baseline runs must never be listable in a PR
+view — pinned by test) but that threw out the PR's OWN runs, so "Recent runs" sat empty
+next to a painted head run. There is no per-attempt history to list — `guard_runs` is
+keyed `(repoKey, commitSha)` and a same-head re-run replaces the row — so the PR timeline
+is one run per pushed head. Fix: `/guard/history?pr=N` → core `readGuardHistoryForPr`
+resolves the PR's distinct head SHAs through the new `GuardGateHeadsLookup` seam
+(`guard-gate-pending.ts`, same idiom as the pending lookup; EE installs
+`createGuardGateHeadsLookup(gateStore)` over the gate-run records at boot, OSS leaves it
+unset ⇒ empty) and joins each head to its stored run via `readGuardRunForCommit` — a head
+whose gate errored before storing a run is skipped (only selectable runs list). Client:
+`useGuardRuns`/`GuardDriftsView` take `prNumber` and fetch the pr-scoped history under a
+PR ref; selecting an older head's run loads it through the existing `/guard/runs/:runId`.
+Baseline runs stay unlistable.
 
 **First-run coverage fixes (user bug reports 2026-07-07, post-scan fresh store — eighth
 review pass).** Four defects found running the published build on a scan-only store (corpus
@@ -1402,12 +1519,124 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   programmatic-API tier (sections already classified; sandbox package-link mechanism
   prototyped in PR #755, closed unmerged — revive on driver start). STATUS: NOT
   STARTED (post-v1)
-- **Phase 8 — EE adaptation.** Only after the OSS loop (Phases 0–5) is proven on real repos:
-  guard store behind the EE storage adapters (Postgres/blob, repo read-only), PR-scoped guard
-  runs (baseline anchored to PR-head, per-PR overlay — same pattern as spec PR-scoping), an
-  additive gate check powered by guard runs (the verify-drift signal stays), hosted execution
-  tier (warm per-repo snapshots, credential rotation), spec-section coverage in the EE repo
-  views. STATUS: NOT STARTED (after OSS v1)
+- **Phase 8 — EE adaptation: hosted Guard replaces the verify drift gate.** Guard becomes the
+  enterprise PR gate — scenarios generated server-side from the spec corpus, run on every PR,
+  posting the gate Check with a new engine. STATUS: IN PROGRESS (branch `sm/spec-guards-ee`,
+  working tree awaiting review). EE swaps seams, not logic: the file store becomes Postgres +
+  blob behind the `GuardStore` interface, execution goes behind the `GuardExecutor` seam,
+  child processes get a minimal explicitly-constructed env (no DB URL / master secret / App
+  key), and gate runs are durable jobs under a bounded worker pool with per-phase timeouts.
+  Diff-gate semantics: the Check fails ONLY on scenarios that pass on base and fail on head;
+  repo + PR-overlay dismissals honored, held scenarios excluded, stale/orphaned bindings become
+  annotations, infra/build/timeout/generation failures settle as an error Check, a genuine
+  absence of spec docs is neutral. Detailed issue tracking lives in the external
+  guard-ee-hosted-gate tracker; the decided sub-phases:
+  - **08.01 — Guard schema + Pg guard store.** Additive drizzle migration; scenario/run/decision
+    persistence + blob-evidence pointers behind the `GuardStore` seam. STATUS: BUILT (awaiting review).
+  - **08.02 — GuardExecutor seam + minimal-env execution.** The single injected `GuardExecutor`
+    function (checkout + scenarios + recipe → run report) at the customer-code boundary; minimal
+    child env. STATUS: BUILT (awaiting review).
+  - **08.03 — Onboarding generate job + `guard` capability.** Repo connect enqueues a server-side
+    generate against the default branch; the `guard` capability advertised only after the guard
+    subsystem (store/jobs/routes) registers. STATUS: BUILT (awaiting review).
+  - **08.04 — Gate-execution durable job + diff Check (warm path).** The webhook enqueues gate
+    execution; the Check sits in-progress while queued; new-failures-vs-base verdict, kill-switch
+    neutral, stale annotations, error-vs-neutral settlement, abort-signal cancellation.
+    STATUS: BUILT (awaiting review).
+  - **08.05 — Cold-generate at gate + spec-change checkbox regen.** First-contact cold-generate on
+    the gate's own checkout (persisted under the commit, never neutral-until-noticed); a
+    spec-doc-changing PR is offered a checkbox comment that regenerates scenarios for the head and
+    re-gates. STATUS: BUILT (awaiting review).
+  - **08.06 — Merge baseline refresh + deploy backfill.** The `guard.baseline` durable job
+    (pending-buffer coalescing, shared gate limiter) refreshes the baseline on merge to the default
+    branch; a one-time deploy backfill enqueues generate + baseline run for every connected repo.
+    STATUS: BUILT (awaiting review).
+  - **08.07 — Hosted PR-scoped dashboard guard views + evidence.** The EE Guard lens as a third
+    repo-console lens (Coverage / Scenarios / Runs), PR-scoped via the head-SHA tab-ref pattern,
+    with per-PR deep links in the Pulls feed and the evidence transcript viewer. STATUS: BUILT
+    (awaiting review).
+  - **08.08 — PR dismissals overlay + merge promotion.** Per-PR scenario dismissals kept as an
+    overlay that promotes into the repo's decisions on merge — the spec-decisions carry-over pattern.
+    STATUS: BUILT (awaiting review).
+  - **08.09 — Retire verify-gate consumers + guard-failure emails + docs.** Verify runs, the
+    drift Check content, inline drift comments, drift-failure emails, the infer checkbox, and the
+    workspace-contracts job retire; guard-failure emails (Resend, per-repo `notifyEmails`,
+    `gateFailure` pref, sent on Check FAILURE only) take over the notification role. The guard
+    Check posts as `TrueCourse / Spec Guard`; the `TrueCourse / Code Quality` violations gate stays
+    as a separate signal. Contract generation code and stores stay dormant-but-intact (see the
+    RETIREMENT DECIDED note above — they are the future spec→code linking half). Workspace-level
+    (cross-repo) contracts drop in v1: a documented known regression (data preserved, returns with
+    the spec→code work). STATUS: BUILT 2026-07-14 (sm/spec-guards-ee, awaiting review).
+  - **08.10 — Open-conflict gate parity + blocked-generation surface.** The OSS guard-generate
+    conflict gate silently never fired in EE (`assertNoOpenConflicts` read the corpus through the
+    active spec store keyed by the ephemeral checkout path — a Pg miss), so birth generation ran
+    over conflicted corpora: both sides extracted, disputed sections failed birth and settled
+    nothing, leaving an empty scenario set with a populated Runs tab. Root fix: the gate reads the
+    on-disk materialized `specs/{corpus,decisions}.json` (the generator's own doc authority), and
+    the EE materialize step writes `decisions.json` alongside the corpus (also unblocks losing-side
+    claim suppression). All three EE entry points handle the gate: onboarding and spec-regen catch
+    `OpenConflictsError` and persist a `status: 'open-conflicts'` report (no scenarios, no chained
+    baseline run — `generateWasBlocked` suppresses it), the gate's cold-generate settles the Check
+    NEUTRAL ("pending spec-conflict resolution", never the error bucket). Blocked outcome notifies
+    in-app (warning) and emails via the previously-stub `conflicts` pref
+    (`sendGuardConflictsBlocked`). Dashboard: Scenarios tab renders a blocked panel with the LIVE
+    open-conflict list (corpus-derived, never snapshotted in the report) deep-linking into the
+    Coverage resolver; Runs tab empty state gets the one-line variant. A repo-scope decision that
+    clears the last conflict while the guard report is blocked auto-enqueues a hosted guard
+    generate (core seam installed by the EE server, alongside the contracts refresh). OSS behavior
+    unchanged (interactive hard-fail, nothing persisted). STATUS: BUILT 2026-07-14
+    (sm/spec-guards-ee, awaiting review).
+  - **08.11 — Review-hardening pass (Check lifecycle + read anchoring + queue bounds).** Fixes
+    from the pre-merge review, each pinned by a test. Check lifecycle: a duplicate delivery
+    reuses the head's existing queued/in-progress Check run (`findActiveCheck`) instead of
+    opening a newer run that would shadow the verdict; the head run + evidence persist BEFORE
+    the verdict Check posts (a store failure becomes an infra-error Check, never flips a posted
+    verdict); a THROWN enqueue settles only a run the delivery itself created and marks the
+    tracked job row failed so the single-flight key frees; stored gate runs carry an optional
+    `corpusFingerprint` (sha256 over scenario ids + binds) and the redelivery fast path only
+    accepts a stored run whose fingerprint matches the committed corpus — a force spec-regen
+    run at the head can no longer flip a red PR green on reopen (untagged legacy runs stay
+    accepted). Read anchoring: no-ref hosted reads of the manifest/generate-result resolve
+    through the baseline scope like every other reader (a PR's regenerated corpus never leaks
+    into repo-level status/coverage), and the job-chain consumers (`hasGuardState`, the
+    conflict-resolution and last-dismissal regen hooks) read at the repo baseline commit — no
+    baseline means no state, never "newest row". Client: PR guard tabs hold behind
+    `GuardPrScopeGate` until the head SHA resolves (loading / explicit "gate hasn't run"
+    states), `useGuardRuns` drops selection+cache on scope change, and dismissals are inert
+    while the scope is unresolved (`guardReadsEnabled`). Queue bounds: onboarding + baseline
+    clones fold a 5-minute wall-clock bound with the job's abort signal (`boundedCloneSignal`;
+    `repo.guard` threads `ctx.signal`), so a hung clone can no longer occupy a worker slot
+    forever. STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
+  - **08.12 — Spec-regen offer email.** When the spec-change checkbox offer is FIRST posted on a
+    PR, the repo's `notifyEmails` also get an email pointer to it (`sendGuardSpecRegenOffer`:
+    changed-doc list capped at 10, single CTA deep-linking the checkbox comment via its
+    `#issuecomment-<id>` anchor — no dashboard link, the action lives on GitHub). First offer per
+    PR only: re-arms on later spec-touching pushes stay silent (the existing comment is the dedup,
+    no new state). Fire-and-forget after `createComment` succeeds — an email failure never fails
+    or slows the offer; forks included (the email follows wherever the offer goes). Gated on
+    Resend configured + non-empty `notifyEmails` + the new `specRegen` notification pref (third
+    key in `GithubNotificationPrefs`, default on, PATCHable like its siblings, settings toggle
+    "Spec changes"). STATUS: BUILT 2026-07-15 (sm/spec-guards-ee, awaiting review).
+  - **08.13 — PR-scoped dismissals regenerate the PR head.** Two gaps found dogfooding PR
+    dismissals (a PR dismissal wrote the overlay but nothing ever regenerated, so the held
+    section and its findings were zombies): (1) `materializeAndGenerateGuard` gains a `pr`
+    option — a PR-head regen merges the PR's `_pr/<n>` decisions overlay over the repo row
+    (via the now-exported `prGuardDecisionsRef` + `mergeGuardDecisions`) before materializing
+    `scenarios/decisions.json`, the generate-side analog of the gate's `foldDismissals`;
+    the head-regen pipeline passes its `prNumber`. (2) A PR-scoped dismissal that leaves the
+    PR with ZERO active findings enqueues the durable `guard.spec-regen` job for that PR head
+    — the PR analog of the repo-scope last-dismissal regen, riding the new core
+    `setGuardPrRegenEnqueue` seam. The route pins the PR's report at its latest gated head
+    (heads-lookup seam) and derives "active" from the MERGED decisions (repo ∪ overlay); the
+    EE installer (`createGuardPrRegenEnqueue`) resolves the live PR (base/head/fork) from
+    GitHub and assembles the request through the checkbox handler's shared
+    `buildGuardSpecRegenRequest` (one place for the base-branch fallback + fork detection),
+    no-ops when the repo's gate is disabled (the job re-gates), and enqueues with
+    `commentId: null` — the spec-regen job's checkbox-comment updates are skipped when there
+    is no comment to settle (`commentId` is now nullable). STATUS: BUILT 2026-07-15
+    (sm/spec-guards-ee, awaiting review).
+  - **Hosted execution tier** — ephemeral job containers / sandboxing, warm per-repo snapshots,
+    credential rotation (v1 consciously accepts minimal-env in-app child processes). STATUS: NOT STARTED.
 
 Phases 0–5 are the OSS v1. Phases 6–7 (new drivers) and Phase 8 (EE) are independent tracks
 after that — order between them is a call to make when OSS v1 ships.
@@ -1432,10 +1661,14 @@ the existing sample-project fixtures for engine tests.
   changed sections/code becomes the default and full runs move to the gate.
 - **CLIs with unavoidable nondeterminism** beyond the normalizer set (random ids in output,
   locale-dependent formatting) — extend normalizers case-by-case; never add retries.
-- **Two verification systems coexist** (contract verify + guard run) until retirement is decided
-  — the dashboard and docs must keep the two vocabularies clearly apart so users aren't confused
-  about which drift is which.
-- **EE workspace contracts** (Knowledge plan) still produce `.tc` — if guard eventually replaces
-  contracts, EE needs its own answer (workspace-level scenarios?). Out of scope here.
+- **Two verification systems coexist** (contract verify + guard run) — RESOLVED: the verify
+  surface was fully removed on 2026-07-13 (item 24) and guard is now the only user-facing
+  verification engine, so the vocabularies no longer overlap. The contract generation engine
+  remains in-process (dormant, the future spec→code linking half — not a competing "drift").
+- **EE workspace contracts** (Knowledge plan): the workspace-contracts job retired with the
+  Phase-8 gate swap, and guard has no cross-repo equivalent yet — workspace-level (cross-repo)
+  scenarios are a later design. The loss of the cross-repo ripple is a **documented known v1
+  regression** (data preserved, feature returns with the spec→code linking work); the client
+  Knowledge surface points at guard rather than presenting workspace contracts as live.
 - **`infer`** stays contract-native. Whether an infer-equivalent exists in the guard world
   (generating scenarios for *undocumented* behavior) is deliberately deferred.

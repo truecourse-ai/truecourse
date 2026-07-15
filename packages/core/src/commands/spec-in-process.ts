@@ -49,6 +49,12 @@ import {
 } from '@truecourse/contract-extractor';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
+
+export type {
+  DecisionsFile,
+  ConflictResolution,
+  CuratedCorpus,
+} from '@truecourse/spec-consolidator';
 import {
   agentTransport,
   getDefaultTransport,
@@ -99,7 +105,6 @@ import { createHash } from 'node:crypto';
 import {
   saveContracts,
   loadContracts,
-  saveWorkspaceContracts,
   type RepoRef,
   type WorkspaceRef,
 } from '../lib/contract-store.js';
@@ -109,9 +114,11 @@ import {
   deleteSpec,
   loadLatestSpec,
   saveWorkspaceSpec,
+  loadWorkspaceSpec,
   specsMaterializeInPlace,
 } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
+import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
 import {
   reapplyPromoted,
   applyInferredActions,
@@ -893,10 +900,11 @@ function resolverHardError(result: {
 //
 // External KB sources (Confluence, …) are synced as in-memory markdown. The
 // corpus engine is disk-based, so we materialize the docs into a TRANSIENT
-// scratch tree, run curate + corpus-generate over it exactly like a repo, then
-// persist the curated corpus + the generated `.tc` contracts under WORKSPACE
-// scope (Postgres in EE). The scratch tree — and the bodies — are deleted after.
-// Unchanged docs hit the per-doc / per-slice caches → ~0 LLM on re-sync.
+// scratch tree, run curate over it exactly like a repo, then persist the curated
+// corpus under WORKSPACE scope (Postgres in EE). The scratch tree — and the
+// bodies — are deleted after. Unchanged docs hit the per-doc caches → ~0 LLM on
+// re-sync. Scenario generation runs separately (the auto-chained workspace guard
+// job); this path is corpus-only.
 // ---------------------------------------------------------------------------
 
 /** One source document handed to the workspace corpus sync. The body is transient. */
@@ -912,25 +920,31 @@ export interface WorkspaceDocInput {
 export interface WorkspaceCorpusSyncResult {
   /** Areas in the curated workspace corpus. */
   areaCount: number;
-  /** Workspace `.tc` files generated and stored. */
-  contractFileCount: number;
-  /** Validation issues surfaced by generate (0 = clean). */
-  validationIssues: number;
 }
 
 /**
- * Curate + generate workspace Knowledge contracts on the corpus path and persist
- * them under workspace scope. Returns counts for the sync notice. Best-effort
- * generate: a resolver-hard corpus throws (the caller surfaces it); otherwise the
- * `.tc` corpus is replaced wholesale.
+ * Curate the workspace Knowledge docs on the corpus path and persist the curated
+ * corpus under workspace scope. Returns the area count for the sync notice.
+ * Scenario generation runs separately (the auto-chained workspace guard job); this
+ * path is corpus-only — it never generates or stores workspace `.tc` contracts.
  */
 export async function syncWorkspaceCorpusInProcess(options: {
   workspaceOrgId: string;
   docs: WorkspaceDocInput[];
+  /**
+   * The workspace's curation decisions (force includes/excludes, conflict
+   * verdicts). Materialized as `decisions.json` in the scratch tree so curate
+   * folds them exactly as it does for a repo — a force-exclude drops its doc, a
+   * verdict marks its conflict resolved. Omit for an un-curated sync.
+   */
+  decisions?: DecisionsFile;
   tracker?: StepTracker;
-  source?: TelemetrySource;
   llm?: 'cli' | 'agent';
   io?: string;
+  // --- test seams (mirror curateInProcess(); production passes none) --------
+  relevanceRunner?: CurateInProcessOptions['relevanceRunner'];
+  areaTagRunner?: CurateInProcessOptions['areaTagRunner'];
+  disableOverlapDetection?: boolean;
 }): Promise<WorkspaceCorpusSyncResult> {
   const ref: WorkspaceRef = { workspaceOrgId: options.workspaceOrgId };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-corpus-'));
@@ -941,66 +955,94 @@ export async function syncWorkspaceCorpusInProcess(options: {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, doc.markdown, 'utf-8');
     }
+    // Materialize the decisions BEFORE curate so it reads them from the tree, the
+    // same channel a repo uses (curate reads `.truecourse/specs/decisions.json`).
+    if (options.decisions) writeDecisions(tmp, options.decisions);
 
     const { curate: curateResult } = await curateInProcess(tmp, {
       tracker: options.tracker,
       skipGit: true,
       llm: options.llm,
       io: options.io,
+      relevanceRunner: options.relevanceRunner,
+      areaTagRunner: options.areaTagRunner,
+      disableOverlapDetection: options.disableOverlapDetection,
     });
     // Persist the curated corpus under workspace scope (the dashboard reads it).
     await saveWorkspaceSpec(ref, 'corpus', curateResult.corpus);
-
-    const { corpus } = await generateFromCorpusInProcess(tmp, {
-      llm: options.llm,
-      io: options.io,
-      tracker: options.tracker,
-    });
-    if (corpus.kind === 'failed') throw corpus.error;
-    if (corpus.kind === 'skipped') {
-      // No areas to generate from → clear any stale workspace corpus.
-      await saveWorkspaceContracts(ref, 'contracts', {});
-      return { areaCount: curateResult.stats.areaCount, contractFileCount: 0, validationIssues: 0 };
-    }
-
-    const files = readContractTree(path.join(tmp, '.truecourse', 'contracts'));
-    await saveWorkspaceContracts(ref, 'contracts', files);
-
-    if (options.source) {
-      await trackEvent('contracts_generate', {
-        source: options.source,
-        artifactsWrittenRange: bucketFileCount(Object.keys(files).length),
-        validationIssues: corpus.result.validationIssues.length,
-        durationRange: bucketDuration(0),
-      });
-    }
-    return {
-      areaCount: curateResult.stats.areaCount,
-      contractFileCount: Object.keys(files).length,
-      validationIssues: corpus.result.validationIssues.length,
-    };
+    return { areaCount: curateResult.stats.areaCount };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-/** Walk a `.tc` contract tree into a `{ posix relPath → content }` map. */
-function readContractTree(root: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!fs.existsSync(root)) return out;
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(abs);
-      } else if (entry.isFile() && entry.name.endsWith('.tc')) {
-        const rel = path.relative(root, abs).split(path.sep).join('/');
-        out[rel] = fs.readFileSync(abs, 'utf-8');
-      }
-    }
+// ---------------------------------------------------------------------------
+// Workspace inheritance (enterprise) — a connected repo folds its workspace
+// Knowledge corpus into its own spec before curate/generate.
+//
+// Inheritance is a materialization problem, not a connector one: the workspace
+// layer is a set of STORED doc bodies (namespaced `knowledge/<kind>/<id>.md`) plus
+// the workspace decisions. `materializeWorkspaceInheritance` writes those bodies
+// into a checkout and folds the workspace decisions UNDER the repo's own (repo
+// wins), so the repo's curate sees one doc universe with the workspace layer
+// pre-resolved. The doc bodies are resolved through the `spec-inheritance-hook`
+// seam (EE installs it; OSS/tests leave it unset → the repo curates alone).
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold the workspace decisions layer UNDER a repo's own — the decisions analog of
+ * workspace doc-body inheritance. Pure. The repo overlay wins per identity on every
+ * dimension (the same {@link mergeDecisions} keying `buildCorpusConflicts` uses): a
+ * workspace-resolved conflict arrives pre-resolved, and a repo verdict on a
+ * cross-layer conflict — written at repo scope — supersedes it.
+ */
+export function mergeInheritedDecisions(workspace: DecisionsFile, repo: DecisionsFile): DecisionsFile {
+  return mergeDecisions(workspace, repo);
+}
+
+/**
+ * Materialize the workspace Knowledge layer into `repoRoot` before curate/generate:
+ * write every workspace doc body at its namespaced `knowledge/<kind>/<id>.md` path
+ * (the same paths the workspace ledger stores, so the repo's curate hits the caches
+ * the workspace already paid for) and return the effective decisions to curate with
+ * — the workspace decisions folded under `repoDecisions` (repo wins). Inert when no
+ * inheritance seam is installed (OSS) or the repo inherits nothing: the passed
+ * `repoDecisions` are returned unchanged and `inherited` is false. Best-effort reads
+ * only — never mutates repo state.
+ */
+export async function materializeWorkspaceInheritance(
+  repoRoot: string,
+  repoKey: string,
+  repoDecisions: DecisionsFile,
+): Promise<{ decisions: DecisionsFile; inherited: boolean }> {
+  const hook = getSpecInheritanceHook();
+  if (!hook) return { decisions: repoDecisions, inherited: false };
+  const layer = await hook(repoKey);
+  if (!layer) return { decisions: repoDecisions, inherited: false };
+  for (const doc of layer.docs) {
+    const dest = path.join(repoRoot, doc.docPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, doc.markdown, 'utf-8');
+  }
+  return { decisions: mergeInheritedDecisions(layer.decisions, repoDecisions), inherited: true };
+}
+
+/**
+ * A stable content signature of a curated corpus — the sha over its meaningful
+ * structure with the volatile fields zeroed (the top-level `generatedAt` and each
+ * doc's `lastTouched`, both of which move on every run/sync without any content
+ * change). Two corpora with the same signature curate to the same doc universe, so
+ * the workspace ripple compares it before/after a process to skip re-scanning the
+ * org's repos when nothing meaningful changed. Null corpus → the empty signature.
+ */
+export function corpusContentSha(corpus: CuratedCorpus | null): string {
+  if (!corpus) return '';
+  const stable = {
+    ...corpus,
+    generatedAt: '',
+    docs: corpus.docs.map((d) => ({ ...d, lastTouched: '' })),
   };
-  walk(root);
-  return out;
+  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
 }
 
 export interface InferInProcessOptions {
@@ -1211,7 +1253,8 @@ function autodetectCodeDir(repoRoot: string): string {
 // document, not a per-commit snapshot. The dashboard read/edit routes use these.
 // ---------------------------------------------------------------------------
 
-const EMPTY_DECISIONS: DecisionsFile = {
+/** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
+export const EMPTY_DECISIONS: DecisionsFile = {
   version: 1,
   manualIncludes: [],
   manualExcludes: [],
@@ -1665,5 +1708,71 @@ export async function removeConflictResolution(
 ): Promise<DecisionsFile> {
   const next = applyRemoveConflictResolution(await loadDecisions(repoRoot, opts), input);
   await storeDecisions(repoRoot, next, opts);
+  return next;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace decisions (enterprise) — the org-scoped analog of the repo decision
+// mutations above. Same pure DecisionsFile transforms, persisted under WORKSPACE
+// scope (the `workspace_spec_sets` `decisions` artifact, keyed by org, no commit).
+// The EE Knowledge page's decision endpoints call these; a workspace has no PR
+// overlay dimension, so there is no `pr` opt. Each write is followed (by the
+// caller) with a re-process so the corpus reflects the decision.
+// ---------------------------------------------------------------------------
+
+async function loadWorkspaceDecisions(org: string): Promise<DecisionsFile> {
+  return (await loadWorkspaceSpec<DecisionsFile>({ workspaceOrgId: org }, 'decisions')) ?? EMPTY_DECISIONS;
+}
+
+async function storeWorkspaceDecisions(org: string, next: DecisionsFile): Promise<void> {
+  await saveWorkspaceSpec({ workspaceOrgId: org }, 'decisions', next);
+}
+
+/** The workspace's current decisions (the Knowledge page read), or empty when none. */
+export function getWorkspaceDecisions(org: string): Promise<DecisionsFile> {
+  return loadWorkspaceDecisions(org);
+}
+
+export async function addWorkspaceManualInclude(org: string, docPath: string): Promise<DecisionsFile> {
+  const existing = await loadWorkspaceDecisions(org);
+  const next = applyAddManualInclude(existing, docPath);
+  if (next !== existing) await storeWorkspaceDecisions(org, next);
+  return next;
+}
+
+export async function removeWorkspaceManualInclude(org: string, docPath: string): Promise<DecisionsFile> {
+  const next = applyRemoveManualInclude(await loadWorkspaceDecisions(org), docPath);
+  await storeWorkspaceDecisions(org, next);
+  return next;
+}
+
+export async function addWorkspaceManualExclude(org: string, docPath: string): Promise<DecisionsFile> {
+  const existing = await loadWorkspaceDecisions(org);
+  const next = applyAddManualExclude(existing, docPath);
+  if (next !== existing) await storeWorkspaceDecisions(org, next);
+  return next;
+}
+
+export async function removeWorkspaceManualExclude(org: string, docPath: string): Promise<DecisionsFile> {
+  const next = applyRemoveManualExclude(await loadWorkspaceDecisions(org), docPath);
+  await storeWorkspaceDecisions(org, next);
+  return next;
+}
+
+export async function addWorkspaceConflictResolution(
+  org: string,
+  input: ConflictResolution,
+): Promise<DecisionsFile> {
+  const next = applyAddConflictResolution(await loadWorkspaceDecisions(org), input);
+  await storeWorkspaceDecisions(org, next);
+  return next;
+}
+
+export async function removeWorkspaceConflictResolution(
+  org: string,
+  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+): Promise<DecisionsFile> {
+  const next = applyRemoveConflictResolution(await loadWorkspaceDecisions(org), input);
+  await storeWorkspaceDecisions(org, next);
   return next;
 }

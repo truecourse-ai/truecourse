@@ -101,7 +101,7 @@ function depsWith(octokit: any, codeQualityAdded: any): GateHandlerDeps {
   return {
     store,
     octokitFor: () => octokit,
-    runVerify: async () => ({ baseSha: 'basesha', headSha: 'headsha', codeQualityAdded }),
+    runAnalyze: async () => ({ baseSha: 'basesha', headSha: 'headsha', codeQualityAdded }),
   } as unknown as GateHandlerDeps;
 }
 

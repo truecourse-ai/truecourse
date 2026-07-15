@@ -11,7 +11,7 @@
  * is surfaced as-is, never retried.
  */
 
-import { runGuard, type GuardRunStepStats, type GuardNoOpAnomaly } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type Recipe, type GuardRunStepStats, type GuardNoOpAnomaly } from '@truecourse/guard-runner'
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { ExtractedClaim } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
@@ -33,6 +33,17 @@ export interface BirthOutcome {
 }
 
 export interface BirthOptions {
+  /**
+   * The execution seam every candidate runs through (REQUIRED). The OSS default runs
+   * in-process; EE swaps in a hosted executor. Threaded from `generateGuards`, which
+   * resolves it from core's `getGuardExecutor()`.
+   */
+  executor: GuardExecutor
+  /**
+   * The recipe to build + run against (REQUIRED). The generate flow already has the
+   * discovered/loaded recipe, so it's passed IN rather than re-read from disk.
+   */
+  recipe: Recipe
   /** Reuse the prior round's build (the working tree hasn't changed between rounds). */
   skipBuild?: boolean
   branch?: string | null
@@ -68,12 +79,13 @@ const ZERO_STEP_STATS: GuardRunStepStats = { executedSteps: 0, noOpSteps: 0, thr
 export async function birthValidate(
   repoRoot: string,
   candidates: BirthCandidate[],
-  opts: BirthOptions = {},
+  opts: BirthOptions,
 ): Promise<BirthResult> {
   if (candidates.length === 0) return { outcomes: [], stepStats: { ...ZERO_STEP_STATS }, anomaly: null }
 
-  const res = await runGuard({
-    repoRoot,
+  const res = await opts.executor({
+    checkoutDir: repoRoot,
+    recipe: opts.recipe,
     scenarios: candidates.map((c) => c.scenario),
     persist: false,
     skipBuild: opts.skipBuild,
@@ -85,12 +97,7 @@ export async function birthValidate(
   })
 
   if (res.status !== 'ok') {
-    const message =
-      res.status === 'build-failed'
-        ? `build failed (\`${res.build.command}\`)${res.build.timedOut ? ' — timed out' : ''}`
-        : res.status === 'invalid-recipe'
-          ? res.message
-          : 'no runnable recipe'
+    const message = runFailureMessage(res)
     return {
       outcomes: candidates.map((candidate) => ({
         candidate,
@@ -121,5 +128,5 @@ export async function birthValidate(
         failure: { step: 1, expected: 'a run result', actual: 'scenario was not executed' },
       },
   }))
-  return { outcomes, stepStats: res.stepStats, anomaly: res.anomaly }
+  return { outcomes, stepStats: res.stepStats ?? { ...ZERO_STEP_STATS }, anomaly: res.anomaly ?? null }
 }

@@ -29,7 +29,7 @@ export interface RepoLinkRecord {
   /** Owning TrueCourse workspace (WorkOS org). */
   workspaceOrgId: string;
   defaultBranch: string;
-  /** When true (default) a PR with new drift fails a required Check; false = advisory. */
+  /** When true (default) a PR with newly failing Spec Guard scenarios fails a required Check; false = advisory. */
   blocking: boolean;
   /** Code Quality gate: when true (default) new violations at/above
    *  `codeQualityMinSeverity` fail a required Check; false = advisory. */
@@ -37,7 +37,7 @@ export interface RepoLinkRecord {
   /** Min new-violation severity that fails the Code Quality Check (default `high`). */
   codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical';
   enabled: boolean;
-  /** Addresses notified (via Resend) when the gate fails. */
+  /** Addresses notified (via Resend) when the Spec Guard gate fails. */
   notifyEmails?: string[];
   /** Per-type email toggles. Absent = every type on (the default). */
   notifications?: GithubNotificationPrefs;

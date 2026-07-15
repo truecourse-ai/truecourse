@@ -24,9 +24,13 @@ import {
   loadSpec,
   specsMaterializeInPlace,
 } from '@truecourse/core/lib/spec-store';
-import { listContractFiles, contractsMaterializeInPlace } from '@truecourse/core/lib/contract-store';
+import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
+import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { getSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
+import { getKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import { readGuardResultForView } from '@truecourse/core/commands/guard-read';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
   addConflictResolution,
@@ -94,6 +98,32 @@ async function loadCorpusForRef(
   return { corpus: null };
 }
 
+/**
+ * Tag + enrich the corpus's workspace-inherited docs (hosted). A connected repo
+ * folds its workspace Knowledge corpus into its own spec, so refs that start
+ * `knowledge/` are inherited docs: mark them `layer: 'workspace'` and — through the
+ * ledger-reader seam (EE installs it; unset ⇒ refs only) — attach the source's human
+ * title + deep-link for display. Repo-local docs are untouched, and OSS (in-place
+ * store) is inert: it has no inherited docs and no seam. Only optional display
+ * fields are added; identity is unchanged.
+ */
+export async function enrichWorkspaceLayer(
+  repoKey: string,
+  corpus: CuratedCorpus | null,
+): Promise<CuratedCorpus | null> {
+  if (!corpus || specsMaterializeInPlace()) return corpus;
+  const inheritedRefs = corpus.docs.filter((d) => d.ref.startsWith('knowledge/')).map((d) => d.ref);
+  if (inheritedRefs.length === 0) return corpus;
+  const reader = getKnowledgeLedgerReader();
+  const meta = reader ? await reader(repoKey, inheritedRefs) : new Map();
+  const docs = corpus.docs.map((d) => {
+    if (!d.ref.startsWith('knowledge/')) return d;
+    const m = meta.get(d.ref);
+    return { ...d, layer: 'workspace' as const, ...(m ? { title: m.title, url: m.url } : {}) };
+  });
+  return { ...corpus, docs };
+}
+
 async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promise<SpecCorpusPayload> {
   const { corpus, corpusCommit } = await loadCorpusForRef(repoPath, ref);
   // PR view: fold the PR's decisions overlay so resolved conflicts render.
@@ -103,7 +133,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
   );
   return {
-    corpus,
+    corpus: await enrichWorkspaceLayer(repoPath, corpus),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -113,19 +143,20 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
 
 // The PR-scoped payload for a mutation response: the freshly re-curated corpus
 // (saved at the PR head) + the effective decisions folding the PR overlay.
-function prCorpusPayload(
+async function prCorpusPayload(
   repoPath: string,
   pr: number,
   ref: string,
   corpus: CuratedCorpus | null,
 ): Promise<SpecCorpusPayload> {
-  return getDecisions(repoPath, { pr }).then((decisions) => ({
-    corpus,
+  const decisions = await getDecisions(repoPath, { pr });
+  return {
+    corpus: await enrichWorkspaceLayer(repoPath, corpus),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
     corpusCommit: corpus ? ref : undefined,
-  }));
+  };
 }
 
 router.get(
@@ -236,6 +267,35 @@ async function enqueueContractsRefresh(repoKey: string): Promise<void> {
   }
 }
 
+// A repo-scope decision cleared the last conflict, so an earlier guard generate
+// that ended BLOCKED on those conflicts can finally author its scenarios. Enqueue a
+// hosted guard generate through the core seam (EE installs it; OSS/tests leave it
+// unset → no-op). Best-effort: a failed enqueue never fails the decision save.
+async function enqueueGuardGenerateRefresh(repoKey: string): Promise<void> {
+  const enqueue = getGuardGenerateEnqueue();
+  if (!enqueue) return;
+  try {
+    await enqueue(repoKey);
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
+}
+
+// The same conflict-clearing decision also makes the hosted repo re-scan its
+// baseline (force — the commit hasn't moved) so the store corpus re-curates and the
+// conflict-free scan chains scenario generation. Dispatch through the core seam (EE
+// installs it; OSS/tests leave it unset → OSS re-scans via its own manual Scan step).
+// Best-effort: a failed enqueue never fails the decision save.
+async function enqueueBaselineScanRefresh(repoKey: string): Promise<void> {
+  const hook = getSpecConflictsResolvedHook();
+  if (!hook) return;
+  try {
+    await hook(repoKey);
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
+}
+
 // EE only. After a decision edit, re-curate the stored corpus and — only if it is
 // now conflict-free — enqueue a contract regeneration. This is the EE analog of the
 // OSS "resolve conflicts, then click Generate" flow: contracts regenerate the moment
@@ -243,11 +303,27 @@ async function enqueueContractsRefresh(repoKey: string): Promise<void> {
 // cheap re-curate). Regeneration triggers off ANY decision that clears the last
 // conflict — a verdict/dismissal OR an exclude — since either can be the one that
 // resolves it. OSS regenerates via the manual Generate step, so this is a no-op there.
+//
+// The same conflict-clearing decision also drives the hosted repo's self-generation.
+// It re-scans the baseline (enqueueBaselineScanRefresh) so the store corpus
+// re-curates and the conflict-free scan chains generation, AND — if the repo's
+// current generate report is `open-conflicts` (a generate that stopped before
+// authoring any scenarios) — enqueues a hosted guard generate so scenarios are
+// authored even when the scan's onboarding chain sees an existing (blocked) report.
+// The guard-store read is gated on `openConflicts === 0` so the hot path (conflicts
+// still remain) never touches it. The report is the REPO-level view read (the
+// baseline commit's row) — never the store's newest row, which a PR head's
+// regenerated `ok` report would shadow, silently skipping the unblock generate.
 async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
-  if (contractsMaterializeInPlace()) return;
+  if (specsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
   if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
     await enqueueContractsRefresh(repoKey);
+    await enqueueBaselineScanRefresh(repoKey);
+    const report = await readGuardResultForView(repoKey);
+    if (report?.status === 'open-conflicts') {
+      await enqueueGuardGenerateRefresh(repoKey);
+    }
   }
 }
 
@@ -315,7 +391,7 @@ async function mutateSpecDecision(
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!contractsMaterializeInPlace()) {
+  if (!specsMaterializeInPlace()) {
     await mutate();
     await recurateAndRegenIfResolved(repoPath);
     res.json(await corpusPayload(repoPath));
@@ -450,7 +526,7 @@ async function mutateConflictResolution(
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!contractsMaterializeInPlace()) {
+  if (!specsMaterializeInPlace()) {
     // EE repo scope: re-curate is how EE decisions flow; return the full corpus
     // (folding the recorded verdict), same as an include/exclude edit.
     await mutate();
@@ -565,7 +641,7 @@ router.get(
       // stat, and the gate produces spec → contracts TOGETHER per commit, so the
       // latest stored sets are always in sync. Report existence from the stores;
       // nothing is stale.
-      if (!contractsMaterializeInPlace()) {
+      if (!specsMaterializeInPlace()) {
         const [corpus, contractFiles] = await Promise.all([
           loadLatestSpec<unknown>(repo.path, 'corpus'),
           listContractFiles(repo.path, 'contracts'),

@@ -1,7 +1,7 @@
 /**
  * Compact pill filter bar — a labeled row of count pills with single-select
- * toggle-off semantics (click a pill to filter to it; re-click clears). Shared by
- * the Verify drift list (severity) and the Inferred list (confidence) so the filter
+ * toggle-off semantics (click a pill to filter to it; re-click clears). A generic
+ * filter affordance for count-keyed lists (e.g. by severity or confidence) so the
  * affordance is identical across tabs. Renders nothing when there are no options.
  */
 

@@ -34,6 +34,14 @@ export interface DocSection {
   headingText: string
   /** Heading level 1–6; `0` for the whole-document (non-markdown) fallback. */
   level: number
+  /** 1-based line of the heading (`1` for the whole-doc fallback). */
+  startLine: number
+  /**
+   * 1-based last line before the next same-or-higher-level heading — end of file
+   * for the last section (a trailing newline adds no phantom line). Whole-doc
+   * fallback: the document's line count.
+   */
+  endLine: number
 }
 
 export interface DocSectionIndex {
@@ -81,6 +89,12 @@ export function fingerprintText(text: string): string {
   return `sha256:${digest}`
 }
 
+/** Document line count for line ranges: a trailing newline adds no phantom line. */
+function countLines(content: string): number {
+  const lines = content.split('\n')
+  return Math.max(1, content.endsWith('\n') ? lines.length - 1 : lines.length)
+}
+
 /** Line index where a section ends: the next heading of same-or-higher level. */
 function sectionEndLine(headings: readonly RawHeading[], index: number, totalLines: number): number {
   const level = headings[index].level
@@ -121,6 +135,8 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
         fingerprint: fingerprintText(content),
         headingText: base,
         level: 0,
+        startLine: 1,
+        endLine: countLines(content),
         fullText: content,
         ownText: content,
       },
@@ -128,6 +144,7 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
   }
 
   const lines = content.split('\n')
+  const totalLines = countLines(content)
   const headings = parseHeadings(lines)
   const out: Array<DocSection & { fullText: string; ownText: string }> = []
   const used = new Set<string>()
@@ -144,12 +161,25 @@ function deriveSections(doc: string, content: string): Array<DocSection & { full
     for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
     used.add(anchor)
 
-    const fullText = lines.slice(heading.line, sectionEndLine(headings, h, lines.length)).join('\n')
+    const end = sectionEndLine(headings, h, lines.length)
+    const fullText = lines.slice(heading.line, end).join('\n')
     // The very next heading in document order is either this section's first
     // child or the boundary that ends it — either way, own text stops there.
     const ownEnd = h + 1 < headings.length ? headings[h + 1].line : lines.length
     const ownText = lines.slice(heading.line, ownEnd).join('\n')
-    out.push({ anchor, fingerprint: fingerprintText(fullText), headingText: heading.text, level: heading.level, fullText, ownText })
+    // `end` is the exclusive 0-based slice end, so as a 1-based line it is already
+    // the last line before the boundary; the last section clamps to the real line
+    // count (a trailing newline's phantom empty split element never counts).
+    out.push({
+      anchor,
+      fingerprint: fingerprintText(fullText),
+      headingText: heading.text,
+      level: heading.level,
+      startLine: heading.line + 1,
+      endLine: Math.min(end, totalLines),
+      fullText,
+      ownText,
+    })
     ancestors.push({ level: heading.level, anchor })
   }
   return out
@@ -187,7 +217,14 @@ function indexFromSections(doc: string, markdown: boolean, sections: DocSection[
  */
 export function buildDocSectionIndex(doc: string, content: string): DocSectionIndex {
   const sections = deriveSections(doc, content).map(
-    ({ anchor, fingerprint, headingText, level }): DocSection => ({ anchor, fingerprint, headingText, level }),
+    ({ anchor, fingerprint, headingText, level, startLine, endLine }): DocSection => ({
+      anchor,
+      fingerprint,
+      headingText,
+      level,
+      startLine,
+      endLine,
+    }),
   )
   return indexFromSections(doc, isMarkdownDoc(doc), sections)
 }

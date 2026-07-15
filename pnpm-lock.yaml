@@ -98,6 +98,9 @@ importers:
       react-router-dom:
         specifier: ^7.1.0
         version: 7.13.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -411,6 +414,9 @@ importers:
       '@truecourse/ee-storage':
         specifier: workspace:*
         version: link:../storage
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../../packages/guard-runner
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../../../packages/llm
@@ -467,9 +473,18 @@ importers:
       '@truecourse/ee-db':
         specifier: workspace:*
         version: link:../db
+      '@truecourse/guard-generator':
+        specifier: workspace:*
+        version: link:../../../packages/guard-generator
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../../packages/guard-runner
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
+      '@truecourse/spec-consolidator':
+        specifier: workspace:*
+        version: link:../../../packages/spec-consolidator
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)

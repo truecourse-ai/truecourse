@@ -132,6 +132,134 @@ function renderView(url = '/repos/r?section=guard&tab=guarddrifts') {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe('GuardDriftsView — PR-scoped empty / pending state', () => {
+  function stubEnvelope(body: { latest: GuardLatest | null; pending: unknown }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/latest')) return json(body);
+        if (u.includes('/guard/history')) return json(HISTORY);
+        return json({});
+      }),
+    );
+  }
+  function renderPr(prRef = 'prhead1234567') {
+    return render(
+      <MemoryRouter initialEntries={['/repos/r?section=guard&tab=guarddrifts&pr=7']}>
+        <GuardDriftsView repoId="r" prRef={prRef} />
+      </MemoryRouter>,
+    );
+  }
+
+  it('shows a "gate running" card when a gate is in flight for the head', async () => {
+    stubEnvelope({ latest: null, pending: { status: 'running', jobId: 'job_1' } });
+    renderPr();
+    expect(await screen.findByText('Guard gate running')).toBeInTheDocument();
+  });
+
+  it('shows a "gate queued" card', async () => {
+    stubEnvelope({ latest: null, pending: { status: 'queued', jobId: 'job_1' } });
+    renderPr();
+    expect(await screen.findByText('Guard gate queued')).toBeInTheDocument();
+  });
+
+  it("shows an explicit \"hasn't run at this commit yet\" card (never baseline data)", async () => {
+    stubEnvelope({ latest: null, pending: null });
+    renderPr();
+    expect(await screen.findByText("Guard gate hasn't run at this commit yet")).toBeInTheDocument();
+    // The baseline run's content must NOT leak in under the PR header.
+    expect(screen.queryByText('login rate limits')).toBeNull();
+  });
+
+  it('renders the PR head run normally when one is stored at that commit', async () => {
+    stubEnvelope({ latest: LATEST, pending: null });
+    renderPr();
+    expect(await screen.findByText('login rate limits')).toBeInTheDocument();
+  });
+
+  it('never lists the repo run history under a PR ref (baseline runs not selectable)', async () => {
+    // The history stub still answers with the repo's baseline runs — the PR view
+    // must not fetch/render them: only the head run, no run-picker rows.
+    stubEnvelope({ latest: LATEST, pending: null });
+    renderPr();
+    await screen.findByText('login rate limits');
+    expect(screen.getByText('No earlier runs recorded.')).toBeInTheDocument();
+  });
+});
+
+describe('GuardDriftsView — PR run timeline (prNumber)', () => {
+  const PR_HISTORY = {
+    runs: [
+      {
+        runId: 'run-pr-head1',
+        ranAt: '2026-07-08T00:00:00.000Z',
+        branch: 'feat/x',
+        commit: 'head1111',
+        summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+      },
+      {
+        runId: 'run-pr-head2',
+        ranAt: '2026-07-09T00:00:00.000Z',
+        branch: 'feat/x',
+        commit: 'head2222',
+        summary: LATEST.summary,
+      },
+    ],
+  };
+  const HEAD_RUN: GuardLatest = { ...LATEST, run: { ...LATEST.run, runId: 'run-pr-head2', commit: 'head2222' } };
+  const OLDER_RUN: GuardLatest = {
+    ...LATEST,
+    run: { ...LATEST.run, runId: 'run-pr-head1', commit: 'head1111' },
+    summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+    scenarios: [{ id: 'old-pass', title: 'older head claim', binds: binds('auth/ok'), outcome: 'pass', durationMs: 1 }],
+  };
+
+  function stubPrTimeline() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/latest')) return json({ latest: HEAD_RUN, pending: null });
+        // The PR view must ask for the PR-scoped timeline — the pr-less answer
+        // is the repo baseline history, which must never render here.
+        if (u.includes('/guard/history'))
+          return new URL(u, 'http://x').searchParams.get('pr') === '7' ? json(PR_HISTORY) : json(HISTORY);
+        if (u.includes('/guard/runs/run-pr-head1')) return json(OLDER_RUN);
+        return json({});
+      }),
+    );
+  }
+
+  function renderPrTimeline() {
+    return render(
+      <MemoryRouter initialEntries={['/repos/r?section=guard&tab=guarddrifts&pr=7']}>
+        <GuardDriftsView repoId="r" prRef="head2222" prNumber={7} />
+      </MemoryRouter>,
+    );
+  }
+
+  it("lists this PR's runs — one per pushed head — from the pr-scoped history", async () => {
+    stubPrTimeline();
+    renderPrTimeline();
+    await screen.findByText('login rate limits');
+    expect(screen.getByText('run-pr-head1')).toBeInTheDocument();
+    expect(screen.getByText('run-pr-head2')).toBeInTheDocument();
+    expect(screen.queryByText('No earlier runs recorded.')).toBeNull();
+    // The repo baseline history rows never leak in.
+    expect(screen.queryByText(/2026-07-06T00-00-00Z/)).toBeNull();
+  });
+
+  it("selecting an earlier head's run loads its snapshot", async () => {
+    stubPrTimeline();
+    renderPrTimeline();
+    const user = userEvent.setup();
+    await screen.findByText('login rate limits');
+    await user.click(screen.getByText('run-pr-head1'));
+    expect(await screen.findByText('older head claim')).toBeInTheDocument();
+  });
+});
+
 describe('GuardDriftsView — ordering + list', () => {
   beforeEach(() => stubFetch());
 
@@ -271,6 +399,34 @@ describe('GuardDriftsView — detail', () => {
     expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });
 
+  // Fix 1 (PR 1) — a drift detail shows the failing run's raw program output.
+  it('renders the Program output section with stdout/stderr beneath expected/actual', async () => {
+    const user = userEvent.setup();
+    const withOutput: GuardLatest = {
+      ...LATEST,
+      scenarios: LATEST.scenarios.map((s) =>
+        s.id === 's-fail'
+          ? { ...s, failure: { ...s.failure!, stdout: 'drift-stdout-line', stderr: 'usage: login --token <t>' } }
+          : s,
+      ),
+    };
+    stubFetch({ latest: withOutput });
+    renderView();
+    await user.click(await screen.findByText('login rate limits'));
+    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(screen.getByText('Program output')).toBeInTheDocument();
+    expect(screen.getByText('drift-stdout-line')).toBeInTheDocument();
+    expect(screen.getByText('usage: login --token <t>')).toBeInTheDocument();
+  });
+
+  it('omits the Program output section when the failure carries no excerpts', async () => {
+    const user = userEvent.setup();
+    renderView(); // default s-fail failure has no stdout/stderr
+    await user.click(await screen.findByText('login rate limits'));
+    await screen.findByText('exit code 1');
+    expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+  });
+
   it('carries the doc + section params on the "view in spec" jump', async () => {
     const user = userEvent.setup();
     renderView();
@@ -284,6 +440,28 @@ describe('GuardDriftsView — detail', () => {
     expect(params.get('section')).toBe('guard');
     expect(params.get('tab')).toBe('coverage');
     expect(params.get('gdrift')).toBeNull();
+  });
+});
+
+describe('GuardDriftsView — stale/orphaned group explainers', () => {
+  beforeEach(() => stubFetch());
+
+  it('explains inline why stale and orphaned scenarios did not run', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    expect(
+      screen.getByText('The bound spec text changed since generation — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('The bound spec section no longer exists — not run. Regenerate to re-anchor.'),
+    ).toBeInTheDocument();
+  });
+
+  it('adds no explainer to the fail/error/pass groups', async () => {
+    renderView();
+    await screen.findByText('stale claim');
+    // Exactly the two drift explainers — never one under fail/error/pass headers.
+    expect(screen.getAllByText(/— not run\. Regenerate to re-anchor\.$/)).toHaveLength(2);
   });
 });
 

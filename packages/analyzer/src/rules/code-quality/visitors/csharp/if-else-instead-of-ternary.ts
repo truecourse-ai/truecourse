@@ -42,6 +42,13 @@ export const csharpIfElseInsteadOfTernaryVisitor: CodeRuleVisitor = {
   languages: ['csharp'],
   nodeTypes: ['if_statement'],
   visit(node, filePath, sourceCode) {
+    // An `else if` branch: this if_statement is the `alternative` of an enclosing
+    // if, so it belongs to a multi-arm if/else-if/else chain. Collapsing only its
+    // tail into a two-arm ternary silently drops the earlier arm(s), producing a
+    // wrong suggestion — such chains are out of scope for this rule.
+    const parent = node.parent
+    if (parent?.type === 'if_statement' && parent.childForFieldName('alternative')?.id === node.id) return null
+
     const alternative = node.childForFieldName('alternative')
     if (!alternative || alternative.type === 'if_statement') return null
 

@@ -15,9 +15,10 @@ import { BadgeCheck, Check, Copy, Loader2, X } from 'lucide-react';
 import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import * as api from '@/lib/api';
 import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlapReview } from '@/lib/api';
 import { SpecDocViewer } from './SpecDocViewer';
+import { WorkspaceBadge } from './WorkspaceBadge';
+import { createRepoSpecSource, useSpecSource } from './spec-source';
 
 /** Shown on resolution actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
@@ -70,6 +71,17 @@ export function SpecOverlapDetail({
   // the area reads as its concern (matches the left-nav tags + conflict rows).
   const showProduct = new Set(data.corpus.areas.map((a) => a.product)).size > 1;
   const fmtArea = (id: string): string => (showProduct ? id : id.split('/').pop() ?? id);
+
+  // Workspace corpora carry the ledger's human title + deep link per doc ref (a
+  // synthetic stable docPath); repo corpora carry none. Display prefers the title,
+  // falling back to the ref — identity (docA/docB in the verdict payloads) is always
+  // the ref.
+  const docMeta = new Map(data.corpus.docs.map((d) => [d.ref, d] as const));
+  const titleOf = (ref: string): string => docMeta.get(ref)?.title ?? ref;
+  // Hosted repo view: a doc inherited from the workspace Knowledge corpus carries
+  // `layer: 'workspace'` — flags the workspace badge beside its title (repo-local
+  // side stays unbadged). Inert on OSS / repo-local corpora.
+  const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
   const overlap = data.corpus.areas
     .find((ar) => ar.id === area)
@@ -135,6 +147,11 @@ export function SpecOverlapDetail({
   const prScope = prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined;
   const decisionsDisabled = prNumber != null && !prRef;
 
+  // A provided (workspace) source wins; otherwise the repo default scoped to the PR.
+  const ctxSource = useSpecSource();
+  const repoSource = useMemo(() => createRepoSpecSource(repoId, prScope), [repoId, prNumber, prRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  const source = ctxSource ?? repoSource;
+
   // Build the persisted verdict from the flagged sections (heading + verbatim quote
   // per doc) — the same identity the CLI and gate key on.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution => {
@@ -154,7 +171,7 @@ export function SpecOverlapDetail({
     setBusy(verdict);
     try {
       const payload = buildResolution(verdict);
-      const res = await api.postSpecConflictResolution(repoId, payload, prScope);
+      const res = await source.postConflictResolution(payload);
       if ('corpus' in res) {
         onResolved(res); // EE PR: the re-curated corpus carries the verdict
       } else {
@@ -171,11 +188,12 @@ export function SpecOverlapDetail({
     if (!resolution) return;
     setBusy('undo');
     try {
-      const res = await api.deleteSpecConflictResolution(
-        repoId,
-        { docA: resolution.docA, anchorA: resolution.anchorA, docB: resolution.docB, anchorB: resolution.anchorB },
-        prScope,
-      );
+      const res = await source.deleteConflictResolution({
+        docA: resolution.docA,
+        anchorA: resolution.anchorA,
+        docB: resolution.docB,
+        anchorB: resolution.anchorB,
+      });
       if ('corpus' in res) onResolved(res);
       else {
         setOverride(null);
@@ -193,9 +211,15 @@ export function SpecOverlapDetail({
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <span>{docA}</span>
+          <span className="flex items-center gap-1.5">
+            {titleOf(docA)}
+            {isWorkspace(docA) && <WorkspaceBadge />}
+          </span>
           <span className="text-muted-foreground">↔</span>
-          <span>{docB}</span>
+          <span className="flex items-center gap-1.5">
+            {titleOf(docB)}
+            {isWorkspace(docB) && <WorkspaceBadge />}
+          </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
           {onClose && (
             <button
@@ -228,8 +252,8 @@ export function SpecOverlapDetail({
             ) : (
               <span className="flex flex-wrap items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 Resolved —
-                <HoverPopover content={winnerOf(resolution)}>
-                  <span className="max-w-[22rem] truncate font-medium">{winnerOf(resolution)}</span>
+                <HoverPopover content={titleOf(winnerOf(resolution))}>
+                  <span className="max-w-[22rem] truncate font-medium">{titleOf(winnerOf(resolution))}</span>
                 </HoverPopover>
                 is right
               </span>
@@ -247,21 +271,21 @@ export function SpecOverlapDetail({
           </div>
         ) : excludedRef ? (
           <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
-            Resolved — {excludedRef} excluded from the corpus
+            Resolved — {titleOf(excludedRef)} excluded from the corpus
           </div>
         ) : (
           // Open — the verdict actions on the disagreement itself.
           <div className="mt-2 flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <VerdictButton
-                doc={docA}
+                doc={titleOf(docA)}
                 busy={busy === 'a'}
                 disabled={busy !== null || decisionsDisabled}
                 disabledReason={decisionsDisabled ? PR_GATE_HINT : null}
                 onClick={() => recordVerdict('a')}
               />
               <VerdictButton
-                doc={docB}
+                doc={titleOf(docB)}
                 busy={busy === 'b'}
                 disabled={busy !== null || decisionsDisabled}
                 disabledReason={decisionsDisabled ? PR_GATE_HINT : null}
@@ -290,6 +314,8 @@ export function SpecOverlapDetail({
           <SpecDocViewer
             repoId={repoId}
             docRef={docA}
+            title={docMeta.get(docA)?.title}
+            url={docMeta.get(docA)?.url}
             commit={prRef}
             badge={docA === newerDoc ? 'Newer' : 'Older'}
             scrollTo={scrollA}
@@ -301,6 +327,8 @@ export function SpecOverlapDetail({
           <SpecDocViewer
             repoId={repoId}
             docRef={docB}
+            title={docMeta.get(docB)?.title}
+            url={docMeta.get(docB)?.url}
             commit={prRef}
             badge={docB === newerDoc ? 'Newer' : 'Older'}
             scrollTo={scrollB}

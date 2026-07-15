@@ -20,9 +20,9 @@ import type { GuardClaimIdentity } from '@/lib/api';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import type { GuardFindingRowData } from '@/lib/guard-list-rows';
 import { GuardFindingBadge } from './GuardFindingBadge';
+import { PRE } from './detail-styles';
+import { GuardProgramOutput } from './GuardProgramOutput';
 
-const PRE =
-  'mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const BTN =
   'inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
@@ -186,6 +186,9 @@ export function GuardFindingDetail({
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
             <pre className={PRE}>{f.actual}</pre>
           </div>
+          {/* The failing run's raw program output (Fix 1) — render-if-present; a
+              fidelity finding has no program run, so it simply shows nothing. */}
+          <GuardProgramOutput stdout={f.stdout} stderr={f.stderr} />
         </div>
 
         <p className="text-sm leading-relaxed text-muted-foreground">

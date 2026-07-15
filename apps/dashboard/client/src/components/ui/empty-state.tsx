@@ -1,6 +1,6 @@
 /**
- * Centered empty-state block used in the left-sidebar panels (Spec,
- * Contracts, Verify, Decisions) when there's no data yet. Standard
+ * Centered empty-state block used across the dashboard's panels (Spec,
+ * Spec Guard, Violations, …) when there's no data yet. Standard
  * shape: section icon, bold title, smaller body paragraph. One
  * component so every panel renders the same vertical rhythm,
  * paddings, colours, and typography.

@@ -1,7 +1,7 @@
 /**
  * GitHub App gate tables. `gh_baselines` is just the pointer to the repo's
- * baseline commit — its drifts live in `verify_snapshots[repo_key, commit_sha]`
- * (the single per-commit snapshot home), not duplicated here.
+ * baseline commit — the baseline run's results live per-commit in
+ * `guard_runs[repo_key, commit_sha]`, not duplicated here.
  */
 
 import {
@@ -44,7 +44,7 @@ export const ghRepos = pgTable('gh_repos', {
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
-  // Per-type email toggles ({ gateFailure, inferResult, conflicts }). Loosely typed here
+  // Per-type email toggles ({ gateFailure, conflicts }). Loosely typed here
   // (ee-db is a dependency-free leaf); the gate store casts at the boundary.
   // Null = unset → every type on.
   notifications: jsonb('notifications').$type<Record<string, boolean>>(),

@@ -1861,6 +1861,12 @@
       "layer": "service"
     },
     {
+      "name": "CatalogApiController",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
       "name": "ChangeNotifier",
       "service": "UserService",
       "kind": "class",
@@ -1925,6 +1931,12 @@
       "service": "UserService",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "DiagnosticLabel",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "Diagnostics",
@@ -2641,6 +2653,12 @@
       "layer": "service"
     },
     {
+      "name": "TelemetryPublisher",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "TenantResolver",
       "service": "UserService",
       "kind": "class",
@@ -2648,6 +2666,12 @@
     },
     {
       "name": "TenantSnapshot",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ThresholdSelector",
       "service": "UserService",
       "kind": "class",
       "layer": "service"
@@ -3234,6 +3258,11 @@
       "method": "GET",
       "path": "/users/{userId}",
       "file": "services/UserService/Program.cs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/catalog",
+      "file": "services/UserService/Violations/Architecture/CatalogApiController.cs"
     },
     {
       "method": "GET",

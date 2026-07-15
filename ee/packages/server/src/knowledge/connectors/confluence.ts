@@ -1,8 +1,8 @@
 /**
  * Confluence Cloud connector. Lists the pages of a space and fetches each
  * page's storage-format body, converting it to markdown. Uses the global
- * `fetch` (Node 18+) with Basic auth (`accountEmail:apiToken`). Bodies are
- * returned transiently — never stored.
+ * `fetch` (Node 18+) with Basic auth (`accountEmail:apiToken`). The connector only
+ * returns bodies; the sync engine persists them (content-addressed) at Sync time.
  *
  * Its config keys ARE the UI field keys, so the settings form is fully generic.
  */

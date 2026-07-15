@@ -903,6 +903,122 @@ describe('GuardScenarioDetail — full scenario story', () => {
     await user.click(await screen.findByText('View in spec'));
     expect(onOpenSpec).toHaveBeenCalledWith('docs/other.md', 'other/gone');
   });
+
+  // Fix 1 (PR 1) — the failing run's raw program output rides on the failure.
+  it('renders the Program output section with stdout/stderr beneath expected/actual', async () => {
+    const user = userEvent.setup();
+    const withOutput: GuardLatest = {
+      ...LATEST,
+      scenarios: LATEST.scenarios.map((s) =>
+        s.id === 'a1'
+          ? { ...s, failure: { ...s.failure!, stdout: 'expense-add-ran-ok', stderr: 'usage: add --amount <n>' } }
+          : s,
+      ),
+    };
+    stubFetch(INVENTORY, withOutput);
+    renderHarness();
+    await user.click(await screen.findByText('alpha claim'));
+    await screen.findByText('exit code 1');
+    expect(screen.getByText('Program output')).toBeInTheDocument();
+    expect(screen.getByText('expense-add-ran-ok')).toBeInTheDocument();
+    expect(screen.getByText('usage: add --amount <n>')).toBeInTheDocument();
+  });
+
+  it('omits the Program output section when the failure carries no excerpts', async () => {
+    const user = userEvent.setup();
+    renderHarness(); // default a1 failure has no stdout/stderr
+    await user.click(await screen.findByText('alpha claim'));
+    await screen.findByText('exit code 1');
+    expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardFindingDetail — program-output excerpts (Fix 1)', () => {
+  it('renders the Program output section from the finding excerpts', async () => {
+    const user = userEvent.setup();
+    const report: GuardGenerateReport = {
+      ...REPORT,
+      birthFindings: [{ ...REPORT.birthFindings[0], stdout: 'add-partial-output', stderr: 'usage: expense add --amount' }],
+    };
+    stubFetch(INVENTORY, LATEST, report);
+    renderHarness();
+    await user.click(await screen.findByText('login rate limits'));
+    await screen.findByRole('heading', { name: 'login rate limits' });
+    expect(screen.getByText('Program output')).toBeInTheDocument();
+    expect(screen.getByText('add-partial-output')).toBeInTheDocument();
+    expect(screen.getByText('usage: expense add --amount')).toBeInTheDocument();
+  });
+
+  it('omits the Program output section for a finding without excerpts', async () => {
+    const user = userEvent.setup();
+    stubFetch(INVENTORY, LATEST, REPORT); // REPORT finding has no stdout/stderr
+    renderHarness();
+    await user.click(await screen.findByText('login rate limits'));
+    await screen.findByRole('heading', { name: 'login rate limits' });
+    expect(screen.queryByText('Program output')).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardScenariosPanel — PR baseline-fallback label', () => {
+  const FALLBACK_LABEL = "Showing the baseline scenarios — this PR didn't regenerate them.";
+  const rows = () =>
+    buildListRows(
+      [
+        {
+          id: 'a1',
+          title: 'alpha claim',
+          doc: 'docs/auth.md',
+          anchor: 'auth/alpha',
+          headingText: 'Alpha',
+          file: 'core/a1.yaml',
+          handWritten: false,
+          lastResult: null,
+        },
+      ],
+      [],
+    );
+
+  it('labels a PR view whose inventory fell back to the baseline set', () => {
+    render(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        prRef="headsha456"
+        scenariosCommit="basesha123"
+      />,
+    );
+    expect(screen.getByText(FALLBACK_LABEL)).toBeInTheDocument();
+  });
+
+  it('shows no label when the head stored its own set, or outside a PR view', () => {
+    const { rerender } = render(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        prRef="headsha456"
+        scenariosCommit="headsha456"
+      />,
+    );
+    expect(screen.queryByText(FALLBACK_LABEL)).not.toBeInTheDocument();
+    // Repo-level view (no PR ref): the baseline IS the view — never a label.
+    rerender(
+      <GuardScenariosPanel
+        rows={rows()}
+        loading={false}
+        error={null}
+        activeId={null}
+        onOpen={vi.fn()}
+        scenariosCommit="basesha123"
+      />,
+    );
+    expect(screen.queryByText(FALLBACK_LABEL)).not.toBeInTheDocument();
+  });
 });
 
 describe('Scenarios surface — title-first labels + long-id overflow', () => {

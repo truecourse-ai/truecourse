@@ -16,7 +16,9 @@ public class RegistrationController : Controller
     /// <summary>Create an account from the posted form.</summary>
     [HttpPost]
     // VIOLATION: architecture/deterministic/missing-modelstate-validation
-    // VIOLATION: architecture/deterministic/action-missing-producesresponsetype
+    // A server-rendered MVC view controller (base `Controller`, no [ApiController])
+    // is not part of the API description, so action-missing-producesresponsetype
+    // intentionally does not fire here.
     public IActionResult Create(RegistrationInput model)
     {
         return RedirectToAction("Index", model);

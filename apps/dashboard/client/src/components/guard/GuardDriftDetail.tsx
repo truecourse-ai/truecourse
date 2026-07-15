@@ -18,9 +18,9 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { formatGuardDuration, shortFingerprint } from '@/lib/guard-drifts';
 import { GuardStatusBadge } from './GuardStatusBadge';
+import { GuardProgramOutput } from './GuardProgramOutput';
+import { PRE } from './detail-styles';
 
-const PRE =
-  'mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
@@ -149,6 +149,8 @@ export function GuardDriftDetail({
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
               <pre className={PRE}>{scenario.failure.actual}</pre>
             </div>
+            {/* The failing run's raw program output (Fix 1) — render-if-present. */}
+            <GuardProgramOutput stdout={scenario.failure.stdout} stderr={scenario.failure.stderr} />
           </div>
         )}
 

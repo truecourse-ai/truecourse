@@ -255,12 +255,16 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
 
 ```json
 {
+  "install": "pnpm install --frozen-lockfile",
   "build": "pnpm turbo build --filter=...{./tools/cli}",
   "entry": ["node", "tools/cli/dist/index.js"],
   "env": { "MY_FLAG": "1" }
 }
 ```
 
+- `install` *(optional)* — one shell command, run in the repo root before every build, to fetch
+  dependencies (e.g. `npm ci`). Needed wherever the tree is a fresh checkout with no
+  `node_modules`; omit it when the build needs no dependency fetch.
 - `build` — one shell command, run in the repo root before scenarios execute.
 - `entry` — the entrypoint argv; each scenario's command is appended to it. Repo-relative.
 - `env` *(optional)* — extra environment variables for every scenario run.

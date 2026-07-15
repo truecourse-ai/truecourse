@@ -18,7 +18,8 @@ function meetsSeverity(s: GateSeverity, min: GateSeverity): boolean {
 export interface CodeQualityOptions {
   /** true → new violations at/above minSeverity fail the Check; false → neutral. */
   blocking: boolean;
-  /** Min new-violation severity that fails. Default 'high' (noisier than drift). */
+  /** Min new-violation severity that fails. Default 'high' (architecture
+   *  analysis is noisier than a line-level lint). */
   minSeverity?: GateSeverity;
 }
 

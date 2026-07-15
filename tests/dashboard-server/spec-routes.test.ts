@@ -55,11 +55,21 @@ import {
   type BackgroundTask,
 } from '@truecourse/core/lib/background-tasks';
 import {
-  setContractStore,
-  resetContractStore,
-  type ContractStore,
-} from '@truecourse/core/lib/contract-store';
+  setGuardStore,
+  resetGuardStore,
+  type GuardStore,
+} from '@truecourse/core/lib/guard-store';
+import {
+  setSpecStore,
+  resetSpecStore,
+  type SpecStore,
+  type RepoRef,
+  type SpecArtifact,
+} from '@truecourse/core/lib/spec-store';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -71,6 +81,45 @@ import {
  * curate/generate engine has its own suite under tests/spec-consolidator/ and
  * tests/contract-extractor/.
  */
+
+/**
+ * A minimal in-memory hosted `SpecStore` — the shape EE actually installs
+ * (`materializesInPlace: false`, Postgres-backed). Map-backed round-trip for
+ * decisions writes / corpus reads so the EE route paths (which read/write through
+ * the ACTIVE spec store) work without a real database. Workspace scope is
+ * unused here (throw / null, mirroring the file default).
+ */
+function makeMemSpecStore(): SpecStore {
+  const byRef = new Map<string, unknown>(); // (repoKey, commitSha, artifact) → json
+  const latest = new Map<string, unknown>(); // (repoKey, artifact) → json
+  const rk = (ref: RepoRef, a: SpecArtifact) => `${ref.repoKey}\x00${ref.commitSha}\x00${a}`;
+  const lk = (repoKey: string, a: SpecArtifact) => `${repoKey}\x00${a}`;
+  return {
+    materializesInPlace: false,
+    async saveSpec(ref, artifact, json) {
+      byRef.set(rk(ref, artifact), json);
+      latest.set(lk(ref.repoKey, artifact), json);
+    },
+    async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact) {
+      return (byRef.get(rk(ref, artifact)) as T) ?? null;
+    },
+    async deleteSpec(ref, artifact) {
+      byRef.delete(rk(ref, artifact));
+    },
+    async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact) {
+      return (latest.get(lk(repoKey, artifact)) as T) ?? null;
+    },
+    async latestCommit() {
+      return null;
+    },
+    async saveWorkspaceSpec() {
+      throw new Error('[mem-spec-store] workspace scope unused in these tests');
+    },
+    async loadWorkspaceSpec<T = unknown>() {
+      return null as T | null;
+    },
+  } satisfies SpecStore;
+}
 
 describe('GET /api/repos/:id/spec/decisions', () => {
   let app: Express;
@@ -257,25 +306,31 @@ describe('corpus routes (spec-scan redesign)', () => {
 // is no local git tree. The decision routes must NOT gate on git and must NOT
 // enqueue the old repo.contracts job. They re-curate the stored corpus in-process
 // (the SAME curate OSS runs, docs sourced through the repo-doc seam), and — only if
-// that leaves the spec conflict-free — enqueue a contract regeneration. A
-// non-materializing contract store flips the route onto that path.
+// that leaves the spec conflict-free — enqueue a contract regeneration.
+//
+// This mirrors LIVE EE wiring: a hosted SPEC store is installed (decisions writes +
+// corpus reads flow through it) and NO contract store, so the file-default contract
+// flag stays TRUE. The spec routes therefore key their edition check on the SPEC
+// store — the store EE actually installs.
 describe('corpus routes — EE (stored corpus, no live tree)', () => {
   let app: Express;
   let fixture: TestFixture;
+  let memSpec: SpecStore;
 
+  // Seed the hosted spec store's current corpus (the store the EE routes read
+  // through), not the working tree — EE has no live `corpus.json`.
   const seedCorpus = (): void => {
-    const specs = path.join(fixture.repoPath, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
+    void memSpec.saveSpec(
+      { repoKey: fixture.repoPath, commitSha: 'seed' },
+      'corpus',
+      {
         version: 3,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [{ ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] }],
         areas: [{ id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v2.md'], overlaps: [] }],
         relations: [],
         skippedDocs: [],
-      }),
+      },
     );
   };
 
@@ -288,18 +343,85 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     });
   };
 
+  // A guard store whose generate report is `status`. `open-conflicts` = a generate
+  // that stalled BLOCKED before authoring scenarios (the unblock trigger); anything
+  // else = a healthy report that must NOT re-trigger. `null` = no report at all.
+  const stubGuardReport = (status: GuardGenerateReport['status'] | null): void => {
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async () =>
+        status === null ? null : ({ status } as unknown as GuardGenerateReport),
+    } as unknown as GuardStore);
+  };
+
+  // Anchor the hosted repo's baseline (the analyze LATEST commit) at `commit` —
+  // the anchor the repo-level guard-report read resolves, never "newest".
+  const seedAnalyzeBaseline = (commit: string): Promise<void> =>
+    writeLatest(fixture.repoPath, {
+      head: 'run.json',
+      analysis: {
+        id: 'r1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        branch: 'main',
+        commitHash: commit,
+        architecture: 'monolith',
+        metadata: { isDiffAnalysis: false },
+        status: 'completed',
+      },
+      graph: {
+        services: [],
+        serviceDependencies: [],
+        layers: [],
+        modules: [],
+        methods: [],
+        moduleDeps: [],
+        methodDeps: [],
+        databases: [],
+        databaseConnections: [],
+        flows: [],
+      },
+      violations: [],
+    });
+
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
-    // A store that reports it does NOT materialize in place = hosted EE. Only the
-    // capability flag is read by these routes, so a bare stub is sufficient.
-    setContractStore({ materializesInPlace: false } as unknown as ContractStore);
+    // Live EE wiring: a hosted SPEC store installed, NO contract store (the
+    // file-default contract flag stays TRUE). The spec routes must key their
+    // edition check on the spec store — mirroring what EE actually installs.
+    memSpec = makeMemSpecStore();
+    setSpecStore(memSpec);
     vi.mocked(recurateStoredCorpus).mockReset();
     app = createApp({ serveStatic: false });
   });
   afterEach(async () => {
-    resetContractStore();
+    resetSpecStore();
+    resetGuardStore();
+    setGuardGenerateEnqueue(null);
     setBackgroundTaskRunner(null);
     await teardownTestFixture(fixture.project.slug);
+  });
+
+  // LIVE EE wiring reproduction (the regression this suite missed): EE installs a
+  // hosted SPEC store and — since the verify-gate retirement — NO contract store, so
+  // the file-default contract flag is TRUE while the spec store is hosted (the fixture
+  // wires exactly that). The spec routes must key their edition check on the SPEC
+  // store: clearing the last conflict with a BLOCKED (open-conflicts) generate report
+  // must re-curate AND fire the guard-generate seam.
+  it('LIVE EE wiring (hosted spec store, no contract store): clearing the last conflict re-curates and fires guard generate', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
+    expect(enqueued).toEqual([fixture.repoPath]);
   });
 
   it('POST /spec/excludes re-curates and — when it leaves the spec conflict-free — enqueues regeneration', async () => {
@@ -353,6 +475,106 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
   });
 
+  // A decision clearing the last conflict must ALSO unblock a guard generate that
+  // stalled on that conflict: when the repo's current generate report is
+  // `open-conflicts`, the installed guard-generate seam fires with the repoKey.
+  it('clearing the last conflict with a BLOCKED (open-conflicts) generate report enqueues a guard generate', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([fixture.repoPath]);
+  });
+
+  it("a newer PR-head 'ok' report never masks the baseline's BLOCKED report — generate still fires", async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    // Commit-aware guard stub: the BASELINE row is the blocked open-conflicts
+    // report; any commit-less ("newest by createdAt") read sees a PR regen's ok
+    // report instead — which would wrongly skip the unblock generate forever.
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async (_repoKey: string, commitSha?: string) =>
+        ({
+          status: commitSha === 'basesha1111' ? 'open-conflicts' : 'ok',
+        }) as unknown as GuardGenerateReport,
+    } as unknown as GuardStore);
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([fixture.repoPath]);
+  });
+
+  it('does NOT enqueue a guard generate when the report is healthy (not open-conflicts)', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    stubGuardReport('ok');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('does NOT enqueue a guard generate while conflicts remain (guard report never consulted)', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    let guardRead = false;
+    setGuardStore({
+      materializesInPlace: false,
+      readGuardResult: async () => {
+        guardRead = true;
+        return { status: 'open-conflicts' } as unknown as GuardGenerateReport;
+      },
+    } as unknown as GuardStore);
+    seedCorpus();
+    stubRecurate(2); // conflicts remain
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(enqueued).toEqual([]);
+    expect(guardRead).toBe(false); // hot path stays cheap — the store is never read
+  });
+
+  it('a BLOCKED report with no guard-generate seam installed (OSS) is a no-op, not an error', async () => {
+    // No setGuardGenerateEnqueue → getGuardGenerateEnqueue() is null; the route must
+    // simply skip it (the contracts enqueue still runs).
+    const tasks: BackgroundTask[] = [];
+    setBackgroundTaskRunner(async (t) => {
+      tasks.push(t);
+    });
+    seedCorpus();
+    await seedAnalyzeBaseline('basesha1111');
+    stubGuardReport('open-conflicts');
+    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
+      .send({ ref: 'docs/v2.md' })
+      .expect(200);
+    expect(tasks).toEqual([{ type: 'repo.contracts', repoKey: fixture.repoPath }]);
+  });
 });
 
 // ---------------------------------------------------------------------------
