@@ -25,6 +25,7 @@ import {
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { readGuardResult, readGuardLatest } from '@truecourse/core/lib/guard-store';
+import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions, type CuratedCorpus } from '@truecourse/core/commands/spec-in-process';
 import type { Runner } from 'graphile-worker';
@@ -370,6 +371,9 @@ export async function registerJobs(
     // spec scan just re-materialized the corpus, so the baseline runs the newest.
     await chainGuardOnboarding({ hasGuardState, enqueueGuardGenerate }, payload, outcome);
     await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
+    // The scan re-curated the corpus — tell any open Spec tab to refresh (routed
+    // by the dashboard server into the repo's room as `spec:complete`).
+    if (outcome === 'succeeded') await emitRepoLifecycle(payload.repoFullName, 'scan');
   };
 
   // After a guard-generate settles: on success a fresh generate just wrote
@@ -380,6 +384,10 @@ export async function registerJobs(
     outcome: JobOutcomeStatus,
     result?: unknown,
   ): Promise<void> => {
+    // A settled generate rewrote the report (scenarios on success, an
+    // open-conflicts report when blocked) — refresh any open Scenarios tab either
+    // way, BEFORE the blocked suppression below (that guards only the run chain).
+    if (outcome === 'succeeded') await emitRepoLifecycle(payload.repoFullName, 'guard-generate');
     // A generate BLOCKED on open spec conflicts persisted an open-conflicts report
     // (hasGuardState is now true) but saved NO scenarios — chaining a baseline run
     // would strand a run row against an empty Scenarios tab. Suppress it.
@@ -391,11 +399,14 @@ export async function registerJobs(
   // coalesced follow-up refresh, if any (latest-commit-wins). The run's verdict
   // status decides whether a redundant same-commit pending drops or replays — a
   // `no-verdict`/failed run leaves it to replay so a transient error self-heals.
-  const onGuardBaselineSettled = (
+  const onGuardBaselineSettled = async (
     payload: GuardBaselineJobPayload,
     settled: GuardBaselineSettleOutcome,
-  ): Promise<void> =>
-    replayPendingGuardBaseline(pendingGuardBaselines, enqueueGuardBaseline, payload, settled);
+  ): Promise<void> => {
+    await replayPendingGuardBaseline(pendingGuardBaselines, enqueueGuardBaseline, payload, settled);
+    // A successful run wrote guard/LATEST — tell any open Runs tab to refresh.
+    if (settled.outcome === 'succeeded') await emitRepoLifecycle(payload.repoFullName, 'guard-run');
+  };
 
   // The workspace's open spec conflicts (the shared `openConflicts` derivation the
   // repo gate uses) — 0 when there is no corpus yet. The ripple skips a workspace

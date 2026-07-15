@@ -13,6 +13,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
 import type { EeServerRegistry } from '@truecourse/shared';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
+import { setRepoLifecycleEmitter } from '@truecourse/core/lib/repo-lifecycle';
 import {
   setGuardStore,
   resetGuardStore,
@@ -241,5 +242,69 @@ describe('registerJobs — generate→baseline chain', () => {
     await reg();
     const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
     expect(deps.onGuardBaselineSettled).toBeDefined();
+  });
+});
+
+describe('registerJobs — repo-lifecycle refresh events', () => {
+  // The settle hooks announce completions through the core repo-lifecycle seam so
+  // the dashboard server can push `spec:complete` into the repo's socket room —
+  // an open Spec/Scenarios/Runs tab refreshes live when a background job lands.
+  const lifecycle = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    lifecycle.mockClear();
+    setRepoLifecycleEmitter(lifecycle);
+  });
+  afterEach(() => setRepoLifecycleEmitter(null));
+
+  async function workerDeps(): Promise<StartWorkerDeps> {
+    await reg();
+    return startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+  }
+
+  it('a successful baseline announces scan for the repo', async () => {
+    const deps = await workerDeps();
+    await deps.onBaselineSettled!(baselinePayload, 'succeeded');
+    expect(lifecycle).toHaveBeenCalledWith(REPO, 'scan');
+  });
+
+  it('a failed baseline announces nothing', async () => {
+    const deps = await workerDeps();
+    await deps.onBaselineSettled!(baselinePayload, 'failed');
+    expect(lifecycle).not.toHaveBeenCalled();
+  });
+
+  it('a successful generate announces guard-generate', async () => {
+    const deps = await workerDeps();
+    await deps.onGuardGenerateSettled!(baselinePayload, 'succeeded');
+    expect(lifecycle).toHaveBeenCalledWith(REPO, 'guard-generate');
+  });
+
+  it('a BLOCKED generate still announces guard-generate (the report flipped to open-conflicts)', async () => {
+    const deps = await workerDeps();
+    await deps.onGuardGenerateSettled!(baselinePayload, 'succeeded', {
+      repoFullName: REPO,
+      scenariosWritten: 0,
+      openConflicts: 2,
+    });
+    expect(lifecycle).toHaveBeenCalledWith(REPO, 'guard-generate');
+  });
+
+  it('a failed generate announces nothing', async () => {
+    const deps = await workerDeps();
+    await deps.onGuardGenerateSettled!(baselinePayload, 'failed');
+    expect(lifecycle).not.toHaveBeenCalled();
+  });
+
+  it('a successful guard-baseline run announces guard-run', async () => {
+    const deps = await workerDeps();
+    await deps.onGuardBaselineSettled!(baselinePayload, { outcome: 'succeeded', status: 'ok' });
+    expect(lifecycle).toHaveBeenCalledWith(REPO, 'guard-run');
+  });
+
+  it('a failed guard-baseline run announces nothing', async () => {
+    const deps = await workerDeps();
+    await deps.onGuardBaselineSettled!(baselinePayload, { outcome: 'failed', status: null });
+    expect(lifecycle).not.toHaveBeenCalled();
   });
 });

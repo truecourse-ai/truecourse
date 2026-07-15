@@ -108,6 +108,10 @@
       "types": "./dist/lib/guard-generate-enqueue.d.ts",
       "import": "./dist/lib/guard-generate-enqueue.js"
     },
+    "./lib/repo-lifecycle": {
+      "types": "./dist/lib/repo-lifecycle.d.ts",
+      "import": "./dist/lib/repo-lifecycle.js"
+    },
     "./lib/spec-conflicts-resolved-hook": {
       "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
       "import": "./dist/lib/spec-conflicts-resolved-hook.js"
