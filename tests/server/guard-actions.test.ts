@@ -49,7 +49,9 @@ import {
   guardRunInProcess,
   EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
-import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
+import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import type { GuardGenerateReport } from '@truecourse/shared';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 const DOC = 'docs/cli.md';
@@ -266,5 +268,120 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
     await request(app).post(url('undismiss?pr=abc')).send(repoClaim).expect(400);
     const repo = await request(app).get(url('decisions')).expect(200);
     expect(titles(repo.body.dismissedClaims)).toEqual(['repo claim']);
+  });
+
+  // A PR-scoped dismissal regenerates through the PR's own flow, never the repo
+  // guard generate — the repo-scope auto-regen seam must stay untouched.
+  it('POST /guard/dismiss?pr=N never fires the hosted repo guard-generate seam', async () => {
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    setGuardGenerateEnqueue(enqueue);
+    try {
+      await request(app).post(url('dismiss?pr=7')).send(prClaim).expect(200);
+      expect(enqueue).not.toHaveBeenCalled();
+    } finally {
+      setGuardGenerateEnqueue(null);
+    }
+  });
+});
+
+// --- Dismiss → hosted auto-regenerate (repo scope) -------------------------
+//
+// A repo-scope dismissal that suppresses the LAST active finding re-generates the
+// scenario corpus honoring the dismissal — the hosted analog of resolving the last
+// spec conflict. The write rides the established `setGuardGenerateEnqueue` seam
+// (EE installs it; OSS leaves it unset → the dismissal is a plain file write). The
+// findings live in the guard result store, so the OSS file fixture seeds one.
+describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
+  let app: Express;
+  let fixture: TestFixture;
+  let root: string;
+  let enqueue: ReturnType<typeof vi.fn>;
+
+  const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+
+  // Two birth findings, each carrying its dismissible claim; dismiss keys on the
+  // claim text (the same `dismissedClaimKey` the coverage view derives "active" from).
+  const findingA = { doc: 'docs/cli.md', anchor: 'a', title: 'A scenario', claim: 'claim A' };
+  const findingB = { doc: 'docs/cli.md', anchor: 'b', title: 'B scenario', claim: 'claim B' };
+
+  const report = (findings: Array<{ doc: string; anchor: string; title: string; claim?: string }>): GuardGenerateReport => ({
+    generatedAt: '2026-01-01T00:00:00Z',
+    status: 'ok',
+    sectionsTotal: 2,
+    sectionsChanged: 2,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: findings.map((f) => ({
+      doc: f.doc,
+      anchor: f.anchor,
+      title: f.title,
+      step: 1,
+      expected: 'x',
+      actual: 'y',
+      ...(f.claim ? { claim: f.claim } : {}),
+    })),
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  });
+
+  // Dismiss by the finding's CLAIM (dismiss's `title` is the extracted claim text).
+  const dismiss = (f: { doc: string; anchor: string; claim: string }) =>
+    request(app).post(url('dismiss')).send({ doc: f.doc, anchor: f.anchor, title: f.claim });
+
+  beforeEach(async () => {
+    fixture = await setupTestFixture();
+    root = fixture.repoPath;
+    app = createApp({ serveStatic: false });
+    enqueue = vi.fn().mockResolvedValue(undefined);
+    setGuardGenerateEnqueue(enqueue);
+  });
+  afterEach(async () => {
+    setGuardGenerateEnqueue(null);
+    await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('batches while findings remain active, then re-generates on the LAST dismissal', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, findingB]));
+
+    // One of two dismissed → one finding still active → NO regenerate.
+    await dismiss(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+
+    // The last active finding dismissed → exactly one hosted regenerate, keyed by repo.
+    await dismiss(findingB).expect(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(root);
+  });
+
+  it('does not regenerate when a finding with no dismissible claim stays active', async () => {
+    // findingB has no `claim` → it can never be dismissed → always active.
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, { ...findingB, claim: undefined }]));
+    await dismiss(findingA).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not regenerate when the report has no findings at all', async () => {
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([]));
+    await request(app).post(url('dismiss')).send({ doc: 'docs/cli.md', anchor: 'z', title: 'stray' }).expect(200);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('swallows a seam failure — the dismissal still succeeds', async () => {
+    enqueue.mockRejectedValue(new Error('queue down'));
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
+    // The only finding is dismissed → the seam fires and throws, but the write is 200.
+    const res = await dismiss(findingA).expect(200);
+    expect(res.body.dismissedClaims.map((c: { title: string }) => c.title)).toEqual(['claim A']);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('never enqueues when the seam is unset (OSS)', async () => {
+    setGuardGenerateEnqueue(null);
+    await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
+    await dismiss(findingA).expect(200); // plain file write, no throw
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

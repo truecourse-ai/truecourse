@@ -10,6 +10,10 @@
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import yaml from 'js-yaml';
 import {
   generateGuards,
   type GuardGenerateResult,
@@ -22,18 +26,37 @@ import {
 import {
   writeGuardResult,
   sourceGuardRunInputs,
+  scenariosDir,
+  readGuardResult as readCloneGuardResult,
   type RunGuardResult,
   type ScenarioLoadError,
 } from '@truecourse/guard-runner';
+import { corpusFilePath, writeDecisions } from '@truecourse/spec-consolidator';
 import {
   openConflicts,
   type GuardGenerateReport,
   type GuardGenerateUsage,
   type GuardScenarioResult,
+  type GuardScenarioListItem,
+  type GuardScenarioSource,
+  type GuardRecipeCard,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
+import { loadWorkspaceSpec } from '../lib/spec-store.js';
+import {
+  getGuardStore,
+  saveScenarios,
+  writeGuardResult as writeGuardResultStore,
+  readGuardResult as readGuardResultStore,
+  readManifest as readManifestStore,
+  listScenarioFiles as listScenarioFilesStore,
+  readScenarioFile as readScenarioFileStore,
+  type RepoRef,
+} from '../lib/guard-store.js';
+import { readGuardScenarioSource, readGuardRecipeCard } from './guard-read.js';
+import type { CuratedCorpus, DecisionsFile, WorkspaceDocInput } from './spec-in-process.js';
 import {
   agentTransport,
   getDefaultTransport,
@@ -471,6 +494,285 @@ export function buildOpenConflictsReport(
     extractionFailures: [],
     orphaned: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Workspace guard (enterprise) — scenario generation over the workspace corpus.
+//
+// The guard analogue of `syncWorkspaceCorpusInProcess`: the workspace corpus is
+// disk-based machinery, so union docs + the persisted workspace corpus + the
+// workspace decisions are materialized into a TRANSIENT scratch tree, the shared
+// in-process guard generate runs over it exactly like a repo, and the resulting
+// scenario corpus + report persist under WORKSPACE scope. Storage reuses the
+// existing guard stores keyed `repoKey = 'ws:<org>'` (the convention the workspace
+// contract/spec blobs already use) with a sentinel commit — the PgGuardStore
+// methods take plain repoKey strings, so no schema change and no workspace store
+// variant are needed. The scratch tree — and the doc bodies — are deleted after.
+// ---------------------------------------------------------------------------
+
+/** The `repoKey` the workspace guard store rows are keyed under (`ws:<org>`). */
+export function workspaceGuardKey(org: string): string {
+  return `ws:${org}`;
+}
+
+/**
+ * The sentinel commit the workspace scenario corpus + report are stored under. The
+ * PgGuardStore per-set writes require a non-empty commit; the workspace scope is
+ * always-latest (no git), so one stable sentinel keys the single current set.
+ */
+export const WORKSPACE_GUARD_COMMIT = '_ws';
+
+/** The store ref for a workspace org's scenario corpus + generate report. */
+function workspaceGuardRef(org: string): RepoRef {
+  return { repoKey: workspaceGuardKey(org), commitSha: WORKSPACE_GUARD_COMMIT };
+}
+
+export interface WorkspaceGuardGenerateResult {
+  /** Scenario-corpus files persisted (`recipe.json` + `manifest.json` + `*.yaml`). */
+  savedFileCount: number;
+  /** Scenarios written by the generate (passed birth-validation and settled). */
+  scenariosWritten: number;
+  /** No processed workspace corpus yet → clean no-op (process a source first). */
+  noCorpus: boolean;
+  /** Open spec conflicts that BLOCKED generation; 0 on every normal path. */
+  openConflicts: number;
+}
+
+/** The in-process guard generate over a scratch tree — the injectable LLM step. */
+export type WorkspaceGuardGenerateFn = (
+  checkoutDir: string,
+  tracker?: StepTracker,
+) => Promise<GuardGenerateInProcessResult>;
+
+/**
+ * Materialize the workspace guard scratch tree: the union doc bodies at their
+ * namespaced paths, the persisted corpus at `.truecourse/specs/corpus.json` (the
+ * generator's doc authority), and the decisions at `.truecourse/specs/decisions.json`
+ * (the conflict gate + losing-side suppression read it). Mirrors
+ * `syncWorkspaceCorpusInProcess`'s materialization so both surfaces see one layout.
+ */
+function materializeWorkspaceGuardTree(
+  tmp: string,
+  corpus: CuratedCorpus,
+  docs: WorkspaceDocInput[],
+  decisions?: DecisionsFile,
+): void {
+  for (const doc of docs) {
+    const dest = path.join(tmp, doc.docPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, doc.markdown, 'utf-8');
+  }
+  const corpusFile = corpusFilePath(tmp);
+  fs.mkdirSync(path.dirname(corpusFile), { recursive: true });
+  fs.writeFileSync(corpusFile, JSON.stringify(corpus, null, 2) + '\n', 'utf-8');
+  if (decisions) writeDecisions(tmp, decisions);
+}
+
+/** Read a birth finding's evidence dir out of the scratch tree as `{ file → body }`,
+ *  or `null` when the dir is missing or holds no regular files. */
+function collectEvidenceFiles(checkoutDir: string, evidencePath: string): Record<string, string> | null {
+  const dir = path.join(checkoutDir, evidencePath);
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const files: Record<string, string> = {};
+  for (const name of names) {
+    const file = path.join(dir, name);
+    if (fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf-8');
+  }
+  return Object.keys(files).length > 0 ? files : null;
+}
+
+/** Copy each birth finding's transcript out of the scratch tree into the guard
+ *  store before it is deleted — the workspace analogue of the onboarding job's
+ *  `persistBirthEvidence`. The report row must already be persisted. */
+async function persistWorkspaceBirthEvidence(
+  ref: RepoRef,
+  checkoutDir: string,
+  report: GuardGenerateReport,
+): Promise<void> {
+  const store = getGuardStore();
+  for (const finding of report.birthFindings) {
+    if (!finding.evidencePath) continue;
+    const files = collectEvidenceFiles(checkoutDir, finding.evidencePath);
+    if (!files) continue;
+    const scenarioSeg = finding.evidencePath.split('/').pop()!;
+    await store.writeGuardResultEvidence(ref, scenarioSeg, files);
+  }
+}
+
+/**
+ * Generate the workspace guard scenario corpus over the persisted workspace corpus
+ * and the just-fetched union doc bodies, and persist the scenario set + report under
+ * workspace scope. The corpus is generation's only doc authority — no processed
+ * corpus is a clean `noCorpus` no-op. An unresolved within-area overlap trips the
+ * shared conflict gate: a blocked `open-conflicts` report persists and NO scenario
+ * set is saved (a needs-attention outcome, not a failure — resolve, then re-run).
+ * Any other generation failure throws (the caller surfaces it).
+ */
+export async function generateWorkspaceGuardInProcess(options: {
+  workspaceOrgId: string;
+  /** The union doc bodies (fetched transiently from the connected sources). */
+  docs: WorkspaceDocInput[];
+  /** The workspace curation decisions (folded into the conflict gate + suppression). */
+  decisions?: DecisionsFile;
+  tracker?: StepTracker;
+  llm?: 'cli' | 'agent';
+  io?: string;
+  /** Injectable generate step (production runs the real in-process driver). */
+  generate?: WorkspaceGuardGenerateFn;
+}): Promise<WorkspaceGuardGenerateResult> {
+  const ref = workspaceGuardRef(options.workspaceOrgId);
+  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: options.workspaceOrgId }, 'corpus');
+  if (corpus == null) {
+    return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 };
+  }
+
+  const generate =
+    options.generate ??
+    ((dir: string, tracker?: StepTracker) =>
+      // No onLlmEstimate: hosted generation has no interactive cost gate. The
+      // process-global EE transport + guard executor are picked up internally.
+      guardGenerateInProcess(dir, { tracker, llm: options.llm, io: options.io }));
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-guard-'));
+  try {
+    materializeWorkspaceGuardTree(tmp, corpus, options.docs, options.decisions);
+
+    let generated: GuardGenerateInProcessResult;
+    try {
+      generated = await generate(tmp, options.tracker);
+    } catch (e) {
+      // The conflict gate hard-fails on unresolved overlaps. Persist a blocked
+      // report (NO scenario set) and RESOLVE — resolve the conflicts, then re-run.
+      if (e instanceof OpenConflictsError) {
+        await writeGuardResultStore(ref, buildOpenConflictsReport(e, new Date().toISOString()));
+        return { savedFileCount: 0, scenariosWritten: 0, noCorpus: false, openConflicts: e.conflicts.length };
+      }
+      throw e;
+    }
+
+    const { guard } = generated;
+    // An empty doc universe generates nothing — same user story as no corpus.
+    if (guard.status === 'no-docs') {
+      return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 };
+    }
+    if (guard.status !== 'ok') {
+      throw new Error(guard.reason ?? `guard generation failed (${guard.status})`);
+    }
+
+    // Prefer the scratch tree's file report (it carries the usage totals the
+    // in-process driver stamped) over rebuilding from the result.
+    const report = readCloneGuardResult(tmp) ?? buildGuardReport(guard, new Date().toISOString());
+    const { fileCount } = await saveScenarios(ref, scenariosDir(tmp));
+    await writeGuardResultStore(ref, report);
+    await persistWorkspaceBirthEvidence(ref, tmp, report);
+
+    return { savedFileCount: fileCount, scenariosWritten: guard.written.length, noCorpus: false, openConflicts: 0 };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The pre-flight guard estimate for a workspace — `estimateGuardTokens` over a
+ * scratch tree of the union docs + the persisted corpus, so the same `LlmEstimate`
+ * the OSS modal renders is produced BEFORE any generation. Deterministic token math
+ * (no LLM call, no persistence); the scratch tree is deleted in a `finally`. A
+ * no-corpus workspace yields a no-stage estimate (nothing to generate).
+ */
+export async function estimateWorkspaceGuard(options: {
+  workspaceOrgId: string;
+  docs: WorkspaceDocInput[];
+  decisions?: DecisionsFile;
+}): Promise<LlmEstimate> {
+  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: options.workspaceOrgId }, 'corpus');
+  if (corpus == null) {
+    return { totalEstimatedTokens: 0, tiers: [], stages: [], subjectLabel: 'no corpus' };
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-guard-est-'));
+  try {
+    materializeWorkspaceGuardTree(tmp, corpus, options.docs, options.decisions);
+    return await estimateGuardTokens(tmp, await getModelPrices());
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+/** The Scenarios-tab read payload — the same pieces the repo guard reads carry
+ *  (the last-generate report, the recipe card, the committed inventory), composed
+ *  from the workspace-keyed guard store. Heading text is not joined (the workspace
+ *  has no working tree to read section indexes from). */
+export interface WorkspaceGuardCoverage {
+  report: GuardGenerateReport | null;
+  recipe: GuardRecipeCard | null;
+  scenarios: GuardScenarioListItem[];
+  hasGenerated: boolean;
+  hasScenarios: boolean;
+}
+
+/** The committed workspace scenario inventory (id/title/doc/anchor/file/handWritten),
+ *  composed from the store — the workspace analogue of `listGuardScenarios`, minus the
+ *  live-doc heading join (no working tree). */
+async function workspaceScenarioInventory(org: string): Promise<GuardScenarioListItem[]> {
+  const repoKey = workspaceGuardKey(org);
+  const commit = WORKSPACE_GUARD_COMMIT;
+  const { scenarios } = await getGuardStore().loadScenarios({ repoKey, commitSha: commit });
+  const manifest = await readManifestStore(repoKey, commit);
+  const manifestIds = new Set<string>();
+  for (const sec of manifest?.sections ?? []) for (const id of sec.scenarioIds) manifestIds.add(id);
+
+  // id → YAML file (first sorted file wins, matching the loader's dedup).
+  const fileById = new Map<string, string>();
+  for (const rel of await listScenarioFilesStore(repoKey, commit)) {
+    const content = await readScenarioFileStore(repoKey, rel, commit);
+    if (content == null) continue;
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(content);
+    } catch {
+      continue;
+    }
+    const id = (parsed as { id?: unknown } | null)?.id;
+    if (typeof id === 'string' && !fileById.has(id)) fileById.set(id, rel);
+  }
+
+  return scenarios
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      doc: s.binds.doc,
+      anchor: s.binds.section,
+      file: fileById.get(s.id) ?? '',
+      handWritten: !manifestIds.has(s.id),
+    }))
+    .sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id));
+}
+
+/** The workspace Scenarios-tab coverage payload (report + recipe + inventory). */
+export async function readWorkspaceGuardCoverage(org: string): Promise<WorkspaceGuardCoverage> {
+  const repoKey = workspaceGuardKey(org);
+  const [report, recipe, scenarios] = await Promise.all([
+    readGuardResultStore(repoKey, WORKSPACE_GUARD_COMMIT),
+    readGuardRecipeCard(repoKey, WORKSPACE_GUARD_COMMIT),
+    workspaceScenarioInventory(org),
+  ]);
+  return {
+    report,
+    recipe,
+    scenarios,
+    hasGenerated: report != null,
+    hasScenarios: scenarios.length > 0,
+  };
+}
+
+/** One workspace scenario's YAML source by id, or `null` — reuses the shared
+ *  traversal-safe reader over the workspace-keyed store. */
+export function readWorkspaceGuardScenario(org: string, id: string): Promise<GuardScenarioSource | null> {
+  return readGuardScenarioSource(workspaceGuardKey(org), id, WORKSPACE_GUARD_COMMIT);
 }
 
 // ---------------------------------------------------------------------------

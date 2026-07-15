@@ -7,9 +7,8 @@
  *   - `analysis_current` — the mutable LATEST + diff singletons (kind-keyed)
  *   - `analysis_history` — the append-only per-analysis summary index
  *
- * Snapshots are stored as jsonb directly (like `verify_snapshots`), not
- * content-addressed: each analysis is a fresh id, so cross-commit dedup buys
- * little.
+ * Snapshots are stored as jsonb directly, not content-addressed: each analysis
+ * is a fresh id, so cross-commit dedup buys little.
  */
 
 import {

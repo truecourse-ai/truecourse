@@ -52,7 +52,7 @@ export async function repoGuardCoverageUrl(
   return `${appUrl.replace(/\/$/, '')}/repos/${slug}?section=guard&tab=coverage`;
 }
 
-/** Link to a repo's dashboard page (drift/overview). */
+/** Link to a repo's dashboard page (overview). */
 export async function repoDashboardUrl(
   appUrl: string | undefined,
   repoFullName: string,

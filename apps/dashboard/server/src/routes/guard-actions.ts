@@ -40,8 +40,10 @@ import {
   undismissGuardClaim,
   getGuardDecisions,
 } from '@truecourse/core/commands/guard-read';
+import { readGuardResult } from '@truecourse/core/lib/guard-store';
+import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import type { GuardDecisions } from '@truecourse/shared';
+import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -52,16 +54,50 @@ import { parsePr } from './route-params.js';
 const router: Router = Router();
 
 // Shared write tail for the two decisions mutations: run the overlay-aware write,
-// then respond with the write result (repo scope) or the merged effective view
-// (PR scope — the same shape `GET /guard/decisions?pr=` returns).
+// the optional post-write side effect (the hosted regen dispatch on the last
+// dismissal), then respond with the write result (repo scope) or the merged
+// effective view (PR scope — the same shape `GET /guard/decisions?pr=` returns).
 async function mutateGuardDecisions(
   repoPath: string,
   pr: number | undefined,
   res: Response,
   mutate: (opts?: { pr?: number }) => Promise<GuardDecisions>,
+  afterWrite?: () => Promise<void>,
 ): Promise<void> {
   const written = await mutate(pr !== undefined ? { pr } : undefined);
+  if (afterWrite) await afterWrite();
   res.json(pr !== undefined ? await getGuardDecisions(repoPath, { pr }) : written);
+}
+
+// A repo-scope dismissal that suppresses the LAST active finding: an earlier
+// generate's scenario corpus should regenerate honoring the dismissal so the
+// suppressed claim no longer surfaces (the hosted analog of resolving a spec
+// conflict). Enqueue a hosted guard generate through the core seam ONLY when the
+// write leaves ZERO active (non-dismissed) findings — while any finding is still
+// active the dismissals batch, and the last one fires exactly one generate. The
+// same shared derivation the coverage view uses decides "active": a finding is
+// dismissed when its `dismissedClaimKey(doc, anchor, claim)` is recorded; a finding
+// with no extracted claim can never be dismissed, so it keeps the set non-empty.
+// EE installs the seam; OSS/tests leave it unset → no-op. Best-effort: a failed
+// enqueue never fails the decision save.
+async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void> {
+  const enqueue = getGuardGenerateEnqueue();
+  if (!enqueue) return;
+  try {
+    const report = await readGuardResult(repoPath);
+    if (!report || report.birthFindings.length === 0) return;
+    const decisions = await getGuardDecisions(repoPath);
+    const dismissed = new Set(
+      decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+    );
+    const anyActive = report.birthFindings.some(
+      (f) => !(f.claim && dismissed.has(dismissedClaimKey(f.doc, f.anchor, f.claim))),
+    );
+    if (anyActive) return;
+    await enqueue(repoPath);
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
 }
 
 // A guard generate/run is in flight for this repo id. Both actions share the set:
@@ -200,12 +236,18 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
-    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
-      dismissGuardClaim(
-        repo.path,
-        { doc, anchor, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
-        opts,
-      ),
+    await mutateGuardDecisions(
+      repo.path,
+      parsed.pr,
+      res,
+      (opts) =>
+        dismissGuardClaim(
+          repo.path,
+          { doc, anchor, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
+          opts,
+        ),
+      // Repo scope only — a PR-scoped dismissal regenerates through the PR's own flow.
+      parsed.pr === undefined ? () => regenerateIfLastFindingDismissed(repo.path) : undefined,
     );
   } catch (e) {
     next(e);

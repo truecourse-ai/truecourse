@@ -1,20 +1,19 @@
 /**
- * Postgres implementation of core's `GuardStore`. Three homes, mirroring the
- * verify + contract stores:
+ * Postgres implementation of core's `GuardStore`. Three homes:
  *
- *   - RUN STATE (`guard_runs`, one row per repo+commit) — like `PgVerifyStore`:
+ *   - RUN STATE (`guard_runs`, one row per repo+commit):
  *     `writeGuardLatest` marks the default-branch baseline, `writeGuardRun` writes
  *     a (PR-head) snapshot without marking it, `readGuardLatest` is the newest
- *     baseline row, and the run history is every baseline row. Unlike verify's
- *     inert per-run read, `readGuardRun(runId)` stays LIVE (the `(repo, run_id)`
- *     index). The commit key comes from the payload (`latest.run.commit`), falling
+ *     baseline row, and the run history is every baseline row. `readGuardRun(runId)`
+ *     stays LIVE (the `(repo, run_id)` index). The commit key comes from the payload
+ *     (`latest.run.commit`), falling
  *     back to the always-present `runId` so distinct runs never collide on the PK.
  *     Re-running guard on the SAME commit upserts that row — latest wins: the
  *     previous run's history point is replaced, its runId stops resolving via
  *     `readGuardRun` (the row's `run_id` is overwritten), and its evidence
  *     manifest resets to `{}` so the old transcripts are never served under the
  *     new runId (the blobs remain in `content`, unreferenced). Deliberate: one row
- *     per commit is `PgVerifyStore`'s model, unlike the OSS append-only `history.json`.
+ *     per commit, unlike the OSS append-only `history.json`.
  *
  *   - EVIDENCE — per-run transcripts, content-addressed in `content` (scope
  *     `guard-evidence:<repo>`); the run row's `evidence` jsonb is the
@@ -23,8 +22,8 @@
  *     report (`guard_results.evidence`, same shape) instead — `readGuardEvidenceAt`
  *     falls back to it when the evidence path's runId matches no run row.
  *
- *   - SCENARIO CORPUS (`guard_scenario_sets`) — content-addressed AND keyed
- *     exactly like `PgContractStore`: the committable `scenarios/` tree (yaml +
+ *   - SCENARIO CORPUS (`guard_scenario_sets`) — content-addressed and keyed
+ *     per (repo, commit): the committable `scenarios/` tree (yaml +
  *     recipe.json + manifest.json) is deduped into `content` (scope `guard:<repo>`)
  *     with a per-(repo, commit) `{ relPath: sha }` manifest row. `saveScenarios`
  *     takes a `RepoRef` and rejects an empty commit; `loadScenarios(ref)` is that
@@ -39,8 +38,8 @@
  *     as `EMPTY_GUARD_DECISIONS` (never null) — core's overlay promotion keys the
  *     "no overlay" signal on `dismissedClaims.length === 0`.
  *
- * In EE the `repoPath` argument carries the stable repo key (as in `PgVerifyStore`
- * / `PgContractStore`), not an on-disk path — `materializesInPlace` is false.
+ * In EE the `repoPath` argument carries the stable repo key (as in the other EE
+ * stores), not an on-disk path — `materializesInPlace` is false.
  */
 
 import os from 'node:os';
@@ -214,8 +213,7 @@ export class PgGuardStore implements GuardStore {
    * Upsert a run snapshot keyed by repo+commit; a baseline write marks the row.
    * A same-commit rerun REPLACES the row's snapshot/summary/run_id (latest wins —
    * see the file header): the old runId no longer resolves, its history data
-   * point is gone, and the evidence manifest resets. Mirrors `PgVerifyStore`'s
-   * one-row-per-commit semantics.
+   * point is gone, and the evidence manifest resets. One-row-per-commit semantics.
    */
   private async upsertRun(repoKey: string, latest: GuardLatest, markBaseline: boolean): Promise<void> {
     const commitSha = latest.run.commit ?? latest.run.runId;

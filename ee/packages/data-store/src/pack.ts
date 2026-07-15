@@ -1,24 +1,14 @@
 /**
- * Helpers for content-addressed contract packing: hashing, bounded concurrency,
- * `.tc` tree walking, and path-traversal safety. Manifest paths are stored data
- * (a `.tc` filename is attacker-influenceable via a PR), so both the save side
- * (`assertSafeRel`) and the materialize side (`safeJoin`) guard against any path
- * that would escape the target root — this is the arbitrary-file-write surface
- * on a multi-tenant host.
+ * Helpers for content-addressed packing: hashing, bounded concurrency, and
+ * path-traversal safety. Manifest paths are stored data (a filename is
+ * attacker-influenceable via a PR), so both the save side (`assertSafeRel`)
+ * and the materialize side (`safeJoin`) guard against any path that would
+ * escape the target root — this is the arbitrary-file-write surface on a
+ * multi-tenant host.
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
-import type { ContractKind } from '@truecourse/core/lib/contract-store';
-
-/**
- * The generate manifest (area→specHash) `contracts generate` writes next to the
- * `.tc` tree. Carried in the stored set so an anchored regenerate can no-op
- * unchanged areas, but excluded from `listContractFiles` (contract listings are
- * `.tc` only, mirroring the file store).
- */
-export const GENERATE_MANIFEST = 'manifest.json';
 
 /** `sha256-<hex>` over the bytes. */
 export function sha256(bytes: Buffer): string {
@@ -84,49 +74,4 @@ export function safeJoin(root: string, rel: string): string {
     throw new Error(`[ee-data-store] manifest path escapes root: ${JSON.stringify(rel)}`);
   }
   return dest;
-}
-
-/**
- * Recursive walk of `root` returning posix-relative paths of the files
- * `includeFile(parentRel, name)` accepts; `skipDir(parentRel, name)` prunes a
- * subtree before descending. Unreadable dirs are skipped, output is walk-order.
- */
-function walkRelFiles(
-  root: string,
-  includeFile: (parentRel: string, name: string) => boolean,
-  skipDir?: (parentRel: string, name: string) => boolean,
-): string[] {
-  const out: string[] = [];
-  const walk = (rel: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const childRel = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) {
-        if (!skipDir?.(rel, e.name)) walk(childRel);
-      } else if (e.isFile() && includeFile(rel, e.name)) {
-        out.push(childRel);
-      }
-    }
-  };
-  walk('');
-  return out;
-}
-
-/**
- * Posix-relative paths of every `.tc` file under `root`. For `kind:'contracts'`
- * the top-level `_inferred/` subtree is excluded (authored contracts only),
- * matching the verifier's `walkTcFiles`. For `kind:'contracts_inferred'` the
- * `root` IS the `_inferred` dir, so nothing is excluded.
- */
-export function walkTcRelFiles(root: string, kind: ContractKind): string[] {
-  return walkRelFiles(
-    root,
-    (_parentRel, name) => name.endsWith('.tc'),
-    (parentRel, name) => kind === 'contracts' && parentRel === '' && name === '_inferred',
-  );
 }

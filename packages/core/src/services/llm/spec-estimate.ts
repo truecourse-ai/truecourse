@@ -110,7 +110,11 @@ function previewChars(): number {
  * when the kept set changed. When nothing changed the estimate has no stages and
  * the confirm prompt is skipped.
  */
-export async function estimateScanTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+export async function estimateScanTokens(
+  repoRoot: string,
+  prices?: PriceTable,
+  opts: { skipGit?: boolean } = {},
+): Promise<LlmEstimate> {
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies. Without the manualIncludes the prefilter (dedup pool) and the
   // kept set diverge from the runtime — the estimate would report "all cached"
@@ -119,7 +123,7 @@ export async function estimateScanTokens(repoRoot: string, prices?: PriceTable):
   const manualIncludes = decisions.manualIncludes ?? [];
   const manualExcludes = new Set(decisions.manualExcludes ?? []);
 
-  const docs = discoverDocs(repoRoot);
+  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
   // Exact same planner `filterByRelevance` runs: one LLM call per doc whose
   // verdict isn't cached (manual-includes never call). Its `known` verdicts also
   // tell us which docs are kept (feed area-tagging).

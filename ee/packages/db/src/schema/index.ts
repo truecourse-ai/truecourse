@@ -24,9 +24,9 @@ import { content } from './content.js';
 import { analyses, analysisCurrent, analysisHistory } from './analyses.js';
 import { decisions } from './decisions.js';
 import { repoConfig, repoUiState, registry } from './config.js';
-import { contractSets, specSets } from './contracts.js';
+import { specSets } from './contracts.js';
 import { extractionCache } from './cache.js';
-import { workspaceSpecSets, workspaceContractSets, knowledgeDocuments } from './knowledge.js';
+import { workspaceSpecSets, knowledgeDocuments } from './knowledge.js';
 import { integrationConnections } from './integrations.js';
 import {
   jobs,
@@ -55,11 +55,9 @@ export const schema = {
   repoConfig,
   repoUiState,
   registry,
-  contractSets,
   specSets,
   extractionCache,
   workspaceSpecSets,
-  workspaceContractSets,
   knowledgeDocuments,
   integrationConnections,
   jobs,

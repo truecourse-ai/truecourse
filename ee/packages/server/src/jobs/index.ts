@@ -13,7 +13,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
+import { openConflicts, type AuthUser, type EeServerRegistry } from '@truecourse/shared';
 import type { EeDb } from '@truecourse/ee-db';
 import {
   JobStore,
@@ -25,6 +25,8 @@ import {
 } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { readGuardResult, readGuardLatest } from '@truecourse/core/lib/guard-store';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import { getWorkspaceDecisions, type CuratedCorpus } from '@truecourse/core/commands/spec-in-process';
 import type { Runner } from 'graphile-worker';
 import {
   selectGateStore,
@@ -40,6 +42,7 @@ import {
   chainGuardBaselineRefresh,
   generateWasBlocked,
 } from './guard-chain.js';
+import { chainWorkspaceGuard } from './knowledge-chain.js';
 import { settleOrphanedGuardGates } from './orphans.js';
 import {
   enqueueOrPendBaseline,
@@ -54,6 +57,9 @@ import {
 } from './pending-guard-baseline.js';
 import { runGuardBackfill } from './guard-backfill.js';
 import {
+  KNOWLEDGE_SYNC_TASK,
+  KNOWLEDGE_ESTIMATE_TASK,
+  KNOWLEDGE_GUARD_TASK,
   REPO_BASELINE_TASK,
   REPO_GUARD_TASK,
   GUARD_GATE_TASK,
@@ -63,6 +69,10 @@ import {
   guardGateJobKey,
   guardSpecRegenJobKey,
   guardBaselineJobKey,
+  workspaceGuardJobKey,
+  type SyncJobPayload,
+  type EstimateJobPayload,
+  type GuardWorkspacePayload,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
   type GuardGenerateEnqueueRequest,
@@ -79,6 +89,12 @@ function orgIdOf(req: Request): string | null {
 /** The job surface other modules enqueue onto: the shared store + the enqueue. */
 export interface JobsApi {
   jobStore: JobStore;
+  /** Enqueue a connector sync (maxAttempts:1 — a failure is terminal, see worker.ts). */
+  enqueueSync(payload: SyncJobPayload, jobKey: string): Promise<void>;
+  /** Enqueue Stage 1 of a sync — the cache-aware cost estimate (maxAttempts:1). */
+  enqueueEstimate(payload: EstimateJobPayload, jobKey: string): Promise<void>;
+  /** Enqueue a workspace guard-scenario generate (Knowledge → Scenarios "Generate", maxAttempts:1). */
+  enqueueGuard(payload: GuardWorkspacePayload, jobKey: string): Promise<void>;
   /**
    * Enqueue an initial/refresh repo scan (connect + default-branch push). Single-
    * flight per repo: returns the new job id, or null when a scan is already
@@ -317,6 +333,12 @@ export async function registerJobs(
       ...req,
     });
 
+  // Single-flight workspace guard-generate enqueue — the post-process chain lands
+  // here (the Scenarios "Generate" route creates its own row for the 409-with-jobId
+  // path). Org-scoped, so a duplicate for the same workspace coalesces to null.
+  const enqueueWorkspaceGuard = (org: string): Promise<string | null> =>
+    singleFlightEnqueue(KNOWLEDGE_GUARD_TASK, org, workspaceGuardJobKey(org), { org });
+
   // Single-flight guard-gate enqueue — the pull-request webhook lands here.
   // Keyed per repo + head SHA: a redelivered webhook for the same head is a
   // no-op, while a new push (new head) queues a fresh gate.
@@ -386,6 +408,31 @@ export async function registerJobs(
   ): Promise<void> =>
     replayPendingGuardBaseline(pendingGuardBaselines, enqueueGuardBaseline, payload, settled);
 
+  // The workspace's open spec conflicts (the shared `openConflicts` derivation the
+  // Scenarios gate uses) — 0 when there is no corpus yet. The post-process chain
+  // blocks scenario generation while any is open.
+  const workspaceOpenConflicts = async (org: string): Promise<number> => {
+    const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
+    if (!corpus) return 0;
+    const decisions = await getWorkspaceDecisions(org);
+    return openConflicts(corpus, decisions).length;
+  };
+
+  // After a knowledge.sync (processing) job succeeds with no open spec conflict,
+  // chain the workspace scenario generate — processing just re-consolidated the
+  // corpus, so this is the moment generation has its doc universe. Best-effort; the
+  // org-scoped single-flight key coalesces a duplicate.
+  const onKnowledgeSyncSettled = async (
+    payload: SyncJobPayload,
+    outcome: JobOutcomeStatus,
+  ): Promise<void> => {
+    await chainWorkspaceGuard(
+      { openConflicts: workspaceOpenConflicts, enqueueWorkspaceGuard },
+      payload,
+      outcome,
+    );
+  };
+
   try {
     // Boot recovery: the in-process worker means a restart abandoned any in-flight
     // job. Reap them so the single-flight key frees and stale "Syncing…" clears.
@@ -414,6 +461,7 @@ export async function registerJobs(
       onBaselineSettled,
       onGuardGenerateSettled,
       onGuardBaselineSettled,
+      onKnowledgeSyncSettled,
     });
     // A crash could have left pending follow-up baselines with no running job to
     // replay them. Now that the reaped keys are free and the worker is up, drain
@@ -460,6 +508,18 @@ export async function registerJobs(
 
   return {
     jobStore,
+    enqueueSync: async (payload, jobKey) => {
+      if (!runner) throw new Error('the background job worker is not running');
+      await runner.addJob(KNOWLEDGE_SYNC_TASK, payload, { jobKey, maxAttempts: 1 });
+    },
+    enqueueEstimate: async (payload, jobKey) => {
+      if (!runner) throw new Error('the background job worker is not running');
+      await runner.addJob(KNOWLEDGE_ESTIMATE_TASK, payload, { jobKey, maxAttempts: 1 });
+    },
+    enqueueGuard: async (payload, jobKey) => {
+      if (!runner) throw new Error('the background job worker is not running');
+      await runner.addJob(KNOWLEDGE_GUARD_TASK, payload, { jobKey, maxAttempts: 1 });
+    },
     enqueueBaseline,
     enqueueGuardGenerate,
     enqueueGuardGate,

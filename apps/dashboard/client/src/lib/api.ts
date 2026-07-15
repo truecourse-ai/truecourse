@@ -694,65 +694,6 @@ export function getAnalyticsResolution(
 // Spec Consolidation (Module 1)
 // ---------------------------------------------------------------------------
 
-export type IlValidationIssue = {
-  artifactKey: string;
-  message: string;
-  severity: 'hard' | 'soft';
-  tcSource?: string;
-  /** Repair tried and failed to fix this artifact's syntax. */
-  repairAttempted?: boolean;
-  /** The last parser error after repair gave up. */
-  repairFailReason?: string;
-};
-
-/** An enumerated target that never got a contract written (a genuine miss after the gap judge). */
-export type IlCoverageGap = {
-  areaId: string;
-  kind: string;
-  identity: string;
-  /** The enumerator's hint for this target. */
-  hint?: string;
-  /** The gap judge's reason for keeping it as a genuine miss. */
-  reason?: string;
-};
-
-// ---------------------------------------------------------------------------
-// Contracts (Module 2) — types only. The `.tc` corpus browser is reused by the
-// enterprise Workspace Knowledge page (`ee/packages/client`), which reads its
-// own `/api/ee/knowledge/contracts/*` routes; the OSS repo Contracts tab and
-// its `/api/repos/:id/contracts/*` routes are retired.
-// ---------------------------------------------------------------------------
-
-export type ContractsTree = {
-  hasContracts: boolean;
-  modules: Array<{
-    name: string;
-    files: Array<{
-      name: string;
-      path: string;
-      /** `workspace` = inherited from workspace Knowledge (enterprise); else the repo's own. */
-      provenance?: 'workspace' | 'repo';
-      /** True when this authored contract was promoted from an inferred decision. */
-      inferred?: boolean;
-    }>;
-  }>;
-  /**
-   * The last `contracts generate` run's outcome, persisted so it survives a
-   * reload. Null when never generated (or EE, where generate runs server-side).
-   */
-  lastGenerate?: {
-    generatedAt: string;
-    written: number;
-    gaps: IlCoverageGap[];
-    validationIssues: IlValidationIssue[];
-  } | null;
-};
-
-export type ContractsFile = {
-  path: string;
-  content: string;
-};
-
 export type SpecStalenessResponse = {
   /** Recorded include/exclude/relation/conflict decisions are newer than the corpus — a Scan applies them. */
   decisionsPending: boolean;
@@ -827,6 +768,11 @@ export interface SpecCorpusDoc {
   status?: string;
   lastTouched: string;
   areaTags: string[];
+  /** Workspace only: the ledger's human title for this ref (synthetic docPath).
+   *  Absent on repo corpora — the UI falls back to the ref. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
 }
 
 export interface SpecCorpusArea {
@@ -840,6 +786,22 @@ export interface SpecCorpusArea {
 export interface SpecSkippedDoc {
   ref: string;
   reason: string;
+  /** Workspace only: the ledger's human title for this ref. Absent on repo corpora. */
+  title?: string;
+  /** Workspace only: deep link to the source doc, when the ledger has one. */
+  url?: string | null;
+}
+
+/**
+ * A skipped-docs SUMMARY (counts only), returned by the workspace corpus GET in
+ * place of the full `skippedDocs` array — a source with thousands of dropped docs
+ * must not ship every row into the corpus payload (the individual rows load lazily
+ * via the paged skipped listing). Absent on the repo corpus, which carries the
+ * full array inline.
+ */
+export interface SpecSkippedSummary {
+  total: number;
+  byReason: { reason: string; count: number }[];
 }
 
 export interface SpecCorpus {
@@ -862,6 +824,12 @@ export interface SpecCorpusResponse {
   manualExcludes?: string[];
   /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
   conflictResolutions?: SpecConflictResolution[];
+  /**
+   * Workspace corpus only: a skipped-docs summary in place of `corpus.skippedDocs`
+   * (which the workspace payload omits for scale). The individual rows load lazily
+   * via the paged skipped listing (the data-source seam's `listSkipped`).
+   */
+  skipped?: SpecSkippedSummary;
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
   /**

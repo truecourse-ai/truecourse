@@ -10,7 +10,7 @@ export type RunHistoryItem = {
 };
 
 /**
- * Past-runs dropdown, shared by analyze (analyses) and verify (verify runs).
+ * Past-runs dropdown for a run-history list (e.g. analyze runs).
  * `items` are newest-first with `items[0]` being the latest; selecting it (or
  * the explicit "Latest" entry) calls `onSelect(null)`. `selectedId` is null
  * when viewing the latest.

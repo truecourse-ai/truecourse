@@ -1,7 +1,7 @@
 /**
  * Section switcher — a compact dropdown that lives in the page
  * header (next to the logo). Click to flip the dashboard between
- * the registered sections (Code Analysis, BL Drift, …, plus any
+ * the registered sections (Code Analysis, Spec Guard, …, plus any
  * `ee/`-contributed sections that pass the current capability gate).
  *
  * The list of sections comes from `useVisibleSections()` so the

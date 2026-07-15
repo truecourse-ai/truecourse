@@ -108,6 +108,10 @@
       "types": "./dist/lib/guard-generate-enqueue.d.ts",
       "import": "./dist/lib/guard-generate-enqueue.js"
     },
+    "./lib/spec-conflicts-resolved-hook": {
+      "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
+      "import": "./dist/lib/spec-conflicts-resolved-hook.js"
+    },
     "./lib/inferred-action-store": {
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"
@@ -191,6 +195,14 @@
     "./services/llm/provider": {
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
+    },
+    "./services/llm/spec-estimate": {
+      "types": "./dist/services/llm/spec-estimate.d.ts",
+      "import": "./dist/services/llm/spec-estimate.js"
+    },
+    "./services/llm/model-prices": {
+      "types": "./dist/services/llm/model-prices.d.ts",
+      "import": "./dist/services/llm/model-prices.js"
     },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",

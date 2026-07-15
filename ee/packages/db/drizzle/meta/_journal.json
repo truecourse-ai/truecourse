@@ -50,6 +50,20 @@
       "when": 1783948653525,
       "tag": "0006_zippy_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784064924009,
+      "tag": "0007_chubby_black_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784078678264,
+      "tag": "0008_wakeful_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }

@@ -27,11 +27,13 @@ const eeClientModule: EeClientModule = {
       load: () => import('./PullRequestsPage'),
       requiredCapability: 'github-gate',
     },
-    // v1 regression: the Knowledge surface used to present workspace (cross-repo)
-    // contracts; that route + nav item are paused (removed here) while the contract
-    // subsystem is dormant. The data is preserved and cross-repo contracts are
-    // planned to return as the spec→code linking layer. Per-repo verification is
-    // covered today by the Spec Guard gate (guard coverage/scenarios).
+    // Workspace Knowledge — the cross-repo spec corpus curated from connected
+    // sources (Confluence / Jira). Spec + Sources tabs; Scenarios placeholder.
+    {
+      path: '/knowledge',
+      load: () => import('./KnowledgePage'),
+      requiredCapability: 'knowledge',
+    },
     {
       path: '/settings',
       load: () => import('./SettingsPage'),
@@ -87,6 +89,13 @@ const eeClientModule: EeClientModule = {
       to: '/pulls',
       iconName: 'GitPullRequest',
       requiredCapability: 'github-gate',
+    },
+    {
+      id: 'knowledge',
+      label: 'Knowledge',
+      to: '/knowledge',
+      iconName: 'BookOpen',
+      requiredCapability: 'knowledge',
     },
     {
       id: 'settings',

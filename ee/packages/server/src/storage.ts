@@ -83,7 +83,7 @@ const STALE_MS = 60 * 60 * 1000; // 1 hour
  * Remove leftover materialization/clone temp dirs from a previous run. A
  * crash between mkdtemp and cleanup would otherwise leak disk on a long-lived
  * worker; the materialize/clone paths name their temp dirs `tc-*`, and an
- * hour is far longer than any single verify/generate.
+ * hour is far longer than any single gate run.
  */
 export function sweepStaleTempDirs(now = Date.now(), dir = os.tmpdir()): number {
   let removed = 0;

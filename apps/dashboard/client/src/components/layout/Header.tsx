@@ -31,8 +31,8 @@ type HeaderProps = {
   /** When provided, render the section switcher next to the logo. */
   dashboardSection?: DashboardSection;
   onDashboardSectionChange?: (next: DashboardSection) => void;
-  /** Section-specific action buttons (e.g. Apply for Spec, Run for
-   * Verify). Rendered just before the Analyze button so global actions
+  /** Section-specific action buttons (e.g. Scan for the Guard Coverage
+   * tab, Generate for Scenarios). Rendered just before the Analyze button so global actions
    * for the current section sit alongside Analyze instead of in a
    * separate row that disappears when switching tabs (which caused the
    * left sidebar to visibly shift). */

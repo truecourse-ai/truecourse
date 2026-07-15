@@ -3,7 +3,7 @@
  * and decides the Check conclusion: newly failing scenarios fail (blocking) or
  * inform (advisory); engine-level failures conclude 'error' — a broken gate
  * blocks the merge, it never silently passes; a repo with no committed
- * scenarios is neutral. Mirrors `decideGate` (the drift gate's decision).
+ * scenarios is neutral.
  */
 
 import { dismissedClaimKey, type GuardScenarioResult } from '@truecourse/shared';

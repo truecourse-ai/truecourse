@@ -18,6 +18,8 @@ import { sha256 } from './pack.js';
 export const contentScope = {
   spec: (repoKey: string): string => `spec:${repoKey}`,
   workspaceSpec: (org: string): string => `spec:ws:${org}`,
+  /** Synced source-doc bodies for workspace Knowledge (sha = the ledger's contentHash). */
+  knowledge: (org: string): string => `knowledge:ws:${org}`,
   trace: (org: string): string => `trace:${org}`,
   /** Committable guard scenario-tree bodies (yaml / recipe.json / manifest.json). */
   guard: (repoKey: string): string => `guard:${repoKey}`,

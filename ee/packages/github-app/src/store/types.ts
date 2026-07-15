@@ -29,7 +29,7 @@ export interface RepoLinkRecord {
   /** Owning TrueCourse workspace (WorkOS org). */
   workspaceOrgId: string;
   defaultBranch: string;
-  /** When true (default) a PR with new drift fails a required Check; false = advisory. */
+  /** When true (default) a PR with newly failing Spec Guard scenarios fails a required Check; false = advisory. */
   blocking: boolean;
   /** Code Quality gate: when true (default) new violations at/above
    *  `codeQualityMinSeverity` fail a required Check; false = advisory. */

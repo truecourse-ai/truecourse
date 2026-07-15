@@ -18,14 +18,20 @@ import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFro
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
+import { registerKnowledge } from './knowledge/index.js';
 import { registerJobs } from './jobs/index.js';
-import { createGuardRouter, createGuardGenerateEnqueue } from './guard/index.js';
+import {
+  createGuardRouter,
+  createGuardGenerateEnqueue,
+  createSpecConflictsResolvedBaselineScan,
+} from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
 import { initSentry, flushSentry } from './observability/sentry.js';
@@ -123,6 +129,9 @@ const plugin: EePlugin = {
     // Settings → Integrations (encrypted connector tokens). Needs the Postgres
     // stores installed above + the master secret.
     registerIntegrations(registry, { db: eeDb, masterSecret });
+    // Workspace Knowledge (connector sweep/process + corpus reads) — rides the
+    // job queue for the sweep and processing stages.
+    registerKnowledge(registry, { db: eeDb, masterSecret, jobs });
     plugin.capabilities.push('knowledge');
 
     // GitHub App PR gate — required (env validated at boot above, so this always
@@ -156,6 +165,14 @@ const plugin: EePlugin = {
     // manual Generate router above, keyed by repoKey alone (no HTTP request).
     setGuardGenerateEnqueue(
       createGuardGenerateEnqueue({ store: gateStore, enqueueGuardGenerate: jobs.enqueueGuardGenerate }),
+    );
+
+    // The same conflict-clearing decision also re-scans the repo baseline so the
+    // store corpus re-curates (force — the commit hasn't moved) and the conflict-
+    // free scan chains scenario generation. Install the core seam the spec routes
+    // call, resolving the repo the same way as the Generate seam above.
+    setSpecConflictsResolvedHook(
+      createSpecConflictsResolvedBaselineScan({ store: gateStore, enqueueBaseline: jobs.enqueueBaseline }),
     );
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the

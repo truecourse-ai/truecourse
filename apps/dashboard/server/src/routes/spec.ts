@@ -32,6 +32,7 @@ import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
+import { getSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { readGuardResult } from '@truecourse/core/lib/guard-store';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
@@ -263,6 +264,21 @@ async function enqueueGuardGenerateRefresh(repoKey: string): Promise<void> {
   }
 }
 
+// The same conflict-clearing decision also makes the hosted repo re-scan its
+// baseline (force — the commit hasn't moved) so the store corpus re-curates and the
+// conflict-free scan chains scenario generation. Dispatch through the core seam (EE
+// installs it; OSS/tests leave it unset → OSS re-scans via its own manual Scan step).
+// Best-effort: a failed enqueue never fails the decision save.
+async function enqueueBaselineScanRefresh(repoKey: string): Promise<void> {
+  const hook = getSpecConflictsResolvedHook();
+  if (!hook) return;
+  try {
+    await hook(repoKey);
+  } catch {
+    /* best-effort — the decision is already saved */
+  }
+}
+
 // EE only. After a decision edit, re-curate the stored corpus and — only if it is
 // now conflict-free — enqueue a contract regeneration. This is the EE analog of the
 // OSS "resolve conflicts, then click Generate" flow: contracts regenerate the moment
@@ -271,15 +287,20 @@ async function enqueueGuardGenerateRefresh(repoKey: string): Promise<void> {
 // conflict — a verdict/dismissal OR an exclude — since either can be the one that
 // resolves it. OSS regenerates via the manual Generate step, so this is a no-op there.
 //
-// The same conflict-clearing decision also unblocks guard: if the repo's current
-// generate report is `open-conflicts` (a generate that stopped before authoring any
-// scenarios), enqueue a hosted guard generate too. The guard-store read is gated on
-// `openConflicts === 0` so the hot path (conflicts still remain) never touches it.
+// The same conflict-clearing decision also drives the hosted repo's self-generation.
+// It re-scans the baseline (enqueueBaselineScanRefresh) so the store corpus
+// re-curates and the conflict-free scan chains generation, AND — if the repo's
+// current generate report is `open-conflicts` (a generate that stopped before
+// authoring any scenarios) — enqueues a hosted guard generate so scenarios are
+// authored even when the scan's onboarding chain sees an existing (blocked) report.
+// The guard-store read is gated on `openConflicts === 0` so the hot path (conflicts
+// still remain) never touches it.
 async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
   if (specsMaterializeInPlace()) return;
   const result = await recurateStoredCorpus(repoKey);
   if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
     await enqueueContractsRefresh(repoKey);
+    await enqueueBaselineScanRefresh(repoKey);
     const report = await readGuardResult(repoKey);
     if (report?.status === 'open-conflicts') {
       await enqueueGuardGenerateRefresh(repoKey);

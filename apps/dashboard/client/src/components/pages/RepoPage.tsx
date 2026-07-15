@@ -912,17 +912,14 @@ function RepoPageInner() {
     ) : leftTab === 'scenarios' ? (
       // Generate lives where its output lives — the Scenarios tab. Capability-
       // gated: OSS (`local-filesystem`) opens the estimate modal then runs
-      // against the working tree; hosted enqueues the `repo.guard` job instead
-      // (`guard` capability) or hides the action when the subsystem is down.
+      // against the working tree; hosted repos self-drive (auto-generate off a
+      // conflict-free scan), so the manual trigger is hidden there.
       <GuardSectionActions
         kind="generate"
         onClick={guardGen.begin}
         busy={guardGen.busy}
         otherBusy={guardRun.running}
         stale={guardStaleness.generateStale}
-        // In EE `repo.name` IS the GitHub fullName (owner/repo) — the same
-        // identity the other EE repo-scoped calls key on.
-        repoFullName={isEe ? repo?.name : undefined}
       />
     ) : leftTab === 'guarddrifts' ? (
       // Run lives on the Drifts tab (it produces the results shown there).
