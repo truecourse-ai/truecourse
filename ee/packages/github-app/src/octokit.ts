@@ -143,6 +143,36 @@ export async function updateComment(
 }
 
 /**
+ * An existing queued/in-progress Check run for `(headSha, name)`, or null. Used to
+ * make the gate handler idempotent per head: GitHub evaluates the NEWEST run per
+ * name+sha, so a duplicate delivery that created a second run would shadow the
+ * verdict later posted to the first. Best-effort (a listing failure → null → the
+ * caller creates a fresh run, the pre-existing behavior).
+ */
+export async function findActiveCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+): Promise<number | null> {
+  try {
+    const { data } = await octokit.checks.listForRef({
+      owner,
+      repo,
+      ref: headSha,
+      check_name: name,
+      per_page: 100,
+    });
+    const active = data.check_runs.find(
+      (r) => r.status === 'queued' || r.status === 'in_progress',
+    );
+    return active?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Open an in-progress Check run for a head sha so the PR shows "running" while the
  * gate works; returns its id to complete later with {@link postCheck}. Best-effort:
  * a failure just means no live "running" pill (the completed Check is still posted).

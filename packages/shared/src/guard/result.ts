@@ -31,6 +31,16 @@ export const GuardRunEnvelopeSchema = z
     commit: z.string().nullable(),
     /** Recipe inputs fingerprint (`sha256:…`) at run time. */
     recipeFingerprint: z.string(),
+    /**
+     * Identity of the scenario corpus this run executed (`sha256:…` over the
+     * scenario ids + bindings — see the hosted gate's `guardCorpusFingerprint`).
+     * Stamped by the gate when it persists a PR-head run so a stored run only
+     * decides a later delivery when the corpus the gate would run still matches
+     * (a force spec-regen run executes the PR's OWN regenerated corpus, whose
+     * ids don't align with the committed set). Optional so CLI runs and
+     * pre-change snapshots keep parsing. NO format-version bump.
+     */
+    corpusFingerprint: z.string().optional(),
     scenarioFormat: z.literal(GUARD_FORMAT_VERSION),
   })
   .strict()

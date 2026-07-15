@@ -318,7 +318,18 @@ export async function registerJobs(
       if (err instanceof ActiveJobExistsError) return null;
       throw err;
     }
-    await runner.addJob(task, { jobId: job.id, ...payload }, { jobKey: key, maxAttempts: 1 });
+    try {
+      await runner.addJob(task, { jobId: job.id, ...payload }, { jobKey: key, maxAttempts: 1 });
+    } catch (err) {
+      // No graphile job exists to run (or settle) the row we just created — a
+      // 'queued' row would hold the single-flight key until the next restart's
+      // boot recovery, turning every request for this key until then into a
+      // bogus "already running" null. Mark it terminal, then rethrow.
+      await jobStore
+        .markFailed(job.id, (err as Error).message)
+        .catch(() => undefined);
+      throw err;
+    }
     return job.id;
   };
 

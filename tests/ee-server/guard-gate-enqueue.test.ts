@@ -179,6 +179,27 @@ describe('registerJobs — enqueueGuardGate', () => {
     expect(addJobMock).toHaveBeenCalledTimes(2);
   });
 
+  it('marks the tracked row failed (freeing the single-flight key) and rethrows when the runner enqueue throws', async () => {
+    const jobs = await reg();
+    addJobMock.mockRejectedValueOnce(new Error('graphile down'));
+
+    await expect(jobs.enqueueGuardGate(enqueueReq)).rejects.toThrow('graphile down');
+
+    // The tracked row is terminal — it must not sit 'queued' holding the key
+    // (no graphile job exists to run or settle it), which would settle every
+    // later delivery for this head as "already running" and never gate the
+    // head until a restart's boot recovery reaps the row.
+    const store = new JobStore(db);
+    const rows = await store.listForOrg(ORG);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe('failed');
+
+    // The key is free: the next delivery for the same head enqueues a fresh job.
+    const retryId = await jobs.enqueueGuardGate(enqueueReq);
+    expect(retryId).not.toBeNull();
+    expect((await store.get(retryId!))?.status).toBe('queued');
+  });
+
   it('throws on enqueue when the worker failed to boot', async () => {
     startWorkerMock.mockRejectedValue(new Error('pg down'));
     const jobs = await reg();

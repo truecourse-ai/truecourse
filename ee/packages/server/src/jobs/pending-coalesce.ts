@@ -58,7 +58,16 @@ export async function enqueueOrPendCoalesced<Req extends CoalesceRequest>(
     }
     throw err;
   }
-  await deps.addJob(job.id, req, key);
+  try {
+    await deps.addJob(job.id, req, key);
+  } catch (err) {
+    // No graphile job exists to run (or settle) the row we just created — a
+    // 'queued' row would hold the single-flight key until the next restart,
+    // coalescing every request until then onto the pending buffer with no
+    // running job to ever replay it. Mark the row terminal, then rethrow.
+    await deps.jobStore.markFailed(job.id, (err as Error).message).catch(() => undefined);
+    throw err;
+  }
   return job.id;
 }
 

@@ -37,9 +37,16 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function makeOctokit(opts: { startCheckFails?: boolean } = {}) {
-  const calls = { check: [] as any[], checkStart: [] as any[] };
+function makeOctokit(
+  opts: {
+    startCheckFails?: boolean;
+    /** Pre-existing check runs on the head, as GitHub would list them. */
+    existing?: Array<{ id: number; name: string; head_sha: string; status: string }>;
+  } = {},
+) {
+  const calls = { check: [] as any[], checkStart: [] as any[], listForRef: [] as any[] };
   const checkRuns = new Map<number, any>();
+  for (const run of opts.existing ?? []) checkRuns.set(run.id, run);
   let nextCheckId = 500;
   const octokit: any = {
     checks: {
@@ -48,7 +55,7 @@ function makeOctokit(opts: { startCheckFails?: boolean } = {}) {
           if (opts.startCheckFails) throw new Error('checks API down');
           const id = ++nextCheckId;
           calls.checkStart.push(p);
-          checkRuns.set(id, p);
+          checkRuns.set(id, { ...p, id });
           return { data: { id } };
         }
         calls.check.push(p);
@@ -56,8 +63,16 @@ function makeOctokit(opts: { startCheckFails?: boolean } = {}) {
       },
       update: async (p: any) => {
         const created = checkRuns.get(p.check_run_id) ?? {};
+        checkRuns.set(p.check_run_id, { ...created, status: p.status ?? created.status });
         calls.check.push({ ...p, head_sha: created.head_sha, name: created.name });
         return { data: { id: p.check_run_id } };
+      },
+      listForRef: async (p: any) => {
+        calls.listForRef.push(p);
+        const runs = [...checkRuns.values()].filter(
+          (r) => r.head_sha === p.ref && (!p.check_name || r.name === p.check_name),
+        );
+        return { data: { check_runs: runs } };
       },
     },
   };
@@ -153,7 +168,10 @@ describe('handlePullRequestGuardGate', () => {
     await handlePullRequestGuardGate(deps, prPayload({ action: 'edited' }));
 
     expect(enqueued).toHaveLength(2);
-    expect(calls.checkStart).toHaveLength(2);
+    // Same head sha both times: the second delivery reuses the first delivery's
+    // still-in-progress run instead of opening a shadowing second one.
+    expect(calls.checkStart).toHaveLength(1);
+    expect(enqueued.map((r) => r.checkRunId)).toEqual([501, 501]);
   });
 
   it('no-ops for unconnected, disabled, or installation-less payloads', async () => {
@@ -186,6 +204,105 @@ describe('handlePullRequestGuardGate', () => {
       status: 'completed',
     });
     expect(calls.check[0].output.title).toBe('Guard gate already running');
+  });
+
+  it('reuses an existing queued/in-progress Check run for the head instead of creating a second one', async () => {
+    // A concurrent delivery already opened run 42 for this head — a second
+    // in-progress run would be NEWER, and GitHub evaluates the newest run per
+    // name+sha, so it would shadow the verdict later posted to 42.
+    const { octokit, calls } = makeOctokit({
+      existing: [
+        { id: 42, name: GUARD_GATE_CHECK_NAME, head_sha: 'headsha', status: 'in_progress' },
+      ],
+    });
+    const { deps, enqueued } = depsWith(octokit);
+
+    await handlePullRequestGuardGate(deps, prPayload());
+
+    expect(calls.checkStart).toHaveLength(0);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0].checkRunId).toBe(42);
+  });
+
+  it('a duplicate delivery that reused the active Check leaves it untouched (no neutral overwrite)', async () => {
+    // enqueue → null means a gate job is already running — and it owns run 42.
+    // Completing 42 as neutral here would destroy the verdict that job will post.
+    const { octokit, calls } = makeOctokit({
+      existing: [
+        { id: 42, name: GUARD_GATE_CHECK_NAME, head_sha: 'headsha', status: 'in_progress' },
+      ],
+    });
+    const { deps } = depsWith(octokit, null);
+
+    await handlePullRequestGuardGate(deps, prPayload());
+
+    expect(calls.checkStart).toHaveLength(0);
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('a completed run for the head does not block a fresh Check (redelivery after settle)', async () => {
+    const { octokit, calls } = makeOctokit({
+      existing: [
+        { id: 42, name: GUARD_GATE_CHECK_NAME, head_sha: 'headsha', status: 'completed' },
+      ],
+    });
+    const { deps, enqueued } = depsWith(octokit);
+
+    await handlePullRequestGuardGate(deps, prPayload());
+
+    expect(calls.checkStart).toHaveLength(1);
+    expect(enqueued[0].checkRunId).toBe(501);
+  });
+
+  it('a thrown enqueue completes the just-opened Check as an infra-error failure and rethrows', async () => {
+    // A REJECTED enqueue (worker down, DB error) creates no job row at all, so
+    // boot orphan settlement can never find it — without settling here the
+    // in-progress Check would spin forever.
+    const { octokit, calls } = makeOctokit();
+    const deps: GuardGateHandlerDeps = {
+      store,
+      octokitFor: () => octokit,
+      enqueueGuardGate: async () => {
+        throw new Error('the background job worker is not running');
+      },
+    };
+
+    await expect(handlePullRequestGuardGate(deps, prPayload())).rejects.toThrow(
+      'the background job worker is not running',
+    );
+
+    expect(calls.check).toHaveLength(1);
+    expect(calls.check[0]).toMatchObject({
+      check_run_id: 501,
+      conclusion: 'failure',
+      status: 'completed',
+    });
+    expect(calls.check[0].output.title).toContain('Gate error');
+  });
+
+  it('a thrown enqueue never settles a REUSED Check run — the owning job posts its verdict', async () => {
+    // Run 42 belongs to the gate job already running for this head; a transient
+    // enqueue failure on this duplicate delivery must not complete it as a
+    // failure out from under that job.
+    const { octokit, calls } = makeOctokit({
+      existing: [
+        { id: 42, name: GUARD_GATE_CHECK_NAME, head_sha: 'headsha', status: 'in_progress' },
+      ],
+    });
+    const deps: GuardGateHandlerDeps = {
+      store,
+      octokitFor: () => octokit,
+      enqueueGuardGate: async () => {
+        throw new Error('transient enqueue failure');
+      },
+    };
+
+    await expect(handlePullRequestGuardGate(deps, prPayload())).rejects.toThrow(
+      'transient enqueue failure',
+    );
+
+    expect(calls.checkStart).toHaveLength(0);
+    expect(calls.check).toHaveLength(0);
   });
 
   it('still enqueues (with a null checkRunId) when opening the Check fails', async () => {

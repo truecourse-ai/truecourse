@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
 import { log } from '@truecourse/core/lib/logger';
 import {
@@ -408,6 +408,52 @@ function storedRunReport(latest: GuardLatest): GuardExecReport {
 }
 
 /**
+ * Content identity of a scenario corpus: `sha256:…` over each scenario's id,
+ * title, and binding (including `binds.fingerprint` — the section-content sha
+ * the corpus already carries), order-independent. Stamped onto gate-persisted
+ * head runs so the redelivery fast path only reuses a stored run whose corpus
+ * matches what the gate would run now.
+ */
+export function guardCorpusFingerprint(scenarios: readonly GuardScenario[]): string {
+  const identities = scenarios
+    .map((s) => [s.id, s.title, s.binds.doc, s.binds.section, s.binds.fingerprint])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return `sha256:${createHash('sha256').update(JSON.stringify(identities)).digest('hex')}`;
+}
+
+/**
+ * Whether a stored head run may decide a redelivery: its corpus fingerprint must
+ * match the committed corpus the gate would run now (resolved exactly like the
+ * full path — the guard store keyed by the repo baseline; the fast path has no
+ * checkout, so a custom `loadCorpus` seam that reads the checkout never applies
+ * here). A force (spec-regen) re-gate persists a run computed from the PR's OWN
+ * regenerated corpus: without this check a later delivery would diff it against
+ * the committed-corpus baseline, bucket every failure as pre-existing, and
+ * conclude green. Untagged (pre-fingerprint) runs are accepted unchanged; any
+ * corpus-load failure or miss falls through to a full run, which settles the
+ * corpus problem through its own paths (invalid-recipe error, cold generate…).
+ */
+async function storedRunMatchesCommittedCorpus(
+  store: GateStore,
+  guardStore: GuardStore,
+  repoKey: string,
+  stored: GuardLatest,
+): Promise<boolean> {
+  const fingerprint = stored.run.corpusFingerprint;
+  if (fingerprint === undefined) return true;
+  try {
+    const ref: RepoRef = {
+      repoKey,
+      commitSha: (await store.getBaseline(repoKey))?.commitSha ?? '',
+    };
+    const corpus = await defaultLoadCorpus(guardStore, ref);
+    return corpus !== null && guardCorpusFingerprint(corpus.scenarios) === fingerprint;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Base results for the diff: the stored baseline when the PR targets the default
  * branch, else (or on a miss) the exact `(repo, baseSha)` row. Null → no stored
  * base at all (the caller decides whether to lazy-run it).
@@ -553,7 +599,7 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
       const stored = opts.force
         ? null
         : await deps.guardStore.readGuardRunForCommit(repoKey, payload.headSha);
-      if (stored) {
+      if (stored && (await storedRunMatchesCommittedCorpus(deps.store, deps.guardStore, repoKey, stored))) {
         const base = await resolveStoredBase(deps.guardStore, payload);
         const decision = decideGuardGate(storedRunReport(stored), base, { blocking, dismissed });
         await opts.onPhase?.('verdict');
@@ -695,16 +741,25 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         if (decision.diff.stale.length > 0) {
           output.annotations = capGuardAnnotations(buildStaleAnnotations(tmp, decision.diff.stale));
         }
+        // Persist the head run (non-baseline row keyed by headSha — decision 5:
+        // redelivery dedupe) + its failure transcripts, BEFORE the conclusion is
+        // posted: a transient store failure must surface as the job's infra-error
+        // Check, never re-complete an already-posted verdict as red. The run row
+        // is written first — evidence rows reference it. The run is stamped with
+        // the corpus fingerprint so the fast path above can tell whether a later
+        // delivery may reuse it (a force run's regenerated corpus must not).
+        if (report.status === 'ok' && corpus) {
+          const stamped: GuardLatest = {
+            ...report.latest,
+            run: { ...report.latest.run, corpusFingerprint: guardCorpusFingerprint(corpus.scenarios) },
+          };
+          await deps.guardStore.writeGuardRun(repoKey, stamped);
+          await persistFailureEvidence(deps.guardStore, repoKey, tmp, stamped);
+        }
+
         await post(render(decision), output);
         await recordGuardGateRun(deps.store, payload, decision);
         await emailFailure(decision);
-
-        // Persist the head run (non-baseline row keyed by headSha — decision 5:
-        // redelivery dedupe) + its failure transcripts, before the checkout goes.
-        if (report.status === 'ok') {
-          await deps.guardStore.writeGuardRun(repoKey, report.latest);
-          await persistFailureEvidence(deps.guardStore, repoKey, tmp, report.latest);
-        }
         return decision;
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });

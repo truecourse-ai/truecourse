@@ -732,6 +732,51 @@ describe('guard-gate pipeline — head-run evidence persistence', () => {
   });
 });
 
+describe('guard-gate pipeline — persistence ordering (a store failure must never flip a posted Check)', () => {
+  it('persists the head run BEFORE posting the conclusion — a persistence failure leaves the verdict unposted', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const { deps, calls } = makeDeps(async (input) =>
+      okReport(latestOf([result('s1', 'pass')], input.commit ?? '')),
+    );
+    deps.guardStore.writeGuardRun = async () => {
+      throw new Error('store down');
+    };
+
+    await expect(pipeline.run(deps, payload())).rejects.toThrow('store down');
+
+    // No verdict Check was posted: the job wrapper's infra-error Check is the
+    // ONLY conclusion, so a green verdict can never be re-completed as red.
+    expect(calls.check).toHaveLength(0);
+  });
+
+  it('an evidence persistence failure leaves the verdict unposted too (run row already written)', async () => {
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const pipeline = createGuardGatePipeline({ clone, loadCorpus: corpus([scenario('s1')]), checkout });
+    const runId = 'run-ev-order';
+    const { deps, calls } = makeDeps(async (input) => {
+      const rel = `.truecourse/guard/evidence/${runId}/s1`;
+      writeFile(input.checkoutDir, `${rel}/transcript.txt`, 'failed\n');
+      return okReport(
+        latestOf([result('s1', 'fail', { evidencePath: rel })], input.commit ?? '', runId),
+      );
+    });
+    deps.guardStore.writeGuardEvidence = async () => {
+      throw new Error('evidence store down');
+    };
+
+    await expect(pipeline.run(deps, payload())).rejects.toThrow('evidence store down');
+
+    expect(calls.check).toHaveLength(0);
+    // Ordering constraint held: the run row was written before evidence failed.
+    expect(await guardStore.readGuardRunForCommit(REPO, HEAD_SHA)).not.toBeNull();
+  });
+});
+
 describe('guard-gate pipeline — cancellation (AbortSignal)', () => {
   it('threads run() opts.signal into EVERY executor call (lazy base run and head run) and the clone/checkout seams', async () => {
     // No stored base → the pipeline lazy-runs the base, then the head: two executes.
@@ -1018,6 +1063,122 @@ describe('guard-gate pipeline — force re-gate (spec-change checkbox)', () => {
 
     // The stored head run did NOT short-circuit — the head was re-executed.
     expect(execCalls.some((c) => c.commit === HEAD_SHA)).toBe(true);
+  });
+});
+
+describe('guard-gate pipeline — a force (spec-regen) run must not poison the redelivery fast path', () => {
+  const SCENARIO_YAML = [
+    'guard: 1',
+    'id: s1',
+    'title: t-s1',
+    'binds:',
+    '  doc: README.md',
+    '  section: intro',
+    '  fingerprint: "sha256:f"',
+    'driver: cli',
+    'steps:',
+    '  - run: ["--help"]',
+    '    expect:',
+    '      exit: 0',
+    '',
+  ].join('\n');
+
+  /** Commit the committed corpus (recipe + scenario s1) under the repo baseline. */
+  async function seedCommittedCorpus(): Promise<void> {
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gate-corpus-src-'));
+    try {
+      writeFile(src, 'recipe.json', JSON.stringify(RECIPE));
+      writeFile(src, 'cli/s1.yaml', SCENARIO_YAML);
+      await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'corpussha123' }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+    await gateStore.saveBaseline({
+      repoFullName: REPO,
+      commitSha: 'corpussha123',
+      drifts: [],
+      capturedAt: '2026-07-01T00:00:00.000Z',
+    });
+  }
+
+  it('a redelivery after a force re-gate re-runs the head with the committed corpus instead of diffing mismatched scenario sets', async () => {
+    await seedCommittedCorpus();
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+
+    // Leg 1 — the force re-gate (the worker's regate): the PR's REGENERATED
+    // corpus (scenario r1, ids disjoint from the committed set) is injected via
+    // loadCorpus; r1 passes on base, fails on head → the force run concludes
+    // failure and persists the head run computed from the regenerated corpus.
+    const regenCorpus = { recipe: RECIPE, scenarios: [scenario('r1')] };
+    const forceExecute: GuardExecutor = async (input) =>
+      okReport(latestOf([result('r1', input.commit === BASE_SHA ? 'pass' : 'fail')], input.commit ?? ''));
+    {
+      const { clone } = fakeClone();
+      const { checkout } = fakeCheckout();
+      const forcePipeline = createGuardGatePipeline({
+        clone,
+        loadCorpus: async () => regenCorpus,
+        checkout,
+      });
+      const { deps, calls } = makeDeps(forceExecute);
+      const decision = await forcePipeline.run(deps, payload(), { force: true });
+      expect(decision.conclusion).toBe('failure');
+      expect(calls.check[0].conclusion).toBe('failure');
+    }
+
+    // Leg 2 — the author closes/reopens: a plain redelivery on the DEFAULT
+    // corpus resolution. The stored head run came from a different corpus, so
+    // the fast path must NOT diff it against the committed-corpus baseline
+    // (r1 has no base counterpart → everything buckets pre-existing → green).
+    // Instead the head is re-run with the committed corpus: s1 fails → red.
+    const execCalls: GuardExecInput[] = [];
+    const { clone } = fakeClone();
+    const { checkout } = fakeCheckout();
+    const redeliveryPipeline = createGuardGatePipeline({ clone, checkout }); // default loadCorpus
+    const { deps, calls } = makeDeps(async (input) => {
+      execCalls.push(input);
+      return okReport(latestOf([result('s1', 'fail')], input.commit ?? ''));
+    });
+
+    const decision = await redeliveryPipeline.run(deps, payload());
+
+    expect(execCalls.map((c) => c.commit)).toEqual([HEAD_SHA]);
+    expect(decision.conclusion).toBe('failure');
+    expect(calls.check[0].conclusion).toBe('failure');
+  });
+
+  it('a same-corpus redelivery still takes the fast path (no re-run)', async () => {
+    await seedCommittedCorpus();
+    await guardStore.writeGuardLatest(REPO, latestOf([result('s1', 'pass')], BASE_SHA));
+
+    // Leg 1 — a normal gate run over the committed corpus persists the head run.
+    {
+      const { clone } = fakeClone();
+      const { checkout } = fakeCheckout();
+      const pipeline = createGuardGatePipeline({ clone, checkout });
+      const { deps } = makeDeps(async (input) =>
+        okReport(latestOf([result('s1', 'fail')], input.commit ?? '')),
+      );
+      await pipeline.run(deps, payload());
+    }
+
+    // Leg 2 — a redelivery with the corpus unchanged: decided from the stored
+    // run, nothing cloned, nothing executed.
+    let cloned = 0;
+    const redeliveryPipeline = createGuardGatePipeline({
+      clone: async () => {
+        cloned++;
+        return { baseSha: BASE_SHA, headSha: HEAD_SHA };
+      },
+      checkout: async () => {},
+    });
+    const { deps, calls } = makeDeps(neverExecute);
+
+    const decision = await redeliveryPipeline.run(deps, payload());
+
+    expect(cloned).toBe(0);
+    expect(decision.conclusion).toBe('failure');
+    expect(calls.check[0].conclusion).toBe('failure');
   });
 });
 
