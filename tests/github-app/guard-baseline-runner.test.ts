@@ -246,3 +246,54 @@ describe('guard-baseline pipeline — no-op short-circuits', () => {
     expect(seen.dir && fs.existsSync(seen.dir)).toBe(false);
   });
 });
+
+describe('guard-baseline pipeline — clone-phase bound', () => {
+  /** A clone that hangs until the signal the pipeline hands it aborts — the
+   *  wedged-remote shape. Bails with a distinct error if never aborted, so a
+   *  missing bound fails fast instead of hitting the suite timeout. */
+  function hangingClone() {
+    const seen: { dir?: string } = {};
+    const clone = (
+      cloneDeps: { auth: GithubAuth; signal?: AbortSignal },
+      _req: GuardBaselineRunRequest,
+      dir: string,
+    ) =>
+      new Promise<void>((_resolve, reject) => {
+        seen.dir = dir;
+        const bail = setTimeout(() => reject(new Error('clone was never aborted')), 1_000);
+        cloneDeps.signal?.addEventListener('abort', () => {
+          clearTimeout(bail);
+          reject(cloneDeps.signal!.reason);
+        });
+      });
+    return { clone, seen };
+  }
+
+  it('bounds the clone by the wall-clock even with NO external signal', async () => {
+    const { clone, seen } = hangingClone();
+    const execute: GuardExecutor = async () => okReport(latestOf([], COMMIT));
+    const pipeline = createGuardBaselinePipeline({
+      clone,
+      loadCorpus: corpusOf([scenario('s1')]),
+      cloneTimeoutMs: 25,
+    });
+
+    await expect(pipeline.run(makeDeps(execute), req())).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    expect(await guardStore.readGuardLatest(REPO)).toBeNull();
+    expect(seen.dir && fs.existsSync(seen.dir)).toBe(false);
+  });
+
+  it('an external abort still cancels the clone before the wall-clock elapses', async () => {
+    const { clone } = hangingClone();
+    const execute: GuardExecutor = async () => okReport(latestOf([], COMMIT));
+    const pipeline = createGuardBaselinePipeline({ clone, loadCorpus: corpusOf([scenario('s1')]) });
+
+    const controller = new AbortController();
+    const run = pipeline.run(makeDeps(execute), req(), { signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});

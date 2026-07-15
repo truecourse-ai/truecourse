@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { GuardStore, RepoRef } from '@truecourse/core/lib/guard-store';
 import type { GuardExecReport, GuardExecutor } from '@truecourse/guard-runner';
-import { cloneRepoAtCommit } from './guard-onboarding.js';
+import { boundedCloneSignal, cloneRepoAtCommit } from './guard-onboarding.js';
 import type { GithubAuth } from './github.js';
 import {
   defaultLoadCorpus,
@@ -79,6 +79,8 @@ export interface GuardBaselinePipelineSeams {
   clone?: GuardBaselineClone;
   /** Load the committed corpus for `ref` (`null` → no corpus). Default = the store. */
   loadCorpus?: (ref: RepoRef, dir: string) => Promise<GuardGateCorpus | null>;
+  /** Test seam: clone-phase wall-clock override (default the gate's 5-minute bound). */
+  cloneTimeoutMs?: number;
 }
 
 export interface GuardBaselinePipeline {
@@ -103,7 +105,14 @@ export function createGuardBaselinePipeline(
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-baseline-'));
       try {
         await opts.onPhase?.('clone');
-        await clone({ auth: deps.auth, signal: opts.signal }, req, tmp);
+        // The clone is bounded no matter which impl runs: wall-clock folded with
+        // the job's cancellation signal (either aborts the git children), so a
+        // wedged remote can never pin one of the worker's concurrency slots.
+        await clone(
+          { auth: deps.auth, signal: boundedCloneSignal(opts.signal, seams.cloneTimeoutMs) },
+          req,
+          tmp,
+        );
 
         // The corpus keyed by this commit (falling back to the newest stored set,
         // via defaultLoadCorpus) — the SAME committed corpus the gate runs.

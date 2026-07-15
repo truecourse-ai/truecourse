@@ -176,6 +176,28 @@ describe('runGuardGenerate — worker body', () => {
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, scenariosWritten: 3 });
   });
 
+  it('threads the job abort signal into the pipeline (worker shutdown cancels the clone)', async () => {
+    const jobStore = new JobStore(db);
+    const notifications = new NotificationStore(db);
+    const job = await jobStore.create({ org: ORG, type: REPO_GUARD_TASK, key: guardJobKey(REPO) });
+
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const pipeline: GuardOnboardingPipeline = {
+      run: async (_deps, _req, progress) => {
+        seenSignal = progress?.signal;
+        return { savedFileCount: 0, scenariosWritten: 0, noCorpus: true, openConflicts: 0 };
+      },
+    };
+
+    await runGuardGenerate(
+      { db, jobStore, notifications, pipeline, signal: controller.signal },
+      payloadFor(job.id),
+    );
+
+    expect(seenSignal).toBe(controller.signal);
+  });
+
   it('a noCorpus run succeeds with the distinct "waiting for spec" wording', async () => {
     const jobStore = new JobStore(db);
     const notifications = new NotificationStore(db);

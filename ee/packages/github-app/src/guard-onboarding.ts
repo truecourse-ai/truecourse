@@ -84,12 +84,15 @@ export interface GuardOnboardingDeps {
   auth: GithubAuth;
 }
 
-/** Progress wiring for the EE job popup. */
+/** Progress + cancellation wiring for the EE job popup. */
 export interface GuardOnboardingProgress {
   /** Coarse phase callback — advances the job's stepped checklist. */
   onPhase?: (phase: 'clone' | 'generate') => void | Promise<void>;
   /** Driven through GUARD_GENERATE_STEPS for the "Generating scenarios" detail. */
   generateTracker?: StepTracker;
+  /** External cancellation (graphile's per-job abort on worker shutdown) — folded
+   *  with the clone wall-clock and threaded into the clone's git children. */
+  signal?: AbortSignal;
 }
 
 export interface GuardOnboardingPipeline {
@@ -277,14 +280,18 @@ export async function persistBirthEvidence(
 
 /** The injectable heavy steps (network + LLM); production uses the defaults. */
 export interface GuardOnboardingSeams {
-  /** Shallow-clone the repo pinned to `req.commitSha` into `dir`. */
+  /** Shallow-clone the repo pinned to `req.commitSha` into `dir`. `deps.signal`
+   *  is the pipeline's clone-phase bound (the wall-clock folded with the job's
+   *  cancellation signal) — every git child must run under it. */
   cloneRepo?: (
-    deps: GuardOnboardingDeps,
+    deps: GuardOnboardingDeps & { signal?: AbortSignal },
     req: GuardOnboardingRequest,
     dir: string,
   ) => Promise<void>;
   /** The in-process guard generate over the checkout. */
   generate?: GuardGenerateFn;
+  /** Test seam: clone-phase wall-clock override (default {@link GUARD_CLONE_TIMEOUT_MS}). */
+  cloneTimeoutMs?: number;
 }
 
 /**
@@ -325,12 +332,33 @@ export async function cloneRepoAtCommit(
   }
 }
 
+/** Clone-phase wall-clock, mirroring the gate's `GUARD_GATE_CLONE_TIMEOUT_MS`
+ *  (guard-gate-runner.ts — deliberately NOT imported: that module imports this
+ *  one, and the constant is not worth a cycle). A hung remote must fail the job,
+ *  not occupy one of the worker's two concurrency slots until restart. */
+export const GUARD_CLONE_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * The signal the clone phase runs under: the clone wall-clock folded with the
+ * job's cancellation signal when one is threaded (either aborts). On abort,
+ * simple-git kills the git child and rejects — the pipeline's existing failure
+ * path takes it from there (the job fails; `finally` removes the checkout).
+ * The gate's `cloneAbortSignal`, mirrored.
+ */
+export function boundedCloneSignal(
+  signal?: AbortSignal,
+  timeoutMs: number = GUARD_CLONE_TIMEOUT_MS,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 async function defaultCloneRepo(
-  deps: GuardOnboardingDeps,
+  deps: GuardOnboardingDeps & { signal?: AbortSignal },
   req: GuardOnboardingRequest,
   dir: string,
 ): Promise<void> {
-  await cloneRepoAtCommit(deps.auth, req, dir);
+  await cloneRepoAtCommit(deps.auth, req, dir, deps.signal);
 }
 
 export function createGuardOnboardingPipeline(
@@ -350,7 +378,13 @@ export function createGuardOnboardingPipeline(
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-guard-'));
       try {
         await progress.onPhase?.('clone');
-        await cloneRepo(deps, req, tmp);
+        // The clone is bounded no matter which impl runs: wall-clock + the job's
+        // cancellation signal, so a wedged remote can never pin a worker slot.
+        await cloneRepo(
+          { ...deps, signal: boundedCloneSignal(progress.signal, seams.cloneTimeoutMs) },
+          req,
+          tmp,
+        );
 
         let generated;
         try {

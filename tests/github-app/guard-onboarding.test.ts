@@ -46,6 +46,8 @@ import {
   materializeStoredCorpus,
   materializeAndGenerateGuard,
   createGuardOnboardingPipeline,
+  boundedCloneSignal,
+  GUARD_CLONE_TIMEOUT_MS,
   type GuardOnboardingRequest,
 } from '../../ee/packages/github-app/src/guard-onboarding';
 
@@ -598,5 +600,62 @@ describe('guard onboarding pipeline', () => {
 
     await expect(pipeline.run(deps, request)).rejects.toThrow('LLM upstream 500');
     expect(fs.existsSync(cloneDir)).toBe(false);
+  });
+});
+
+describe('guard onboarding pipeline — clone-phase bound', () => {
+  /** A clone that hangs until the signal the pipeline hands it aborts — the
+   *  wedged-remote shape. Bails with a distinct error if never aborted, so a
+   *  missing bound fails fast instead of hitting the suite timeout. */
+  function hangingClone() {
+    let cloneDir = '';
+    const cloneRepo = vi.fn(
+      (cloneDeps: { auth: GithubAuth; signal?: AbortSignal }, _req: unknown, dir: string) =>
+        new Promise<void>((_resolve, reject) => {
+          cloneDir = dir;
+          const bail = setTimeout(() => reject(new Error('clone was never aborted')), 1_000);
+          cloneDeps.signal?.addEventListener('abort', () => {
+            clearTimeout(bail);
+            reject(cloneDeps.signal!.reason);
+          });
+        }),
+    );
+    return { cloneRepo, dirOf: () => cloneDir };
+  }
+
+  it('honors an external abort signal: the run fails and the checkout is removed', async () => {
+    const { cloneRepo, dirOf } = hangingClone();
+    const generate = vi.fn();
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate });
+
+    const controller = new AbortController();
+    const run = pipeline.run(deps, request, { signal: controller.signal });
+    setTimeout(() => controller.abort(), 20);
+
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    expect(generate).not.toHaveBeenCalled();
+    expect(fs.existsSync(dirOf())).toBe(false);
+  });
+
+  it('bounds the clone by the wall-clock even with NO external signal', async () => {
+    const { cloneRepo, dirOf } = hangingClone();
+    const generate = vi.fn();
+    const pipeline = createGuardOnboardingPipeline({ cloneRepo, generate, cloneTimeoutMs: 25 });
+
+    await expect(pipeline.run(deps, request)).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(generate).not.toHaveBeenCalled();
+    expect(fs.existsSync(dirOf())).toBe(false);
+  });
+
+  it('the default wall-clock mirrors the gate clone bound (5 minutes)', () => {
+    expect(GUARD_CLONE_TIMEOUT_MS).toBe(5 * 60_000);
+  });
+
+  it('boundedCloneSignal folds an external abort in before the timeout fires', () => {
+    const controller = new AbortController();
+    const signal = boundedCloneSignal(controller.signal, 60_000);
+    expect(signal.aborted).toBe(false);
+    controller.abort();
+    expect(signal.aborted).toBe(true);
   });
 });

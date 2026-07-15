@@ -554,6 +554,9 @@ export function guardGenerateJob(deps: GuardGenerateJobDeps): JobDefinition<Guar
         {
           onPhase: (phase) => ctx.phase(phase),
           generateTracker: stepBridge(ctx.tracker, 'generate', GUARD_GENERATE_STEPS),
+          // ctx.signal = graphile's abortSignal — folded into the pipeline's
+          // clone bound so a worker shutdown aborts the git children.
+          signal: ctx.signal,
         },
       );
 
@@ -969,12 +972,14 @@ function registerJob<P extends { jobId: string }>(
 }
 
 /** Deps the exported `runGuardGenerate` test seam needs — the stores + the
- *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live). */
+ *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live).
+ *  `signal` stands in for graphile's per-job `helpers.abortSignal`. */
 export interface RunGuardGenerateDeps extends ConflictsEmailSeam {
   db: EeDb;
   jobStore: JobStore;
   notifications: NotificationStore;
   pipeline: GuardOnboardingPipeline;
+  signal?: AbortSignal;
 }
 
 /**
@@ -994,6 +999,7 @@ export async function runGuardGenerate(
       appUrl: deps.appUrl,
     }),
     payload,
+    { signal: deps.signal },
   );
 }
 
