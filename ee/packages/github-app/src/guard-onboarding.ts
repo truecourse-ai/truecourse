@@ -223,7 +223,11 @@ export async function materializeAndGenerateGuard(
           repoGuardDecisions,
           await readStoredGuardDecisions(ref.repoKey, prGuardDecisionsRef(opts.pr)),
         );
-  if (guardDecisions.dismissedClaims.length > 0) {
+  // "Anything stored" means EITHER array: post-feature the typical Pg row holds
+  // only `dismissedFindings` (the claim-level dismiss action is gone from the
+  // UI) — a claims-only gate would let a stale committed decisions.json win and
+  // every dismissed finding would reappear in the fresh report.
+  if (guardDecisions.dismissedClaims.length > 0 || (guardDecisions.dismissedFindings ?? []).length > 0) {
     const decFile = guardDecisionsPath(checkoutDir);
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, JSON.stringify(guardDecisions, null, 2) + '\n');

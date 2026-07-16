@@ -229,6 +229,7 @@ describe('guard head-regen pipeline', () => {
     expect(decisionsSeenByGenerate).toEqual({
       version: 1,
       dismissedClaims: [...repoRow.dismissedClaims, ...overlay.dismissedClaims],
+      dismissedFindings: [],
     });
   });
 
