@@ -28,6 +28,7 @@ const CONTENT = [
   '# S Moved', 'm',
   '# S Finding', 'n',
   '# S Held', 'o',
+  '# S Auth Error', 'p',
 ].join('\n');
 
 const fp = 'sha256:seed';
@@ -82,7 +83,17 @@ const result: GuardGenerateReport = {
     { doc: 'docs/other.md', anchor: 'elsewhere', title: 'other-doc finding', step: 1, expected: 'a', actual: 'b' },
     { doc: DOC, anchor: 's-finding', title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
   ],
-  errors: [],
+  errors: [
+    // Another doc's error, proving the join filters by doc.
+    { doc: 'docs/other.md', anchor: 'elsewhere', message: 'other-doc authoring error' },
+    // An error-only section: two attempts of the SAME message dedupe to one entry
+    // with attempts:2, a third distinct message stays separate.
+    { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
+    { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
+    { doc: DOC, anchor: 's-auth-error', message: 'invalid output twice' },
+    // A held section whose blocker WAS an authoring error — held must still win.
+    { doc: DOC, anchor: 's-held', message: 'sibling authoring error' },
+  ],
   extractionFailures: [],
   orphaned: [],
   heldSections: [
@@ -161,12 +172,33 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     ]);
   });
 
-  it('paints an unsettled section with only held scenarios as held', () => {
+  it('paints an unsettled section with only held scenarios as held, listing its sibling authoring error as blocker context', () => {
     const sh = byAnchor.get('s-held')!;
     expect(sh.status).toBe('held');
     expect(sh.reason).toBe('1 ready scenario held — the section did not settle');
     expect(sh.heldScenarios).toEqual([{ id: 'sh1', title: 'held by a sibling error' }]);
     expect(sh.findings).toBeUndefined();
+    // held wins over authoring-error, but the blocker rides along as context.
+    expect(sh.authoringErrors).toEqual([{ message: 'sibling authoring error', attempts: 1 }]);
+  });
+
+  it('paints an error-only section as authoring-error with a deduped, attempt-counted reason', () => {
+    const sa = byAnchor.get('s-auth-error')!;
+    expect(sa.status).toBe('authoring-error');
+    expect(sa.reason).toBe('authoring failed — 3 attempts; re-run generate to retry');
+    // Retries of the same message collapse to one entry with attempts:2, in first-seen order.
+    expect(sa.authoringErrors).toEqual([
+      { message: 'timed out after 10m', attempts: 2 },
+      { message: 'invalid output twice', attempts: 1 },
+    ]);
+    // No manifest entry, gap, or finding — the sole record is the errors.
+    expect(sa.scenarioIds).toEqual([]);
+    expect(sa.findings).toBeUndefined();
+  });
+
+  it('never conflates the authoring-error status with the RUN error outcome', () => {
+    expect(status('s-error')).toBe('error');
+    expect(status('s-auth-error')).toBe('authoring-error');
   });
 
   it('re-anchors a moved section via remappedTo', () => {
@@ -188,14 +220,14 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
   it('tallies totals across the live sections and stamps provenance', () => {
     expect(cov.doc).toBe(DOC);
     expect(cov.markdown).toBe(true);
-    expect(cov.sections).toHaveLength(15);
+    expect(cov.sections).toHaveLength(16);
     expect(cov.runId).toBe('r1');
     expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
       api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      finding: 1, held: 1, unguarded: 1, orphaned: 0,
+      finding: 1, held: 1, 'authoring-error': 1, unguarded: 1, orphaned: 0,
     });
   });
 

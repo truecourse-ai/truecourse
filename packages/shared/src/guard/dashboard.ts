@@ -32,6 +32,10 @@ import type { GuardTestabilityVerdict } from './manifest.js'
  *    settled; a human decision is pending);
  *  - `held` — the section is unsettled with ready-but-held scenarios and no
  *    active finding (its blocker was an authoring error);
+ *  - `authoring-error` — the section's ONLY record is generate authoring errors
+ *    (no findings, no ready scenarios): generate tried and failed, so it is NOT
+ *    `unguarded` ("nothing ever tried"). Distinct id from the RUN outcome `error`
+ *    — the two must never conflate in totals or meta;
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
@@ -40,6 +44,7 @@ export type GuardSectionCoverageStatus =
   | 'guarded'
   | 'finding'
   | 'held'
+  | 'authoring-error'
   | 'unguarded'
 
 /** One scenario's run result, projected onto a section for the coverage detail. */
@@ -78,6 +83,19 @@ export interface GuardSectionHeldScenario {
   title: string
 }
 
+/**
+ * A generate authoring error projected onto its section for the coverage detail —
+ * the deduped error message plus how many attempts produced it (the report's
+ * `errors[]` carries one entry per failed authoring attempt, so retries dedupe to a
+ * single message with an `attempts` count).
+ */
+export interface GuardSectionAuthoringError {
+  /** The deduped authoring-error message. */
+  message: string
+  /** How many attempts produced this message (retries collapse into one entry). */
+  attempts: number
+}
+
 /** A live doc section joined to its guard coverage. */
 export interface GuardSectionCoverage {
   /** Slugified heading path (the section anchor) in the live doc. */
@@ -101,6 +119,13 @@ export interface GuardSectionCoverage {
   findings?: GuardSectionFinding[]
   /** Ready-but-held scenarios from the last generate (status `finding`/`held`). */
   heldScenarios?: GuardSectionHeldScenario[]
+  /**
+   * This section's generate authoring errors, deduped by message with attempt
+   * counts. Present on status `authoring-error` (its sole record), and on
+   * `finding`/`held` sections as blocker context (their unsettled blocker IS an
+   * authoring error, joined by the same doc+anchor).
+   */
+  authoringErrors?: GuardSectionAuthoringError[]
   /** Per-scenario run results for this section from the last run (empty until run). */
   scenarios: GuardSectionScenario[]
 }

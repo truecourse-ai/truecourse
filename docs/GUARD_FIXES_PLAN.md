@@ -81,7 +81,7 @@ lines, all listed, no top-3 cap.
 
 ## 3. Coverage: error-blocked sections paint as their own status, never "unguarded"
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** A section whose authoring failed has no manifest entry, no gap, no finding
 — so `composeDocCoverage` (`packages/core/src/commands/guard-read.ts`) falls through to

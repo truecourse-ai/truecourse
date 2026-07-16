@@ -49,6 +49,7 @@ import {
   type GuardScenarioListItem,
   type GuardScenarioResult,
   type GuardScenarioSource,
+  type GuardSectionAuthoringError,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
   type GuardSectionFinding,
@@ -200,6 +201,27 @@ export function composeDocCoverage(
     )
   }
 
+  // Generate authoring errors from the last report — an error-blocked section has
+  // NO manifest entry, gap, or finding, so without this join it reads as bare
+  // `unguarded` ("nothing ever tried") when the truth is "generate tried and
+  // failed". Grouped by anchor and deduped by message: the report carries one
+  // `errors[]` entry per failed authoring ATTEMPT, so retries collapse to one
+  // message with an `attempts` count (first-seen order preserved).
+  const errorsByAnchor = new Map<string, GuardSectionAuthoringError[]>()
+  const rawErrorsByAnchor = new Map<string, string[]>()
+  for (const e of result?.errors ?? []) {
+    if (e.doc !== doc) continue
+    push(rawErrorsByAnchor, e.anchor, e.message)
+  }
+  for (const [anchor, messages] of rawErrorsByAnchor) {
+    const counts = new Map<string, number>()
+    for (const m of messages) counts.set(m, (counts.get(m) ?? 0) + 1)
+    errorsByAnchor.set(
+      anchor,
+      [...counts.entries()].map(([message, attempts]) => ({ message, attempts })),
+    )
+  }
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -208,6 +230,7 @@ export function composeDocCoverage(
       gap: gapByAnchor.get(sec.anchor),
       findings: findingsByAnchor.get(sec.anchor) ?? [],
       heldScenarios: heldByAnchor.get(sec.anchor) ?? [],
+      authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
     })
     totals[cov.status]++
     return cov
@@ -233,6 +256,7 @@ function resolveSectionCoverage(
     gap?: GuardCoverageGap
     findings: GuardSectionFinding[]
     heldScenarios: GuardSectionHeldScenario[]
+    authoringErrors: GuardSectionAuthoringError[]
   },
 ): GuardSectionCoverage {
   const base = {
@@ -243,9 +267,13 @@ function resolveSectionCoverage(
     scenarioIds: [] as string[],
     scenarios: [] as GuardSectionScenario[],
   }
-  const { run, manifest, gap, findings, heldScenarios } = joins
+  const { run, manifest, gap, findings, heldScenarios, authoringErrors } = joins
   const verdict = manifest?.classification
   const withVerdict = verdict ? { classification: verdict } : {}
+  // Sibling authoring errors ride finding/held sections as blocker context (the
+  // unsettled blocker IS an authoring error); a section whose ONLY record is
+  // errors paints `authoring-error` below.
+  const withErrors = authoringErrors.length > 0 ? { authoringErrors: authoringErrors.slice() } : {}
 
   // 1. Ran — the worst scenario outcome paints the section.
   if (run.length > 0) {
@@ -265,7 +293,10 @@ function resolveSectionCoverage(
 
   // 3. Unsettled by the last generate — a birth finding (a pending human
   // decision) paints the section red; ready-but-held work with no active finding
-  // (its blocker was an authoring error) paints amber. Both outrank gaps: an
+  // (its blocker was an authoring error) paints amber; a section whose ONLY
+  // record is authoring errors paints `authoring-error` (never `unguarded`).
+  // Precedence: finding > held > authoring-error, so a held section stays held
+  // even when a sibling authoring error blocked it. All outrank gaps: an
   // unsettled section never recorded one.
   if (findings.length > 0) {
     const held =
@@ -278,6 +309,7 @@ function resolveSectionCoverage(
       reason: `${findings.length} birth finding${findings.length === 1 ? '' : 's'} awaiting a decision${held}`,
       findings: findings.slice(),
       ...(heldScenarios.length > 0 ? { heldScenarios: heldScenarios.slice() } : {}),
+      ...withErrors,
       ...withVerdict,
     }
   }
@@ -287,6 +319,17 @@ function resolveSectionCoverage(
       status: 'held',
       reason: `${heldScenarios.length} ready scenario${heldScenarios.length === 1 ? '' : 's'} held — the section did not settle`,
       heldScenarios: heldScenarios.slice(),
+      ...withErrors,
+      ...withVerdict,
+    }
+  }
+  if (authoringErrors.length > 0) {
+    const attempts = authoringErrors.reduce((n, e) => n + e.attempts, 0)
+    return {
+      ...base,
+      status: 'authoring-error',
+      reason: `authoring failed — ${attempts} attempt${attempts === 1 ? '' : 's'}; re-run generate to retry`,
+      ...withErrors,
       ...withVerdict,
     }
   }
@@ -382,6 +425,7 @@ const COVERAGE_STATUSES = [
   'guarded',
   'finding',
   'held',
+  'authoring-error',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 
