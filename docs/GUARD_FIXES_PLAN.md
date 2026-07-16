@@ -357,3 +357,21 @@ and any prompt work is secondary.
 **Tests.** Retry-context content test proving the failing step's raw stderr/usage error
 is present and labeled; e2e fixture where the doc states config in prose above the
 example — the authored scenario seeds it; prompt-content assertions for both rules.
+
+## 11. Invalid expect regexes die at build time, not at birth
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** A scenario was authored with a `matches:` regex invalid in the JS engine
+("Invalid group"); it passed schema validation and burned a full birth cycle (sandbox
+build + run) before dying. Matcher validity is knowable in microseconds at build time.
+
+**Fix.** Scenario build/validation (the `safeBuild`/composition-defect path in
+guard-generator, and the shared scenario schema where `matches` fields live): every
+`matches` pattern must compile (`new RegExp`) — an invalid one is a composition defect
+routed through the existing corrective re-ask, never reaching birth. The committed-
+scenario loader applies the same check so a hand-written bad regex fails loud at load.
+
+**Tests.** Authoring output with an invalid regex triggers the re-ask with the compile
+error quoted; a valid-after-re-ask scenario proceeds; loader rejects a committed
+scenario with an invalid pattern with a clear error.
