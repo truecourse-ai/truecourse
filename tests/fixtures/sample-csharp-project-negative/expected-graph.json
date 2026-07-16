@@ -1855,6 +1855,12 @@
       "layer": "service"
     },
     {
+      "name": "CallbackRegistrar",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "CartItem",
       "service": "UserService",
       "kind": "class",
@@ -1913,6 +1919,12 @@
       "service": "UserService",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "Current",
+      "service": "UserService",
+      "kind": "standalone",
+      "layer": "external"
     },
     {
       "name": "CustomerAddress",
@@ -2305,6 +2317,12 @@
       "layer": "service"
     },
     {
+      "name": "PartnerApiClient",
+      "service": "UserService",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "PassthroughFormatter",
       "service": "UserService",
       "kind": "class",
@@ -2332,6 +2350,12 @@
       "name": "PatternValidators",
       "service": "UserService",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PayloadReader",
+      "service": "UserService",
+      "kind": "class",
       "layer": "service"
     },
     {

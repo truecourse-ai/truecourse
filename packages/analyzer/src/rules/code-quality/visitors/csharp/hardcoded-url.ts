@@ -5,7 +5,7 @@ import { isCSharpTestPath } from '../../../_shared/csharp-helpers.js'
 
 // XML/SOAP/schema namespace hosts — fixed identifiers, not service endpoints.
 // `tempuri.org` and `schemas.microsoft.com` are the .NET-specific additions.
-const NAMESPACE_URI_HOSTS = /w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org|tempuri\.org|schemas\.microsoft\.com|tools\.ietf\.org|datatracker\.ietf\.org|rfc-editor\.org/
+const NAMESPACE_URI_HOSTS = /w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org|tempuri\.org|schemas\.microsoft\.com|tools\.ietf\.org|datatracker\.ietf\.org|rfc-editor\.org|sitemaps\.org/
 
 // Stable third-party API/CDN domains with no environment-specific form.
 const STABLE_API_HOSTS = /googleapis\.com|maps\.google|api\.stripe\.com|api\.twilio\.com|api\.sendgrid\.com|api\.github\.com|cdn\.|fonts\.googleapis|cloudflare|unpkg\.com|cdnjs\.cloudflare|jsdelivr\.net|nuget\.org/

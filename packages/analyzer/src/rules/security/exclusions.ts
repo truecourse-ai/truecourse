@@ -45,6 +45,12 @@ export const GLOBAL_ALLOWLIST: RegExp[] = [
   // are deliberately NOT allowlisted here.
   /^phc_[A-Za-z0-9]{30,}$/,
 
+  // Subresource Integrity (SRI) hashes (`sha256-`/`sha384-`/`sha512-` + base64)
+  // — public asset digests published in page markup so the browser can verify a
+  // fetched script/stylesheet. Their base64 body collides with the generic
+  // Cohere-token shape, but an SRI hash is public by design, not a credential.
+  /^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/,
+
   // Common config patterns that aren't secrets
   /^\*+$/, // All asterisks (masked values)
   /^x+$/i, // All x's (placeholder)
