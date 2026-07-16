@@ -7,6 +7,7 @@ import type { GuardScenario } from '@truecourse/shared'
 import { generateGuards } from '@truecourse/guard-generator'
 import { buildScenario, serializeScenarioYaml } from '../../packages/guard-generator/src/serialize.js'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, authorBy, PASSING_STEPS } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const SECTION: SectionInput = {
   doc: 'docs/cli.md',
@@ -58,6 +59,7 @@ describe('generateGuards — threads ref→claim onto written scenarios', () => 
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({ version: [{ claim: CLAIM, driver: 'cli' }] }),
       generateRunner: authorBy({ version: [raw('relkit prints its version and exits clean', PASSING_STEPS)] }),

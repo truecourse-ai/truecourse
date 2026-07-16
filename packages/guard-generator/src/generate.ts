@@ -428,34 +428,26 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
     })
-  // The fidelity reviewer (item 33) audits each green scenario before it persists.
-  // It needs an LLM: production (`guardGenerateInProcess`) always supplies a
-  // transport, so the review always runs there. A caller supplying NEITHER a
-  // transport NOR a `fidelityRunner` (only the pre-feature unit tests) has no model
-  // access, so the audit is skipped and green scenarios persist unreviewed.
-  const fidelityRunner: FidelityRunner | undefined =
+  // The fidelity reviewer and triage judge spawn exactly like the extract/generate
+  // runners: unconditionally, with the spawn falling back to the claude CLI transport
+  // when no explicit transport is handed in. The OSS CLI passes NO transport (only EE
+  // installs a process default), so gating either on `options.transport` silently
+  // disables the stage in every OSS run — fidelity audits skipped, findings shipped
+  // without a verdict. Tests inject stub runners, never transports.
+  const fidelityRunner: FidelityRunner =
     options.fidelityRunner ??
-    (options.transport
-      ? spawnFidelityRunner({
-          transport: options.transport,
-          model: options.models?.fidelity,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
-  // The triage judge (item: finding triage) runs one post-settle Opus call per
-  // birth/fidelity finding. Like fidelity it needs an LLM: production always
-  // supplies a transport, so triage always runs there; a caller with NEITHER a
-  // transport NOR a `triageRunner` (only the pre-feature unit tests) has no model
-  // access, so findings simply ship without a triage verdict.
-  const triageRunner: TriageRunner | undefined =
+    spawnFidelityRunner({
+      transport: options.transport,
+      model: options.models?.fidelity,
+      fallbackModel: options.models?.fallback,
+    })
+  const triageRunner: TriageRunner =
     options.triageRunner ??
-    (options.transport
-      ? spawnTriageRunner({
-          transport: options.transport,
-          model: options.models?.triage,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
+    spawnTriageRunner({
+      transport: options.transport,
+      model: options.models?.triage,
+      fallbackModel: options.models?.fallback,
+    })
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -946,9 +938,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // fidelity FINDING (its section then unsettles like any birth finding, and the
     // faithful siblings drop to `heldSections` below); a review that can't complete
     // is a local error (re-attempted next run — faithful reviews are cached). Only
-    // faithful candidates stay in the persist set. Skipped when no reviewer is
-    // configured (a caller with no transport + no `fidelityRunner`).
-    if (fidelityRunner && persistedHere.length > 0) {
+    // faithful candidates stay in the persist set.
+    if (persistedHere.length > 0) {
       fidelityPlanned += persistedHere.length
       options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
       // The green candidates are reviewed independently — fan them through the
@@ -1104,7 +1095,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // recommendation with quoted evidence — advisory, never auto-applied. The section
   // text + grounding probes it needs come from the settle-time state (probes are a
   // cache hit — authoring already grounded the finding's claim).
-  if (triageRunner && birthFindings.length > 0) {
+  if (birthFindings.length > 0) {
     let triaged = 0
     options.onTriageProgress?.(triaged, birthFindings.length)
     await Promise.all(

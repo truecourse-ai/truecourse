@@ -175,3 +175,23 @@ export function writeScenarioFile(repo: string, rel: string, scenario: GuardScen
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(scenario, null, 2))
 }
+
+/**
+ * Neutral defaults for the aux LLM runners. `generateGuards` spawns REAL
+ * cli-transport runners for fidelity/triage when none is injected (the production
+ * default — OSS passes no transport), so every test must supply stubs or it dies
+ * on the setup.ts binary tripwire. Spread FIRST in the options object so a test's
+ * own runner (listed after) overrides its default: fidelity approves everything,
+ * triage fails soft (no verdict).
+ */
+export function stubAuxRunners(): {
+  fidelityRunner: FidelityRunner
+  triageRunner: TriageRunner
+} {
+  return {
+    fidelityRunner: async () => ({ verdict: 'faithful' }),
+    triageRunner: async () => {
+      throw new Error('triage stubbed off')
+    },
+  }
+}

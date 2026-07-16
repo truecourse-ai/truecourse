@@ -4,6 +4,7 @@ import path from 'node:path'
 import { generateGuards } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, authorBy, PASSING_STEPS } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -32,6 +33,7 @@ describe('generateGuards — entry pre-flight', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
@@ -72,6 +74,7 @@ describe('generateGuards — entry pre-flight', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
@@ -99,6 +102,7 @@ describe('generateGuards — entry pre-flight', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
@@ -124,6 +128,7 @@ describe('recipe discovery — post-build entry existence check', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
       extractRunner: extractBy({}),

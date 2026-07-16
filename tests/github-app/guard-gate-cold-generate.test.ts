@@ -274,6 +274,7 @@ describe('defaultGuardColdGenerate', () => {
         }),
         extractRunner: extract,
         generateRunner: author,
+        fidelityRunner: async () => ({ verdict: 'faithful' as const }),
       }),
     });
     try {
