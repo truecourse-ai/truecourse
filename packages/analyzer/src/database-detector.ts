@@ -3,7 +3,8 @@ import { join, resolve } from 'path'
 import type { FileAnalysis, DatabaseType, DatabaseInfo, DatabaseConnectionInfo, DatabaseDetectionResult, TableInfo, RelationInfo } from '@truecourse/shared'
 import { DATABASE_IMPORT_MAP, DOCKER_IMAGE_MAP } from './patterns/database-patterns.js'
 import { parsePrismaSchema } from './schema-parsers/prisma.js'
-import { SCHEMA_PARSERS } from './schema-parsers/registry.js'
+import { parseEfCoreProject, type EfCoreProjectFile } from './schema-parsers/efcore.js'
+import { EF_CORE_SCHEMA_PARSER, SCHEMA_PARSERS } from './schema-parsers/registry.js'
 import { readAllDependencies } from './service-detectors/registry.js'
 import type { Service } from './service-detector.js'
 
@@ -123,9 +124,69 @@ export function detectDatabases(
     schemaResults.set(dbType, existing)
   }
 
+  // EF Core is a model-scoped ORM: DbContext declarations, entity classes,
+  // navigation properties, and fluent mappings normally live in separate
+  // files. Parse all matching files together per service so those facts can be
+  // reconciled before emitting tables and relations.
+  const efParser = EF_CORE_SCHEMA_PARSER
+  if (efParser.scope === 'service') {
+    const efFiles: EfCoreProjectFile[] = []
+    const serviceByFile = new Map<string, Service>()
+    for (const service of services) {
+      for (const filePath of service.files) serviceByFile.set(filePath, service)
+    }
+    const efServiceNames = new Set(
+      detections
+        .filter((detection) => detection.driver.startsWith('efcore-'))
+        .map((detection) => detection.serviceName),
+    )
+    for (const analysis of analyses) {
+      if (!efParser.matchesImport(analysis)) continue
+      const service = serviceByFile.get(analysis.filePath)
+      if (service) efServiceNames.add(service.name)
+    }
+
+    for (const analysis of analyses) {
+      if (analysis.language !== 'csharp') continue
+
+      const service = serviceByFile.get(analysis.filePath)
+      const serviceName = service?.name ?? '__root__'
+      const hasEfEvidence = efParser.matchesImport(analysis)
+      if (!hasEfEvidence && !efServiceNames.has(serviceName)) continue
+
+      try {
+        const content = readFileSync(resolve(analysis.filePath), 'utf-8')
+
+        const providerTypes = detections
+          .filter((detection) =>
+            detection.serviceName === serviceName && detection.driver.startsWith('efcore-')
+          )
+          .map((detection) => detection.type)
+
+        efFiles.push({
+          filePath: analysis.filePath,
+          content,
+          serviceName,
+          providerTypes,
+        })
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+
+    for (const result of parseEfCoreProject(efFiles)) {
+      if (result.dbType === null) continue
+      const existing = schemaResults.get(result.dbType) || { tables: [], relations: [] }
+      existing.tables.push(...result.tables)
+      existing.relations.push(...result.relations)
+      schemaResults.set(result.dbType, existing)
+    }
+  }
+
   // Import-based schema parsers (Drizzle, SQLAlchemy, etc.)
   for (const analysis of analyses) {
     for (const parser of SCHEMA_PARSERS) {
+      if (parser.scope === 'service') continue // handled repository-wide above
       if (!parser.matchesImport(analysis)) continue
 
       try {
