@@ -41,3 +41,29 @@ export function setKnowledgeLedgerReader(fn: KnowledgeLedgerReader | null): void
 export function getKnowledgeLedgerReader(): KnowledgeLedgerReader | null {
   return reader;
 }
+
+/**
+ * The STORED body of a repo's inherited doc, by its `knowledge/`-prefixed path — the
+ * inherited layer folds workspace docs into the repo corpus at scan time, but their
+ * bodies live in the workspace document store, not the repo tree. The repo Spec-tab
+ * doc route reads them through this seam so a `knowledge/` ref serves the same content
+ * that scan folded in. Null when the repo has no workspace, no ledger row for the path,
+ * or the body is absent (the route renders that as its 404). Same seam idiom as the
+ * title reader above; EE installs it, unset in OSS/tests. Reads only.
+ */
+export type KnowledgeDocBodyReader = (
+  repoKey: string,
+  docPath: string,
+) => Promise<string | null>;
+
+let bodyReader: KnowledgeDocBodyReader | null = null;
+
+/** Install the EE body reader (or clear it with null). Called once at boot. */
+export function setKnowledgeDocBodyReader(fn: KnowledgeDocBodyReader | null): void {
+  bodyReader = fn;
+}
+
+/** The active body reader, or null when none is registered (OSS/tests). */
+export function getKnowledgeDocBodyReader(): KnowledgeDocBodyReader | null {
+  return bodyReader;
+}

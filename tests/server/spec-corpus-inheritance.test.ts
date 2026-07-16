@@ -6,7 +6,7 @@
  * untouched; OSS (in-place store, no seam) is fully inert.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { enrichWorkspaceLayer } from '../../apps/dashboard/server/src/routes/spec';
+import { enrichWorkspaceLayer, readInheritedDoc } from '../../apps/dashboard/server/src/routes/spec';
 import {
   setSpecStore,
   resetSpecStore,
@@ -14,6 +14,7 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import {
   setKnowledgeLedgerReader,
+  setKnowledgeDocBodyReader,
   type KnowledgeDocMeta,
 } from '@truecourse/core/lib/knowledge-ledger-reader';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
@@ -45,6 +46,7 @@ function corpusFixture(): CuratedCorpus {
 afterEach(() => {
   resetSpecStore();
   setKnowledgeLedgerReader(null);
+  setKnowledgeDocBodyReader(null);
 });
 
 type EnrichedDoc = CuratedCorpus['docs'][number] & {
@@ -111,5 +113,57 @@ describe('enrichWorkspaceLayer', () => {
   it('a null corpus passes through', async () => {
     setSpecStore(hostedStore);
     expect(await enrichWorkspaceLayer('acme/api', null)).toBeNull();
+  });
+});
+
+// The repo Spec-tab doc route (GET /:id/spec/doc) resolves an inherited `knowledge/`
+// doc's body through the body-reader seam instead of the repo tree — the bug where a
+// hosted repo 404'd on an inherited doc because knowledge/* never exists on GitHub.
+describe('readInheritedDoc', () => {
+  it('OSS (in-place store) is inert — even a knowledge/ ref reads the repo tree', async () => {
+    // Default FileSpecStore materializes in place → OSS. No body seam installed.
+    expect(await readInheritedDoc('acme/api', 'knowledge/jira/10000.md')).toEqual({ inherited: false });
+    expect(await readInheritedDoc('acme/api', 'docs/adr-001.md')).toEqual({ inherited: false });
+  });
+
+  it('hosted: a knowledge/ ref serves the stored body via the seam', async () => {
+    setSpecStore(hostedStore);
+    const seen: string[][] = [];
+    setKnowledgeDocBodyReader(async (repoKey, docPath) => {
+      seen.push([repoKey, docPath]);
+      return '# Jira 10000\n\nInherited body.';
+    });
+
+    const out = await readInheritedDoc('acme/api', 'knowledge/jira/10000.md');
+    expect(out).toEqual({ inherited: true, content: '# Jira 10000\n\nInherited body.' });
+    // The seam was queried with the repoKey + the exact ref.
+    expect(seen).toEqual([['acme/api', 'knowledge/jira/10000.md']]);
+  });
+
+  it('hosted: a knowledge/ ref with no ledger row/body → inherited but null (the route 404s)', async () => {
+    setSpecStore(hostedStore);
+    setKnowledgeDocBodyReader(async () => null); // ledger row or body missing
+
+    expect(await readInheritedDoc('acme/api', 'knowledge/jira/10000.md')).toEqual({
+      inherited: true,
+      content: null,
+    });
+  });
+
+  it('hosted with no seam installed: a knowledge/ ref is inherited but null (the route 404s)', async () => {
+    setSpecStore(hostedStore);
+    setKnowledgeDocBodyReader(null);
+
+    expect(await readInheritedDoc('acme/api', 'knowledge/jira/10000.md')).toEqual({
+      inherited: true,
+      content: null,
+    });
+  });
+
+  it('hosted: a repo-local ref falls through to the repo tree (not inherited)', async () => {
+    setSpecStore(hostedStore);
+    setKnowledgeDocBodyReader(async () => '# should not be read');
+
+    expect(await readInheritedDoc('acme/api', 'docs/adr-001.md')).toEqual({ inherited: false });
   });
 });

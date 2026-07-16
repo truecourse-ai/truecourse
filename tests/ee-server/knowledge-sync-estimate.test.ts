@@ -22,7 +22,13 @@ vi.mock('@truecourse/core/services/llm/model-prices', () => ({
 
 import { estimateScanTokens } from '@truecourse/core/services/llm/spec-estimate';
 import { syncWorkspaceCorpusInProcess } from '@truecourse/core/commands/spec-in-process';
-import { PgKnowledgeStore } from '../../ee/packages/data-store/src/index';
+import {
+  setSpecStore,
+  resetSpecStore,
+  saveWorkspaceSpec,
+} from '@truecourse/core/lib/spec-store';
+import { PgKnowledgeStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { pendingFromEstimate } from '../../ee/packages/server/src/jobs/worker';
 import {
   syncSource,
   processWorkspaceKnowledge,
@@ -114,7 +120,9 @@ function plainConnector(opts: {
   };
 }
 
-/** Pre-seed the provenance ledger with content-hashed rows (the prior sync's state). */
+/** Pre-seed the ledger with rows that have been synced AND processed at their
+ *  current content (the realistic prior-run baseline the sweep delta measures
+ *  against — stamps `processedHash = contentHash`). */
 async function seedLedger(
   store: PgKnowledgeStore,
   kind: string,
@@ -133,6 +141,10 @@ async function seedLedger(
       lastSyncedAt: '2026-01-01T00:00:00Z',
     });
   }
+  await store.markProcessed(
+    ORG,
+    rows.map((r) => ({ docPath: connectorDocPath(kind, r.externalId), processedHash: hash(r.markdown) })),
+  );
 }
 
 /** Seed the store the way Sync leaves it: the body content-addressed + the ledger row. */
@@ -159,6 +171,19 @@ async function seedStored(
 
 const ids = async (store: PgKnowledgeStore): Promise<string[]> =>
   (await store.listDocuments(ORG)).map((d) => d.externalId).sort();
+
+/** Persist a minimal workspace corpus whose kept docs are the given refs — the
+ *  `removed` half of the delta diffs these against the fetched set. Requires the
+ *  Postgres spec store to be installed (see the Stage-1 describe's beforeEach). */
+async function seedCorpus(refs: string[]): Promise<void> {
+  await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
+    version: 3,
+    generatedAt: '2026-01-01T00:00:00Z',
+    docs: refs.map((ref) => ({ ref, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: [] })),
+    areas: [],
+    skippedDocs: [],
+  });
+}
 
 describe('syncSource — fetch + persist bodies + reconcile the ledger', () => {
   let client: PGlite;
@@ -314,10 +339,15 @@ describe('syncSource — Stage-1 cost estimate', () => {
 
   beforeEach(async () => {
     client = new PGlite();
-    knowledge = new PgKnowledgeStore(await makeDb(client));
+    const db = await makeDb(client);
+    knowledge = new PgKnowledgeStore(db);
+    // The delta's `removed` diffs the persisted workspace corpus against the fetched
+    // set — install the Postgres spec store so `loadWorkspaceSpec` can read it.
+    setSpecStore(new PgSpecStore(db));
     vi.mocked(estimateScanTokens).mockReset().mockResolvedValue(EMPTY);
   });
   afterEach(async () => {
+    resetSpecStore();
     await client.close();
   });
 
@@ -358,7 +388,9 @@ describe('syncSource — Stage-1 cost estimate', () => {
       { externalId: '1', markdown: md1 },
       { externalId: '2', markdown: bodyOf('2') },
     ]);
-    // Issue 2 deleted upstream; issue 1 unchanged.
+    // Both were processed into the corpus; issue 2 is now deleted upstream. `removed`
+    // is the corpus doc no longer present upstream (pending removal at next Process).
+    await seedCorpus([connectorDocPath('jira', '1'), connectorDocPath('jira', '2')]);
     const conn = batchConnector({ refs: [ref('1')], bodies: { '1': md1 } });
 
     const est = await syncSource(ORG, knowledge, conn, {});
@@ -366,17 +398,17 @@ describe('syncSource — Stage-1 cost estimate', () => {
     expect(est.stages).toEqual([]); // zero LLM cost → the client skips the modal, still runs Process
   });
 
-  it('persists the fetched bodies + reconciles the ledger (delta is vs the PRE-upsert state)', async () => {
+  it('persists the fetched bodies + reconciles the ledger (delta is vs the processed marker)', async () => {
     await seedLedger(knowledge, 'jira', [{ externalId: '1', markdown: bodyOf('1'), version: 'v-orig' }]);
 
-    // Issue 1 edited, issue 2 brand new.
+    // Issue 1 edited (processed before at bodyOf('1')), issue 2 brand new.
     const conn = batchConnector({
       refs: [ref('1', 'bumped'), ref('2', 'new')],
       bodies: { '1': bodyOf('1', 9), '2': bodyOf('2') },
     });
     const est = await syncSource(ORG, knowledge, conn, {});
 
-    // The delta is counted against the ledger BEFORE the upsert.
+    // Issue 1's body differs from what was processed → changed; issue 2 → new.
     expect(est.delta).toEqual({ new: 1, changed: 1, removed: 0, total: 2 });
     // …and the ledger + bodies now reflect the sweep.
     expect(await ids(knowledge)).toEqual(['1', '2']);
@@ -435,5 +467,97 @@ describe('syncSource — Stage-1 cost estimate', () => {
     // A new doc → scenario generation follows unpriced → the cost is a partial total.
     expect(est.costPartial).toBe(true);
     expect(est.subjectLabel).toBe('1 new of 1 doc');
+  });
+});
+
+describe('syncSource — delta measures synced-vs-PROCESSED (storage-pivot regression)', () => {
+  let client: PGlite;
+  let knowledge: PgKnowledgeStore;
+
+  beforeEach(async () => {
+    client = new PGlite();
+    const db = await makeDb(client);
+    knowledge = new PgKnowledgeStore(db);
+    setSpecStore(new PgSpecStore(db));
+    vi.mocked(estimateScanTokens).mockReset().mockResolvedValue(EMPTY);
+    vi.mocked(syncWorkspaceCorpusInProcess).mockClear();
+  });
+  afterEach(async () => {
+    resetSpecStore();
+    await client.close();
+  });
+
+  const nineRefs = Array.from({ length: 9 }, (_, i) => ref(String(i + 1)));
+  const nineBodies = Object.fromEntries(nineRefs.map((r) => [r.id, bodyOf(r.id)]));
+  const sweep = () => syncSource(ORG, knowledge, batchConnector({ refs: nineRefs, bodies: nineBodies }), {});
+
+  it('a second sweep of an unchanged-but-UNPROCESSED source keeps the Process work (the bug)', async () => {
+    // Sweep #1: 9 tickets land in the ledger; none processed yet → all pending.
+    const est1 = await sweep();
+    expect(est1.delta).toEqual({ new: 9, changed: 0, removed: 0, total: 9 });
+    expect(pendingFromEstimate(est1, 'Jira', 't1').pending).not.toBeNull();
+
+    // Sweep #2: source unchanged and STILL nothing processed. Pre-fix the ledger
+    // matched the fetch → empty delta → pending cleared → 9 docs stranded. Now the
+    // delta is synced-vs-processed, so the 9 stay pending and Process is intact.
+    const est2 = await sweep();
+    expect(est2.delta).toEqual({ new: 9, changed: 0, removed: 0, total: 9 });
+    expect(pendingFromEstimate(est2, 'Jira', 't2').pending).not.toBeNull();
+  });
+
+  it('Process stamps the processed marker on every consolidated doc', async () => {
+    await sweep();
+    // Pre-process: no doc carries a processed marker.
+    expect((await knowledge.listDocuments(ORG)).every((r) => r.processedHash === null)).toBe(true);
+
+    await processWorkspaceKnowledge(ORG, knowledge);
+
+    // Post-process: every ledger row is stamped with the body it was consolidated at.
+    for (const row of await knowledge.listDocuments(ORG)) {
+      expect(row.processedHash).toBe(row.contentHash);
+    }
+  });
+
+  it('process → re-sweep unchanged → up to date, clearing pending', async () => {
+    await sweep();
+    await processWorkspaceKnowledge(ORG, knowledge);
+
+    const est = await sweep();
+    expect(est.delta).toEqual({ new: 0, changed: 0, removed: 0, total: 9 });
+    // Empty delta → the sweep clears the pending record ("up to date").
+    expect(pendingFromEstimate(est, 'Jira', 't').pending).toBeNull();
+  });
+
+  it('detects a doc edited AFTER it was processed as changed (not new)', async () => {
+    await syncSource(ORG, knowledge, batchConnector({ refs: [ref('1')], bodies: { '1': bodyOf('1', 1) } }), {});
+    await processWorkspaceKnowledge(ORG, knowledge);
+
+    // Ticket 1 edited upstream after processing → changed, not new, not up to date.
+    const est = await syncSource(
+      ORG,
+      knowledge,
+      batchConnector({ refs: [ref('1', 'bumped')], bodies: { '1': bodyOf('1', 2) } }),
+      {},
+    );
+    expect(est.delta).toEqual({ new: 0, changed: 1, removed: 0, total: 1 });
+  });
+
+  it('keeps the estimate honest on a repeat sweep — unprocessed cold docs still price stages', async () => {
+    // The estimator gates its stages on the relevance caches; unprocessed docs stay
+    // cold, so a repeat sweep must still surface non-empty stages — the delta being
+    // "9 new" and the priced work must agree. Simulate a cold cache with one stage.
+    vi.mocked(estimateScanTokens).mockResolvedValue({
+      totalEstimatedTokens: 100,
+      tiers: [],
+      stages: [
+        { stage: 'relevance', label: 'Filtering docs', model: 'haiku', calls: 9, estimatedTokens: 100, estimatedCostUsd: 0.01 },
+      ],
+      estimatedCostUsd: 0.01,
+      costSource: 'bundled',
+    });
+    await sweep();
+    const est2 = await sweep();
+    expect(est2.delta.new).toBe(9);
+    expect(est2.stages?.length).toBeGreaterThan(0); // honest: still priced, not zeroed
   });
 });

@@ -29,7 +29,10 @@ import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
-import { getKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import {
+  getKnowledgeLedgerReader,
+  getKnowledgeDocBodyReader,
+} from '@truecourse/core/lib/knowledge-ledger-reader';
 import { readGuardResultForView } from '@truecourse/core/commands/guard-read';
 import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import {
@@ -122,6 +125,25 @@ export async function enrichWorkspaceLayer(
     return { ...d, layer: 'workspace' as const, ...(m ? { title: m.title, url: m.url } : {}) };
   });
   return { ...corpus, docs };
+}
+
+/**
+ * Resolve an inherited workspace doc's body for the repo Spec-tab doc route (hosted).
+ * A connected repo folds its workspace Knowledge into its own spec, so a ref under the
+ * `knowledge/` prefix (the inherited layer `enrichWorkspaceLayer` tags) names a doc
+ * whose body lives in the workspace document store, never the repo tree. Hosted + such
+ * a ref is served through the body-reader seam (EE installs it; unset ⇒ missing).
+ * Any other case — OSS in-place, or a repo-local ref — returns `{ inherited: false }`
+ * so the route reads the repo tree as before. `content: null` (row/body absent) is the
+ * route's 404 trigger.
+ */
+export async function readInheritedDoc(
+  repoKey: string,
+  ref: string,
+): Promise<{ inherited: false } | { inherited: true; content: string | null }> {
+  if (specsMaterializeInPlace() || !ref.startsWith('knowledge/')) return { inherited: false };
+  const reader = getKnowledgeDocBodyReader();
+  return { inherited: true, content: reader ? await reader(repoKey, ref) : null };
 }
 
 async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promise<SpecCorpusPayload> {
@@ -235,6 +257,18 @@ router.get(
       // holds in EE too, where repo.path is a repoKey, not a filesystem path.
       if (path.isAbsolute(ref) || ref.split(/[\\/]/).includes('..')) {
         res.status(400).json({ error: 'ref escapes the repository.' });
+        return;
+      }
+      // A `knowledge/` ref (hosted) is an inherited workspace doc: its body lives in
+      // the workspace document store, not the repo tree — serve it through the seam.
+      // `commit` doesn't apply (the current workspace snapshot); a missing row/body 404s.
+      const inherited = await readInheritedDoc(repo.path, ref);
+      if (inherited.inherited) {
+        if (inherited.content == null) {
+          res.status(404).json({ error: `Doc not found: ${ref}` });
+          return;
+        }
+        res.json({ ref, content: inherited.content });
         return;
       }
       // Read through the seam: local working tree in OSS, GitHub (App) in EE.

@@ -7,8 +7,10 @@
  *     content-addressed into the shared `content` table (sha = its `contentHash`,
  *     so identical bodies dedup), and the provenance ledger is reconciled for this
  *     source (upsert present docs, prune removed ones). Sources therefore fills the
- *     moment a sync completes. The pending record's `delta` is counted against the
- *     ledger BEFORE the upsert. See {@link syncSource}.
+ *     moment a sync completes. The pending record's `delta` is counted against what
+ *     Process has consolidated (the `processed_hash` marker), NOT the ledger — so a
+ *     re-sync of an unchanged-but-unprocessed source still reports the pending work.
+ *     See {@link syncSource}.
  *   - **Process (workspace union)** — NO connector I/O. Load every ledger row + its
  *     stored body, re-consolidate the FULL union via `syncWorkspaceCorpusInProcess`
  *     (the corpus path: materialize the docs into a transient scratch tree, curate
@@ -29,9 +31,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   syncWorkspaceCorpusInProcess,
+  type CuratedCorpus,
   type DecisionsFile,
   type WorkspaceDocInput,
 } from '@truecourse/core/commands/spec-in-process';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { estimateScanTokens } from '@truecourse/core/services/llm/spec-estimate';
 import { getModelPrices } from '@truecourse/core/services/llm/model-prices';
 import type { LlmEstimate } from '@truecourse/core/commands/analyze-core';
@@ -216,6 +220,9 @@ export async function processWorkspaceKnowledge(
   // union on one gap). Doc path + newest-wins timestamp ride from the ledger row.
   const docs: WorkspaceDocInput[] = [];
   const bySource: Record<string, number> = {};
+  // The processed marker to stamp per consolidated doc: its docPath + the exact
+  // body sha this run saw (`contentHash`), so a later sweep diffs synced-vs-processed.
+  const consolidated: Array<{ docPath: string; processedHash: string }> = [];
   let loaded = 0;
   for (const row of rows) {
     const markdown = await knowledge.getDocBody(org, row.contentHash);
@@ -223,6 +230,7 @@ export async function processWorkspaceKnowledge(
     await progress?.(loaded, total, SYNC_MSG_FETCH);
     if (markdown == null) continue;
     docs.push({ docPath: row.docPath, markdown, lastTouched: row.lastSyncedAt });
+    consolidated.push({ docPath: row.docPath, processedHash: row.contentHash });
     bySource[row.sourceKind] = (bySource[row.sourceKind] ?? 0) + 1;
   }
   await progress?.(total, total, SYNC_MSG_CONSOLIDATE);
@@ -236,24 +244,35 @@ export async function processWorkspaceKnowledge(
     tracker: opts.tracker,
   });
 
+  // Stamp the processed marker for every doc this run consolidated, AFTER the
+  // corpus persists — so the next sweep reads them as up to date (delta measures
+  // synced-vs-processed, not synced-vs-ledger). A crash before this leaves the
+  // markers stale-low, which only over-reports pending — safe (idempotent re-run).
+  await knowledge.markProcessed(org, consolidated);
+
   return { synced: docs.length, bySource };
 }
 
 // --- Sync ("Sync now"): fetch + persist + price (no LLM) -------------
 
 /**
- * Ledger delta for a sync, counted by CONTENT HASH (not the source's version /
- * `updatedAt`): a doc whose upstream timestamp bumped but whose body is unchanged
- * is a cache hit, not a change. `total` is the current doc count.
+ * Sweep delta, counted by CONTENT HASH against what has actually been PROCESSED —
+ * NOT against the ledger. Since the storage pivot, a sync reconciles the ledger the
+ * moment it runs, so a fetched-vs-ledger diff reads empty on the second sweep of an
+ * unchanged source and would strand synced-but-unprocessed docs. The processed
+ * marker (`knowledge_documents.processed_hash`, stamped only by Process) is the
+ * baseline instead: work is pending until Process has consolidated the current body.
+ * `total` is the current upstream doc count.
  */
 export interface SyncDelta {
-  /** Docs not yet in the provenance ledger. */
+  /** Docs present upstream that Process has never consolidated (no processed marker). */
   new: number;
-  /** Docs in the ledger whose content hash differs. */
+  /** Docs processed before whose fetched body now differs from the processed one. */
   changed: number;
-  /** Ledger docs no longer present upstream (pruned on the sync). */
+  /** Docs the persisted corpus still holds that are gone upstream — pruned at sync,
+   *  not yet processed out of the corpus. */
   removed: number;
-  /** Current doc count (new + unchanged + changed). */
+  /** Current upstream doc count (new + unchanged + changed). */
   total: number;
 }
 
@@ -267,27 +286,52 @@ export interface WorkspaceSyncEstimate extends LlmEstimate {
   delta: SyncDelta;
 }
 
-/** Count new / changed / removed docs for this source against the provenance ledger (content-hash exact). */
-async function deltaAgainstLedger(
+/**
+ * Count new / changed / removed docs for this source against what Process has
+ * consolidated — the fix for the synced-≠-processed conflation. For each fetched
+ * (present-upstream) doc we read its ledger row's `processedHash`:
+ *   - new     = no processed marker yet (a brand-new row, or one synced on an
+ *               earlier sweep but never processed) — the fetched content is unseen.
+ *   - changed = a marker exists but differs from the fetched body's hash — the doc
+ *               was processed at an older content (fetched-vs-processed, content
+ *               exact so a bumped `updatedAt` alone is not a change).
+ *   - removed = a doc the persisted workspace corpus still holds that is no longer
+ *               present upstream — it was (or will be) pruned from the ledger at
+ *               this sync but stays in the corpus until the next Process drops it.
+ * Corpus refs are the connector-namespaced docPaths, so filtering by this source's
+ * `knowledge/<kind>/` prefix keeps the count per-source. The corpus load returns
+ * null before the first Process (no EE spec store / no corpus) ⇒ removed = 0.
+ */
+async function deltaAgainstProcessed(
   org: string,
   knowledge: PgKnowledgeStore,
   sourceKind: string,
   docs: SyncDoc[],
 ): Promise<SyncDelta> {
-  const priorHash = new Map<string, string>();
+  const priorProcessed = new Map<string, string | null>();
   for (const row of await knowledge.listDocuments(org)) {
-    if (row.sourceKind === sourceKind) priorHash.set(row.externalId, row.contentHash);
+    if (row.sourceKind === sourceKind) priorProcessed.set(row.externalId, row.processedHash);
   }
-  const present = new Set(docs.map((d) => d.externalId));
   let added = 0;
   let changed = 0;
   for (const d of docs) {
-    const prev = priorHash.get(d.externalId);
-    if (prev === undefined) added++;
-    else if (prev !== d.contentHash) changed++;
+    const processed = priorProcessed.get(d.externalId);
+    // No row, or a row synced but never processed → the fetched content is unseen.
+    if (processed === undefined || processed === null) added++;
+    // Processed before, but at a different body → re-processing produces new work.
+    else if (processed !== d.contentHash) changed++;
   }
+  // Removed: corpus docs of this source no longer present upstream (the post-sync
+  // ledger will not hold them). Diff the corpus refs against the fetched set.
+  const present = new Set(docs.map((d) => d.doc.docPath));
+  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
+  const prefix = `knowledge/${sourceKind}/`;
   let removed = 0;
-  for (const id of priorHash.keys()) if (!present.has(id)) removed++;
+  if (corpus) {
+    for (const cd of corpus.docs) {
+      if (cd.ref.startsWith(prefix) && !present.has(cd.ref)) removed++;
+    }
+  }
   return { new: added, changed, removed, total: docs.length };
 }
 
@@ -326,16 +370,17 @@ export interface EstimateOptions {
 
 /**
  * "Sync now" — the ONLY stage that talks to a source. Sweep it (list + fetch,
- * preferring `fetchMany`), count the ledger `delta` BEFORE any write, then PERSIST:
+ * preferring `fetchMany`), count the synced-vs-PROCESSED `delta`, then PERSIST:
  * every body content-addressed into the store + the ledger reconciled for this
  * source (upsert present, prune removed, GC orphaned bodies) — so Sources fills
  * immediately and Process needs no connector. Finally price the classify +
  * consolidate stage BEFORE it runs by running the cache-aware estimators against a
  * transient scratch tree of the fetched docs — the same `LlmEstimate` the OSS scan
- * modal renders, plus the `delta`. Unchanged docs are cache hits (zero cost); the
- * content-hash delta is exact, so a doc whose `updatedAt` bumped without a body
- * change doesn't inflate it. The delta is counted before the upsert, so a re-sync
- * of unchanged docs still reports "unchanged".
+ * modal renders, plus the `delta`. Docs already processed (and cached) are zero
+ * cost; the content-hash delta is exact, so a doc whose `updatedAt` bumped without a
+ * body change doesn't inflate it. The delta is against the `processed_hash` marker
+ * (untouched by sync), so a re-sync of synced-but-unprocessed docs still reports the
+ * pending work — Process, not sync, is what clears it.
  */
 export async function syncSource<Cfg extends ConnectorConfig>(
   org: string,
@@ -346,9 +391,11 @@ export async function syncSource<Cfg extends ConnectorConfig>(
 ): Promise<WorkspaceSyncEstimate> {
   const refs = await connector.list(cfg);
   const docs = await fetchSyncDocs(connector, cfg, refs, opts.onFetchProgress);
-  const delta = await deltaAgainstLedger(org, knowledge, connector.kind, docs);
-  // Persist bodies + reconcile the ledger AFTER the delta read (delta is vs the
-  // pre-upsert ledger). Sources reflects this sync the moment it returns.
+  // Delta is synced-vs-PROCESSED: the processed marker is untouched by sync, so it
+  // reads the same before or after the reconcile below; we compute it first anyway.
+  const delta = await deltaAgainstProcessed(org, knowledge, connector.kind, docs);
+  // Persist bodies + reconcile the ledger. Sources reflects this sync the moment it
+  // returns; the processed markers stay put until the next Process consolidates them.
   await persistSyncedSource(org, knowledge, connector.kind, docs);
 
   const prices = await getModelPrices();

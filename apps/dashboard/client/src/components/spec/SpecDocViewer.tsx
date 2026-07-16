@@ -100,7 +100,10 @@ export function SpecDocViewer({
           )}
           <span className="truncate text-xs font-medium text-foreground">{title ?? docRef}</span>
           {url && (
-            <HoverPopover content="Open source" side="top">
+            // The header sits at the top-right of the pane, inside an
+            // `overflow-hidden` column — anchor the tooltip below-and-left so it
+            // isn't clipped by the pane top or the viewport right edge.
+            <HoverPopover content="Open source" side="bottom" align="end">
               <a
                 href={url}
                 target="_blank"
