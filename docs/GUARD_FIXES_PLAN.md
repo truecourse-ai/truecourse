@@ -22,7 +22,7 @@ Re-run guard on sqlfluff after implementing items and compare against these numb
 
 ## 1. Authoring must always see the full document — remove the titles-only fallback
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** `buildAuthorDocContext` (`packages/guard-generator/src/prompts.ts`) sends the
 whole doc as authoring context only when it is ≤ `AUTHOR_DOC_BUDGET` (48k chars). Over

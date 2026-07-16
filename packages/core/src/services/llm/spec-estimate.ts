@@ -361,7 +361,6 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
 // reads average ~2 cli claims per changed section, with dense sections higher).
 const GUARD_CLI_CLAIMS_PER_SECTION = 2.0; // rough cli claims a changed section yields (point)
 const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
-const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
@@ -402,7 +401,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
     extractCalls += await countUncachedExtractViews(repoRoot, doc);
     workDocChars += doc.content.length;
   }
-  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_AUTHOR_DOC_BUDGET, workDocChars / totalViews)) : 0;
+  // Extraction chunks losslessly at its view budget, so the per-view average IS the
+  // extract call's body size.
+  const avgViewChars = totalViews > 0 ? Math.round(workDocChars / totalViews) : 0;
 
   // Authoring: batches of cli claims from the changed sections. Claim counts are
   // unknown until extraction runs, so range around the per-section heuristic.
@@ -411,7 +412,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   const authorPoint = Math.ceil(claimsPoint / batchSize);
   const authorMax = Math.ceil(claimsMax / batchSize);
   const avgOwnChars = work.length ? Math.round(work.reduce((n, s) => n + s.ownText.length, 0) / work.length) : 0;
-  const docContextChars = Math.min(GUARD_AUTHOR_DOC_BUDGET, avgViewChars);
+  // Authoring always carries the FULL document as context (no thinning) — one whole
+  // work document per authoring call, re-paid on every call.
+  const avgDocContextChars = workDocs.length ? Math.round(workDocChars / workDocs.length) : 0;
 
   const stages: StageCallEstimate[] = [
     {
@@ -435,11 +438,11 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       calls: authorPoint,
       minCalls: 0,
       maxCalls: authorMax,
-      // A batch carries the system prompt + the doc context + ~batchSize claims'
-      // own text + the injected grounding transcripts.
+      // A batch carries the system prompt + the full doc context + ~batchSize
+      // claims' own text + the injected grounding transcripts.
       avgInputTokens: tokensFromChars(
         GENERATE_SYSTEM_PROMPT.length,
-        docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
+        avgDocContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
       ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
     },

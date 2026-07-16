@@ -1160,7 +1160,7 @@ function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes:
 function buildAuthorCtxFor(gd: GuardDoc, claims: AuthorClaim[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
   return {
     doc: gd.doc,
-    docContext: buildAuthorDocContext(gd, claims.map((c) => c.section.anchor)),
+    docContext: buildAuthorDocContext(gd),
     areaTags: gd.sections[0]?.areaTags ?? [],
     recipeEntry: recipe.entry,
     recipeBuild: recipe.build,
