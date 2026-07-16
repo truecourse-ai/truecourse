@@ -12,6 +12,7 @@ import {
   authorBy,
   PASSING_STEPS,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -77,13 +78,30 @@ describe('estimateGuardTokens', () => {
     expect(triage.callsRange!.high).toBe(est.stages!.find((s) => s.stage === 'guardFidelity')!.callsRange!.high)
   })
 
+  it('includes an exemplar-generation stage — 0..claimsMax range (support-claim count is unknown pre-run)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const est = await estimateGuardTokens(r)
+    const exemplars = est.stages!.find((s) => s.stage === 'guardExemplars')!
+    expect(exemplars).toBeTruthy()
+    expect(exemplars.label).toBe('Generating exemplars')
+    // Floor 0 (a run may produce no support claims) and ceiling = the claim ceiling
+    // (worst case: every planned claim a support claim) — the same per-claim proxy the
+    // fidelity/triage stages use.
+    expect(exemplars.callsRange!.low).toBe(0)
+    expect(exemplars.callsRange!.high).toBe(est.stages!.find((s) => s.stage === 'guardFidelity')!.callsRange!.high)
+  })
+
   it('cache-aware: after a full generate every section is settled ⇒ empty estimate', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    await generateGuards({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: author })
 
     const est = await estimateGuardTokens(r)
     expect(est.subjectLabel).toBe('all 2 sections cached')

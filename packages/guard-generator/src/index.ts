@@ -115,6 +115,7 @@ export {
   spawnRecipeRunner,
   spawnFidelityRunner,
   spawnTriageRunner,
+  spawnExemplarRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
@@ -137,6 +138,7 @@ export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
   ExampleBlockSchema,
+  SupportSubjectSchema,
   ExtractedClaimSchema,
   UntestableNoteSchema,
   DocExtractionSchema,
@@ -148,6 +150,7 @@ export {
   type TestabilityVerdict,
   type RecipeProposal,
   type ExampleBlock,
+  type SupportSubject,
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
@@ -155,3 +158,15 @@ export {
   type AuthoredClaim,
   type FidelityReview,
 } from './schemas.js'
+
+export {
+  seedSupportPack,
+  supportPackId,
+  defaultSupportPackSize,
+  buildExemplarUserPrompt,
+  EXEMPLAR_CACHE_NAME,
+  EXEMPLAR_SYSTEM_PROMPT,
+  EXEMPLAR_PROMPT_FINGERPRINT,
+  type ExemplarRunner,
+  type ExemplarUserContext,
+} from './exemplars.js'

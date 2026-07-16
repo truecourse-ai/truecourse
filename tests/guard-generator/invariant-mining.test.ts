@@ -7,6 +7,7 @@ import type { ExtractRunner, GenerateRunner } from '@truecourse/guard-generator'
 import { loadPackInputs, readManifest } from '@truecourse/guard-runner'
 import type { GuardScenario } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 /**
  * Item 8 end to end: an `invariant`-flavor claim seeds an input-corpus pack from its
@@ -63,6 +64,7 @@ describe('invariant mining — a documented always/never rule becomes a pack-swe
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractInvariant(['{"a":1}\n', '{"b":2,"c":3}\n']),
       generateRunner: authorRule,
@@ -101,6 +103,7 @@ describe('invariant mining — a documented always/never rule becomes a pack-swe
 
     // The second seed is invalid JSON — `parse input` exits 5 on it, breaking the rule.
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractInvariant(['{"a":1}\n', '{oops not json\n']),
       generateRunner: authorRule,

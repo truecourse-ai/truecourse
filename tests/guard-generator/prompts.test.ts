@@ -90,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: invariant mining (item 8 — a universal always/never/idempotent
-    // rule becomes an `invariant`-flavor claim carrying the section's example blocks)
-    // moved this from 13fc530f43b85b75. It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('4f1fa6e53abe4e1f')
+    // Pinned literal: support mining (item 9 — a quantified "supports/handles X"
+    // promise becomes a `support`-flavor claim carrying the class + subject) moved
+    // this from 4f1fa6e53abe4e1f. It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('5f3a52a95d5e2767')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -135,6 +135,30 @@ describe('guard-generator prompts', () => {
     // The block is copied byte-for-byte, never reformatted.
     expect(EXTRACT_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(EXTRACT_SYSTEM_PROMPT).toContain('re-indented')
+  })
+
+  // Support mining (item 9) — a quantified "supports X" promise becomes a `support` claim.
+  it('EXTRACT_SYSTEM_PROMPT recognizes quantified support claims, with a positive and a negative example', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('# Support claims — a "supports X" promise tested over a GENERATED corpus')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"flavor": "support"')
+    // The closed class enum + the subject payload.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"kind": "language" | "dialect" | "format" | "syntax"')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"subject"')
+    // The deciding line: quantification over a class, not a mention.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('QUANTIFICATION over a class')
+    // One positive and one negative worked example (a mere mention is NOT a support claim).
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('POSITIVE — emit a support claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('NEGATIVE — do NOT emit a support claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('MENTIONS dialects without promising')
+  })
+
+  it('GENERATE_SYSTEM_PROMPT rules a support claim runs the documented operation over a generated corpus', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Support claims — ONE operation, run over a GENERATED corpus')
+    // The shared boring expectation, authored from what the section promises.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('BORING PASS')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('unparsable')
+    // One rule scenario; the engine stages the corpus, the model never seeds it.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Return exactly ONE scenario for a support claim')
   })
 
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).
@@ -274,6 +298,54 @@ describe('guard-generator prompts', () => {
       claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
     }
     expect(buildAuthorUserPrompt(ctx)).not.toContain('RETRY —')
+  })
+
+  // Item 10 — the retry must ACT on a usage/setup error the program printed, not
+  // treat every failure as a keep-the-assertion doc-vs-code disagreement. The
+  // evidence was already in the prompt; the rule wording made the model keep the
+  // broken invocation and let it become a finding instead of fixing setup.
+  it('the RETRY prompt distinguishes a usage/setup error (always fix) from a doc-vs-code disagreement (keep)', () => {
+    const p = retryPrompt()
+    // The two failure kinds are named and handled oppositely.
+    expect(p).toContain('FIRST decide which of two failures this is')
+    expect(p).toContain('USAGE / SETUP error')
+    expect(p).toContain('REJECTED the invocation')
+    expect(p).toContain('never evaluated')
+    // A usage/setup error is ALWAYS the scenario's own defect, never a finding.
+    expect(p).toContain('ALWAYS a defect in YOUR scenario')
+    // Fixing SETUP visibly includes creating/altering a config file.
+    expect(p).toContain('CREATE OR EDIT the config file under `setup.files`')
+    expect(p).toContain('Do NOT leave the rejected invocation in place')
+    // The doc-vs-code branch still stands for a genuine value disagreement.
+    expect(p).toContain('DOC-vs-CODE disagreement on the asserted VALUE')
+    expect(p).toContain("KEEP the claim's assertion")
+  })
+
+  // Item 10 rule (a) — an example's assumed environment is part of the test.
+  it("GENERATE_SYSTEM_PROMPT rules the example's assumed environment is reproduced in setup", () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# The assumed environment is part of the test — reproduce it in setup')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('REFUSES TO RUN WITHOUT')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('a config file under')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('DIFFERENT world')
+  })
+
+  // Item 10 rule (b) — a scenario verifies ONLY its claim; scope the invocation.
+  it('GENERATE_SYSTEM_PROMPT rules a scenario verifies ONLY its claim and scopes the invocation', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Verify ONLY the claim — constrain the invocation so nothing else contaminates it')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('contaminate the outcome you assert')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('MINIMAL input')
+    expect(GENERATE_SYSTEM_PROMPT).toContain("the claim's behavior ALONE")
+  })
+
+  // Overfit guard — the two item-10 authoring rules must stay tool-agnostic: no
+  // repo-specific token may leak into a prompt. Validated on the exact rule slice.
+  it('the item-10 authoring rules carry no repo-specific token', () => {
+    const start = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
+    const end = GENERATE_SYSTEM_PROMPT.indexOf("# Example claims — the doc's own block IS the input")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const rules = GENERATE_SYSTEM_PROMPT.slice(start, end)
+    expect(rules).not.toMatch(/dialect|sqlfluff|tab_space_size/i)
   })
 
   // Item 6b — the seeding constraint, LOUD, in the capabilities block.

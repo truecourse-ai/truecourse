@@ -290,7 +290,7 @@ pack; coverage/manifest join unchanged for invariant scenarios; orphaned-pack er
 
 ## 9. Support-claim corpora — "supports X" tested by a generated exemplar pack
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** "Supports the Postgres dialect" quietly promises thousands of inputs;
 docs never enumerate them, so today the claim produces nothing testable. This is the

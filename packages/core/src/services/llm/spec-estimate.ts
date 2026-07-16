@@ -55,11 +55,13 @@ import {
   countExtractViews,
   countUncachedExtractViews,
   resolveGenerateBatch,
+  defaultSupportPackSize,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   TRIAGE_SYSTEM_PROMPT,
+  EXEMPLAR_SYSTEM_PROMPT,
   type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
@@ -97,6 +99,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardAuthor: 'Authoring scenarios',
   guardFidelity: 'Reviewing fidelity',
   guardTriage: 'Triaging findings',
+  guardExemplars: 'Generating exemplars',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -370,6 +373,8 @@ const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
 const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
 const GUARD_FINDING_RATE = 0.15; // rough fraction of authored claims that birth a finding
+const GUARD_SUPPORT_RATE = 0.1; // rough fraction of authored claims that are support claims
+const GUARD_EXEMPLAR_TOKENS_PER = 50; // ~tokens per generated exemplar in the pack output
 const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
 // Grounded authoring injects real empty-sandbox probe transcripts into each batch
 // prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
@@ -392,6 +397,9 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * that authors several scenarios or none. Finding triage (one Opus call per
  * birth/fidelity finding) is likewise not knowable pre-run — the finding count
  * depends on birth outcomes — so it ranges 0..claimsMax with a heuristic point.
+ * Support-claim exemplar generation (item 9, one call per support claim, each writing
+ * a diverse input pack) is the same shape — support claims aren't known pre-run — so
+ * it too ranges 0..claimsMax with a heuristic point.
  *
  * `mode` is the speed/cost dial (item 5): economical batches claims per authoring
  * call (fewer calls), fast authors one claim per call (more calls, each re-paying
@@ -407,6 +415,7 @@ export async function estimateGuardTokens(
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
   const batchSize = resolveGenerateBatch(mode);
+  const supportPackSize = defaultSupportPackSize();
 
   // Extraction: one call per uncached view across the documents with changed
   // sections. The per-view extract cache makes this exact.
@@ -495,6 +504,22 @@ export async function estimateGuardTokens(
         avgOwnChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
       ),
       avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
+    },
+    {
+      // One exemplar-generation call per SUPPORT claim (item 9), each writing a
+      // diverse pack of `supportPackSize` inputs. How many claims are support claims
+      // is unknowable pre-run (extraction hasn't run), so — following the triage
+      // stage's per-claim proxy — this ranges from 0 (no support claims) up to a
+      // ceiling of every planned claim being a support claim (`claimsMax`), with a
+      // heuristic point at GUARD_SUPPORT_RATE of the planned claims. The ceiling drives
+      // the quoted cost. The output is large (the whole pack), input small (a subject).
+      stage: 'guardExemplars',
+      model: resolveModel('guard.exemplars', undefined, repoRoot),
+      calls: Math.round(claimsPoint * GUARD_SUPPORT_RATE),
+      minCalls: 0,
+      maxCalls: claimsMax,
+      avgInputTokens: tokensFromChars(EXEMPLAR_SYSTEM_PROMPT.length, 800),
+      avgOutputTokens: supportPackSize * GUARD_EXEMPLAR_TOKENS_PER,
     },
   ];
 
