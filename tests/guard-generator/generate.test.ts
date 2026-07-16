@@ -111,9 +111,9 @@ describe('generateGuards — extraction honesty + manifest', () => {
     expect(ver.classification).toMatchObject({ driver: 'cli' })
   })
 
-  it('records an api-driver claim as a coverage gap (recorded, not authored)', async () => {
+  it('records an api-driver claim as blocked-on when the recipe has no api block', async () => {
     const r = repo()
-    writeRecipe(r)
+    writeRecipe(r) // cli-only recipe: `entry`, no `api` block
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
@@ -126,11 +126,12 @@ describe('generateGuards — extraction honesty + manifest', () => {
       generateRunner: authorBy({}),
     })
 
+    // The api driver is runnable, but THIS recipe carries no api preparation —
+    // the claim is an honest blocked-on gap, never authored to die at birth.
     expect(res.written).toEqual([])
     const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    // Un-conflated: a non-runnable driver is one `awaiting-driver` kind + the driver.
-    expect(gap.kind).toBe('awaiting-driver')
-    expect(gap.driver).toBe('api')
+    expect(gap.kind).toBe('blocked-on')
+    expect(gap.reason).toContain('a recipe `api` block')
     // Settled with an api classification — a visible, recorded gap.
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.classification).toMatchObject({ driver: 'api' })
   })

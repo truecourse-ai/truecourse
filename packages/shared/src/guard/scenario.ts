@@ -5,8 +5,10 @@
  *
  * The envelope (`guard`, `id`, `title`, `binds`, `driver`, `setup`, `steps`,
  * `normalize`) is frozen across drivers; only the per-driver verb sub-schema
- * (keyed by `driver`) grows. v1 ships the `cli` driver: a `run` argv appended to
- * the recipe entrypoint, with `expect` matchers on exit code, streams, and files.
+ * (keyed by `driver`) grows. The `cli` driver runs a `run` argv appended to the
+ * recipe entrypoint, with `expect` matchers on exit code, streams, and files.
+ * The `api` driver boots the recipe's HTTP server and drives it with `request`
+ * steps, with `expect` matchers on status, headers, body text, and JSON paths.
  */
 
 import { z } from 'zod'
@@ -58,7 +60,7 @@ export const GuardExpectSchema = z
   })
   .strict()
 
-// --- Steps ----------------------------------------------------------
+// --- Steps (cli driver) ----------------------------------------------
 
 export const GuardStepSchema = z
   .object({
@@ -68,6 +70,94 @@ export const GuardStepSchema = z
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardExpectSchema,
+  })
+  .strict()
+
+// --- Steps (api driver) ----------------------------------------------
+
+/** The closed HTTP method set an api step may use. */
+export const GUARD_HTTP_METHODS = [
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+] as const
+
+/**
+ * One HTTP request against the recipe's booted server. `path` (and header/body
+ * string values) may reference earlier `capture`s as `${name}`; the engine
+ * interpolates before sending. Exactly one body form: `body` (raw text, sent
+ * as-is) or `json` (a JSON value, serialized with `content-type: application/json`).
+ */
+export const GuardHttpRequestSchema = z
+  .object({
+    method: z.enum(GUARD_HTTP_METHODS),
+    /** Request path incl. query, e.g. `/todos/${id}?full=1`. Must start with `/`. */
+    path: z.string().regex(/^\//, 'path must start with /'),
+    headers: z.record(z.string(), z.string()).optional(),
+    /** Raw request body, sent byte-for-byte. */
+    body: z.string().optional(),
+    /** JSON request body; serialized and sent with `content-type: application/json`. */
+    json: z.unknown().optional(),
+  })
+  .strict()
+  .refine((r) => r.body === undefined || r.json === undefined, {
+    message: 'a request carries `body` or `json`, not both',
+  })
+
+/**
+ * Matcher on the value at one JSON path of the response body. `equals` compares
+ * the JSON value (scalars compared strictly; objects/arrays structurally);
+ * `contains`/`matches` compare against the value's string form.
+ */
+export const GuardJsonMatcherSchema = z
+  .object({
+    equals: z.unknown().optional(),
+    contains: z.string().optional(),
+    /** Regex source; matched with `RegExp(pattern).test(String(value))`. */
+    matches: z.string().optional(),
+    exists: z.boolean().optional(),
+    absent: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (m) =>
+      m.equals !== undefined ||
+      m.contains !== undefined ||
+      m.matches !== undefined ||
+      m.exists !== undefined ||
+      m.absent !== undefined,
+    { message: 'json matcher needs one of equals | contains | matches | exists | absent' },
+  )
+
+export const GuardApiExpectSchema = z
+  .object({
+    /** Exact HTTP status code. */
+    status: z.number().int().optional(),
+    /** Header name (case-insensitive) → matcher on its value. */
+    headers: z.record(z.string(), GuardStreamMatcherSchema).optional(),
+    /** Matcher on the raw response body text, compared post-normalization. */
+    body: GuardStreamMatcherSchema.optional(),
+    /** JSON path (`a.b[0].c`, `""` for the root) → matcher on the value there. */
+    json: z.record(z.string(), GuardJsonMatcherSchema).optional(),
+  })
+  .strict()
+
+export const GuardApiStepSchema = z
+  .object({
+    request: GuardHttpRequestSchema,
+    /**
+     * Variable name → JSON path into THIS step's response body. Captured values
+     * are available to later steps as `${name}` in path/header/body strings.
+     * A path that resolves to nothing fails the step.
+     */
+    capture: z.record(z.string(), z.string()).optional(),
+    /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
+    repeat: z.number().int().positive().optional(),
+    expect: GuardApiExpectSchema,
   })
   .strict()
 
@@ -145,27 +235,53 @@ export const GuardBindsSchema = z
 
 // --- The scenario ---------------------------------------------------
 
-export const GuardScenarioSchema = z
+/** The driver-independent envelope fields (frozen across drivers). */
+const envelope = {
+  guard: z.literal(GUARD_FORMAT_VERSION),
+  id: z.string().min(1),
+  /** Restates the section's claim in one line. */
+  title: z.string().min(1),
+  binds: GuardBindsSchema,
+  setup: GuardSetupSchema.optional(),
+  normalize: z.array(GuardNormalizerSchema).default([]),
+}
+
+export const GuardCliScenarioSchema = z
   .object({
-    guard: z.literal(GUARD_FORMAT_VERSION),
-    id: z.string().min(1),
-    /** Restates the section's claim in one line. */
-    title: z.string().min(1),
-    binds: GuardBindsSchema,
+    ...envelope,
     driver: z.literal('cli'),
-    setup: GuardSetupSchema.optional(),
     steps: z.array(GuardStepSchema).min(1),
-    normalize: z.array(GuardNormalizerSchema).default([]),
   })
   .strict()
+
+export const GuardApiScenarioSchema = z
+  .object({
+    ...envelope,
+    driver: z.literal('api'),
+    steps: z.array(GuardApiStepSchema).min(1),
+  })
+  .strict()
+
+/** A committed scenario — the per-driver variants, keyed by `driver`. */
+export const GuardScenarioSchema = z.discriminatedUnion('driver', [
+  GuardCliScenarioSchema,
+  GuardApiScenarioSchema,
+])
 
 export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
 export type GuardExpect = z.infer<typeof GuardExpectSchema>
 export type GuardStep = z.infer<typeof GuardStepSchema>
+export type GuardHttpMethod = (typeof GUARD_HTTP_METHODS)[number]
+export type GuardHttpRequest = z.infer<typeof GuardHttpRequestSchema>
+export type GuardJsonMatcher = z.infer<typeof GuardJsonMatcherSchema>
+export type GuardApiExpect = z.infer<typeof GuardApiExpectSchema>
+export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
+export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
+export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>

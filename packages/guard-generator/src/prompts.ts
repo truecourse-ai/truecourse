@@ -25,16 +25,19 @@ import {
   CLAIM_DRIVERS,
   DocExtractionSchema,
   RecipeProposalSchema,
-  RawGeneratedScenarioSchema,
+  RawGeneratedCliScenarioSchema,
+  RawGeneratedApiScenarioSchema,
   FidelityReviewSchema,
 } from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
 
-/** The authored-scenario JSON Schema — the behavioral fields only, rendered from
- *  the SAME Zod schema the engine parses replies with (`.strip()` renders it
- *  without the parse-side unknown-key tolerance, so the hint stays closed). */
-const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedScenarioSchema.strip())
+/** The authored-scenario JSON Schemas — the behavioral fields only, rendered from
+ *  the SAME Zod schemas the engine parses replies with (`.strip()` renders them
+ *  without the parse-side unknown-key tolerance, so the hints stay closed). One
+ *  per runnable driver: each authoring prompt embeds its own. */
+const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
+const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.strip())
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
@@ -101,9 +104,10 @@ This is the most important rule after faithfulness:
 # Drivers — which kind of test could assert the claim
 - cli — a command-line program's behavior when invoked with arguments (and
   optional stdin): its exit code, what it writes to stdout/stderr, or the files it
-  creates or changes. This is the ONLY driver a test is authored for today; still
-  extract api/web/tui/library claims so the coverage picture stays honest.
+  creates or changes.
 - api — an HTTP/RPC service's response, or the datastore state a request leaves.
+  cli and api are the drivers tests are authored for today; still extract
+  web/tui/library claims so the coverage picture stays honest.
 - web — a browser UI (navigation, clicks, visible content).
 - tui — an interactive terminal UI (keystrokes, on-screen contents).
 - library — the package's programmatic API, consumed by IMPORTING it from user
@@ -320,6 +324,102 @@ every \`ref\` you were given exactly once. No prose — only the JSON array.`
 
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
+// ---------------------------------------------------------------------------
+// Scenario authoring — api driver
+// ---------------------------------------------------------------------------
+
+export const GENERATE_API_SYSTEM_PROMPT = `\
+You author guard SCENARIOS — declarative, executable tests that bind a spec CLAIM
+to an HTTP service's observable behavior. You are given one document's context and
+a BATCH of claims drawn from it (each already judged API-testable), with how the
+service is built and served. For EACH claim you return the scenarios that assert
+it. No prose, only JSON.
+
+# No tools, no repository access
+You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
+invalid output — your response can ONLY be the JSON array described below. You never
+need to inspect code: author requests from what the CLAIM and its section state, and
+when a scenario fails birth validation the retry supplies the service's ACTUAL
+response body — use it to fix PATHS, METHODS, and REQUEST BODIES, never to decide
+WHAT to assert (see the next rule).
+
+# Assertions come from the claim, never the observed response
+Every ASSERTION must state what the CLAIM — read against its section's text — says:
+the exact status code it names, the exact field values or messages it quotes,
+adapting only placeholders to the concrete values your scenario creates. If the
+service demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the
+CLAIM'S version. The scenario then fails birth — and that is the CORRECT, desired
+outcome: the doc-vs-code disagreement surfaces as a finding. Never weaken,
+generalize, or swap a claimed assertion for a softer, effect-only check (asserting
+"some 2xx" where the claim says 201, or that a list changed where the claim quotes
+an error message) to make a scenario pass — a green test that proves less than the
+claim is the worst outcome.
+
+# Faithfulness — the prime directive
+Assert only what the claim, read against its section's text, states. A scenario
+must never claim more than the prose does. If, on reflection, a claim states
+nothing an HTTP exchange can actually observe, return an empty scenarios array for
+it rather than inventing behavior.
+
+# How a scenario runs
+The service is built once from the recipe, then booted FRESH for each scenario in
+an empty sandbox working directory (its state files land there, so every scenario
+starts from the service's empty/initial state) on a runner-chosen port. Each step
+sends ONE HTTP request to that server:
+- \`request\`: \`method\` + \`path\` (starts with \`/\`, may carry a query string),
+  optional \`headers\`, and at most one body — \`body\` (raw text) or \`json\` (a JSON
+  value, sent as \`application/json\`).
+- \`capture\`: variable name → a dotted path into THIS step's JSON response body
+  (\`id\`, \`items[0].id\`; \`""\` is the whole body). Captured values are available to
+  LATER steps as \`\${name}\` inside path, header values, and body strings — this is
+  how you chain create-then-fetch flows without guessing ids.
+- \`expect\` asserts on \`status\` (exact code), \`headers\` (name → one of
+  equals | contains | matches), \`body\` (the raw text, same matchers, compared
+  AFTER normalization), and \`json\` (dotted path → equals — a JSON value compared
+  structurally — | contains | matches | exists | absent).
+- \`repeat\` runs the step N times (each iteration must satisfy \`expect\`).
+Seed inputs declaratively with \`setup.files\` (path → content, materialized in the
+sandbox cwd the service starts in) and \`setup.env\` (extra env for the service
+process); there is no shell escape.
+
+# World-state capabilities
+\`setup\` declares the WORLD a test needs — never code, never shell. The recipe's
+own \`api\` block already brings up the service (and its declared datastores);
+scenarios never manage processes. The sandbox is otherwise bare: no network egress
+beyond the service under test, no credentials, no external systems. When a claim
+needs world-state neither \`setup\` nor the recipe provides — a third-party SaaS, a
+credentialed integration, another live service — author NOTHING for it: return an
+empty \`scenarios\` array AND name the missing capability in \`blockedOn\`. An honest
+blocked claim is right; a scenario that fakes the missing world is wrong.
+
+# The scenario schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition — match it exactly.
+It contains ONLY the fields you author (\`driver\` is always "api"); the engine
+assigns each scenario's id and section binding itself, so do not emit any field
+that is not in the schema.
+${API_SCENARIO_JSON_SCHEMA}
+
+# Determinism
+No timing assumptions, no retries, no assertions on values the service generates
+non-deterministically (timestamps, uuids) unless you \`capture\` them first or list
+the matching \`normalize\` entry (timestamps | abs-paths | versions | durations).
+Ids your scenario itself creates against the empty initial state ARE deterministic
+(the first created resource's id is stable) — but prefer \`capture\` + \`\${var}\`
+chaining over hard-coding them. Prefer \`contains\`/\`matches\` on the meaningful
+substring over \`equals\` on a whole body that carries volatile fields, and prefer
+\`json\` path matchers over whole-body \`equals\`.
+
+# Output — one entry per input claim, echoing its ref
+Return a JSON ARRAY with EXACTLY ONE object per claim in the batch, in any order:
+  [ { "ref": "<the claim's ref, copied verbatim>", "scenarios": [ <scenario>, … ], "blockedOn": ["<capability, e.g. external-service|credentials>"] } ]
+Author one or more scenarios per claim (one per distinct way to assert it), or an
+empty \`scenarios\` array if the claim is not HTTP-assertable after all. Set
+\`blockedOn\` ONLY on an empty-scenarios claim that needs world-state the sandbox
+can't provide, naming what's missing (free-form nouns); omit it otherwise. Include
+every \`ref\` you were given exactly once. No prose — only the JSON array.`
+
+export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
+
 /**
  * A birth-validation failure attached to a claim on a retry so the model can fix
  * it. Extends the shared excerpt pair: the failing run's RAW program output is the
@@ -382,14 +482,22 @@ export interface AuthorUserContext {
   docContext: string
   /** Canonical area ids the doc covers, from the corpus (may be empty). */
   areaTags: string[]
-  /** The recipe entrypoint argv, so the model knows what `run` is appended to. */
-  recipeEntry: string[]
+  /** The driver this batch authors for — selects the system prompt + the
+   *  preparation framing below. Every claim in a batch shares one driver. */
+  driver: 'cli' | 'api'
+  /** cli batches: the recipe entrypoint argv, so the model knows what `run` is
+   *  appended to. Absent on api batches. */
+  recipeEntry?: string[]
+  /** api batches: the recipe's serve argv (the runner boots it per scenario). */
+  recipeServe?: string[]
+  /** api batches: the health endpoint the runner polls before any step runs. */
+  recipeHealthPath?: string
   /** Recipe build command — context on what is built before scenarios run. */
   recipeBuild: string
   /** The claims to author this call. */
   claims: AuthorClaim[]
-  /** Real empty-sandbox transcripts for the commands the claims name (may be empty
-   *  — ungrounded when the build failed or no command was named). */
+  /** Real empty-sandbox transcripts for the commands the claims name (cli batches
+   *  only; may be empty — ungrounded when the build failed or no command was named). */
   probes?: ProbeTranscript[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
@@ -404,10 +512,17 @@ function indentBlock(text: string): string {
 }
 
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
-  const lines: string[] = [
-    `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
-    `Build command: ${ctx.recipeBuild}`,
-  ]
+  const lines: string[] =
+    ctx.driver === 'api'
+      ? [
+          `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
+          `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
+          `Build command: ${ctx.recipeBuild}`,
+        ]
+      : [
+          `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
+          `Build command: ${ctx.recipeBuild}`,
+        ]
   if (ctx.areaTags.length > 0) lines.push(`Area context: ${ctx.areaTags.join(', ')}`)
   lines.push(
     '',
@@ -449,7 +564,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         "something other than what the claim quotes), KEEP the claim's assertion — the",
         'retry then fails again and the claim correctly becomes a finding. Do NOT change a',
         'claimed assertion to match the code. Return an empty scenarios array only if the',
-        'claim is genuinely not CLI-observable:',
+        `claim is genuinely not ${ctx.driver === 'api' ? 'HTTP' : 'CLI'}-observable:`,
         `  scenario: ${c.retry.scenarioTitle}`,
         `  failing step: ${c.retry.step}`,
         `  expected: ${c.retry.expected}`,
@@ -467,9 +582,9 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'CORRECTION — your previous response was NOT a valid output array. You returned:',
       ctx.correction.invalidOutput,
       'Return a JSON ARRAY with exactly one { "ref", "scenarios" } object per claim ref',
-      'above; each scenario matches the schema (title, driver "cli", non-empty steps,',
+      `above; each scenario matches the schema (title, driver "${ctx.driver}", non-empty steps,`,
       'optional setup/normalize). Use an empty scenarios array for a claim that is not',
-      'CLI-assertable — and add "blockedOn": ["<capability>"] when it is empty because',
+      `${ctx.driver === 'api' ? 'HTTP' : 'CLI'}-assertable — and add "blockedOn": ["<capability>"] when it is empty because`,
       'the claim needs world-state the sandbox cannot provide. No prose — only the JSON array.',
     )
   }

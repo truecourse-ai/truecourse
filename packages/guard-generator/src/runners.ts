@@ -17,6 +17,7 @@ import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
   GENERATE_SYSTEM_PROMPT,
+  GENERATE_API_SYSTEM_PROMPT,
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
@@ -73,7 +74,8 @@ export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string }
       stage,
       model: isRetry ? (opts.retryModel ?? opts.model) : opts.model,
       fallbackModel: opts.fallbackModel,
-      system: GENERATE_SYSTEM_PROMPT,
+      // One authoring runner, one system prompt PER DRIVER — a batch never mixes.
+      system: ctx.driver === 'api' ? GENERATE_API_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT,
       user: buildAuthorUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,

@@ -7,7 +7,7 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardScenario, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
+import type { GuardCliScenario, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { executeStep, type StepCapture } from './executor.js'
@@ -86,7 +86,7 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
 }
 
 export async function runScenario(
-  scenario: GuardScenario,
+  scenario: GuardCliScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()

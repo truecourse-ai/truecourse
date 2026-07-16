@@ -55,10 +55,18 @@ export function GuardRecipeCard({ recipe }: { recipe: GuardRecipeCardData }) {
           <div className={LABEL}>Build</div>
           <code className={`${CODE} mt-1 block`}>{recipe.build}</code>
         </div>
-        <div>
-          <div className={LABEL}>Entry</div>
-          <code className={`${CODE} mt-1 block`}>{recipe.entry.join(' ')}</code>
-        </div>
+        {recipe.entry && (
+          <div>
+            <div className={LABEL}>Entry</div>
+            <code className={`${CODE} mt-1 block`}>{recipe.entry.join(' ')}</code>
+          </div>
+        )}
+        {recipe.serve && (
+          <div>
+            <div className={LABEL}>Serve</div>
+            <code className={`${CODE} mt-1 block`}>{recipe.serve.join(' ')}</code>
+          </div>
+        )}
       </div>
 
       {envEntries.length > 0 && (

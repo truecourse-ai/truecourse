@@ -287,11 +287,13 @@ export const GuardOrphanedSectionSchema = z
   .strict()
 export type GuardOrphanedSection = z.infer<typeof GuardOrphanedSectionSchema>
 
-/** The recipe outcome for the run — loaded as-is or freshly discovered. */
+/** The recipe outcome for the run — loaded as-is or freshly discovered. `entry`
+ *  is the cli preparation (absent on an api-only recipe); `serve` the api one. */
 export const GuardRecipeReportSchema = z
   .object({
     status: z.enum(['exists', 'discovered']),
-    entry: z.array(z.string()),
+    entry: z.array(z.string()).optional(),
+    serve: z.array(z.string()).optional(),
     wrotePath: z.string().optional(),
   })
   .strict()

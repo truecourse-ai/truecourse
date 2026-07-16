@@ -90,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: the library-driver classification (programmatic import-by-name
-    // claims are recorded, not authored) moved this from 2f26bbf187a8a087 (item-23's
-    // llm-provider rule). It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('55c0ace88c3f3a5a')
+    // Pinned literal: the api driver becoming authorable moved this from
+    // 55c0ace88c3f3a5a (the library-driver classification). It must not move
+    // again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('40e35f8ec26c72cb')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -113,7 +113,8 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('IMPORTING it from user')
     // The deciding line is how the docs consume it, not which feature it is.
     expect(EXTRACT_SYSTEM_PROMPT).toContain('documented consumption form')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('extract api/web/tui/library claims')
+    // api became authorable; only web/tui/library stay recorded-only.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('web/tui/library claims')
   })
 
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).

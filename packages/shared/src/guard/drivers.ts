@@ -7,10 +7,10 @@
  * never fine-tune to the current case).
  *
  * A driver is `runnable` when its scenarios can be authored AND executed today
- * (the `cli` driver). A non-runnable driver is RECORDED for coverage honesty — its
+ * (the `cli` and `api` drivers). A non-runnable driver is RECORDED for coverage honesty — its
  * sections are classified and surface as "awaiting-driver" gaps — but no scenario
  * is authored or run until the driver ships. `waitingLabel` is the UI copy for
- * that awaiting state ("Needs API driver").
+ * that awaiting state ("Needs web driver").
  *
  * ── The driver contract (how api/web/tui/… land additively) ──────────────────
  * When driver #2 ships it contributes exactly three NEW things, each keyed off its
@@ -41,7 +41,7 @@ export interface GuardDriverDef {
 }
 
 /**
- * The drivers, in canonical order. `cli` is the only runnable driver today; the
+ * The drivers, in canonical order. `cli` and `api` are runnable today; the
  * rest are recorded for coverage honesty. ADD A ROW to introduce a driver — every
  * derived array, schema, status, and label below picks it up automatically.
  *
@@ -52,7 +52,7 @@ export interface GuardDriverDef {
  */
 export const GUARD_DRIVERS = [
   { id: 'cli', label: 'CLI', runnable: true },
-  { id: 'api', label: 'API', runnable: false, waitingLabel: 'Needs API driver' },
+  { id: 'api', label: 'API', runnable: true },
   { id: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver' },
   { id: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver' },
   { id: 'library', label: 'Library', runnable: false, waitingLabel: 'Needs library driver' },
@@ -67,12 +67,12 @@ export type GuardAwaitingDriverId = Extract<(typeof GUARD_DRIVERS)[number], { ru
 /** All driver ids as a non-empty tuple — the source for `z.enum` (which needs one). */
 export const guardDriverIds = GUARD_DRIVERS.map((d) => d.id) as [GuardDriverId, ...GuardDriverId[]]
 
-/** Ids of drivers that can be authored + run today (`['cli']`). */
+/** Ids of drivers that can be authored + run today (`['cli', 'api']`). */
 export const runnableDriverIds: readonly GuardDriverId[] = GUARD_DRIVERS.filter((d) => d.runnable).map(
   (d) => d.id,
 )
 
-/** Ids of drivers recorded-only until they ship (`['api', 'web', 'tui', 'library']`). */
+/** Ids of drivers recorded-only until they ship (`['web', 'tui', 'library']`). */
 export const awaitingDriverIds: readonly GuardAwaitingDriverId[] = GUARD_DRIVERS.filter(
   (d) => !d.runnable,
 ).map((d) => d.id as GuardAwaitingDriverId)

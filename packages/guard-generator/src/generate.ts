@@ -8,15 +8,16 @@
  *   2. index    deterministic doc universe + section index + change detection.
  *   3. extract  one cached call per work document → claims + untestable notes,
  *               anchors snapped to the live index; per-section coverage derived.
- *   4. author   the cli claims from changed sections, in batches carrying the
- *               whole-document context (cached per claim) → scenario arrays.
+ *   4. author   the runnable-driver claims (cli, api) from changed sections, in
+ *               per-driver batches carrying the whole-document context (cached
+ *               per claim) → scenario arrays.
  *   5. birth    run every candidate once; retry a failing CLAIM ONCE with its
  *               evidence; still-failing candidates are birth findings, never kept.
  *   6. manifest rewrite the binding record with the settled outcomes.
  *
- * Unchanged sections are skipped entirely; awaiting-driver (api/web/tui/library),
- * untestable, and no-claim sections land in the result + manifest as visible
- * coverage gaps.
+ * Unchanged sections are skipped entirely; awaiting-driver (web/tui/library),
+ * untestable, no-claim, and prep-missing (a runnable claim whose driver has no
+ * recipe preparation) sections land in the result + manifest as visible coverage gaps.
  */
 
 import { createHash } from 'node:crypto'
@@ -47,6 +48,7 @@ import {
   composeBlockedOnReason,
   dismissedClaimKey,
   isRunnableDriver,
+  runnableDriverIds,
   type GuardBirthFinding,
   type OutputExcerpts,
   type GuardCoverageGap,
@@ -67,6 +69,7 @@ import {
 } from './section-plan.js'
 import {
   GENERATE_PROMPT_FINGERPRINT,
+  GENERATE_API_PROMPT_FINGERPRINT,
   FIDELITY_PROMPT_FINGERPRINT,
   buildAuthorDocContext,
   type AuthorClaim,
@@ -158,7 +161,8 @@ export interface GuardGenerateResult {
   status: 'no-docs' | 'recipe-failed' | 'ok'
   /** For `no-docs` / `recipe-failed`: the user-facing reason. */
   reason?: string
-  recipe?: { status: 'exists' | 'discovered'; entry: string[]; wrotePath?: string }
+  /** `entry` is the cli preparation (absent on an api-only recipe); `serve` the api one. */
+  recipe?: { status: 'exists' | 'discovered'; entry?: string[]; serve?: string[]; wrotePath?: string }
   sectionsTotal: number
   sectionsChanged: number
   skippedUnchanged: number
@@ -275,13 +279,19 @@ export function defaultGenerateBatch(): number {
   return 4
 }
 
+/** The authoring system-prompt fingerprint for a claim's driver — each driver has
+ *  its own prompt, so a claim's cache entry moves only when ITS prompt changes. */
+function authorPromptFingerprint(driver: ExtractedClaim['driver']): string {
+  return driver === 'api' ? GENERATE_API_PROMPT_FINGERPRINT : GENERATE_PROMPT_FINGERPRINT
+}
+
 /** Per-claim authoring cache key: it moves when the claim, its section, the
- *  recipe, the format, or the authoring prompt changes. */
+ *  recipe, the format, or the claim's driver-specific authoring prompt changes. */
 function authorCacheKey(claim: ExtractedClaim, section: SectionInput, recipeFingerprint: string): string {
   return createHash('sha256')
     .update(
       [
-        GENERATE_PROMPT_FINGERPRINT,
+        authorPromptFingerprint(claim.driver),
         recipeFingerprint,
         String(GUARD_FORMAT_VERSION),
         section.fingerprint,
@@ -320,7 +330,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeFingerprint = recipeResult.fingerprint
   const recipeMeta = {
     status: recipeResult.status,
-    entry: recipe.entry,
+    ...(recipe.entry ? { entry: recipe.entry } : {}),
+    ...(recipe.api ? { serve: recipe.api.serve } : {}),
     ...(recipeResult.status === 'discovered' ? { wrotePath: recipeResult.wrotePath } : {}),
   }
 
@@ -455,18 +466,32 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const s of doc.sections) {
       if (!workKeys.has(key(s))) continue
       const claims = claimsByAnchor.get(s.anchor) ?? []
-      const cliAll = claims.filter((c) => isRunnableDriver(c.driver))
+      const runnableAll = claims.filter((c) => isRunnableDriver(c.driver))
       const others = claims.filter((c) => !isRunnableDriver(c.driver))
       const note = noteByAnchor.get(s.anchor)
 
-      // A dismissed cli claim is not authored, not birthed, never a finding: record
+      // A dismissed claim is not authored, not birthed, never a finding: record
       // it as an explicit `dismissed` gap and drop it from the authoring set. Its
       // section can then settle on its remaining (live) claims alone.
-      const cli = cliAll.filter((c) => !dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
-      const dismissed = cliAll.filter((c) => dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
+      const live = runnableAll.filter((c) => !dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
+      const dismissed = runnableAll.filter((c) => dismissalByKey.has(dismissedClaimKey(s.doc, s.anchor, c.claim)))
       for (const d of dismissed) {
         const entry = dismissalByKey.get(dismissedClaimKey(s.doc, s.anchor, d.claim))
         coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'dismissed', reason: dismissedReason(d.claim, entry?.note) })
+      }
+
+      // A runnable claim whose driver has no recipe preparation (a cli claim with
+      // no `entry`, an api claim with no `api` block) is an honest blocked-on gap —
+      // never authored to die at birth, never silently dropped.
+      const prepared = live.filter((c) => driverPrepared(recipe, c.driver))
+      const unprepared = live.filter((c) => !driverPrepared(recipe, c.driver))
+      for (const u of unprepared) {
+        coverageGaps.push({
+          doc: s.doc,
+          anchor: s.anchor,
+          kind: 'blocked-on',
+          reason: composeBlockedOnReason([missingPrepNoun(u.driver)], oneLine(u.claim)),
+        })
       }
 
       // Every non-runnable-driver claim is a recorded coverage gap (its driver isn't
@@ -474,8 +499,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       for (const o of others) {
         coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: o.driver, reason: o.reason })
       }
-      if (cli.length === 0 && others.length === 0) {
-        // A section whose only cli claims were all dismissed settles on those
+      if (live.length === 0 && others.length === 0) {
+        // A section whose only runnable claims were all dismissed settles on those
         // `dismissed` gaps alone — never re-classified as no-claim/untestable.
         if (dismissed.length === 0) {
           // No claim and no note. In a COMPLETE doc that's an honest gap; in an
@@ -488,12 +513,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             doc: s.doc,
             anchor: s.anchor,
             kind: note ? 'untestable' : 'no-claim',
-            reason: note?.reason ?? 'the section states no CLI-assertable claim',
+            reason: note?.reason ?? 'the section states no claim a runnable driver can assert',
           })
         }
       }
-      classificationByKey.set(key(s), deriveClassification(cli, others, note))
-      for (const c of cli) authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c })
+      classificationByKey.set(key(s), deriveClassification(live, others, note))
+      for (const c of prepared) authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c })
     }
   }
 
@@ -544,6 +569,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let groundPlanned = 0
   let groundCaptured = 0
   const groundClaims = async (claimTexts: string[]): Promise<ProbeTranscript[]> => {
+    // Probes are a cli-driver affair (they invoke the entry) — an api-only recipe
+    // has nothing to probe; api batches never call this.
+    if (!recipe.entry) return []
     const build = await buildPromise
     if (!build.ok) return []
     resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
@@ -572,6 +600,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let entryPreflightMemo: Promise<EntryPreflightResult | null> | null = null
   const preflightEntryOnce = (): Promise<EntryPreflightResult | null> => {
     entryPreflightMemo ??= (async () => {
+      // No entry ⇒ nothing to preflight (an api-only recipe); the api server gets
+      // its own loud preflight inside the runner, per birth round.
+      if (!recipe.entry) return null
       const build = await buildPromise
       if (!build.ok) return null
       resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
@@ -747,10 +778,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       if (!build.ok) {
         const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
         for (const c of round1) localErrors.push(errorFrom({ candidate: c, result: { failure: { actual: message } } }))
-      } else if (await deadEntry()) {
+      } else if (round1.some((c) => c.scenario.driver === 'cli') && (await deadEntry())) {
         // The built entry can't start — birthing anything against it would produce N
         // indistinguishable failures. Leave THIS section unsettled (run-end cleanup
         // drops it for a re-attempt) and return; the ONE loud error was recorded once.
+        // (Api-only sections skip this — the api server has its own preflight inside
+        // the runner, which surfaces through birth as an entry-preflight failure.)
         return
       } else {
         birthTotal += round1.length
@@ -913,15 +946,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  const missByDoc = new Map<string, AuthTask[]>()
-  for (const t of missTasks) pushInto(missByDoc, t.section.doc, t)
+  // Batches never mix drivers — each driver has its own system prompt + schema.
+  const missByDocDriver = new Map<string, AuthTask[]>()
+  for (const t of missTasks) pushInto(missByDocDriver, `${t.section.doc}\0${t.claim.driver}`, t)
 
   const authoring = Promise.all(
-    [...missByDoc].flatMap(([docPath, tasks]) => {
+    [...missByDocDriver].flatMap(([docDriver, tasks]) => {
+      const docPath = docDriver.slice(0, docDriver.indexOf('\0'))
       const gd = workDocByPath.get(docPath)!
       return chunk(tasks, batchSize).map((batch) =>
         limit(async () => {
-          const probes = await groundClaims(batch.map((t) => t.claim.claim))
+          // Probes ground CLI commands against the built entry — api batches are
+          // authored ungrounded (birth evidence supplies the real responses).
+          const probes =
+            batch[0].claim.driver === 'cli' ? await groundClaims(batch.map((t) => t.claim.claim)) : []
           const attempt = await callAuthorWithReask(buildAuthorCtx(gd, batch, recipe, probes), generateRunner)
           if ('error' in attempt) {
             for (const t of batch) {
@@ -1023,16 +1061,25 @@ function groupExtraction(data: DocClaims): {
 }
 
 /**
- * The per-section manifest classification summary, derived from extraction: cli
- * when any claim is CLI-testable, else the first other driver, else untestable.
+ * The per-section manifest classification summary, derived from extraction: the
+ * first runnable driver (registry order) with a claim, else the first other
+ * driver, else untestable.
  */
 function deriveClassification(
-  cli: ExtractedClaim[],
+  runnable: ExtractedClaim[],
   others: ExtractedClaim[],
   note: UntestableNote | undefined,
 ): TestabilityVerdict {
-  if (cli.length > 0) {
-    return { driver: 'cli', reason: cli.length === 1 ? cli[0].reason : `${cli.length} CLI claims; e.g. ${oneLine(cli[0].reason)}` }
+  for (const id of runnableDriverIds) {
+    const mine = runnable.filter((c) => c.driver === id)
+    if (mine.length === 0) continue
+    return {
+      driver: id,
+      reason:
+        mine.length === 1
+          ? mine[0].reason
+          : `${mine.length} ${id.toUpperCase()} claims; e.g. ${oneLine(mine[0].reason)}`,
+    }
   }
   if (others.length > 0) return { driver: others[0].driver, reason: others[0].reason }
   if (note) return { untestable: true, reason: note.reason }
@@ -1072,23 +1119,49 @@ function pushInto<T>(map: Map<string, T[]>, k: string, value: T): void {
 
 // --- Authoring context + caching -------------------------------------------
 
-/** Author context for a batch of AuthTasks (round 1). */
+/** Author context for a batch of AuthTasks (round 1). A batch is single-driver. */
 function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
   const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section }))
-  return buildAuthorCtxFor(gd, claims, recipe, probes)
+  return buildAuthorCtxFor(gd, claims, authorDriver(batch[0].claim), recipe, probes)
+}
+
+/** The driver a claim's authoring batch runs under (only runnable drivers author). */
+function authorDriver(claim: ExtractedClaim): 'cli' | 'api' {
+  return claim.driver === 'api' ? 'api' : 'cli'
 }
 
 /** Author context for explicit AuthorClaims (round 2 carries retry evidence). */
-function buildAuthorCtxFor(gd: GuardDoc, claims: AuthorClaim[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
+function buildAuthorCtxFor(
+  gd: GuardDoc,
+  claims: AuthorClaim[],
+  driver: 'cli' | 'api',
+  recipe: Recipe,
+  probes: ProbeTranscript[],
+): AuthorUserContext {
   return {
     doc: gd.doc,
     docContext: buildAuthorDocContext(gd, claims.map((c) => c.section.anchor)),
     areaTags: gd.sections[0]?.areaTags ?? [],
-    recipeEntry: recipe.entry,
+    driver,
+    ...(driver === 'api'
+      ? { recipeServe: recipe.api?.serve, recipeHealthPath: recipe.api?.healthPath }
+      : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
     claims,
     probes,
   }
+}
+
+/** True when the recipe carries a driver's preparation layer. */
+function driverPrepared(recipe: Recipe, driver: ExtractedClaim['driver']): boolean {
+  if (driver === 'cli') return recipe.entry !== undefined
+  if (driver === 'api') return recipe.api !== undefined
+  return false
+}
+
+/** The capability noun a prep-missing blocked-on gap names. */
+function missingPrepNoun(driver: ExtractedClaim['driver']): string {
+  return driver === 'api' ? 'a recipe `api` block' : 'a recipe `entry`'
 }
 
 type AuthorAttempt = { authored: AuthoredClaim[] } | { error: string }
@@ -1375,8 +1448,9 @@ async function authorRetry(
   const cached = await readRetryCache(repoRoot, entry.task.claim, section, recipeFingerprint, entry.evidence)
   if (cached) return cached.scenarios
 
-  // Same transcripts as round 1 (cached by argv) — derived from this claim only.
-  const probes = await ground([entry.task.claim.claim])
+  // Same transcripts as round 1 (cached by argv), cli claims only — api retries
+  // carry the failing run's response body as their evidence instead.
+  const probes = entry.task.claim.driver === 'cli' ? await ground([entry.task.claim.claim]) : []
   const claim: AuthorClaim = {
     ref: entry.task.ref,
     claim: entry.task.claim.claim,
@@ -1390,7 +1464,10 @@ async function authorRetry(
       ...excerptsOf(entry.evidence),
     },
   }
-  const attempt = await callAuthorWithReask(buildAuthorCtxFor(gd, [claim], recipe, probes), runner)
+  const attempt = await callAuthorWithReask(
+    buildAuthorCtxFor(gd, [claim], authorDriver(entry.task.claim), recipe, probes),
+    runner,
+  )
   if ('error' in attempt) {
     errors.push({ doc: section.doc, anchor: section.anchor, message: `retry authoring ${attempt.error}` })
     return []
@@ -1427,7 +1504,7 @@ export function retryCacheKey(
   return createHash('sha256')
     .update(
       [
-        GENERATE_PROMPT_FINGERPRINT,
+        authorPromptFingerprint(claim.driver),
         recipeFingerprint,
         String(GUARD_FORMAT_VERSION),
         section.fingerprint,

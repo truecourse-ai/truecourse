@@ -46,7 +46,7 @@ const MD = [
   '## Blocked bit',
   'Needs a database.',
   '',
-  '## Api bit',
+  '## Web bit',
   'HTTP boundary.',
   '',
   '## Untestable bit',
@@ -99,7 +99,7 @@ const SECTIONS: GuardSectionCoverage[] = [
   sec('Stale bit', 2, 'stale', { scenarioIds: ['s3'], scenarios: [{ id: 's3', title: 'stale claim', outcome: 'stale', durationMs: 0 }] }),
   sec('Guarded bit', 2, 'guarded', { scenarioIds: ['g1'] }),
   sec('Blocked bit', 2, 'blocked-on', { reason: 'blocked on db: needs a database', blockedOnCapabilities: ['db'] }),
-  sec('Api bit', 2, 'api', { reason: 'HTTP boundary' }),
+  sec('Web bit', 2, 'web', { reason: 'browser UI boundary' }),
   sec('Untestable bit', 2, 'untestable', { reason: 'nothing assertable' }),
   sec('Dismissed bit', 2, 'dismissed', { reason: 'dismissed: the rate-limit claim' }),
   sec('Unguarded bit', 2, 'unguarded'),
@@ -112,8 +112,7 @@ const TOTALS: Record<GuardSectionCoverageStatus, number> = {
   stale: 1,
   orphaned: 0,
   guarded: 1,
-  api: 1,
-  web: 0,
+  web: 1,
   tui: 0,
   'blocked-on': 1,
   untestable: 1,
@@ -370,7 +369,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     renderPage(ALL_TRUE);
     expect(await screen.findByText('Guard Spec')).toBeInTheDocument();
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    for (const label of ['Passing', 'Failing', 'Guarded (no run)', 'Blocked on', 'Needs API driver', 'Untestable']) {
+    for (const label of ['Passing', 'Failing', 'Guarded (no run)', 'Blocked on', 'Needs web driver', 'Untestable']) {
       expect(within(strip).getByText(label)).toBeInTheDocument();
     }
   });
@@ -380,7 +379,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
 
-    const cli = within(strip).getByRole('group', { name: 'CLI' });
+    const cli = within(strip).getByRole('group', { name: 'CLI, API' });
     const others = within(strip).getByRole('group', { name: 'Other drivers' });
 
     // CLI verdicts + coverage gaps (incl. the user's dismissals) live in the CLI
@@ -391,8 +390,8 @@ describe('GuardCoveragePage — coverage surface', () => {
     }
 
     // The future-driver postponement lives in the Other-drivers cluster only.
-    expect(within(others).getByText('Needs API driver')).toBeInTheDocument();
-    expect(within(cli).queryByText('Needs API driver')).not.toBeInTheDocument();
+    expect(within(others).getByText('Needs web driver')).toBeInTheDocument();
+    expect(within(cli).queryByText('Needs web driver')).not.toBeInTheDocument();
 
     // A subtle divider physically separates the two clusters.
     expect(container.querySelector('span[aria-hidden].w-px')).not.toBeNull();
@@ -402,8 +401,8 @@ describe('GuardCoveragePage — coverage surface', () => {
     // Coverage with every driver status at zero — the cluster must not render.
     const driverFree: GuardDocCoverage = {
       ...COVERAGE,
-      sections: SECTIONS.filter((s) => s.status !== 'api'),
-      totals: { ...TOTALS, api: 0 },
+      sections: SECTIONS.filter((s) => s.status !== 'web'),
+      totals: { ...TOTALS, web: 0 },
     };
     vi.stubGlobal(
       'fetch',
@@ -417,7 +416,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
 
-    expect(screen.getByRole('group', { name: 'CLI' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'CLI, API' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Other drivers' })).not.toBeInTheDocument();
     expect(container.querySelector('span[aria-hidden].w-px')).toBeNull();
   });
@@ -432,7 +431,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     expect(bandOf('stale-bit')).toContain('border-amber-500');
     expect(bandOf('guarded-bit')).toContain('border-sky-500');
     expect(bandOf('blocked-bit')).toContain('bg-muted');
-    expect(bandOf('api-bit')).toContain('border-dashed');
+    expect(bandOf('web-bit')).toContain('border-dashed');
     // Unguarded stays unmarked (no band wrapper classes).
     expect(bandOf('unguarded-bit')).not.toContain('border-l-4');
   });
