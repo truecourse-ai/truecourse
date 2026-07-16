@@ -7,10 +7,10 @@
  * so it sits inline with the status pills.
  */
 
-export function GuardHeldBadge({ className = '' }: { className?: string }) {
+export function GuardHeldBadge({ className = '', compact = false }: { className?: string; compact?: boolean }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400 ${className}`}
+      className={`inline-flex shrink-0 items-center rounded border border-amber-500/40 ${compact ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'} font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400 ${className}`}
     >
       held
     </span>
