@@ -26,6 +26,8 @@ const CONTENT = [
   '# S Blocked', 'k',
   '# S Unguarded', 'l',
   '# S Moved', 'm',
+  '# S Finding', 'n',
+  '# S Held', 'o',
 ].join('\n');
 
 const fp = 'sha256:seed';
@@ -63,9 +65,9 @@ const manifest: GuardManifest = {
 const result: GuardGenerateReport = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 13,
+  sectionsTotal: 15,
   sectionsChanged: 0,
-  skippedUnchanged: 13,
+  skippedUnchanged: 15,
   noChanges: false,
   written: [],
   coverageGaps: [
@@ -74,10 +76,23 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
     { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
   ],
-  birthFindings: [],
+  birthFindings: [
+    // Another doc's finding first, so the projected `index` proves it is the
+    // finding's position in the FULL report array (the Scenarios-tab key basis).
+    { doc: 'docs/other.md', anchor: 'elsewhere', title: 'other-doc finding', step: 1, expected: 'a', actual: 'b' },
+    { doc: DOC, anchor: 's-finding', title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
+  ],
   errors: [],
   extractionFailures: [],
   orphaned: [],
+  heldSections: [
+    { doc: DOC, anchor: 's-finding', readyScenarios: [
+      { id: 'hf1', title: 'held by the finding 1', yaml: 'id: hf1' },
+      { id: 'hf2', title: 'held by the finding 2', yaml: 'id: hf2' },
+    ] },
+    { doc: DOC, anchor: 's-held', readyScenarios: [{ id: 'sh1', title: 'held by a sibling error', yaml: 'id: sh1' }] },
+    { doc: 'docs/other.md', anchor: 'elsewhere', readyScenarios: [{ id: 'xx1', title: 'other doc', yaml: 'id: xx1' }] },
+  ],
 };
 
 describe('composeDocCoverage — per-section join (all statuses)', () => {
@@ -133,6 +148,27 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(status('s-unguarded')).toBe('unguarded');
   });
 
+  it('paints an unsettled section with a birth finding, projecting its findings + held scenarios', () => {
+    const sf = byAnchor.get('s-finding')!;
+    expect(sf.status).toBe('finding');
+    expect(sf.reason).toBe('1 birth finding awaiting a decision · holds 2 ready scenarios');
+    expect(sf.findings).toEqual([
+      { index: 1, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
+    ]);
+    expect(sf.heldScenarios).toEqual([
+      { id: 'hf1', title: 'held by the finding 1' },
+      { id: 'hf2', title: 'held by the finding 2' },
+    ]);
+  });
+
+  it('paints an unsettled section with only held scenarios as held', () => {
+    const sh = byAnchor.get('s-held')!;
+    expect(sh.status).toBe('held');
+    expect(sh.reason).toBe('1 ready scenario held — the section did not settle');
+    expect(sh.heldScenarios).toEqual([{ id: 'sh1', title: 'held by a sibling error' }]);
+    expect(sh.findings).toBeUndefined();
+  });
+
   it('re-anchors a moved section via remappedTo', () => {
     const sm = byAnchor.get('s-moved')!;
     expect(sm.status).toBe('pass');
@@ -152,14 +188,14 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
   it('tallies totals across the live sections and stamps provenance', () => {
     expect(cov.doc).toBe(DOC);
     expect(cov.markdown).toBe(true);
-    expect(cov.sections).toHaveLength(13);
+    expect(cov.sections).toHaveLength(15);
     expect(cov.runId).toBe('r1');
     expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
       api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      unguarded: 1, orphaned: 0,
+      finding: 1, held: 1, unguarded: 1, orphaned: 0,
     });
   });
 

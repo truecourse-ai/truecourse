@@ -281,42 +281,28 @@ const overviewTab = () => screen.getByText('Overview');
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('GuardScenariosPanel — grouped inventory + flags', () => {
+describe('GuardScenariosPanel — flat inventory + flags', () => {
   beforeEach(() => stubFetch());
 
-  it('groups rows doc › section with every committed scenario and its joined badge', async () => {
+  it('renders a FLAT list — every row badged, no doc or section headers', async () => {
     renderHarness();
     await screen.findByText('alpha claim');
     const list = inventoryList();
-    // Doc group headers use the full repo-relative path (docs/auth.md heads a
-    // group in BOTH the findings block and the scenarios block, so it renders
-    // more than once — hence getAllByText.)
-    expect(within(list).getAllByText('docs/auth.md').length).toBeGreaterThan(0);
-    expect(within(list).getByText('docs/other.md')).toBeInTheDocument();
     // Generated fail, hand-written pass, orphaned, and a never-run (neutral guarded).
     expect(within(list).getByText('Failing')).toBeInTheDocument();
     expect(within(list).getByText('Orphaned')).toBeInTheDocument();
     expect(within(list).getByText('Guarded (no run)')).toBeInTheDocument();
     // The hand-written scenario is flagged; the generated ones are not.
     expect(within(list).getAllByText('hand-written')).toHaveLength(1);
+    // NO grouping headers: neither doc paths nor section heading text render in
+    // the list — that context lives in the detail pane.
+    expect(within(list).queryByText('docs/auth.md')).not.toBeInTheDocument();
+    expect(within(list).queryByText('docs/other.md')).not.toBeInTheDocument();
+    expect(within(list).queryByText('10.7 The Local Developer Loop')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Beta Rules')).not.toBeInTheDocument();
   });
 
-  it('section headers show the HUMAN heading text, never the anchor slug', async () => {
-    renderHarness();
-    await screen.findByText('alpha claim');
-    const list = inventoryList();
-    // Human heading text from the joined section index…
-    expect(within(list).getByText('10.7 The Local Developer Loop')).toBeInTheDocument();
-    expect(within(list).getByText('Beta Rules')).toBeInTheDocument();
-    expect(within(list).getByText('New Things')).toBeInTheDocument();
-    // …never the raw slug.
-    expect(within(list).queryByText(/10-7-the-local-developer-loop/)).not.toBeInTheDocument();
-    // A section that no longer exists (o1, orphaned) has no headingText — the
-    // group falls back to the slug leaf rather than vanishing.
-    expect(within(list).getByText('gone')).toBeInTheDocument();
-  });
-
-  it('filters by document (rows and group headers)', async () => {
+  it('filters by document', async () => {
     const user = userEvent.setup();
     renderHarness();
     await screen.findByText('alpha claim');
@@ -353,129 +339,28 @@ describe('GuardScenariosPanel — grouped inventory + flags', () => {
 describe('GuardScenariosPanel — birth findings as first-class rows', () => {
   beforeEach(() => stubFetch());
 
-  it('renders each finding as a row with a distinct "finding" chip in its section group', async () => {
+  it('renders each finding as a row with a distinct "finding" chip', async () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const list = inventoryList();
     // The finding row: its title + the distinct red chip (lowercase DOM text).
     expect(within(list).getByText('login rate limits')).toBeInTheDocument();
     expect(within(list).getByText('finding')).toBeInTheDocument();
-    // Its findings-only section still gets a group header. This finding carries no
-    // server-joined headingText and no scenario binds its anchor, so the header
-    // falls back to the slug leaf.
-    expect(within(list).getByText('rate-limiting')).toBeInTheDocument();
-  });
-
-  it("a finding's server-joined headingText renders as its section header, never the slug", async () => {
-    // A finding's section is unsettled, so no committed scenario donates the
-    // heading — the report enriches it server-side and the client prefers it.
-    const withHeading: GuardGenerateReport = {
-      ...REPORT,
-      birthFindings: [{ ...REPORT.birthFindings[0], headingText: 'Login Rate Limiting' }],
-    };
-    stubFetch(INVENTORY, LATEST, withHeading);
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    expect(within(list).getByText('Login Rate Limiting')).toBeInTheDocument();
+    // No section header renders for it — the flat list carries rows only.
     expect(within(list).queryByText('rate-limiting')).not.toBeInTheDocument();
   });
 
-  it('floats the findings block to the TOP — a labeled "Findings" header before the scenarios', async () => {
+  it('floats findings to the TOP of the flat list, before scenarios, with no block headers', async () => {
     renderHarness();
     await panelRowAsync('login rate limits');
     const list = inventoryList();
-    // A red-tinted "Findings" block header carries the visible finding count, and a
-    // neutral "Scenarios" header labels the block below.
-    const findingsHeader = within(list).getByText('Findings');
-    expect(findingsHeader.closest('div')).toHaveTextContent('1');
-    expect(within(list).getByText('Scenarios')).toBeInTheDocument();
+    expect(within(list).queryByText('Findings')).not.toBeInTheDocument();
+    expect(within(list).queryByText('Scenarios')).not.toBeInTheDocument();
     // The finding row is the FIRST listitem, and it precedes the first scenario row.
     expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('login rate limits');
     const finding = within(list).getByText('login rate limits');
     const scenario = within(list).getByText('alpha claim');
     expect(finding.compareDocumentPosition(scenario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('collapses the Findings block header, hiding its rows while scenarios stay', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    const findingsBtn = within(list).getByText('Findings').closest('button') as HTMLElement;
-    expect(findingsBtn).toHaveAttribute('aria-expanded', 'true');
-    // Collapse → findings rows disappear, scenario rows stay.
-    await user.click(findingsBtn);
-    expect(findingsBtn).toHaveAttribute('aria-expanded', 'false');
-    expect(within(list).queryByText('login rate limits')).not.toBeInTheDocument();
-    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
-    // Re-open → findings rows return.
-    await user.click(findingsBtn);
-    expect(findingsBtn).toHaveAttribute('aria-expanded', 'true');
-    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
-  });
-
-  it('collapses the Scenarios block header, hiding its rows while findings stay', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    const scenariosBtn = within(list).getByText('Scenarios').closest('button') as HTMLElement;
-    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'true');
-    await user.click(scenariosBtn);
-    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'false');
-    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
-    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
-    await user.click(scenariosBtn);
-    expect(scenariosBtn).toHaveAttribute('aria-expanded', 'true');
-    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
-  });
-
-  it('anchors each block header on a SOLID bg-card sticky wrapper (no see-through tint)', async () => {
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    const findingsWrapper = within(list).getByText('Findings').closest('button')?.parentElement as HTMLElement;
-    expect(findingsWrapper).toHaveClass('sticky', 'bg-card');
-    const scenariosWrapper = within(list).getByText('Scenarios').closest('button')?.parentElement as HTMLElement;
-    expect(scenariosWrapper).toHaveClass('sticky', 'bg-card');
-  });
-
-  it('collapses a doc group via its header — rows hide, aria-expanded flips, click restores', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    // docs/auth.md heads a doc group in BOTH blocks (findings first) — [1] is the
-    // scenarios block's.
-    const authDocBtn = within(list).getAllByText('docs/auth.md')[1].closest('button') as HTMLElement;
-    expect(authDocBtn).toHaveAttribute('aria-expanded', 'true');
-    await user.click(authDocBtn);
-    expect(authDocBtn).toHaveAttribute('aria-expanded', 'false');
-    // Its section headers + rows hide; the sibling doc group stays.
-    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
-    expect(within(list).queryByText('hand rolled')).not.toBeInTheDocument();
-    expect(within(list).queryByText('10.7 The Local Developer Loop')).not.toBeInTheDocument();
-    expect(within(list).getByText('orphan claim')).toBeInTheDocument();
-    await user.click(authDocBtn);
-    expect(authDocBtn).toHaveAttribute('aria-expanded', 'true');
-    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
-  });
-
-  it('doc collapse is independent per block — collapsing scenarios-block auth.md leaves the findings-block auth.md group open', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    const list = inventoryList();
-    const [findingsAuthBtn, scenariosAuthBtn] = within(list)
-      .getAllByText('docs/auth.md')
-      .map((el) => el.closest('button') as HTMLElement);
-    await user.click(scenariosAuthBtn);
-    expect(scenariosAuthBtn).toHaveAttribute('aria-expanded', 'false');
-    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
-    // The findings block's same-doc group is untouched — open, row still visible.
-    expect(findingsAuthBtn).toHaveAttribute('aria-expanded', 'true');
-    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
   });
 
   it('renders neither block header when no findings are visible', async () => {
@@ -576,21 +461,18 @@ describe('GuardScenariosPanel — ready-but-held scenarios', () => {
   /** The held detail's "What holds it" region — scopes finding-blocker lookups. */
   const whatHolds = () => screen.getByText('What holds it').parentElement as HTMLElement;
 
-  it('renders a "Held" block between Findings and Scenarios with a distinct held chip + count', async () => {
+  it('renders held rows between findings and scenarios with a distinct held chip', async () => {
     renderHarness();
     await panelRowAsync('held rate limit');
     const list = inventoryList();
-    // The amber "Held" block header carries the visible held count (3 = 1 + 2).
-    const heldHeader = within(list).getByText('Held');
-    expect(heldHeader.closest('div')).toHaveTextContent('3');
-    // Each held row carries the distinct "held" chip.
-    expect(within(list).getAllByText('held')).toHaveLength(3);
-    // Block order — bad-news-first: Findings → Held → Scenarios.
-    const findings = within(list).getByText('Findings');
-    const held = within(list).getByText('Held');
-    const scenarios = within(list).getByText('Scenarios');
-    expect(findings.compareDocumentPosition(held) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(held.compareDocumentPosition(scenarios) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(list).getAllByText('held').length).toBeGreaterThan(0);
+    expect(within(list).queryByText('Held')).not.toBeInTheDocument();
+    // Order: finding first, held next, committed scenarios last.
+    const finding = within(list).getByText('login rate limits');
+    const held = within(list).getByText('held rate limit');
+    const scenario = within(list).getByText('alpha claim');
+    expect(finding.compareDocumentPosition(held) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(held.compareDocumentPosition(scenario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('counts held rows in the count line and offers a "held" status filter', async () => {
@@ -605,21 +487,6 @@ describe('GuardScenariosPanel — ready-but-held scenarios', () => {
     expect(within(list).getByText('held z one')).toBeInTheDocument();
     expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
     expect(within(list).queryByText('login rate limits')).not.toBeInTheDocument();
-  });
-
-  it('collapses the Held block header, hiding its rows while findings + scenarios stay', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('held rate limit');
-    const list = inventoryList();
-    const heldBtn = within(list).getByText('Held').closest('button') as HTMLElement;
-    expect(heldBtn).toHaveAttribute('aria-expanded', 'true');
-    await user.click(heldBtn);
-    expect(heldBtn).toHaveAttribute('aria-expanded', 'false');
-    expect(within(list).queryByText('held rate limit')).not.toBeInTheDocument();
-    // Findings + scenarios rows stay.
-    expect(within(list).getByText('login rate limits')).toBeInTheDocument();
-    expect(within(list).getByText('alpha claim')).toBeInTheDocument();
   });
 
   it('a finding row shows its blast radius — "holds N" — when its section holds ready work', async () => {

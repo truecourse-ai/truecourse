@@ -6,10 +6,10 @@
  * geometry as GuardStatusBadge so it sits inline with the status pills.
  */
 
-export function GuardFindingBadge({ className = '' }: { className?: string }) {
+export function GuardFindingBadge({ className = '', compact = false }: { className?: string; compact?: boolean }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-600 dark:text-red-400 ${className}`}
+      className={`inline-flex shrink-0 items-center rounded border border-red-500/40 ${compact ? 'px-1 py-0 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'} font-medium uppercase tracking-wider text-red-600 dark:text-red-400 ${className}`}
     >
       finding
     </span>

@@ -7,6 +7,11 @@
  * reveal its YAML source. Rows are previewable (single-click preview,
  * double-click pin), with inline actions stopping propagation.
  *
+ * An unsettled section (status `finding` / `held`) lists EVERYTHING bound to it:
+ * its birth findings (red rows, expandable to expected → actual) and its
+ * ready-but-held scenarios (amber rows) — the all-or-nothing persist withheld
+ * them, so no committed scenario exists to list otherwise.
+ *
  * When the section has no run results — a guarded section with no run yet, or a
  * coverage gap (untestable / driver-not-yet / blocked-on) — the pane explains
  * that with an EmptyState instead of an empty list.
@@ -14,12 +19,14 @@
 
 import { useCallback, useState } from 'react';
 import { FlaskConical, PlayCircle, X } from 'lucide-react';
-import type { GuardSectionCoverage, GuardSectionScenario } from '@truecourse/shared';
+import type { GuardSectionCoverage, GuardSectionFinding, GuardSectionHeldScenario, GuardSectionScenario } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { guardStatusMeta } from '@/lib/guard-status';
 import { GuardStatusBadge } from './GuardStatusBadge';
+import { GuardFindingBadge } from './GuardFindingBadge';
+import { GuardHeldBadge } from './GuardHeldBadge';
 
 const OUTCOME_TEXT: Record<string, string> = {
   pass: 'text-emerald-600 dark:text-emerald-400',
@@ -222,6 +229,71 @@ function GuardScenarioIdRow({ repoId, id }: { repoId: string; id: string }) {
   );
 }
 
+/** One birth finding bound to the section — expandable to its expected → actual. */
+function GuardSectionFindingRow({
+  finding,
+  expanded,
+  onClick,
+  onDoubleClick,
+}: {
+  finding: GuardSectionFinding;
+  expanded: boolean;
+  onClick: () => void;
+  onDoubleClick: () => void;
+}) {
+  return (
+    <div className="border-b border-border/60">
+      <button
+        type="button"
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+      >
+        <div className="flex items-center gap-2">
+          <GuardFindingBadge compact />
+          {finding.kind === 'fidelity' && (
+            <HoverPopover content="The scenario passed birth but the fidelity reviewer judged it does not truly verify its section's claim.">
+              <span className="shrink-0 rounded bg-muted px-1 py-0 text-[9px] font-medium text-muted-foreground">fidelity</span>
+            </HoverPopover>
+          )}
+          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">step {finding.step}</span>
+        </div>
+        <span className="text-[13px] text-foreground">{finding.title}</span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 text-xs">
+          <div className="grid gap-1">
+            <div>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Expected</span>
+              <pre className={PRE}>{finding.expected}</pre>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Actual</span>
+              <pre className={PRE}>{finding.actual}</pre>
+            </div>
+          </div>
+          <div className="mt-1.5 text-[11px] text-muted-foreground">
+            Decide in the Scenarios tab: dismiss the claim, or fix the drift and re-generate.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One ready-but-held scenario — birth-passed work the unsettled section withheld. */
+function GuardSectionHeldRow({ scenario }: { scenario: GuardSectionHeldScenario }) {
+  return (
+    <div className="border-b border-border/60 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <GuardHeldBadge compact />
+        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">{scenario.id}</span>
+      </div>
+      <span className="mt-0.5 block text-[13px] text-foreground">{scenario.title}</span>
+    </div>
+  );
+}
+
 export function GuardSectionDetail({
   repoId,
   section,
@@ -247,6 +319,9 @@ export function GuardSectionDetail({
       return next;
     });
 
+  const findings = section.findings ?? [];
+  const heldScenarios = section.heldScenarios ?? [];
+  const hasUnsettled = findings.length > 0 || heldScenarios.length > 0;
   const isRunOutcome = section.scenarios.length > 0;
   const isGuardedNoRun = !isRunOutcome && section.scenarioIds.length > 0;
 
@@ -286,6 +361,21 @@ export function GuardSectionDetail({
       )}
 
       <div className="flex-1 overflow-auto">
+        {findings.map((f) => {
+          const key = `finding:${f.index}`;
+          return (
+            <GuardSectionFindingRow
+              key={key}
+              finding={f}
+              expanded={previewId === key || pinned.has(key)}
+              onClick={() => setPreviewId(key)}
+              onDoubleClick={() => togglePin(key)}
+            />
+          );
+        })}
+        {heldScenarios.map((h) => (
+          <GuardSectionHeldRow key={h.id} scenario={h} />
+        ))}
         {isRunOutcome ? (
           section.scenarios.map((s) => (
             <GuardScenarioRow
@@ -316,7 +406,7 @@ export function GuardSectionDetail({
               <GuardScenarioIdRow key={id} repoId={repoId} id={id} />
             ))}
           </div>
-        ) : (
+        ) : hasUnsettled ? null : (
           <div className="px-3 pt-3">
             <EmptyState
               icon={FlaskConical}

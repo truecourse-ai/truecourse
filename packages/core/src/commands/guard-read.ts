@@ -51,6 +51,8 @@ import {
   type GuardScenarioSource,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
+  type GuardSectionFinding,
+  type GuardSectionHeldScenario,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardSectionScenario,
@@ -171,12 +173,41 @@ export function composeDocCoverage(
     if (g.doc === doc) gapByAnchor.set(g.anchor, g)
   }
 
+  // Birth findings + held scenarios from the last generate — an unsettled section
+  // has NO manifest entry, so without this join it would read as bare `unguarded`
+  // when it is actually the section most in need of a decision. Full projections
+  // (not counts) so the section detail can list them; `index` is the finding's
+  // position in the report (the Scenarios-tab finding key derives from it).
+  const findingsByAnchor = new Map<string, GuardSectionFinding[]>()
+  for (const [i, f] of (result?.birthFindings ?? []).entries()) {
+    if (f.doc !== doc) continue
+    push(findingsByAnchor, f.anchor, {
+      index: i,
+      ...(f.kind ? { kind: f.kind } : {}),
+      title: f.title,
+      step: f.step,
+      expected: f.expected,
+      actual: f.actual,
+      ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
+    })
+  }
+  const heldByAnchor = new Map<string, GuardSectionHeldScenario[]>()
+  for (const h of result?.heldSections ?? []) {
+    if (h.doc !== doc) continue
+    heldByAnchor.set(
+      h.anchor,
+      h.readyScenarios.map((r) => ({ id: r.id, title: r.title })),
+    )
+  }
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
       run: runByAnchor.get(sec.anchor) ?? [],
       manifest: manifestByAnchor.get(sec.anchor),
       gap: gapByAnchor.get(sec.anchor),
+      findings: findingsByAnchor.get(sec.anchor) ?? [],
+      heldScenarios: heldByAnchor.get(sec.anchor) ?? [],
     })
     totals[cov.status]++
     return cov
@@ -196,7 +227,13 @@ export function composeDocCoverage(
 
 function resolveSectionCoverage(
   sec: DocSection,
-  joins: { run: GuardScenarioResult[]; manifest?: GuardManifestSection; gap?: GuardCoverageGap },
+  joins: {
+    run: GuardScenarioResult[]
+    manifest?: GuardManifestSection
+    gap?: GuardCoverageGap
+    findings: GuardSectionFinding[]
+    heldScenarios: GuardSectionHeldScenario[]
+  },
 ): GuardSectionCoverage {
   const base = {
     anchor: sec.anchor,
@@ -206,7 +243,7 @@ function resolveSectionCoverage(
     scenarioIds: [] as string[],
     scenarios: [] as GuardSectionScenario[],
   }
-  const { run, manifest, gap } = joins
+  const { run, manifest, gap, findings, heldScenarios } = joins
   const verdict = manifest?.classification
   const withVerdict = verdict ? { classification: verdict } : {}
 
@@ -226,7 +263,35 @@ function resolveSectionCoverage(
     return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withVerdict }
   }
 
-  // 3. A coverage gap from the last generate. An awaiting-driver gap paints under
+  // 3. Unsettled by the last generate — a birth finding (a pending human
+  // decision) paints the section red; ready-but-held work with no active finding
+  // (its blocker was an authoring error) paints amber. Both outrank gaps: an
+  // unsettled section never recorded one.
+  if (findings.length > 0) {
+    const held =
+      heldScenarios.length > 0
+        ? ` · holds ${heldScenarios.length} ready scenario${heldScenarios.length === 1 ? '' : 's'}`
+        : ''
+    return {
+      ...base,
+      status: 'finding',
+      reason: `${findings.length} birth finding${findings.length === 1 ? '' : 's'} awaiting a decision${held}`,
+      findings: findings.slice(),
+      ...(heldScenarios.length > 0 ? { heldScenarios: heldScenarios.slice() } : {}),
+      ...withVerdict,
+    }
+  }
+  if (heldScenarios.length > 0) {
+    return {
+      ...base,
+      status: 'held',
+      reason: `${heldScenarios.length} ready scenario${heldScenarios.length === 1 ? '' : 's'} held — the section did not settle`,
+      heldScenarios: heldScenarios.slice(),
+      ...withVerdict,
+    }
+  }
+
+  // 4. A coverage gap from the last generate. An awaiting-driver gap paints under
   // its driver id (api/web/tui/library) so the drivers stay separate; other kinds paint as
   // themselves. (Tolerant of an old-shape in-memory gap whose kind IS a driver id.)
   if (gap) {
@@ -245,7 +310,7 @@ function resolveSectionCoverage(
     }
   }
 
-  // 4. A bare classification (no scenario authored, no recorded gap).
+  // 5. A bare classification (no scenario authored, no recorded gap).
   if (verdict) {
     if ('untestable' in verdict) return { ...base, status: 'untestable', reason: verdict.reason, ...withVerdict }
     // A non-runnable driver awaits its driver; paint under the driver id.
@@ -254,7 +319,7 @@ function resolveSectionCoverage(
     return { ...base, status: 'unguarded', ...withVerdict }
   }
 
-  // 5. Nothing binds this section.
+  // 6. Nothing binds this section.
   return { ...base, status: 'unguarded' }
 }
 
@@ -315,6 +380,8 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
+  'finding',
+  'held',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 

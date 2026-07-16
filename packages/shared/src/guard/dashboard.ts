@@ -28,12 +28,18 @@ import type { GuardTestabilityVerdict } from './manifest.js'
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
+ *  - `finding` — the last generate left a birth finding on the section (it never
+ *    settled; a human decision is pending);
+ *  - `held` — the section is unsettled with ready-but-held scenarios and no
+ *    active finding (its blocker was an authoring error);
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
+  | 'finding'
+  | 'held'
   | 'unguarded'
 
 /** One scenario's run result, projected onto a section for the coverage detail. */
@@ -50,6 +56,26 @@ export interface GuardSectionScenario {
   remappedTo?: string
   /** The section's current (edited) fingerprint; present on `stale`. */
   currentFingerprint?: string
+}
+
+/** A birth finding projected onto its section for the coverage detail. */
+export interface GuardSectionFinding {
+  /** The finding's index in the generate report (the Scenarios-tab key derives from it). */
+  index: number
+  /** `fidelity` for a reviewer-flagged scenario; `birth` (or absent) otherwise. */
+  kind?: 'birth' | 'fidelity'
+  title: string
+  step: number
+  expected: string
+  actual: string
+  /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
+  evidencePath?: string
+}
+
+/** A ready-but-held scenario projected onto its section for the coverage detail. */
+export interface GuardSectionHeldScenario {
+  id: string
+  title: string
 }
 
 /** A live doc section joined to its guard coverage. */
@@ -71,6 +97,10 @@ export interface GuardSectionCoverage {
   classification?: GuardTestabilityVerdict
   /** Scenario ids bound to this section (from the run, else the manifest). */
   scenarioIds: string[]
+  /** This section's birth findings from the last generate (status `finding`). */
+  findings?: GuardSectionFinding[]
+  /** Ready-but-held scenarios from the last generate (status `finding`/`held`). */
+  heldScenarios?: GuardSectionHeldScenario[]
   /** Per-scenario run results for this section from the last run (empty until run). */
   scenarios: GuardSectionScenario[]
 }
