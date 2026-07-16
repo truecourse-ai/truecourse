@@ -320,3 +320,40 @@ RFC/number/regex claims ~17%; ruff version-syntax ~7%).
 pack generation writes + commits + caches; scenario runs per exemplar and failure
 names the file; user-added files survive regeneration; estimate includes the
 generation call.
+
+## 10. Retry must use its evidence; authoring must carry the example's assumed environment
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** The 2026-07-16 sqlfluff run's dominant defect pattern (5+3 of 12 defects):
+scenarios copied a doc example faithfully but not the CONFIGURATION the doc assumes
+around it (an indent width set by surrounding prose, a mandatory base setting), or ran
+the whole tool instead of isolating the claimed behavior, so unrelated rules
+contaminated the outcome. Worse: the birth retry received the tool's own error naming
+the missing setup ("No dialect was specified", exit 2) as evidence and STILL did not
+correct the setup — five times. The retry-with-evidence loop is the engine's general
+self-heal mechanism; if it cannot act on a literal usage error, that is the root cause,
+and any prompt work is secondary.
+
+**Fix — investigation FIRST, no speculative changes.**
+- Reconstruct the exact retry contexts for the run's dialect/config defects from
+  `result.json` (findings carry expected/actual, raw output excerpts, and the authored
+  YAML) plus the deterministic prompt builders. Determine concretely why the evidence
+  did not produce a setup correction — e.g. the stderr excerpt never reaches the retry
+  prompt, the "keep the claim's assertion" rule reads as "change nothing", or the
+  failing step's error is drowned. Fix the MECHANISM (context content / rule wording /
+  evidence placement), not the symptom.
+- Then two GENERAL authoring-prompt rules (no repo-specific token may ever enter a
+  prompt): (a) an example's assumed environment is part of the example — configuration
+  stated in the surrounding section/document that the example depends on must be
+  reproduced in `setup`; (b) a scenario verifies ONLY its claim — constrain the
+  invocation (scoping flags, minimal input) so unrelated behaviors cannot contaminate
+  the asserted outcome.
+- Overfit guard: nothing in the change may reference sqlfluff or any concrete tool
+  setting; validation is by prompt-content tests + fixture e2e (a doc whose example
+  depends on config stated in a sibling paragraph), and by the numbers on the NEXT
+  cross-repo run — never by making one repo's defect list zero.
+
+**Tests.** Retry-context content test proving the failing step's raw stderr/usage error
+is present and labeled; e2e fixture where the doc states config in prose above the
+example — the authored scenario seeds it; prompt-content assertions for both rules.
