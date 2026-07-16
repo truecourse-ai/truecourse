@@ -174,6 +174,98 @@ describe('EF Core schema parser', () => {
 
     expect(result).toEqual({ tables: [], relations: [] })
   })
+
+  it('draws a collection-only one-to-many when the dependent side has no reference navigation', () => {
+    const result = parseEfCoreSchema(`
+      using Microsoft.EntityFrameworkCore;
+      using System.ComponentModel.DataAnnotations;
+
+      public class AppDbContext : DbContext
+      {
+        public DbSet<Order> Orders { get; set; }
+        public DbSet<OrderLine> OrderLines { get; set; }
+      }
+
+      public class Order
+      {
+        [Key] public Guid Id { get; set; }
+        public List<OrderLine> Lines { get; set; } = new();
+      }
+
+      public class OrderLine
+      {
+        [Key] public Guid Id { get; set; }
+        public Guid OrderId { get; set; }
+      }
+    `)
+
+    const orderLine = result.tables.find((table) => table.name === 'OrderLines')
+    expect(orderLine?.columns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'order_id', isForeignKey: true, referencesTable: 'Orders' }),
+      ]),
+    )
+    expect(result.relations).toContainEqual({
+      sourceTable: 'OrderLines',
+      targetTable: 'Orders',
+      relationType: 'one-to-many',
+      foreignKeyColumn: 'order_id',
+    })
+  })
+
+  it('does not invent a target for a *Id scalar that names no modeled entity', () => {
+    const result = parseEfCoreSchema(`
+      using Microsoft.EntityFrameworkCore;
+      using System.ComponentModel.DataAnnotations;
+
+      public class AppDbContext : DbContext
+      {
+        public DbSet<Order> Orders { get; set; }
+      }
+
+      public class Order
+      {
+        [Key] public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
+      }
+    `)
+
+    const tenant = result.tables
+      .find((table) => table.name === 'Orders')
+      ?.columns.find((column) => column.name === 'tenant_id')
+    expect(tenant).not.toHaveProperty('isForeignKey')
+    expect(tenant).not.toHaveProperty('referencesTable')
+    expect(result.relations).toEqual([])
+  })
+
+  it('keeps enum-typed properties as scalar columns instead of dropping them', () => {
+    const result = parseEfCoreSchema(`
+      using Microsoft.EntityFrameworkCore;
+      using System.ComponentModel.DataAnnotations;
+
+      public class AppDbContext : DbContext
+      {
+        public DbSet<Order> Orders { get; set; }
+      }
+
+      public class Order
+      {
+        [Key] public Guid Id { get; set; }
+        public OrderStatus Status { get; set; }
+      }
+
+      public enum OrderStatus { Pending, Paid }
+    `)
+
+    const columns = result.tables.find((table) => table.name === 'Orders')?.columns
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'status', type: 'OrderStatus' }),
+      ]),
+    )
+    // The enum must not be mistaken for a navigation / relationship.
+    expect(result.relations).toEqual([])
+  })
 })
 
 describe('EF Core project reconciliation', () => {

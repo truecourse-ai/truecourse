@@ -26,6 +26,7 @@ interface ParsedFile {
   masked: string
   namespace: string
   usings: string[]
+  enums: string[]
   entities: EntityCandidate[]
   contexts: ContextCandidate[]
   configurations: ConfigurationCandidate[]
@@ -133,6 +134,10 @@ export function parseEfCoreProject(files: EfCoreProjectFile[]): EfCoreProjectSch
 
   for (const [serviceName, serviceFiles] of filesByService) {
     const { entities, contexts } = reconcileClassDeclarations(serviceFiles)
+    // Enum-typed properties look like reference navigations (PascalCase,
+    // non-BCL) but map to scalar columns. Reclassify them once the whole
+    // service is visible so an entity's enum columns are not dropped.
+    reclassifyEnumColumns(entities, new Set(serviceFiles.flatMap((file) => file.enums)))
     const configurations = serviceFiles.flatMap((file) => file.configurations)
     const providerHints = serviceFiles.flatMap((file) => file.providerHints)
     const index = buildEntityIndex(entities)
@@ -207,6 +212,7 @@ function parseProjectFile(input: EfCoreProjectFile): ParsedFile {
     masked,
     namespace: extractNamespace(masked),
     usings: extractUsings(masked),
+    enums: extractEnumNames(masked),
     entities: [],
     contexts: [],
     configurations: [],
@@ -638,9 +644,18 @@ function buildEntityTable(
       : entity.properties.find((candidate) =>
         candidate.navigationType && candidate.foreignKeyNavigation === property.name
       )
-    const targetEntity = navigation?.navigationType
+    let targetEntity = navigation?.navigationType
       ? resolveEntityReference(navigation.navigationType, navigation.file, index)
       : undefined
+    // EF's `<PrincipalType>Id` convention: when the dependent side declares no
+    // reference navigation — the principal owns the only navigation (a
+    // collection), or none is declared — resolve `<X>Id` to a modeled entity
+    // named `X`. Restricted to a real, bound entity so unrelated scalars like
+    // `owner_id` (no `Owner` entity) are still left unlinked rather than guessed.
+    if (!targetEntity && conventionNavigation) {
+      const byName = resolveEntityReference(conventionNavigation, property.file, index)
+      if (byName && canonicalNames.has(byName.fullName)) targetEntity = byName
+    }
     const targetTable = targetEntity ? canonicalNames.get(targetEntity.fullName) : undefined
     const isForeignKey = targetTable !== undefined || property.foreignKeyNavigation !== undefined
 
@@ -969,6 +984,28 @@ function extractNamespace(maskedContent: string): string {
 function extractUsings(maskedContent: string): string[] {
   return [...maskedContent.matchAll(/(?:^|\n)\s*(?:global\s+)?using\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*;/g)]
     .map((match) => match[1])
+}
+
+function extractEnumNames(maskedContent: string): string[] {
+  return [...maskedContent.matchAll(/\benum\s+([A-Za-z_]\w*)/g)].map((match) => match[1])
+}
+
+/**
+ * Enum properties are scalar columns, not navigations. `extractProperties`
+ * classifies a PascalCase non-BCL type as a navigation before the enum
+ * declarations elsewhere in the service are known; clear that flag for types
+ * that turn out to be enums so `buildEntityTable` emits them as columns.
+ */
+function reclassifyEnumColumns(entities: EntityCandidate[], enumNames: Set<string>): void {
+  if (enumNames.size === 0) return
+  for (const entity of entities) {
+    for (const property of entity.properties) {
+      const type = property.navigationType
+      if (type && enumNames.has(type.split('.').pop() ?? type)) {
+        property.navigationType = undefined
+      }
+    }
+  }
 }
 
 function detectProviderFromContent(content: string): DatabaseType | undefined {
