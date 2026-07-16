@@ -786,6 +786,41 @@ describe('runGuardDrifts (printer)', () => {
     expect(out).toContain('Showing 1–2 of 2')
   })
 
+  it('renders the "doc says" claim line so a failure reads as doc-vs-code', async () => {
+    const r = repo()
+    writeGuardLatest(
+      r,
+      sampleLatest([
+        scn('f', 'fail', {
+          claim: 'the fixer never corrupts a valid file',
+          failure: { step: 1, expected: 'exit 0', actual: 'exit 2' },
+        }),
+      ]),
+    )
+    await runGuardDrifts({ cwd: r })
+    expect(out).toContain('doc says: the fixer never corrupts a valid file')
+  })
+
+  it('omits the claim line for a drift that carries no claim (pre-claim scenario)', async () => {
+    const r = repo()
+    writeGuardLatest(r, sampleLatest([scn('f', 'fail')]))
+    await runGuardDrifts({ cwd: r })
+    expect(out).not.toContain('doc says:')
+  })
+
+  it('--json carries the claim on a drift', async () => {
+    const r = repo()
+    writeGuardLatest(
+      r,
+      sampleLatest([scn('f', 'fail', { claim: 'never corrupts a valid file', failure: { step: 1, expected: 'e', actual: 'a' } })]),
+    )
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await runGuardDrifts({ cwd: r, json: true })
+    const printed = logSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+    logSpy.mockRestore()
+    expect(JSON.parse(printed).drifts[0].claim).toBe('never corrupts a valid file')
+  })
+
   it('--json emits { total, drifts[] } in severity order, passes excluded', async () => {
     const r = repo()
     writeGuardLatest(

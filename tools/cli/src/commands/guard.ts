@@ -539,6 +539,7 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
         outcome: d.outcome,
         doc: d.binds.doc,
         section: d.binds.section,
+        ...(d.claim ? { claim: d.claim } : {}),
         ...(d.failure ? { failure: d.failure } : {}),
         ...(d.evidencePath ? { evidencePath: d.evidencePath } : {}),
       })),
@@ -572,6 +573,8 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   for (const d of page) {
     p.log.message(`  ${MARK[d.outcome]} [${d.outcome}] ${d.id} — ${d.title}`);
     p.log.message(`      ${d.binds.doc} › ${d.binds.section}`);
+    // The claim this scenario defends — a failure reads as doc-vs-code, not regex-vs-stdout.
+    if (d.claim) p.log.message(`      doc says: ${oneLine(d.claim)}`);
     if (d.outcome === "fail" && d.failure) {
       p.log.message(`      step ${d.failure.step} · expected ${d.failure.expected} · actual ${d.failure.actual}`);
     }

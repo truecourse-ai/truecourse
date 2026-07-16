@@ -28,6 +28,7 @@ import { corpusFilePath } from '@truecourse/spec-consolidator'
 import {
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
+  GuardScenarioSchema,
   awaitingDriverIds,
   dismissedClaimKey,
   isAwaitingDriver,
@@ -751,7 +752,11 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      return { id, file: rel, content: raw }
+      // Attach the parsed scenario when it validates, so the detail view renders the
+      // plain-words story + claim without re-parsing YAML client-side. A malformed
+      // (but id-matching) file still returns its raw `content` for the toggle.
+      const validated = GuardScenarioSchema.safeParse(parsed)
+      return { id, file: rel, content: raw, ...(validated.success ? { scenario: validated.data } : {}) }
     }
   }
   return null

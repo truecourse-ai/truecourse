@@ -124,6 +124,7 @@ export async function runScenario(
   const base = {
     id: scenario.id,
     title: scenario.title,
+    ...(scenario.claim ? { claim: scenario.claim } : {}),
     binds: scenario.binds,
   }
 

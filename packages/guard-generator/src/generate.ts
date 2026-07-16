@@ -772,7 +772,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         continue
       }
       for (const rawS of scs) {
-        const built = safeBuild(section, rawS, usedIds, localErrors)
+        const built = safeBuild(section, rawS, usedIds, localErrors, t.claim.claim)
         if (built) {
           const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
           round1.push(cand)
@@ -857,7 +857,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 try {
                   const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims, options.onAuthorFailure)
                   for (const rawS of retryScs) {
-                    const built = safeBuild(section, rawS, usedIds, localErrors)
+                    const built = safeBuild(section, rawS, usedIds, localErrors, entry.task.claim.claim)
                     if (built) retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
                   }
                 } finally {
@@ -1343,16 +1343,18 @@ function normalizeBlockedOn(names: string[]): string[] {
   return out
 }
 
-/** Build a scenario, recording a validation failure as an error rather than throwing. */
+/** Build a scenario, recording a validation failure as an error rather than throwing.
+ *  `claim` is the extracted claim text persisted onto the committed scenario. */
 function safeBuild(
   section: SectionInput,
   raw: RawGeneratedScenario,
   usedIds: Set<string>,
   errors: GuardGenerateError[],
+  claim: string,
 ): GuardScenario | null {
   const id = assignScenarioId(section.anchor, usedIds)
   try {
-    return buildScenario(section, raw, id)
+    return buildScenario(section, raw, id, claim)
   } catch (e) {
     usedIds.delete(id)
     errors.push({ doc: section.doc, anchor: section.anchor, message: `invalid generated scenario: ${(e as Error).message}` })

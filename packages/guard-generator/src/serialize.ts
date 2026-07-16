@@ -46,10 +46,16 @@ export function areaOrDocSlug(section: SectionInput): string {
 
 /**
  * Build the final scenario: engine-assigned `id`, binding pinned to the live
- * section index (doc + anchor + fingerprint), `guard`/`driver` stamped, and the
- * model's behavioral fields kept. Throws if the result fails the strict schema.
+ * section index (doc + anchor + fingerprint), `guard`/`driver` stamped, the
+ * extracted `claim` persisted (so a committed scenario reads as doc-vs-code), and
+ * the model's behavioral fields kept. Throws if the result fails the strict schema.
  */
-export function buildScenario(section: SectionInput, raw: RawGeneratedScenario, id: string): GuardScenario {
+export function buildScenario(
+  section: SectionInput,
+  raw: RawGeneratedScenario,
+  id: string,
+  claim?: string,
+): GuardScenario {
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
   if (!isRunnableDriver(raw.driver)) {
@@ -59,6 +65,7 @@ export function buildScenario(section: SectionInput, raw: RawGeneratedScenario, 
     guard: GUARD_FORMAT_VERSION,
     id,
     title: raw.title,
+    ...(claim ? { claim } : {}),
     binds: { doc: section.doc, section: section.anchor, fingerprint: section.fingerprint },
     driver: raw.driver,
     ...(raw.setup ? { setup: raw.setup } : {}),

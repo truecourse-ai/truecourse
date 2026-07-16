@@ -149,8 +149,15 @@ export const GuardScenarioSchema = z
   .object({
     guard: z.literal(GUARD_FORMAT_VERSION),
     id: z.string().min(1),
-    /** Restates the section's claim in one line. */
+    /** The doc's behavioral promise in plain words (never the literal expected output). */
     title: z.string().min(1),
+    /**
+     * The extracted CLAIM this scenario defends — the doc sentence that justifies
+     * its setup, argv, and matchers. Written at authoring so a committed scenario
+     * reads as doc-vs-code, not regex-vs-stdout. Optional: pre-claim corpora keep
+     * loading, and a regenerate backfills it.
+     */
+    claim: z.string().min(1).optional(),
     binds: GuardBindsSchema,
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
