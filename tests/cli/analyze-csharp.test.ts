@@ -68,10 +68,19 @@ describe('CLI analyze pipeline (e2e, C#)', () => {
     execSync('git add -A', { cwd: workDir, env });
     execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
 
+    // copyDir drops obj/, which also drops the NuGet restore metadata
+    // (project.assets.json). Without a restore in the temp copy, Roslyn cannot
+    // resolve framework/project references and rejects the solution with
+    // "project <Name> loaded without a reference set". Restore the copied
+    // solution so project-aware analysis sees a valid, resolvable C# solution.
+    // Run after the git commit so the regenerated obj/ stays untracked (it is
+    // ignored by analysis anyway via the C# **/obj/ ignore pattern).
+    execSync('dotnet restore', { cwd: workDir, env, stdio: 'ignore' });
+
     project = await registerProject(workDir);
     await updateProjectConfig(workDir, { enableLlmRules: false });
     clearLatestCache();
-  }, 30_000);
+  }, 300_000);
 
   afterAll(async () => {
     if (project) await unregisterProject(project.slug);
