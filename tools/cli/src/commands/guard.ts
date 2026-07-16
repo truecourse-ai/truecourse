@@ -22,6 +22,7 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
+  type GenerateMode,
   type AuthorFailure,
 } from "@truecourse/core/commands/guard-in-process";
 import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecourse/shared";
@@ -30,6 +31,7 @@ import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightClaudeOrExit } from "../lib/claude-preflight.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
+import { isInteractive } from "./helpers.js";
 
 export interface RunGuardRunOptions {
   cwd?: string;
@@ -203,6 +205,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
+      // Fast-vs-economical ask (item 5), BEFORE the estimate — skipped internally
+      // when nothing changed or `TRUECOURSE_GENERATE_BATCH` is set; auto-approve /
+      // non-interactive keep the remembered/default mode without prompting.
+      onModeChoice: (defaultMode) => promptGenerateMode(defaultMode, autoApprove),
       onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } }),
       // Authoring failures surface live (item 2) — a warn line the moment each
       // attempt fails, above the checklist (the section never ticks the settle
@@ -282,6 +288,32 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.log.success(`Wrote ${guard.written.length} scenario file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
   p.outro("Review + commit the scenarios, then `truecourse guard run`.");
+}
+
+/**
+ * The fast-vs-economical prompt (item 5). Called by the driver BEFORE the estimate,
+ * only when there is work and no `TRUECOURSE_GENERATE_BATCH` override. Auto-approve
+ * (`-y` / agent) and non-interactive keep the remembered/default choice silently.
+ */
+async function promptGenerateMode(defaultMode: GenerateMode, autoApprove: boolean): Promise<GenerateMode> {
+  if (autoApprove || !isInteractive()) return defaultMode;
+  const choice = await p.select<GenerateMode>({
+    message: "Authoring speed vs. cost?",
+    initialValue: defaultMode,
+    options: [
+      {
+        value: "economical",
+        label: "Economical — batched (cheapest, slowest)",
+        hint: "one call per batch of claims",
+      },
+      {
+        value: "fast",
+        label: "Fast — one claim per call, parallel",
+        hint: "fastest, ~1.4× cost (re-pays the shared context per call)",
+      },
+    ],
+  });
+  return p.isCancel(choice) ? defaultMode : choice;
 }
 
 /**

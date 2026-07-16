@@ -1095,10 +1095,24 @@ export function undismissGuardClaim(
 // progress streams over `spec:progress` and completes with `spec:complete`
 // (`kind: guard-generate | guard-run`).
 
+/** The fast-vs-economical authoring dial (item 5): `economical` batches claims
+ *  (cheapest), `fast` authors one claim per call (fastest, ~1.4× cost). */
+export type GuardGenerateMode = 'fast' | 'economical';
+
+export interface GuardEstimateResult {
+  estimate: LlmEstimateData;
+  /** The effective mode this estimate is for — the modal pre-selects it. */
+  mode: GuardGenerateMode;
+  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the choice. */
+  canChooseMode: boolean;
+}
+
 /** The pre-flight guard-generate estimate. `stages: []` ⇒ nothing changed ⇒ the
- *  client skips the modal and triggers directly. */
-export function getGuardEstimate(repoId: string): Promise<{ estimate: LlmEstimateData }> {
-  return fetchApi<{ estimate: LlmEstimateData }>(`/api/repos/${repoId}/guard/estimate`);
+ *  client skips the modal and triggers directly. `mode` scopes the authoring
+ *  estimate; omitted ⇒ the remembered per-repo choice (economical default). */
+export function getGuardEstimate(repoId: string, mode?: GuardGenerateMode): Promise<GuardEstimateResult> {
+  const q = mode ? `?mode=${mode}` : '';
+  return fetchApi<GuardEstimateResult>(`/api/repos/${repoId}/guard/estimate${q}`);
 }
 
 export interface GuardGenerateTriggerResult {
@@ -1111,11 +1125,16 @@ export interface GuardGenerateTriggerResult {
 }
 
 /** Trigger `guard generate`. `confirmed` is the user's answer to the estimate modal
- *  (always true once the modal is confirmed, or when there were no stages). */
-export function triggerGuardGenerate(repoId: string, confirmed: boolean): Promise<GuardGenerateTriggerResult> {
+ *  (always true once the modal is confirmed, or when there were no stages); `mode`
+ *  is the chosen authoring dial (item 5), remembered per repo. */
+export function triggerGuardGenerate(
+  repoId: string,
+  confirmed: boolean,
+  mode?: GuardGenerateMode,
+): Promise<GuardGenerateTriggerResult> {
   return fetchApi<GuardGenerateTriggerResult>(`/api/repos/${repoId}/guard/generate`, {
     method: 'POST',
-    body: JSON.stringify({ confirmed }),
+    body: JSON.stringify({ confirmed, ...(mode ? { mode } : {}) }),
   });
 }
 

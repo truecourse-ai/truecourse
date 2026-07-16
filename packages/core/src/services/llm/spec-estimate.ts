@@ -54,10 +54,12 @@ import {
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
+  resolveGenerateBatch,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
@@ -384,11 +386,21 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * content isn't known until authoring + birth run — so it counts one review per
  * planned cli claim (the same range as authoring), honestly over-counting a claim
  * that authors several scenarios or none.
+ *
+ * `mode` is the speed/cost dial (item 5): economical batches claims per authoring
+ * call (fewer calls), fast authors one claim per call (more calls, each re-paying
+ * the shared document context). It changes ONLY the authoring stage's call count
+ * and per-call body; every other stage is identical. `TRUECOURSE_GENERATE_BATCH`
+ * overrides both modes to a fixed batch (see `resolveGenerateBatch`).
  */
-export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+export async function estimateGuardTokens(
+  repoRoot: string,
+  prices?: PriceTable,
+  mode: GenerateMode = 'economical',
+): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
-  const batchSize = defaultGenerateBatch();
+  const batchSize = resolveGenerateBatch(mode);
 
   // Extraction: one call per uncached view across the documents with changed
   // sections. The per-view extract cache makes this exact.

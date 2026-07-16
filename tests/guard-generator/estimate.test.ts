@@ -74,3 +74,56 @@ describe('estimateGuardTokens', () => {
     expect(est.totalEstimatedTokens).toBe(0)
   })
 })
+
+// A doc with several cli-claim sections so batched (economical) vs per-claim (fast)
+// authoring diverges.
+const MANY_SECTIONS = [
+  '## a',
+  '`relkit a` does A and exits 0.',
+  '',
+  '## b',
+  '`relkit b` does B and exits 0.',
+  '',
+  '## c',
+  '`relkit c` does C and exits 0.',
+  '',
+  '## d',
+  '`relkit d` does D and exits 0.',
+].join('\n')
+
+describe('estimateGuardTokens — fast vs economical (item 5)', () => {
+  const authorStage = (est: Awaited<ReturnType<typeof estimateGuardTokens>>) =>
+    est.stages!.find((s) => s.stage === 'guardAuthor')!
+
+  it('fast prices per-claim authoring calls; economical batches them (fewer calls, cheaper)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, MANY_SECTIONS)
+
+    const eco = await estimateGuardTokens(r, undefined, 'economical')
+    const fast = await estimateGuardTokens(r, undefined, 'fast')
+
+    // Same 4 changed sections, same subject — only the authoring dial differs.
+    expect(eco.subjectLabel).toBe('4 sections')
+    expect(fast.subjectLabel).toBe('4 sections')
+
+    // Fast authors one claim per call → strictly more calls than the batched dial.
+    expect(fast.stages!.length).toBe(eco.stages!.length)
+    expect(authorStage(fast).calls).toBeGreaterThan(authorStage(eco).calls)
+    expect(authorStage(fast).callsRange!.high).toBeGreaterThan(authorStage(eco).callsRange!.high)
+    // More calls, each re-paying the shared document context → more total tokens.
+    expect(fast.totalEstimatedTokens).toBeGreaterThan(eco.totalEstimatedTokens)
+  })
+
+  it('defaults to economical when no mode is passed', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, MANY_SECTIONS)
+
+    const dflt = await estimateGuardTokens(r)
+    const eco = await estimateGuardTokens(r, undefined, 'economical')
+    expect(authorStage(dflt).calls).toBe(authorStage(eco).calls)
+  })
+})

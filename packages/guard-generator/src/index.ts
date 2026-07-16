@@ -10,10 +10,13 @@
 export {
   generateGuards,
   defaultGenerateBatch,
+  resolveGenerateBatch,
+  generateBatchOverride,
   retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
+  type GenerateMode,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type GeneratedScenarioInfo,

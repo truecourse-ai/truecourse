@@ -148,7 +148,7 @@ line.
 
 ## 5. Fast-vs-economical generate: ask first, estimate for the chosen mode
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** SPEC_GUARD_PLAN stage-4 sub-bullet, measured 2026-07-06 but never scheduled:
 authoring batch size is a speed-vs-cost dial (same 4 claims — 1 call × 4 claims = 388s /

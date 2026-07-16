@@ -293,15 +293,43 @@ function defaultConcurrency(): number {
   return Math.min(os.cpus().length, 4)
 }
 
-export function defaultGenerateBatch(): number {
+/**
+ * The speed-vs-cost dial for scenario authoring (item 5). `economical` batches
+ * claims into one call (fewest calls, cheapest, slowest); `fast` authors one claim
+ * per call (parallel, re-paying the shared document context per call — fastest,
+ * ~1.4× cost). Only authoring (the one stage where independent claims share a call)
+ * has a batch to dial.
+ */
+export type GenerateMode = 'fast' | 'economical'
+
+// Scenario authoring is output-heavy (full YAML bodies per claim) — larger batches
+// blow the per-call output budget and time out; 4 stays well inside it.
+const ECONOMICAL_BATCH = 4
+
+/** The raw `TRUECOURSE_GENERATE_BATCH` override (a batch size ≥ 1), or null when
+ *  unset/invalid. When set it wins for both modes AND skips the mode ask (item 5). */
+export function generateBatchOverride(): number | null {
   const env = process.env.TRUECOURSE_GENERATE_BATCH
   if (env) {
     const n = parseInt(env, 10)
     if (Number.isFinite(n) && n >= 1) return n
   }
-  // Scenario authoring is output-heavy (full YAML bodies per claim) — larger
-  // batches blow the per-call output budget and time out; 4 stays well inside it.
-  return 4
+  return null
+}
+
+/**
+ * Claims per authoring call for the chosen mode. `TRUECOURSE_GENERATE_BATCH` is the
+ * raw override and wins for BOTH modes; otherwise `fast` is one claim per call and
+ * `economical` batches. The estimate and the pipeline both resolve the batch here,
+ * so they can never drift.
+ */
+export function resolveGenerateBatch(mode: GenerateMode): number {
+  return generateBatchOverride() ?? (mode === 'fast' ? 1 : ECONOMICAL_BATCH)
+}
+
+/** The default (economical) claims-per-authoring-call, honoring the env override. */
+export function defaultGenerateBatch(): number {
+  return resolveGenerateBatch('economical')
 }
 
 /** Per-claim authoring cache key: it moves when the claim, its section, the
