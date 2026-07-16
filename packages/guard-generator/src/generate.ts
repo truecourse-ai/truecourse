@@ -46,6 +46,7 @@ import {
   type GuardNoOpAnomaly,
 } from '@truecourse/guard-runner'
 import {
+  DEFAULT_INPUT_NAME,
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
   dismissedClaimKey,
@@ -113,6 +114,7 @@ import {
   deleteScenarioFiles,
   existingScenarioIds,
 } from './serialize.js'
+import { seedInvariantPack } from './invariant.js'
 
 export const GENERATE_CACHE_NAME = 'guard/generate'
 export const FIDELITY_CACHE_NAME = 'guard/fidelity'
@@ -569,7 +571,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
       }
       classificationByKey.set(key(s), deriveClassification(cli, others, note))
-      for (const c of cli) authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c })
+      for (const c of cli) {
+        // An invariant claim (item 8) seeds its input-corpus pack NOW — before birth,
+        // which sweeps the rule over it — from the section's example blocks. The
+        // seeded pack id rides on the task so the built scenario binds to it.
+        const pack = c.flavor === 'invariant' ? seedInvariantPack(repoRoot, s, c) ?? undefined : undefined
+        authTasks.push({ ref: `c${refSeq++}`, section: s, claim: c, ...(pack ? { pack } : {}) })
+      }
     }
   }
 
@@ -819,7 +827,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         continue
       }
       for (const rawS of scs) {
-        const built = safeBuild(section, rawS, usedIds, localErrors, t.claim.claim)
+        const built = safeBuild(section, rawS, usedIds, localErrors, t.claim.claim, t.pack)
         if (built) {
           const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
           round1.push(cand)
@@ -903,7 +911,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 try {
                   const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims, options.onAuthorFailure)
                   for (const rawS of retryScs) {
-                    const built = safeBuild(section, rawS, usedIds, localErrors, entry.task.claim.claim)
+                    const built = safeBuild(section, rawS, usedIds, localErrors, entry.task.claim.claim, entry.task.pack)
                     if (built) retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
                   }
                 } finally {
@@ -1170,6 +1178,10 @@ interface AuthTask {
   ref: string
   section: SectionInput
   claim: ExtractedClaim
+  /** For an invariant claim whose input pack was seeded (item 8): the pack id, stamped
+   *  onto the built scenario's `inputs`. Absent for a normal/example claim, or an
+   *  invariant claim with no seed blocks (it then authors as a single-input scenario). */
+  pack?: string
 }
 
 const key = (s: { doc: string; anchor: string }): string => `${s.doc}\0${s.anchor}`
@@ -1268,9 +1280,17 @@ function exampleOf(claim: ExtractedClaim): Pick<AuthorClaim, 'example'> {
   return claim.flavor === 'example' && claim.example ? { example: claim.example } : {}
 }
 
+/** The invariant payload to thread to authoring, present only for an invariant claim
+ *  (extraction `flavor: 'invariant'`) whose pack was seeded — the sample inputs let
+ *  the model shape the property assertion over the corpus (item 8). */
+function invariantOf(task: AuthTask): Pick<AuthorClaim, 'invariant'> {
+  if (task.claim.flavor !== 'invariant' || !task.pack) return {}
+  return { invariant: { pack: task.pack, samples: task.claim.examples ?? [] } }
+}
+
 /** Author context for a batch of AuthTasks (round 1). */
 function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
-  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim) }))
+  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim), ...invariantOf(t) }))
   return buildAuthorCtxFor(gd, claims, recipe, probes)
 }
 
@@ -1434,17 +1454,21 @@ function normalizeBlockedOn(names: string[]): string[] {
 }
 
 /** Build a scenario, recording a validation failure as an error rather than throwing.
- *  `claim` is the extracted claim text persisted onto the committed scenario. */
+ *  `claim` is the extracted claim text persisted onto the committed scenario. `pack`
+ *  (item 8) is the seeded invariant pack id — when present, the built scenario binds
+ *  its `inputs` to that pack, with the staged name the model authored (`inputs.as`). */
 function safeBuild(
   section: SectionInput,
   raw: RawGeneratedScenario,
   usedIds: Set<string>,
   errors: GuardGenerateError[],
   claim: string,
+  pack?: string,
 ): GuardScenario | null {
   const id = assignScenarioId(section.anchor, usedIds)
   try {
-    return buildScenario(section, raw, id, claim)
+    const inputs = pack ? { pack, as: raw.inputs?.as ?? DEFAULT_INPUT_NAME } : undefined
+    return buildScenario(section, raw, id, claim, inputs)
   } catch (e) {
     usedIds.delete(id)
     errors.push({ doc: section.doc, anchor: section.anchor, message: `invalid generated scenario: ${(e as Error).message}` })
@@ -1653,6 +1677,7 @@ async function authorRetry(
     claim: entry.task.claim.claim,
     section,
     ...exampleOf(entry.task.claim),
+    ...invariantOf(entry.task),
     retry: {
       scenarioTitle: entry.evidence.title,
       step: entry.evidence.step,

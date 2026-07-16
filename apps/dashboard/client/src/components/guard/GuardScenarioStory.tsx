@@ -34,6 +34,17 @@ export function GuardScenarioStory({
         </div>
       )}
 
+      {story.inputs && (
+        <div>
+          <div className={LABEL}>For every file in</div>
+          <div className="break-all text-[12px] text-foreground">
+            pack <span className="font-mono">{story.inputs.pack}</span>
+            <span className="text-muted-foreground"> · staged as </span>
+            <span className="font-mono">{story.inputs.as}</span>
+          </div>
+        </div>
+      )}
+
       {story.setupFiles.length > 0 && (
         <div>
           <div className={LABEL}>Setup</div>
@@ -52,6 +63,11 @@ export function GuardScenarioStory({
           {step.stdin !== undefined && (
             <div className="mt-1 text-[11px] text-muted-foreground">
               stdin: <span className="font-mono text-foreground">{step.stdin || '(empty)'}</span>
+            </div>
+          )}
+          {step.stdinFromStep !== undefined && (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              stdin: <span className="text-foreground">output of step {step.stdinFromStep}</span>
             </div>
           )}
           {step.repeat !== undefined && (

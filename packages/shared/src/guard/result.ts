@@ -66,6 +66,13 @@ export const GuardFailureDetailSchema = z
     expected: z.string(),
     actual: z.string(),
     /**
+     * The corpus file that broke the rule, on an invariant scenario (`inputs.pack`):
+     * the pack-relative name of the staged input the failing sweep iteration ran —
+     * that file IS the repro. Absent on an ordinary (single-input) scenario failure.
+     * Optional so pre-item-8 snapshots keep parsing; NO format-version bump.
+     */
+    input: z.string().optional(),
+    /**
      * The failing step's RAW program output (see {@link OutputExcerptsSchema}),
      * attached on EVERY expect-mismatch so the retry/finding sees the usage error
      * the program actually printed. Optional so pre-change snapshots keep parsing,

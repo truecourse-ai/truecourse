@@ -90,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: example mining (a fenced block + a stated outcome becomes an
-    // `example`-flavor claim carrying the block verbatim) moved this from
-    // 55c0ace88c3f3a5a. It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('13fc530f43b85b75')
+    // Pinned literal: invariant mining (item 8 — a universal always/never/idempotent
+    // rule becomes an `invariant`-flavor claim carrying the section's example blocks)
+    // moved this from 13fc530f43b85b75. It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('4f1fa6e53abe4e1f')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.

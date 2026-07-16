@@ -10,7 +10,7 @@
  * guard-runner in.
  */
 
-import type { GuardScenario, GuardExpect, GuardSetup, GuardStreamMatcher, GuardFileMatcher } from './scenario.js'
+import { DEFAULT_INPUT_NAME, type GuardScenario, type GuardStep, type GuardExpect, type GuardSetup, type GuardInputs, type GuardStreamMatcher, type GuardFileMatcher } from './scenario.js'
 
 /** One step of a scenario, rendered to words. */
 export interface ScenarioStepStory {
@@ -20,16 +20,28 @@ export interface ScenarioStepStory {
   command: string
   /** Data piped to stdin, when the step declares it. */
   stdin?: string
+  /** The earlier step whose stdout feeds this step's stdin (step-chaining), when set. */
+  stdinFromStep?: number
   /** Repeat count when the step runs more than once. */
   repeat?: number
-  /** Each `expect` matcher as a plain sentence, in evaluation order. */
+  /** Each `expect` matcher — plus any property form (`stableOnRerun`) — as a plain
+   *  sentence, in evaluation order. */
   expectations: string[]
+}
+
+/** The input-corpus binding, rendered to words — "for every file in pack X …". */
+export interface ScenarioInputsStory {
+  pack: string
+  /** The stable sandbox path each corpus file is staged to (default resolved). */
+  as: string
 }
 
 /** A whole scenario, rendered to the words a reviewer reads. */
 export interface ScenarioStory {
   /** The doc's promise this scenario defends — absent on a pre-claim scenario. */
   claim?: string
+  /** The input-corpus binding — present only on an invariant scenario (`inputs`). */
+  inputs?: ScenarioInputsStory
   /** Sandbox-relative paths `setup.files` seeds before the run. */
   setupFiles: string[]
   /** The steps, each rendered to its argv + expectations. */
@@ -79,6 +91,26 @@ export function describeExpect(expect: GuardExpect): string[] {
   return lines
 }
 
+/**
+ * The property forms of a step (`stableOnRerun`) as plain sentences, appended after
+ * its `expect` matchers so the story reads the whole assertion top to bottom. The
+ * step-chaining wiring (`stdinFromStep`) is rendered separately as a run note, not
+ * an expectation.
+ */
+export function describeStepProperties(step: GuardStep): string[] {
+  const lines: string[] = []
+  if (step.stableOnRerun) {
+    lines.push('running the step again yields identical output (deterministic / idempotent)')
+  }
+  return lines
+}
+
+/** The input-corpus binding as a story, resolving the default staged name. */
+export function describeInputs(inputs: GuardInputs | undefined): ScenarioInputsStory | undefined {
+  if (!inputs) return undefined
+  return { pack: inputs.pack, as: inputs.as ?? DEFAULT_INPUT_NAME }
+}
+
 /** The seeded-file list a `setup` block declares (empty when it seeds none). */
 export function describeSetupFiles(setup: GuardSetup | undefined): string[] {
   return setup?.files ? Object.keys(setup.files) : []
@@ -90,17 +122,22 @@ export function describeRun(run: string[]): string {
   return run.map((arg) => (/\s/.test(arg) ? quoted(arg) : arg)).join(' ')
 }
 
-/** The whole scenario as a {@link ScenarioStory} — claim + seeded files + per-step words. */
+/** The whole scenario as a {@link ScenarioStory} — claim + optional input pack +
+ *  seeded files + per-step words. An inputs-bearing scenario reads "for every file
+ *  in pack X: <the steps>", with each property form folded into its step. */
 export function describeScenario(scenario: GuardScenario): ScenarioStory {
+  const inputs = describeInputs(scenario.inputs)
   return {
     ...(scenario.claim ? { claim: scenario.claim } : {}),
+    ...(inputs ? { inputs } : {}),
     setupFiles: describeSetupFiles(scenario.setup),
     steps: scenario.steps.map((step) => ({
       run: step.run,
       command: describeRun(step.run),
       ...(step.stdin !== undefined ? { stdin: step.stdin } : {}),
+      ...(step.stdinFromStep !== undefined ? { stdinFromStep: step.stdinFromStep } : {}),
       ...(step.repeat !== undefined && step.repeat > 1 ? { repeat: step.repeat } : {}),
-      expectations: describeExpect(step.expect),
+      expectations: [...describeExpect(step.expect), ...describeStepProperties(step)],
     })),
   }
 }

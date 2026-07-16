@@ -116,6 +116,66 @@ switch (command) {
     break
   }
 
+  case 'fmt': {
+    // Read a JSON file (arg) or stdin, print it canonically (2-space indent) to
+    // stdout. Deterministic and idempotent: canonical JSON is a fixed point, so
+    // fmt(fmt(x)) === fmt(x). Invalid JSON exits 5 (used for the "re-parses clean"
+    // step-chaining property).
+    const source = args[0] ? fs.readFileSync(path.resolve(cwd, args[0]), 'utf-8') : await readStdin()
+    let obj
+    try {
+      obj = JSON.parse(source)
+    } catch {
+      process.stderr.write('error: input is not valid JSON\n')
+      process.exit(5)
+    }
+    process.stdout.write(`${JSON.stringify(obj, null, 2)}\n`)
+    break
+  }
+
+  case 'normalize': {
+    // Rewrite a JSON file IN PLACE in canonical form. Idempotent: a second run over
+    // already-canonical content produces byte-identical output (the invariant
+    // "formatting is idempotent" / "fix never breaks your code" is checked over a
+    // corpus with stableOnRerun).
+    const file = path.resolve(cwd, args[0] ?? 'input')
+    let obj
+    try {
+      obj = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    } catch {
+      process.stderr.write('error: input is not valid JSON\n')
+      process.exit(5)
+    }
+    fs.writeFileSync(file, `${JSON.stringify(obj, null, 2)}\n`)
+    process.stdout.write(`normalized ${args[0] ?? 'input'}\n`)
+    break
+  }
+
+  case 'parse': {
+    // Validate JSON from a file arg or stdin; exit 0 (valid) or 5 (invalid). The
+    // parse side of the "fmt output re-parses clean" step-chain.
+    const source = args[0] ? fs.readFileSync(path.resolve(cwd, args[0]), 'utf-8') : await readStdin()
+    try {
+      JSON.parse(source)
+    } catch {
+      process.stderr.write('error: not valid JSON\n')
+      process.exit(5)
+    }
+    process.stdout.write('valid\n')
+    break
+  }
+
+  case 'bump': {
+    // A deliberately NON-idempotent in-place edit: append a line every run, so the
+    // file differs after a second run (exercises the stableOnRerun file-idempotence
+    // failure path — a "fix" that keeps changing already-fixed input).
+    const file = path.resolve(cwd, args[0] ?? 'input')
+    const prior = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : ''
+    fs.writeFileSync(file, `${prior}bumped\n`)
+    process.stdout.write('bumped\n')
+    break
+  }
+
   case 'run-child': {
     // Spawn a child binary resolved via PATH and echo its stdout — proves a
     // scenario's setup.env.PATH override reaches CHILD processes (stub injection)

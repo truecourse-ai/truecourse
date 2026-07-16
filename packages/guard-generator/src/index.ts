@@ -44,6 +44,8 @@ export {
   suppressionKey,
 } from './suppression.js'
 
+export { seedInvariantPack, invariantPackId } from './invariant.js'
+
 export {
   extractDocClaims,
   docExtractionCached,
