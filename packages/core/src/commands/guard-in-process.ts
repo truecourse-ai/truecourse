@@ -127,7 +127,8 @@ export const GUARD_GENERATE_STEPS = [
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
+ * `extract`, round-1 authoring plus support-claim exemplar generation (stage
+ * `guard.exemplars`, item 9) ride `author` (stage `guard.generate`). Birth
  * EXECUTION is deterministic sandbox work, but the one evidence-retry per
  * birth-failed claim is a full re-author (stage `guard.retry`), every green
  * candidate's fidelity review (stage `guard.fidelity`), AND the post-settle
@@ -137,7 +138,7 @@ export const GUARD_GENERATE_STEPS = [
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
-  author: ['guard.generate'],
+  author: ['guard.generate', 'guard.exemplars'],
   validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
 };
 
@@ -219,6 +220,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
     triage: resolveModel('guard.triage', undefined, repoRoot),
+    exemplars: resolveModel('guard.exemplars', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -512,7 +514,7 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity', 'guard.triage'] as const;
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.exemplars', 'guard.retry', 'guard.fidelity', 'guard.triage'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`

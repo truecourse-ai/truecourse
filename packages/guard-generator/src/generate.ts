@@ -93,13 +93,16 @@ import {
   spawnRecipeRunner,
   spawnFidelityRunner,
   spawnTriageRunner,
+  spawnExemplarRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
   type TriageRunner,
+  type ExemplarRunner,
 } from './runners.js'
 import { runTriage } from './triage.js'
+import { seedSupportPack, defaultSupportPackSize } from './exemplars.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
@@ -235,6 +238,9 @@ export interface GuardGenerateModels {
   fidelity?: string
   /** Finding triage (stage `guard.triage`) — the top-tier post-settle judgment pass. */
   triage?: string
+  /** Support-claim exemplar generation (stage `guard.exemplars`) — the diversity pack
+   *  generator (item 9), a generation stage on the sonnet tier. */
+  exemplars?: string
   recipe?: string
   fallback?: string
 }
@@ -253,12 +259,18 @@ export interface GenerateGuardsOptions {
   concurrency?: number
   /** Claims per authoring call — `TRUECOURSE_GENERATE_BATCH` env, else 4. */
   batchSize?: number
+  /** Exemplars a support claim's generated pack holds (item 9) —
+   *  `TRUECOURSE_SUPPORT_PACK_SIZE` env, else 40. */
+  supportPackSize?: number
   // --- test seams (production injects none) ---
   extractRunner?: ExtractRunner
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
   fidelityRunner?: FidelityRunner
   triageRunner?: TriageRunner
+  /** Support-claim exemplar-pack generator (item 9). Injected in tests; production
+   *  spawns it from the transport when one is available (like fidelity/triage). */
+  exemplarRunner?: ExemplarRunner
   /** Forwarded to birth validation — the no-op step threshold (a test seam). */
   noOpThresholdMs?: number
   // --- progress hooks ---
@@ -458,6 +470,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           fallbackModel: options.models?.fallback,
         })
       : undefined)
+  // The exemplar generator (item 9) writes a support claim's diverse input pack. Like
+  // fidelity/triage it needs an LLM: production always supplies a transport, so a
+  // support claim always gets its pack; a caller with NEITHER a transport NOR an
+  // `exemplarRunner` (unit tests with no support claims) simply generates no packs —
+  // any support claim then errors (its section unsettles, re-attempted next run).
+  const exemplarRunner: ExemplarRunner | undefined =
+    options.exemplarRunner ??
+    (options.transport
+      ? spawnExemplarRunner({
+          transport: options.transport,
+          model: options.models?.exemplars,
+          fallbackModel: options.models?.fallback,
+        })
+      : undefined)
+  const supportPackSize = Math.max(1, options.supportPackSize ?? defaultSupportPackSize())
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1016,6 +1043,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
+  // Support-claim exemplar packs (item 9): each support claim generates a diverse
+  // input pack via ONE cached LLM call. Seeded HERE — before any birth sweeps the
+  // pack — so the built scenario binds to a pack that exists on disk; the generated
+  // exemplars are content-cached on the claim, so a re-generate re-materializes the
+  // same pack with no second call. A claim whose generation can't complete (no
+  // runner, thrown, or still-invalid after one re-ask) is recorded failed; its
+  // section then errors in the author loop below and unsettles (re-attempted next
+  // run) — never authoring a pack-less support scenario.
+  const supportSeedFailed = new Set<string>()
+  const supportTasks = authTasks.filter((t) => t.claim.flavor === 'support')
+  if (supportTasks.length > 0) {
+    await Promise.all(
+      supportTasks.map((t) =>
+        limit(async () => {
+          const pack = exemplarRunner
+            ? await seedSupportPack(repoRoot, t.section, t.claim, exemplarRunner, supportPackSize)
+            : null
+          if (pack) t.pack = pack
+          else supportSeedFailed.add(t.ref)
+        }),
+      ),
+    )
+  }
+
   // Author progress.
   const authorTotal = authTasks.length
   let authorDone = 0
@@ -1029,6 +1080,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // section can settle without waiting on the LLM), only misses are sent.
   const missTasks: AuthTask[] = []
   for (const t of authTasks) {
+    // A support claim whose exemplar pack could not be generated (item 9) never
+    // authors — its section errors and unsettles for a clean re-attempt.
+    if (supportSeedFailed.has(t.ref)) {
+      errors.push({ doc: t.section.doc, anchor: t.section.anchor, message: `support-claim exemplar generation failed for "${oneLine(t.claim.claim)}"` })
+      resolveClaim(t, true)
+      continue
+    }
     const cached = await readAuthorCache(repoRoot, t.claim, t.section, recipeFingerprint)
     if (cached) {
       rawByRef.set(t.ref, cached.scenarios)
@@ -1178,9 +1236,11 @@ interface AuthTask {
   ref: string
   section: SectionInput
   claim: ExtractedClaim
-  /** For an invariant claim whose input pack was seeded (item 8): the pack id, stamped
-   *  onto the built scenario's `inputs`. Absent for a normal/example claim, or an
-   *  invariant claim with no seed blocks (it then authors as a single-input scenario). */
+  /** The input-corpus pack id stamped onto the built scenario's `inputs`, for a claim
+   *  the engine seeds a pack for: an invariant claim's seeded pack (item 8) or a
+   *  support claim's GENERATED exemplar pack (item 9, set by the async seeding phase).
+   *  Absent for a normal/example claim, or an invariant claim with no seed blocks (it
+   *  then authors as a single-input scenario). */
   pack?: string
 }
 
@@ -1288,9 +1348,19 @@ function invariantOf(task: AuthTask): Pick<AuthorClaim, 'invariant'> {
   return { invariant: { pack: task.pack, samples: task.claim.examples ?? [] } }
 }
 
+/** The support payload to thread to authoring, present only for a support claim
+ *  (extraction `flavor: 'support'`) — the subject + class + optional extension tell
+ *  the model to author ONE rule over the engine-generated exemplar corpus (item 9).
+ *  The pack itself is engine-seeded; the model never authors it. */
+function supportOf(task: AuthTask): Pick<AuthorClaim, 'support'> {
+  if (task.claim.flavor !== 'support' || !task.claim.support) return {}
+  const s = task.claim.support
+  return { support: { kind: s.kind, subject: s.subject, ...(s.extension ? { extension: s.extension } : {}) } }
+}
+
 /** Author context for a batch of AuthTasks (round 1). */
 function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
-  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim), ...invariantOf(t) }))
+  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim), ...invariantOf(t), ...supportOf(t) }))
   return buildAuthorCtxFor(gd, claims, recipe, probes)
 }
 
@@ -1678,6 +1748,7 @@ async function authorRetry(
     section,
     ...exampleOf(entry.task.claim),
     ...invariantOf(entry.task),
+    ...supportOf(entry.task),
     retry: {
       scenarioTitle: entry.evidence.title,
       step: entry.evidence.step,

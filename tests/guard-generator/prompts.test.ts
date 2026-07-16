@@ -90,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: invariant mining (item 8 — a universal always/never/idempotent
-    // rule becomes an `invariant`-flavor claim carrying the section's example blocks)
-    // moved this from 13fc530f43b85b75. It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('4f1fa6e53abe4e1f')
+    // Pinned literal: support mining (item 9 — a quantified "supports/handles X"
+    // promise becomes a `support`-flavor claim carrying the class + subject) moved
+    // this from 4f1fa6e53abe4e1f. It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('5f3a52a95d5e2767')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -135,6 +135,30 @@ describe('guard-generator prompts', () => {
     // The block is copied byte-for-byte, never reformatted.
     expect(EXTRACT_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(EXTRACT_SYSTEM_PROMPT).toContain('re-indented')
+  })
+
+  // Support mining (item 9) — a quantified "supports X" promise becomes a `support` claim.
+  it('EXTRACT_SYSTEM_PROMPT recognizes quantified support claims, with a positive and a negative example', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('# Support claims — a "supports X" promise tested over a GENERATED corpus')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"flavor": "support"')
+    // The closed class enum + the subject payload.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"kind": "language" | "dialect" | "format" | "syntax"')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"subject"')
+    // The deciding line: quantification over a class, not a mention.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('QUANTIFICATION over a class')
+    // One positive and one negative worked example (a mere mention is NOT a support claim).
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('POSITIVE — emit a support claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('NEGATIVE — do NOT emit a support claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('MENTIONS dialects without promising')
+  })
+
+  it('GENERATE_SYSTEM_PROMPT rules a support claim runs the documented operation over a generated corpus', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Support claims — ONE operation, run over a GENERATED corpus')
+    // The shared boring expectation, authored from what the section promises.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('BORING PASS')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('unparsable')
+    // One rule scenario; the engine stages the corpus, the model never seeds it.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Return exactly ONE scenario for a support claim')
   })
 
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).

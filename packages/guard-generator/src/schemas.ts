@@ -64,6 +64,22 @@ export const ExampleBlockSchema = z.object({
 export type ExampleBlock = z.infer<typeof ExampleBlockSchema>
 
 /**
+ * A quantified SUPPORT claim's subject (item 9): the doc says the tool supports /
+ * is compatible with / handles a whole class of inputs — "supports the Postgres
+ * dialect", "handles JSON5", "compatible with PEP 604 syntax". Such a claim
+ * promises thousands of inputs the doc never enumerates, so the engine GENERATES a
+ * diverse exemplar pack for `subject` and runs the documented operation over it.
+ * `kind` is the class of thing supported; `extension` is the sandbox filename
+ * extension the tool dispatches on (e.g. `sql`, `py`), when the section names one.
+ */
+export const SupportSubjectSchema = z.object({
+  kind: z.enum(['language', 'dialect', 'format', 'syntax']),
+  subject: z.string().min(1),
+  extension: z.string().min(1).optional(),
+})
+export type SupportSubject = z.infer<typeof SupportSubjectSchema>
+
+/**
  * One testable claim the model read out of a document: a single externally-
  * observable behavior, the driver that could assert it, the section it belongs to
  * (an anchor the engine snaps against the live index), and the observable a test
@@ -77,6 +93,11 @@ export type ExampleBlock = z.infer<typeof ExampleBlockSchema>
  *    can't be tested by one hand-picked input, so it authors a PROPERTY scenario run
  *    over MANY inputs; `examples` carries the section's own example blocks (item 7's
  *    payloads), copied verbatim, that seed the input corpus pack round 1.
+ *  - `support` — a quantified "supports/handles/compatible-with <class> X" claim
+ *    (item 9). X promises thousands of inputs the doc never lists, so the engine
+ *    GENERATES a diverse exemplar pack for `support` and runs the documented
+ *    operation over it — one property scenario, like `invariant`, but pack-generated
+ *    rather than seeded. A mere MENTION of X is not a support claim.
  * All are optional so a pre-flavor cache parses as a normal claim (item-7 back-compat).
  */
 export const ExtractedClaimSchema = z.object({
@@ -84,12 +105,16 @@ export const ExtractedClaimSchema = z.object({
   driver: z.enum(CLAIM_DRIVERS),
   sectionAnchor: z.string().min(1),
   reason: z.string().min(1),
-  flavor: z.enum(['normal', 'example', 'invariant']).optional(),
+  flavor: z.enum(['normal', 'example', 'invariant', 'support']).optional(),
   example: ExampleBlockSchema.optional(),
   /** Present only for an `invariant` claim: the section's example blocks (verbatim)
    *  that seed the input corpus pack. Absent/empty ⇒ the pack seeds from repo
    *  fixtures alone (or, until item 9's generated exemplars, may be empty). */
   examples: z.array(ExampleBlockSchema).optional(),
+  /** Present only for a `support` claim (item 9): the class + named subject X the
+   *  exemplar generator writes diverse inputs for. Absent ⇒ the claim can't generate
+   *  a pack and authors as an ordinary claim (back-compat with pre-support caches). */
+  support: SupportSubjectSchema.optional(),
 })
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>
 

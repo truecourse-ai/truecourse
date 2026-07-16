@@ -46,6 +46,7 @@ export type StageId =
   | 'guard.retry'
   | 'guard.fidelity'
   | 'guard.triage'
+  | 'guard.exemplars'
   | 'guard.recipe'
   | 'rules.violationGen';
 
@@ -98,6 +99,14 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // call whose verdict a human acts on — deliberately top-tier like the overlap
   // verify pass; the finding count keeps the spend small.
   'guard.triage': 'opus',
+  // Support-claim exemplar packs (item 9): write N diverse inputs in a supported
+  // language/dialect/format to test a "supports X" promise over many inputs. This is
+  // a GENERATION stage (breadth of valid inputs), NOT a judgment call — the boring
+  // pass/fail is decided deterministically by the runner over the pack — so it sits
+  // at the cheaper generation tier. Sonnet, not opus: diversity over a well-specified
+  // grammar is exactly what sonnet does well, and the pack is birth-validated before
+  // it commits, so a weak exemplar is caught, not trusted.
+  'guard.exemplars': 'sonnet',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   'rules.violationGen': 'opus',

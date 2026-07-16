@@ -28,6 +28,7 @@ import {
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
   type ExampleBlock,
+  type SupportSubject,
 } from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
@@ -163,6 +164,32 @@ declarative sentence stating the rule; the "driver" is the kind of test that ass
 Reserve "invariant" for a genuine universal rule — a one-off behavior is a "normal" (or
 "example") claim, not an invariant.
 
+# Support claims — a "supports X" promise tested over a GENERATED corpus
+Some documented behaviors are QUANTIFIED SUPPORT promises: the prose says the tool
+SUPPORTS, HANDLES, ACCEPTS, PARSES, or is COMPATIBLE WITH a whole CLASS of input named
+by a language, dialect, format, or syntax — "supports the Postgres dialect", "handles
+JSON5", "parses any valid YAML 1.2 document", "compatible with PEP 604 union syntax".
+Such a promise covers thousands of inputs the doc never lists, so mark it
+"flavor": "support" and carry a "support" object naming the class:
+  { "kind": "language" | "dialect" | "format" | "syntax",
+    "subject": "<the named class X, e.g. \\"the Postgres SQL dialect\\">",
+    "extension": "<the file extension the tool dispatches on, e.g. \\"sql\\"; omit if none>" }
+The engine then GENERATES a diverse corpus of X inputs and runs the tool's documented
+operation over all of them. The "claim" is still one declarative sentence stating the
+support promise; the "driver" is the kind of test that asserts it (usually "cli").
+The deciding line is QUANTIFICATION over a class — the promise is that a WHOLE FAMILY of
+inputs works, not that one specific input does.
+  POSITIVE — emit a support claim. Prose: "sqlfluff supports the Postgres, BigQuery, and
+    Snowflake dialects." ⇒ one support claim per dialect (or one naming the dialect the
+    section is about), "flavor":"support", "support":{ "kind":"dialect",
+    "subject":"the Postgres SQL dialect", "extension":"sql" }.
+  NEGATIVE — do NOT emit a support claim. Prose: "The --dialect flag selects the SQL
+    dialect; see the dialect reference." merely MENTIONS dialects without promising a
+    class of inputs works ⇒ this is a "normal" claim about the flag (or nothing), NOT a
+    support claim. A passing MENTION of a format/language is not a "supports X" promise.
+Reserve "support" for a genuine quantified support promise; a single documented example
+is an "example" claim and a one-off behavior is a "normal" claim.
+
 # Sandbox limits — commands that need an LLM provider are not cli-testable
 Guard runs each command in a sealed sandbox with NO credentials and NO network. A
 command whose documented behavior requires an authenticated LLM provider or an
@@ -206,7 +233,8 @@ Concretely:
 Omit "flavor"/"example" for a normal prose claim; set "flavor":"example" and the
 "example" object ONLY for a worked-example block whose prose states an outcome; set
 "flavor":"invariant" and the "examples" array (verbatim input blocks from the section)
-for a universal always/never/idempotent/deterministic rule.`
+for a universal always/never/idempotent/deterministic rule; set "flavor":"support" and
+the "support" object for a quantified "supports/handles/parses <class> X" promise.`
 
 export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
 
@@ -354,6 +382,25 @@ seeds the corpus; you author only the rule.
 - Return exactly ONE scenario for an invariant claim (the rule). It rides the same
   schema; only \`inputs.as\` + the property forms are invariant-specific.
 
+# Support claims — ONE operation, run over a GENERATED corpus
+Some claims arrive marked SUPPORT (the doc promises the tool supports / handles / is
+compatible with a whole CLASS of input — "supports the Postgres dialect", "handles
+JSON5", "compatible with PEP 604 syntax"). The class promises thousands of inputs, so
+the engine GENERATES a diverse corpus of valid inputs in that class and runs your
+steps ONCE PER FILE, staging each at a stable name — exactly like an invariant claim.
+You author ONE scenario: run the DOCUMENTED OPERATION over the staged input and assert
+the BORING PASS the section promises for supported input — it PARSES / LINTS / FORMATS
+CLEAN, exits 0, and its output contains no failure marker (e.g. no \`unparsable\`,
+no \`error\`). Read the section to pick the operation + the pass signal; the corpus is
+all VALID input, so a supported class means every file passes.
+- The staged input name is \`input\` by default. Set \`inputs.as\` (e.g. "input.sql")
+  when the tool dispatches on file extension, and reference THAT path in your \`run\`
+  argv. Do NOT seed the input via \`setup.files\` — the engine stages each corpus file.
+- Assert the RULE (every input is accepted), never one input's exact output: use the
+  exit code and structural \`contains\`/\`matches\`, never \`equals\` on a whole line.
+- Return exactly ONE scenario for a support claim (the rule). It rides the same schema;
+  only \`inputs.as\` is support-specific.
+
 # Titles — the doc's promise, never the expected output
 Each scenario \`title\` states, in plain words, the BEHAVIORAL PROMISE the doc makes —
 what the tool does — so a reviewer reads it as doc-vs-code without decoding the
@@ -453,6 +500,12 @@ export interface AuthorClaim {
    *  whole corpus satisfies. Its presence tells the model to author ONE rule over
    *  many staged inputs (item 8). */
   invariant?: { pack: string; samples: ExampleBlock[] }
+  /** Present ONLY for a support claim (extraction `flavor: 'support'`): the class +
+   *  named subject X the engine generated an exemplar pack for, and the file
+   *  extension the tool dispatches on (when the section names one). Its presence
+   *  tells the model to author ONE rule that runs the documented operation over the
+   *  engine-generated corpus with the boring pass expectation (item 9). */
+  support?: { kind: SupportSubject['kind']; subject: string; extension?: string }
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
 }
@@ -557,6 +610,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       if (c.invariant.samples.length > 3) {
         lines.push(`(…and ${c.invariant.samples.length - 3} more input(s) in the corpus)`)
       }
+    }
+    if (c.support) {
+      const staged = c.support.extension ? `input.${c.support.extension.replace(/^\./, '')}` : 'input'
+      lines.push(
+        `SUPPORT — the doc promises this tool handles the ${c.support.kind} "${c.support.subject}".`,
+        `Author ONE scenario (the RULE). The engine generated a DIVERSE corpus of valid`,
+        `${c.support.subject} inputs and runs your steps once per file, staging each at "${staged}"`,
+        c.support.extension
+          ? `— set inputs.as to "${staged}" and reference it in your run argv.`
+          : '(override via inputs.as if the tool dispatches on file extension).',
+        'Run the documented operation over the staged input and assert the BORING PASS the',
+        'section promises for supported input — it is accepted (parses/lints/formats clean,',
+        'exit 0, no failure marker in the output). Do NOT seed the input yourself; do NOT',
+        "assert one input's exact output — the corpus varies file to file.",
+      )
     }
     if (c.retry) {
       lines.push(
