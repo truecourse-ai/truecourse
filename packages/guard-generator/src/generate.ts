@@ -91,11 +91,14 @@ import {
   spawnGenerateRunner,
   spawnRecipeRunner,
   spawnFidelityRunner,
+  spawnTriageRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type TriageRunner,
 } from './runners.js'
+import { runTriage } from './triage.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
 import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
@@ -228,6 +231,8 @@ export interface GuardGenerateModels {
   retry?: string
   /** Fidelity review (stage `guard.fidelity`) — a cheap-tier adversarial pass. */
   fidelity?: string
+  /** Finding triage (stage `guard.triage`) — the top-tier post-settle judgment pass. */
+  triage?: string
   recipe?: string
   fallback?: string
 }
@@ -251,6 +256,7 @@ export interface GenerateGuardsOptions {
   generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
   fidelityRunner?: FidelityRunner
+  triageRunner?: TriageRunner
   /** Forwarded to birth validation — the no-op step threshold (a test seam). */
   noOpThresholdMs?: number
   // --- progress hooks ---
@@ -278,6 +284,9 @@ export interface GenerateGuardsOptions {
   /** Fidelity-review progress: `reviewed` = green scenarios reviewed so far, `planned`
    *  = green scenarios queued for review (grows as later sections reach persist). */
   onFidelityProgress?: (reviewed: number, planned: number) => void
+  /** Finding-triage progress: `done` = findings triaged so far, `total` = the run's
+   *  finding count (known once every section settles — the triage stage runs last). */
+  onTriageProgress?: (done: number, total: number) => void
   /** Per-section settle progress: `total` = the run's work-section count, fixed at
    *  indexing. Unsettled sections (extraction/authoring/birth failures) never tick,
    *  so `settled` may honestly end below `total`. */
@@ -430,6 +439,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ? spawnFidelityRunner({
           transport: options.transport,
           model: options.models?.fidelity,
+          fallbackModel: options.models?.fallback,
+        })
+      : undefined)
+  // The triage judge (item: finding triage) runs one post-settle Opus call per
+  // birth/fidelity finding. Like fidelity it needs an LLM: production always
+  // supplies a transport, so triage always runs there; a caller with NEITHER a
+  // transport NOR a `triageRunner` (only the pre-feature unit tests) has no model
+  // access, so findings simply ship without a triage verdict.
+  const triageRunner: TriageRunner | undefined =
+    options.triageRunner ??
+    (options.transport
+      ? spawnTriageRunner({
+          transport: options.transport,
+          model: options.models?.triage,
           fallbackModel: options.models?.fallback,
         })
       : undefined)
@@ -1071,6 +1094,39 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
     writeWorkingManifest()
     return emptyResult('recipe-failed', { reason: noOpAnomalyReason(noOpAnomaly, recipe.entry) })
+  }
+
+  // Triage — one Opus judgment call per birth/fidelity finding, AFTER they all
+  // settle. Each verdict + recommendation is attached to its finding in place (the
+  // report carries it). Fail-soft and cached per finding identity, so a re-generate
+  // re-triages only new/changed findings; a finding simply ships without triage when
+  // no triage runner is configured or a call can't complete. The verdict is a
+  // recommendation with quoted evidence — advisory, never auto-applied. The section
+  // text + grounding probes it needs come from the settle-time state (probes are a
+  // cache hit — authoring already grounded the finding's claim).
+  if (triageRunner && birthFindings.length > 0) {
+    let triaged = 0
+    options.onTriageProgress?.(triaged, birthFindings.length)
+    await Promise.all(
+      birthFindings.map((finding) =>
+        limit(async () => {
+          const section = sectionByKey.get(key(finding))
+          const probes = finding.claim ? await groundClaims([finding.claim]) : []
+          const triage = await runTriage(
+            repoRoot,
+            finding,
+            {
+              sectionHeading: section?.headingText ?? finding.anchor,
+              sectionText: section ? section.fullText || section.ownText : '',
+              probes,
+            },
+            triageRunner,
+          )
+          if (triage) finding.triage = triage
+          options.onTriageProgress?.(++triaged, birthFindings.length)
+        }),
+      ),
+    )
   }
 
   // 6. Run end — every work section still unsettled (extraction failure, authoring

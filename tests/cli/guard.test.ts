@@ -1018,6 +1018,12 @@ function findingsReport(): GuardGenerateReport {
         expected: 'exit 0',
         actual: 'exit 7',
         evidencePath: '.truecourse/guard/evidence/run/f1',
+        triage: {
+          verdict: 'code-drift',
+          confidence: 'high',
+          brief: 'The command exits 7 where the doc promises 0.',
+          recommendation: 'Fix the exit code to 0 to match the documented contract.',
+        },
       },
       { doc: DOC, anchor: 'cli/version', kind: 'fidelity', title: 'weak assertion', step: 1, expected: 'n/a', actual: 'reviewer: vacuous' },
       { doc: 'docs/api.md', anchor: 'api/auth', kind: 'birth', title: 'rejects bad token', step: 2, expected: '401', actual: '200' },
@@ -1059,6 +1065,19 @@ describe('runGuardFindings (printer)', () => {
     expect(out).toContain('2. [fidelity] weak assertion')
     // Numbering continues across groups (third finding is in the second group).
     expect(out).toContain('3. [birth] rejects bad token')
+  })
+
+  it('renders the triage verdict + recommendation for a triaged finding', async () => {
+    const r = repo()
+    writeGuardResult(r, findingsReport())
+    await runGuardFindings({ cwd: r })
+
+    // The triaged finding shows its verdict/confidence and the concrete recommendation.
+    expect(out).toContain('verdict: code-drift (high confidence)')
+    expect(out).toContain('recommend: Fix the exit code to 0 to match the documented contract.')
+    // A finding with no triage prints no verdict line.
+    const rejectsIdx = out.indexOf('rejects bad token')
+    expect(out.slice(rejectsIdx)).not.toContain('verdict:')
   })
 
   it('--kind filters to one kind', async () => {

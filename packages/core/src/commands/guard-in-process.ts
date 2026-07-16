@@ -22,6 +22,7 @@ import {
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type TriageRunner,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -128,15 +129,16 @@ export const GUARD_GENERATE_STEPS = [
  * discovery rides `index` (the section-indexing window), extraction rides
  * `extract`, round-1 authoring rides `author` (stage `guard.generate`). Birth
  * EXECUTION is deterministic sandbox work, but the one evidence-retry per
- * birth-failed claim is a full re-author (stage `guard.retry`) AND every green
- * candidate's fidelity review (stage `guard.fidelity`) both happen in the settle
- * flow — their spend rides the `validate` line.
+ * birth-failed claim is a full re-author (stage `guard.retry`), every green
+ * candidate's fidelity review (stage `guard.fidelity`), AND the post-settle
+ * per-finding triage (stage `guard.triage`) all happen in the settle flow — their
+ * spend rides the `validate` line.
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
   extract: ['guard.extract'],
   author: ['guard.generate'],
-  validate: ['guard.retry', 'guard.fidelity'],
+  validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -174,6 +176,7 @@ export interface GuardGenerateInProcessOptions {
   generateRunner?: GenerateRunner;
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
+  triageRunner?: TriageRunner;
 }
 
 /**
@@ -215,6 +218,7 @@ function resolveGuardModels(repoRoot: string): GuardGenerateModels {
     generate: resolveModel('guard.generate', undefined, repoRoot),
     retry: resolveModel('guard.retry', undefined, repoRoot),
     fidelity: resolveModel('guard.fidelity', undefined, repoRoot),
+    triage: resolveModel('guard.triage', undefined, repoRoot),
     recipe: resolveModel('guard.recipe', undefined, repoRoot),
     fallback: resolveFallbackModel(repoRoot) ?? undefined,
   };
@@ -332,6 +336,12 @@ export async function guardGenerateInProcess(
   // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
   let fidelitySeen = false;
   let fidelityReviewed = 0;
+  // Finding triage runs once per finding AFTER every section settles — its counter
+  // rides the same validate line ("triage N/M"; the total is known by then, so it
+  // carries an honest denominator).
+  let triageSeen = false;
+  let triageDone = 0;
+  let triageTotal = 0;
   // Author and validate overlap under the per-section pipeline: birth for an early
   // section can begin while later sections are still authoring. renderValidate
   // therefore starts validate WITHOUT completing author (advanceTo('author') only
@@ -352,6 +362,7 @@ export async function guardGenerateInProcess(
     const parts = [sectionsPart, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
+    if (triageSeen) parts.push(`triage ${triageDone}/${triageTotal}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
   };
 
@@ -369,6 +380,7 @@ export async function guardGenerateInProcess(
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
+      triageRunner: options.triageRunner,
       // Authoring-failure surfacing (item 2): count the finally-failed sections for
       // the CLI counter and forward every event to the CLI's live sink.
       onAuthorFailure: options.onAuthorFailure
@@ -449,6 +461,13 @@ export async function guardGenerateInProcess(
         // Reviews happen in the settle flow — only render a LIVE validate line.
         if (validateStarted) renderValidate();
       },
+      onTriageProgress: (done, total) => {
+        triageSeen = true;
+        triageDone = done;
+        triageTotal = total;
+        // Triage is the post-settle tail of the settle flow — render the live line.
+        if (validateStarted) renderValidate();
+      },
       onSectionSettled: (settled, total) => {
         sectionsDone = settled;
         sectionsTotal = total;
@@ -493,7 +512,7 @@ export async function guardGenerateInProcess(
 }
 
 /** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity'] as const;
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.extract', 'guard.generate', 'guard.retry', 'guard.fidelity', 'guard.triage'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`

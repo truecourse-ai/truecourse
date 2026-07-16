@@ -179,7 +179,7 @@ estimate; batch plumbing honors the choice (1 vs default 4).
 
 ## 6. Finding triage: every finding carries a verdict + how to unblock
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** A birth/fidelity finding reports expected-vs-actual and stops — "defect or
 drift, your call" — even though everything needed to make the call is already stored.

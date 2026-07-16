@@ -60,6 +60,23 @@ describe('estimateGuardTokens', () => {
     expect(est.stages!.find((s) => s.stage === 'guardRecipe')!.calls).toBe(1)
   })
 
+  it('includes a triage stage — 0..claimsMax range (finding count is unknown pre-run)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const est = await estimateGuardTokens(r)
+    const triage = est.stages!.find((s) => s.stage === 'guardTriage')!
+    expect(triage).toBeTruthy()
+    expect(triage.label).toBe('Triaging findings')
+    // The floor is 0 (a run may produce no findings) and the ceiling is the claim
+    // ceiling (worst case: every authored scenario a finding) — the same per-claim
+    // proxy the fidelity stage uses.
+    expect(triage.callsRange!.low).toBe(0)
+    expect(triage.callsRange!.high).toBe(est.stages!.find((s) => s.stage === 'guardFidelity')!.callsRange!.high)
+  })
+
   it('cache-aware: after a full generate every section is settled ⇒ empty estimate', async () => {
     const r = repo()
     writeRecipe(r)

@@ -112,11 +112,24 @@ export {
   spawnGenerateRunner,
   spawnRecipeRunner,
   spawnFidelityRunner,
+  spawnTriageRunner,
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
+  type TriageRunner,
 } from './runners.js'
+
+export {
+  runTriage,
+  triageCacheKey,
+  buildTriageUserPrompt,
+  TRIAGE_CACHE_NAME,
+  TRIAGE_SYSTEM_PROMPT,
+  TRIAGE_PROMPT_FINGERPRINT,
+  type TriageUserContext,
+  type TriageSectionContext,
+} from './triage.js'
 
 export {
   TestabilityVerdictSchema,

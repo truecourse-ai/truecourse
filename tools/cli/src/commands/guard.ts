@@ -728,6 +728,12 @@ export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Prom
       n += 1;
       p.log.message(`  ${n}. [${findingKind(f)}] ${f.title}`);
       p.log.message(`     ${oneLine(f.expected)} → ${oneLine(f.actual)}`);
+      // Triage verdict + the concrete recommendation for how to unblock it — the
+      // Opus judgment attached at generate. Absent on older reports / untriaged runs.
+      if (f.triage) {
+        p.log.message(`     verdict: ${f.triage.verdict} (${f.triage.confidence} confidence)`);
+        p.log.message(`     recommend: ${oneLine(f.triage.recommendation)}`);
+      }
       if (f.evidencePath) p.log.message(`     evidence: ${f.evidencePath}`);
     }
   }

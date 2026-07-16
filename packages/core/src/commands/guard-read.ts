@@ -191,6 +191,7 @@ export function composeDocCoverage(
       expected: f.expected,
       actual: f.actual,
       ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
+      ...(f.triage ? { triageVerdict: f.triage.verdict } : {}),
     })
   }
   const heldByAnchor = new Map<string, GuardSectionHeldScenario[]>()

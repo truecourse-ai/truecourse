@@ -8,7 +8,9 @@ import type {
   GenerateRunner,
   ExtractRunner,
   FidelityRunner,
+  TriageRunner,
 } from '@truecourse/guard-generator'
+import type { GuardTriage } from '@truecourse/shared'
 
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
 export const FIXTURE_BIN = fileURLToPath(
@@ -155,6 +157,15 @@ export function reviewBy(flagged: Record<string, string>, onCall?: () => void): 
       if (scenarioYaml.includes(`title: ${title}`)) return { verdict: 'flagged', mismatch }
     }
     return { verdict: 'faithful' }
+  }
+}
+
+/** A triage runner returning a FIXED verdict for every finding; `onCall` fires once
+ *  per finding triaged. */
+export function triageBy(verdict: GuardTriage, onCall?: () => void): TriageRunner {
+  return async () => {
+    onCall?.()
+    return verdict
   }
 }
 

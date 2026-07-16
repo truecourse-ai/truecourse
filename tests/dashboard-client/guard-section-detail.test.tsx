@@ -67,6 +67,18 @@ describe('GuardSectionDetail — unsettled sections', () => {
     expect(screen.getByText(/step 2/)).toBeInTheDocument();
   });
 
+  it('shows the triage verdict chip on a finding row', () => {
+    renderDetail(
+      section({
+        status: 'finding',
+        findings: [
+          { index: 0, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', triageVerdict: 'code-drift' },
+        ],
+      }),
+    );
+    expect(screen.getByText('code drift')).toBeInTheDocument();
+  });
+
   it('marks a fidelity finding with its chip', () => {
     renderDetail(
       section({

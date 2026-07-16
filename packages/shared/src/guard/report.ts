@@ -129,6 +129,40 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * An Opus triage verdict on ONE birth/fidelity finding — the tool's recommendation
+ * for how to unblock it, produced by a post-settle judgment call over the finding's
+ * evidence (claim, section text, authored YAML, expected/actual, the failing run's
+ * raw output, and the section's grounding probes). A recommendation with quoted
+ * evidence — NEVER auto-applied; the user stays the judge, exactly like a conflict
+ * resolution. Object schema is NOT strict: an extra key from the model is dropped,
+ * not a validation failure.
+ *  - `doc-drift` — the doc is wrong; the `recommendation` quotes the exact doc line
+ *    to change and its replacement.
+ *  - `code-drift` — the code is wrong; the `recommendation` names the observed
+ *    behavior vs the doc's promise (a real bug the finding caught).
+ *  - `generation-defect` — the scenario itself is faulty (a mis-authored assertion);
+ *    the `recommendation` is dismiss-or-retry with the reason.
+ *  - `environment` — the finding is an artefact of the sandbox/run environment, not
+ *    a doc/code disagreement; the `recommendation` is dismiss-or-retry with the reason.
+ */
+export const GuardTriageSchema = z.object({
+  verdict: z.enum(['doc-drift', 'code-drift', 'generation-defect', 'environment']),
+  confidence: z.enum(['high', 'medium', 'low']),
+  /** One-paragraph plain-words assessment of what the finding shows. */
+  brief: z.string().min(1),
+  /** The concrete next action (see the verdict cases above). */
+  recommendation: z.string().min(1),
+})
+export type GuardTriage = z.infer<typeof GuardTriageSchema>
+export type GuardTriageVerdict = GuardTriage['verdict']
+
+/** True when the triage verdict recommends dismissal (the finding is noise, not
+ *  real doc/code drift) — the signal the surfaces use to wire the Dismiss action. */
+export function triageRecommendsDismiss(verdict: GuardTriageVerdict): boolean {
+  return verdict === 'generation-defect' || verdict === 'environment'
+}
+
 /** A candidate that failed birth validation twice — a generation defect or real drift. */
 export const GuardBirthFindingSchema = z
   .object({
@@ -184,6 +218,14 @@ export const GuardBirthFindingSchema = z
      * donate the heading client-side; slugs are engine ids, not UI copy.
      */
     headingText: z.string().optional(),
+    /**
+     * The Opus triage verdict + recommendation for this finding (see
+     * {@link GuardTriageSchema}), attached AT GENERATE by the post-settle triage
+     * stage and persisted with the finding (triage is expensive, so it does not
+     * re-derive on read). Optional so older `result.json` files — and any run with
+     * no triage runner — keep parsing; a finding simply ships without triage then.
+     */
+    triage: GuardTriageSchema.optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>

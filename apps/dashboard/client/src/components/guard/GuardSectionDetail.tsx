@@ -30,6 +30,7 @@ import { guardStatusMeta } from '@/lib/guard-status';
 import { GuardStatusBadge } from './GuardStatusBadge';
 import { GuardScenarioStory } from './GuardScenarioStory';
 import { GuardFindingBadge } from './GuardFindingBadge';
+import { GuardTriageChip } from './GuardTriageChip';
 import { GuardHeldBadge } from './GuardHeldBadge';
 
 const OUTCOME_TEXT: Record<string, string> = {
@@ -269,6 +270,7 @@ function GuardSectionFindingRow({
               <span className="shrink-0 rounded bg-muted px-1 py-0 text-[9px] font-medium text-muted-foreground">fidelity</span>
             </HoverPopover>
           )}
+          {finding.triageVerdict && <GuardTriageChip verdict={finding.triageVerdict} compact />}
           <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">step {finding.step}</span>
         </div>
         <span className="text-[13px] text-foreground">{finding.title}</span>

@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { GuardBirthFinding, GuardGenerateReport } from '@truecourse/shared';
+import type { GuardBirthFinding, GuardGenerateReport, GuardTriage } from '@truecourse/shared';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
 import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import {
@@ -132,6 +132,55 @@ describe('GuardFindingDetail — dismiss (item 20)', () => {
   it('offers no dismiss action for an old-report finding with no claim', () => {
     renderDetail({ finding: { ...FINDING, claim: undefined } });
     expect(screen.queryByRole('button', { name: 'Dismiss finding' })).not.toBeInTheDocument();
+  });
+});
+
+const TRIAGE_CODE_DRIFT: GuardTriage = {
+  verdict: 'code-drift',
+  confidence: 'high',
+  brief: 'The program exits 7 where the section promises exit 0.',
+  recommendation: 'Fix the command to exit 0, or update the doc if the new behavior is intended.',
+};
+const TRIAGE_DEFECT: GuardTriage = {
+  verdict: 'generation-defect',
+  confidence: 'medium',
+  brief: 'The scenario asserts a flag the claim never mentions.',
+  recommendation: 'Dismiss — the scenario mis-tests the claim; the doc and code do not disagree.',
+};
+
+describe('GuardFindingDetail — triage', () => {
+  it('renders the verdict chip, confidence, brief, and recommendation', () => {
+    renderDetail({ finding: { ...FINDING, triage: TRIAGE_CODE_DRIFT } });
+    expect(screen.getByText('code drift')).toBeInTheDocument();
+    expect(screen.getByText(/high confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(TRIAGE_CODE_DRIFT.brief)).toBeInTheDocument();
+    expect(screen.getByText(TRIAGE_CODE_DRIFT.recommendation)).toBeInTheDocument();
+    expect(screen.getByText('Recommended action')).toBeInTheDocument();
+  });
+
+  it('a drift verdict adds NO extra Dismiss — only the canonical action-row button', () => {
+    renderDetail({ finding: { ...FINDING, triage: TRIAGE_CODE_DRIFT } });
+    expect(screen.getAllByRole('button', { name: 'Dismiss finding' })).toHaveLength(1);
+  });
+
+  it('a dismiss-recommending verdict wires a Dismiss in the recommendation box', async () => {
+    const user = userEvent.setup();
+    const { onDismiss } = renderDetail({ finding: { ...FINDING, triage: TRIAGE_DEFECT } });
+    // Two entry points to the same action: the canonical action row + the wired
+    // recommendation box (the "apply recommendation" idiom).
+    const buttons = screen.getAllByRole('button', { name: 'Dismiss finding' });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[1]);
+    expect(onDismiss).toHaveBeenCalledWith({
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      title: 'the --version flag prints the semver',
+    });
+  });
+
+  it('shows no triage block when the finding was never triaged', () => {
+    renderDetail();
+    expect(screen.queryByText('Recommended action')).not.toBeInTheDocument();
   });
 });
 
