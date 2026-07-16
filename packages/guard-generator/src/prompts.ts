@@ -342,6 +342,29 @@ proving less than the claim — is the worst failure mode. If, on reflection, a
 claim states nothing a CLI invocation can actually observe, return an empty
 scenarios array for it rather than inventing behavior.
 
+# The assumed environment is part of the test — reproduce it in setup
+A claim or example rarely runs in a vacuum: the surrounding section or document
+usually establishes the CONFIGURATION it depends on — a required setting, a mode, an
+option value, a selected target — stated in nearby prose or a shown config snippet.
+That environment is PART of the test. Reproduce it in \`setup\` (a config file under
+\`setup.files\`, \`setup.env\`) so the program runs under the same assumptions the doc
+makes around the example. A setting the program REFUSES TO RUN WITHOUT — one the docs
+take for granted and never repeat — belongs in \`setup\` too, even when the claim's own
+sentence does not mention it (the real program, and any transcript below, will name it
+when it is missing). A scenario that copies the example's input but drops the
+configuration it assumes is testing a DIFFERENT world than the doc describes, and it
+fails for the wrong reason.
+
+# Verify ONLY the claim — constrain the invocation so nothing else contaminates it
+Assert exactly the one behavior the claim names, and nothing else. When the program
+applies MANY behaviors at once (several rules, checks, or default passes) and only one
+is the claim's subject, an unrelated behavior can contaminate the outcome you assert —
+a second, off-topic failure flips a documented "passes" into a "fails". Constrain the
+invocation so it cannot: scope the run to the claim's subject (the flag or subcommand
+that selects just the relevant behavior) and use the MINIMAL input that exercises the
+claimed behavior. The scenario must turn red for the claim's behavior ALONE, never for
+a neighbor the claim says nothing about.
+
 # Example claims — the doc's own block IS the input, byte-faithful
 Some claims arrive marked as an EXAMPLE (the claim shows an "EXAMPLE BLOCK" and its
 promised outcome). For such a claim the doc already contains the EXACT input and its
@@ -629,21 +652,37 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     if (c.retry) {
       lines.push(
         'RETRY — a scenario you authored for this claim FAILED birth validation (it did',
-        'not pass against the current code). Use the evidence below to fix COMMANDS,',
-        'ARGUMENTS, and SETUP — a wrong flag, a missing `setup` file, an off-by-one id.',
-        'But the ASSERTION still states what the CLAIM says: if the evidence shows a',
-        'genuine DOC-vs-CODE disagreement on the asserted VALUE (the code really prints',
-        "something other than what the claim quotes), KEEP the claim's assertion — the",
-        'retry then fails again and the claim correctly becomes a finding. Do NOT change a',
-        'claimed assertion to match the code. Return an empty scenarios array only if the',
-        'claim is genuinely not CLI-observable:',
+        'not pass against the current code). Read the evidence below — ESPECIALLY the',
+        "program's own output printed under it — and fix COMMANDS, ARGUMENTS, and SETUP.",
+        'The program tells you, in its own words below, what it needs.',
+        '',
+        'FIRST decide which of two failures this is — they are handled OPPOSITELY:',
+        '- USAGE / SETUP error — the program REJECTED the invocation and never evaluated',
+        '  the claimed behavior: it printed a usage message, named a missing or required',
+        '  option, reported an unknown/invalid argument, or refused to run because a',
+        '  mandatory setting was not configured (often a non-zero "usage" exit, or empty',
+        '  output with an error on stderr). This is ALWAYS a defect in YOUR scenario, never',
+        '  a finding — the claim was never tested. FIX it: add the option/argument the',
+        "  program says it needs to the step's `run`, or reproduce the required",
+        '  configuration in `setup` — CREATE OR EDIT the config file under `setup.files`,',
+        '  set `setup.env`. Do NOT leave the rejected invocation in place.',
+        '- DOC-vs-CODE disagreement — the program actually RAN the claimed behavior and',
+        '  produced a DIFFERENT value than the claim quotes. ONLY here does the assertion',
+        '  stand: if the evidence shows a genuine',
+        '  DOC-vs-CODE disagreement on the asserted VALUE (the code really RAN and printed',
+        "  something other than what the claim quotes), KEEP the claim's assertion — the",
+        '  retry then fails again and the claim',
+        '  correctly becomes a finding. Do NOT change a claimed assertion to match the',
+        '  code. Return an empty scenarios array only if the claim is genuinely not',
+        '  CLI-observable:',
         `  scenario: ${c.retry.scenarioTitle}`,
         `  failing step: ${c.retry.step}`,
         `  expected: ${c.retry.expected}`,
         `  actual:   ${c.retry.actual}`,
       )
-      // The failing run's raw program output — the evidence the rules above point
-      // at (a usage error reveals the real flags). Each stream omitted when absent.
+      // The failing run's raw program output — the program's own words the rules above
+      // point at (a usage/setup error names exactly what to add). Each stream omitted
+      // when absent.
       if (c.retry.stdout) lines.push('  program stdout:', indentBlock(c.retry.stdout))
       if (c.retry.stderr) lines.push('  program stderr:', indentBlock(c.retry.stderr))
     }

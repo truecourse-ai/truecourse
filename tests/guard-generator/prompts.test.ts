@@ -300,6 +300,54 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('RETRY —')
   })
 
+  // Item 10 — the retry must ACT on a usage/setup error the program printed, not
+  // treat every failure as a keep-the-assertion doc-vs-code disagreement. The
+  // evidence was already in the prompt; the rule wording made the model keep the
+  // broken invocation and let it become a finding instead of fixing setup.
+  it('the RETRY prompt distinguishes a usage/setup error (always fix) from a doc-vs-code disagreement (keep)', () => {
+    const p = retryPrompt()
+    // The two failure kinds are named and handled oppositely.
+    expect(p).toContain('FIRST decide which of two failures this is')
+    expect(p).toContain('USAGE / SETUP error')
+    expect(p).toContain('REJECTED the invocation')
+    expect(p).toContain('never evaluated')
+    // A usage/setup error is ALWAYS the scenario's own defect, never a finding.
+    expect(p).toContain('ALWAYS a defect in YOUR scenario')
+    // Fixing SETUP visibly includes creating/altering a config file.
+    expect(p).toContain('CREATE OR EDIT the config file under `setup.files`')
+    expect(p).toContain('Do NOT leave the rejected invocation in place')
+    // The doc-vs-code branch still stands for a genuine value disagreement.
+    expect(p).toContain('DOC-vs-CODE disagreement on the asserted VALUE')
+    expect(p).toContain("KEEP the claim's assertion")
+  })
+
+  // Item 10 rule (a) — an example's assumed environment is part of the test.
+  it("GENERATE_SYSTEM_PROMPT rules the example's assumed environment is reproduced in setup", () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# The assumed environment is part of the test — reproduce it in setup')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('REFUSES TO RUN WITHOUT')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('a config file under')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('DIFFERENT world')
+  })
+
+  // Item 10 rule (b) — a scenario verifies ONLY its claim; scope the invocation.
+  it('GENERATE_SYSTEM_PROMPT rules a scenario verifies ONLY its claim and scopes the invocation', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Verify ONLY the claim — constrain the invocation so nothing else contaminates it')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('contaminate the outcome you assert')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('MINIMAL input')
+    expect(GENERATE_SYSTEM_PROMPT).toContain("the claim's behavior ALONE")
+  })
+
+  // Overfit guard — the two item-10 authoring rules must stay tool-agnostic: no
+  // repo-specific token may leak into a prompt. Validated on the exact rule slice.
+  it('the item-10 authoring rules carry no repo-specific token', () => {
+    const start = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
+    const end = GENERATE_SYSTEM_PROMPT.indexOf("# Example claims — the doc's own block IS the input")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const rules = GENERATE_SYSTEM_PROMPT.slice(start, end)
+    expect(rules).not.toMatch(/dialect|sqlfluff|tab_space_size/i)
+  })
+
   // Item 6b — the seeding constraint, LOUD, in the capabilities block.
   it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')

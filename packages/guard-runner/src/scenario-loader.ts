@@ -1,14 +1,15 @@
 /**
  * Load committed scenarios from `.truecourse/scenarios/**\/*.yaml`, Zod-validate
- * each against the v1 schema, and collect malformed files as load errors rather
- * than crashing the run — one bad file must never take the whole suite down.
- * `recipe.json` is not a scenario and is skipped.
+ * each against the v1 schema (plus the `expect` `matches` compile check the schema
+ * cannot express), and collect malformed files as load errors rather than crashing
+ * the run — one bad file must never take the whole suite down. `recipe.json` is not
+ * a scenario and is skipped.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { GuardScenarioSchema, type GuardScenario } from '@truecourse/shared'
+import { GuardScenarioSchema, firstInvalidMatchPattern, type GuardScenario } from '@truecourse/shared'
 import { scenariosDir } from './store.js'
 
 export interface ScenarioLoadError {
@@ -86,6 +87,14 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
         .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
         .join('; ')
       errors.push({ file: rel, message: detail })
+      continue
+    }
+    const badRe = firstInvalidMatchPattern(parsed.data.steps)
+    if (badRe) {
+      errors.push({
+        file: rel,
+        message: `step ${badRe.step} expect.${badRe.stream} "matches" /${badRe.pattern}/ is not a valid regular expression: ${badRe.error}`,
+      })
       continue
     }
     scenarios.push(parsed.data)

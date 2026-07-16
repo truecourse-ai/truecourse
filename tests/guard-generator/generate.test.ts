@@ -43,6 +43,7 @@ import {
   raw,
   extractBy,
   authorBy,
+  reviewBy,
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
@@ -1258,15 +1259,17 @@ describe('generateGuards — live progress', () => {
     ])
   })
 
-  it('counts birthPassed across BOTH rounds even when the section never settles', async () => {
+  it('reconciles birthPassed with written + held + fidelity-flagged when a sibling forces a retry', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // One claim, two scenarios: `good` always passes, `bad` always fails. The bad
-    // one forces a retry that re-authors the same pair — so the section never
-    // settles (nothing written) yet birth saw `good` pass in BOTH rounds.
+    // One claim, two scenarios: `good` always passes, `bad` always fails. `bad` forces
+    // a whole-claim retry that re-authors the same pair, so the round-1 `good` pass is
+    // DISCARDED; only the surviving retry `good` pass counts, and it is HELD (its
+    // section never settles — `bad` is a birth finding). The discarded round-1 pass no
+    // longer inflates the count, so birthPassed reconciles exactly.
     const res = await generateGuards({
       ...stubAuxRunners(),
       repoRoot: r,
@@ -1276,7 +1279,37 @@ describe('generateGuards — live progress', () => {
 
     expect(res.written).toEqual([]) // section unsettled → nothing written
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    expect(res.birthPassed).toBe(2) // diverges from written.length (0) — the honest count
+    const heldReady = res.heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
+    const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
+    expect(heldReady).toBe(1) // the surviving `good`, held not written
+    expect(res.birthPassed).toBe(1) // the discarded round-1 twin no longer counts
+    expect(res.birthPassed).toBe(res.written.length + heldReady + fidelityFlagged)
+  })
+
+  it('reconciles birthPassed when a fidelity flag holds a faithful sibling', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    // One claim, two green scenarios: both pass birth, the fidelity reviewer flags `b`.
+    // `a` is held (its section unsettles on the fidelity finding). Both cleared birth
+    // and reached a reported bucket (`a` → held, `b` → fidelity finding), so both count.
+    const res = await generateGuards({
+      ...stubAuxRunners(),
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
+      fidelityRunner: reviewBy({ b: 'weak: asserts less than the claim' }),
+    })
+
+    expect(res.written).toEqual([])
+    const heldReady = res.heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
+    const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
+    expect(heldReady).toBe(1) // the faithful `a`
+    expect(fidelityFlagged).toBe(1) // the flagged `b`
+    expect(res.birthPassed).toBe(2)
+    expect(res.birthPassed).toBe(res.written.length + heldReady + fidelityFlagged)
   })
 
   it('fires onSectionSettled per settle with the fixed work-section denominator', async () => {

@@ -320,3 +320,76 @@ RFC/number/regex claims ~17%; ruff version-syntax ~7%).
 pack generation writes + commits + caches; scenario runs per exemplar and failure
 names the file; user-added files survive regeneration; estimate includes the
 generation call.
+
+## 10. Retry must use its evidence; authoring must carry the example's assumed environment
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** The 2026-07-16 sqlfluff run's dominant defect pattern (5+3 of 12 defects):
+scenarios copied a doc example faithfully but not the CONFIGURATION the doc assumes
+around it (an indent width set by surrounding prose, a mandatory base setting), or ran
+the whole tool instead of isolating the claimed behavior, so unrelated rules
+contaminated the outcome. Worse: the birth retry received the tool's own error naming
+the missing setup ("No dialect was specified", exit 2) as evidence and STILL did not
+correct the setup — five times. The retry-with-evidence loop is the engine's general
+self-heal mechanism; if it cannot act on a literal usage error, that is the root cause,
+and any prompt work is secondary.
+
+**Fix — investigation FIRST, no speculative changes.**
+- Reconstruct the exact retry contexts for the run's dialect/config defects from
+  `result.json` (findings carry expected/actual, raw output excerpts, and the authored
+  YAML) plus the deterministic prompt builders. Determine concretely why the evidence
+  did not produce a setup correction — e.g. the stderr excerpt never reaches the retry
+  prompt, the "keep the claim's assertion" rule reads as "change nothing", or the
+  failing step's error is drowned. Fix the MECHANISM (context content / rule wording /
+  evidence placement), not the symptom.
+- Then two GENERAL authoring-prompt rules (no repo-specific token may ever enter a
+  prompt): (a) an example's assumed environment is part of the example — configuration
+  stated in the surrounding section/document that the example depends on must be
+  reproduced in `setup`; (b) a scenario verifies ONLY its claim — constrain the
+  invocation (scoping flags, minimal input) so unrelated behaviors cannot contaminate
+  the asserted outcome.
+- Overfit guard: nothing in the change may reference sqlfluff or any concrete tool
+  setting; validation is by prompt-content tests + fixture e2e (a doc whose example
+  depends on config stated in a sibling paragraph), and by the numbers on the NEXT
+  cross-repo run — never by making one repo's defect list zero.
+
+**Tests.** Retry-context content test proving the failing step's raw stderr/usage error
+is present and labeled; e2e fixture where the doc states config in prose above the
+example — the authored scenario seeds it; prompt-content assertions for both rules.
+
+## 11. Invalid expect regexes die at build time, not at birth
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** A scenario was authored with a `matches:` regex invalid in the JS engine
+("Invalid group"); it passed schema validation and burned a full birth cycle (sandbox
+build + run) before dying. Matcher validity is knowable in microseconds at build time.
+
+**Fix.** Scenario build/validation (the `safeBuild`/composition-defect path in
+guard-generator, and the shared scenario schema where `matches` fields live): every
+`matches` pattern must compile (`new RegExp`) — an invalid one is a composition defect
+routed through the existing corrective re-ask, never reaching birth. The committed-
+scenario loader applies the same check so a hand-written bad regex fails loud at load.
+
+**Tests.** Authoring output with an invalid regex triggers the re-ask with the compile
+error quoted; a valid-after-re-ask scenario proceeds; loader rejects a committed
+scenario with an invalid pattern with a clear error.
+
+## 12. Birth counters must reconcile: passed = written + held + flagged
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** The CLI prints "126 passed birth · 72 written", and the numbers cannot be
+reconciled by the reader: `birthPassed` counts round-1 passes on claims that later went
+to retry (whose candidates are discarded and re-validated), so it double-counts and
+matches nothing else in the report. The user flagged it immediately.
+
+**Fix.** Count a birth pass once per SURVIVING candidate: a discarded round-1 pass
+(sibling triggered a whole-claim retry) does not increment; the retry's own passes do.
+Resulting invariant, asserted in tests: `birthPassed === written + heldReady +
+fidelityFlagged` for every run. CLI summary and report field keep their names; the
+report schema comment documents the invariant.
+
+**Tests.** A run with a retried claim whose round-1 sibling passed reconciles exactly;
+the CLI summary line's numbers add up in the e2e fixture runs.

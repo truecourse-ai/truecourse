@@ -182,10 +182,14 @@ export interface GuardGenerateResult {
   extractionFailures: GuardExtractionFailure[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
-   * Birth outcomes that passed across BOTH validation rounds — counted regardless
-   * of whether the scenario's section ultimately settled, so it diverges above
-   * `written.length` when a passing scenario's section is left unsettled (a sibling
-   * birth finding / authoring error). The honest "N passed" for the closing detail.
+   * Birth passes that SURVIVED to a reported bucket — written, held-ready, or a
+   * fidelity finding. Counted once per surviving candidate: a round-1 pass discarded
+   * when a sibling forced a whole-claim retry does not count (only the retry's own
+   * passes do), and a birth pass whose fidelity review could not complete does not
+   * count (its section re-attempts). So the run reconciles exactly —
+   * `birthPassed === written.length + Σ heldSections.readyScenarios + fidelity findings`
+   * — while still diverging above `written.length` when a passing scenario's section
+   * is left unsettled (a sibling birth finding / authoring error).
    */
   birthPassed: number
   /**
@@ -890,7 +894,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
 
         const r1 = birth1.outcomes
-        birthPassed += r1.filter((o) => o.result.outcome === 'pass').length
         const r1ByRef = new Map<string, typeof r1>()
         for (const o of r1) pushInto(r1ByRef, o.candidate.ref, o)
 
@@ -951,7 +954,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             })
             const r2 = birth2.outcomes
             reconcileBirth()
-            birthPassed += r2.filter((o) => o.result.outcome === 'pass').length
             for (const o of r2) {
               if (o.result.outcome === 'pass') persistedHere.push(o.candidate)
               else if (o.result.outcome === 'fail') localFindings.push(toFinding(o))
@@ -986,12 +988,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const faithful: BirthCandidate[] = []
       for (const { c, review } of reviews) {
         if ('error' in review) {
+          // Passed birth but the fidelity review could not complete — the candidate is
+          // neither persisted, held, nor a finding this run (its section re-attempts),
+          // so it is NOT a reconciled birth pass.
           localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
-        } else if (review.verdict === 'flagged') {
-          localFindings.push(fidelityFinding(c, review.mismatch))
-        } else {
-          faithful.push(c)
+          continue
         }
+        // A candidate that cleared birth AND reached a reported bucket — written, held,
+        // or a fidelity finding — is one birth pass. A round-1 pass discarded when a
+        // sibling forced a whole-claim retry never reaches here, so it never inflates
+        // the count: birthPassed === written + heldReady + fidelityFlagged for the run.
+        birthPassed++
+        if (review.verdict === 'flagged') localFindings.push(fidelityFinding(c, review.mismatch))
+        else faithful.push(c)
       }
       persistedHere = faithful
     }

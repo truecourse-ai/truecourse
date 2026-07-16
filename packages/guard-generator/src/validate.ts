@@ -5,14 +5,17 @@
  * (see the per-stage prompts). These render the two pieces that re-ask needs: a
  * safe-to-embed quote of the offending output and a one-line reason.
  *
- * Beyond schema shape, authored scenarios must obey a COMPOSITION rule the schema
- * cannot express: a step's `run` is argv APPENDED to the recipe entrypoint, so its
- * first token must be an argument — never the program name again, never a foreign
- * binary. That defect is caught here and routed through the same corrective re-ask.
+ * Beyond schema shape, authored scenarios must obey COMPOSITION rules the schema
+ * accepts but the engine cannot: a step's `run` is argv APPENDED to the recipe
+ * entrypoint, so its first token must be an argument — never the program name
+ * again, never a foreign binary; and every `expect` `matches` pattern must compile
+ * under `new RegExp`, since the runner would otherwise throw at evaluation. Both
+ * defects are caught here and routed through the same corrective re-ask.
  */
 
 import path from 'node:path'
 import type { ZodError } from 'zod'
+import { firstInvalidMatchPattern } from '@truecourse/shared'
 import { programNamesOf } from './ground.js'
 import type { AuthoredClaim } from './schemas.js'
 
@@ -56,11 +59,12 @@ function tokenNames(token: string): { base: string; stem: string } {
 }
 
 /**
- * Find the first authored step whose `run[0]` is a COMPOSITION defect: it repeats the
- * entrypoint's program name, or names a foreign build/package/runtime binary. `run`
- * is argv appended to the entry, so its head must be a subcommand or flag. Returns a
- * one-line, model-facing reason (naming the offending scenario, step, token, and the
- * rule) that seeds the corrective re-ask — or null when every step is argv-only.
+ * Find the first authored scenario with a COMPOSITION defect: a step whose `run[0]`
+ * repeats the entrypoint's program name or names a foreign build/package/runtime
+ * binary (`run` is argv appended to the entry, so its head must be a subcommand or
+ * flag), or an `expect` `matches` pattern that does not compile under `new RegExp`.
+ * Returns a one-line, model-facing reason (naming the offending scenario, step, and
+ * the rule) that seeds the corrective re-ask — or null when every scenario is clean.
  */
 export function scenarioCompositionDefect(
   authored: readonly AuthoredClaim[],
@@ -85,6 +89,15 @@ export function scenarioCompositionDefect(
           `(a subcommand and/or flags), never the program name and never another binary. ` +
           `E.g. with entry ${JSON.stringify([...entry])}, to run \`${[...entry, 'check', '--strict'].join(' ')}\` ` +
           `set run: ["check","--strict"]. Re-author with argv-only "run" arrays.`
+        )
+      }
+      const badRe = firstInvalidMatchPattern(sc.steps)
+      if (badRe) {
+        return (
+          `scenario "${sc.title}" step ${badRe.step}: expect.${badRe.stream} "matches" /${badRe.pattern}/ ` +
+          `is not a valid regular expression (${badRe.error}). A "matches" value is a JS regex source compiled ` +
+          `with new RegExp — it must compile. Fix the pattern, or use "contains" for a literal substring ` +
+          `(or "equals" for the whole stream).`
         )
       }
     }

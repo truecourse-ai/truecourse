@@ -226,6 +226,48 @@ export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
 export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
 export type GuardExpect = z.infer<typeof GuardExpectSchema>
 export type GuardStep = z.infer<typeof GuardStepSchema>
+
+// --- Regex-matcher validation ---------------------------------------
+
+/**
+ * An `expect` `matches` pattern that does not compile — the offending step
+ * (1-based), the stream that carried it, the regex source, and the `new RegExp`
+ * error text. Both the authoring validate path and the committed-scenario loader
+ * report an uncompilable pattern from this same evidence.
+ */
+export interface InvalidMatchPattern {
+  /** 1-based index of the offending step. */
+  step: number
+  /** Which stream matcher carried the pattern. */
+  stream: 'stdout' | 'stderr'
+  /** The regex source that failed to compile. */
+  pattern: string
+  /** The `new RegExp` compile-error message. */
+  error: string
+}
+
+/**
+ * The first step whose `expect` carries a stdout/stderr `matches` pattern that
+ * does not compile under `new RegExp` — the exact call the runner makes when it
+ * evaluates the matcher (no flags). Returns null when every `matches` pattern
+ * compiles (or none is present). A non-compiling pattern is always a bug: the
+ * runner would throw at evaluation, so it is rejected before birth (authoring)
+ * and at load (committed scenarios) rather than after a wasted sandbox run.
+ */
+export function firstInvalidMatchPattern(steps: readonly GuardStep[]): InvalidMatchPattern | null {
+  for (let i = 0; i < steps.length; i++) {
+    for (const stream of ['stdout', 'stderr'] as const) {
+      const pattern = steps[i].expect[stream]?.matches
+      if (pattern === undefined) continue
+      try {
+        new RegExp(pattern)
+      } catch (e) {
+        return { step: i + 1, stream, pattern, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+  }
+  return null
+}
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
