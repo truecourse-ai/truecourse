@@ -404,7 +404,7 @@ scenario.
 
 ## 13. High-confidence fidelity flags self-heal — discard, re-author once, never a task
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-16
 
 **Problem.** Every fidelity flag becomes a finding today (51 on the sqlfluff run) —
 each one a human task, even though the machine is often certain the scenario is simply

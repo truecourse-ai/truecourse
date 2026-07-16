@@ -28,7 +28,7 @@ import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardReport } from '@/hooks/useGuardReport';
-import { buildFindingRows, buildHeldRows, buildListRows } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFindingRows, buildHeldRows, buildListRows } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 
 const json = (body: unknown) =>
@@ -885,6 +885,69 @@ describe('GuardScenariosPanel — PR baseline-fallback label', () => {
       />,
     );
     expect(screen.queryByText(FALLBACK_LABEL)).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardScenariosPanel — auto-resolved ledger group (item 13)', () => {
+  const REPORT: GuardGenerateReport = {
+    generatedAt: '2026-07-16T00:00:00.000Z',
+    status: 'ok',
+    sectionsTotal: 1,
+    sectionsChanged: 1,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+    autoResolved: [
+      {
+        kind: 'fidelity-discard',
+        doc: 'docs/cli.md',
+        anchor: 'cli/version',
+        title: 'weak version check',
+        mismatch: 'asserts exit 0 but the claim quotes exact output',
+        outcome: 'resolved',
+      },
+    ],
+  };
+  const scenarioRow = {
+    id: 'a1',
+    title: 'alpha',
+    doc: 'docs/cli.md',
+    anchor: 'cli/version',
+    headingText: 'Version',
+    file: 'core/a1.yaml',
+    handWritten: false,
+    lastResult: null,
+  };
+
+  it('lifts report.autoResolved into rows (title + mismatch + resolved heading)', () => {
+    const rows = buildAutoResolvedRows(REPORT, [scenarioRow]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      title: 'weak version check',
+      mismatch: 'asserts exit 0 but the claim quotes exact output',
+      outcome: 'resolved',
+      headingText: 'Version',
+    });
+  });
+
+  it('renders a collapsed group — count in the header, title + mismatch hidden until expanded', async () => {
+    const rows = buildAutoResolvedRows(REPORT, [scenarioRow]);
+    render(
+      <GuardScenariosPanel rows={[]} autoResolved={rows} loading={false} error={null} activeId={null} onOpen={vi.fn()} />,
+    );
+    const header = screen.getByRole('button', { name: /Auto-resolved/ });
+    expect(header).toHaveTextContent('1');
+    // Collapsed by default: the discarded title + mismatch are not shown.
+    expect(screen.queryByText('weak version check')).not.toBeInTheDocument();
+    // Expanding reveals the title (struck through) and the mismatch.
+    await userEvent.click(header);
+    expect(screen.getByText('weak version check')).toBeInTheDocument();
+    expect(screen.getByText('asserts exit 0 but the claim quotes exact output')).toBeInTheDocument();
   });
 });
 

@@ -51,6 +51,7 @@ import {
   composeBlockedOnReason,
   dismissedClaimKey,
   isRunnableDriver,
+  type GuardAutoResolved,
   type GuardBirthFinding,
   type OutputExcerpts,
   type GuardCoverageGap,
@@ -205,6 +206,13 @@ export interface GuardGenerateResult {
    * Empty when every dismissal matched a live claim (or its doc wasn't re-read).
    */
   orphanedDismissals: GuardOrphanedDismissal[]
+  /**
+   * The auto-resolved ledger — high-confidence machine judgments the tool acted on
+   * itself instead of raising a human task (a visible record, never silence). Today:
+   * HIGH-confidence fidelity flags discarded + re-authored once. Empty when nothing
+   * auto-resolved this run.
+   */
+  autoResolved: GuardAutoResolved[]
   manifestPath?: string
   /**
    * Present ONLY when the built entry failed to start — the birth phase was
@@ -430,6 +438,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       birthPassed: 0,
       heldSections: [],
       orphanedDismissals: [],
+      autoResolved: [],
     }
   }
 
@@ -728,6 +737,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Sections left unsettled (a sibling finding/error) whose candidates ALL passed
   // birth — recorded so the report/UI can surface the withheld validated work.
   const heldSections: GuardHeldSection[] = []
+  // The auto-resolved ledger — high-confidence fidelity flags the pipeline discarded
+  // and re-authored itself (a visible record, never a human task).
+  const autoResolved: GuardAutoResolved[] = []
   // Set the first time a section reaches birth and finds the entry can't start; from
   // then on every cli section short-circuits (no birth, unsettled) and the failure is
   // recorded ONCE, in `errors`, never as per-section findings.
@@ -850,22 +862,47 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     const localErrors: GuardGenerateError[] = []
     const localFindings: GuardBirthFinding[] = []
+    const localAutoResolved: GuardAutoResolved[] = []
     const persistedHere: BirthCandidate[] = []
+    // Round-1 birth-passing candidates the fidelity reviewer flagged at HIGH
+    // confidence: discarded and re-authored ONCE below (never a human task).
+    const selfHeal: { candidate: BirthCandidate; mismatch: string }[] = []
 
-    // Route a birth-PASSING candidate by its (concurrently-computed) fidelity verdict:
-    // faithful → persist, flagged → finding, an incomplete review → the section
-    // re-attempts. Both a faithful and a flagged verdict are one reconciled birth pass
-    // (written/held or a fidelity finding); an incomplete review is NOT counted (the
-    // candidate is neither persisted, held, nor a finding this run). Keeps the item-12
-    // invariant `birthPassed === written + heldReady + fidelityFlagged`.
-    const applyFidelity = (candidate: BirthCandidate, review: FidelityResult): void => {
+    // Route a ROUND-1 birth-passing candidate by its (concurrently-computed) fidelity
+    // verdict: faithful → persist; flagged at HIGH confidence → SELF-HEAL (discard +
+    // re-author once — an auto-resolved ledger entry, never a human task); flagged at
+    // medium/low → a finding, as today; an incomplete review → the section re-attempts.
+    // Every completed review is one reconciled birth pass — a high-confidence discard
+    // counts too (it reaches the auto-resolved ledger) — keeping the item-12 invariant
+    // `birthPassed === written + heldReady + fidelityFlagged + autoResolved`.
+    const applyFidelityR1 = (candidate: BirthCandidate, review: FidelityResult): void => {
       if ('error' in review) {
         localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
         return
       }
       birthPassed++
-      if (review.verdict === 'flagged') localFindings.push(fidelityFinding(candidate, review.mismatch))
-      else persistedHere.push(candidate)
+      if (review.verdict === 'flagged') {
+        if (review.confidence === 'high') selfHeal.push({ candidate, mismatch: review.mismatch })
+        else localFindings.push(fidelityFinding(candidate, review.mismatch))
+      } else persistedHere.push(candidate)
+    }
+
+    // Route a birth-passing candidate when NO further self-heal is allowed — a round-2
+    // birth-retry survivor or a round-3 self-heal re-author: a flag at ANY confidence
+    // is a finding (at most one extra authoring round per scenario). Returns the
+    // candidate's disposition so the self-heal round can classify its ledger outcome.
+    const applyFidelityFinal = (candidate: BirthCandidate, review: FidelityResult): 'persist' | 'finding' | 'error' => {
+      if ('error' in review) {
+        localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
+        return 'error'
+      }
+      birthPassed++
+      if (review.verdict === 'flagged') {
+        localFindings.push(fidelityFinding(candidate, review.mismatch))
+        return 'finding'
+      }
+      persistedHere.push(candidate)
+      return 'persist'
     }
 
     // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
@@ -960,7 +997,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           for (const o of outcomes) {
-            if (o.result.outcome === 'pass') applyFidelity(o.candidate, fid1.get(o.candidate)!)
+            if (o.result.outcome === 'pass') applyFidelityR1(o.candidate, fid1.get(o.candidate)!)
             else localErrors.push(errorFrom(o))
           }
         }
@@ -1005,7 +1042,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ])
             reconcileBirth()
             for (const o of birth2.outcomes) {
-              if (o.result.outcome === 'pass') applyFidelity(o.candidate, fid2.get(o.candidate)!)
+              if (o.result.outcome === 'pass') applyFidelityFinal(o.candidate, fid2.get(o.candidate)!)
               else if (o.result.outcome === 'fail') localFindings.push(toFinding(o))
               else localErrors.push(errorFrom(o))
             }
@@ -1014,8 +1051,95 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
     }
 
+    // Self-heal (item 13): a HIGH-confidence fidelity flag is the system's own mess to
+    // clean up, not a human task. Discard the candidate and re-author its claim ONCE
+    // with the mismatch as correction evidence (the birth-retry machinery), then run
+    // the replacement through birth + fidelity again — flagged again (any confidence)
+    // or a birth fail becomes a finding (no second self-heal). Every discard is an
+    // auditable ledger entry, never silent.
+    if (selfHeal.length > 0) {
+      const gd = workDocByPath.get(section.doc)!
+      // Dedupe by ref: re-author each claim once even if several of its candidates
+      // flagged high (the first flag's mismatch is the correction evidence).
+      const healByRef = new Map<string, { task: AuthTask; discarded: { candidate: BirthCandidate; mismatch: string }[] }>()
+      for (const item of selfHeal) {
+        const e = healByRef.get(item.candidate.ref)
+        if (e) e.discarded.push(item)
+        else healByRef.set(item.candidate.ref, { task: taskByRef.get(item.candidate.ref)!, discarded: [item] })
+      }
+      // Free the discarded ids so the re-author reuses the stable `<leaf>.<n>`.
+      for (const { candidate } of selfHeal) usedIds.delete(candidate.scenario.id)
+
+      retryTotal += healByRef.size
+      options.onRetryProgress?.(retryDone, retryTotal)
+      const replacementsByRef = new Map<string, BirthCandidate[]>()
+      await Promise.all(
+        [...healByRef.values()].map((e) =>
+          limit(async () => {
+            try {
+              const evidence = fidelityFinding(e.discarded[0].candidate, e.discarded[0].mismatch)
+              const scs = await authorRetry(repoRoot, gd, { task: e.task, evidence }, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims, options.onAuthorFailure)
+              for (const rawS of scs) {
+                const built = safeBuild(section, rawS, usedIds, localErrors, e.task.claim.claim, e.task.pack)
+                if (built) pushInto(replacementsByRef, e.task.ref, { section, scenario: built, ref: e.task.ref, claim: e.task.claim })
+              }
+            } finally {
+              options.onRetryProgress?.(++retryDone, retryTotal)
+            }
+          }),
+        ),
+      )
+
+      // Birth + fidelity the replacements in parallel (per item 16); a flag at ANY
+      // confidence — or a birth fail — on a re-author is a finding.
+      const disposition = new Map<BirthCandidate, 'persist' | 'finding' | 'error'>()
+      const replacements = [...replacementsByRef.values()].flat()
+      if (replacements.length > 0) {
+        birthTotal += replacements.length
+        const [birth3, fid3] = await Promise.all([
+          birthValidate(repoRoot, replacements, {
+            executor,
+            recipe,
+            skipBuild: true,
+            noOpThresholdMs: options.noOpThresholdMs,
+            onPhase: options.onBirthPhase,
+            onScenarioSettled: bumpBirth,
+          }),
+          runFidelity(replacements),
+        ])
+        reconcileBirth()
+        for (const o of birth3.outcomes) {
+          if (o.result.outcome === 'pass') disposition.set(o.candidate, applyFidelityFinal(o.candidate, fid3.get(o.candidate)!))
+          else if (o.result.outcome === 'fail') {
+            localFindings.push(toFinding(o))
+            disposition.set(o.candidate, 'finding')
+          } else {
+            localErrors.push(errorFrom(o))
+            disposition.set(o.candidate, 'error')
+          }
+        }
+      }
+
+      // Ledger the discards — one entry per discarded scenario, carrying its own
+      // mismatch and the ref's re-author outcome.
+      for (const e of healByRef.values()) {
+        const outcome = selfHealOutcome(replacementsByRef.get(e.task.ref) ?? [], disposition)
+        for (const { candidate, mismatch } of e.discarded) {
+          localAutoResolved.push({
+            kind: 'fidelity-discard',
+            doc: section.doc,
+            anchor: section.anchor,
+            title: candidate.scenario.title,
+            mismatch,
+            outcome,
+          })
+        }
+      }
+    }
+
     errors.push(...localErrors)
     birthFindings.push(...localFindings)
+    autoResolved.push(...localAutoResolved)
 
     // Settled ⇒ persist now: replace this section's OWN prior files with the green
     // survivors and upsert its manifest entry. A partial persist would leave a
@@ -1229,6 +1353,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthPassed,
     heldSections,
     orphanedDismissals,
+    autoResolved,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
   }
@@ -1309,6 +1434,7 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     birthPassed: 0,
     heldSections: [],
     orphanedDismissals: [],
+    autoResolved: [],
   }
 }
 
@@ -1602,11 +1728,13 @@ function errorFrom(o: { candidate: BirthCandidate; result: { failure?: { actual:
 
 // --- Fidelity review (item 33) -----------------------------------------------
 
-/** The reviewer's decision on one green candidate: persist, flag as a finding, or
- *  (a review that couldn't complete) surface as an error that unsettles the section. */
+/** The reviewer's decision on one green candidate: persist, flag (with a confidence
+ *  that decides self-heal vs finding), or (a review that couldn't complete) surface
+ *  as an error that unsettles the section. */
+type FidelityConfidence = 'high' | 'medium' | 'low'
 type FidelityResult =
   | { verdict: 'faithful' }
-  | { verdict: 'flagged'; mismatch: string }
+  | { verdict: 'flagged'; mismatch: string; confidence: FidelityConfidence }
   | { error: string }
 
 /**
@@ -1644,10 +1772,20 @@ async function reviewFidelity(
   return normalizeFidelity(attempt.review)
 }
 
-/** A flagged verdict always yields a non-empty mismatch (the finding's evidence). */
-function normalizeFidelity(r: { verdict: 'faithful' | 'flagged'; mismatch?: string }): FidelityResult {
+/** A flagged verdict always yields a non-empty mismatch (the finding's evidence) and
+ *  a confidence — a missing one reads conservatively as `medium` (a finding, never an
+ *  auto-discard without an explicit high signal). */
+function normalizeFidelity(r: {
+  verdict: 'faithful' | 'flagged'
+  mismatch?: string
+  confidence?: FidelityConfidence
+}): FidelityResult {
   if (r.verdict === 'flagged') {
-    return { verdict: 'flagged', mismatch: r.mismatch?.trim() || 'the scenario does not verify what the claim asserts' }
+    return {
+      verdict: 'flagged',
+      mismatch: r.mismatch?.trim() || 'the scenario does not verify what the claim asserts',
+      confidence: r.confidence ?? 'medium',
+    }
   }
   return { verdict: 'faithful' }
 }
@@ -1682,7 +1820,9 @@ function fidelityCacheKey(scenarioBehaviorKey: string, section: SectionInput, cl
     .digest('hex')
 }
 
-type FidelityAttempt = { review: { verdict: 'faithful' | 'flagged'; mismatch?: string } } | { error: string }
+type FidelityAttempt =
+  | { review: { verdict: 'faithful' | 'flagged'; mismatch?: string; confidence?: FidelityConfidence } }
+  | { error: string }
 
 /**
  * Call the fidelity runner and validate its verdict; on a schema failure re-ask
@@ -1708,6 +1848,20 @@ async function callFidelityWithReask(ctx: FidelityUserContext, runner: FidelityR
   const reParsed = FidelityReviewSchema.safeParse(reRaw)
   if (reParsed.success) return { review: reParsed.data }
   return { error: `output invalid after re-ask: ${flattenZodError(reParsed.error)}` }
+}
+
+/** Classify a self-heal ref's outcome from its re-authored replacements: `resolved`
+ *  (all persisted faithfully), `finding` (any replacement flagged again / failed
+ *  birth), or `unresolved` (no replacement authored, or a review couldn't complete). */
+function selfHealOutcome(
+  replacements: BirthCandidate[],
+  disposition: Map<BirthCandidate, 'persist' | 'finding' | 'error'>,
+): 'resolved' | 'finding' | 'unresolved' {
+  if (replacements.length === 0) return 'unresolved'
+  const ds = replacements.map((c) => disposition.get(c))
+  if (ds.some((d) => d === 'finding')) return 'finding'
+  if (ds.some((d) => d === 'error' || d === undefined)) return 'unresolved'
+  return 'resolved'
 }
 
 /** A fidelity finding: a green scenario the reviewer judged unfaithful. Same shape

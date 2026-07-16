@@ -11,6 +11,7 @@
 
 import {
   dismissedClaimKey,
+  type GuardAutoResolved,
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardGenerateReport,
@@ -221,6 +222,43 @@ export function buildHeldRows(
     }
   }
   return rows;
+}
+
+/** An auto-resolved ledger entry lifted into a muted, informational row — a
+ *  high-confidence weak scenario the tool discarded + re-authored itself (item 13).
+ *  Not part of the filterable inventory: it renders in its own collapsed group. */
+export interface GuardAutoResolvedRowData {
+  /** Deterministic key — `auto:<anchor>:<index-in-report>`. */
+  id: string;
+  /** The discarded scenario's title. */
+  title: string;
+  /** The reviewer's high-confidence mismatch — why it was discarded. */
+  mismatch: string;
+  doc: string;
+  anchor: string;
+  /** The bound section's human heading, resolved from a co-bound scenario, else the slug leaf. */
+  headingText: string;
+  /** What the single re-author produced. */
+  outcome: GuardAutoResolved['outcome'];
+}
+
+/** Lift a generate report's auto-resolved ledger into rows (title + mismatch), for
+ *  the Scenarios-tab collapsed "auto-resolved" group. Empty when nothing self-healed. */
+export function buildAutoResolvedRows(
+  report: GuardGenerateReport | null,
+  scenarioRows: readonly GuardScenarioRowData[],
+): GuardAutoResolvedRowData[] {
+  if (!report?.autoResolved?.length) return [];
+  const resolveHeading = makeHeadingResolver(scenarioRows);
+  return report.autoResolved.map((entry, index) => ({
+    id: `auto:${entry.anchor}:${index}`,
+    title: entry.title,
+    mismatch: entry.mismatch,
+    doc: entry.doc,
+    anchor: entry.anchor,
+    headingText: resolveHeading(entry.doc, entry.anchor),
+    outcome: entry.outcome,
+  }));
 }
 
 /** The unified inventory: committed scenarios first, then birth findings, then

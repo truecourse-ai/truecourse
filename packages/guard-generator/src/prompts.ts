@@ -848,15 +848,26 @@ stay green while the claimed behavior is broken → flagged. When the claim quot
 exact message or value, a scenario that does not assert that exact message/value is
 flagged (weak), no matter how much else it checks.
 
+# Confidence (on a flagged verdict)
+When you flag, also state how SURE you are the scenario is weak — this decides
+whether the system fixes itself or asks a human:
+- high — you are certain the scenario is vacuous/weak/miscast (it plainly cannot
+  fail if the claimed behavior broke). The system will DISCARD it and re-author once
+  automatically; reserve "high" for the clear cases.
+- medium — likely weak, but a reasonable reader could disagree.
+- low — a mild concern; the scenario may be acceptable.
+Omit "confidence" when faithful.
+
 # Output schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition; your reply must
 validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
 ${FIDELITY_JSON_SCHEMA}
 Concretely:
   { "verdict": "faithful" }
-  { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>" }
+  { "verdict": "flagged", "confidence": "high", "mismatch": "<one sentence naming what the scenario fails to verify>" }
 On "flagged" the "mismatch" is REQUIRED — one sentence stating the gap between what
-the claim asserts and what the scenario actually checks. Omit it when faithful.`
+the claim asserts and what the scenario actually checks — and "confidence" is
+REQUIRED (high | medium | low). Omit both when faithful.`
 
 export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
@@ -894,7 +905,7 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
     '"""',
     '',
     'Return exactly one JSON object: { "verdict": "faithful" } or',
-    '{ "verdict": "flagged", "mismatch": "<one sentence>" }.',
+    '{ "verdict": "flagged", "confidence": "high|medium|low", "mismatch": "<one sentence>" }.',
   ]
   if (ctx.correction) {
     lines.push(
@@ -902,7 +913,8 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object with a "verdict" of "faithful" or "flagged"',
-      '(a one-sentence "mismatch" when flagged), and NOTHING else.',
+      '(a one-sentence "mismatch" AND a "confidence" of high|medium|low when flagged),',
+      'and NOTHING else.',
     )
   }
   return lines.join('\n')

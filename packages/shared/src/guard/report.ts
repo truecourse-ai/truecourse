@@ -329,6 +329,35 @@ export const GuardOrphanedSectionSchema = z
   .strict()
 export type GuardOrphanedSection = z.infer<typeof GuardOrphanedSectionSchema>
 
+/**
+ * One AUTO-RESOLVED ledger entry — a high-confidence machine judgment the tool
+ * acted on ITSELF instead of handing the user a task. A visible record, never
+ * silence: nothing is deleted without an auditable trace.
+ *  - `fidelity-discard` — a green scenario the fidelity reviewer flagged at HIGH
+ *    confidence (weak/vacuous/miscast, and the machine is sure). Rather than birth a
+ *    finding (a human task), the candidate is discarded and its claim is re-authored
+ *    ONCE with the mismatch as correction evidence; `outcome` says what that produced.
+ */
+export const GuardAutoResolvedSchema = z
+  .object({
+    kind: z.literal('fidelity-discard'),
+    doc: z.string(),
+    anchor: z.string(),
+    /** The discarded scenario's title. */
+    title: z.string(),
+    /** The reviewer's high-confidence mismatch — why the scenario was discarded. */
+    mismatch: z.string(),
+    /**
+     * What the single re-author produced:
+     *  - `resolved` — a faithful, birth-passing replacement (committed or held).
+     *  - `finding` — the replacement was flagged again / failed birth → a finding.
+     *  - `unresolved` — no replacement was authored (empty/blocked/authoring error).
+     */
+    outcome: z.enum(['resolved', 'finding', 'unresolved']),
+  })
+  .strict()
+export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
+
 /** The recipe outcome for the run — loaded as-is or freshly discovered. */
 export const GuardRecipeReportSchema = z
   .object({
@@ -374,15 +403,16 @@ export const GuardGenerateReportSchema = z
     extractionFailures: z.array(GuardExtractionFailureSchema),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth passes that survived to a reported bucket — written, held-ready, or a
-     * fidelity finding. Counted once per surviving candidate, so the run reconciles
-     * exactly: `birthPassed === written.length + Σ heldSections.readyScenarios +
-     * (birthFindings with kind 'fidelity')`. A round-1 pass discarded when a sibling
-     * forced a whole-claim retry is NOT counted (only the retry's own passes are),
-     * nor is a birth pass whose fidelity review could not complete. May still exceed
-     * `written.length` when a passing scenario's section didn't settle (it is held).
-     * Optional so the report stays a superset of the result AND tolerant reads of
-     * older files (written before this field existed) keep parsing.
+     * Birth passes that survived to a reported bucket — written, held-ready, a
+     * fidelity finding, or an auto-resolved fidelity discard. Counted once per
+     * surviving candidate, so the run reconciles exactly: `birthPassed ===
+     * written.length + Σ heldSections.readyScenarios + (birthFindings with kind
+     * 'fidelity') + autoResolved.length`. A round-1 pass discarded when a sibling
+     * forced a whole-claim BIRTH retry is NOT counted (only the retry's own passes
+     * are), nor is a birth pass whose fidelity review could not complete. May still
+     * exceed `written.length` when a passing scenario's section didn't settle (it is
+     * held). Optional so the report stays a superset of the result AND tolerant reads
+     * of older files (written before this field existed) keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
@@ -398,6 +428,13 @@ export const GuardGenerateReportSchema = z
      * honored). Optional so older reports parse; absent reads as "none".
      */
     orphanedDismissals: z.array(GuardOrphanedDismissalSchema).optional(),
+    /**
+     * The auto-resolved ledger — high-confidence machine judgments the tool acted on
+     * itself (a visible record, never a task): today, HIGH-confidence fidelity flags
+     * discarded and re-authored once. Optional so older reports parse; absent reads
+     * as "none".
+     */
+    autoResolved: z.array(GuardAutoResolvedSchema).optional(),
     manifestPath: z.string().optional(),
     usage: GuardGenerateUsageSchema.optional(),
     /**

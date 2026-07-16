@@ -68,7 +68,7 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -402,6 +402,12 @@ function RepoPageInner() {
   const guardListRows = useMemo(
     () => buildListRows(guardScenarios.rows, guardFindingRows, guardHeldRows),
     [guardScenarios.rows, guardFindingRows, guardHeldRows],
+  );
+  // The auto-resolved ledger (item 13) — high-confidence weak scenarios the tool
+  // discarded + re-authored itself — renders as a collapsed group at the list bottom.
+  const guardAutoResolvedRows = useMemo(
+    () => buildAutoResolvedRows(guardReport, guardScenarios.rows),
+    [guardReport, guardScenarios.rows],
   );
 
   // Switching to a data tab re-fetches its data, so the panel reflects the latest
@@ -1154,6 +1160,7 @@ function RepoPageInner() {
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardScenariosPanel
                 rows={guardListRows}
+                autoResolved={guardAutoResolvedRows}
                 loading={guardScenarios.loading}
                 error={guardScenarios.error}
                 activeId={guardScenarioTabs.activeId}

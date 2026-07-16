@@ -203,12 +203,18 @@ export const AuthoredBatchSchema = z.array(AuthoredClaimSchema)
  * The fidelity reviewer's verdict on ONE green scenario read against its section
  * and claim: `faithful` (the scenario genuinely verifies what the section/claim
  * asserts) or `flagged` (it is weak, vacuous, or miscast). A flagged verdict MUST
- * carry a one-sentence `mismatch` — the stated reason recorded as the finding's
- * evidence. The object schema is NOT strict: an extra key from a smaller model is
- * dropped, not a validation failure.
+ * carry a one-sentence `mismatch` — the stated reason recorded as evidence — and a
+ * `confidence` (same closed enum as triage) in how sure the review is the scenario
+ * is weak. A HIGH-confidence flag self-heals (the candidate is discarded and its
+ * claim re-authored once with the mismatch as evidence, never a human task);
+ * medium/low flags become findings. A flagged verdict missing `confidence` is read
+ * conservatively as `medium` (a finding — never an auto-discard without an explicit
+ * high signal). The object schema is NOT strict: an extra key from a smaller model
+ * is dropped, not a validation failure.
  */
 export const FidelityReviewSchema = z.object({
   verdict: z.enum(['faithful', 'flagged']),
   mismatch: z.string().optional(),
+  confidence: z.enum(['high', 'medium', 'low']).optional(),
 })
 export type FidelityReview = z.infer<typeof FidelityReviewSchema>

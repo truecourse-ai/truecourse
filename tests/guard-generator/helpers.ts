@@ -146,16 +146,25 @@ export function faithfulReviewer(onCall?: () => void): FidelityRunner {
   }
 }
 
+/** How a flagged scenario is described: a bare mismatch string (no confidence — the
+ *  engine reads a missing confidence conservatively as `medium`), or a mismatch with
+ *  an explicit confidence (`high` triggers the self-heal path). */
+export type FlagSpec = string | { mismatch: string; confidence?: 'high' | 'medium' | 'low' }
+
 /**
- * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`
- * (its value is the mismatch), judging everything else faithful. Reads the scenario
- * title out of the YAML it is handed. `onCall` fires once per review.
+ * A fidelity reviewer that FLAGS any scenario whose title is a key of `flagged`,
+ * judging everything else faithful. The value is the mismatch (optionally with a
+ * confidence). Reads the scenario title out of the YAML it is handed. `onCall` fires
+ * once per review.
  */
-export function reviewBy(flagged: Record<string, string>, onCall?: () => void): FidelityRunner {
+export function reviewBy(flagged: Record<string, FlagSpec>, onCall?: () => void): FidelityRunner {
   return async ({ scenarioYaml }) => {
     onCall?.()
-    for (const [title, mismatch] of Object.entries(flagged)) {
-      if (scenarioYaml.includes(`title: ${title}`)) return { verdict: 'flagged', mismatch }
+    for (const [title, spec] of Object.entries(flagged)) {
+      if (scenarioYaml.includes(`title: ${title}`)) {
+        const s = typeof spec === 'string' ? { mismatch: spec } : spec
+        return { verdict: 'flagged', mismatch: s.mismatch, ...(s.confidence ? { confidence: s.confidence } : {}) }
+      }
     }
     return { verdict: 'faithful' }
   }

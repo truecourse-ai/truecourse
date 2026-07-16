@@ -371,11 +371,15 @@ describe('guard-generator prompts', () => {
     expect(FIDELITY_SYSTEM_PROMPT).toContain('would THIS scenario turn red')
     // A flagged verdict must state the mismatch (the finding evidence).
     expect(FIDELITY_SYSTEM_PROMPT).toContain('"mismatch"')
+    // A flagged verdict also carries a confidence — a HIGH one self-heals (discard +
+    // re-author) rather than raising a human task.
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('"confidence"')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('DISCARD it and re-author once')
     expect(FIDELITY_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
   it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a14f96711c37aafb')
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('f27d441e28399ba9')
   })
 
   it('buildFidelityUserPrompt carries the section text, the claim, and the scenario YAML', () => {

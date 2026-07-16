@@ -11,12 +11,13 @@
  */
 
 import { useMemo, useState } from 'react';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { guardRowStatus } from '@/hooks/useGuardScenarios';
 import {
   guardListRowStatus,
   guardListStatusLabel,
+  type GuardAutoResolvedRowData,
   type GuardListRow,
   type GuardListStatus,
 } from '@/lib/guard-list-rows';
@@ -144,8 +145,59 @@ function HeldRow({
   );
 }
 
+/** The label + tone for an auto-resolved entry's re-author outcome. */
+function outcomeMeta(outcome: GuardAutoResolvedRowData['outcome']): { label: string; tone: string } {
+  if (outcome === 'resolved') return { label: 'resolved', tone: 'text-emerald-600 dark:text-emerald-400' };
+  if (outcome === 'finding') return { label: 'became a finding', tone: 'text-amber-600 dark:text-amber-400' };
+  return { label: 'no replacement', tone: 'text-muted-foreground' };
+}
+
+/**
+ * The collapsed "auto-resolved" ledger group at the bottom of the list (item 13):
+ * high-confidence weak scenarios the tool discarded + re-authored itself. Muted, with
+ * a count in the header; expanding shows each discarded title (struck through), its
+ * outcome, and the mismatch that triggered the discard. Informational — no selection.
+ */
+function AutoResolvedGroup({ rows }: { rows: GuardAutoResolvedRowData[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-border/60 bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-medium text-muted-foreground hover:bg-muted/40"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+        <span>Auto-resolved</span>
+        <span className="rounded bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">{rows.length}</span>
+        <span className="ml-auto truncate text-[10px] font-normal text-muted-foreground/80">
+          weak scenarios discarded + re-authored
+        </span>
+      </button>
+      {open && (
+        <ul role="list" aria-label="Auto-resolved scenarios">
+          {rows.map((row) => {
+            const meta = outcomeMeta(row.outcome);
+            return (
+              <li key={row.id} className="border-t border-border/40 px-3 py-1.5 pl-8">
+                <div className="flex w-full items-center gap-2">
+                  <span className="min-w-0 truncate text-[12px] text-muted-foreground line-through">{row.title}</span>
+                  <span className={`ml-auto shrink-0 text-[10px] ${meta.tone}`}>{meta.label}</span>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">{row.mismatch}</p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function GuardScenariosPanel({
   rows,
+  autoResolved = [],
   loading,
   error,
   activeId,
@@ -154,6 +206,8 @@ export function GuardScenariosPanel({
   scenariosCommit,
 }: {
   rows: GuardListRow[];
+  /** The run's auto-resolved ledger (item 13) — rendered as a collapsed bottom group. */
+  autoResolved?: GuardAutoResolvedRowData[];
   loading: boolean;
   error: string | null;
   activeId: string | null;
@@ -218,7 +272,7 @@ export function GuardScenariosPanel({
       </div>
     );
   }
-  if (rows.length === 0) {
+  if (rows.length === 0 && autoResolved.length === 0) {
     // The MAIN pane carries the single CTA empty state — here the left panel stays
     // quiet (one muted line) so two identical cards never sit side by side.
     return (
@@ -295,24 +349,28 @@ export function GuardScenariosPanel({
         </div>
       </div>
 
-      {/* One flat, bad-news-first list: findings → held → committed scenarios. */}
-      {visible.length === 0 ? (
-        <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-          No scenarios match these filters.
-        </div>
-      ) : (
-        <div className="flex-1 overflow-auto" role="list" aria-label="Scenario inventory">
-          {findingRows.map((row) => (
-            <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-          ))}
-          {heldRows.map((row) => (
-            <HeldRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-          ))}
-          {scenarioRows.map((row) => (
-            <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-          ))}
-        </div>
-      )}
+      {/* One flat, bad-news-first list: findings → held → committed scenarios, then
+          the collapsed auto-resolved ledger pinned to the bottom. */}
+      <div className="flex-1 overflow-auto">
+        {visible.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No scenarios match these filters.
+          </div>
+        ) : (
+          <div role="list" aria-label="Scenario inventory">
+            {findingRows.map((row) => (
+              <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+            ))}
+            {heldRows.map((row) => (
+              <HeldRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+            ))}
+            {scenarioRows.map((row) => (
+              <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
+            ))}
+          </div>
+        )}
+        {autoResolved.length > 0 && <AutoResolvedGroup rows={autoResolved} />}
+      </div>
     </div>
   );
 }

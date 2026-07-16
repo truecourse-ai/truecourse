@@ -966,7 +966,22 @@ describe('printGuardGenerateSummary', () => {
     expect(out).not.toContain('Top birth finding')
     expect(out).not.toContain('Top authoring error')
     expect(out).not.toContain('ready but held')
+    expect(out).not.toContain('auto-fixed')
     expect(out).toContain('REPORT_PATH')
+  })
+
+  it('prints the auto-resolved count line when the run self-healed weak scenarios', () => {
+    const rep = report({
+      sectionsChanged: 2,
+      written: [{ id: 'a.1', title: 'fixed', doc: DOC, anchor: 'a', file: 'a.yaml' }],
+      birthPassed: 2,
+      autoResolved: [
+        { kind: 'fidelity-discard', doc: DOC, anchor: 'a', title: 'weak', mismatch: 'vacuous', outcome: 'resolved' },
+        { kind: 'fidelity-discard', doc: DOC, anchor: 'b', title: 'weak2', mismatch: 'still vacuous', outcome: 'finding' },
+      ],
+    })
+    printGuardGenerateSummary(rep, 'p')
+    expect(out).toContain('auto-fixed  2 weak scenarios discarded + re-authored (1 resolved)')
   })
 
   it('renders the ready-but-held line, blamed on its sections\' findings + errors', () => {

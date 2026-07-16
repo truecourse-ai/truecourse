@@ -379,6 +379,14 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   }
   if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
+  // Auto-resolved (item 13): HIGH-confidence weak scenarios the tool discarded and
+  // re-authored itself — a visible count, never a hidden deletion. `resolved` = the
+  // re-author committed; the rest fell through to a finding / no replacement.
+  if (report.autoResolved && report.autoResolved.length > 0) {
+    const n = report.autoResolved.length;
+    const resolved = report.autoResolved.filter((a) => a.outcome === "resolved").length;
+    p.log.step(`auto-fixed  ${n} weak scenario${n === 1 ? "" : "s"} discarded + re-authored (${resolved} resolved)`);
+  }
   if (g.usage) p.log.step(`cost        ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
 
   // Top 3 birth findings, one line each (title + section leaf). The rest live in
