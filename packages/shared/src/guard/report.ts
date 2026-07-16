@@ -184,6 +184,16 @@ export const GuardBirthFindingSchema = z
      * donate the heading client-side; slugs are engine ids, not UI copy.
      */
     headingText: z.string().optional(),
+    /**
+     * The per-finding dismissal identity `guardFindingKey(doc, anchor,
+     * scenarioHash)`, stamped SERVER-SIDE at report read time (`stampFindingKeys`)
+     * from the finding's verbatim stored `yaml` — NEVER persisted (a persisted
+     * unknown field would make post-feature reports unparseable to a downgraded
+     * pre-feature CLI through this `.strict()` schema). Absent when the yaml is
+     * missing or fails behavioral derivation — the finding is not dismissible.
+     * This field types the SERVED shape only.
+     */
+    findingKey: z.string().optional(),
   })
   .strict()
 export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>

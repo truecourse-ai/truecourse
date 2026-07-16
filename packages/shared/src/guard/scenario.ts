@@ -145,6 +145,12 @@ export const GuardBindsSchema = z
 
 // --- The scenario ---------------------------------------------------
 
+// The behavioral sub-schemas above (GuardSetupSchema, GuardStepSchema,
+// GuardNormalizerSchema) are ALSO composed by `ScenarioBehaviorSchema`
+// (./scenario-hash.ts), the lenient gate the per-finding dismissal hash derives
+// through. Any change to them must be reviewed against BOTH schemas: an
+// incompatible change silently orphans committed dismissals (old yaml stops
+// deriving a key) — see the cross-bump contract on `scenarioHashFromYaml`.
 export const GuardScenarioSchema = z
   .object({
     guard: z.literal(GUARD_FORMAT_VERSION),

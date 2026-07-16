@@ -22,12 +22,12 @@ function repo(): string {
 
 describe('guard decisions store', () => {
   it('reads an empty decisions file when none exists', () => {
-    expect(readGuardDecisions(repo())).toEqual({ version: 1, dismissedClaims: [] });
+    expect(readGuardDecisions(repo())).toEqual({ version: 1, dismissedClaims: [], dismissedFindings: [] });
   });
 
   it('writes to .truecourse/scenarios/decisions.json (next to recipe/manifest)', () => {
     const r = repo();
-    writeGuardDecisions(r, { version: 1, dismissedClaims: [] });
+    writeGuardDecisions(r, { version: 1, dismissedClaims: [], dismissedFindings: [] });
     expect(guardDecisionsPath(r)).toBe(path.join(r, '.truecourse', 'scenarios', 'decisions.json'));
     expect(fs.existsSync(guardDecisionsPath(r))).toBe(true);
   });
@@ -40,7 +40,7 @@ describe('guard decisions store', () => {
     expect(readGuardDecisions(r).dismissedClaims).toEqual([claim]);
 
     fs.writeFileSync(guardDecisionsPath(r), '{ not json');
-    expect(readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [] });
+    expect(readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFindings: [] });
   });
 
   it('re-dismissing the same identity refreshes in place (no duplicate)', () => {
@@ -54,7 +54,7 @@ describe('guard decisions store', () => {
 
   it('a read-modify-write preserves unknown top-level keys (a future array survives an old mutator)', () => {
     const r = repo();
-    writeGuardDecisions(r, { version: 1, dismissedClaims: [] });
+    writeGuardDecisions(r, { version: 1, dismissedClaims: [], dismissedFindings: [] });
     const withUnknown = {
       version: 1,
       dismissedClaims: [],

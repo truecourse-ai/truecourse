@@ -23,7 +23,7 @@ import {
   writeGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardStore, resetGuardStore } from '../../packages/core/src/lib/guard-store';
-import type { GuardDecisions, GuardDismissedClaim } from '../../packages/shared/src/index';
+import type { GuardDecisions, GuardDismissedClaim, GuardDismissedFinding } from '../../packages/shared/src/index';
 
 function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
   return {
@@ -59,6 +59,26 @@ describe('mergeGuardDecisions — union dismissedClaims by identity', () => {
     const base = decisions([claim({ anchor: 'a' }), claim({ anchor: 'b' })]);
     const merged = mergeGuardDecisions(base, decisions([]));
     expect(merged.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['a', 'b']);
+  });
+
+  it('unions dismissedFindings by findingKey (overlay wins on a colliding identity)', () => {
+    const finding = (over: Partial<GuardDismissedFinding> = {}): GuardDismissedFinding => ({
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      scenarioHash: 'deadbeefdeadbeef',
+      yaml: 'y',
+      title: 't',
+      dismissedAt: '2026-07-16T00:00:00.000Z',
+      ...over,
+    });
+    const base: GuardDecisions = {
+      ...decisions([]),
+      dismissedFindings: [finding({ note: 'base' }), finding({ anchor: 'other' })],
+    };
+    const overlay: GuardDecisions = { ...decisions([]), dismissedFindings: [finding({ note: 'overlay' })] };
+    const merged = mergeGuardDecisions(base, overlay);
+    expect(merged.dismissedFindings).toHaveLength(2);
+    expect(merged.dismissedFindings.find((f) => f.anchor === 'version')?.note).toBe('overlay');
   });
 
   it('carries unknown top-level keys from base and overlay forward (never hand-builds the result)', () => {

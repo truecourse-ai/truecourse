@@ -30,6 +30,7 @@ import {
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
   dismissedClaimKey,
+  guardFindingKey,
   isAwaitingDriver,
   parseBlockedOnCapabilities,
   worstOutcome,
@@ -38,6 +39,7 @@ import {
   type GuardDecisions,
   type GuardClaimIdentity,
   type GuardDismissedClaim,
+  type GuardDismissedFinding,
   type GuardDocCoverage,
   type GuardLatest,
   type GuardManifest,
@@ -755,7 +757,19 @@ export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecision
   const byKey = new Map<string, GuardDismissedClaim>()
   for (const c of base.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
   for (const c of overlay.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  return { ...base, ...overlay, version: 1, dismissedClaims: [...byKey.values()] }
+  // Per-finding entries union by their own identity. The EE Pg store reads the
+  // payload back with a raw cast (no schema parse), so a row written before the
+  // feature can lack the array — tolerate undefined.
+  const byFindingKey = new Map<string, GuardDismissedFinding>()
+  for (const f of base.dismissedFindings ?? []) byFindingKey.set(guardFindingKey(f.doc, f.anchor, f.scenarioHash), f)
+  for (const f of overlay.dismissedFindings ?? []) byFindingKey.set(guardFindingKey(f.doc, f.anchor, f.scenarioHash), f)
+  return {
+    ...base,
+    ...overlay,
+    version: 1,
+    dismissedClaims: [...byKey.values()],
+    dismissedFindings: [...byFindingKey.values()],
+  }
 }
 
 /**
