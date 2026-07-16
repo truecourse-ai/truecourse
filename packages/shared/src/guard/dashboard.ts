@@ -12,7 +12,7 @@
  */
 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
-import type { GuardGapDisplayKind } from './report.js'
+import type { GuardGapDisplayKind, GuardTriageVerdict } from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
 import type { GuardScenario } from './scenario.js'
 
@@ -76,6 +76,9 @@ export interface GuardSectionFinding {
   actual: string
   /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
   evidencePath?: string
+  /** The finding's Opus triage verdict, for the coverage row's verdict chip. Absent
+   *  when the finding was never triaged (no triage runner / older report). */
+  triageVerdict?: GuardTriageVerdict
 }
 
 /** A ready-but-held scenario projected onto its section for the coverage detail. */

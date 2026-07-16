@@ -59,6 +59,7 @@ import {
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  TRIAGE_SYSTEM_PROMPT,
   type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
@@ -95,6 +96,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardExtract: 'Extracting claims',
   guardAuthor: 'Authoring scenarios',
   guardFidelity: 'Reviewing fidelity',
+  guardTriage: 'Triaging findings',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -366,6 +368,8 @@ const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sectio
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
+const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
+const GUARD_FINDING_RATE = 0.15; // rough fraction of authored claims that birth a finding
 const GUARD_SCENARIO_YAML_CHARS = 1200; // ~one authored scenario's YAML body (the review input)
 // Grounded authoring injects real empty-sandbox probe transcripts into each batch
 // prompt (zero extra LLM CALLS — it just enlarges the authoring input). A
@@ -385,7 +389,9 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * review (one call per green scenario, item 33) is NOT cache-aware — scenario
  * content isn't known until authoring + birth run — so it counts one review per
  * planned cli claim (the same range as authoring), honestly over-counting a claim
- * that authors several scenarios or none.
+ * that authors several scenarios or none. Finding triage (one Opus call per
+ * birth/fidelity finding) is likewise not knowable pre-run — the finding count
+ * depends on birth outcomes — so it ranges 0..claimsMax with a heuristic point.
  *
  * `mode` is the speed/cost dial (item 5): economical batches claims per authoring
  * call (fewer calls), fast authors one claim per call (more calls, each re-paying
@@ -469,6 +475,26 @@ export async function estimateGuardTokens(
       // A review carries the system prompt + the section's own text + one scenario YAML.
       avgInputTokens: tokensFromChars(FIDELITY_SYSTEM_PROMPT.length, avgOwnChars + GUARD_SCENARIO_YAML_CHARS),
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
+    },
+    {
+      // One Opus triage call per birth/fidelity finding, after the sections settle.
+      // The finding COUNT is unknowable pre-run (it depends on birth/fidelity
+      // outcomes), so — following the fidelity stage's per-claim proxy convention —
+      // this ranges from 0 (no findings) up to a ceiling of every planned claim's
+      // scenario becoming a finding (`claimsMax`), with a heuristic point at
+      // GUARD_FINDING_RATE of the planned claims. The ceiling drives the quoted cost.
+      stage: 'guardTriage',
+      model: resolveModel('guard.triage', undefined, repoRoot),
+      calls: Math.round(claimsPoint * GUARD_FINDING_RATE),
+      minCalls: 0,
+      maxCalls: claimsMax,
+      // A triage carries the system prompt + the section's own text + one scenario
+      // YAML + the finding's grounding transcripts.
+      avgInputTokens: tokensFromChars(
+        TRIAGE_SYSTEM_PROMPT.length,
+        avgOwnChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
+      ),
+      avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
     },
   ];
 

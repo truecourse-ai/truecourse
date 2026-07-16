@@ -27,11 +27,18 @@ import {
   type RecipeDiscoveryInput,
   type FidelityUserContext,
 } from './prompts.js'
+import {
+  TRIAGE_SYSTEM_PROMPT,
+  buildTriageUserPrompt,
+  type TriageUserContext,
+  type TriageRunner,
+} from './triage.js'
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
+export type { TriageRunner } from './triage.js'
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -93,6 +100,24 @@ export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
       fallbackModel: opts.fallbackModel,
       system: FIDELITY_SYSTEM_PROMPT,
       user: buildFidelityUserPrompt(ctx),
+      responseFormat: 'json',
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (ctx: TriageUserContext) => {
+    const raw = await transport({
+      id: `guard.triage:${ctx.doc}:${ctx.sectionHeading}${ctx.correction ? ':correction' : ''}`,
+      stage: 'guard.triage',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: TRIAGE_SYSTEM_PROMPT,
+      user: buildTriageUserPrompt(ctx),
       responseFormat: 'json',
       timeoutMs,
     })
