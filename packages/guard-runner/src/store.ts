@@ -14,10 +14,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
 import {
+  EMPTY_GUARD_AUTO_RESOLUTIONS,
+  GuardAutoResolutionsSchema,
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
   GuardPackManifestSchema,
+  type GuardAutoResolutions,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
@@ -34,6 +37,7 @@ const EVIDENCE_DIR = 'evidence'
 const LATEST_FILE = 'LATEST.json'
 const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
+const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -62,6 +66,10 @@ export function guardHistoryPath(repoRoot: string): string {
 
 export function guardResultPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), RESULT_FILE)
+}
+
+export function guardAutoResolutionsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -244,6 +252,19 @@ export function writeGuardResult(repoRoot: string, report: GuardGenerateReport):
 /** Read the last `guard generate` report, or `null` when absent or unparseable. */
 export function readGuardResult(repoRoot: string): GuardGenerateReport | null {
   return readJsonOr(guardResultPath(repoRoot), GuardGenerateReportSchema, null)
+}
+
+/** Read the durable auto-resolution ledger (item-14 escalation memory), falling back
+ *  to an empty ledger when absent or unparseable — a stale file never blocks a run. */
+export function readGuardAutoResolutions(repoRoot: string): GuardAutoResolutions {
+  return readJsonOr(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, EMPTY_GUARD_AUTO_RESOLUTIONS)
+}
+
+/** Write the durable auto-resolution ledger atomically. */
+export function writeGuardAutoResolutions(repoRoot: string, ledger: GuardAutoResolutions): string {
+  const target = guardAutoResolutionsPath(repoRoot)
+  atomicWriteJson(target, ledger)
+  return target
 }
 
 /** Parse `file` against `schema`, returning `fallback` when absent or unreadable.

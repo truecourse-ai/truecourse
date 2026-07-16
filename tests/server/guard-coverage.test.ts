@@ -240,3 +240,54 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(empty.generatedAt).toBeNull();
   });
 });
+
+// Item 14: auto-resolved findings ride the ledger, NOT `birthFindings` — so a section
+// whose only finding was auto-resolved never paints red `finding`; it paints by
+// whatever else it has (gap / unguarded), with the auto-resolved entry as muted context.
+describe('composeDocCoverage — auto-resolved findings never paint finding', () => {
+  const CONTENT2 = ['# S Dismissed', 'a', '# S Resolved', 'b'].join('\n');
+  const result2: GuardGenerateReport = {
+    generatedAt: '2026-07-16T00:00:00.000Z',
+    status: 'ok',
+    sectionsTotal: 2,
+    sectionsChanged: 2,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    // s-dismissed's claim was auto-dismissed → it settles as a dismissed GAP next run,
+    // but THIS report shows only the ledger entry; the section paints by the gap.
+    coverageGaps: [{ doc: DOC, anchor: 's-dismissed', kind: 'dismissed', reason: 'dismissed: tty-gated output' }],
+    // No birth findings survive — both were auto-resolved.
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+    autoResolved: [
+      { kind: 'triage-dismiss', doc: DOC, anchor: 's-dismissed', title: 'tty check', verdict: 'environment', brief: 'tty-gated, untestable here', claim: 'prints emoji' },
+      { kind: 'triage-resolve', doc: DOC, anchor: 's-resolved', title: 'bad flag', verdict: 'generation-defect', brief: 'the scenario used the wrong flag' },
+    ],
+  };
+
+  const cov = composeDocCoverage(DOC, CONTENT2, { manifest: null, latest: null, result: result2 });
+  const byAnchor = new Map(cov.sections.map((s) => [s.anchor, s]));
+
+  it('a section whose only finding was a triage-dismiss paints its gap, never finding, and never red', () => {
+    const s = byAnchor.get('s-dismissed')!;
+    expect(s.status).toBe('dismissed');
+    expect(s.autoResolved).toEqual([
+      { index: 0, kind: 'triage-dismiss', title: 'tty check', detail: 'tty-gated, untestable here', verdict: 'environment' },
+    ]);
+  });
+
+  it('a section whose only finding was a triage-resolve paints unguarded, with the ledger entry as muted context', () => {
+    const s = byAnchor.get('s-resolved')!;
+    expect(s.status).toBe('unguarded');
+    expect(s.autoResolved).toEqual([
+      { index: 1, kind: 'triage-resolve', title: 'bad flag', detail: 'the scenario used the wrong flag', verdict: 'generation-defect' },
+    ]);
+  });
+
+  it('auto-resolved entries never add a finding to the totals', () => {
+    expect(cov.totals.finding).toBe(0);
+  });
+});

@@ -13,7 +13,7 @@ import path from "node:path";
 import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
-import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding } from "@truecourse/shared";
+import type { GuardScenarioResult, GuardGenerateReport, GuardBirthFinding, GuardAutoResolved } from "@truecourse/shared";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   guardGenerateInProcess,
@@ -345,6 +345,12 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   const unsettled = new Set<string>();
   for (const f of report.birthFindings) unsettled.add(`${f.doc}\0${f.anchor}`);
   for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
+  // A triage-auto-resolved finding (item 14) left `birthFindings`, but its section
+  // committed nothing this run — count it unsettled so `settled` stays honest (an
+  // environment dismissal settles next run; a generation-defect re-attempts).
+  for (const a of report.autoResolved ?? []) {
+    if (a.kind === "triage-dismiss" || a.kind === "triage-resolve") unsettled.add(`${a.doc}\0${a.anchor}`);
+  }
   const settled = Math.max(0, report.sectionsChanged - unsettled.size);
 
   p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled · ${unsettled.size} unsettled · ${report.skippedUnchanged} unchanged`);
@@ -377,15 +383,17 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
     const n = report.orphanedDismissals.length;
     p.log.step(`dismissals  ${n} orphaned — the dismissed claim no longer exists; re-dismiss the new text or drop it from decisions.json`);
   }
-  if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
+  if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"} — human decision needed`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);
-  // Auto-resolved (item 13): HIGH-confidence weak scenarios the tool discarded and
-  // re-authored itself — a visible count, never a hidden deletion. `resolved` = the
-  // re-author committed; the rest fell through to a finding / no replacement.
+  // Auto-resolved ledger (items 13 + 14): high-confidence machine judgments the tool
+  // handled itself — a visible count, never a hidden deletion or a human task. One
+  // honest breakdown line: weak scenarios re-authored (item 13), plus triage
+  // auto-resolutions (item 14) — environment claims dismissed, generation-defect
+  // findings retired to re-attempt.
   if (report.autoResolved && report.autoResolved.length > 0) {
     const n = report.autoResolved.length;
-    const resolved = report.autoResolved.filter((a) => a.outcome === "resolved").length;
-    p.log.step(`auto-fixed  ${n} weak scenario${n === 1 ? "" : "s"} discarded + re-authored (${resolved} resolved)`);
+    const parts = autoResolvedBreakdown(report.autoResolved);
+    p.log.step(`auto-resolved ${n} without a task (${parts})`);
   }
   if (g.usage) p.log.step(`cost        ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
 
@@ -422,6 +430,20 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
 function sectionLeaf(anchor: string): string {
   return anchor.split("/").pop() || anchor;
+}
+
+/** The honest per-kind breakdown of the auto-resolved ledger, for the summary line —
+ *  item-13 fidelity discards (re-authored) and item-14 triage auto-resolutions
+ *  (environment dismissed, generation-defect re-attempts). Only nonzero kinds show. */
+function autoResolvedBreakdown(entries: readonly GuardAutoResolved[]): string {
+  const discarded = entries.filter((a) => a.kind === "fidelity-discard").length;
+  const dismissed = entries.filter((a) => a.kind === "triage-dismiss").length;
+  const resolved = entries.filter((a) => a.kind === "triage-resolve").length;
+  const parts: string[] = [];
+  if (discarded > 0) parts.push(`${discarded} weak scenario${discarded === 1 ? "" : "s"} re-authored`);
+  if (dismissed > 0) parts.push(`${dismissed} environment claim${dismissed === 1 ? "" : "s"} dismissed`);
+  if (resolved > 0) parts.push(`${resolved} generation defect${resolved === 1 ? "" : "s"} re-attempt`);
+  return parts.join(" · ");
 }
 
 /** Collapse whitespace and clip an error message to one readable line. */
@@ -658,6 +680,29 @@ function findingKind(f: GuardBirthFinding): "birth" | "fidelity" {
   return f.kind ?? "birth";
 }
 
+/**
+ * Print the auto-resolved ledger beneath a divider in `guard findings` — the
+ * high-confidence machine judgments the tool handled WITHOUT a human task (item 13
+ * fidelity discards + item 14 triage auto-resolutions). The human findings list is
+ * the default view; this rides below it as a visible record. No-op when empty.
+ */
+function printAutoResolvedLedger(report: GuardGenerateReport): void {
+  const entries = report.autoResolved ?? [];
+  if (entries.length === 0) return;
+  p.log.message("");
+  p.log.message(`── auto-resolved · no human task (${entries.length}) ──`);
+  for (const a of entries) {
+    const at = `${a.doc} › ${a.anchor}`;
+    if (a.kind === "fidelity-discard") {
+      p.log.message(`  · [re-authored ${a.outcome}] ${a.title} — ${oneLine(a.mismatch)}  (${at})`);
+    } else if (a.kind === "triage-dismiss") {
+      p.log.message(`  · [dismissed · environment] ${a.title} — ${oneLine(a.brief)}  (${at})`);
+    } else {
+      p.log.message(`  · [re-attempts · generation-defect] ${a.title} — ${oneLine(a.brief)}  (${at})`);
+    }
+  }
+}
+
 /** Human description of the active `--kind`/`--doc` filters, for the close/empty copy. */
 function describeFindingsFilter(opts: { kind?: string; doc?: string }): string {
   const parts: string[] = [];
@@ -704,16 +749,20 @@ export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Prom
   p.log.step(`scenarios   ${report.written.length} written${birth}`);
   p.log.step(`findings    ${report.birthFindings.length} total${matchNote}`);
 
-  // Empty states: nothing to review at all, vs. filters excluded everything.
+  // Empty states: nothing to review at all, vs. filters excluded everything. The
+  // auto-resolved ledger still prints beneath a divider — a visible record even when
+  // no human finding remains.
   if (report.birthFindings.length === 0) {
     p.log.success(
       `No findings in the last generate — ${report.written.length} scenario${report.written.length === 1 ? "" : "s"} written.`,
     );
+    printAutoResolvedLedger(report);
     p.outro("Nothing to review.");
     return;
   }
   if (filtered.length === 0) {
     p.log.info(`No findings match ${describeFindingsFilter(opts)}.`);
+    printAutoResolvedLedger(report);
     p.outro("Nothing to review.");
     return;
   }
@@ -742,9 +791,19 @@ export async function runGuardFindings(opts: RunGuardFindingsOptions = {}): Prom
         p.log.message(`     verdict: ${f.triage.verdict} (${f.triage.confidence} confidence)`);
         p.log.message(`     recommend: ${oneLine(f.triage.recommendation)}`);
       }
+      // Item-14 escalation: this finding kept auto-resolving without converging, so it
+      // is surfaced instead of auto-resolved again — re-generation is not fixing it.
+      if (f.autoResolveEscalation) {
+        p.log.message(
+          `     ⚠ re-generation is not fixing this — auto-resolved ${f.autoResolveEscalation.count}× as ${f.autoResolveEscalation.verdict}; needs a human`,
+        );
+      }
       if (f.evidencePath) p.log.message(`     evidence: ${f.evidencePath}`);
     }
   }
+
+  // The auto-resolved ledger beneath the human findings — a divider separates them.
+  printAutoResolvedLedger(report);
 
   const suffix = filterActive ? ` (${describeFindingsFilter(opts)})` : "";
   p.outro(`${filtered.length} finding${filtered.length === 1 ? "" : "s"}${suffix}.`);

@@ -29,6 +29,9 @@ import {
   writeManifest,
   readManifest,
   readGuardDecisions,
+  writeGuardDecisions,
+  readGuardAutoResolutions,
+  writeGuardAutoResolutions,
   manifestPath,
   runBuild,
   runInstall,
@@ -46,13 +49,16 @@ import {
   type GuardNoOpAnomaly,
 } from '@truecourse/guard-runner'
 import {
+  DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   DEFAULT_INPUT_NAME,
   GUARD_FORMAT_VERSION,
   composeBlockedOnReason,
   dismissedClaimKey,
   isRunnableDriver,
+  type GuardAutoResolutionEntry,
   type GuardAutoResolved,
   type GuardBirthFinding,
+  type GuardTriage,
   type OutputExcerpts,
   type GuardCoverageGap,
   type GuardDismissedClaim,
@@ -102,7 +108,7 @@ import {
   type TriageRunner,
   type ExemplarRunner,
 } from './runners.js'
-import { runTriage } from './triage.js'
+import { runTriage, triageCacheKey } from './triage.js'
 import { seedSupportPack, defaultSupportPackSize } from './exemplars.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import { groundProbes, type ProbeTranscript } from './ground.js'
@@ -285,6 +291,13 @@ export interface GenerateGuardsOptions {
   exemplarRunner?: ExemplarRunner
   /** Forwarded to birth validation — the no-op step threshold (a test seam). */
   noOpThresholdMs?: number
+  /**
+   * Item-14 escalation threshold: how many times a finding identity may auto-resolve
+   * across generates before it surfaces to the human ("re-generation is not fixing
+   * this"). Defaults to {@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER} (2); tests lower
+   * it to observe escalation in fewer runs.
+   */
+  escalateAutoResolveAfter?: number
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   onExtractProgress?: (done: number, total: number) => void
@@ -1326,6 +1339,107 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
   }
 
+  // Item 14: high-confidence triage recommendations auto-resolve — the human sees
+  // only real questions. A finding whose Opus triage said `environment` or
+  // `generation-defect` at HIGH confidence is not a human question; the tool acts on
+  // it itself and records a ledger entry (never silence, never a task):
+  //   - environment       → auto-DISMISS the claim into scenarios/decisions.json
+  //     (marked `auto`, brief as the reason) — it is untestable in this sandbox, so
+  //     generate skips it next run.
+  //   - generation-defect → retire the FINDING to the ledger; the claim is fine, our
+  //     scenario was bad, so the claim re-attempts next generate.
+  // Drift (doc/code, any confidence) and any verdict below HIGH stay HUMAN findings —
+  // drift is the product's value; it is never auto-resolved. Escalation guard: a
+  // finding identity that keeps auto-resolving without converging (default 2) surfaces
+  // to the human with a "re-generation is not fixing this" note — auto-resolution is
+  // never an infinite silent loop. The durable per-identity count lives in the
+  // gitignored `guard/auto-resolutions.json` (the triage cache key IS the identity).
+  if (birthFindings.length > 0) {
+    const escalateAfter = Math.max(1, options.escalateAutoResolveAfter ?? DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER)
+    const priorLedger = readGuardAutoResolutions(repoRoot)
+    const nextEntries: Record<string, GuardAutoResolutionEntry> = {}
+    const humanFindings: GuardBirthFinding[] = []
+    const autoDismissals: GuardDismissedClaim[] = []
+    const now = new Date().toISOString()
+
+    for (const finding of birthFindings) {
+      const action = finding.triage ? triageAutoResolution(finding.triage) : null
+      if (!action) {
+        // Drift, a medium/low verdict, or no triage — a human task, exactly as today.
+        humanFindings.push(finding)
+        continue
+      }
+      const key = triageCacheKey(finding)
+      const prior = priorLedger.entries[key]
+      const priorCount = prior?.count ?? 0
+      // Escalation: this identity already auto-resolved enough times without
+      // converging — surface it to the human and keep the count so it stays escalated.
+      if (priorCount >= escalateAfter) {
+        finding.autoResolveEscalation = { verdict: finding.triage!.verdict, count: priorCount }
+        humanFindings.push(finding)
+        nextEntries[key] = { count: priorCount, verdict: finding.triage!.verdict, updatedAt: prior?.updatedAt ?? now }
+        continue
+      }
+      if (action === 'dismiss') {
+        // environment: auto-dismiss the claim. Needs the claim identity to key on; a
+        // finding without one (an older internal finding) can't be dismissed — human.
+        if (!finding.claim) {
+          humanFindings.push(finding)
+          continue
+        }
+        autoDismissals.push({
+          doc: finding.doc,
+          anchor: finding.anchor,
+          title: finding.claim,
+          dismissedAt: now,
+          auto: true,
+          reason: finding.triage!.brief,
+        })
+        autoResolved.push({
+          kind: 'triage-dismiss',
+          doc: finding.doc,
+          anchor: finding.anchor,
+          title: finding.title,
+          verdict: finding.triage!.verdict,
+          brief: finding.triage!.brief,
+          claim: finding.claim,
+        })
+      } else {
+        // generation-defect: retire the finding; the claim re-attempts next generate.
+        autoResolved.push({
+          kind: 'triage-resolve',
+          doc: finding.doc,
+          anchor: finding.anchor,
+          title: finding.title,
+          verdict: finding.triage!.verdict,
+          brief: finding.triage!.brief,
+        })
+      }
+      nextEntries[key] = { count: priorCount + 1, verdict: finding.triage!.verdict, updatedAt: now }
+    }
+
+    // Persist the pruned ledger — only identities still auto-resolving or escalating
+    // survive; a finding that converged (became a human task, or stopped recurring)
+    // drops out so its count resets.
+    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries })
+
+    // Land the auto-dismissals in scenarios/decisions.json (read once, merge, write
+    // once) so generate honors them on the next run. Idempotent on the (doc, anchor,
+    // title) identity — an auto-dismissal refreshes a matching entry in place.
+    if (autoDismissals.length > 0) {
+      const byKey = new Map(
+        decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
+      )
+      for (const d of autoDismissals) byKey.set(dismissedClaimKey(d.doc, d.anchor, d.title), d)
+      writeGuardDecisions(repoRoot, { ...decisions, dismissedClaims: [...byKey.values()] })
+    }
+
+    // The returned findings are the HUMAN-needed ones only; the auto-resolved ones now
+    // ride the `autoResolved` ledger, not the task list.
+    birthFindings.length = 0
+    birthFindings.push(...humanFindings)
+  }
+
   // 6. Run end — every work section still unsettled (extraction failure, authoring
   // error, birth finding, birth error) drops its prior files + manifest entry so the
   // next run re-attempts it. Final whole-manifest write.
@@ -1377,6 +1491,20 @@ interface AuthTask {
 }
 
 const key = (s: { doc: string; anchor: string }): string => `${s.doc}\0${s.anchor}`
+
+/**
+ * The auto-resolution action a triage verdict warrants (item 14), or `null` when the
+ * finding stays a human task. Only a HIGH-confidence non-drift verdict auto-resolves:
+ * `environment` → `dismiss` (the claim is untestable here), `generation-defect` →
+ * `resolve` (our scenario was bad; the claim re-attempts). Drift (doc/code) at ANY
+ * confidence, and everything below HIGH, stays human — drift is never auto-resolved.
+ */
+function triageAutoResolution(triage: GuardTriage): 'dismiss' | 'resolve' | null {
+  if (triage.confidence !== 'high') return null
+  if (triage.verdict === 'environment') return 'dismiss'
+  if (triage.verdict === 'generation-defect') return 'resolve'
+  return null
+}
 
 function oneLine(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim()

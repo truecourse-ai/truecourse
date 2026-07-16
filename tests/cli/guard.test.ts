@@ -966,22 +966,28 @@ describe('printGuardGenerateSummary', () => {
     expect(out).not.toContain('Top birth finding')
     expect(out).not.toContain('Top authoring error')
     expect(out).not.toContain('ready but held')
-    expect(out).not.toContain('auto-fixed')
+    expect(out).not.toContain('auto-resolved')
     expect(out).toContain('REPORT_PATH')
   })
 
-  it('prints the auto-resolved count line when the run self-healed weak scenarios', () => {
+  it('prints the auto-resolved ledger line with an honest per-kind breakdown', () => {
     const rep = report({
-      sectionsChanged: 2,
+      sectionsChanged: 4,
       written: [{ id: 'a.1', title: 'fixed', doc: DOC, anchor: 'a', file: 'a.yaml' }],
       birthPassed: 2,
       autoResolved: [
+        // item 13: weak scenarios discarded + re-authored.
         { kind: 'fidelity-discard', doc: DOC, anchor: 'a', title: 'weak', mismatch: 'vacuous', outcome: 'resolved' },
         { kind: 'fidelity-discard', doc: DOC, anchor: 'b', title: 'weak2', mismatch: 'still vacuous', outcome: 'finding' },
+        // item 14: an environment claim dismissed, a generation defect re-attempts.
+        { kind: 'triage-dismiss', doc: DOC, anchor: 'c', title: 'tty', verdict: 'environment', brief: 'tty-gated', claim: 'prints emoji' },
+        { kind: 'triage-resolve', doc: DOC, anchor: 'd', title: 'badflag', verdict: 'generation-defect', brief: 'wrong flag' },
       ],
     })
     printGuardGenerateSummary(rep, 'p')
-    expect(out).toContain('auto-fixed  2 weak scenarios discarded + re-authored (1 resolved)')
+    expect(out).toContain(
+      'auto-resolved 4 without a task (2 weak scenarios re-authored · 1 environment claim dismissed · 1 generation defect re-attempt)',
+    )
   })
 
   it('renders the ready-but-held line, blamed on its sections\' findings + errors', () => {
@@ -1169,5 +1175,61 @@ describe('runGuardFindings (printer)', () => {
     }
     expect(exitCode).toBe(1)
     expect(out).toContain('guard generate')
+  })
+
+  // Item 14: the auto-resolved ledger renders beneath a divider — the human findings
+  // list is the default view; auto-resolutions ride below it as a visible record.
+  it('prints the auto-resolved ledger beneath a divider, below the human findings', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 3,
+        written: WRITTEN,
+        birthPassed: 3,
+        birthFindings: [
+          { doc: DOC, anchor: 'cli/version', kind: 'birth', title: 'prints semver', step: 1, expected: 'exit 0', actual: 'exit 7' },
+        ],
+        autoResolved: [
+          { kind: 'triage-dismiss', doc: DOC, anchor: 'cli/tty', title: 'tty emoji', verdict: 'environment', brief: 'tty-gated output, untestable here', claim: 'prints emoji' },
+          { kind: 'triage-resolve', doc: DOC, anchor: 'cli/flag', title: 'bad flag', verdict: 'generation-defect', brief: 'the scenario used the wrong subcommand' },
+        ],
+      }),
+    )
+    await runGuardFindings({ cwd: r })
+
+    // The human finding renders in the numbered list…
+    expect(out).toContain('prints semver')
+    // …and the auto-resolved entries beneath the divider, each with its action.
+    expect(out).toContain('auto-resolved · no human task (2)')
+    expect(out).toContain('[dismissed · environment] tty emoji')
+    expect(out).toContain('[re-attempts · generation-defect] bad flag')
+  })
+
+  it('shows the escalation note on a finding that keeps auto-resolving without converging', async () => {
+    const r = repo()
+    writeGuardResult(
+      r,
+      report({
+        sectionsChanged: 1,
+        written: [],
+        birthFindings: [
+          {
+            doc: DOC,
+            anchor: 'cli/version',
+            kind: 'birth',
+            title: 'prints semver',
+            step: 1,
+            expected: 'exit 0',
+            actual: 'exit 7',
+            triage: { verdict: 'generation-defect', confidence: 'high', brief: 'b', recommendation: 'r' },
+            autoResolveEscalation: { verdict: 'generation-defect', count: 2 },
+          },
+        ],
+      }),
+    )
+    await runGuardFindings({ cwd: r })
+    expect(out).toContain('re-generation is not fixing this')
+    expect(out).toContain('auto-resolved 2×')
   })
 })

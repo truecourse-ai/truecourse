@@ -12,7 +12,7 @@
  */
 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
-import type { GuardGapDisplayKind, GuardTriageVerdict } from './report.js'
+import type { GuardAutoResolved, GuardGapDisplayKind, GuardTriageVerdict } from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
 import type { GuardScenario } from './scenario.js'
 
@@ -88,6 +88,26 @@ export interface GuardSectionHeldScenario {
 }
 
 /**
+ * An auto-resolved ledger entry projected onto its section for the coverage detail —
+ * a finding the tool handled itself (item 14: a `triage-dismiss` / `triage-resolve`,
+ * or an item-13 `fidelity-discard`). It rides the section as MUTED context and never
+ * sets the section's status: an auto-resolved finding is not a pending human task, so
+ * a section whose only finding was auto-resolved paints by whatever else it has
+ * (gap / unguarded), never red `finding`.
+ */
+export interface GuardSectionAutoResolved {
+  /** Index in `report.autoResolved` — stable while the report is on disk. */
+  index: number
+  kind: GuardAutoResolved['kind']
+  /** The auto-resolved scenario's title. */
+  title: string
+  /** The one-line explanation — the triage brief, or the fidelity mismatch. */
+  detail: string
+  /** The triage verdict (item-14 entries only; absent for a fidelity-discard). */
+  verdict?: GuardTriageVerdict
+}
+
+/**
  * A generate authoring error projected onto its section for the coverage detail —
  * the deduped error message plus how many attempts produced it (the report's
  * `errors[]` carries one entry per failed authoring attempt, so retries dedupe to a
@@ -123,6 +143,12 @@ export interface GuardSectionCoverage {
   findings?: GuardSectionFinding[]
   /** Ready-but-held scenarios from the last generate (status `finding`/`held`). */
   heldScenarios?: GuardSectionHeldScenario[]
+  /**
+   * Auto-resolved findings the tool handled itself (item 14) — muted context only.
+   * Present on ANY status: they never paint the section, so a section whose only
+   * finding was auto-resolved shows this context under its gap/unguarded status.
+   */
+  autoResolved?: GuardSectionAutoResolved[]
   /**
    * This section's generate authoring errors, deduped by message with attempt
    * counts. Present on status `authoring-error` (its sole record), and on

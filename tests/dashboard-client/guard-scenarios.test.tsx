@@ -949,6 +949,50 @@ describe('GuardScenariosPanel — auto-resolved ledger group (item 13)', () => {
     expect(screen.getByText('weak version check')).toBeInTheDocument();
     expect(screen.getByText('asserts exit 0 but the claim quotes exact output')).toBeInTheDocument();
   });
+
+  // Item 14: the same collapsed group also carries triage auto-resolutions — an
+  // `environment` claim dismissed, a `generation-defect` finding retired to re-attempt.
+  const TRIAGE_REPORT: GuardGenerateReport = {
+    ...REPORT,
+    autoResolved: [
+      { kind: 'triage-dismiss', doc: 'docs/cli.md', anchor: 'cli/tty', title: 'tty emoji check', verdict: 'environment', brief: 'tty-gated output, untestable in the sandbox', claim: 'prints emoji' },
+      { kind: 'triage-resolve', doc: 'docs/cli.md', anchor: 'cli/flag', title: 'bad flag check', verdict: 'generation-defect', brief: 'the scenario used the wrong subcommand' },
+    ],
+  };
+
+  it('lifts item-14 triage entries into rows with a kind, detail (brief) and action badge', () => {
+    const rows = buildAutoResolvedRows(TRIAGE_REPORT, [scenarioRow]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      kind: 'triage-dismiss',
+      title: 'tty emoji check',
+      detail: 'tty-gated output, untestable in the sandbox',
+      badge: { label: 'dismissed', tone: expect.any(String) },
+    });
+    expect(rows[1]).toMatchObject({
+      kind: 'triage-resolve',
+      title: 'bad flag check',
+      detail: 'the scenario used the wrong subcommand',
+      badge: { label: 're-attempts', tone: expect.any(String) },
+    });
+    // Triage entries carry no fidelity-discard `mismatch`/`outcome`.
+    expect(rows[0].mismatch).toBeUndefined();
+    expect(rows[0].outcome).toBeUndefined();
+  });
+
+  it('renders the triage entries in the collapsed group with their action + brief', async () => {
+    const rows = buildAutoResolvedRows(TRIAGE_REPORT, [scenarioRow]);
+    render(
+      <GuardScenariosPanel rows={[]} autoResolved={rows} loading={false} error={null} activeId={null} onOpen={vi.fn()} />,
+    );
+    const header = screen.getByRole('button', { name: /Auto-resolved/ });
+    expect(header).toHaveTextContent('2');
+    await userEvent.click(header);
+    expect(screen.getByText('tty emoji check')).toBeInTheDocument();
+    expect(screen.getByText('dismissed')).toBeInTheDocument();
+    expect(screen.getByText('re-attempts')).toBeInTheDocument();
+    expect(screen.getByText('the scenario used the wrong subcommand')).toBeInTheDocument();
+  });
 });
 
 describe('Scenarios surface — title-first labels + long-id overflow', () => {

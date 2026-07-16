@@ -96,6 +96,7 @@ export {
   guardRunPath,
   guardHistoryPath,
   guardResultPath,
+  guardAutoResolutionsPath,
   scenariosDir,
   recipePath,
   manifestPath,
@@ -118,6 +119,8 @@ export {
   appendGuardHistory,
   writeGuardResult,
   readGuardResult,
+  readGuardAutoResolutions,
+  writeGuardAutoResolutions,
   atomicWriteJson,
 } from './store.js'
 export type { PackInput } from './store.js'

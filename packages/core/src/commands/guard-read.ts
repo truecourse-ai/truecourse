@@ -51,6 +51,7 @@ import {
   type GuardScenarioResult,
   type GuardScenarioSource,
   type GuardSectionAuthoringError,
+  type GuardSectionAutoResolved,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
   type GuardSectionFinding,
@@ -224,6 +225,22 @@ export function composeDocCoverage(
     )
   }
 
+  // Auto-resolved ledger entries (item 14) — a finding the tool handled itself. These
+  // are NOT in `birthFindings` (they left the task list), so the section never paints
+  // `finding` from them; they ride as MUTED context so the detail can still show
+  // "we auto-resolved a finding here" under whatever else the section shows.
+  const autoResolvedByAnchor = new Map<string, GuardSectionAutoResolved[]>()
+  for (const [i, a] of (result?.autoResolved ?? []).entries()) {
+    if (a.doc !== doc) continue
+    push(autoResolvedByAnchor, a.anchor, {
+      index: i,
+      kind: a.kind,
+      title: a.title,
+      detail: a.kind === 'fidelity-discard' ? a.mismatch : a.brief,
+      ...(a.kind === 'fidelity-discard' ? {} : { verdict: a.verdict }),
+    })
+  }
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -234,8 +251,13 @@ export function composeDocCoverage(
       heldScenarios: heldByAnchor.get(sec.anchor) ?? [],
       authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
     })
-    totals[cov.status]++
-    return cov
+    // Auto-resolved entries ride as muted context on WHATEVER status the section
+    // resolved to — they never change the status (an auto-resolved finding is not a
+    // pending task), so the totals count `cov.status` unchanged.
+    const auto = autoResolvedByAnchor.get(sec.anchor) ?? []
+    const withAuto = auto.length > 0 ? { ...cov, autoResolved: auto } : cov
+    totals[withAuto.status]++
+    return withAuto
   })
 
   return {

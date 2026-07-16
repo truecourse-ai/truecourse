@@ -139,4 +139,24 @@ describe('GuardSectionDetail — unsettled sections', () => {
     expect(screen.getByText('sibling timed out')).toBeInTheDocument();
     expect(screen.getByText('Blocking authoring errors')).toBeInTheDocument();
   });
+
+  // Item 14: a section whose only finding was auto-resolved paints by its gap/unguarded
+  // status (never red `finding`); the auto-resolved entry rides as MUTED context.
+  it('shows auto-resolved entries as muted context, not a red finding, under an unguarded section', () => {
+    renderDetail(
+      section({
+        status: 'unguarded',
+        autoResolved: [
+          { index: 0, kind: 'triage-resolve', title: 'bad flag scenario', detail: 'used the wrong subcommand', verdict: 'generation-defect' },
+        ],
+      }),
+    );
+
+    expect(screen.getByText('Auto-resolved · no task')).toBeInTheDocument();
+    expect(screen.getByText('bad flag scenario')).toBeInTheDocument();
+    expect(screen.getByText('used the wrong subcommand')).toBeInTheDocument();
+    expect(screen.getByText('generation-defect')).toBeInTheDocument();
+    // The muted-context section suppresses the "no scenario" EmptyState.
+    expect(screen.queryByText(/no scenario/i)).not.toBeInTheDocument();
+  });
 });

@@ -145,18 +145,13 @@ function HeldRow({
   );
 }
 
-/** The label + tone for an auto-resolved entry's re-author outcome. */
-function outcomeMeta(outcome: GuardAutoResolvedRowData['outcome']): { label: string; tone: string } {
-  if (outcome === 'resolved') return { label: 'resolved', tone: 'text-emerald-600 dark:text-emerald-400' };
-  if (outcome === 'finding') return { label: 'became a finding', tone: 'text-amber-600 dark:text-amber-400' };
-  return { label: 'no replacement', tone: 'text-muted-foreground' };
-}
-
 /**
- * The collapsed "auto-resolved" ledger group at the bottom of the list (item 13):
- * high-confidence weak scenarios the tool discarded + re-authored itself. Muted, with
- * a count in the header; expanding shows each discarded title (struck through), its
- * outcome, and the mismatch that triggered the discard. Informational — no selection.
+ * The collapsed "auto-resolved" ledger group at the bottom of the list (items 13 +
+ * 14): high-confidence machine judgments the tool handled itself — weak scenarios
+ * re-authored, `environment` claims dismissed, `generation-defect` findings retired to
+ * re-attempt. Muted, with a count in the header; expanding shows each entry's title
+ * (struck through), the action badge, and the one-line reason. Informational — no
+ * selection.
  */
 function AutoResolvedGroup({ rows }: { rows: GuardAutoResolvedRowData[] }) {
   const [open, setOpen] = useState(false);
@@ -172,23 +167,20 @@ function AutoResolvedGroup({ rows }: { rows: GuardAutoResolvedRowData[] }) {
         <span>Auto-resolved</span>
         <span className="rounded bg-muted px-1.5 py-0 text-[10px] font-medium text-muted-foreground">{rows.length}</span>
         <span className="ml-auto truncate text-[10px] font-normal text-muted-foreground/80">
-          weak scenarios discarded + re-authored
+          handled without a task
         </span>
       </button>
       {open && (
         <ul role="list" aria-label="Auto-resolved scenarios">
-          {rows.map((row) => {
-            const meta = outcomeMeta(row.outcome);
-            return (
-              <li key={row.id} className="border-t border-border/40 px-3 py-1.5 pl-8">
-                <div className="flex w-full items-center gap-2">
-                  <span className="min-w-0 truncate text-[12px] text-muted-foreground line-through">{row.title}</span>
-                  <span className={`ml-auto shrink-0 text-[10px] ${meta.tone}`}>{meta.label}</span>
-                </div>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">{row.mismatch}</p>
-              </li>
-            );
-          })}
+          {rows.map((row) => (
+            <li key={row.id} className="border-t border-border/40 px-3 py-1.5 pl-8">
+              <div className="flex w-full items-center gap-2">
+                <span className="min-w-0 truncate text-[12px] text-muted-foreground line-through">{row.title}</span>
+                <span className={`ml-auto shrink-0 text-[10px] ${row.badge.tone}`}>{row.badge.label}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/80">{row.detail}</p>
+            </li>
+          ))}
         </ul>
       )}
     </div>

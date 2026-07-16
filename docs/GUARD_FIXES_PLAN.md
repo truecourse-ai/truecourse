@@ -432,7 +432,7 @@ entries present in report/CLI/UI; counter invariant (item 12) updated for the ne
 
 ## 14. High-confidence triage recommendations auto-resolve — humans see only real questions
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-16
 
 **Problem.** Triage already knows what to do (14/14 verified accurate) but still hands
 every finding to the human. 81 of sqlfluff's 92 findings were high-confidence
