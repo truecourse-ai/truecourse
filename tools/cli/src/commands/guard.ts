@@ -321,11 +321,19 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
-  // Orphan honesty (item 20): a dismissal whose claim text no longer matches any
-  // live claim in a re-read doc — surfaced so it is never silently honored forever.
+  // Orphan honesty (item 20 + per-finding): a dismissal that no longer matches —
+  // stale claim text, or a finding entry no candidate reproduced this run —
+  // surfaced so it is never silently honored forever.
   if (report.orphanedDismissals && report.orphanedDismissals.length > 0) {
     const n = report.orphanedDismissals.length;
-    p.log.step(`dismissals  ${n} orphaned — the dismissed claim no longer exists; re-dismiss the new text or drop it from decisions.json`);
+    p.log.step(`dismissals  ${n} orphaned — the dismissed claim/behavior no longer exists; re-dismiss what replaced it or drop the entry from decisions.json`);
+  }
+  // Per-finding suppression (§9 operability): candidates dropped pre-birth by a
+  // dismissedFindings behavior-hash match, per authoring round.
+  const suppressed = report.suppressedByHash;
+  if (suppressed && suppressed.round1 + suppressed.round2 > 0) {
+    const total = suppressed.round1 + suppressed.round2;
+    p.log.step(`dismissed   ${total} candidate${total === 1 ? "" : "s"} suppressed by finding dismissals (round 1: ${suppressed.round1}, retry: ${suppressed.round2})`);
   }
   if (g.birthFindings > 0) p.log.step(`findings    ${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
   if (g.errors > 0) p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"}`);

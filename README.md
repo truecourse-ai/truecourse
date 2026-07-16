@@ -237,6 +237,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 ├── scenarios/               ← the guard scenario corpus (committable)
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
+│   ├── decisions.json        ← user dismissals: per-finding entries (behavior-hash identity) + legacy claim entries
 │   └── <area>/*.yaml         ← the scenario tests
 ├── guard/                   ← guard run store (mirrors analyze; `truecourse guard run`)
 │   ├── runs/                 ← per-run snapshots (gitignored)
