@@ -23,10 +23,13 @@ import {
   writeManifest,
   scenariosDir,
   dismissGuardClaim,
+  readGuardDecisions,
+  writeGuardDecisions,
   defaultGuardExecutor,
   loadRecipe,
   recipePath,
 } from '@truecourse/guard-runner'
+import { scenarioHashFromYaml } from '@truecourse/shared/guard-scenario-hash'
 import {
   GuardManifestSchema,
   GuardGenerateReportSchema,
@@ -722,6 +725,178 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
     // The live claim is unaffected — it authors + commits normally.
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
+  })
+})
+
+describe('generateGuards — per-finding dismissals (dismissedFindings)', () => {
+  const dismissFinding = (r: string, finding: GuardBirthFinding, over: Record<string, unknown> = {}) => {
+    const hash = scenarioHashFromYaml(finding.yaml!)!
+    const decisions = readGuardDecisions(r)
+    writeGuardDecisions(r, {
+      ...decisions,
+      dismissedFindings: [
+        ...(decisions.dismissedFindings ?? []),
+        {
+          doc: finding.doc,
+          anchor: finding.anchor,
+          scenarioHash: hash,
+          yaml: finding.yaml!,
+          title: finding.title,
+          ...(finding.claim ? { claim: finding.claim } : {}),
+          dismissedAt: '2026-07-16T00:00:00.000Z',
+          ...over,
+        },
+      ],
+    })
+  }
+
+  it('suppresses ONLY the dismissed candidate — its same-claim sibling survives, reusing the freed id', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    // ONE claim authoring TWO candidates — the sibling-striking shape that motivated the design.
+    const runner = authorBy({ version: [raw('bad', FAILING_STEPS), raw('good', PASSING_STEPS)] })
+
+    const first = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const finding = first.birthFindings.find((f) => f.title === 'bad')!
+    expect(first.written).toEqual([])
+
+    dismissFinding(r, finding)
+
+    const second = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(second.birthFindings).toEqual([])
+    expect(second.orphanedDismissals).toEqual([]) // the entry matched a candidate
+    // The claim keeps its live sibling — NO dismissed gap (the claim is still guarded).
+    expect(second.coverageGaps.filter((g) => g.kind === 'dismissed')).toEqual([])
+    expect(second.written.map((w) => w.title)).toEqual(['good'])
+    // Inline id release: the filtered candidate freed its id before the sibling's build.
+    expect(second.written.map((w) => w.id)).toEqual(['version.1'])
+    expect(second.suppressedByHash).toEqual({ round1: 1, round2: 0 })
+  })
+
+  it('a claim whose candidates were ALL hash-filtered settles as a dismissed gap and releases held siblings', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    const twoClaims = extractBy({
+      version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
+      background: { untestable: 'bg' },
+    })
+    const runner: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios: c.claim === 'CLAIM_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)],
+      }))
+
+    const first = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: runner })
+    const finding = first.birthFindings.find((f) => f.title === 'bad')!
+    expect(first.heldSections.flatMap((h) => h.readyScenarios.map((s) => s.title))).toEqual(['good'])
+
+    dismissFinding(r, finding, { note: 'noise' })
+
+    const second = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: runner })
+    expect(second.birthFindings).toEqual([])
+    expect(second.heldSections).toEqual([]) // released
+    const gap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
+    expect(gap).toMatchObject({ doc: DOC, anchor: 'version' })
+    expect(gap.reason).toContain('CLAIM_BAD')
+    expect(second.written.map((w) => w.title)).toEqual(['good'])
+    expect(second.orphanedDismissals).toEqual([])
+  })
+
+  it('filters the retry door too: a re-authored dismissed behavior is suppressed in round 2', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    // Round 1 authors failing A; the evidence retry authors failing B (a DIFFERENT
+    // behavior). Dismissing B must suppress it at the retry-candidate build.
+    const runner: GenerateRunner = async ({ claims }) =>
+      claims.map((c) =>
+        c.retry
+          ? { ref: c.ref, scenarios: [raw('badB', [{ run: ['boom', '--again'], expect: { exit: 0 } }])] }
+          : { ref: c.ref, scenarios: [raw('badA', FAILING_STEPS)] },
+      )
+
+    const first = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(first.birthFindings.map((f) => f.title)).toEqual(['badB'])
+
+    dismissFinding(r, first.birthFindings[0])
+
+    const second = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    expect(second.birthFindings).toEqual([]) // the dismissed behavior never resurfaces through the retry door
+    expect(second.suppressedByHash).toEqual({ round1: 0, round2: 1 })
+    // The claim ended the run with nothing live — settled visibly as a dismissed gap.
+    const gap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
+    expect(gap).toMatchObject({ doc: DOC, anchor: 'version' })
+    expect(second.orphanedDismissals).toEqual([]) // matched at the retry site
+  })
+
+  it('orphan honesty is scoped to work sections: an entry in an untouched section is reported NOWHERE', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }, { ref: TWO_CLI_DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+    const runner = authorBy({ version: [raw('v', PASSING_STEPS)], help: [raw('h', PASSING_STEPS)] })
+    const extractor = extractBy({ background: { untestable: 'bg' } })
+
+    // Run 1 settles everything.
+    await generateGuards({ repoRoot: r, extractRunner: extractor, generateRunner: runner })
+
+    // Two stale entries (hashes matching nothing): one in DOC (will stay untouched),
+    // one in TWO_CLI_DOC's help section (about to become work).
+    const decisions = readGuardDecisions(r)
+    const stale = (doc: string, anchor: string) => ({
+      doc,
+      anchor,
+      scenarioHash: 'feedfacefeedface',
+      yaml: 'y',
+      title: 'stale entry',
+      dismissedAt: '2026-07-16T00:00:00.000Z',
+    })
+    writeGuardDecisions(r, {
+      ...decisions,
+      dismissedFindings: [stale(DOC, 'version'), stale(TWO_CLI_DOC, 'help')],
+    })
+
+    // Only TWO_CLI_DOC's help section changes → only it is work.
+    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT.replace('also answers here', 'answers differently now'))
+    const second = await generateGuards({ repoRoot: r, extractRunner: extractor, generateRunner: runner })
+
+    // The work-section entry is orphaned (title = the entry's scenario title);
+    // the untouched section's entry is LEFT ALONE — reported nowhere.
+    expect(second.orphanedDismissals).toEqual([{ doc: TWO_CLI_DOC, anchor: 'help', title: 'stale entry' }])
+  })
+
+  it('a work section with a legacy claim-skip is excluded from orphaning (§5 shadow rule)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    const twoClaims = extractBy({
+      version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
+      background: { untestable: 'bg' },
+    })
+    const runner = authorBy({ version: [raw('good', PASSING_STEPS)] })
+
+    // A legacy claim dismissal shadows the section…
+    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
+    // …and an unmatched finding entry sits under the same section.
+    const decisions = readGuardDecisions(r)
+    writeGuardDecisions(r, {
+      ...decisions,
+      dismissedFindings: [
+        { doc: DOC, anchor: 'version', scenarioHash: 'feedfacefeedface', yaml: 'y', title: 'unmatched', dismissedAt: '2026-07-16T00:00:00.000Z' },
+      ],
+    })
+
+    const res = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: runner })
+    // The finding entry appears NOWHERE — not orphaned (the legacy skip means it
+    // could never match), not a gap, not a finding.
+    expect(res.orphanedDismissals).toEqual([])
   })
 })
 
