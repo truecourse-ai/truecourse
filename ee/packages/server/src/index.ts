@@ -21,8 +21,8 @@ import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
-import { setKnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
-import { createSpecInheritanceHook, createKnowledgeLedgerReader } from './knowledge/inheritance.js';
+import { setKnowledgeLedgerReader, setKnowledgeDocBodyReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import { createSpecInheritanceHook, createKnowledgeLedgerReader, createKnowledgeDocBodyReader } from './knowledge/inheritance.js';
 import { guardGateJobKey } from './jobs/constants.js';
 import { loadWorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './auth.js';
@@ -196,11 +196,14 @@ const plugin: EePlugin = {
     // corpus into its own spec. The spec pipeline materializes the workspace doc
     // bodies + merges the workspace decisions (repo wins) into the checkout before
     // curate/generate through this seam; the repo corpus GET enriches the inherited
-    // docs' title/url through the ledger reader seam. Both resolve the repo's
-    // workspace org from the gate store; a repo with no workspace inherits nothing.
+    // docs' title/url through the ledger reader seam, and the repo Spec-tab doc route
+    // serves an inherited (`knowledge/`) doc's body through the body reader seam
+    // (those bodies live in the workspace store, not the repo tree). All resolve the
+    // repo's workspace org from the gate store; a repo with no workspace inherits nothing.
     const knowledgeStore = new PgKnowledgeStore(eeDb);
     setSpecInheritanceHook(createSpecInheritanceHook({ store: gateStore, knowledge: knowledgeStore }));
     setKnowledgeLedgerReader(createKnowledgeLedgerReader({ store: gateStore, knowledge: knowledgeStore }));
+    setKnowledgeDocBodyReader(createKnowledgeDocBodyReader({ store: gateStore, knowledge: knowledgeStore }));
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App
