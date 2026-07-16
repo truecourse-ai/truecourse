@@ -34,6 +34,16 @@ describe('guard decisions schema', () => {
     expect(dismissedClaimKey('d', 'a', 't')).toBe('d\0a\0t');
     expect(dismissedClaimKey('d', 'a', 't')).not.toBe(dismissedClaimKey('d', 'a', 't2'));
   });
+
+  it('preserves unknown top-level keys (an old reader must never strip a future array)', () => {
+    const file = {
+      version: 1,
+      dismissedClaims: [],
+      futureDecisions: [{ doc: 'docs/cli.md', anchor: 'version', someKey: 'x' }],
+    };
+    const parsed = GuardDecisionsSchema.parse(file) as Record<string, unknown>;
+    expect(parsed.futureDecisions).toEqual(file.futureDecisions);
+  });
 });
 
 describe('dismissed coverage gap kind', () => {

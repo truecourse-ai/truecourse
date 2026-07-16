@@ -52,6 +52,27 @@ describe('guard decisions store', () => {
     expect(after.dismissedClaims[0]).toMatchObject({ ...id, dismissedAt: 't2', note: 'flaky' });
   });
 
+  it('a read-modify-write preserves unknown top-level keys (a future array survives an old mutator)', () => {
+    const r = repo();
+    writeGuardDecisions(r, { version: 1, dismissedClaims: [] });
+    const withUnknown = {
+      version: 1,
+      dismissedClaims: [],
+      futureDecisions: [{ doc: 'docs/cli.md', anchor: 'version', someKey: 'x' }],
+    };
+    fs.writeFileSync(guardDecisionsPath(r), JSON.stringify(withUnknown));
+
+    dismissGuardClaim(r, { doc: 'docs/cli.md', anchor: 'help', title: 'help lists commands', dismissedAt: 't1' });
+
+    const onDisk = JSON.parse(fs.readFileSync(guardDecisionsPath(r), 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.futureDecisions).toEqual(withUnknown.futureDecisions);
+    expect((onDisk.dismissedClaims as unknown[])).toHaveLength(1);
+
+    undismissGuardClaim(r, { doc: 'docs/cli.md', anchor: 'help', title: 'help lists commands' });
+    const after = JSON.parse(fs.readFileSync(guardDecisionsPath(r), 'utf-8')) as Record<string, unknown>;
+    expect(after.futureDecisions).toEqual(withUnknown.futureDecisions);
+  });
+
   it('undismiss removes by identity (no-op when absent)', () => {
     const r = repo();
     const id = { doc: 'docs/cli.md', anchor: 'version', title: 'the --version claim' };

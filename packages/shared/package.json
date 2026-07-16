@@ -22,10 +22,12 @@
   },
   "dependencies": {
     "ignore": "^7.0.5",
+    "js-yaml": "^4.1.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "typescript": "^5.7.0"
   }
 }

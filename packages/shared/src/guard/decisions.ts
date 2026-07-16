@@ -42,11 +42,16 @@ export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
 export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 'title'>
 
 /** The whole decisions file. `dismissedClaims` defaults to `[]` so a partial or
- *  freshly-created file still parses. */
-export const GuardDecisionsSchema = z.object({
-  version: z.literal(1),
-  dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
-})
+ *  freshly-created file still parses. `.passthrough()` is load-bearing: every
+ *  mutator is a read-modify-write that persists the PARSED object, so a reader
+ *  older than a field (e.g. a future dismissal array) must carry the unknown key
+ *  through to disk, never strip it — a plain (non-strict) object still strips. */
+export const GuardDecisionsSchema = z
+  .object({
+    version: z.literal(1),
+    dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
+  })
+  .passthrough()
 export type GuardDecisions = z.infer<typeof GuardDecisionsSchema>
 
 /** An empty, valid decisions file — the reader's fallback and the writer's seed. */

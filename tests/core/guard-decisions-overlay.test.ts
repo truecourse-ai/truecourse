@@ -60,6 +60,15 @@ describe('mergeGuardDecisions — union dismissedClaims by identity', () => {
     const merged = mergeGuardDecisions(base, decisions([]));
     expect(merged.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['a', 'b']);
   });
+
+  it('carries unknown top-level keys from base and overlay forward (never hand-builds the result)', () => {
+    const base = { ...decisions([claim({ anchor: 'a' })]), baseFuture: [1, 2] } as GuardDecisions;
+    const overlay = { ...decisions([claim({ anchor: 'b' })]), overlayFuture: ['x'] } as GuardDecisions;
+    const merged = mergeGuardDecisions(base, overlay) as GuardDecisions & Record<string, unknown>;
+    expect(merged.baseFuture).toEqual([1, 2]);
+    expect(merged.overlayFuture).toEqual(['x']);
+    expect(merged.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['a', 'b']);
+  });
 });
 
 describe('PR-scoped guard decisions are enterprise-only on the file store', () => {
@@ -123,6 +132,25 @@ describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
     await undismissGuardClaim(REPO, claim({ anchor: 'a' }), { pr: 7 });
     const merged = await getGuardDecisions(REPO, { pr: 7 });
     expect(merged.dismissedClaims.map((c) => c.anchor)).toEqual(['b']);
+  });
+
+  it('promote-on-merge preserves unknown top-level keys on both rows (no hand-built merge result)', async () => {
+    // The repo row carries a future array an old writer must not strip…
+    await writeGuardDecisions(REPO, { ...decisions([claim({ anchor: 'repo' })]), repoFuture: [1] } as GuardDecisions);
+    // …and the PR overlay carries one too.
+    await dismissGuardClaim(REPO, claim({ anchor: 'pr' }), { pr: 7 });
+    const overlayRef = '_pr/7';
+    const { readGuardDecisions: readStore, writeGuardDecisions: writeStore } = await import(
+      '../../packages/core/src/lib/guard-store'
+    );
+    const overlay = await readStore(REPO, overlayRef);
+    await writeStore(REPO, { ...overlay, overlayFuture: ['x'] } as GuardDecisions, overlayRef);
+
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(true);
+    const repoRow = (await getGuardDecisions(REPO)) as GuardDecisions & Record<string, unknown>;
+    expect(repoRow.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['pr', 'repo']);
+    expect(repoRow.repoFuture).toEqual([1]);
+    expect(repoRow.overlayFuture).toEqual(['x']);
   });
 
   it('a PR un-dismiss of a repo-level dismissal is a no-op on the overlay; the merged view still shows it dismissed', async () => {

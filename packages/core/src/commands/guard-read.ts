@@ -744,15 +744,18 @@ function assertNoGuardPrInPlace(pr?: number): void {
 }
 
 /**
- * Merge a PR's guard decisions overlay over the repo row. Pure. Guard decisions
- * carry only `dismissedClaims`, unioned by their `dismissedClaimKey` identity
- * (doc+anchor+title); the overlay wins on a colliding identity.
+ * Merge a PR's guard decisions overlay over the repo row. Pure. The known arrays
+ * are unioned by their identity keys (`dismissedClaims` by `dismissedClaimKey`,
+ * the overlay wins on a colliding identity); everything ELSE is carried forward
+ * by spreading base then overlay — never hand-build the result, or an unknown
+ * top-level key (a future decisions array) would be dropped on every PR-scope
+ * read, every promote-on-merge write, and every EE PR-head materialization.
  */
 export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecisions): GuardDecisions {
   const byKey = new Map<string, GuardDismissedClaim>()
   for (const c of base.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
   for (const c of overlay.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  return { version: 1, dismissedClaims: [...byKey.values()] }
+  return { ...base, ...overlay, version: 1, dismissedClaims: [...byKey.values()] }
 }
 
 /**
