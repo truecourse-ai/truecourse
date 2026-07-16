@@ -46,6 +46,7 @@ import {
   raw,
   extractBy,
   authorBy,
+  reviewBy,
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
@@ -832,6 +833,40 @@ describe('generateGuards — per-finding dismissals (dismissedFindings)', () => 
     const gap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
     expect(gap).toMatchObject({ doc: DOC, anchor: 'version' })
     expect(second.orphanedDismissals).toEqual([]) // matched at the retry site
+  })
+
+  it('a FIDELITY-origin dismissal suppresses the candidate pre-birth (kind-uniform, §2a)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    // The candidate PASSES birth but the reviewer flags it → a fidelity finding.
+    const runner = authorBy({ version: [raw('weak', PASSING_STEPS)] })
+    const reviewer = reviewBy({ weak: 'asserts exit 0 but the claim quotes exact output' })
+
+    const first = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: runner,
+      fidelityRunner: reviewer,
+    })
+    const finding = first.birthFindings.find((f) => f.kind === 'fidelity')!
+    expect(finding.title).toBe('weak')
+
+    dismissFinding(r, finding)
+
+    // The dismissed behavior is filtered PRE-birth — upstream of both reviewers —
+    // and the claim settles as a dismissed gap.
+    const second = await generateGuards({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      generateRunner: runner,
+      fidelityRunner: reviewer,
+    })
+    expect(second.birthFindings).toEqual([])
+    expect(second.suppressedByHash).toEqual({ round1: 1, round2: 0 })
+    expect(second.coverageGaps.find((g) => g.kind === 'dismissed')).toMatchObject({ doc: DOC, anchor: 'version' })
+    expect(second.orphanedDismissals).toEqual([])
   })
 
   it('orphan honesty is scoped to work sections: an entry in an untouched section is reported NOWHERE', async () => {
