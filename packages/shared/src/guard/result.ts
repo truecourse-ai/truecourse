@@ -82,6 +82,12 @@ export const GuardScenarioResultSchema = z
     id: z.string(),
     title: z.string(),
     binds: GuardBindsSchema,
+    /**
+     * The scenario's extracted claim (the doc's promise it defends), carried from
+     * the committed YAML so `guard drifts` can frame a failure as doc-vs-code.
+     * Optional: pre-claim scenarios and pre-change run snapshots keep parsing.
+     */
+    claim: z.string().optional(),
     outcome: GuardOutcomeSchema,
     durationMs: z.number().nonnegative(),
     /** Present on `fail` / `error`. */

@@ -14,6 +14,7 @@
 import type { GuardOutcome, GuardFailureDetail, GuardLatest } from './result.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardTestabilityVerdict } from './manifest.js'
+import type { GuardScenario } from './scenario.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -206,6 +207,13 @@ export interface GuardScenarioSource {
   file: string
   /** Raw YAML text. */
   content: string
+  /**
+   * The parsed scenario — present when `content` validates against the schema, so
+   * the detail view can render the plain-words story (via `describeScenario`) and
+   * the `claim` without re-parsing YAML client-side. Absent for a malformed but
+   * id-matching file (the raw `content` still shows behind the toggle).
+   */
+  scenario?: GuardScenario
 }
 
 /**

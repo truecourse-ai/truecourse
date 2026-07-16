@@ -112,7 +112,7 @@ client — status meta/order, section-detail error rows, coverage band rendering
 
 ## 4. Scenarios must explain themselves — claim on the YAML, promise titles, rendered story
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** A committed scenario is unreadable even to an engineer (sqlfluff review):
 the YAML carries only the title and mechanics (setup files, argv, regex matchers). The

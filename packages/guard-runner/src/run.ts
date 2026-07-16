@@ -499,7 +499,7 @@ function nonExecutableResult(
   scenario: GuardScenario,
   resolution: BindingResolution,
 ): GuardScenarioResult {
-  const base = { id: scenario.id, title: scenario.title, binds: scenario.binds, durationMs: 0 }
+  const base = { id: scenario.id, title: scenario.title, ...(scenario.claim ? { claim: scenario.claim } : {}), binds: scenario.binds, durationMs: 0 }
   if (resolution.kind === 'stale') {
     return { ...base, outcome: 'stale', currentFingerprint: resolution.currentFingerprint }
   }

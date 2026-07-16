@@ -264,6 +264,17 @@ proving less than the claim — is the worst failure mode. If, on reflection, a
 claim states nothing a CLI invocation can actually observe, return an empty
 scenarios array for it rather than inventing behavior.
 
+# Titles — the doc's promise, never the expected output
+Each scenario \`title\` states, in plain words, the BEHAVIORAL PROMISE the doc makes —
+what the tool does — so a reviewer reads it as doc-vs-code without decoding the
+matchers. It is NEVER the literal expected output (the exact stdout/exit code/file
+content the assertion checks — that already lives in the step's \`expect\`). You MAY
+cite the doc's own example in parentheses for concreteness.
+  Good: "fix rewrites the file in place (leaving \`SELECT 1\`)".
+  Good: "an unparsable token is reported under an \`unparsable:\` node".
+  Bad:  "stdout contains 'unparsable: [2, 3]'" (that is the expected output, not the promise).
+  Bad:  "exit code is 1" (a mechanic, not what the doc promises).
+
 # How a scenario runs
 The program is built once from the recipe and invoked per step. Each step's
 \`run\` is ARGV APPENDED to the recipe entrypoint: with entry ["node","cli.js"],
