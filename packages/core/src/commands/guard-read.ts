@@ -75,6 +75,7 @@ import {
   writeGuardDecisions as writeGuardDecisionsStore,
   deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
+import { scenarioHashFromYaml } from '@truecourse/shared/guard-scenario-hash'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
@@ -431,6 +432,39 @@ async function headingTextIndex(
 }
 
 /**
+ * Decorate every served finding with its per-finding dismissal identity —
+ * `guardFindingKey(doc, anchor, scenarioHashFromYaml(yaml))` — computed from the
+ * finding's VERBATIM stored yaml. This is the ONLY stamping site: generate never
+ * writes keys and reports never persist them (a persisted unknown field would
+ * blank the Guard tab for a downgraded pre-feature CLI, whose report schema is
+ * `.strict()`), so every stored report is keyless and the stamp is what makes
+ * old reports dismissible. Applied at the store-read choke point — everywhere
+ * `readGuardResultStore` is consumed FOR FINDINGS: `readGuardReport` (direct
+ * read + baseline fallback) and `readGuardResultForView`'s loader (the regen
+ * triggers read through it; keyless findings count as active, so an unstamped
+ * read would silently kill the last-finding-dismissed regen). Intentionally
+ * exempt, presence-only reads: the staleness probe (`storeGuardStaleness`) and
+ * `repo-events`' generatedAt read. Recomputed per read, unmemoized, never
+ * written back — do not "optimize" this into a write.
+ *
+ * A finding with no `yaml` (reports older than item 19) or whose yaml fails
+ * behavioral derivation (the cross-bump degradation case) gets no key and is
+ * simply not dismissible. The lenient derivation schema is what makes this work
+ * on reports written under an OLDER format version.
+ */
+function stampFindingKeys(report: GuardGenerateReport | null): GuardGenerateReport | null {
+  if (!report || report.birthFindings.length === 0) return report
+  return {
+    ...report,
+    birthFindings: report.birthFindings.map((f) => {
+      if (!f.yaml) return f
+      const hash = scenarioHashFromYaml(f.yaml)
+      return hash ? { ...f, findingKey: guardFindingKey(f.doc, f.anchor, hash) } : f
+    }),
+  }
+}
+
+/**
  * The last-generate report for the DASHBOARD, with each birth finding enriched
  * with its section's human `headingText` — joined at read time from the live doc's
  * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
@@ -444,7 +478,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
   let commit = scope.commit
-  let report = await readGuardResultStore(repoKey, commit)
+  let report = stampFindingKeys(await readGuardResultStore(repoKey, commit))
   // A pinned PR head that never generated falls back to the BASELINE report —
   // the generate its gate-run scenarios came from (never "newest"; the PR-view
   // analogue of the spec route's corpus fallback). Heading joins follow `commit`
@@ -452,7 +486,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
   if (!report && scope.kind === 'commit' && ref !== undefined) {
     const base = await guardBaselineCommit(repoKey)
     if (base !== undefined && base !== commit) {
-      const fromBase = await readGuardResultStore(repoKey, base)
+      const fromBase = stampFindingKeys(await readGuardResultStore(repoKey, base))
       if (fromBase) {
         report = fromBase
         commit = base
@@ -517,9 +551,12 @@ export function readManifestForView(repoKey: string, ref?: string): Promise<Guar
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readManifestStore(repoKey, c))
 }
 
-/** The raw last-generate result a (possibly PR-scoped) guard view paints from. */
+/** The raw last-generate result a (possibly PR-scoped) guard view paints from —
+ *  findings stamped with their dismissal keys (the regen triggers compare them). */
 export function readGuardResultForView(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
-  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardResultStore(repoKey, c))
+  return readPinnedWithBaselineFallback(repoKey, ref, async (c) =>
+    stampFindingKeys(await readGuardResultStore(repoKey, c)),
+  )
 }
 
 /**
