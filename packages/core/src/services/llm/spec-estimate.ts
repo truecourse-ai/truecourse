@@ -54,10 +54,12 @@ import {
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
+  resolveGenerateBatch,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
+  type GenerateMode,
 } from '@truecourse/guard-generator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
@@ -361,7 +363,6 @@ export async function estimateGenerateTokens(repoRoot: string, prices?: PriceTab
 // reads average ~2 cli claims per changed section, with dense sections higher).
 const GUARD_CLI_CLAIMS_PER_SECTION = 2.0; // rough cli claims a changed section yields (point)
 const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
-const GUARD_AUTHOR_DOC_BUDGET = 48_000; // matches the generator's per-batch context cap
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 300; // ~one scenario of YAML per claim
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
@@ -385,11 +386,21 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * content isn't known until authoring + birth run — so it counts one review per
  * planned cli claim (the same range as authoring), honestly over-counting a claim
  * that authors several scenarios or none.
+ *
+ * `mode` is the speed/cost dial (item 5): economical batches claims per authoring
+ * call (fewer calls), fast authors one claim per call (more calls, each re-paying
+ * the shared document context). It changes ONLY the authoring stage's call count
+ * and per-call body; every other stage is identical. `TRUECOURSE_GENERATE_BATCH`
+ * overrides both modes to a fixed batch (see `resolveGenerateBatch`).
  */
-export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable): Promise<LlmEstimate> {
+export async function estimateGuardTokens(
+  repoRoot: string,
+  prices?: PriceTable,
+  mode: GenerateMode = 'economical',
+): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
-  const batchSize = defaultGenerateBatch();
+  const batchSize = resolveGenerateBatch(mode);
 
   // Extraction: one call per uncached view across the documents with changed
   // sections. The per-view extract cache makes this exact.
@@ -402,7 +413,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
     extractCalls += await countUncachedExtractViews(repoRoot, doc);
     workDocChars += doc.content.length;
   }
-  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_AUTHOR_DOC_BUDGET, workDocChars / totalViews)) : 0;
+  // Extraction chunks losslessly at its view budget, so the per-view average IS the
+  // extract call's body size.
+  const avgViewChars = totalViews > 0 ? Math.round(workDocChars / totalViews) : 0;
 
   // Authoring: batches of cli claims from the changed sections. Claim counts are
   // unknown until extraction runs, so range around the per-section heuristic.
@@ -411,7 +424,9 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
   const authorPoint = Math.ceil(claimsPoint / batchSize);
   const authorMax = Math.ceil(claimsMax / batchSize);
   const avgOwnChars = work.length ? Math.round(work.reduce((n, s) => n + s.ownText.length, 0) / work.length) : 0;
-  const docContextChars = Math.min(GUARD_AUTHOR_DOC_BUDGET, avgViewChars);
+  // Authoring always carries the FULL document as context (no thinning) — one whole
+  // work document per authoring call, re-paid on every call.
+  const avgDocContextChars = workDocs.length ? Math.round(workDocChars / workDocs.length) : 0;
 
   const stages: StageCallEstimate[] = [
     {
@@ -435,11 +450,11 @@ export async function estimateGuardTokens(repoRoot: string, prices?: PriceTable)
       calls: authorPoint,
       minCalls: 0,
       maxCalls: authorMax,
-      // A batch carries the system prompt + the doc context + ~batchSize claims'
-      // own text + the injected grounding transcripts.
+      // A batch carries the system prompt + the full doc context + ~batchSize
+      // claims' own text + the injected grounding transcripts.
       avgInputTokens: tokensFromChars(
         GENERATE_SYSTEM_PROMPT.length,
-        docContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
+        avgDocContextChars + batchSize * avgOwnChars + GUARD_GROUND_TRANSCRIPT_CHARS,
       ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS * batchSize,
     },

@@ -10,6 +10,20 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 
+/**
+ * The fast-vs-economical authoring dial (item 5) — present ONLY for guard generate.
+ * Rendered above the estimate line as a two-option toggle; picking one re-estimates
+ * for that mode so the numbers below always match the chosen dial.
+ */
+export interface EstimateModeChoice {
+  mode: 'fast' | 'economical';
+  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the toggle. */
+  canChoose: boolean;
+  onChange: (mode: 'fast' | 'economical') => void;
+  /** True while re-estimating for a newly-picked mode — disables the toggle. */
+  busy?: boolean;
+}
+
 interface LlmEstimateModalProps {
   estimate: LlmEstimateData;
   /** Proceed with the run. */
@@ -22,9 +36,11 @@ interface LlmEstimateModalProps {
    * Absent for single-source estimates (spec scan / guard generate / one connector).
    */
   sources?: { name: string; summary: string }[];
+  /** The guard-only fast-vs-economical choice (item 5); absent for scan / analyze. */
+  modeChoice?: EstimateModeChoice;
 }
 
-export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }: LlmEstimateModalProps) {
+export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources, modeChoice }: LlmEstimateModalProps) {
   // Escape dismisses — the same affordance as the overlay click and the X.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -75,6 +91,39 @@ export function LlmEstimateModal({ estimate: est, onConfirm, onCancel, sources }
                 <span className="text-right text-muted-foreground">{s.summary}</span>
               </div>
             ))}
+          </div>
+        )}
+        {modeChoice && modeChoice.canChoose && (
+          <div className="mb-4">
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+              Authoring speed vs. cost
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { value: 'economical', label: 'Economical', hint: 'batched · cheapest' },
+                  { value: 'fast', label: 'Fast', hint: 'parallel · ~1.4× cost' },
+                ] as const
+              ).map((o) => {
+                const active = modeChoice.mode === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    disabled={modeChoice.busy}
+                    onClick={() => modeChoice.onChange(o.value)}
+                    className={`rounded-md border px-3 py-2 text-left text-xs disabled:opacity-60 ${
+                      active
+                        ? 'border-primary bg-primary/10 text-foreground'
+                        : 'border-border text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <div className="font-medium">{o.label}</div>
+                    <div className="text-[10px] text-muted-foreground/80">{o.hint}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
         {staged ? (

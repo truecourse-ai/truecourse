@@ -202,6 +202,25 @@ export interface GuardGenerateResult {
   entryPreflight?: GuardEntryPreflight
 }
 
+/**
+ * One failed authoring attempt, surfaced live (item 2) the moment it happens — a
+ * timeout or invalid output, for one section, on one attempt of an authoring call.
+ * The CLI renders it immediately (the section's unsettled work never ticks the
+ * settle counter, so a timing-out call is otherwise indistinguishable from a slow
+ * one). Fired once per affected section per failed attempt; a batch spanning
+ * several sections fires one event each.
+ */
+export interface AuthorFailure {
+  doc: string
+  anchor: string
+  /** One-line reason — e.g. `timed out after 10m`, `invalid output twice`. */
+  reason: string
+  /** 1-based attempt index within this authoring call sequence (1 = first call, 2 = the re-ask). */
+  attempt: number
+  /** True when another attempt will follow (a corrective re-ask); false on the final failure. */
+  willRetry: boolean
+}
+
 export interface GuardGenerateModels {
   extract?: string
   generate?: string
@@ -242,6 +261,11 @@ export interface GenerateGuardsOptions {
    *  planned per doc upfront), then once per completed view. */
   onExtractViewProgress?: (done: number, total: number) => void
   onAuthorProgress?: (done: number, total: number) => void
+  /** Fired the moment an authoring attempt fails (item 2) — a timeout or invalid
+   *  output. One event per affected section per failed attempt; the CLI surfaces it
+   *  immediately as a warn line and bumps its live failed-section counter. Optional,
+   *  so callers that don't surface failures (the dashboard popup) pass nothing. */
+  onAuthorFailure?: (failure: AuthorFailure) => void
   /** Grounding probe progress — captured vs planned probes across all authoring
    *  batches; the planned total grows as later sections enter grounding. */
   onGroundProgress?: (captured: number, planned: number) => void
@@ -269,15 +293,43 @@ function defaultConcurrency(): number {
   return Math.min(os.cpus().length, 4)
 }
 
-export function defaultGenerateBatch(): number {
+/**
+ * The speed-vs-cost dial for scenario authoring (item 5). `economical` batches
+ * claims into one call (fewest calls, cheapest, slowest); `fast` authors one claim
+ * per call (parallel, re-paying the shared document context per call — fastest,
+ * ~1.4× cost). Only authoring (the one stage where independent claims share a call)
+ * has a batch to dial.
+ */
+export type GenerateMode = 'fast' | 'economical'
+
+// Scenario authoring is output-heavy (full YAML bodies per claim) — larger batches
+// blow the per-call output budget and time out; 4 stays well inside it.
+const ECONOMICAL_BATCH = 4
+
+/** The raw `TRUECOURSE_GENERATE_BATCH` override (a batch size ≥ 1), or null when
+ *  unset/invalid. When set it wins for both modes AND skips the mode ask (item 5). */
+export function generateBatchOverride(): number | null {
   const env = process.env.TRUECOURSE_GENERATE_BATCH
   if (env) {
     const n = parseInt(env, 10)
     if (Number.isFinite(n) && n >= 1) return n
   }
-  // Scenario authoring is output-heavy (full YAML bodies per claim) — larger
-  // batches blow the per-call output budget and time out; 4 stays well inside it.
-  return 4
+  return null
+}
+
+/**
+ * Claims per authoring call for the chosen mode. `TRUECOURSE_GENERATE_BATCH` is the
+ * raw override and wins for BOTH modes; otherwise `fast` is one claim per call and
+ * `economical` batches. The estimate and the pipeline both resolve the batch here,
+ * so they can never drift.
+ */
+export function resolveGenerateBatch(mode: GenerateMode): number {
+  return generateBatchOverride() ?? (mode === 'fast' ? 1 : ECONOMICAL_BATCH)
+}
+
+/** The default (economical) claims-per-authoring-call, honoring the env override. */
+export function defaultGenerateBatch(): number {
+  return resolveGenerateBatch('economical')
 }
 
 /** Per-claim authoring cache key: it moves when the claim, its section, the
@@ -831,7 +883,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             retryEntries.map((entry) =>
               limit(async () => {
                 try {
-                  const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims)
+                  const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims, options.onAuthorFailure)
                   for (const rawS of retryScs) {
                     const built = safeBuild(section, rawS, usedIds, localErrors)
                     if (built) retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
@@ -968,7 +1020,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       return chunk(tasks, batchSize).map((batch) =>
         limit(async () => {
           const probes = await groundClaims(batch.map((t) => t.claim.claim))
-          const attempt = await callAuthorWithReask(buildAuthorCtx(gd, batch, recipe, probes), generateRunner)
+          const attempt = await callAuthorWithReask(
+            buildAuthorCtx(gd, batch, recipe, probes),
+            generateRunner,
+            authorFailureEmitter(batch, options.onAuthorFailure),
+          )
           if ('error' in attempt) {
             for (const t of batch) {
               errors.push({ doc: t.section.doc, anchor: t.section.anchor, message: `authoring ${attempt.error}` })
@@ -1160,7 +1216,7 @@ function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes:
 function buildAuthorCtxFor(gd: GuardDoc, claims: AuthorClaim[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
   return {
     doc: gd.doc,
-    docContext: buildAuthorDocContext(gd, claims.map((c) => c.section.anchor)),
+    docContext: buildAuthorDocContext(gd),
     areaTags: gd.sections[0]?.areaTags ?? [],
     recipeEntry: recipe.entry,
     recipeBuild: recipe.build,
@@ -1195,30 +1251,78 @@ function validateAuthored(raw: unknown, entry: readonly string[]): AuthoredValid
   return { authored: parsed.data }
 }
 
+/** One failed authoring attempt, sunk to the live surface (item 2). */
+type AttemptFailSink = (info: { reason: string; attempt: number; willRetry: boolean }) => void
+
+/** A clean one-line reason for a thrown authoring call — a timeout collapses to
+ *  `timed out after Nm`, anything else to its trimmed message. */
+function authorFailureReason(raw: string): string {
+  const m = /timed out(?: after (\d+)\s*ms)?/i.exec(raw)
+  if (m) {
+    const mins = m[1] ? Math.round(parseInt(m[1], 10) / 60000) : 0
+    return mins > 0 ? `timed out after ${mins}m` : 'timed out'
+  }
+  return oneLine(raw)
+}
+
 /**
  * Call the author runner and validate its batch output (schema + run[]-composition);
  * on a defect re-ask ONCE with the corrective text quoted back, then validate again.
  * A thrown call is not re-asked. Returns `{ error }` on a still-invalid or thrown call.
+ * `onAttemptFail` (item 2) fires the moment each attempt fails so the caller can
+ * surface it live before the whole call sequence resolves.
  */
-async function callAuthorWithReask(ctx: AuthorUserContext, runner: GenerateRunner): Promise<AuthorAttempt> {
+async function callAuthorWithReask(
+  ctx: AuthorUserContext,
+  runner: GenerateRunner,
+  onAttemptFail?: AttemptFailSink,
+): Promise<AuthorAttempt> {
   let raw: unknown
   try {
     raw = await runner(ctx)
   } catch (e) {
+    onAttemptFail?.({ reason: authorFailureReason((e as Error).message), attempt: 1, willRetry: false })
     return { error: `call failed: ${(e as Error).message}` }
   }
   const first = validateAuthored(raw, ctx.recipeEntry)
   if ('authored' in first) return { authored: first.authored }
+  // Invalid output on the first call — a corrective re-ask follows.
+  onAttemptFail?.({ reason: 'invalid output', attempt: 1, willRetry: true })
 
   let reRaw: unknown
   try {
     reRaw = await runner({ ...ctx, correction: { invalidOutput: first.correction } })
   } catch (e) {
+    onAttemptFail?.({ reason: authorFailureReason((e as Error).message), attempt: 2, willRetry: false })
     return { error: `re-ask failed: ${(e as Error).message}` }
   }
   const second = validateAuthored(reRaw, ctx.recipeEntry)
   if ('authored' in second) return { authored: second.authored }
+  onAttemptFail?.({ reason: 'invalid output twice', attempt: 2, willRetry: false })
   return { error: second.reason }
+}
+
+/**
+ * The per-attempt failure sink for one authoring call: fans each failed attempt out
+ * to `onAuthorFailure` once per distinct section in the batch (item 2). Returns
+ * undefined when no sink is wired (the common non-CLI path) so the call stays cheap.
+ */
+function authorFailureEmitter(
+  batch: AuthTask[],
+  onAuthorFailure?: (f: AuthorFailure) => void,
+): AttemptFailSink | undefined {
+  if (!onAuthorFailure) return undefined
+  const seen = new Set<string>()
+  const sections: { doc: string; anchor: string }[] = []
+  for (const t of batch) {
+    const k = key(t.section)
+    if (seen.has(k)) continue
+    seen.add(k)
+    sections.push({ doc: t.section.doc, anchor: t.section.anchor })
+  }
+  return (info) => {
+    for (const s of sections) onAuthorFailure({ doc: s.doc, anchor: s.anchor, ...info })
+  }
 }
 
 async function readAuthorCache(
@@ -1473,6 +1577,7 @@ async function authorRetry(
   runner: GenerateRunner,
   errors: GuardGenerateError[],
   ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>,
+  onAuthorFailure?: (f: AuthorFailure) => void,
 ): Promise<RawGeneratedScenario[]> {
   const cached = await readRetryCache(repoRoot, entry.task.claim, section, recipeFingerprint, entry.evidence)
   if (cached) return cached.scenarios
@@ -1492,7 +1597,11 @@ async function authorRetry(
       ...excerptsOf(entry.evidence),
     },
   }
-  const attempt = await callAuthorWithReask(buildAuthorCtxFor(gd, [claim], recipe, probes), runner)
+  const attempt = await callAuthorWithReask(
+    buildAuthorCtxFor(gd, [claim], recipe, probes),
+    runner,
+    authorFailureEmitter([entry.task], onAuthorFailure),
+  )
   if ('error' in attempt) {
     errors.push({ doc: section.doc, anchor: section.anchor, message: `retry authoring ${attempt.error}` })
     return []

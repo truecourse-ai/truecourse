@@ -12,6 +12,10 @@
 
 import {
   generateGuards,
+  resolveGenerateBatch,
+  generateBatchOverride,
+  type GenerateMode,
+  type AuthorFailure,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
@@ -43,6 +47,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
+import { readGuardGenerateMode, writeGuardGenerateMode } from '../config/project-config.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
@@ -52,6 +57,7 @@ import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
+export type { GenerateMode, AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -144,6 +150,25 @@ export interface GuardGenerateInProcessOptions {
    * when nothing changed (the estimate has no stages).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  /**
+   * The fast-vs-economical authoring dial (item 5), chosen up front by the caller
+   * (the dashboard modal). When omitted the remembered per-repo choice is used
+   * (economical by default). The chosen mode is remembered for next time.
+   */
+  mode?: GenerateMode;
+  /**
+   * The CLI's interactive mode prompt: asked (with the remembered choice
+   * pre-selected) BEFORE the estimate is shown, only when there is work AND
+   * `TRUECOURSE_GENERATE_BATCH` is not set. Returns the chosen mode. The dashboard
+   * passes `mode` directly instead of this.
+   */
+  onModeChoice?: (defaultMode: GenerateMode) => Promise<GenerateMode>;
+  /**
+   * Fired the moment an authoring attempt fails (item 2) — the CLI surfaces it live
+   * and counts failed sections. Optional, so the dashboard popup (which never wires
+   * it) is unchanged.
+   */
+  onAuthorFailure?: (failure: AuthorFailure) => void;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
@@ -153,12 +178,35 @@ export interface GuardGenerateInProcessOptions {
 
 /**
  * The pre-flight guard estimate the dashboard renders — the SAME
- * `estimateGuardTokens(repoRoot, prices)` the CLI prompt and the driver's own gate
- * use (deterministic token math + ceiling cost, cache-aware, "N of M sections
- * changed"). Exposed so the dashboard estimate route re-derives nothing.
+ * `estimateGuardTokens(repoRoot, prices, mode)` the CLI prompt and the driver's own
+ * gate use (deterministic token math + ceiling cost, cache-aware, "N of M sections
+ * changed"). Parameterized by the fast-vs-economical dial (item 5) so the CLI and
+ * the modal render identical numbers. Exposed so the dashboard estimate route
+ * re-derives nothing.
  */
-export async function estimateGuard(repoRoot: string): Promise<LlmEstimate> {
-  return estimateGuardTokens(repoRoot, await getModelPrices());
+export async function estimateGuard(repoRoot: string, mode: GenerateMode = 'economical'): Promise<LlmEstimate> {
+  return estimateGuardTokens(repoRoot, await getModelPrices(), mode);
+}
+
+export interface GuardGenerateModeInfo {
+  /** The mode to estimate for and pre-select in the prompt/modal. */
+  mode: GenerateMode;
+  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — hide the choice. */
+  canChoose: boolean;
+}
+
+/**
+ * Resolve the guard-generate authoring mode for a surface (item 5): the caller's
+ * requested mode if valid, else the remembered per-repo choice, else `economical`.
+ * `canChoose` is false under the raw `TRUECOURSE_GENERATE_BATCH` override (the ask
+ * is skipped). Used by the dashboard estimate route to pre-select + gate the choice.
+ */
+export async function resolveGuardGenerateMode(repoRoot: string, requested?: string): Promise<GuardGenerateModeInfo> {
+  const canChoose = generateBatchOverride() === null;
+  const remembered = await readGuardGenerateMode(repoRoot);
+  const mode: GenerateMode =
+    requested === 'fast' || requested === 'economical' ? requested : (remembered ?? 'economical');
+  return { mode, canChoose };
 }
 
 function resolveGuardModels(repoRoot: string): GuardGenerateModels {
@@ -196,14 +244,30 @@ export async function guardGenerateInProcess(
   // spend, then fail. Extracting both sides of an open overlap births noise.
   assertNoOpenConflicts(repoRoot);
 
+  // The fast-vs-economical authoring dial (item 5). The raw
+  // TRUECOURSE_GENERATE_BATCH override wins and skips the ask; otherwise the
+  // caller's `mode` (dashboard modal) or the remembered per-repo choice seeds it,
+  // economical by default.
+  const batchOverride = generateBatchOverride() !== null;
+  let mode: GenerateMode = options.mode ?? (await readGuardGenerateMode(repoRoot)) ?? 'economical';
+
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
-  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
+  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort. The
+  // mode is asked (CLI `onModeChoice`) BEFORE the estimate is shown, then the
+  // estimate is (re)computed for the chosen mode so its numbers match the run.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateGuardTokens(repoRoot, prices);
+    let estimate = await estimateGuardTokens(repoRoot, prices, mode);
     if ((estimate.stages?.length ?? 0) > 0) {
+      if (options.onModeChoice && !batchOverride) {
+        mode = await options.onModeChoice(mode);
+        estimate = await estimateGuardTokens(repoRoot, prices, mode);
+      }
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('guard');
+      // Remember the resolved choice so the next generate pre-selects it (harmless
+      // under the env override — it re-writes the same value).
+      if (!batchOverride) await writeGuardGenerateMode(repoRoot, mode);
     }
   }
 
@@ -256,6 +320,11 @@ export async function guardGenerateInProcess(
   let birthDone = 0;
   let sectionsDone = 0;
   let sectionsTotal = 0;
+  // Authoring-failure surfacing (item 2) is a CLI-only concern: only when the caller
+  // wires `onAuthorFailure` does the section counter gain a "· M failed" reading. The
+  // dashboard popup never wires it, so its counter is unchanged.
+  const cliSurfacesFailures = !!options.onAuthorFailure;
+  const failedSectionKeys = new Set<string>();
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -275,7 +344,12 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
+    // The CLI section counter gains a failed reading (settled · failed · remaining);
+    // the dashboard keeps the plain settled/total form.
+    const sectionsPart = cliSurfacesFailures
+      ? `sections ${sectionsDone} settled · ${failedSectionKeys.size} failed · ${Math.max(0, sectionsTotal - sectionsDone - failedSectionKeys.size)} remaining`
+      : `sections ${sectionsDone}/${sectionsTotal}`;
+    const parts = [sectionsPart, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
@@ -288,10 +362,22 @@ export async function guardGenerateInProcess(
       transport: resolveTransport(options),
       models: resolveGuardModels(repoRoot),
       executor: getGuardExecutor(),
+      // The chosen mode's batch size drives the actual authoring calls, matching the
+      // estimate shown above (both resolve through `resolveGenerateBatch`).
+      batchSize: resolveGenerateBatch(mode),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
+      // Authoring-failure surfacing (item 2): count the finally-failed sections for
+      // the CLI counter and forward every event to the CLI's live sink.
+      onAuthorFailure: options.onAuthorFailure
+        ? (failure) => {
+            if (!failure.willRetry) failedSectionKeys.add(`${failure.doc}\0${failure.anchor}`);
+            options.onAuthorFailure!(failure);
+            if (validateStarted) renderValidate();
+          }
+        : undefined,
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.

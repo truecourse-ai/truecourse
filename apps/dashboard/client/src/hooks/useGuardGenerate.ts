@@ -12,6 +12,7 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import type { LlmEstimateData } from './useSocket';
 import * as api from '@/lib/api';
+import type { GuardGenerateMode } from '@/lib/api';
 
 export interface GuardGenerateState {
   /** The estimate the modal renders; null while the modal is closed. */
@@ -20,6 +21,12 @@ export interface GuardGenerateState {
   modalOpen: boolean;
   /** A generate is in flight (fetching the estimate OR running) — disables the button. */
   busy: boolean;
+  /** The chosen fast-vs-economical authoring dial (item 5); the modal pre-selects it. */
+  mode: GuardGenerateMode;
+  /** False when `TRUECOURSE_GENERATE_BATCH` forces a fixed batch — the modal hides the choice. */
+  canChooseMode: boolean;
+  /** Re-estimate for a newly-picked mode (modal toggle). */
+  setMode: (mode: GuardGenerateMode) => void;
   /** Fetch the estimate, then open the modal (or trigger directly when nothing changed). */
   begin: () => void;
   /** Confirm the estimate → trigger the generate. */
@@ -33,13 +40,15 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
   const [modalOpen, setModalOpen] = useState(false);
   const [estimating, setEstimating] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [mode, setModeState] = useState<GuardGenerateMode>('economical');
+  const [canChooseMode, setCanChooseMode] = useState(true);
 
   const trigger = useCallback(
-    async (confirmed: boolean) => {
+    async (confirmed: boolean, chosenMode: GuardGenerateMode) => {
       if (!repoId) return;
       setGenerating(true);
       try {
-        const res = await api.triggerGuardGenerate(repoId, confirmed);
+        const res = await api.triggerGuardGenerate(repoId, confirmed, chosenMode);
         if (res.cancelled) return;
         if (res.noChanges) {
           toast.success('Nothing changed', {
@@ -70,13 +79,16 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
     if (!repoId || estimating || generating) return;
     setEstimating(true);
     try {
-      const { estimate: est } = await api.getGuardEstimate(repoId);
+      // First fetch uses the remembered per-repo mode (server default) and echoes it.
+      const { estimate: est, mode: effMode, canChooseMode: canChoose } = await api.getGuardEstimate(repoId);
       // No stages ⇒ nothing changed ⇒ skip the modal and run (CLI semantics).
       if (!est.stages || est.stages.length === 0) {
-        void trigger(true);
+        void trigger(true, effMode);
         return;
       }
       setEstimate(est);
+      setModeState(effMode);
+      setCanChooseMode(canChoose);
       setModalOpen(true);
     } catch (e) {
       toast.error('Could not estimate the generate', {
@@ -87,16 +99,46 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
     }
   }, [repoId, estimating, generating, trigger]);
 
+  // Re-estimate for a newly-picked mode — the modal shows the mode-scoped numbers.
+  const setMode = useCallback(
+    async (next: GuardGenerateMode) => {
+      if (!repoId || next === mode) return;
+      setModeState(next);
+      setEstimating(true);
+      try {
+        const { estimate: est } = await api.getGuardEstimate(repoId, next);
+        setEstimate(est);
+      } catch (e) {
+        toast.error('Could not estimate the generate', {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        setEstimating(false);
+      }
+    },
+    [repoId, mode],
+  );
+
   const confirm = useCallback(() => {
     setModalOpen(false);
     setEstimate(null);
-    void trigger(true);
-  }, [trigger]);
+    void trigger(true, mode);
+  }, [trigger, mode]);
 
   const cancel = useCallback(() => {
     setModalOpen(false);
     setEstimate(null);
   }, []);
 
-  return { estimate, modalOpen, busy: estimating || generating, begin, confirm, cancel };
+  return {
+    estimate,
+    modalOpen,
+    busy: estimating || generating,
+    mode,
+    canChooseMode,
+    setMode,
+    begin,
+    confirm,
+    cancel,
+  };
 }

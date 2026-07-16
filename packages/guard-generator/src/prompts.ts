@@ -346,39 +346,21 @@ export interface AuthorClaim {
   retry?: BirthRetryContext
 }
 
-/** Char budget above which authoring sends outline + section texts instead of the
- *  full document. */
-export const AUTHOR_DOC_BUDGET = 48_000
-
 /**
- * Build the whole-document context for an authoring batch: the full text when the
- * doc fits the budget, otherwise a titles-only outline (the model never outputs
- * anchors — the engine binds scenarios itself, so slugs would be dead weight) plus
- * each batch section's own text exactly ONCE (the per-claim blocks reference their
- * section by title instead of re-carrying its text).
+ * The whole-document context for an authoring batch: the FULL document text,
+ * always. Authoring reasons over the complete document it draws claims from — it
+ * never degrades to a thinned outline. (Extraction chunks large docs losslessly;
+ * authoring does not — a doc that physically exceeds the model context fails loud
+ * rather than silently thinning.)
  */
-export function buildAuthorDocContext(gd: GuardDoc, anchors: string[]): string {
-  if (gd.content.length <= AUTHOR_DOC_BUDGET) return gd.content
-  const outline = gd.sections
-    .map((s) => `${'  '.repeat(Math.max(0, s.level - 1))}- ${s.headingText}`)
-    .join('\n')
-  const byAnchor = new Map(gd.sections.map((s) => [s.anchor, s]))
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const a of anchors) {
-    if (seen.has(a)) continue
-    seen.add(a)
-    const text = byAnchor.get(a)?.ownText
-    if (text) parts.push(text)
-  }
-  return `OUTLINE (titles only):\n${outline}\n\nTEXT OF THE SECTIONS THE CLAIMS CITE:\n${parts.join('\n\n')}`
+export function buildAuthorDocContext(gd: GuardDoc): string {
+  return gd.content
 }
 
 export interface AuthorUserContext {
   /** Repo-relative doc path the claims come from. */
   doc: string
-  /** Whole-document context: the full text when it fits, else a titles-only
-   *  outline + each batch section's text once (see {@link buildAuthorDocContext}). */
+  /** Whole-document context: the full document text (see {@link buildAuthorDocContext}). */
   docContext: string
   /** Canonical area ids the doc covers, from the corpus (may be empty). */
   areaTags: string[]
@@ -412,8 +394,8 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   lines.push(
     '',
     `Document: ${ctx.doc}`,
-    'Document context (for the global picture — each claim cites its section by',
-    'title; that section\'s text is in here exactly once):',
+    'Document context — the FULL document the claims are drawn from (each claim below',
+    'cites its section by heading):',
     '"""',
     ctx.docContext,
     '"""',

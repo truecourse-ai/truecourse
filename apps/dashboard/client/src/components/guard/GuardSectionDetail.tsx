@@ -7,10 +7,13 @@
  * reveal its YAML source. Rows are previewable (single-click preview,
  * double-click pin), with inline actions stopping propagation.
  *
- * An unsettled section (status `finding` / `held`) lists EVERYTHING bound to it:
- * its birth findings (red rows, expandable to expected → actual) and its
- * ready-but-held scenarios (amber rows) — the all-or-nothing persist withheld
- * them, so no committed scenario exists to list otherwise.
+ * An unsettled section (status `finding` / `held` / `authoring-error`) lists
+ * EVERYTHING bound to it: its birth findings (red rows, expandable to expected →
+ * actual), its ready-but-held scenarios (amber rows), and its deduped authoring
+ * errors (red rows with attempt counts) — the all-or-nothing persist withheld the
+ * scenarios, so no committed scenario exists to list otherwise. On `finding`/`held`
+ * the authoring errors ride along as blocker context; on `authoring-error` they are
+ * the section's sole record.
  *
  * When the section has no run results — a guarded section with no run yet, or a
  * coverage gap (untestable / driver-not-yet / blocked-on) — the pane explains
@@ -19,7 +22,7 @@
 
 import { useCallback, useState } from 'react';
 import { FlaskConical, PlayCircle, X } from 'lucide-react';
-import type { GuardSectionCoverage, GuardSectionFinding, GuardSectionHeldScenario, GuardSectionScenario } from '@truecourse/shared';
+import type { GuardSectionAuthoringError, GuardSectionCoverage, GuardSectionFinding, GuardSectionHeldScenario, GuardSectionScenario } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -294,6 +297,23 @@ function GuardSectionHeldRow({ scenario }: { scenario: GuardSectionHeldScenario 
   );
 }
 
+/** One deduped authoring error — the message plus how many attempts produced it. */
+function GuardAuthoringErrorRow({ error }: { error: GuardSectionAuthoringError }) {
+  return (
+    <div className="border-b border-border/60 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex shrink-0 items-center rounded border border-red-500/40 px-1 py-0 text-[9px] font-medium uppercase tracking-wider text-red-600 dark:text-red-400">
+          authoring error
+        </span>
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+          {error.attempts} attempt{error.attempts === 1 ? '' : 's'}
+        </span>
+      </div>
+      <pre className={PRE}>{error.message}</pre>
+    </div>
+  );
+}
+
 export function GuardSectionDetail({
   repoId,
   section,
@@ -321,9 +341,14 @@ export function GuardSectionDetail({
 
   const findings = section.findings ?? [];
   const heldScenarios = section.heldScenarios ?? [];
-  const hasUnsettled = findings.length > 0 || heldScenarios.length > 0;
+  const authoringErrors = section.authoringErrors ?? [];
+  const hasUnsettled = findings.length > 0 || heldScenarios.length > 0 || authoringErrors.length > 0;
   const isRunOutcome = section.scenarios.length > 0;
   const isGuardedNoRun = !isRunOutcome && section.scenarioIds.length > 0;
+  // On a finding/held section the errors are blocker context (a labelled header);
+  // when they are the sole record (status `authoring-error`) the reason line above
+  // already frames them, so the plain "Authoring errors" header suffices.
+  const errorsAreBlockerContext = findings.length > 0 || heldScenarios.length > 0;
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
@@ -376,6 +401,16 @@ export function GuardSectionDetail({
         {heldScenarios.map((h) => (
           <GuardSectionHeldRow key={h.id} scenario={h} />
         ))}
+        {authoringErrors.length > 0 && (
+          <div>
+            <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {errorsAreBlockerContext ? 'Blocking authoring errors' : 'Authoring errors'}
+            </div>
+            {authoringErrors.map((e, i) => (
+              <GuardAuthoringErrorRow key={i} error={e} />
+            ))}
+          </div>
+        )}
         {isRunOutcome ? (
           section.scenarios.map((s) => (
             <GuardScenarioRow

@@ -1694,6 +1694,12 @@ function RepoPageInner() {
           estimate={guardGen.estimate}
           onConfirm={guardGen.confirm}
           onCancel={guardGen.cancel}
+          modeChoice={{
+            mode: guardGen.mode,
+            canChoose: guardGen.canChooseMode,
+            onChange: guardGen.setMode,
+            busy: guardGen.busy,
+          }}
         />
       )}
       {analysisProgress && (

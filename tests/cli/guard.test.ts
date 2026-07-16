@@ -891,14 +891,30 @@ describe('printGuardGenerateSummary', () => {
     expect(out).toContain('… and 7 more — see `truecourse guard drifts`')
   })
 
-  it('shows at most the top 3 authoring errors, then a truncation pointer', () => {
+  it('lists ALL failed authoring sections (deduped by doc+anchor), no top-3 cap', () => {
     const errors = Array.from({ length: 5 }, (_, i) => ({ doc: DOC, anchor: `sec/e${i}`, message: `boom ${i}` }))
     printGuardGenerateSummary(report({ sectionsChanged: 5, errors }), 'p')
 
-    expect(out).toContain('e0: boom 0')
-    expect(out).toContain('e2: boom 2')
-    expect(out).not.toContain('boom 3')
-    expect(out).toContain('… and 2 more')
+    // Every failed section, one line each — no truncation pointer.
+    for (let i = 0; i < 5; i++) expect(out).toContain(`✗ e${i} — boom ${i}`)
+    expect(out).not.toContain('… and')
+    expect(out).toContain('re-run generate to retry')
+  })
+
+  it('collapses a section\'s repeated errors into one line with an attempt count', () => {
+    const errors = [
+      // Two timed-out claims under one section → "timed out (2 attempts)".
+      { doc: DOC, anchor: 'cli/slow', message: 'authoring call failed: claude timed out after 600000ms' },
+      { doc: DOC, anchor: 'cli/slow', message: 'authoring call failed: claude timed out after 600000ms' },
+      // A section whose model returned invalid output on both tries.
+      { doc: DOC, anchor: 'cli/bad', message: 'authoring output invalid after re-ask: bad shape' },
+    ]
+    printGuardGenerateSummary(report({ sectionsChanged: 2, errors }), 'p')
+
+    expect(out).toContain('✗ slow — timed out (2 attempts)')
+    expect(out).toContain('✗ bad — invalid output twice')
+    // Deduped to two section lines, not four raw entries.
+    expect(out).not.toContain('600000ms')
   })
 
   it('prints only the counts block and pointers when there are no findings or errors', () => {

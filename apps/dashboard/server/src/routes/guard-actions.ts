@@ -28,12 +28,14 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
+  resolveGuardGenerateMode,
   guardGenerateInProcess,
   guardRunInProcess,
   GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
+  type GenerateMode,
 } from '@truecourse/core/commands/guard-in-process';
 import {
   dismissGuardClaim,
@@ -143,12 +145,17 @@ const guardJobs = new Set<string>();
 // GET the pre-flight estimate — the SAME estimateGuardTokens call the CLI prompt
 // renders (deterministic token math + ceiling cost, cache-aware, "N of M sections
 // changed"). No stages ⇒ nothing changed ⇒ the client skips the modal and triggers
-// directly. Read-only: never mutates, never spends.
+// directly. Read-only: never mutates, never spends. The `mode` query scopes the
+// authoring estimate (item 5): fast prices per-claim calls, economical per-batch.
+// When absent, the remembered per-repo choice (economical default) is used. The
+// response echoes the effective `mode` (so the modal pre-selects it) and whether
+// the choice is available (`canChooseMode` is false under TRUECOURSE_GENERATE_BATCH).
 router.get('/:id/guard/estimate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const estimate = await estimateGuard(repo.path);
-    res.json({ estimate });
+    const { mode, canChoose } = await resolveGuardGenerateMode(repo.path, req.query.mode as string | undefined);
+    const estimate = await estimateGuard(repo.path, mode);
+    res.json({ estimate, mode, canChooseMode: canChoose });
   } catch (e) {
     next(e);
   }
@@ -171,13 +178,18 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     guardJobs.add(repoId);
     held = true;
 
-    const confirmed =
-      (req.body as { confirmed?: boolean } | undefined)?.confirmed === true ||
-      req.query.confirmed === 'true';
+    const body = req.body as { confirmed?: boolean; mode?: string } | undefined;
+    const confirmed = body?.confirmed === true || req.query.confirmed === 'true';
+    // The fast-vs-economical dial the modal picked (item 5); undefined ⇒ the driver
+    // uses the remembered per-repo choice. The chosen mode drives the authoring
+    // batch and is remembered for next time.
+    const mode: GenerateMode | undefined =
+      body?.mode === 'fast' || body?.mode === 'economical' ? body.mode : undefined;
 
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
+      mode,
       onLlmEstimate: async () => confirmed,
     });
     emitSpecComplete(repoId, 'guard-generate');

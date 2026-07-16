@@ -22,7 +22,7 @@ Re-run guard on sqlfluff after implementing items and compare against these numb
 
 ## 1. Authoring must always see the full document — remove the titles-only fallback
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** `buildAuthorDocContext` (`packages/guard-generator/src/prompts.ts`) sends the
 whole doc as authoring context only when it is ≤ `AUTHOR_DOC_BUDGET` (48k chars). Over
@@ -51,7 +51,7 @@ add one proving an over-48k doc still sends full content (docContext === doc con
 
 ## 2. CLI: authoring failures surface live, not buried in the closing summary
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** An authoring call that times out (10-minute cap in `runners.ts`) or returns
 invalid output twice is silent while it happens: unsettled sections never tick the
@@ -81,7 +81,7 @@ lines, all listed, no top-3 cap.
 
 ## 3. Coverage: error-blocked sections paint as their own status, never "unguarded"
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** A section whose authoring failed has no manifest entry, no gap, no finding
 — so `composeDocCoverage` (`packages/core/src/commands/guard-read.ts`) falls through to
@@ -148,7 +148,7 @@ line.
 
 ## 5. Fast-vs-economical generate: ask first, estimate for the chosen mode
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** SPEC_GUARD_PLAN stage-4 sub-bullet, measured 2026-07-06 but never scheduled:
 authoring batch size is a speed-vs-cost dial (same 4 claims — 1 call × 4 claims = 388s /
