@@ -51,7 +51,7 @@ add one proving an over-48k doc still sends full content (docContext === doc con
 
 ## 2. CLI: authoring failures surface live, not buried in the closing summary
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** An authoring call that times out (10-minute cap in `runners.ts`) or returns
 invalid output twice is silent while it happens: unsettled sections never tick the

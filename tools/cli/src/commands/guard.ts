@@ -22,6 +22,7 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
+  type AuthorFailure,
 } from "@truecourse/core/commands/guard-in-process";
 import { composeGuardStatus, orderGuardDrifts, guardDriverIds } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
@@ -203,6 +204,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       llm: opts.llmTransport,
       io: opts.io,
       onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } }),
+      // Authoring failures surface live (item 2) — a warn line the moment each
+      // attempt fails, above the checklist (the section never ticks the settle
+      // counter, so a timing-out call is otherwise indistinguishable from a slow one).
+      onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
     }));
   } catch (e: unknown) {
     renderer.dispose();
@@ -280,11 +285,24 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 }
 
 /**
+ * A live authoring-failure warn line (item 2): the failing section leaf, the
+ * one-line reason, and whether a corrective re-ask follows (`retrying (2/2)`) or the
+ * section is given up on for this run (`will retry next generate`).
+ */
+function authorFailureLine(f: AuthorFailure): string {
+  const leaf = sectionLeaf(f.anchor);
+  return f.willRetry
+    ? `✗ ${leaf} — ${f.reason}, retrying (${f.attempt + 1}/2)`
+    : `✗ ${leaf} — ${f.reason}; section failed, will retry next generate`;
+}
+
+/**
  * The closing summary for `guard generate` — a compact counts block, the top few
- * birth findings and authoring errors as one-liners, and pointers to the detail
- * surfaces. Reuses the `guard status` summary composition so the terminal and the
- * store never tell different stories; the full detail (expected/actual/evidence)
- * lives in `guard/result.json`, `guard drifts`, and `guard status`.
+ * birth findings, ALL failed authoring sections (deduped by doc+anchor), and
+ * pointers to the detail surfaces. Reuses the `guard status` summary composition so
+ * the terminal and the store never tell different stories; the full detail
+ * (expected/actual/evidence) lives in `guard/result.json`, `guard drifts`, and
+ * `guard status`.
  */
 export function printGuardGenerateSummary(report: GuardGenerateReport, reportPath: string): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
@@ -340,11 +358,15 @@ export function printGuardGenerateSummary(report: GuardGenerateReport, reportPat
     if (more > 0) p.log.message(`… and ${more} more — see \`truecourse guard drifts\``);
   }
 
+  // ALL failed authoring sections, deduped by doc+anchor, one line each (no cap):
+  // section leaf + collapsed reason (`timed out (3 attempts)` / `invalid output
+  // twice`), then the note that nothing was written for them.
   if (report.errors.length > 0) {
-    p.log.warn(`Top authoring error${report.errors.length === 1 ? "" : "s"}:`);
-    for (const e of report.errors.slice(0, 3)) p.log.message(`• ${sectionLeaf(e.anchor)}: ${oneLine(e.message)}`);
-    const more = report.errors.length - 3;
-    if (more > 0) p.log.message(`… and ${more} more — see the report`);
+    const sections = collapseAuthoringErrors(report.errors);
+    p.log.warn(
+      `Authoring failure${sections.length === 1 ? "" : "s"} — nothing was written for ${sections.length === 1 ? "this section" : "these sections"}, re-run generate to retry:`,
+    );
+    for (const s of sections) p.log.message(`✗ ${sectionLeaf(s.anchor)} — ${s.reason}`);
   }
 
   // Pointers — the surfaces hold the detail the terminal no longer dumps.
@@ -366,6 +388,43 @@ function sectionLeaf(anchor: string): string {
 function oneLine(text: string): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > 100 ? `${t.slice(0, 100)}…` : t;
+}
+
+/** One failed authoring section: doc+anchor plus a reason collapsed from all its
+ *  error entries (its per-claim/per-attempt failures). */
+interface FailedAuthoringSection {
+  doc: string;
+  anchor: string;
+  reason: string;
+}
+
+/**
+ * Dedupe the report's authoring errors by doc+anchor and collapse each section's
+ * messages into one reason with an attempt count (item 2). A section that only
+ * timed out reads `timed out (N attempts)`; one that returned invalid output reads
+ * `invalid output twice`; anything else leads with the first message.
+ */
+function collapseAuthoringErrors(errors: { doc: string; anchor: string; message: string }[]): FailedAuthoringSection[] {
+  const groups = new Map<string, { doc: string; anchor: string; messages: string[] }>();
+  for (const e of errors) {
+    const k = `${e.doc}\0${e.anchor}`;
+    const g = groups.get(k);
+    if (g) g.messages.push(e.message);
+    else groups.set(k, { doc: e.doc, anchor: e.anchor, messages: [e.message] });
+  }
+  return [...groups.values()].map((g) => ({ doc: g.doc, anchor: g.anchor, reason: collapseFailureReason(g.messages) }));
+}
+
+/** Collapse one section's authoring-error messages into a single reason + count. */
+function collapseFailureReason(messages: string[]): string {
+  const n = messages.length;
+  const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
+  const isTimeout = (m: string) => /timed out/i.test(m);
+  const isInvalid = (m: string) => /invalid|composition/i.test(m);
+  if (messages.every(isTimeout)) return `timed out (${attempts})`;
+  if (messages.every(isInvalid)) return n === 1 ? "invalid output twice" : `invalid output twice (${attempts})`;
+  const first = oneLine(messages[0]);
+  return n === 1 ? first : `${first} (+${n - 1} more)`;
 }
 
 // ---------------------------------------------------------------------------

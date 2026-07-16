@@ -12,6 +12,7 @@
 
 import {
   generateGuards,
+  type AuthorFailure,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractRunner,
@@ -52,6 +53,7 @@ import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
+export type { AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -144,6 +146,12 @@ export interface GuardGenerateInProcessOptions {
    * when nothing changed (the estimate has no stages).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  /**
+   * Fired the moment an authoring attempt fails (item 2) — the CLI surfaces it live
+   * and counts failed sections. Optional, so the dashboard popup (which never wires
+   * it) is unchanged.
+   */
+  onAuthorFailure?: (failure: AuthorFailure) => void;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
@@ -256,6 +264,11 @@ export async function guardGenerateInProcess(
   let birthDone = 0;
   let sectionsDone = 0;
   let sectionsTotal = 0;
+  // Authoring-failure surfacing (item 2) is a CLI-only concern: only when the caller
+  // wires `onAuthorFailure` does the section counter gain a "· M failed" reading. The
+  // dashboard popup never wires it, so its counter is unchanged.
+  const cliSurfacesFailures = !!options.onAuthorFailure;
+  const failedSectionKeys = new Set<string>();
   let retrySeen = false;
   let retryDone = 0;
   let retryTotal = 0;
@@ -275,7 +288,12 @@ export async function guardGenerateInProcess(
       tracker?.start('validate');
       validateStarted = true;
     }
-    const parts = [`sections ${sectionsDone}/${sectionsTotal}`, building ? 'building…' : `birth ${birthDone}`];
+    // The CLI section counter gains a failed reading (settled · failed · remaining);
+    // the dashboard keeps the plain settled/total form.
+    const sectionsPart = cliSurfacesFailures
+      ? `sections ${sectionsDone} settled · ${failedSectionKeys.size} failed · ${Math.max(0, sectionsTotal - sectionsDone - failedSectionKeys.size)} remaining`
+      : `sections ${sectionsDone}/${sectionsTotal}`;
+    const parts = [sectionsPart, building ? 'building…' : `birth ${birthDone}`];
     if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
     if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
     tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
@@ -292,6 +310,15 @@ export async function guardGenerateInProcess(
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
+      // Authoring-failure surfacing (item 2): count the finally-failed sections for
+      // the CLI counter and forward every event to the CLI's live sink.
+      onAuthorFailure: options.onAuthorFailure
+        ? (failure) => {
+            if (!failure.willRetry) failedSectionKeys.add(`${failure.doc}\0${failure.anchor}`);
+            options.onAuthorFailure!(failure);
+            if (validateStarted) renderValidate();
+          }
+        : undefined,
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
