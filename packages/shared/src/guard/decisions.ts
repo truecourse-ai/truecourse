@@ -118,3 +118,11 @@ export function dismissedClaimKey(doc: string, anchor: string, title: string): s
 export function guardFindingKey(doc: string, anchor: string, scenarioHash: string): string {
   return `${doc}\0${anchor}\0${scenarioHash}`
 }
+
+/** Split a served `findingKey` back into its identity — the inverse of
+ *  {@link guardFindingKey}, so no consumer (the client's dismiss payload) has to
+ *  know the string's internal layout. `null` for a malformed key. */
+export function parseGuardFindingKey(key: string): GuardFindingIdentity | null {
+  const [doc, anchor, scenarioHash] = key.split('\0')
+  return doc && anchor && scenarioHash ? { doc, anchor, scenarioHash } : null
+}

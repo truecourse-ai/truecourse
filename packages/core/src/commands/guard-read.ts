@@ -455,7 +455,10 @@ async function headingTextIndex(
  * on reports written under an OLDER format version.
  */
 function stampFindingKeys(report: GuardGenerateReport | null): GuardGenerateReport | null {
-  if (!report || report.birthFindings.length === 0) return report
+  // `?.` is load-bearing: the EE Pg store reads rows back with a raw cast (no
+  // schema parse), so a degenerate row (e.g. a status-only blocked report) can
+  // lack the findings array entirely — pass it through, never throw.
+  if (!report || !report.birthFindings?.length) return report
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {

@@ -12,7 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readGuardReport, readGuardResultForView } from '../../packages/core/src/commands/guard-read';
-import { resetGuardStore } from '../../packages/core/src/lib/guard-store';
+import { resetGuardStore, setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store';
+import type { GuardGenerateReport } from '../../packages/shared/src/guard/index';
 import { guardFindingKey, GUARD_FORMAT_VERSION } from '../../packages/shared/src/guard/index';
 import { scenarioHashFromYaml } from '../../packages/shared/src/guard/scenario-hash';
 
@@ -99,6 +100,17 @@ describe('stamp-on-read at the store-read choke point', () => {
     expect(report).not.toBeNull();
     expect(report!.birthFindings[0].findingKey).toBe(expectedKey);
     expect(report!.birthFindings[2].findingKey).toBeUndefined();
+  });
+
+  it('tolerates a raw store row with NO birthFindings array (the EE Pg store bypasses the schema)', async () => {
+    // Hosted rows come back through a raw cast — a status-only row (e.g. an
+    // open-conflicts blocked report consumer stub, or a degenerate row) must
+    // pass through unstamped, never throw a 500 out of the read path.
+    setGuardStore({
+      materializesInPlace: true,
+      readGuardResult: async () => ({ status: 'open-conflicts' }) as unknown as GuardGenerateReport,
+    } as unknown as GuardStore);
+    await expect(readGuardResultForView(repo)).resolves.toMatchObject({ status: 'open-conflicts' });
   });
 
   it('never persists the stamp — the stored report bytes are unchanged by reads', async () => {

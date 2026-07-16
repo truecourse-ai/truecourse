@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban } from 'lucide-react';
+import { parseGuardFindingKey } from '@truecourse/shared';
 import * as api from '@/lib/api';
 import type { GuardClaimIdentity, GuardFindingIdentity } from '@/lib/api';
 import { sectionLeaf } from '@/lib/guard-drifts';
@@ -84,14 +85,12 @@ export function GuardFindingDetail({
       });
   }, [repoId, f.evidencePath]);
 
-  // The dismissal identity is the SERVER-stamped `findingKey` — `guardFindingKey
-  // (doc, anchor, scenarioHash)`, NUL-joined; the trailing segment is the behavior
-  // hash. The client only parses what it received, it never derives identity. A
-  // finding the server could not key (no/underivable yaml) is not dismissible;
-  // the action hides — claim presence no longer matters (§1a).
-  const scenarioHash = f.findingKey?.split('\0')[2];
-  const findingIdentity: GuardFindingIdentity | null = scenarioHash
-    ? { doc: f.doc, anchor: f.anchor, scenarioHash }
+  // The dismissal identity is the SERVER-stamped `findingKey`, split back through
+  // the shared inverse helper — the client only parses what it received, it never
+  // derives identity. A finding the server could not key (no/underivable yaml) is
+  // not dismissible; the action hides — claim presence no longer matters (§1a).
+  const findingIdentity: GuardFindingIdentity | null = f.findingKey
+    ? parseGuardFindingKey(f.findingKey)
     : null;
   const runDismiss = useCallback(
     async (fn: () => Promise<void>) => {

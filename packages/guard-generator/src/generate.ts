@@ -771,6 +771,35 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const localFindings: GuardBirthFinding[] = []
     let persistedHere: BirthCandidate[] = []
 
+    // Build one claim's raw scenarios and hash-filter them pre-birth — the SAME
+    // path for round 1 and the retry door (authorRetry re-authors from scratch
+    // and can reproduce a dismissed behavior byte-for-byte). Each survivor goes
+    // to `keep`; a claim whose built candidates were ALL filtered settles as a
+    // `dismissed` gap recorded HERE at the filter site (the empty-scenarios
+    // branch fires too early to catch it) — §4: it releases held siblings.
+    const buildFiltered = (
+      scs: RawGeneratedScenario[],
+      round: 'round1' | 'round2',
+      claimText: string,
+      keep: (built: GuardScenario) => void,
+    ): void => {
+      let live = 0
+      let filtered = 0
+      for (const rawS of scs) {
+        const built = safeBuild(section, rawS, usedIds, localErrors)
+        if (!built) continue
+        if (hashFiltered(section, built, round)) {
+          filtered++
+          continue
+        }
+        live++
+        keep(built)
+      }
+      if (filtered > 0 && live === 0) {
+        coverageGaps.push({ doc: section.doc, anchor: section.anchor, kind: 'dismissed', reason: dismissedReason(claimText) })
+      }
+    }
+
     // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
     const round1: BirthCandidate[] = []
     const round1ByRef = new Map<string, BirthCandidate[]>()
@@ -787,26 +816,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         )
         continue
       }
-      let live = 0
-      let filtered = 0
-      for (const rawS of scs) {
-        const built = safeBuild(section, rawS, usedIds, localErrors)
-        if (!built) continue
-        if (hashFiltered(section, built, 'round1')) {
-          filtered++
-          continue
-        }
-        live++
+      buildFiltered(scs, 'round1', t.claim.claim, (built) => {
         const cand: BirthCandidate = { section, scenario: built, ref, claim: t.claim }
         round1.push(cand)
         pushInto(round1ByRef, ref, cand)
-      }
-      // Every built candidate of this claim was hash-filtered → the claim settles
-      // as a `dismissed` gap, recorded HERE at the filter site (the empty-scenarios
-      // branch above fires too early to catch it) — §4: it releases held siblings.
-      if (filtered > 0 && live === 0) {
-        coverageGaps.push({ doc: section.doc, anchor: section.anchor, kind: 'dismissed', reason: dismissedReason(t.claim.claim) })
-      }
+      })
     }
 
     if (round1.length > 0) {
@@ -861,27 +875,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               limit(async () => {
                 try {
                   const retryScs = await authorRetry(repoRoot, gd, entry, section, recipe, recipeFingerprint, generateRunner, localErrors, groundClaims)
-                  // The retry door gets the SAME pre-birth filter (with inline id
-                  // release): authorRetry re-authors from scratch and can reproduce
-                  // a dismissed behavior byte-for-byte.
-                  let live = 0
-                  let filtered = 0
-                  for (const rawS of retryScs) {
-                    const built = safeBuild(section, rawS, usedIds, localErrors)
-                    if (!built) continue
-                    if (hashFiltered(section, built, 'round2')) {
-                      filtered++
-                      continue
-                    }
-                    live++
+                  // Same pre-birth filter as round 1; a retry that produced only
+                  // dismissed behavior ends the claim with nothing live (its
+                  // round-1 candidates were discarded as retry evidence), so the
+                  // shared gap recording settles it visibly.
+                  buildFiltered(retryScs, 'round2', entry.task.claim.claim, (built) => {
                     retryCandidates.push({ section, scenario: built, ref: entry.task.ref, claim: entry.task.claim })
-                  }
-                  // The retry produced only dismissed behavior — the claim ends the
-                  // run with nothing live (its round-1 candidates were discarded as
-                  // retry evidence); settle it visibly as a `dismissed` gap.
-                  if (filtered > 0 && live === 0) {
-                    coverageGaps.push({ doc: section.doc, anchor: section.anchor, kind: 'dismissed', reason: dismissedReason(entry.task.claim.claim) })
-                  }
+                  })
                 } finally {
                   options.onRetryProgress?.(++retryDone, retryTotal)
                 }
