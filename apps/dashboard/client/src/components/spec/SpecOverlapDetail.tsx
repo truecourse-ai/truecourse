@@ -220,11 +220,21 @@ export function SpecOverlapDetail({
           </span>
           <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtArea(area)}</span>
         </div>
-        {(review?.explanation || note) && (
+        {review ? (
+          <ConflictAssessment
+            review={review}
+            winner={recVerdict === 'a' ? docA : recVerdict === 'b' ? docB : null}
+            canApply={open && recVerdict !== null}
+            applyDisabled={busy !== null || decisionsDisabled}
+            applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+            applying={recVerdict !== null && busy === recVerdict}
+            onApply={() => recVerdict && recordVerdict(recVerdict)}
+          />
+        ) : note ? (
           <div className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-            <p className="text-xs leading-relaxed text-foreground">{review?.explanation || note}</p>
+            <p className="text-xs leading-relaxed text-foreground">{note}</p>
           </div>
-        )}
+        ) : null}
 
         {resolution ? (
           // Resolved by a section verdict — render in place with an Undo.
@@ -319,17 +329,6 @@ export function SpecOverlapDetail({
           />
         </div>
       </div>
-      {review && (
-        <RecommendationFooter
-          review={review}
-          winner={recVerdict === 'a' ? docA : recVerdict === 'b' ? docB : null}
-          canApply={open && recVerdict !== null}
-          applyDisabled={busy !== null || decisionsDisabled}
-          applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
-          applying={recVerdict !== null && busy === recVerdict}
-          onApply={() => recVerdict && recordVerdict(recVerdict)}
-        />
-      )}
     </div>
   );
 }
@@ -342,13 +341,16 @@ function recActionLabel(action: SpecOverlapReview['recommendation']['action'], w
 }
 
 /**
- * The reviewer's recommendation, pinned below the doc excerpts. Advisory: the
- * "Apply recommendation" shortcut runs the SAME verdict action as the manual
- * controls (pick-a-side / dismissal), nothing new. `fix-doc` gets no apply
- * button — the fix text is offered with a copy affordance for the user to edit
- * the doc themselves.
+ * The verify judge's assessment for a reviewed conflict — reasoning and its
+ * recommendation together in one accented block (the finding-triage idiom), so
+ * the reader judges without hunting. The reasoning leads; the recommendation
+ * rides in a highlighted sub-block with its "Apply recommendation" shortcut
+ * wired inside it. Advisory: the shortcut runs the SAME verdict action as the
+ * manual controls (pick-a-side / dismissal), nothing new. `fix-doc` gets no
+ * apply button (and no accent) — the fix text is offered with a copy affordance
+ * for the user to edit the doc themselves.
  */
-function RecommendationFooter({
+function ConflictAssessment({
   review,
   winner,
   canApply,
@@ -366,24 +368,32 @@ function RecommendationFooter({
   onApply: () => void;
 }) {
   const { action, rationale, fix } = review.recommendation;
+  const actionable = action !== 'fix-doc';
   return (
-    <div className="shrink-0 border-t border-border px-4 py-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Recommendation</div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
-          {recActionLabel(action, winner)}
-        </span>
-        {canApply && (
-          <HoverPopover content={applyDisabledReason} side="top">
-            <Button size="sm" disabled={applyDisabled} onClick={onApply}>
-              {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-              Apply recommendation
-            </Button>
-          </HoverPopover>
-        )}
+    <div data-testid="conflict-assessment" className="mt-2 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+      <p className="text-xs leading-relaxed text-foreground">{review.explanation}</p>
+      <div
+        className={`mt-2 rounded border-l-2 bg-background/60 px-2.5 py-2 ${
+          actionable ? 'border-amber-500/60' : 'border-border'
+        }`}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recommendation</div>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+            {recActionLabel(action, winner)}
+          </span>
+          {canApply && (
+            <HoverPopover content={applyDisabledReason} side="top">
+              <Button size="sm" disabled={applyDisabled} onClick={onApply}>
+                {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                Apply recommendation
+              </Button>
+            </HoverPopover>
+          )}
+        </div>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
+        {action === 'fix-doc' && fix && <FixText fix={fix} />}
       </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
-      {action === 'fix-doc' && fix && <FixText fix={fix} />}
     </div>
   );
 }

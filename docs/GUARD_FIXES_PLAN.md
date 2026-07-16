@@ -393,3 +393,157 @@ report schema comment documents the invariant.
 
 **Tests.** A run with a retried claim whose round-1 sibling passed reconciles exactly;
 the CLI summary line's numbers add up in the e2e fixture runs.
+
+---
+
+Items 13-15 implement the product principle set 2026-07-16: **the tool creates as few
+human tasks as possible.** High-confidence machine judgments auto-resolve with an
+auditable ledger (a visible record, never a task); human attention is reserved for
+genuine doc-vs-code drift and low-confidence calls; no finding ever blocks another
+scenario.
+
+## 13. High-confidence fidelity flags self-heal — discard, re-author once, never a task
+
+STATUS: OPEN
+
+**Problem.** Every fidelity flag becomes a finding today (51 on the sqlfluff run) —
+each one a human task, even though the machine is often certain the scenario is simply
+weak (all 51 were later triaged generation-defect at high confidence). A vacuous
+scenario the system is SURE about is the system's own mess to clean up, not a report.
+
+**Fix.**
+- Fidelity's verdict gains `confidence: high | medium | low` (same closed enum as
+  triage).
+- A `flagged` verdict at HIGH confidence never births a finding: the candidate is
+  discarded and re-authored ONCE with the fidelity mismatch as evidence (reuse the
+  birth-retry machinery — the mismatch sentence is the correction context). The
+  re-authored candidate goes through birth + fidelity again; if it is flagged again
+  (any confidence) or fails birth, THEN it becomes a finding — no infinite loop, at
+  most one extra authoring round per scenario.
+- Flags at medium/low confidence become findings exactly as today.
+- Ledger, not silence: the report gains an `autoResolved[]` section (kind:
+  `fidelity-discard`, scenario title, mismatch, what the re-author produced). The CLI
+  summary prints one count line; the dashboard shows a collapsed "auto-resolved"
+  group. Nothing is ever silently deleted without a record.
+
+**Tests.** High-confidence flag → discard + one re-author + no finding when the retry
+is faithful; second flag → finding; medium confidence → finding as today; ledger
+entries present in report/CLI/UI; counter invariant (item 12) updated for the new path.
+
+## 14. High-confidence triage recommendations auto-resolve — humans see only real questions
+
+STATUS: OPEN
+
+**Problem.** Triage already knows what to do (14/14 verified accurate) but still hands
+every finding to the human. 81 of sqlfluff's 92 findings were high-confidence
+generation-defect/environment — none of them needed a person.
+
+**Fix.** Auto-resolution policy, by verdict × confidence:
+- `environment` + HIGH → auto-dismiss the claim: write the dismissal into
+  `scenarios/decisions.json` marked `auto` with the triage brief as the reason (the
+  claim is untestable in this sandbox, permanently — e.g. tty-gated output). Surfaced
+  in the ledger, reversible by deleting the decision.
+- `generation-defect` + HIGH → auto-resolve the FINDING, never dismiss the claim (the
+  claim is fine; our scenario was bad — it must re-attempt next generate). The finding
+  moves to the ledger instead of the task list. **Escalation guard:** the triage cache
+  key already identifies a recurring identical finding — when the same finding
+  identity auto-resolves N times (default 2) without converging, it surfaces to the
+  human with a "re-generation is not fixing this" note. Auto-resolution must never
+  become an infinite silent loop.
+- `doc-drift` / `code-drift` (any confidence) and ANY verdict at medium/low confidence
+  → a human task, exactly as today. Drift is the product's value; it is never
+  auto-resolved.
+- Surfaces: findings list shows only human-needed items by default, with the
+  auto-resolved ledger collapsed beneath (count + expandable); CLI `guard findings`
+  mirrors (ledger lines behind a flag or beneath a divider); coverage section detail
+  marks auto-resolved findings with a muted treatment, not red.
+
+**Tests.** Each verdict×confidence cell routes correctly; environment dismissal lands
+in decisions.json marked auto and generate honors it; recurrence escalation after N;
+ledger rendering in CLI + dashboard; drift verdicts never auto-resolve.
+
+## 15. Kill held/all-or-nothing settling — every scenario commits on its own merits
+
+STATUS: OPEN
+
+**Problem.** A finding on one claim currently unsettles its whole section and holds
+every sibling scenario hostage (sqlfluff: 61 finding-blocked sections held 111
+verified-good scenarios). The user's verdict: a finding has its own life — each is
+reviewed and dismissed as itself, never as a side effect of a neighbor. Held-ness
+creates exactly the extra mental effort the product exists to remove.
+
+**Fix.**
+- A scenario that passes birth and fidelity COMMITS, regardless of what happened to
+  sibling claims in its section. Per-scenario persistence replaces per-section
+  all-or-nothing settling.
+- `heldSections`/ready-but-held disappear from the report schema (kept parseable as
+  optional for old result.json files, never written again). The `held` coverage
+  status and its UI (rows, badges, status meta) are REMOVED — update the pinned
+  GUARD_STATUS_ORDER test. The CLI `held` summary line goes away.
+- Sections can now carry committed scenarios AND findings simultaneously: the
+  coverage join paints the section by run outcome where outcomes exist, with the
+  finding surfaced alongside (dot/chip), not as a preemptive status — rework the
+  precedence introduced in item 3 accordingly (`finding`/`authoring-error` still
+  paint sections that have NOTHING committed).
+- Manifest: a section with a finding still records its committed scenarioIds (partial
+  coverage is real coverage); the unsettled-section file-deletion sweep at run end
+  only touches sections with zero survivors.
+- Counter invariant (item 12) simplifies: `birthPassed === written + fidelityFlagged`
+  (+ item 13's discards once both land).
+
+**Tests.** A section with one finding + two green siblings commits the two and
+reports the finding; coverage shows outcome + finding together; old reports with
+heldSections still parse; status order/UI tests updated; run-end sweep spares
+partial sections.
+
+## 16. Fidelity runs in parallel with birth, not after it
+
+STATUS: OPEN
+
+**Problem.** Fidelity judges the scenario YAML against the claim — it needs nothing
+from the birth run — yet it waits for birth to finish. On the 2026-07-16 sqlfluff run
+that ordering wasted 51 birth executions (every flagged scenario had already paid its
+sandbox run, including multi-file pack sweeps), and birth execution is the wall-time
+long pole (~1h non-LLM). The saved Sonnet calls are trivial by comparison (~+$5 on an
+$8.60 fidelity bill to review all candidates instead of survivors).
+
+**Fix.**
+- For each authored candidate, birth validation and the fidelity review START
+  CONCURRENTLY the moment authoring returns; a scenario commits only when BOTH are
+  green. Wall time per candidate becomes max(birth, fidelity), not sum.
+- Precedence when both go wrong: a birth FAILURE wins — the candidate is discarded
+  into the evidence-retry path and the fidelity verdict on the discarded candidate is
+  dropped (never a finding). A fidelity flag on a birth-passing candidate behaves as
+  today (finding — or item 13's self-heal once that lands).
+- Re-authored candidates (birth retry) get both checks again, also in parallel.
+- Progress: the fidelity counter's `planned` now grows at authoring time (per
+  candidate), not at green time — CLI/dashboard lines need no structural change.
+- Accepted cost: fidelity reviews candidates birth will reject (~35%); the verdicts
+  on those are discarded unused.
+
+**Tests.** Both checks observably start before birth completes (stub runners with
+ordering probes); birth-fail + fidelity-flag on the same candidate → retry path, no
+finding; commit requires both green; counters reconcile under the new planned basis.
+
+## 17. Spec conflict detail adopts the finding-triage assessment layout
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** Two different UX for the same "machine assessment + recommendation"
+concept: a finding's triage renders as one assessment block — verdict chip, reasoning,
+and the highlighted recommended action together, with the action button wired inside
+it (GuardFindingDetail). The spec conflict detail (SpecOverlapDetail) shows its
+resolution brief's recommendation at the BOTTOM, far from the reasoning. The user
+wants one idiom: the findings one, applied to spec conflicts too.
+
+**Fix.** Restructure SpecOverlapDetail's brief rendering to the finding-assessment
+idiom: recommendation sits next to the reasoning in one accented block, with the
+matching resolve action wired inside the block (the "Apply recommendation" affordance
+moves into it). No behavior change — same brief data, same resolve actions, same
+five-option resolver below — layout only. Applies everywhere SpecOverlapDetail
+renders (BL-Drift Spec tab and the guard coverage conflict tab; OSS and EE get it
+free — one component).
+
+**Tests.** Existing SpecOverlapDetail tests updated for the new structure: the
+recommendation text and its apply action render inside the assessment block adjacent
+to the reasoning; resolve wiring unchanged.

@@ -730,11 +730,13 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
   });
 });
 
-// The verify judge's resolution brief (issue: reviewed conflicts). The detail
-// pane surfaces the explanation as a labelled brief above the excerpts and the
-// recommendation below them; the "Apply recommendation" shortcut runs the SAME
-// verdict action as the manual controls. `fix-doc` gets no apply button — only
-// the copyable fix text. Absent `review` renders byte-identically to before.
+// The verify judge's assessment (issue: reviewed conflicts). The detail pane
+// surfaces the reasoning and its recommendation TOGETHER in one accented
+// assessment block (the finding-triage idiom): the explanation leads, the
+// recommendation + its "Apply recommendation" shortcut ride inside the same
+// block. The shortcut runs the SAME verdict action as the manual controls.
+// `fix-doc` gets no apply button — only the copyable fix text. Absent `review`
+// renders byte-identically to before.
 describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
   let lastPost: Record<string, unknown> | null;
   beforeEach(() => {
@@ -766,20 +768,23 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       />,
     );
 
-  it('renders the brief explanation + the recommendation label and rationale', () => {
+  it('renders the reasoning + the recommendation label and rationale inside one assessment block', () => {
     renderDetail(
       withReview({
         explanation: 'The two docs disagree on the cancellation window (24h vs 48h).',
         recommendation: { action: 'pick-a', rationale: 'v1 is the newer, authoritative policy.' },
       }),
     );
-    expect(screen.getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
     expect(screen.queryByText('Resolution brief')).not.toBeInTheDocument();
-    // The brief REPLACES the detector note — never both.
+    // The reasoning REPLACES the detector note — never both.
     expect(screen.queryByText('24h vs 48h cancellation')).not.toBeInTheDocument();
-    expect(screen.getByText('Recommendation')).toBeInTheDocument();
-    expect(screen.getByText('docs/v1.md is right')).toBeInTheDocument();
-    expect(screen.getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
+    // Reasoning, recommendation label + action label + rationale all live in the
+    // ONE assessment block (finding-triage idiom), not split across the pane.
+    const block = screen.getByTestId('conflict-assessment');
+    expect(within(block).getByText('The two docs disagree on the cancellation window (24h vs 48h).')).toBeInTheDocument();
+    expect(within(block).getByText('Recommendation')).toBeInTheDocument();
+    expect(within(block).getByText('docs/v1.md is right')).toBeInTheDocument();
+    expect(within(block).getByText('v1 is the newer, authoritative policy.')).toBeInTheDocument();
   });
 
   it('the Apply recommendation button routes through the SAME verdict mutation as the manual control', async () => {
@@ -793,7 +798,9 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       }),
       { onConflictChange },
     );
-    await user.click(screen.getByRole('button', { name: 'Apply recommendation' }));
+    // The apply shortcut is wired INSIDE the assessment block, next to the reasoning.
+    const block = screen.getByTestId('conflict-assessment');
+    await user.click(within(block).getByRole('button', { name: 'Apply recommendation' }));
     // The identical POST the manual "docs/v1.md is right" button would send.
     await waitFor(() => expect(lastPost).not.toBeNull());
     expect(lastPost).toMatchObject({
@@ -831,13 +838,15 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         recommendation: { action: 'fix-doc', rationale: 'Neither wins outright.', fix: 'Change 24h to 48h in docs/v1.md.' },
       }),
     );
-    expect(screen.getByText('Suggested fix')).toBeInTheDocument();
-    expect(screen.getByText('Change 24h to 48h in docs/v1.md.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Copy/ })).toBeInTheDocument();
+    // The fix text rides inside the assessment block; a fix-doc offers no apply shortcut.
+    const block = screen.getByTestId('conflict-assessment');
+    expect(within(block).getByText('Suggested fix')).toBeInTheDocument();
+    expect(within(block).getByText('Change 24h to 48h in docs/v1.md.')).toBeInTheDocument();
+    expect(within(block).getByRole('button', { name: /Copy/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 
-  it('an already-resolved reviewed conflict shows the brief but no apply shortcut', () => {
+  it('an already-resolved reviewed conflict shows the assessment but no apply shortcut', () => {
     const data = withReview({
       explanation: 'They disagree.',
       recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
@@ -849,7 +858,8 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
       ],
     };
     renderDetail(resolved);
-    expect(screen.getByText('They disagree.')).toBeInTheDocument();
+    const block = screen.getByTestId('conflict-assessment');
+    expect(within(block).getByText('They disagree.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
   });
 
