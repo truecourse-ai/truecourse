@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban } from 'lucide-react';
 import * as api from '@/lib/api';
-import type { GuardClaimIdentity } from '@/lib/api';
+import type { GuardClaimIdentity, GuardFindingIdentity } from '@/lib/api';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import type { GuardFindingRowData } from '@/lib/guard-list-rows';
 import { GuardFindingBadge } from './GuardFindingBadge';
@@ -35,16 +35,21 @@ export function GuardFindingDetail({
   onOpenSpec,
   onDismiss,
   onUndismiss,
+  onUndismissClaim,
 }: {
   repoId: string;
   row: GuardFindingRowData;
   /** Unused — the tab strip's X is the only close. Kept for the RepoPage caller. */
   onClose: () => void;
   onOpenSpec: (doc: string, section: string) => void;
-  /** Dismiss this finding's claim (writes decisions.json); parent refetches decisions. */
-  onDismiss: (claim: GuardClaimIdentity) => Promise<void>;
-  /** Reverse the dismissal. */
-  onUndismiss: (claim: GuardClaimIdentity) => Promise<void>;
+  /** Dismiss THIS finding by its per-finding identity (writes decisions.json);
+   *  parent refetches decisions (and, on a 409 stale-report, the report too). */
+  onDismiss: (identity: GuardFindingIdentity) => Promise<void>;
+  /** Reverse a per-finding dismissal. */
+  onUndismiss: (identity: GuardFindingIdentity) => Promise<void>;
+  /** Reverse a LEGACY claim dismissal (pre-existing entries; the legacy route is
+   *  retained forever even though the claim-level dismiss action is gone). */
+  onUndismissClaim: (claim: GuardClaimIdentity) => Promise<void>;
 }) {
   const f = row.finding;
 
@@ -79,24 +84,35 @@ export function GuardFindingDetail({
       });
   }, [repoId, f.evidencePath]);
 
-  // The dismissal identity keys on the extracted claim's stable text (`f.claim`),
-  // not the scenario title — the same identity generate matches. An old report with
-  // no `claim` can't be dismissed (nothing to key on); the action hides.
-  const claimIdentity: GuardClaimIdentity | null = f.claim
-    ? { doc: f.doc, anchor: f.anchor, title: f.claim }
+  // The dismissal identity is the SERVER-stamped `findingKey` — `guardFindingKey
+  // (doc, anchor, scenarioHash)`, NUL-joined; the trailing segment is the behavior
+  // hash. The client only parses what it received, it never derives identity. A
+  // finding the server could not key (no/underivable yaml) is not dismissible;
+  // the action hides — claim presence no longer matters (§1a).
+  const scenarioHash = f.findingKey?.split('\0')[2];
+  const findingIdentity: GuardFindingIdentity | null = scenarioHash
+    ? { doc: f.doc, anchor: f.anchor, scenarioHash }
     : null;
   const runDismiss = useCallback(
-    async (fn: (c: GuardClaimIdentity) => Promise<void>) => {
-      if (!claimIdentity) return;
+    async (fn: () => Promise<void>) => {
       setDismissing(true);
       try {
-        await fn(claimIdentity);
+        await fn();
       } finally {
         if (mounted.current) setDismissing(false);
       }
     },
-    [claimIdentity],
+    [],
   );
+  // Un-dismiss routes by HOW the row was dismissed — two identities, two
+  // operations: a legacy claim entry goes through the retained legacy route.
+  const undismiss = useCallback(async () => {
+    if (row.dismissedVia === 'claim' && f.claim) {
+      await onUndismissClaim({ doc: f.doc, anchor: f.anchor, title: f.claim });
+    } else if (findingIdentity) {
+      await onUndismiss(findingIdentity);
+    }
+  }, [row.dismissedVia, f.claim, f.doc, f.anchor, findingIdentity, onUndismiss, onUndismissClaim]);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -138,30 +154,31 @@ export function GuardFindingDetail({
               View in spec
               <ArrowUpRight className="h-3 w-3" />
             </button>
-            {claimIdentity &&
-              (row.dismissed ? (
+            {row.dismissed ? (
+              <button
+                type="button"
+                disabled={dismissing}
+                onClick={() => void runDismiss(undismiss)}
+                className={`${BTN} disabled:opacity-50`}
+              >
+                <Ban className="h-3 w-3" />
+                {dismissing ? 'Working…' : 'Un-dismiss'}
+              </button>
+            ) : (
+              findingIdentity && (
                 <button
                   type="button"
                   disabled={dismissing}
-                  onClick={() => void runDismiss(onUndismiss)}
-                  className={`${BTN} disabled:opacity-50`}
-                >
-                  <Ban className="h-3 w-3" />
-                  {dismissing ? 'Working…' : 'Un-dismiss'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={dismissing}
-                  onClick={() => void runDismiss(onDismiss)}
+                  onClick={() => void runDismiss(() => onDismiss(findingIdentity))}
                   className={`${BTN} disabled:opacity-50`}
                 >
                   <Ban className="h-3 w-3" />
                   {dismissing ? 'Working…' : 'Dismiss finding'}
                 </button>
-              ))}
+              )
+            )}
           </div>
-          {claimIdentity && row.dismissed && (
+          {row.dismissed && (
             <div className="mt-1.5 text-[11px] text-muted-foreground">Dismissed — takes effect next generate.</div>
           )}
         </div>

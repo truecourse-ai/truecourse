@@ -68,7 +68,13 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
+import {
+  buildFindingRows,
+  buildHeldRows,
+  buildListRows,
+  dismissedKeySet,
+  dismissedFindingKeySet,
+} from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -384,14 +390,18 @@ function RepoPageInner() {
     () => dismissedKeySet(guardDecisions.dismissedClaims),
     [guardDecisions],
   );
+  const guardDismissedFindingKeys = useMemo(
+    () => dismissedFindingKeySet(guardDecisions.dismissedFindings),
+    [guardDecisions],
+  );
   // Birth findings live in the SAME left-panel list as committed scenarios (the
   // plan: they are section-bound artifacts that failed to become guards). Lifted
   // from the last-generate report + joined to the committed rows so their group
   // headings resolve the same way scenario rows do; each row carries whether its
   // claim is already dismissed.
   const guardFindingRows = useMemo(
-    () => buildFindingRows(guardReport, guardScenarios.rows, guardDismissedKeys),
-    [guardReport, guardScenarios.rows, guardDismissedKeys],
+    () => buildFindingRows(guardReport, guardScenarios.rows, guardDismissedKeys, guardDismissedFindingKeys),
+    [guardReport, guardScenarios.rows, guardDismissedKeys, guardDismissedFindingKeys],
   );
   // Ready-but-held scenarios (birth-passed, section withheld) join the SAME left
   // list as scenarios + findings — a first-class block between them.
@@ -1372,15 +1382,31 @@ function RepoPageInner() {
                           row={activeFinding}
                           onClose={() => guardScenarioTabs.close(activeFinding.id)}
                           onOpenSpec={openSpecSection}
-                          onDismiss={async (claim) => {
+                          onDismiss={async (identity) => {
                             // Unreachable while the PR scope is unresolved (the pane is
                             // gated), but never write a PR-overlay decision against
                             // findings the user could only have seen on the baseline.
                             if (!guardReadsEnabled) return;
-                            await api.dismissGuardClaim(repoId, claim, prNumber ?? undefined);
+                            try {
+                              await api.dismissGuardFinding(repoId, identity, prNumber ?? undefined);
+                            } catch (e) {
+                              // 409 stale-report: the report regenerated between render
+                              // and click — refetch report + decisions (the reload key
+                              // drives both), write nothing.
+                              if (e instanceof api.ApiError && e.status === 409) {
+                                setGuardReloadKey((k) => k + 1);
+                                return;
+                              }
+                              throw e;
+                            }
                             refetchGuardDecisions();
                           }}
-                          onUndismiss={async (claim) => {
+                          onUndismiss={async (identity) => {
+                            if (!guardReadsEnabled) return;
+                            await api.undismissGuardFinding(repoId, identity, prNumber ?? undefined);
+                            refetchGuardDecisions();
+                          }}
+                          onUndismissClaim={async (claim) => {
                             if (!guardReadsEnabled) return;
                             await api.undismissGuardClaim(repoId, claim, prNumber ?? undefined);
                             refetchGuardDecisions();

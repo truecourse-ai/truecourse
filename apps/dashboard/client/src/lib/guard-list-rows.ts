@@ -11,6 +11,7 @@
 
 import {
   dismissedClaimKey,
+  guardFindingKey,
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardGenerateReport,
@@ -57,12 +58,17 @@ export interface GuardFindingRowData {
    */
   heldCount: number;
   /**
-   * The user has already dismissed this finding's claim in `decisions.json` — the
-   * report is a snapshot, so the row stays until the next generate. The panel
-   * strikes it through and the detail offers Un-dismiss. `false` when the finding
-   * carries no `claim` (an old report — nothing to key a dismissal on).
+   * The user has already dismissed this finding in `decisions.json` — the report
+   * is a snapshot, so the row stays until the next generate. The panel strikes it
+   * through and the detail offers Un-dismiss. Set when EITHER the row's received
+   * `findingKey` matches a `dismissedFindings` entry (exactly this row) or a
+   * LEGACY claim entry matches its `(doc, anchor, claim)` — legacy entries
+   * represent a whole-claim judgment, so they strike every sibling row.
    */
   dismissed: boolean;
+  /** Which identity dismissed it — decides the Un-dismiss route (two identities,
+   *  two operations). `'finding'` wins when both match. Absent when not dismissed. */
+  dismissedVia?: 'finding' | 'claim';
 }
 
 /** A blocking finding on a held section — carries its finding-row key for click-through. */
@@ -103,8 +109,10 @@ export type GuardListRow =
   | ({ kind: 'finding' } & GuardFindingRowData)
   | ({ kind: 'held' } & GuardHeldRowData);
 
-/** The deterministic key for a finding at a given report index. */
-export function findingKey(finding: GuardBirthFinding, index: number): string {
+/** The deterministic ROW key (tab/URL identity) for a finding at a given report
+ *  index. Renamed from `findingKey`: that name now belongs to the durable
+ *  per-finding dismissal identity the server stamps (`GuardBirthFinding.findingKey`). */
+export function findingRowKey(finding: GuardBirthFinding, index: number): string {
   return `finding:${finding.anchor}:${index}`;
 }
 
@@ -132,7 +140,7 @@ function blockersByKey(report: GuardGenerateReport): Map<string, GuardHeldBlocke
     return b;
   };
   report.birthFindings.forEach((finding, index) => {
-    at(finding.doc, finding.anchor).findings.push({ finding, findingId: findingKey(finding, index) });
+    at(finding.doc, finding.anchor).findings.push({ finding, findingId: findingRowKey(finding, index) });
   });
   for (const error of report.errors) at(error.doc, error.anchor).errors.push(error);
   return m;
@@ -163,23 +171,35 @@ export function buildFindingRows(
   report: GuardGenerateReport | null,
   scenarioRows: readonly GuardScenarioRowData[],
   dismissedKeys: ReadonlySet<string> = new Set(),
+  dismissedFindingKeys: ReadonlySet<string> = new Set(),
 ): GuardFindingRowData[] {
   if (!report) return [];
   const m = headingMap(scenarioRows);
   const held = heldCountByKey(report);
-  return report.birthFindings.map((finding, index) => ({
-    id: findingKey(finding, index),
-    title: finding.title,
-    doc: finding.doc,
-    anchor: finding.anchor,
-    headingText: finding.headingText ?? m.get(`${finding.doc}\0${finding.anchor}`),
-    index,
-    finding,
-    heldCount: held.get(`${finding.doc}\0${finding.anchor}`) ?? 0,
-    dismissed: finding.claim
-      ? dismissedKeys.has(dismissedClaimKey(finding.doc, finding.anchor, finding.claim))
-      : false,
-  }));
+  return report.birthFindings.map((finding, index) => {
+    // Two dismissal identities, two striking rules (§1c): a NEW finding entry
+    // strikes exactly the rows whose RECEIVED findingKey matches (the client
+    // never re-derives identity); a LEGACY claim entry represents a whole-claim
+    // judgment and still strikes every sibling row of the claim.
+    const viaFinding =
+      finding.findingKey !== undefined && dismissedFindingKeys.has(finding.findingKey);
+    const viaClaim =
+      finding.claim !== undefined &&
+      dismissedKeys.has(dismissedClaimKey(finding.doc, finding.anchor, finding.claim));
+    const dismissedVia = viaFinding ? ('finding' as const) : viaClaim ? ('claim' as const) : undefined;
+    return {
+      id: findingRowKey(finding, index),
+      title: finding.title,
+      doc: finding.doc,
+      anchor: finding.anchor,
+      headingText: finding.headingText ?? m.get(`${finding.doc}\0${finding.anchor}`),
+      index,
+      finding,
+      heldCount: held.get(`${finding.doc}\0${finding.anchor}`) ?? 0,
+      dismissed: dismissedVia !== undefined,
+      ...(dismissedVia !== undefined ? { dismissedVia } : {}),
+    };
+  });
 }
 
 /** The dismissed-claim identity keys from a decisions file — `buildFindingRows`
@@ -188,6 +208,17 @@ export function dismissedKeySet(
   dismissedClaims: readonly { doc: string; anchor: string; title: string }[] | undefined,
 ): Set<string> {
   return new Set((dismissedClaims ?? []).map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)));
+}
+
+/** The per-finding dismissal identity keys from a decisions file — the
+ *  `dismissedKeySet` sibling for `dismissedFindings`, joined with the same shared
+ *  `guardFindingKey` the server stamps rows with. */
+export function dismissedFindingKeySet(
+  dismissedFindings: readonly { doc: string; anchor: string; scenarioHash: string }[] | undefined,
+): Set<string> {
+  return new Set(
+    (dismissedFindings ?? []).map((f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash)),
+  );
 }
 
 /** Lift a generate report's held sections into per-scenario inventory rows. Each
