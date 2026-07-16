@@ -52,16 +52,35 @@ export type RecipeProposal = z.infer<typeof RecipeProposalSchema>
 // ---------------------------------------------------------------------------
 
 /**
+ * A documented worked example mined into a claim: the fenced code block's content
+ * copied VERBATIM (the exact input the doc shows) plus the outcome its surrounding
+ * prose promises. Authoring seeds the scenario's setup from `block` byte-for-byte
+ * instead of paraphrasing, so the doc's own example is what runs.
+ */
+export const ExampleBlockSchema = z.object({
+  block: z.string().min(1),
+  outcome: z.string().min(1),
+})
+export type ExampleBlock = z.infer<typeof ExampleBlockSchema>
+
+/**
  * One testable claim the model read out of a document: a single externally-
  * observable behavior, the driver that could assert it, the section it belongs to
  * (an anchor the engine snaps against the live index), and the observable a test
  * would check.
+ *
+ * `flavor` marks a claim mined from a documented example block (`example`) — a
+ * fenced block whose surrounding prose states an outcome — versus an ordinary
+ * prose claim (`normal`, the default). It is optional, and `example` carries the
+ * block payload; both are optional so a pre-flavor cache parses as a normal claim.
  */
 export const ExtractedClaimSchema = z.object({
   claim: z.string().min(1),
   driver: z.enum(CLAIM_DRIVERS),
   sectionAnchor: z.string().min(1),
   reason: z.string().min(1),
+  flavor: z.enum(['normal', 'example']).optional(),
+  example: ExampleBlockSchema.optional(),
 })
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>
 

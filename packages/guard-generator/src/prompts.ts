@@ -27,6 +27,7 @@ import {
   RecipeProposalSchema,
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
+  type ExampleBlock,
 } from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 import type { ProbeTranscript } from './ground.js'
@@ -120,6 +121,32 @@ background, rationale, definitions, naming, design history, a pure cross-
 reference, or needs a capability no driver has, record an untestable note instead
 of forcing a weak claim.
 
+# Example blocks — a worked example is a high-value claim
+Docs are full of WORKED EXAMPLES: a fenced code block whose SURROUNDING PROSE states
+what the block produces. When the prose states an OUTCOME for the block, emit ONE
+claim for it with "flavor": "example", carrying the block's content copied VERBATIM
+(byte-for-byte, exactly as fenced) in "example.block" and the promised result in
+"example.outcome". These are the cheapest, highest-fidelity claims — the exact input
+AND its expected result are already written in the doc.
+The prose STATES AN OUTCOME when it says, in effect, what running the block does:
+"this fails" / "this passes" / "produces X" / "outputs X" / "returns X" / "is
+rejected" / "is valid" / "is an anti-pattern (rule Y flags it)" / "is reported as an
+error". The outcome must be a concrete, observable result — not a vague "for example".
+A fenced block with NO stated outcome is NOT a claim. A bare snippet shown only to
+ILLUSTRATE syntax, a config shape, or usage — with no sentence saying what running it
+produces — must NOT become a claim: extract nothing for it (and do not force an
+untestable note for the block alone).
+  POSITIVE — emit an example claim. Prose: "This query is an anti-pattern; ST07 flags
+    it:" followed by a fenced SQL block ⇒ ONE claim, "flavor":"example", "example.block"
+    the SQL copied verbatim, "example.outcome" "ST07 flags this query".
+  NEGATIVE — do NOT emit a claim. Prose: "A rule file looks like this:" followed by a
+    fenced TOML block, with no sentence stating what running it produces ⇒ extract
+    nothing for that block (it only illustrates the file shape).
+Bind an example claim to the narrowest section that states it, like any claim; its
+"claim" is still one declarative sentence in the doc's terms and its "driver" is the
+kind of test that could assert it. "example.block" is copied VERBATIM — never
+reformatted, re-indented, or "corrected".
+
 # Sandbox limits — commands that need an LLM provider are not cli-testable
 Guard runs each command in a sealed sandbox with NO credentials and NO network. A
 command whose documented behavior requires an authenticated LLM provider or an
@@ -153,10 +180,15 @@ Concretely:
       { "claim": "<one declarative sentence>",
         "driver": "cli" | "api" | "web" | "tui" | "library",
         "sectionAnchor": "<an anchor copied verbatim from the outline>",
-        "reason": "<the observable behavior a test would assert>" } ],
+        "reason": "<the observable behavior a test would assert>",
+        "flavor": "example",
+        "example": { "block": "<the fenced block's content, copied VERBATIM>",
+                     "outcome": "<the result the prose promises for it>" } } ],
     "untestable": [
       { "sectionAnchor": "<an anchor copied verbatim>",
-        "reason": "<why no driver can assert anything here>" } ] }`
+        "reason": "<why no driver can assert anything here>" } ] }
+Omit "flavor"/"example" for a normal prose claim; set "flavor":"example" and the
+"example" object ONLY for a worked-example block whose prose states an outcome.`
 
 export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
 
@@ -287,6 +319,19 @@ that selects just the relevant behavior) and use the MINIMAL input that exercise
 claimed behavior. The scenario must turn red for the claim's behavior ALONE, never for
 a neighbor the claim says nothing about.
 
+# Example claims — the doc's own block IS the input, byte-faithful
+Some claims arrive marked as an EXAMPLE (the claim shows an "EXAMPLE BLOCK" and its
+promised outcome). For such a claim the doc already contains the EXACT input and its
+expected result, so you do NOT invent or paraphrase inputs: seed the doc's block as
+the scenario's setup file content (\`setup.files\`) — or pipe it as \`stdin\` — copied
+BYTE-FOR-BYTE, exactly as given, minus only the doc's own escaping. Do NOT reformat,
+re-indent, re-quote, trim, "fix", or otherwise edit the block — a deliberately-broken
+example must stay broken. You choose only the MECHANICS: which command/argv runs it,
+which file path to seed the block into, and the matcher FORM. The asserted OUTCOME is
+the promised result the example states (the rule fires / the output equals the shown
+output / it passes clean). Editing or "improving" the block's bytes is the worst
+failure — the whole point is that the doc's exact example is what runs.
+
 # Titles — the doc's promise, never the expected output
 Each scenario \`title\` states, in plain words, the BEHAVIORAL PROMISE the doc makes —
 what the tool does — so a reviewer reads it as doc-vs-code without decoding the
@@ -376,6 +421,10 @@ export interface AuthorClaim {
   claim: string
   /** The section this claim binds to (its anchor + own text drive authoring). */
   section: SectionInput
+  /** Present ONLY for an example claim (extraction `flavor: 'example'`): the doc's
+   *  own block content (verbatim) + the promised outcome. Threaded so the model
+   *  seeds the scenario's setup from the exact bytes, never a paraphrase. */
+  example?: ExampleBlock
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
 }
@@ -455,6 +504,17 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `claim: ${c.claim}`,
       `section: ${c.section.headingText}`,
     )
+    if (c.example) {
+      lines.push(
+        'EXAMPLE BLOCK — the doc\'s own example. Seed this as the scenario input',
+        '(setup.files content or stdin) copied BYTE-FOR-BYTE; do NOT reformat, edit, or',
+        '"fix" it. Choose only the command, the file path, and the matcher form:',
+        '"""',
+        c.example.block,
+        '"""',
+        `promised outcome: ${c.example.outcome}`,
+      )
+    }
     if (c.retry) {
       lines.push(
         'RETRY — a scenario you authored for this claim FAILED birth validation (it did',

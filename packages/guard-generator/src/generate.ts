@@ -1262,9 +1262,15 @@ function pushInto<T>(map: Map<string, T[]>, k: string, value: T): void {
 
 // --- Authoring context + caching -------------------------------------------
 
+/** The example payload to thread to authoring, present only for an example claim
+ *  (extraction `flavor: 'example'`) that actually carries its block bytes. */
+function exampleOf(claim: ExtractedClaim): Pick<AuthorClaim, 'example'> {
+  return claim.flavor === 'example' && claim.example ? { example: claim.example } : {}
+}
+
 /** Author context for a batch of AuthTasks (round 1). */
 function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
-  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section }))
+  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim) }))
   return buildAuthorCtxFor(gd, claims, recipe, probes)
 }
 
@@ -1646,6 +1652,7 @@ async function authorRetry(
     ref: entry.task.ref,
     claim: entry.task.claim.claim,
     section,
+    ...exampleOf(entry.task.claim),
     retry: {
       scenarioTitle: entry.evidence.title,
       step: entry.evidence.step,
