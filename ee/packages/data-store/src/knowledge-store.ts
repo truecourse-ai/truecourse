@@ -24,6 +24,8 @@ export interface KnowledgeDocRow {
   url: string | null;
   version: string | null;
   contentHash: string;
+  /** sha256 of the body the last process consolidated; null until first processed. */
+  processedHash: string | null;
   lastSyncedAt: string;
 }
 
@@ -64,9 +66,12 @@ export class PgKnowledgeStore {
     return this.content.gc(contentScope.knowledge(workspaceOrgId), liveHashes);
   }
 
-  /** Insert or update one source-doc provenance row (keyed by org+sourceKind+externalId). */
+  /** Insert or update one source-doc provenance row (keyed by org+sourceKind+externalId).
+   *  `processedHash` is deliberately NOT set here — sync leaves the processed marker
+   *  untouched (a new row defaults to null; an existing row keeps its marker), so the
+   *  sweep delta measures synced-vs-processed. Only {@link markProcessed} stamps it. */
   async upsertDocument(
-    row: Omit<KnowledgeDocRow, 'lastSyncedAt'> & { lastSyncedAt?: string },
+    row: Omit<KnowledgeDocRow, 'lastSyncedAt' | 'processedHash'> & { lastSyncedAt?: string },
   ): Promise<void> {
     const now = row.lastSyncedAt ?? new Date().toISOString();
     await this.db
@@ -100,6 +105,32 @@ export class PgKnowledgeStore {
       });
   }
 
+  /**
+   * Stamp the processed marker for the docs a process just consolidated, in ONE
+   * statement. `processedHash` is the sha of the body that consolidation actually
+   * saw (passed explicitly, not read back from `content_hash`, so a concurrent sync
+   * that re-hashed the row can't misattribute the marker). Keyed by the doc's unique
+   * `docPath`. After this, a re-sweep reads those docs as up to date until their
+   * content changes again.
+   */
+  async markProcessed(
+    workspaceOrgId: string,
+    entries: Array<{ docPath: string; processedHash: string }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const values = sql.join(
+      entries.map((e) => sql`(${e.docPath}::text, ${e.processedHash}::text)`),
+      sql`, `,
+    );
+    await this.db.execute(sql`
+      update ${knowledgeDocuments} as k
+         set processed_hash = v.processed_hash
+        from (values ${values}) as v(doc_path, processed_hash)
+       where k.workspace_org_id = ${workspaceOrgId}
+         and k.doc_path = v.doc_path
+    `);
+  }
+
   /** Every source doc for a workspace, newest-synced first. */
   async listDocuments(workspaceOrgId: string): Promise<KnowledgeDocRow[]> {
     const rows = await this.db
@@ -116,6 +147,7 @@ export class PgKnowledgeStore {
         url: r.url,
         version: r.version,
         contentHash: r.contentHash,
+        processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
       }))
       .sort((a, b) => (a.lastSyncedAt < b.lastSyncedAt ? 1 : a.lastSyncedAt > b.lastSyncedAt ? -1 : 0));
@@ -164,6 +196,7 @@ export class PgKnowledgeStore {
         url: r.url,
         version: r.version,
         contentHash: r.contentHash,
+        processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
       })),
       total: countRow?.total ?? 0,
@@ -193,6 +226,7 @@ export class PgKnowledgeStore {
       url: r.url,
       version: r.version,
       contentHash: r.contentHash,
+      processedHash: r.processedHash,
       lastSyncedAt: r.lastSyncedAt,
     };
   }

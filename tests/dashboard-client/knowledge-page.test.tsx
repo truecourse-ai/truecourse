@@ -12,8 +12,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 
 import KnowledgePage from '../../ee/packages/client/src/KnowledgePage';
+
+// The Spec tab opens docs/conflicts through the house preview/pin tab strip, which
+// is `?spec=`-synced — so the page mounts under a router.
+const renderPage = () => render(<KnowledgePage />, { wrapper: MemoryRouter });
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -95,7 +100,7 @@ describe('KnowledgePage — Spec tab (workspace corpus)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('renders kept docs by their ledger title (ref fallback) + the cross-source conflict', async () => {
-    render(<KnowledgePage />);
+    renderPage();
     // The corpus GET hits the workspace spec route (not a repo route).
     await waitFor(() => expect(screen.getByText('Documents')).toBeInTheDocument());
     expect(calls.some((u) => u.includes('/api/ee/knowledge/spec/corpus'))).toBe(true);
@@ -108,23 +113,61 @@ describe('KnowledgePage — Spec tab (workspace corpus)', () => {
     expect(
       screen.getByText('ADR 0002 — Error response envelope ↔ knowledge/jira/2.md'),
     ).toBeInTheDocument();
-    // The titled doc carries the ledger's deep link (the Open-source affordance).
-    const link = screen.getByRole('link', { name: 'Open source' });
-    expect(link).toHaveAttribute('href', 'https://acme.atlassian.net/wiki/1');
+    // The Open-source deep link is NOT on the list rows — it lives in the detail
+    // header only (exercised below).
+    expect(screen.queryByRole('link', { name: 'Open source' })).not.toBeInTheDocument();
   });
 
   it('opens a doc in the right pane via the workspace doc endpoint', async () => {
     const user = userEvent.setup();
-    render(<KnowledgePage />);
+    renderPage();
     await screen.findByText('knowledge/jira/2.md');
     await user.click(screen.getByText('knowledge/jira/2.md'));
     expect(await screen.findByText('48h.')).toBeInTheDocument();
     expect(calls.some((u) => u.includes('/api/ee/knowledge/spec/doc?ref='))).toBe(true);
   });
 
+  it('surfaces the doc source deep link in the detail header, not the list rows', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('ADR 0002 — Error response envelope');
+    // No Open-source affordance in the left nav…
+    expect(screen.queryByRole('link', { name: 'Open source' })).not.toBeInTheDocument();
+    // …until the titled doc is opened, when its detail header carries the ledger link.
+    await user.click(screen.getByText('ADR 0002 — Error response envelope'));
+    const link = await screen.findByRole('link', { name: 'Open source' });
+    expect(link).toHaveAttribute('href', 'https://acme.atlassian.net/wiki/1');
+  });
+
+  it('opens docs through the preview/pin tab strip (single-click previews + replaces, double-click pins)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const adr = await screen.findByText('ADR 0002 — Error response envelope');
+    const jira = screen.getByText('knowledge/jira/2.md');
+
+    // Single-click opens a transient preview tab.
+    await user.click(adr);
+    expect(await screen.findByRole('button', { name: 'Close knowledge/confluence/1.md' })).toBeInTheDocument();
+
+    // A second single-click REPLACES the preview — one tab, now the Jira doc.
+    await user.click(jira);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Close knowledge/confluence/1.md' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Close knowledge/jira/2.md' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Close / })).toHaveLength(1);
+
+    // Double-click PINS — the pinned tab survives the next single-click preview.
+    await user.dblClick(adr);
+    await user.click(jira);
+    expect(screen.getByRole('button', { name: 'Close knowledge/confluence/1.md' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close knowledge/jira/2.md' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Close / })).toHaveLength(2);
+  });
+
   it('the "Not included" expander pages + searches via the paged skipped endpoint', async () => {
     const user = userEvent.setup();
-    render(<KnowledgePage />);
+    renderPage();
     // Header shows the SUMMARY count, with no rows shipped in the corpus payload.
     const header = await screen.findByText('Not included');
     expect(within(header.closest('button')!).getByText('120')).toBeInTheDocument();
@@ -169,7 +212,7 @@ describe('KnowledgePage — Spec tab (workspace corpus)', () => {
         return json({});
       }),
     );
-    render(<KnowledgePage />);
+    renderPage();
     await user.click(await screen.findByText('Not included'));
     await screen.findByText('JIRA-0: flaky ticket 0');
     // Include the first row → it leaves the skipped list and appears under Force-included.
@@ -203,7 +246,7 @@ describe('KnowledgePage — Sources tab (paginated ledger)', () => {
       }),
     );
     const user = userEvent.setup();
-    render(<KnowledgePage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /Sources/ }));
     expect(await screen.findByText('No sources yet')).toBeInTheDocument();
     // Sources fills after Sync (not Process) now.
@@ -225,7 +268,7 @@ describe('KnowledgePage — Sources tab (paginated ledger)', () => {
       }),
     );
     const user = userEvent.setup();
-    render(<KnowledgePage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /Sources/ }));
 
     // First page (50 of 120) + a "Load more" affordance.
@@ -260,7 +303,7 @@ describe('KnowledgePage — tab strip (Scenarios retired)', () => {
         return json({});
       }),
     );
-    render(<KnowledgePage />);
+    renderPage();
     // The tab strip carries Spec + Sources and nothing else.
     expect(await screen.findByRole('button', { name: /Spec/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Sources/ })).toBeInTheDocument();

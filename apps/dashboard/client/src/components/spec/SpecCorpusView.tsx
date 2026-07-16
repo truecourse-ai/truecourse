@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink, ExternalLink } from 'lucide-react';
+import { Loader2, Play, FileText, ChevronRight, ChevronDown, AlertCircle, GitMerge, EyeOff, Search, X, Unlink } from 'lucide-react';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -536,7 +536,6 @@ export function SpecCorpusView({
                     key={doc.ref}
                     docRef={doc.ref}
                     title={doc.title}
-                    url={doc.url}
                     reason={doc.reason}
                     active={activeKey === doc.ref}
                     actionLabel="include"
@@ -779,28 +778,6 @@ function Section({
 }
 
 /**
- * A deep link to a doc's source (Confluence / Jira / …), shown when the workspace
- * ledger has a URL for the ref. An anchor that stops propagation so it opens the
- * source without triggering the row's preview/pin. Hover help via HoverPopover.
- */
-function DocLink({ url }: { url: string }) {
-  return (
-    <HoverPopover content="Open source" side="top" align="end">
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        aria-label="Open source"
-        className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground"
-      >
-        <ExternalLink className="h-3 w-3" />
-      </a>
-    </HoverPopover>
-  );
-}
-
-/**
  * A kept-doc row (the "Documents" section). Previewable like every list row —
  * single-click previews, double-click pins. Carries an inline "skip" action
  * (force-exclude) revealed on hover; the action button stops propagation so it
@@ -857,7 +834,6 @@ function DocRow({
           </span>
         )}
       </span>
-      {doc.url && <DocLink url={doc.url} />}
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
         <button
           type="button"
@@ -887,7 +863,6 @@ function DocRow({
 function IncludeRow({
   docRef,
   title,
-  url,
   reason,
   active,
   actionLabel,
@@ -900,8 +875,6 @@ function IncludeRow({
   docRef: string;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
-  /** Workspace only: deep link to the source doc, when the ledger has one. */
-  url?: string | null;
   reason?: string;
   active: boolean;
   actionLabel: string;
@@ -934,7 +907,6 @@ function IncludeRow({
         )}
         {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>
-      {url && <DocLink url={url} />}
       <HoverPopover content={disabledReason ?? null} side="top" align="end">
         <button
           type="button"
@@ -1060,7 +1032,6 @@ function SkippedSection({
               key={doc.ref}
               docRef={doc.ref}
               title={doc.title}
-              url={doc.url}
               reason={doc.reason}
               active={activeKey === doc.ref}
               actionLabel="include"
