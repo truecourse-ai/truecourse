@@ -11,9 +11,9 @@
  * pack (a no-op while the claim stands) without a second LLM call. `writePack`
  * preserves any `user`-source file already in the pack, so a hand-added real-world
  * repro survives regeneration (the ratchet). A generation that can't complete
- * (thrown or still-invalid after one re-ask) fails soft — the seed returns `null`
- * and the claim's section unsettles, re-attempted next run — never a pack-less
- * scenario.
+ * (thrown or still-invalid after one re-ask) fails with its concrete reason — the
+ * claim's section errors with it and unsettles, re-attempted next run — never a
+ * pack-less scenario and never a swallowed cause.
  */
 
 import { createHash } from 'node:crypto'
@@ -23,7 +23,7 @@ import type { GuardPackManifest, GuardPackFile } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import { z } from 'zod'
 import { anchorLeaf } from './serialize.js'
-import { quoteInvalidOutput } from './validate.js'
+import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import type { ExtractedClaim, SupportSubject } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
 import type { OutputCorrection } from './prompts.js'
@@ -214,33 +214,41 @@ function exemplarFileName(index: number, extension?: string): string {
   return extension ? `${stem}.${extension.replace(/^\./, '')}` : stem
 }
 
-async function callExemplarWithReask(ctx: ExemplarUserContext, runner: ExemplarRunner): Promise<ExemplarPack | null> {
+type ExemplarCallResult = { ok: true; pack: ExemplarPack } | { ok: false; reason: string }
+
+async function callExemplarWithReask(ctx: ExemplarUserContext, runner: ExemplarRunner): Promise<ExemplarCallResult> {
   let raw: unknown
   try {
     raw = await runner(ctx)
-  } catch {
-    return null
+  } catch (e) {
+    return { ok: false, reason: `exemplar call failed: ${e instanceof Error ? e.message : String(e)}` }
   }
   const first = ExemplarPackSchema.safeParse(raw)
-  if (first.success) return first.data
+  if (first.success) return { ok: true, pack: first.data }
 
   let reRaw: unknown
   try {
     reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
-  } catch {
-    return null
+  } catch (e) {
+    return { ok: false, reason: `exemplar re-ask failed: ${e instanceof Error ? e.message : String(e)}` }
   }
   const second = ExemplarPackSchema.safeParse(reRaw)
-  return second.success ? second.data : null
+  if (second.success) return { ok: true, pack: second.data }
+  return { ok: false, reason: `exemplar output invalid after re-ask: ${flattenZodError(second.error)}` }
 }
 
+/** A seed outcome: the materialized pack id, or the failure's actual reason —
+ *  surfaced verbatim in the section's authoring error (never swallowed). */
+export type SupportSeedResult = { ok: true; packId: string } | { ok: false; reason: string }
+
 /**
- * Seed a support claim's exemplar pack and return the pack id, or `null` fail-soft
- * when the claim carries no `support` subject or the generation could not complete.
- * The generated exemplars are cached content-keyed on the claim identity + prompt +
- * size, so a re-generate re-materializes the SAME pack with NO second LLM call while
- * the claim stands. `writePack` overwrites the `seed`-source files but PRESERVES any
- * `user`-source file already in the pack — a hand-added repro survives regeneration.
+ * Seed a support claim's exemplar pack. The generated exemplars are cached
+ * content-keyed on the claim identity + prompt + size, so a re-generate
+ * re-materializes the SAME pack with NO second LLM call while the claim stands.
+ * `writePack` overwrites the `seed`-source files but PRESERVES any `user`-source
+ * file already in the pack — a hand-added repro survives regeneration. A
+ * generation that can't complete fails with its concrete reason; the claim's
+ * section then errors and unsettles, re-attempted next run.
  */
 export async function seedSupportPack(
   repoRoot: string,
@@ -248,9 +256,9 @@ export async function seedSupportPack(
   claim: ExtractedClaim,
   runner: ExemplarRunner,
   packSize: number,
-): Promise<string | null> {
+): Promise<SupportSeedResult> {
   const subject = claim.support
-  if (!subject) return null
+  if (!subject) return { ok: false, reason: 'support claim carries no subject payload' }
   const count = Math.max(1, packSize)
   const cacheKey = exemplarCacheKey(section, claim.claim, subject, count)
 
@@ -261,11 +269,12 @@ export async function seedSupportPack(
     if (parsed.success) pack = parsed.data
   }
   if (!pack) {
-    pack = await callExemplarWithReask(
+    const generated = await callExemplarWithReask(
       { kind: subject.kind, subject: subject.subject, claim: claim.claim, count },
       runner,
     )
-    if (!pack) return null
+    if (!generated.ok) return generated
+    pack = generated.pack
     await setCacheEntry(repoRoot, EXEMPLAR_CACHE_NAME, cacheKey, pack)
   }
 
@@ -288,5 +297,5 @@ export async function seedSupportPack(
     files: manifestFiles,
   }
   writePack(repoRoot, manifest, files)
-  return packId
+  return { ok: true, packId }
 }

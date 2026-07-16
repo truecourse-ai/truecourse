@@ -442,48 +442,34 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       retryModel: options.models?.retry,
       fallbackModel: options.models?.fallback,
     })
-  // The fidelity reviewer (item 33) audits each green scenario before it persists.
-  // It needs an LLM: production (`guardGenerateInProcess`) always supplies a
-  // transport, so the review always runs there. A caller supplying NEITHER a
-  // transport NOR a `fidelityRunner` (only the pre-feature unit tests) has no model
-  // access, so the audit is skipped and green scenarios persist unreviewed.
-  const fidelityRunner: FidelityRunner | undefined =
+  // The fidelity reviewer, triage judge, and exemplar generator spawn exactly like
+  // the extract/generate runners: unconditionally, with the spawn falling back to
+  // the claude CLI transport when no explicit transport is handed in. The OSS CLI
+  // passes NO transport (only EE installs a process default), so gating any of
+  // these on `options.transport` silently disables the stage in every OSS run —
+  // fidelity audits skipped, findings shipped without a verdict, and every support
+  // claim erroring for lack of a pack. Tests inject stub runners, never transports.
+  const fidelityRunner: FidelityRunner =
     options.fidelityRunner ??
-    (options.transport
-      ? spawnFidelityRunner({
-          transport: options.transport,
-          model: options.models?.fidelity,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
-  // The triage judge (item: finding triage) runs one post-settle Opus call per
-  // birth/fidelity finding. Like fidelity it needs an LLM: production always
-  // supplies a transport, so triage always runs there; a caller with NEITHER a
-  // transport NOR a `triageRunner` (only the pre-feature unit tests) has no model
-  // access, so findings simply ship without a triage verdict.
-  const triageRunner: TriageRunner | undefined =
+    spawnFidelityRunner({
+      transport: options.transport,
+      model: options.models?.fidelity,
+      fallbackModel: options.models?.fallback,
+    })
+  const triageRunner: TriageRunner =
     options.triageRunner ??
-    (options.transport
-      ? spawnTriageRunner({
-          transport: options.transport,
-          model: options.models?.triage,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
-  // The exemplar generator (item 9) writes a support claim's diverse input pack. Like
-  // fidelity/triage it needs an LLM: production always supplies a transport, so a
-  // support claim always gets its pack; a caller with NEITHER a transport NOR an
-  // `exemplarRunner` (unit tests with no support claims) simply generates no packs —
-  // any support claim then errors (its section unsettles, re-attempted next run).
-  const exemplarRunner: ExemplarRunner | undefined =
+    spawnTriageRunner({
+      transport: options.transport,
+      model: options.models?.triage,
+      fallbackModel: options.models?.fallback,
+    })
+  const exemplarRunner: ExemplarRunner =
     options.exemplarRunner ??
-    (options.transport
-      ? spawnExemplarRunner({
-          transport: options.transport,
-          model: options.models?.exemplars,
-          fallbackModel: options.models?.fallback,
-        })
-      : undefined)
+    spawnExemplarRunner({
+      transport: options.transport,
+      model: options.models?.exemplars,
+      fallbackModel: options.models?.fallback,
+    })
   const supportPackSize = Math.max(1, options.supportPackSize ?? defaultSupportPackSize())
 
   const coverageGaps: GuardCoverageGap[] = []
@@ -981,9 +967,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // fidelity FINDING (its section then unsettles like any birth finding, and the
     // faithful siblings drop to `heldSections` below); a review that can't complete
     // is a local error (re-attempted next run — faithful reviews are cached). Only
-    // faithful candidates stay in the persist set. Skipped when no reviewer is
-    // configured (a caller with no transport + no `fidelityRunner`).
-    if (fidelityRunner && persistedHere.length > 0) {
+    // faithful candidates stay in the persist set.
+    if (persistedHere.length > 0) {
       fidelityPlanned += persistedHere.length
       options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
       // The green candidates are reviewed independently — fan them through the
@@ -1051,17 +1036,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // runner, thrown, or still-invalid after one re-ask) is recorded failed; its
   // section then errors in the author loop below and unsettles (re-attempted next
   // run) — never authoring a pack-less support scenario.
-  const supportSeedFailed = new Set<string>()
+  const supportSeedFailed = new Map<string, string>()
   const supportTasks = authTasks.filter((t) => t.claim.flavor === 'support')
   if (supportTasks.length > 0) {
     await Promise.all(
       supportTasks.map((t) =>
         limit(async () => {
-          const pack = exemplarRunner
-            ? await seedSupportPack(repoRoot, t.section, t.claim, exemplarRunner, supportPackSize)
-            : null
-          if (pack) t.pack = pack
-          else supportSeedFailed.add(t.ref)
+          const seeded = await seedSupportPack(repoRoot, t.section, t.claim, exemplarRunner, supportPackSize)
+          if (seeded.ok) t.pack = seeded.packId
+          else supportSeedFailed.set(t.ref, seeded.reason)
         }),
       ),
     )
@@ -1080,10 +1063,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // section can settle without waiting on the LLM), only misses are sent.
   const missTasks: AuthTask[] = []
   for (const t of authTasks) {
-    // A support claim whose exemplar pack could not be generated (item 9) never
-    // authors — its section errors and unsettles for a clean re-attempt.
-    if (supportSeedFailed.has(t.ref)) {
-      errors.push({ doc: t.section.doc, anchor: t.section.anchor, message: `support-claim exemplar generation failed for "${oneLine(t.claim.claim)}"` })
+    // A support claim whose exemplar pack could not be generated never authors —
+    // its section errors WITH the seed failure's concrete reason and unsettles
+    // for a clean re-attempt.
+    const seedFailure = supportSeedFailed.get(t.ref)
+    if (seedFailure !== undefined) {
+      errors.push({
+        doc: t.section.doc,
+        anchor: t.section.anchor,
+        message: `support-claim exemplar generation failed for "${oneLine(t.claim.claim)}": ${seedFailure}`,
+      })
       resolveClaim(t, true)
       continue
     }
@@ -1170,7 +1159,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // recommendation with quoted evidence — advisory, never auto-applied. The section
   // text + grounding probes it needs come from the settle-time state (probes are a
   // cache hit — authoring already grounded the finding's claim).
-  if (triageRunner && birthFindings.length > 0) {
+  if (birthFindings.length > 0) {
     let triaged = 0
     options.onTriageProgress?.(triaged, birthFindings.length)
     await Promise.all(

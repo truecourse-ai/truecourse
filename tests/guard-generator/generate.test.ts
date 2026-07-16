@@ -47,6 +47,7 @@ import {
   FAILING_STEPS,
   writeScenarioFile,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -89,6 +90,7 @@ describe('generateGuards — extraction honesty + manifest', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('relkit --version prints the version', PASSING_STEPS)] }),
@@ -118,6 +120,7 @@ describe('generateGuards — extraction honesty + manifest', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ driver: 'api', reason: 'returns a 200 with the version body' }],
@@ -142,6 +145,7 @@ describe('generateGuards — extraction honesty + manifest', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ driver: 'library', reason: 'register() hooks the loader when imported from user code' }],
@@ -172,6 +176,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
       claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['Git', ' git ', 'DB'] }))
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: blocked,
@@ -199,6 +204,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
       claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)], blockedOn: ['db'] }))
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: runner,
@@ -216,6 +222,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [] }),
@@ -234,12 +241,13 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     const blocked: GenerateRunner = async ({ claims }) =>
       claims.map((c) => ({ ref: c.ref, scenarios: [], blockedOn: ['db'] }))
-    await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: blocked })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: blocked })
 
     // Reset the manifest so `version` is work again; authoring is a per-claim cache HIT.
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     let authorCalls = 0
     const res2 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: (async ({ claims }) => {
@@ -263,6 +271,7 @@ describe('generateGuards — change detection', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -271,6 +280,7 @@ describe('generateGuards — change detection', () => {
     let extractCalls = 0
     let authorCalls = 0
     const res2 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({ background: { untestable: 'bg' } }, () => extractCalls++),
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }, () => authorCalls++),
@@ -289,6 +299,7 @@ describe('generateGuards — change detection', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -299,6 +310,7 @@ describe('generateGuards — change detection', () => {
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     let authorCalls = 0
     const res2 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }, () => authorCalls++),
@@ -322,6 +334,7 @@ describe('generateGuards — write + binds enforcement', () => {
       binds: { doc: 'other.md', section: 'nope', fingerprint: 'sha256:wrong' },
     })
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [wrong] }),
@@ -345,6 +358,7 @@ describe('generateGuards — id assignment', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
@@ -370,6 +384,7 @@ describe('generateGuards — id assignment', () => {
     writeScenarioFile(r, 'manual/version.1.yaml', handWritten)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('generated', PASSING_STEPS)] }),
@@ -389,6 +404,7 @@ describe('generateGuards — birth validation', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -411,7 +427,7 @@ describe('generateGuards — birth validation', () => {
       return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: retryRunner })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: retryRunner })
     expect(calls).toBe(2) // round 1 batch + one retry
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res.birthFindings).toEqual([])
@@ -427,6 +443,7 @@ describe('generateGuards — birth validation', () => {
     // One claim, two scenarios: one passes, one always fails at birth (retry keeps
     // failing). The section is unsettled, so NEITHER is written.
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
@@ -445,6 +462,7 @@ describe('generateGuards — birth validation', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
@@ -472,6 +490,7 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
 
     // FAILING_STEPS runs `boom` → exit 7, stderr "fatal: intentional failure".
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('always broken', FAILING_STEPS)] }),
@@ -499,7 +518,7 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
         return { ref: c.ref, scenarios: [raw('broken', FAILING_STEPS)] }
       })
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(retryStderr).toContain('fatal: intentional failure')
     // boom writes nothing to stdout → the retry evidence omits it.
@@ -555,6 +574,7 @@ describe('generateGuards — ready-but-held scenarios', () => {
     // One claim, two scenarios: `good` passes birth in both rounds, `bad` always
     // fails — so the section never settles, yet `good` is validated work withheld.
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
@@ -584,6 +604,7 @@ describe('generateGuards — ready-but-held scenarios', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -659,6 +680,7 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: twoClaims,
       generateRunner: authorPerClaim,
@@ -677,7 +699,7 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     // Run 1 — the finding (BAD) holds back the birth-passed sibling (GOOD).
-    const first = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    const first = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
     expect(first.birthFindings.map((f) => f.title)).toEqual(['bad'])
     expect(first.heldSections.flatMap((h) => h.readyScenarios.map((s) => s.title))).toEqual(['good'])
     expect(first.written).toEqual([])
@@ -687,7 +709,7 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
 
     // Run 2 — BAD is skipped (dismissed gap), so the section settles on GOOD alone.
-    const second = await generateGuards({ repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    const second = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
     expect(second.birthFindings).toEqual([]) // never re-findinged
     expect(second.heldSections).toEqual([]) // its held sibling is released
     expect(second.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
@@ -714,6 +736,7 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT', dismissedAt: '2026-07-08T00:00:00.000Z' })
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -753,6 +776,7 @@ describe('generateGuards — capability/materialization-error retry routing', ()
 
     const retries: Array<[number, number]> = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: runner,
@@ -793,7 +817,7 @@ describe('generateGuards — capability/materialization-error retry routing', ()
       }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
 
     expect(calls).toBe(2) // round-1 batch + exactly one retry, no second
     expect(res.written).toEqual([])
@@ -822,7 +846,7 @@ describe('generateGuards — capability/materialization-error retry routing', ()
       }))
     }
 
-    const res1 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
     expect(round1Calls).toBe(1)
     expect(retryCalls).toBe(1)
@@ -832,7 +856,7 @@ describe('generateGuards — capability/materialization-error retry routing', ()
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     round1Calls = 0
     retryCalls = 0
-    const res2 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res2 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
 
     expect(round1Calls).toBe(0) // round-1 authoring cache hit
     expect(retryCalls).toBe(0) // capability-error retry cache hit
@@ -861,6 +885,7 @@ describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
     }
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: runner,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -887,6 +912,7 @@ describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
     }
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: runner,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)], help: [raw('h', PASSING_STEPS)] }),
@@ -913,6 +939,7 @@ describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
     }
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: throwing,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -939,6 +966,7 @@ describe('generateGuards — authoring robustness', () => {
         .map((c) => ({ ref: c.ref, scenarios: [raw('help works', PASSING_STEPS)] }))
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}), // both sections default to a cli claim
       generateRunner: gen,
@@ -964,7 +992,7 @@ describe('generateGuards — authoring robustness', () => {
       return { not: 'an array' } // invalid on both the call and the re-ask
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(calls).toBe(2) // authoring call + one corrective re-ask
     expect(res.status).toBe('ok')
@@ -990,6 +1018,7 @@ describe('generateGuards — manifest rewrite + orphans', () => {
     })
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -1007,7 +1036,7 @@ describe('generateGuards — manifest rewrite + orphans', () => {
 describe('generateGuards — universe + recipe discovery', () => {
   it('errors with a spec-scan hint when there is no corpus', async () => {
     const r = repo()
-    const res = await generateGuards({ repoRoot: r })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r })
     expect(res.status).toBe('no-docs')
     expect(res.reason).toMatch(/spec scan/)
   })
@@ -1024,7 +1053,7 @@ describe('generateGuards — universe + recipe discovery', () => {
       steps: [{ run: ['--version'], expect: { exit: 0 } }],
       normalize: [],
     })
-    const res = await generateGuards({ repoRoot: r })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r })
     expect(res.status).toBe('no-docs')
     expect(res.reason).toMatch(/spec scan/)
   })
@@ -1036,6 +1065,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', (await import('./helpers.js')).FIXTURE_BIN] }),
       extractRunner: versionCliBgUntestable,
@@ -1054,6 +1084,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       recipeRunner: async () => ({
         install: 'touch install-marker',
@@ -1078,6 +1109,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       recipeRunner: async () => ({
         install: 'false',
@@ -1155,6 +1187,7 @@ describe('generateGuards — live progress', () => {
     const births: Array<[number, number]> = []
     const phases: string[] = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('a', PASSING_STEPS), raw('b', PASSING_STEPS)] }),
@@ -1179,6 +1212,7 @@ describe('generateGuards — live progress', () => {
 
     const views: Array<[number, number]> = []
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({}),
@@ -1203,6 +1237,7 @@ describe('generateGuards — live progress', () => {
 
     const retries: Array<[number, number]> = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}), // both sections default to a cli claim
       generateRunner: runner,
@@ -1233,6 +1268,7 @@ describe('generateGuards — live progress', () => {
     // one forces a retry that re-authors the same pair — so the section never
     // settles (nothing written) yet birth saw `good` pass in BOTH rounds.
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
@@ -1251,6 +1287,7 @@ describe('generateGuards — live progress', () => {
 
     const ticks: Array<[number, number]> = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -1274,6 +1311,7 @@ describe('generateGuards — live progress', () => {
 
     const ticks: Array<[number, number]> = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       // Fails birth in both rounds → `version` never settles.
@@ -1318,7 +1356,7 @@ describe('generateGuards — grounded authoring', () => {
       return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: extract, generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: gen })
 
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
     expect(received).toBeDefined()
@@ -1341,7 +1379,7 @@ describe('generateGuards — grounded authoring', () => {
       return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     // The authoring call still happened, but with no transcripts; birth then errors
     // on the broken build so nothing settles.
@@ -1358,6 +1396,7 @@ describe('generateGuards — grounded authoring', () => {
     writeDoc(r, DOC, DOC_CONTENT)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -1380,7 +1419,7 @@ describe('generateGuards — grounded authoring', () => {
       return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(received).toEqual([])
     expect(res.written).toEqual([])
@@ -1395,6 +1434,7 @@ describe('generateGuards — grounded authoring', () => {
 
     const ground: Array<[number, number]> = []
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({
         version: [{ claim: '`--version` prints the version and exits 0' }],
@@ -1426,13 +1466,13 @@ describe('generateGuards — grounded authoring', () => {
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
     }
-    await generateGuards({ repoRoot: r, ...runners })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, ...runners })
 
     // Reset the manifest so `version` is work again; authoring is a per-claim cache
     // HIT → no authoring call and therefore no grounding.
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     let groundCalls = 0
-    await generateGuards({ repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
     expect(groundCalls).toBe(0)
   })
 })
@@ -1460,6 +1500,7 @@ describe('generateGuards — per-section pipeline', () => {
     }
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       concurrency: 4, // both docs' batches dispatch concurrently
       extractRunner: extractBy({}), // one cli claim per doc → two independent sections
@@ -1492,7 +1533,7 @@ describe('generateGuards — per-section pipeline', () => {
       return claims.map((c) => ({ ref: c.ref, scenarios: [raw('v', PASSING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
     expect(sawMarker).toBe(true)
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
   })
@@ -1537,7 +1578,7 @@ describe('generateGuards — per-section pipeline', () => {
       return claims.map((c) => ({ ref: c.ref, scenarios }))
     }
 
-    const res = await generateGuards({ repoRoot: r, concurrency: 4, extractRunner: extractBy({}), generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, concurrency: 4, extractRunner: extractBy({}), generateRunner: gen })
 
     const m = readManifest(r)!
     // A reuses limits.1 and takes the next free stem (limits.3) — never B's limits.2.
@@ -1564,7 +1605,7 @@ describe('generateGuards — per-section pipeline', () => {
       return claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
     }
 
-    const res1 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
     expect(round1Calls).toBe(1)
     expect(retryCalls).toBe(1)
@@ -1574,7 +1615,7 @@ describe('generateGuards — per-section pipeline', () => {
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     round1Calls = 0
     retryCalls = 0
-    const res2 = await generateGuards({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res2 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
 
     expect(round1Calls).toBe(0) // round-1 authoring cache hit
     expect(retryCalls).toBe(0) // retry authoring cache hit

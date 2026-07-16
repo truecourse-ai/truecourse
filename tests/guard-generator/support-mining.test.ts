@@ -14,6 +14,7 @@ import {
 } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 /**
  * Item 9 end to end: a `support`-flavor claim ("supports/handles/parses X") generates
@@ -97,6 +98,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
 
     let exemplarCalls = 0
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractSupport,
       generateRunner: authorRule,
@@ -145,14 +147,14 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
 
     let calls = 0
     const runner = exemplarsReturning(['{"a":1}\n', '[1,2,3]\n'], () => calls++)
-    await generateGuards({ repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
     expect(calls).toBe(1)
 
     // Force the whole pipeline to re-run (fresh manifest) with the SAME claim: the
     // exemplar pack is served from the guard/exemplars cache — no second generation.
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     calls = 0
-    const res2 = await generateGuards({ repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
+    const res2 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
     expect(calls).toBe(0)
     expect(res2.written).toHaveLength(1)
   })
@@ -165,6 +167,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
 
     // The second exemplar is invalid JSON — `parse input` exits 5 on it, breaking the rule.
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractSupport,
       generateRunner: authorRule,
@@ -186,7 +189,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
     writeDoc(r, DOC, DOC_CONTENT)
 
     const runner = exemplarsReturning(['{"a":1}\n', '[1,2,3]\n'])
-    const res1 = await generateGuards({ repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
+    const res1 = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
     const pack = res1.written[0] && (yaml.load(fs.readFileSync(path.join(r, res1.written[0].file), 'utf-8')) as GuardScenario).inputs!.pack
     expect(pack).toBeTruthy()
 
@@ -200,7 +203,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
     // Force a full regenerate (fresh manifest). Cache hit ⇒ no exemplar call, but the
     // pack is re-materialized — and the user file must NOT be removed.
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
-    await generateGuards({ repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: runner, supportPackSize: 2 })
 
     // The user file is still on disk, still swept, and still marked `user` in the manifest.
     expect(fs.existsSync(path.join(packDir(r, pack!), 'repro-user.json'))).toBe(true)
@@ -219,7 +222,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
     const throwing: ExemplarRunner = async () => {
       throw new Error('exemplar model down')
     }
-    const res = await generateGuards({ repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: throwing })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractSupport, generateRunner: authorRule, exemplarRunner: throwing })
 
     expect(res.written).toEqual([])
     expect(res.birthFindings).toEqual([])
@@ -236,6 +239,7 @@ describe('support mining — a "supports X" claim becomes a generated-exemplar p
 
     let calls = 0
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractNormal,
       generateRunner: authorPlain,

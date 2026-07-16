@@ -6,6 +6,7 @@ import {
   type AuthorUserContext,
 } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw, extractBy, PASSING_STEPS } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -67,7 +68,7 @@ describe('generateGuards — run[]-composition re-ask', () => {
       }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
 
     expect(res.status).toBe('ok')
     // The engine detected the defect and re-asked EXACTLY once, quoting the rule back.
@@ -93,7 +94,7 @@ describe('generateGuards — run[]-composition re-ask', () => {
       return ctx.claims.map((c) => ({ ref: c.ref, scenarios: [raw('clean', PASSING_STEPS)] }))
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
     expect(res.status).toBe('ok')
     expect(calls).toHaveLength(1) // no correction round
     expect(res.written.map((w) => w.title)).toEqual(['clean'])

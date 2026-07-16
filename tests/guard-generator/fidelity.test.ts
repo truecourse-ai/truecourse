@@ -16,6 +16,7 @@ import {
   PASSING_STEPS,
   FAILING_STEPS,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -51,6 +52,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
   it('a FAITHFUL green scenario persists exactly as today', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -64,6 +66,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
   it('a FLAGGED green scenario becomes a fidelity finding — section unsettled, nothing persisted', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('weak', PASSING_STEPS)] }),
@@ -95,6 +98,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
   it('a flagged scenario holds its faithful sibling as ready-but-held (nothing persisted)', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       // One claim, two green scenarios: `good` is faithful, `bad` is flagged.
@@ -120,6 +124,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
       claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw('fixed', PASSING_STEPS)] : [raw('broken', FAILING_STEPS)] }))
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: retryRunner,
@@ -136,6 +141,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
     const r = seed()
     let calls = 0
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -148,6 +154,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     calls = 0
     const res2 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -163,6 +170,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
       throw new Error('reviewer down')
     }
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -178,6 +186,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
   it('with NO reviewer configured (no transport, no fidelityRunner) green scenarios persist unreviewed', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: authorBy({ version: [raw('v', PASSING_STEPS)] }),
@@ -201,6 +210,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
       return { verdict: 'faithful' }
     }
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       concurrency: 2,
       extractRunner: versionExtract,
@@ -235,6 +245,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
     process.env.TRUECOURSE_MAX_CONCURRENCY = '2'
     try {
       const res = await generateGuards({
+      ...stubAuxRunners(),
         repoRoot: r,
         extractRunner: versionExtract,
         generateRunner: authorBy({

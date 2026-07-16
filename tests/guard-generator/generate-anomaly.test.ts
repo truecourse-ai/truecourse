@@ -15,6 +15,7 @@ import {
   faithfulReviewer,
   PASSING_STEPS,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -70,6 +71,7 @@ describe('generateGuards — no-op recipe anomaly abort', () => {
     const fidelity = faithfulReviewer(() => fidelityCalls++)
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: gen,
@@ -109,6 +111,7 @@ describe('generateGuards — no-op recipe anomaly abort', () => {
     let fidelityCalls = 0
 
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extractBy({}),
       generateRunner: authorBy({ version: twentyTwo }),

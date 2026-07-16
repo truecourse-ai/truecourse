@@ -23,6 +23,7 @@ import {
   type RecipeRunner,
   type FidelityRunner,
   type TriageRunner,
+  type ExemplarRunner,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -178,6 +179,7 @@ export interface GuardGenerateInProcessOptions {
   recipeRunner?: RecipeRunner;
   fidelityRunner?: FidelityRunner;
   triageRunner?: TriageRunner;
+  exemplarRunner?: ExemplarRunner;
 }
 
 /**
@@ -383,6 +385,7 @@ export async function guardGenerateInProcess(
       recipeRunner: options.recipeRunner,
       fidelityRunner: options.fidelityRunner,
       triageRunner: options.triageRunner,
+      exemplarRunner: options.exemplarRunner,
       // Authoring-failure surfacing (item 2): count the finally-failed sections for
       // the CLI counter and forward every event to the CLI's live sink.
       onAuthorFailure: options.onAuthorFailure

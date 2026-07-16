@@ -12,6 +12,7 @@ import {
   authorBy,
   PASSING_STEPS,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -100,7 +101,7 @@ describe('estimateGuardTokens', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    await generateGuards({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: author })
 
     const est = await estimateGuardTokens(r)
     expect(est.subjectLabel).toBe('all 2 sections cached')

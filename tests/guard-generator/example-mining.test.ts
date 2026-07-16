@@ -6,6 +6,7 @@ import { generateGuards } from '@truecourse/guard-generator'
 import type { ExtractRunner, GenerateRunner } from '@truecourse/guard-generator'
 import type { GuardScenario } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, raw } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 /**
  * Example mining end to end: extraction emits `example`-flavor claims carrying the
@@ -102,7 +103,7 @@ describe('example mining — documented example blocks become scenarios (e2e)', 
       })
     }
 
-    const res = await generateGuards({ repoRoot: r, extractRunner, generateRunner })
+    const res = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner, generateRunner })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])

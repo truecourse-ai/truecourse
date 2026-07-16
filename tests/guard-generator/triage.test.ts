@@ -14,6 +14,7 @@ import {
   triageBy,
   FAILING_STEPS,
 } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -52,6 +53,7 @@ describe('generateGuards — finding triage', () => {
   it('attaches an Opus triage verdict to a birth finding', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -64,6 +66,7 @@ describe('generateGuards — finding triage', () => {
   it('a finding ships WITHOUT triage when no triage runner is configured', async () => {
     const r = seed()
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -76,6 +79,7 @@ describe('generateGuards — finding triage', () => {
     const r = seed()
     let calls = 0
     const res1 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -90,6 +94,7 @@ describe('generateGuards — finding triage', () => {
     writeManifest(r, { guard: GUARD_FORMAT_VERSION, sections: [] })
     calls = 0
     const res2 = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -108,6 +113,7 @@ describe('generateGuards — finding triage', () => {
       return CODE_DRIFT
     }
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -121,6 +127,7 @@ describe('generateGuards — finding triage', () => {
     const r = seed()
     const badRunner: TriageRunner = async () => ({ verdict: 'nonsense' })
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,
@@ -136,6 +143,7 @@ describe('generateGuards — finding triage', () => {
       throw new Error('triage down')
     }
     const res = await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: versionExtract,
       generateRunner: alwaysFails,

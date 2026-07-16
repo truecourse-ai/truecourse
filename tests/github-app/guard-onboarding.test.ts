@@ -530,6 +530,7 @@ describe('guard onboarding pipeline', () => {
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
         generateRunner: authorVersion,
+        fidelityRunner: async () => ({ verdict: 'faithful' as const }),
       }),
     });
   }

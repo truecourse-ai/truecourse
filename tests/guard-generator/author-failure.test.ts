@@ -7,6 +7,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { generateGuards, type GenerateRunner, type AuthorFailure } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, extractBy } from './helpers.js'
+import { stubAuxRunners } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -39,6 +40,7 @@ describe('onAuthorFailure (item 2)', () => {
     }
     const failures: AuthorFailure[] = []
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extract,
       generateRunner: timeoutRunner,
@@ -57,6 +59,7 @@ describe('onAuthorFailure (item 2)', () => {
     const invalidRunner: GenerateRunner = async () => ({ garbage: true })
     const failures: AuthorFailure[] = []
     await generateGuards({
+      ...stubAuxRunners(),
       repoRoot: r,
       extractRunner: extract,
       generateRunner: invalidRunner,
@@ -76,7 +79,7 @@ describe('onAuthorFailure (item 2)', () => {
     const timeoutRunner: GenerateRunner = async () => {
       throw new Error('claude timed out after 600000ms')
     }
-    const result = await generateGuards({ repoRoot: r, extractRunner: extract, generateRunner: timeoutRunner })
+    const result = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: extract, generateRunner: timeoutRunner })
     // The section stayed unsettled (authoring error), recorded — but nothing threw.
     expect(result.status).toBe('ok')
     expect(result.errors.some((e) => e.anchor === 'version')).toBe(true)
