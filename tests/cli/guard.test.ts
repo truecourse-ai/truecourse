@@ -424,8 +424,9 @@ describe('guardGenerateInProcess — sections-led birth line + retry usage', () 
     expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
 
     // The retry counter and the guard.retry usage (model recorded on the retry
-    // call) ride the SAME birth line.
-    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
+    // call) ride the SAME birth line. The concurrent fidelity counter (item 16) may
+    // sit between the retry counter and its usage tag, so match non-adjacently.
+    expect(details.some((d) => /^sections \d+\/2 · birth \d+ · retrying \d+\/\d+ .*retry-model/.test(d))).toBe(true)
 
     // result.json totals include the retry spend under the new stage.
     const report = readGuardResult(r)!

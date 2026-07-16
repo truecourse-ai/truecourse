@@ -53,7 +53,7 @@ function twentyPassing(): ReturnType<typeof raw>[] {
 }
 
 describe('generateGuards — no-op recipe anomaly abort', () => {
-  it('aborts as recipe-failed, writes nothing, and spends NO retry/fidelity calls', async () => {
+  it('aborts as recipe-failed, writes nothing, and spends NO retry calls', async () => {
     const r = repo()
     writeRecipe(r, { build: 'true', entry: ['node', 'silent.mjs'] })
     writeSilentEntry(r)
@@ -93,10 +93,14 @@ describe('generateGuards — no-op recipe anomaly abort', () => {
     expect(loadScenarios(r).scenarios).toEqual([])
     expect((readManifest(r)?.sections ?? []).some((s) => s.anchor === 'version')).toBe(false)
 
-    // The round-1 authoring ran ONCE; NO retry, and the fidelity reviewer never fired.
+    // The round-1 authoring ran ONCE; NO retry — the abort fires before any retry is
+    // dispatched, and every later section short-circuits. Fidelity runs CONCURRENTLY
+    // with the birth that trips the anomaly (item 16), so the racing section's reviews
+    // are spent — an accepted cost of parallel fidelity; the abort still prevents any
+    // retry round and any later-section spend.
     expect(authorCalls).toBe(1)
     expect(retryCalls).toBe(0)
-    expect(fidelityCalls).toBe(0)
+    expect(fidelityCalls).toBe(20)
   })
 
   it('does NOT abort when the entry produces output (a healthy CLI at scale)', async () => {

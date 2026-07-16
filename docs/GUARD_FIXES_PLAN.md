@@ -498,7 +498,7 @@ partial sections.
 
 ## 16. Fidelity runs in parallel with birth, not after it
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-16
 
 **Problem.** Fidelity judges the scenario YAML against the claim — it needs nothing
 from the birth run — yet it waits for birth to finish. On the 2026-07-16 sqlfluff run

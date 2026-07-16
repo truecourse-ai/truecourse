@@ -749,10 +749,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Retry-authoring progress accumulates across sections as each settles.
   let retryTotal = 0
   let retryDone = 0
-  // Fidelity-review progress accumulates across sections: `planned` grows as each
-  // section's green candidates reach review; `reviewed` ticks per completed review.
+  // Fidelity-review progress accumulates across sections: `planned` grows at CANDIDATE
+  // time — the moment a round's candidates enter review alongside birth (not at green
+  // time) — so it counts every candidate reviewed, including the ~35% birth later
+  // rejects; `reviewed` ticks per completed review.
   let fidelityPlanned = 0
   let fidelityReviewed = 0
+  // Review a round's candidates for fidelity CONCURRENTLY with birth (fidelity needs
+  // nothing from the birth run). Fans them through the shared pool, bumps `planned`
+  // for the whole set up front and ticks `reviewed` per verdict, and returns each
+  // candidate's result keyed by the candidate so the settle can pair it with birth.
+  const runFidelity = async (candidates: BirthCandidate[]): Promise<Map<BirthCandidate, FidelityResult>> => {
+    if (candidates.length === 0) return new Map()
+    fidelityPlanned += candidates.length
+    options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
+    const entries = await Promise.all(
+      candidates.map((c) =>
+        limit(async () => {
+          const review = await reviewFidelity(repoRoot, c, fidelityRunner)
+          options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+          return [c, review] as const
+        }),
+      ),
+    )
+    return new Map(entries)
+  }
 
   // Per-section state: the cli claims to author, and the raw scenarios they land.
   const taskByRef = new Map(authTasks.map((t) => [t.ref, t]))
@@ -829,7 +850,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
     const localErrors: GuardGenerateError[] = []
     const localFindings: GuardBirthFinding[] = []
-    let persistedHere: BirthCandidate[] = []
+    const persistedHere: BirthCandidate[] = []
+
+    // Route a birth-PASSING candidate by its (concurrently-computed) fidelity verdict:
+    // faithful → persist, flagged → finding, an incomplete review → the section
+    // re-attempts. Both a faithful and a flagged verdict are one reconciled birth pass
+    // (written/held or a fidelity finding); an incomplete review is NOT counted (the
+    // candidate is neither persisted, held, nor a finding this run). Keeps the item-12
+    // invariant `birthPassed === written + heldReady + fidelityFlagged`.
+    const applyFidelity = (candidate: BirthCandidate, review: FidelityResult): void => {
+      if ('error' in review) {
+        localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
+        return
+      }
+      birthPassed++
+      if (review.verdict === 'flagged') localFindings.push(fidelityFinding(candidate, review.mismatch))
+      else persistedHere.push(candidate)
+    }
 
     // Round-1 candidates; an empty-scenario claim is a recorded gap, not a blocker.
     const round1: BirthCandidate[] = []
@@ -868,22 +905,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // drops it for a re-attempt) and return; the ONE loud error was recorded once.
         return
       } else {
+        // Birth (the wall-time long pole) and fidelity run CONCURRENTLY — fidelity
+        // judges the YAML against the claim and needs nothing from the birth run, so
+        // reviewing WHILE birth executes makes a candidate's cost max(birth, fidelity),
+        // not their sum. A candidate commits only when BOTH are green.
         birthTotal += round1.length
-        const birth1 = await birthValidate(repoRoot, round1, {
-          executor,
-          recipe,
-          skipBuild: true,
-          noOpThresholdMs: options.noOpThresholdMs,
-          onPhase: options.onBirthPhase,
-          onScenarioSettled: bumpBirth,
-        })
+        const [birth1, fid1] = await Promise.all([
+          birthValidate(repoRoot, round1, {
+            executor,
+            recipe,
+            skipBuild: true,
+            noOpThresholdMs: options.noOpThresholdMs,
+            onPhase: options.onBirthPhase,
+            onScenarioSettled: bumpBirth,
+          }),
+          runFidelity(round1),
+        ])
         reconcileBirth()
 
         // No-op anomaly gate (item: birth anomaly detection). Fold THIS round's step
         // stats into the cumulative aggregate; once enough steps have run and almost
         // all did nothing, the recipe entry is a do-nothing binary. Abort NOW — before
-        // this section's retries/fidelity — leaving it (and every later section)
-        // unsettled; the run returns `recipe-failed` at the end.
+        // this section's retries — leaving it (and every later section) unsettled; the
+        // run returns `recipe-failed` at the end.
         birthStepStats.executedSteps += birth1.stepStats.executedSteps
         birthStepStats.noOpSteps += birth1.stepStats.noOpSteps
         birthStepStats.thresholdMs = birth1.stepStats.thresholdMs
@@ -909,11 +953,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             (o) => o.result.outcome === 'fail' || isSetupDefectResult(o.result),
           )
           if (retriable) {
+            // Precedence: a birth failure WINS over any fidelity verdict on this claim's
+            // candidates. The whole claim regenerates; the round-1 candidates AND their
+            // (now moot) fidelity verdicts in `fid1` are discarded — never a finding.
             retryEntries.push({ task: taskByRef.get(ref)!, evidence: toFinding(retriable) })
-            continue // whole claim is regenerated; round-1 candidates are discarded
+            continue
           }
           for (const o of outcomes) {
-            if (o.result.outcome === 'pass') persistedHere.push(o.candidate)
+            if (o.result.outcome === 'pass') applyFidelity(o.candidate, fid1.get(o.candidate)!)
             else localErrors.push(errorFrom(o))
           }
         }
@@ -943,66 +990,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           )
 
           if (retryCandidates.length > 0) {
+            // Re-authored candidates get BOTH checks again, also in parallel.
             birthTotal += retryCandidates.length
-            const birth2 = await birthValidate(repoRoot, retryCandidates, {
-              executor,
-              recipe,
-              skipBuild: true,
-              noOpThresholdMs: options.noOpThresholdMs,
-              onPhase: options.onBirthPhase,
-              onScenarioSettled: bumpBirth,
-            })
-            const r2 = birth2.outcomes
+            const [birth2, fid2] = await Promise.all([
+              birthValidate(repoRoot, retryCandidates, {
+                executor,
+                recipe,
+                skipBuild: true,
+                noOpThresholdMs: options.noOpThresholdMs,
+                onPhase: options.onBirthPhase,
+                onScenarioSettled: bumpBirth,
+              }),
+              runFidelity(retryCandidates),
+            ])
             reconcileBirth()
-            for (const o of r2) {
-              if (o.result.outcome === 'pass') persistedHere.push(o.candidate)
+            for (const o of birth2.outcomes) {
+              if (o.result.outcome === 'pass') applyFidelity(o.candidate, fid2.get(o.candidate)!)
               else if (o.result.outcome === 'fail') localFindings.push(toFinding(o))
               else localErrors.push(errorFrom(o))
             }
           }
         }
       }
-    }
-
-    // Fidelity review (item 33): every green candidate — a round-1 pass OR a retry
-    // survivor — is audited BEFORE it may persist. A flagged candidate becomes a
-    // fidelity FINDING (its section then unsettles like any birth finding, and the
-    // faithful siblings drop to `heldSections` below); a review that can't complete
-    // is a local error (re-attempted next run — faithful reviews are cached). Only
-    // faithful candidates stay in the persist set.
-    if (persistedHere.length > 0) {
-      fidelityPlanned += persistedHere.length
-      options.onFidelityProgress?.(fidelityReviewed, fidelityPlanned)
-      // The green candidates are reviewed independently — fan them through the
-      // shared LLM pool (bounded by `TRUECOURSE_MAX_CONCURRENCY`) instead of one at
-      // a time; verdicts are consumed in candidate order so findings stay stable.
-      const reviews = await Promise.all(
-        persistedHere.map((c) =>
-          limit(async () => {
-            const review = await reviewFidelity(repoRoot, c, fidelityRunner)
-            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
-            return { c, review }
-          }),
-        ),
-      )
-      const faithful: BirthCandidate[] = []
-      for (const { c, review } of reviews) {
-        if ('error' in review) {
-          // Passed birth but the fidelity review could not complete — the candidate is
-          // neither persisted, held, nor a finding this run (its section re-attempts),
-          // so it is NOT a reconciled birth pass.
-          localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
-          continue
-        }
-        // A candidate that cleared birth AND reached a reported bucket — written, held,
-        // or a fidelity finding — is one birth pass. A round-1 pass discarded when a
-        // sibling forced a whole-claim retry never reaches here, so it never inflates
-        // the count: birthPassed === written + heldReady + fidelityFlagged for the run.
-        birthPassed++
-        if (review.verdict === 'flagged') localFindings.push(fidelityFinding(c, review.mismatch))
-        else faithful.push(c)
-      }
-      persistedHere = faithful
     }
 
     errors.push(...localErrors)
@@ -1314,7 +1323,7 @@ function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, entry: readonly string[]):
     `The recipe entry \`${entry.join(' ')}\` behaves like a do-nothing binary: ${anomaly.noOpSteps} of ` +
     `${anomaly.executedSteps} birth steps (${pct}%) exited 0 with no output in under ${anomaly.thresholdMs}ms, ` +
     `so it ignores its arguments. Every scenario validated against it would be a silent no-op, so generation ` +
-    `was aborted before writing any scenarios or spending retry/fidelity calls. Fix the recipe entry (it likely ` +
+    `was aborted before writing any scenarios or spending a retry round. Fix the recipe entry (it likely ` +
     `names a stale build output or a placeholder such as \`true\`) and re-run \`truecourse guard generate\`.`
   )
 }
