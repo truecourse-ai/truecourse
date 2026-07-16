@@ -22,7 +22,10 @@ import type {
   SpecInheritanceHook,
   WorkspaceInheritanceDoc,
 } from '@truecourse/core/lib/spec-inheritance-hook';
-import type { KnowledgeLedgerReader } from '@truecourse/core/lib/knowledge-ledger-reader';
+import type {
+  KnowledgeLedgerReader,
+  KnowledgeDocBodyReader,
+} from '@truecourse/core/lib/knowledge-ledger-reader';
 
 export interface InheritanceDeps {
   /** Resolves a connected repo's workspace org from the stored gate records. */
@@ -69,5 +72,24 @@ export function createKnowledgeLedgerReader(deps: InheritanceDeps): KnowledgeLed
     const link = await deps.store.getRepo(repoKey);
     if (!link?.workspaceOrgId) return new Map();
     return deps.knowledge.titlesByDocPath(link.workspaceOrgId, docPaths);
+  };
+}
+
+/**
+ * Build the `(repoKey, docPath) → stored body` reader installed via
+ * `setKnowledgeDocBodyReader`. Resolves the repo's workspace org from the gate
+ * records, then reads the inherited doc's STORED body from its ledger row's content
+ * hash (no connector I/O — Sync already persisted it). Null when the repo has no
+ * workspace, no ledger row for the path, or the body is absent; the repo Spec-tab
+ * doc route renders any of those as a 404.
+ */
+export function createKnowledgeDocBodyReader(deps: InheritanceDeps): KnowledgeDocBodyReader {
+  return async (repoKey, docPath) => {
+    const link = await deps.store.getRepo(repoKey);
+    if (!link?.workspaceOrgId) return null;
+    const org = link.workspaceOrgId;
+    const row = await deps.knowledge.findByDocPath(org, docPath);
+    if (!row) return null;
+    return deps.knowledge.getDocBody(org, row.contentHash);
   };
 }

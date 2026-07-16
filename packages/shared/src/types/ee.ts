@@ -250,7 +250,8 @@ export interface IntegrationPendingEstimate {
  * estimate: source bodies are never stored (Process re-fetches internally).
  */
 export interface IntegrationPendingView {
-  /** Doc delta vs the provenance ledger, counted by content hash. */
+  /** Doc delta vs what Process has consolidated (the processed marker), counted by
+   *  content hash — new/changed/removed unprocessed work. */
   delta: { new: number; changed: number; removed: number; total: number }
   /** The full estimate captured at sweep time — the Process confirm dialog. */
   estimate: IntegrationPendingEstimate
