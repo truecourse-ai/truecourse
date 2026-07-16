@@ -56,8 +56,9 @@ fs.mkdirSync(DIST, { recursive: true });
 // 1. Build packages in dependency order:
 //      shared → analyzer
 //      spec-consolidator → contract-verifier → contract-extractor → core
+//      guard-runner → guard-generator → core
 //
-// core's tsc imports the three contract/spec packages, so their .d.ts
+// core's tsc imports the contract/spec/guard packages, so their .d.ts
 // files MUST exist before core compiles. The intra-package graph:
 //
 //   shared             ←  no truecourse deps
@@ -66,10 +67,12 @@ fs.mkdirSync(DIST, { recursive: true });
 //   spec-consolidator  ←  shared + llm
 //   contract-verifier  ←  shared + analyzer
 //   contract-extractor ←  shared + contract-verifier + spec-consolidator + llm
+//   guard-runner       ←  shared
+//   guard-generator    ←  guard-runner (+ shared)
 //   core               ←  all of the above
 //
 // Sequential order below honors that graph. Prior to this, fresh-checkout
-// `pnpm build:dist` failed at core's tsc because the contract/spec
+// `pnpm build:dist` failed at core's tsc because the contract/spec/guard
 // packages weren't built yet — and later at spec-consolidator's tsc because
 // its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
@@ -79,6 +82,8 @@ run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
 run('pnpm --filter @truecourse/contract-extractor build');
+run('pnpm --filter @truecourse/guard-runner build');
+run('pnpm --filter @truecourse/guard-generator build');
 run('pnpm --filter @truecourse/core build');
 
 // 2. Build dashboard client (static export)
