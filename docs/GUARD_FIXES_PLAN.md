@@ -375,3 +375,21 @@ scenario loader applies the same check so a hand-written bad regex fails loud at
 **Tests.** Authoring output with an invalid regex triggers the re-ask with the compile
 error quoted; a valid-after-re-ask scenario proceeds; loader rejects a committed
 scenario with an invalid pattern with a clear error.
+
+## 12. Birth counters must reconcile: passed = written + held + flagged
+
+STATUS: BUILT 2026-07-16
+
+**Problem.** The CLI prints "126 passed birth · 72 written", and the numbers cannot be
+reconciled by the reader: `birthPassed` counts round-1 passes on claims that later went
+to retry (whose candidates are discarded and re-validated), so it double-counts and
+matches nothing else in the report. The user flagged it immediately.
+
+**Fix.** Count a birth pass once per SURVIVING candidate: a discarded round-1 pass
+(sibling triggered a whole-claim retry) does not increment; the retry's own passes do.
+Resulting invariant, asserted in tests: `birthPassed === written + heldReady +
+fidelityFlagged` for every run. CLI summary and report field keep their names; the
+report schema comment documents the invariant.
+
+**Tests.** A run with a retried claim whose round-1 sibling passed reconciles exactly;
+the CLI summary line's numbers add up in the e2e fixture runs.

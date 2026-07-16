@@ -374,10 +374,15 @@ export const GuardGenerateReportSchema = z
     extractionFailures: z.array(GuardExtractionFailureSchema),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth outcomes that passed across both validation rounds. Optional so the
-     * report stays a superset of the result AND tolerant reads of older files
-     * (written before this field existed) keep parsing. May exceed
-     * `written.length` when a passing scenario's section didn't settle.
+     * Birth passes that survived to a reported bucket — written, held-ready, or a
+     * fidelity finding. Counted once per surviving candidate, so the run reconciles
+     * exactly: `birthPassed === written.length + Σ heldSections.readyScenarios +
+     * (birthFindings with kind 'fidelity')`. A round-1 pass discarded when a sibling
+     * forced a whole-claim retry is NOT counted (only the retry's own passes are),
+     * nor is a birth pass whose fidelity review could not complete. May still exceed
+     * `written.length` when a passing scenario's section didn't settle (it is held).
+     * Optional so the report stays a superset of the result AND tolerant reads of
+     * older files (written before this field existed) keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
