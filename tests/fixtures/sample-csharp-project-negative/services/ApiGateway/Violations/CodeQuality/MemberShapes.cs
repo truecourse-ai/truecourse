@@ -96,6 +96,15 @@ internal sealed class MemberShapes
     {
         _last = id;
     }
+
+    // A non-fluent value-returning method: the return type is not this class and
+    // it is not an extension receiver, so a parameter named after it is still a
+    // copy-paste artifact and must fire.
+    // VIOLATION: code-quality/deterministic/parameter-duplicates-method-name
+    internal int Compute(int compute)
+    {
+        return compute;
+    }
 }
 
 internal sealed class EventRaiser
