@@ -44,17 +44,27 @@ export function areaOrDocSlug(section: SectionInput): string {
   return slugifyHeading(base) || 'doc'
 }
 
+/** The engine-owned input-corpus binding stamped onto an invariant scenario (item
+ *  8): the seeded pack id and the stable sandbox path each corpus file stages to. */
+export interface ScenarioInputsBinding {
+  pack: string
+  as: string
+}
+
 /**
  * Build the final scenario: engine-assigned `id`, binding pinned to the live
  * section index (doc + anchor + fingerprint), `guard`/`driver` stamped, the
  * extracted `claim` persisted (so a committed scenario reads as doc-vs-code), and
- * the model's behavioral fields kept. Throws if the result fails the strict schema.
+ * the model's behavioral fields kept. For an invariant claim the engine also stamps
+ * `inputs` (the pack it seeded + the staged name) — engine-owned like `binds`, never
+ * trusted from the model. Throws if the result fails the strict schema.
  */
 export function buildScenario(
   section: SectionInput,
   raw: RawGeneratedScenario,
   id: string,
   claim?: string,
+  inputs?: ScenarioInputsBinding,
 ): GuardScenario {
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
@@ -69,6 +79,7 @@ export function buildScenario(
     binds: { doc: section.doc, section: section.anchor, fingerprint: section.fingerprint },
     driver: raw.driver,
     ...(raw.setup ? { setup: raw.setup } : {}),
+    ...(inputs ? { inputs: { pack: inputs.pack, as: inputs.as } } : {}),
     steps: raw.steps,
     normalize: raw.normalize ?? [],
   }

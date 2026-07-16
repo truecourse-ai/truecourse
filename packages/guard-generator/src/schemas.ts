@@ -69,18 +69,27 @@ export type ExampleBlock = z.infer<typeof ExampleBlockSchema>
  * (an anchor the engine snaps against the live index), and the observable a test
  * would check.
  *
- * `flavor` marks a claim mined from a documented example block (`example`) — a
- * fenced block whose surrounding prose states an outcome — versus an ordinary
- * prose claim (`normal`, the default). It is optional, and `example` carries the
- * block payload; both are optional so a pre-flavor cache parses as a normal claim.
+ * `flavor` marks the claim's shape (default `normal`, an ordinary prose claim):
+ *  - `example` — mined from a documented example block; carries the `example`
+ *    payload (the block copied verbatim + its promised outcome).
+ *  - `invariant` — an always/never/idempotent/deterministic rule about the tool's
+ *    behavior ("fix never breaks your code", "formatting is idempotent"). One rule
+ *    can't be tested by one hand-picked input, so it authors a PROPERTY scenario run
+ *    over MANY inputs; `examples` carries the section's own example blocks (item 7's
+ *    payloads), copied verbatim, that seed the input corpus pack round 1.
+ * All are optional so a pre-flavor cache parses as a normal claim (item-7 back-compat).
  */
 export const ExtractedClaimSchema = z.object({
   claim: z.string().min(1),
   driver: z.enum(CLAIM_DRIVERS),
   sectionAnchor: z.string().min(1),
   reason: z.string().min(1),
-  flavor: z.enum(['normal', 'example']).optional(),
+  flavor: z.enum(['normal', 'example', 'invariant']).optional(),
   example: ExampleBlockSchema.optional(),
+  /** Present only for an `invariant` claim: the section's example blocks (verbatim)
+   *  that seed the input corpus pack. Absent/empty ⇒ the pack seeds from repo
+   *  fixtures alone (or, until item 9's generated exemplars, may be empty). */
+  examples: z.array(ExampleBlockSchema).optional(),
 })
 export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>
 
@@ -115,15 +124,28 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
 // ---------------------------------------------------------------------------
 
 /**
+ * The model-facing shape of an invariant scenario's `inputs` (item 8): ONLY the
+ * staged name `as` the steps reference. The `pack` is engine-owned (the engine
+ * seeds it and stamps the id, like `binds`), so the model never authors it — a pack
+ * key here is tolerated and ignored via `.passthrough()`.
+ */
+export const RawInputsSchema = z
+  .object({ as: z.string().min(1).optional() })
+  .passthrough()
+
+/**
  * One scenario as the model authors it: the behavioral fields only. `id`,
  * `binds`, and `guard` are engine-owned, so we tolerate (and ignore) whatever the
- * model wrote for them via `.passthrough()`.
+ * model wrote for them via `.passthrough()`. For an invariant claim the model may
+ * set `inputs.as` (the staged input name its steps reference); the engine supplies
+ * `inputs.pack`.
  */
 export const RawGeneratedScenarioSchema = z
   .object({
     title: z.string().min(1),
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
+    inputs: RawInputsSchema.optional(),
     steps: z.array(GuardStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })

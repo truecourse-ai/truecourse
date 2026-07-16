@@ -255,7 +255,7 @@ scenarios asserting flag/no-flag.
 
 ## 8. Invariant scenarios — documented always-rules checked over many inputs
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** The severest reachable bug class everywhere is a violated documented
 invariant: "fix never breaks your code" (ruff's top bug co-label at ~28%, eslint ~13%,

@@ -17,15 +17,18 @@ import {
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
+  GuardPackManifestSchema,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardLatest,
+  type GuardPackManifest,
 } from '@truecourse/shared'
 
 const TRUECOURSE_DIR = '.truecourse'
 const GUARD_DIR = 'guard'
 const SCENARIOS_DIR = 'scenarios'
+const CORPUS_DIR = 'corpus'
 const RUNS_DIR = 'runs'
 const EVIDENCE_DIR = 'evidence'
 const LATEST_FILE = 'LATEST.json'
@@ -34,6 +37,7 @@ const RESULT_FILE = 'result.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
+const PACK_MANIFEST_FILE = 'pack.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -76,6 +80,99 @@ export function manifestPath(repoRoot: string): string {
  *  NOT under the mostly-gitignored `guard/` run store. */
 export function guardDecisionsPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
+}
+
+// --- Input-corpus store (item 8) ------------------------------------
+// Committed input packs under `scenarios/corpus/<pack>/` — the many inputs an
+// invariant scenario runs its rule over. The `scenarios/` tree is committable by
+// convention, so packs travel via git with no `.gitignore` work.
+
+/** The corpus root — `scenarios/corpus/`. */
+export function corpusDir(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), CORPUS_DIR)
+}
+
+/** One pack's directory — `scenarios/corpus/<pack>/`. */
+export function packDir(repoRoot: string, packId: string): string {
+  return path.join(corpusDir(repoRoot), packId)
+}
+
+/** A pack's `pack.json` manifest path. */
+export function packManifestPath(repoRoot: string, packId: string): string {
+  return path.join(packDir(repoRoot, packId), PACK_MANIFEST_FILE)
+}
+
+/** Read + validate a pack's manifest, or `null` when absent or unparseable. */
+export function readPackManifest(repoRoot: string, packId: string): GuardPackManifest | null {
+  return readJsonOr(packManifestPath(repoRoot, packId), GuardPackManifestSchema, null)
+}
+
+/** Write a pack's `pack.json` manifest atomically. */
+export function writePackManifest(repoRoot: string, manifest: GuardPackManifest): string {
+  const target = packManifestPath(repoRoot, manifest.pack)
+  atomicWriteJson(target, manifest)
+  return target
+}
+
+/** One staged input file: its pack-relative name and its content. */
+export interface PackInput {
+  name: string
+  content: string
+}
+
+/**
+ * Load a pack's input files (everything under `scenarios/corpus/<pack>/` except the
+ * `pack.json` manifest), sorted by name for a deterministic sweep order. A failure
+ * result — the pack directory is missing or holds no input files — is returned so
+ * the runner can fail LOUD (an orphaned pack must never be silently skipped), never
+ * an empty success.
+ */
+export function loadPackInputs(
+  repoRoot: string,
+  packId: string,
+): { ok: true; files: PackInput[] } | { ok: false; reason: string } {
+  const dir = packDir(repoRoot, packId)
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    return { ok: false, reason: `input pack "${packId}" not found at ${path.relative(repoRoot, dir)}` }
+  }
+  const files: PackInput[] = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isFile() || entry.name === PACK_MANIFEST_FILE) continue
+    files.push({ name: entry.name, content: fs.readFileSync(path.join(dir, entry.name), 'utf-8') })
+  }
+  if (files.length === 0) {
+    return { ok: false, reason: `input pack "${packId}" has no input files under ${path.relative(repoRoot, dir)}` }
+  }
+  return { ok: true, files }
+}
+
+/**
+ * Seed (write) a pack: its input files plus the `pack.json` manifest. Idempotent
+ * per file — overwrites `seed`-source files, but PRESERVES any existing `user`-source
+ * file (a hand-added real-world repro survives regeneration; the item-9 ratchet). The
+ * manifest is rewritten to the union so the provenance record stays complete.
+ */
+export function writePack(
+  repoRoot: string,
+  manifest: GuardPackManifest,
+  files: Record<string, string>,
+): void {
+  const dir = packDir(repoRoot, manifest.pack)
+  fs.mkdirSync(dir, { recursive: true })
+  // Preserve user-added files from a prior manifest — never clobber a real repro.
+  const prior = readPackManifest(repoRoot, manifest.pack)
+  const userFiles = (prior?.files ?? []).filter((f) => f.source === 'user')
+  for (const [name, content] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, name), content)
+  }
+  const merged: GuardPackManifest = {
+    ...manifest,
+    files: [
+      ...manifest.files,
+      ...userFiles.filter((u) => !manifest.files.some((f) => f.name === u.name)),
+    ],
+  }
+  writePackManifest(repoRoot, merged)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {

@@ -100,6 +100,13 @@ export {
   recipePath,
   manifestPath,
   guardDecisionsPath,
+  corpusDir,
+  packDir,
+  packManifestPath,
+  readPackManifest,
+  writePackManifest,
+  loadPackInputs,
+  writePack,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
@@ -113,6 +120,7 @@ export {
   readGuardResult,
   atomicWriteJson,
 } from './store.js'
+export type { PackInput } from './store.js'
 
 export {
   buildDocSectionIndex,

@@ -147,6 +147,22 @@ Bind an example claim to the narrowest section that states it, like any claim; i
 kind of test that could assert it. "example.block" is copied VERBATIM — never
 reformatted, re-indented, or "corrected".
 
+# Invariant claims — an always/never rule tested over MANY inputs
+Some documented behaviors are UNIVERSAL RULES, not single facts: the prose says the
+tool does (or never does) something for ALL inputs — "always" / "never" / "idempotent"
+/ "deterministic" / "for any input" / "round-trips" / "safe on every file". Examples:
+"fix never changes your code's behavior", "formatting is idempotent", "the parser
+accepts any valid document", "install is deterministic given a lockfile". Such a rule
+cannot be tested by one hand-picked input, so mark it "flavor": "invariant" — the
+engine will check it over a whole corpus of inputs rather than one. An invariant claim
+carries an "examples" ARRAY: copy VERBATIM (byte-for-byte, like example.block) every
+worked-example block in the SAME section that can serve as an input the rule applies to
+(the docs' own before/after snippets, sample files, or inputs). Omit "examples" (or
+leave it empty) when the section shows no such inputs. The "claim" is still one
+declarative sentence stating the rule; the "driver" is the kind of test that asserts it.
+Reserve "invariant" for a genuine universal rule — a one-off behavior is a "normal" (or
+"example") claim, not an invariant.
+
 # Sandbox limits — commands that need an LLM provider are not cli-testable
 Guard runs each command in a sealed sandbox with NO credentials and NO network. A
 command whose documented behavior requires an authenticated LLM provider or an
@@ -188,7 +204,9 @@ Concretely:
       { "sectionAnchor": "<an anchor copied verbatim>",
         "reason": "<why no driver can assert anything here>" } ] }
 Omit "flavor"/"example" for a normal prose claim; set "flavor":"example" and the
-"example" object ONLY for a worked-example block whose prose states an outcome.`
+"example" object ONLY for a worked-example block whose prose states an outcome; set
+"flavor":"invariant" and the "examples" array (verbatim input blocks from the section)
+for a universal always/never/idempotent/deterministic rule.`
 
 export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
 
@@ -309,6 +327,33 @@ the promised result the example states (the rule fires / the output equals the s
 output / it passes clean). Editing or "improving" the block's bytes is the worst
 failure — the whole point is that the doc's exact example is what runs.
 
+# Invariant claims — ONE rule, checked over MANY inputs
+Some claims arrive marked INVARIANT (an always / never / idempotent / deterministic
+rule about the tool — "fix never breaks your code", "formatting is idempotent",
+"install is deterministic given a lockfile"). One hand-picked input cannot test the
+word "never", so you author ONE scenario (the RULE) and the engine runs your steps
+ONCE PER FILE in a committed input corpus, staging each file into the sandbox under a
+STABLE name your steps reference. You do NOT author or invent the inputs — the engine
+seeds the corpus; you author only the rule.
+- The staged input name is \`input\` by default. Set \`inputs.as\` (e.g. "input.sql")
+  when the tool dispatches on file extension, and reference THAT exact path in your
+  step \`run\` argv / \`files\` matchers. Do not seed the input via \`setup.files\` — the
+  engine stages it.
+- Assert the RULE, not one input's exact output — the corpus varies file to file. Use
+  exit codes and the two PROPERTY forms, plus structural \`contains\`/\`matches\`; never
+  \`equals\` on a whole line of per-file output.
+  - \`stableOnRerun: true\` on a step — the engine runs the step a SECOND time and
+    requires identical output (same exit + stdout/stderr, and the staged input file
+    unchanged). This is idempotence / determinism: "formatting is idempotent", "a
+    second fix changes nothing", "output is deterministic".
+  - \`stdinFromStep: N\` on a step — feed the stdout of earlier step N as this step's
+    stdin, so "the output of step N must itself pass step M". Example (fix output
+    re-parses clean): step 1 runs the formatter to stdout; step 2 sets
+    \`stdinFromStep: 1\` and asserts a clean parse (exit 0). \`stdinFromStep\` replaces
+    \`stdin\` — never set both on one step.
+- Return exactly ONE scenario for an invariant claim (the rule). It rides the same
+  schema; only \`inputs.as\` + the property forms are invariant-specific.
+
 # Titles — the doc's promise, never the expected output
 Each scenario \`title\` states, in plain words, the BEHAVIORAL PROMISE the doc makes —
 what the tool does — so a reviewer reads it as doc-vs-code without decoding the
@@ -402,6 +447,12 @@ export interface AuthorClaim {
    *  own block content (verbatim) + the promised outcome. Threaded so the model
    *  seeds the scenario's setup from the exact bytes, never a paraphrase. */
   example?: ExampleBlock
+  /** Present ONLY for an invariant claim (extraction `flavor: 'invariant'`) whose
+   *  input pack the engine seeded: the pack id (engine-owned; the model does not
+   *  author it) plus sample inputs so the model shapes a property assertion the
+   *  whole corpus satisfies. Its presence tells the model to author ONE rule over
+   *  many staged inputs (item 8). */
+  invariant?: { pack: string; samples: ExampleBlock[] }
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
 }
@@ -491,6 +542,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         '"""',
         `promised outcome: ${c.example.outcome}`,
       )
+    }
+    if (c.invariant) {
+      lines.push(
+        'INVARIANT — author ONE scenario (the RULE). The engine runs your steps once per',
+        'file in a committed corpus, staging each at "input" (override via inputs.as).',
+        'Reference the staged input by that name; do NOT seed it yourself. Assert the rule',
+        'across ALL inputs with exit codes + stableOnRerun / stdinFromStep, never one',
+        "input's exact output. Sample inputs the corpus holds (each staged in turn):",
+      )
+      for (const s of c.invariant.samples.slice(0, 3)) {
+        lines.push('"""', s.block, '"""')
+      }
+      if (c.invariant.samples.length > 3) {
+        lines.push(`(…and ${c.invariant.samples.length - 3} more input(s) in the corpus)`)
+      }
     }
     if (c.retry) {
       lines.push(
