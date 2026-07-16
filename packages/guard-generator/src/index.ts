@@ -134,6 +134,7 @@ export {
 export {
   TestabilityVerdictSchema,
   RecipeProposalSchema,
+  ExampleBlockSchema,
   ExtractedClaimSchema,
   UntestableNoteSchema,
   DocExtractionSchema,
@@ -144,6 +145,7 @@ export {
   CLAIM_DRIVERS,
   type TestabilityVerdict,
   type RecipeProposal,
+  type ExampleBlock,
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,

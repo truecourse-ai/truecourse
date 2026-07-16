@@ -225,7 +225,7 @@ document them) → support corpora (parser/dialect genre, reuses item 8's machin
 
 ## 7. Example mining — documented example blocks become scenarios
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-15
 
 **Problem.** Docs are full of worked examples: a fenced code block plus the promised
 outcome ("this SQL is an anti-pattern, ST07 flags it"; jq's manual gives input⇒output

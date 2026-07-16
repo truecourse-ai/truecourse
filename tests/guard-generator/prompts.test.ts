@@ -90,10 +90,10 @@ describe('guard-generator prompts', () => {
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: the library-driver classification (programmatic import-by-name
-    // claims are recorded, not authored) moved this from 2f26bbf187a8a087 (item-23's
-    // llm-provider rule). It must not move again silently.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('55c0ace88c3f3a5a')
+    // Pinned literal: example mining (a fenced block + a stated outcome becomes an
+    // `example`-flavor claim carrying the block verbatim) moved this from
+    // 55c0ace88c3f3a5a. It must not move again silently.
+    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('13fc530f43b85b75')
   })
 
   // Item 23 — LLM-dependent commands classify as blocked-on, never authored.
@@ -116,6 +116,27 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('extract api/web/tui/library claims')
   })
 
+  // Example mining — a fenced block + a stated outcome becomes an `example` claim.
+  it('EXTRACT_SYSTEM_PROMPT mines documented example blocks into example claims', () => {
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('# Example blocks — a worked example is a high-value claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('"flavor": "example"')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('example.block')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('example.outcome')
+    // Crisp "prose states an outcome" criteria.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('STATES AN OUTCOME')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('this fails')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('anti-pattern')
+    // A bare snippet with no stated outcome must NOT become a claim.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('must NOT become a claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('ILLUSTRATE')
+    // One positive and one negative worked example.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('POSITIVE — emit an example claim')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('NEGATIVE — do NOT emit a claim')
+    // The block is copied byte-for-byte, never reformatted.
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('copied VERBATIM')
+    expect(EXTRACT_SYSTEM_PROMPT).toContain('re-indented')
+  })
+
   // Item 32 — assertions come from the claim/doc, never the transcript (AUTHORING).
   it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('# Assertions come from the claim, never the transcript')
@@ -131,6 +152,59 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('Worked example')
     expect(GENERATE_SYSTEM_PROMPT).toContain('Completed t1 ✓')
     expect(GENERATE_SYSTEM_PROMPT).toContain('Marked t1 as done')
+  })
+
+  // Example mining — the example claim's authoring rule is loud about byte-faithful inputs.
+  it('GENERATE_SYSTEM_PROMPT rules an example claim seeds the doc block byte-faithfully', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Example claims — the doc\'s own block IS the input, byte-faithful')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('BYTE-FOR-BYTE')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('do NOT invent or paraphrase inputs')
+    // No reformatting / no "fixing" a deliberately-broken example.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('re-indent')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('must stay broken')
+    // The model still owns the mechanics (command, path, matcher form).
+    expect(GENERATE_SYSTEM_PROMPT).toContain('only the MECHANICS')
+  })
+
+  // Example mining — buildAuthorUserPrompt threads the verbatim block + instruction.
+  it('buildAuthorUserPrompt renders an example claim\'s block verbatim with the byte-faithful rule', () => {
+    // A block with deliberately tricky whitespace/indentation to prove byte-faithfulness.
+    const block = 'SELECT\n\t a.b,\n  a.c\nFROM  a   JOIN b USING (id)\n'
+    const ctx: AuthorUserContext = {
+      doc: 'docs/rules/st07.md',
+      docContext: '## ST07\nThis query is an anti-pattern; ST07 flags it.',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [
+        {
+          ref: 'c0',
+          claim: 'the query is flagged by ST07',
+          section: SECTION,
+          example: { block, outcome: 'ST07 flags this query' },
+        },
+      ],
+    }
+    const p = buildAuthorUserPrompt(ctx)
+    expect(p).toContain('EXAMPLE BLOCK')
+    // The exact bytes survive — no reformatting of tabs/multi-spaces/newlines.
+    expect(p).toContain(block)
+    expect(p).toContain('promised outcome: ST07 flags this query')
+    // The instruction forbids editing the block.
+    expect(p).toContain('BYTE-FOR-BYTE')
+    expect(p).toMatch(/do NOT reformat/i)
+  })
+
+  it('buildAuthorUserPrompt carries no EXAMPLE BLOCK for a normal (non-example) claim', () => {
+    const ctx: AuthorUserContext = {
+      doc: 'docs/cli.md',
+      docContext: '## done',
+      areaTags: [],
+      recipeEntry: ['node', 'cli.js'],
+      recipeBuild: 'true',
+      claims: [{ ref: 'c0', claim: 'x', section: SECTION }],
+    }
+    expect(buildAuthorUserPrompt(ctx)).not.toContain('EXAMPLE BLOCK')
   })
 
   // Item 32 — mirrored rule in the RETRY prompt (buildAuthorUserPrompt with retry evidence).
