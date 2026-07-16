@@ -28,6 +28,14 @@ internal class CommentHygiene
         Track(1);
     }
 
+    internal void Compact()
+    {
+        Track(0);
+        // VIOLATION: code-quality/deterministic/empty-comment
+        /*  */
+        Track(1);
+    }
+
     private void Track(int value)
     {
         _values.Add(value);
