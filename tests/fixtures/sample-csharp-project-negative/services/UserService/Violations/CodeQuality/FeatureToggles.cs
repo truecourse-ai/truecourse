@@ -12,13 +12,19 @@ public sealed class FeatureToggles
     // VIOLATION: code-quality/deterministic/static-field-initialize-inline
     private static readonly string ConfigRoot;
 
+    // VIOLATION: code-quality/deterministic/static-field-initialize-inline
+    private static readonly string ConfigVersion;
+
     // VIOLATION: code-quality/deterministic/mutable-private-member
     // VIOLATION: code-quality/deterministic/field-can-be-readonly
     private string _environment;
 
+    // Both static fields are assigned by simple statements that are the whole cctor
+    // body, so inlining them drops the constructor and gains beforefieldinit.
     static FeatureToggles()
     {
         ConfigRoot = "/etc/userservice";
+        ConfigVersion = "v1";
     }
 
     public FeatureToggles(string environment)
@@ -35,5 +41,5 @@ public sealed class FeatureToggles
     // VIOLATION: code-quality/deterministic/obsolete-without-message
     // VIOLATION: code-quality/deterministic/obsolete-without-explanation
     [Obsolete]
-    public string ConfigPath() => ConfigRoot;
+    public string ConfigPath() => ConfigRoot + ConfigVersion;
 }
