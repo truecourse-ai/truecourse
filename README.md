@@ -215,7 +215,7 @@ Stages run in order, each producing committable artifacts the next consumes:
 
 Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
-**2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (today's driver runs your project's CLI; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — a scenario that fails at birth is reported as a finding (the spec and the code already disagree) instead of being silently committed. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+**2. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — a scenario that fails at birth is reported as a finding (the spec and the code already disagree) instead of being silently committed. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
 
 **3. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario, and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
@@ -223,7 +223,7 @@ The section ↔ scenario binding is **bidirectional**: code changed → its scen
 
 ## What it catches
 
-Any documented behavior a scenario can drive and assert (today through your project's CLI; api/web/tui drivers are planned): wrong responses and exit codes, missing or mistyped output fields, illegal state transitions, bypassed validation and auth rules, silently-dropped side effects, formulas producing wrong results — plus the reverse direction: spec sections whose scenarios went stale because the docs changed out from under them.
+Any documented behavior a scenario can drive and assert (today through your project's CLI or its HTTP API; web/tui drivers are planned): wrong responses and exit codes, missing or mistyped output fields, illegal state transitions, bypassed validation and auth rules, silently-dropped side effects, formulas producing wrong results — plus the reverse direction: spec sections whose scenarios went stale because the docs changed out from under them.
 
 ## Setup
 
@@ -266,8 +266,32 @@ The recipe tells guard how to build your repo and what binary the scenarios exer
   dependencies (e.g. `npm ci`). Needed wherever the tree is a fresh checkout with no
   `node_modules`; omit it when the build needs no dependency fetch.
 - `build` — one shell command, run in the repo root before scenarios execute.
-- `entry` — the entrypoint argv; each scenario's command is appended to it. Repo-relative.
+- `entry` — the entrypoint argv for `cli` scenarios; each scenario's command is appended to it.
+  Repo-relative. Optional when the repo only has `api` scenarios.
 - `env` *(optional)* — extra environment variables for every scenario run.
+- `api` *(optional)* — the api driver's preparation, for repos whose specs describe an HTTP
+  service. `serve` is the argv that starts the server (the runner allocates a free port and
+  injects it as `PORT`, then boots one fresh server per scenario in that scenario's sandbox
+  cwd — state files written there are isolated per scenario); `healthPath` (default `/`) is
+  polled until it answers 2xx (budget `readyTimeoutMs`, default 30s); `env` adds server-only
+  variables; `services` *(optional)* holds one-shot `up`/`down` shell commands (run once per
+  run, in the repo root) for datastores the server needs — guard runs your commands, it does
+  no container orchestration itself:
+
+  ```json
+  {
+    "build": "pnpm build",
+    "api": {
+      "serve": ["node", "dist/server.js"],
+      "healthPath": "/health",
+      "services": { "up": "docker compose up -d db", "down": "docker compose down" }
+    }
+  }
+  ```
+
+  Api scenarios then drive the booted server with `request` steps (method/path/headers/body),
+  assert on `status`, `headers`, `body`, and JSON paths (`json`), and chain calls by
+  `capture`-ing values from responses into `${var}` placeholders.
 
 It's discovered by the LLM **once**, on your first `guard generate`, and never touched again —
 **the file is yours to edit**: an existing `recipe.json` always wins, and it's committed so the

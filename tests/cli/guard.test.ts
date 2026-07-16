@@ -527,7 +527,7 @@ describe('composeGuardStatus', () => {
       birthPassed: 3,
       coverageGaps: [
         { doc: DOC, anchor: 'a', kind: 'untestable', reason: 'r' },
-        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'api', reason: 'r' },
+        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'web', reason: 'r' },
         { doc: DOC, anchor: 'c', kind: 'untestable', reason: 'r' },
       ],
       birthFindings: [{ doc: DOC, anchor: 'a', title: 't', step: 1, expected: 'e', actual: 'a' }],
@@ -538,7 +538,7 @@ describe('composeGuardStatus', () => {
     expect(s.lastGenerate).toMatchObject({
       written: 1,
       birthPassed: 3,
-      coverageGapsByKind: { api: 1, web: 0, tui: 0, untestable: 2, 'no-claim': 0 },
+      coverageGapsByKind: { web: 1, tui: 0, library: 0, untestable: 2, 'no-claim': 0 },
       birthFindings: 1,
       errors: 1,
       usage: { calls: 5, costUsd: 0.42 },

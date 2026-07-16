@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GuardScenario } from '@truecourse/shared'
+import type { GuardApiScenario, GuardCliScenario, GuardScenario } from '@truecourse/shared'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 
 /** Absolute path to the realistic fixture CLI (`relkit`). */
@@ -99,10 +99,10 @@ export function writeScenarioFile(repo: string, relPath: string, content: string
   fs.writeFileSync(target, content)
 }
 
-/** Build a full, valid scenario from a partial spec. */
+/** Build a full, valid cli scenario from a partial spec. */
 export function scenario(
-  partial: Partial<GuardScenario> & Pick<GuardScenario, 'id' | 'steps'>,
-): GuardScenario {
+  partial: Partial<GuardCliScenario> & Pick<GuardCliScenario, 'id' | 'steps'>,
+): GuardCliScenario {
   return {
     guard: 1,
     id: partial.id,
@@ -147,5 +147,65 @@ export async function withPlantedSecrets(fn: () => void | Promise<void>): Promis
       if (prev === undefined) delete process.env[key]
       else process.env[key] = prev
     }
+  }
+}
+
+// --- Api-driver fixtures ----------------------------------------------------
+
+/** Absolute path to the fixture HTTP API (`todos`). */
+export const FIXTURE_API_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
+)
+
+/** Absolute path to the fixture server that dies at startup. */
+export const FIXTURE_API_CRASH = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/crash.mjs', import.meta.url),
+)
+
+/** Write a recipe.json whose `api` block boots the fixture todos server. */
+export function writeApiRecipe(
+  repo: string,
+  overrides: {
+    build?: string
+    entry?: string[]
+    serve?: string[]
+    healthPath?: string
+    readyTimeoutMs?: number
+    env?: Record<string, string>
+    apiEnv?: Record<string, string>
+    services?: { up: string; down?: string }
+  } = {},
+): void {
+  const recipe = {
+    build: overrides.build ?? 'true',
+    ...(overrides.entry ? { entry: overrides.entry } : {}),
+    ...(overrides.env ? { env: overrides.env } : {}),
+    api: {
+      serve: overrides.serve ?? ['node', FIXTURE_API_SERVER],
+      healthPath: overrides.healthPath ?? '/health',
+      ...(overrides.readyTimeoutMs ? { readyTimeoutMs: overrides.readyTimeoutMs } : {}),
+      ...(overrides.apiEnv ? { env: overrides.apiEnv } : {}),
+      ...(overrides.services ? { services: overrides.services } : {}),
+    },
+  }
+  const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(recipe, null, 2))
+  writeSpecDoc(repo)
+}
+
+/** Build a full, valid api scenario from a partial spec. */
+export function apiScenario(
+  partial: Partial<GuardApiScenario> & Pick<GuardApiScenario, 'id' | 'steps'>,
+): GuardApiScenario {
+  return {
+    guard: 1,
+    id: partial.id,
+    title: partial.title ?? partial.id,
+    binds: partial.binds ?? specBinds('a/b'),
+    driver: 'api',
+    ...(partial.setup ? { setup: partial.setup } : {}),
+    steps: partial.steps,
+    normalize: partial.normalize ?? [],
   }
 }

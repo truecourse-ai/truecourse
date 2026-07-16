@@ -1,0 +1,209 @@
+/**
+ * Api expectation evaluation. Body text arrives already normalized; JSON-path
+ * matchers parse the RAW body (normalizers are text transforms — applying them
+ * before JSON.parse could corrupt the syntax) and normalize only the compared
+ * string forms. Checks run in a fixed order — status, headers, body, json — and
+ * the FIRST mismatch is returned, so the compact inline `{ expected, actual }`
+ * is deterministic (mirrors the cli driver's `evaluateExpect`).
+ */
+
+import type { GuardApiExpect, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
+import type { ExpectMismatch } from '../expect.js'
+import { lookupJsonPath, JSON_PATH_MISS, captureValueToString } from './vars.js'
+
+export interface EvaluateApiExpectParams {
+  expect: GuardApiExpect
+  status: number | null
+  /** Response headers, lower-cased names. */
+  headers: Record<string, string>
+  /** Already-normalized response body text. */
+  bodyText: string
+  /** RAW response body text (JSON matchers parse this). */
+  rawBodyText: string
+  /** Applies the scenario's normalizers (for json-value string comparison). */
+  normalizeText: (text: string) => string
+}
+
+/** An api mismatch reuses the cli mismatch shape; `subject` gains api values. */
+export type ApiExpectMismatch = Omit<ExpectMismatch, 'subject'> & {
+  subject: 'status' | 'headers' | 'body' | 'json'
+}
+
+export function evaluateApiExpect(params: EvaluateApiExpectParams): ApiExpectMismatch | null {
+  const { expect } = params
+
+  if (expect.status !== undefined && params.status !== expect.status) {
+    return {
+      subject: 'status',
+      expected: `status ${expect.status}`,
+      actual: `status ${params.status ?? '(none)'}`,
+      detail: [
+        `expected HTTP status ${expect.status}, got ${params.status ?? '(no response)'}`,
+        `--- response body ---`,
+        params.bodyText,
+      ],
+    }
+  }
+
+  if (expect.headers) {
+    for (const [name, matcher] of Object.entries(expect.headers)) {
+      const value = params.headers[name.toLowerCase()]
+      if (value === undefined) {
+        return {
+          subject: 'headers',
+          expected: `header ${name} to be present`,
+          actual: `header ${name} missing`,
+          detail: [`expected response header ${name}, present headers: ${Object.keys(params.headers).join(', ') || '(none)'}`],
+        }
+      }
+      const m = matchText(`header ${name}`, matcher, value)
+      if (m) return { ...m, subject: 'headers' }
+    }
+  }
+
+  if (expect.body) {
+    const m = matchText('body', expect.body, params.bodyText)
+    if (m) return { ...m, subject: 'body' }
+  }
+
+  if (expect.json) {
+    const parsed = parseJsonBody(params.rawBodyText)
+    if ('error' in parsed) {
+      return {
+        subject: 'json',
+        expected: 'a JSON response body',
+        actual: `unparseable body: ${parsed.error}`,
+        detail: ['expected the response body to parse as JSON', '--- actual body ---', params.rawBodyText],
+      }
+    }
+    for (const [path, matcher] of Object.entries(expect.json)) {
+      const m = matchJsonPath(path, matcher, parsed.value, params.normalizeText)
+      if (m) return m
+    }
+  }
+
+  return null
+}
+
+/** Parse a response body as JSON, tolerating nothing — the matcher asked for JSON. */
+export function parseJsonBody(rawBodyText: string): { value: unknown } | { error: string } {
+  try {
+    return { value: JSON.parse(rawBodyText) as unknown }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+function truncate(value: string, max = 400): string {
+  return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value
+}
+
+/** `equals | contains | matches` against a text value (same vocabulary as streams). */
+function matchText(
+  label: string,
+  matcher: GuardStreamMatcher,
+  value: string,
+): Omit<ApiExpectMismatch, 'subject'> | null {
+  if (matcher.equals !== undefined) {
+    if (value === matcher.equals) return null
+    return {
+      expected: `${label} equals ${JSON.stringify(truncate(matcher.equals))}`,
+      actual: `${label} was ${JSON.stringify(truncate(value))}`,
+      detail: [`--- expected ${label} (equals) ---`, matcher.equals, `--- actual ${label} ---`, value],
+    }
+  }
+  if (matcher.contains !== undefined) {
+    if (value.includes(matcher.contains)) return null
+    return {
+      expected: `${label} contains ${JSON.stringify(matcher.contains)}`,
+      actual: `${label} was ${JSON.stringify(truncate(value))}`,
+      detail: [`expected ${label} to contain:`, matcher.contains, `--- actual ${label} ---`, value],
+    }
+  }
+  let re: RegExp | null = null
+  let reError = ''
+  try {
+    re = new RegExp(matcher.matches as string)
+  } catch (e) {
+    reError = e instanceof Error ? e.message : String(e)
+  }
+  if (re && re.test(value)) return null
+  return {
+    expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+    actual: `${label} was ${JSON.stringify(truncate(value))}`,
+    detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
+  }
+}
+
+function matchJsonPath(
+  path: string,
+  matcher: GuardJsonMatcher,
+  root: unknown,
+  normalizeText: (text: string) => string,
+): ApiExpectMismatch | null {
+  const label = path === '' ? 'json root' : `json ${path}`
+  const value = lookupJsonPath(root, path)
+  const present = value !== JSON_PATH_MISS
+
+  if (matcher.exists === true || matcher.absent === false) {
+    if (!present) return jsonMiss(label, 'to exist', 'missing')
+  }
+  if (matcher.absent === true || matcher.exists === false) {
+    if (present) {
+      return jsonMiss(label, 'to be absent', `present (${truncate(captureValueToString(value))})`)
+    }
+  }
+
+  if (matcher.equals !== undefined || matcher.contains !== undefined || matcher.matches !== undefined) {
+    if (!present) return jsonMiss(label, 'to exist for a value check', 'missing')
+
+    if (matcher.equals !== undefined) {
+      if (!jsonEquals(value, matcher.equals)) {
+        return {
+          subject: 'json',
+          expected: `${label} equals ${JSON.stringify(matcher.equals)}`,
+          actual: `${label} was ${JSON.stringify(truncate(JSON.stringify(value)))}`,
+          detail: [
+            `--- expected ${label} (equals) ---`,
+            JSON.stringify(matcher.equals, null, 2),
+            `--- actual ${label} ---`,
+            JSON.stringify(value, null, 2),
+          ],
+        }
+      }
+      return null
+    }
+
+    const text = normalizeText(captureValueToString(value))
+    const m = matchText(label, matcher as GuardStreamMatcher, text)
+    if (m) return { ...m, subject: 'json' }
+  }
+
+  return null
+}
+
+/** Structural JSON equality (key order irrelevant, arrays ordered). */
+function jsonEquals(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => jsonEquals(v, b[i]))
+  }
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
+    const ka = Object.keys(a as Record<string, unknown>)
+    const kb = Object.keys(b as Record<string, unknown>)
+    return (
+      ka.length === kb.length &&
+      ka.every((k) => jsonEquals((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+    )
+  }
+  return false
+}
+
+function jsonMiss(label: string, expectedPhrase: string, actualState: string): ApiExpectMismatch {
+  return {
+    subject: 'json',
+    expected: `${label} ${expectedPhrase}`,
+    actual: `${label} ${actualState}`,
+    detail: [`expected ${label} ${expectedPhrase}, but it was ${actualState}`],
+  }
+}

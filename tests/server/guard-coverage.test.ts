@@ -69,7 +69,7 @@ const result: GuardGenerateReport = {
   noChanges: false,
   written: [],
   coverageGaps: [
-    { doc: DOC, anchor: 's-api', kind: 'awaiting-driver', driver: 'api', reason: 'needs the api driver' },
+    { doc: DOC, anchor: 's-api', kind: 'awaiting-driver', driver: 'library', reason: 'import-only surface' },
     { doc: DOC, anchor: 's-tui', kind: 'awaiting-driver', driver: 'tui', reason: 'terminal UI only' },
     { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
     { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
@@ -109,9 +109,9 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(sg.scenarioIds).toEqual(['sg1']);
   });
 
-  it('maps coverage gaps (api / tui / no-claim) with their reasons', () => {
-    expect(status('s-api')).toBe('api');
-    expect(byAnchor.get('s-api')!.reason).toBe('needs the api driver');
+  it('maps coverage gaps (library / tui / no-claim) with their reasons', () => {
+    expect(status('s-api')).toBe('library');
+    expect(byAnchor.get('s-api')!.reason).toBe('import-only surface');
     expect(status('s-tui')).toBe('tui');
     expect(status('s-no-claim')).toBe('no-claim');
   });
@@ -158,7 +158,7 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
-      api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
+      library: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
       unguarded: 1, orphaned: 0,
     });
   });

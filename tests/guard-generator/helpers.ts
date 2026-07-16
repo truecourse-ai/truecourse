@@ -164,3 +164,44 @@ export function writeScenarioFile(repo: string, rel: string, scenario: GuardScen
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, JSON.stringify(scenario, null, 2))
 }
+
+// --- Api-driver fixtures ----------------------------------------------------
+
+/** The fixture HTTP API (`todos`) shared with the guard-runner api tests. */
+export const FIXTURE_API_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-api/server.mjs', import.meta.url),
+)
+
+/** Write a `recipe.json` with an `api` block booting the fixture todos server
+ *  (and, unless `entry: null`, the fixture CLI entry so cli claims stay authorable). */
+export function writeApiRecipe(
+  repo: string,
+  overrides: { build?: string; entry?: string[] | null } = {},
+): void {
+  const recipe = {
+    build: overrides.build ?? 'true',
+    ...(overrides.entry === null ? {} : { entry: overrides.entry ?? ['node', FIXTURE_BIN] }),
+    api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+  }
+  const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, JSON.stringify(recipe, null, 2))
+}
+
+/** A raw generated api scenario as a model would return it. */
+export function rawApi(
+  title: string,
+  steps: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'],
+  extra: Partial<RawGeneratedScenario> = {},
+): RawGeneratedScenario {
+  return { title, driver: 'api', steps, ...extra } as RawGeneratedScenario
+}
+
+/** An api step listing the fixture's empty todos (passes against the fixture). */
+export const PASSING_API_STEPS: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'] = [
+  { request: { method: 'GET', path: '/todos' }, expect: { status: 200, json: { todos: { equals: [] } } } },
+]
+/** An api step asserting /boom answers 200 (the fixture answers 500 → fails). */
+export const FAILING_API_STEPS: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'] = [
+  { request: { method: 'GET', path: '/boom' }, expect: { status: 200 } },
+]

@@ -156,9 +156,12 @@ sub-schema keyed by its `driver` value, (2) a runner module (sandbox/environment
 verb executor + evidence capture + its normalizer additions), and (3) a recipe kind for its
 preparation. Nothing else moves: stores, section anchoring, the manifest, the dashboard status
 model, and the generate pipeline are driver-agnostic. Testability classification already records
-the target driver per section today, so when the api driver ships, its sections are
-pre-classified and generation targets them with no re-scan — CLI-first is a sequencing choice,
-not an architectural one.
+the target driver per section today, so when a driver ships, its sections are
+pre-classified and generation targets them with no re-scan — CLI-first was a sequencing choice,
+not an architectural one. The api driver (Phase 6 PoC) landed exactly along this contract:
+its verb sub-schema (`request`/`capture`/`expect`), its runner module (server boot +
+health-wait + HTTP executor + api evidence), and its recipe kind (the `api` block), with the
+registry row flipped to runnable and nothing else moving.
 
 ## Setup capabilities (world-state vocabulary)
 
@@ -1514,7 +1517,19 @@ staleness refresh, empty/placeholder flows, guard deep links (?guard/?gsec) pres
   (small): move the pure guard status/drift composition helpers from core into shared so
   client and CLI import one copy (client currently mirrors them).
 - **Phase 6 — api driver.** Environment recipe v2 (compose), ephemeral datastores, network-
-  boundary fakes, egress control. STATUS: NOT STARTED (post-v1)
+  boundary fakes, egress control. STATUS: PoC BUILT 2026-07-16 (no sandboxing tier, per the
+  decision to defer isolation). What shipped: the `api` scenario variant (frozen envelope;
+  `request`/`capture`/`expect` verbs — status, headers, body matchers, JSON-path matchers,
+  `${var}` chaining), the recipe `api` block (`serve` argv + `healthPath`/`readyTimeoutMs`/
+  `env` + one-shot `services.up/down` commands), the runner module (per-scenario server boot
+  in the sandbox cwd with a runner-allocated `PORT`, health-wait, one loud api preflight
+  reusing `entry-preflight-failed`, api evidence bundles incl. server logs), the registry flip
+  (`api` runnable), and generation (api authoring prompt + per-driver batches/caches; api
+  claims with no recipe `api` block settle as honest `blocked-on` gaps; birth validation runs
+  through the same engine). Recipe `entry` is now optional — required only when cli scenarios
+  exist. Still open (the rest of this phase): compose-managed ephemeral datastores + baked
+  images, network-boundary fakes, egress control, api recipe discovery, per-scenario boot
+  amortization (shared-server mode), and the isolation/sandboxing tier.
 - **Phase 7 — tui / web / library drivers.** PTY tier; Playwright tier; in-process
   programmatic-API tier (sections already classified; sandbox package-link mechanism
   prototyped in PR #755, closed unmerged — revive on driver start). STATUS: NOT

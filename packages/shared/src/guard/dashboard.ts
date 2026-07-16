@@ -187,10 +187,12 @@ export interface GuardScenarioListItem {
  * it is `null` when there is no run to compare against.
  */
 export interface GuardRecipeCard {
-  /** Shell command run once to produce the entrypoint. */
+  /** Shell command run once to produce the entrypoint/server. */
   build: string
-  /** Entrypoint argv; scenario `run` argv is appended to this. */
-  entry: string[]
+  /** Entrypoint argv (cli driver); null on an api-only recipe. */
+  entry: string[] | null
+  /** Serve argv (api driver); null when the recipe has no `api` block. */
+  serve: string[] | null
   /** Recipe-level env the sandbox inherits; null when none is declared. */
   env: Record<string, string> | null
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */

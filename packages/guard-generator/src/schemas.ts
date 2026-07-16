@@ -20,6 +20,7 @@ import { z } from 'zod'
 import {
   GuardSetupSchema,
   GuardStepSchema,
+  GuardApiStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
   guardDriverIds,
@@ -98,9 +99,11 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
 /**
  * One scenario as the model authors it: the behavioral fields only. `id`,
  * `binds`, and `guard` are engine-owned, so we tolerate (and ignore) whatever the
- * model wrote for them via `.passthrough()`.
+ * model wrote for them via `.passthrough()`. One schema per runnable driver —
+ * each authoring prompt embeds ITS driver's schema, and the parse accepts either
+ * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
  */
-export const RawGeneratedScenarioSchema = z
+export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
     driver: z.literal('cli'),
@@ -109,6 +112,23 @@ export const RawGeneratedScenarioSchema = z
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()
+export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSchema>
+
+export const RawGeneratedApiScenarioSchema = z
+  .object({
+    title: z.string().min(1),
+    driver: z.literal('api'),
+    setup: GuardSetupSchema.optional(),
+    steps: z.array(GuardApiStepSchema).min(1),
+    normalize: z.array(GuardNormalizerSchema).optional(),
+  })
+  .passthrough()
+export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
+
+export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
+  RawGeneratedCliScenarioSchema,
+  RawGeneratedApiScenarioSchema,
+])
 export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
 
 /**

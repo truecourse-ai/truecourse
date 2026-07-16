@@ -1,7 +1,7 @@
 /**
  * `@truecourse/guard-runner` — the deterministic side of guard: scenario loading,
- * sandbox lifecycle, the cli driver, normalizers, evidence capture, and result
- * mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
+ * sandbox lifecycle, the cli and api drivers, normalizers, evidence capture, and
+ * result mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
 export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, runFailureMessage } from './run.js'
@@ -13,9 +13,37 @@ export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-exe
 export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 
-export { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError } from './recipe.js'
-export type { Recipe, LoadedRecipe } from './recipe.js'
-export { RecipeSchema } from './recipe.js'
+export {
+  loadRecipe,
+  resolveEntry,
+  computeRecipeFingerprint,
+  RecipeError,
+  DEFAULT_API_HEALTH_PATH,
+  DEFAULT_API_READY_TIMEOUT_MS,
+} from './recipe.js'
+export type { Recipe, RecipeApi, LoadedRecipe } from './recipe.js'
+export { RecipeSchema, RecipeApiSchema } from './recipe.js'
+
+export { runApiScenario } from './api/run-api-scenario.js'
+export type { RunApiScenarioContext } from './api/run-api-scenario.js'
+export { startApiServer, allocateFreePort } from './api/server.js'
+export type { ApiServerHandle, StartApiServerResult, StartApiServerOptions } from './api/server.js'
+export { executeApiRequest } from './api/executor.js'
+export type { ApiStepCapture, ExecuteApiRequestOptions } from './api/executor.js'
+export { evaluateApiExpect, parseJsonBody } from './api/expect.js'
+export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js'
+export {
+  interpolate,
+  interpolateRequest,
+  lookupJsonPath,
+  captureValueToString,
+  JSON_PATH_MISS,
+  UnknownVariableError,
+} from './api/vars.js'
+export { preflightApiServer } from './api/preflight.js'
+export type { ApiPreflightOptions } from './api/preflight.js'
+export { writeApiEvidence } from './api/evidence.js'
+export type { ApiEvidenceStep, WriteApiEvidenceParams } from './api/evidence.js'
 
 export {
   runScenario,

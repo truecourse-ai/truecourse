@@ -543,7 +543,12 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
   const result = RecipeSchema.safeParse(parsed)
   if (!result.success) return null
   const recipe = result.data
-  const card = { build: recipe.build, entry: recipe.entry.slice(), env: recipe.env ?? null }
+  const card = {
+    build: recipe.build,
+    entry: recipe.entry ? recipe.entry.slice() : null,
+    serve: recipe.api ? recipe.api.serve.slice() : null,
+    env: recipe.env ?? null,
+  }
   if (!guardsMaterializeInPlace()) {
     const run = await readGuardRunForView(repoKey, commit)
     return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }

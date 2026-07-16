@@ -17,11 +17,22 @@ import {
   type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
-import { loadRecipe, resolveEntry, computeRecipeFingerprint, RecipeError, type Recipe, type LoadedRecipe } from './recipe.js'
+import {
+  loadRecipe,
+  resolveEntry,
+  computeRecipeFingerprint,
+  RecipeError,
+  DEFAULT_API_HEALTH_PATH,
+  DEFAULT_API_READY_TIMEOUT_MS,
+  type Recipe,
+  type LoadedRecipe,
+} from './recipe.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
+import { runApiScenario } from './api/run-api-scenario.js'
+import { preflightApiServer } from './api/preflight.js'
 import { appendGuardHistory, recipePath, writeGuardLatest, writeGuardRun } from './store.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs } from './doc-index.js'
@@ -240,9 +251,27 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     (p) => p.resolution.kind === 'stale' || p.resolution.kind === 'orphaned',
   )
 
+  // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
+  // scenario needs the `api` block. A scenario whose preparation is missing
+  // settles as an `error` naming the gap (never a silent skip) and never blocks
+  // the other driver's scenarios from running.
+  const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
+  const apiExec = executable.filter((p) => p.scenario.driver === 'api')
+  const hasEntry = loaded.recipe.entry !== undefined
+  const api = loaded.recipe.api
+  const runnable = [...(hasEntry ? cliExec : []), ...(api ? apiExec : [])]
+  const unprepared = [
+    ...(hasEntry
+      ? []
+      : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
+    ...(api
+      ? []
+      : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
+  ]
+
   // We own the build (and thus the entry pre-flight) only on a real run; birth
   // validation reuses the generator's single build + pre-flight and passes skipBuild.
-  const buildsOwnEntry = !opts.skipBuild && executable.length > 0
+  const buildsOwnEntry = !opts.skipBuild && runnable.length > 0
 
   // Run-level cancellation: children listen on ONE internal controller, tripped by
   // either the external `signal` or the overall `runTimeoutMs` wall-clock —
@@ -251,6 +280,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const cancel = new AbortController()
   let runTimedOut = false
   let settled = 0
+  // True once `api.services.up` ran — the matching `down` runs on the way out.
+  let servicesUp = false
   const onExternalAbort = (): void => cancel.abort()
   opts.signal?.addEventListener('abort', onExternalAbort, { once: true })
   const runTimer =
@@ -302,15 +333,15 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (!build.ok) return { status: 'build-failed', build, loadErrors }
     }
 
-    const resolvedEntry = resolveEntry(repoRoot, loaded.recipe.entry)
+    const resolvedEntry = hasEntry ? resolveEntry(repoRoot, loaded.recipe.entry!) : null
 
-    // Pre-flight the built entry ONCE before any scenario touches it: if it can't even
-    // start, that is ONE loud entry-level error, not N indistinguishable scenario
-    // failures. Runs under the build phase (before the run counter is announced).
-    if (buildsOwnEntry) {
+    // Pre-flight the built entry ONCE before any cli scenario touches it: if it
+    // can't even start, that is ONE loud entry-level error, not N indistinguishable
+    // scenario failures. Runs under the build phase (before the run counter is announced).
+    if (buildsOwnEntry && resolvedEntry && cliExec.length > 0) {
       const preflight = await preflightEntry({
         resolvedEntry,
-        displayEntry: loaded.recipe.entry,
+        displayEntry: loaded.recipe.entry!,
         recipeEnv: loaded.recipe.env,
         repoRoot,
       })
@@ -318,6 +349,44 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (stop) return stop
       if (!preflight.ok) {
         return { status: 'entry-preflight-failed', preflight, buildCommand: loaded.recipe.build, loadErrors }
+      }
+    }
+
+    // Api preparation — the optional one-shot services bring-up (the repo's own
+    // command, e.g. `docker compose up -d db`), then ONE loud boot preflight in a
+    // throwaway sandbox (the api analog of the entry preflight above, reported
+    // through the SAME result status). Runs even under `skipBuild` — the server
+    // boot is not the build, and birth validation needs the loud single error too.
+    let resolvedServe: string[] | null = null
+    let apiRecipeEnv: Record<string, string> | undefined
+    if (api && apiExec.length > 0) {
+      resolvedServe = resolveEntry(repoRoot, api.serve)
+      apiRecipeEnv = { ...(loaded.recipe.env ?? {}), ...(api.env ?? {}) }
+      if (api.services) {
+        const up = await runBuild(
+          repoRoot,
+          api.services.up,
+          loaded.recipe.env,
+          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          cancel.signal,
+        )
+        const stop = cancelled('build')
+        if (stop) return stop
+        if (!up.ok) return { status: 'build-failed', build: up, loadErrors }
+        servicesUp = true
+      }
+      const apiPreflight = await preflightApiServer({
+        resolvedServe,
+        displayServe: api.serve,
+        recipeEnv: apiRecipeEnv,
+        healthPath: api.healthPath ?? DEFAULT_API_HEALTH_PATH,
+        readyTimeoutMs: api.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+        signal: cancel.signal,
+      })
+      const stop = cancelled('build')
+      if (stop) return stop
+      if (!apiPreflight.ok) {
+        return { status: 'entry-preflight-failed', preflight: apiPreflight, buildCommand: loaded.recipe.build, loadErrors }
       }
     }
 
@@ -338,23 +407,53 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
+    // Scenarios whose driver has no preparation in the recipe settle as errors —
+    // an honest per-scenario gap, never a silent skip, never a run-wide failure.
+    for (const { scenario, resolution, missing } of unprepared) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds,
+        outcome: 'error',
+        durationMs: 0,
+        failure: { step: 1, expected: `the recipe to prepare the ${scenario.driver} driver`, actual: missing },
+        ...(resolution.kind === 'remap' ? { remappedTo: resolution.section.anchor } : {}),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
     // Pass evidence is part of the persisted run baseline; a non-persisted (birth
     // validation) run captures none for its passing candidates — the next real run does.
     const capturePassEvidence = opts.persist !== false
     const executed = (
-      await mapWithConcurrency(executable, concurrency, async ({ scenario, resolution }) => {
+      await mapWithConcurrency(runnable, concurrency, async ({ scenario, resolution }) => {
         // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
         // either — a run ending `aborted`/`run-timed-out` discards these results.
         if (cancel.signal.aborted) return null
-        const outcome = await runScenario(scenario, {
-          repoRoot,
-          runId,
-          resolvedEntry,
-          recipeEnv: loaded.recipe.env,
-          stepTimeoutMs,
-          capturePassEvidence,
-          signal: cancel.signal,
-        })
+        const outcome =
+          scenario.driver === 'api'
+            ? await runApiScenario(scenario, {
+                repoRoot,
+                runId,
+                resolvedServe: resolvedServe!,
+                healthPath: api!.healthPath ?? DEFAULT_API_HEALTH_PATH,
+                readyTimeoutMs: api!.readyTimeoutMs ?? DEFAULT_API_READY_TIMEOUT_MS,
+                recipeEnv: apiRecipeEnv,
+                stepTimeoutMs,
+                capturePassEvidence,
+                signal: cancel.signal,
+              })
+            : await runScenario(scenario, {
+                repoRoot,
+                runId,
+                resolvedEntry: resolvedEntry!,
+                recipeEnv: loaded.recipe.env,
+                stepTimeoutMs,
+                capturePassEvidence,
+                signal: cancel.signal,
+              })
         if (cancel.signal.aborted) return null
         const result: GuardScenarioResult =
           resolution.kind === 'remap' ? { ...outcome, remappedTo: resolution.section.anchor } : outcome
@@ -400,6 +499,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   } finally {
     if (runTimer) clearTimeout(runTimer)
     opts.signal?.removeEventListener('abort', onExternalAbort)
+    // Tear down whatever `api.services.up` brought up — best-effort, unconditional
+    // (a failed teardown must never mask the run's own result).
+    if (servicesUp && api?.services?.down) {
+      await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+    }
   }
 }
 

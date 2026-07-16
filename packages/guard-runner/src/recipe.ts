@@ -1,8 +1,13 @@
 /**
  * The preparation recipe (`.truecourse/scenarios/recipe.json`) — how to turn the
- * working tree into a runnable entrypoint. `build` runs once per run in the repo
- * root; `entry` (argv) is stored repo-relative and resolved to absolute at run
- * time so a sandbox in a temp dir can still invoke the built binary.
+ * working tree into something scenarios can drive. `build` runs once per run in
+ * the repo root; `entry` (argv, the cli driver's preparation) is stored
+ * repo-relative and resolved to absolute at run time so a sandbox in a temp dir
+ * can still invoke the built binary. The optional `api` block is the api
+ * driver's preparation: how to START the built HTTP server (`serve` argv, same
+ * resolution as `entry`), how to know it's ready (`healthPath` polled until
+ * 2xx), and optional one-shot `services` commands for datastores the server
+ * needs. The runner allocates a free port per boot and injects it as `PORT`.
  *
  * The recipe also carries an inputs fingerprint — a hash of the files that would
  * inform discovery (package.json, the lockfile, build config). This phase records
@@ -14,19 +19,54 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 
+/** The api driver's preparation layer — how to boot + health-check the server. */
+export const RecipeApiSchema = z
+  .object({
+    /** Argv that starts the HTTP server (resolved like `entry`). The runner sets `PORT`. */
+    serve: z.array(z.string()).min(1),
+    /** Health endpoint polled until it returns 2xx. Defaults to `/`. */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Wall-clock budget for the server to become healthy. Defaults to 30s. */
+    readyTimeoutMs: z.number().int().positive().optional(),
+    /** Extra env for the server process (on top of the recipe-level `env`). */
+    env: z.record(z.string(), z.string()).optional(),
+    /**
+     * One-shot datastore orchestration, run in the repo root once per run:
+     * `up` before any api scenario, `down` (optional) after the last one.
+     * The runner does no orchestration itself — these are the repo's own commands
+     * (e.g. `docker compose up -d db`).
+     */
+    services: z
+      .object({ up: z.string().min(1), down: z.string().min(1).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict()
+
 export const RecipeSchema = z
   .object({
     /** Optional shell command run once in the repo root, before every build, to fetch dependencies. */
     install: z.string().min(1).optional(),
-    /** Shell command run once in the repo root to produce the entrypoint. */
+    /** Shell command run once in the repo root to produce the entrypoint/server. */
     build: z.string().min(1),
-    /** Entrypoint argv; scenario `run` argv is appended to this. Repo-relative. */
-    entry: z.array(z.string()).min(1),
+    /** Entrypoint argv (cli driver); scenario `run` argv is appended to this. Repo-relative. */
+    entry: z.array(z.string()).min(1).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    /** The api driver's preparation layer; present when the repo has api scenarios. */
+    api: RecipeApiSchema.optional(),
   })
   .strict()
+  .refine((r) => r.entry !== undefined || r.api !== undefined, {
+    message: 'recipe needs an `entry` (cli driver) and/or an `api` block (api driver)',
+  })
 
+export type RecipeApi = z.infer<typeof RecipeApiSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
+
+/** Default health path polled on the booted api server. */
+export const DEFAULT_API_HEALTH_PATH = '/'
+/** Default wall-clock budget for the api server to become healthy. */
+export const DEFAULT_API_READY_TIMEOUT_MS = 30_000
 
 export interface LoadedRecipe {
   recipe: Recipe
