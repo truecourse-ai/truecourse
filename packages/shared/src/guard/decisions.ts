@@ -101,6 +101,11 @@ export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
   dismissedFindings: [],
 }
 
+/** Hard length cap for a dismissal `note` — it persists into a git-committed
+ *  file. Both dismiss routes (claim and finding) reject an oversize note with a
+ *  400 rather than truncating silently. */
+export const GUARD_DISMISS_NOTE_MAX = 2000
+
 /** The stable identity key a dismissal / claim matches on: doc + anchor + title. */
 export function dismissedClaimKey(doc: string, anchor: string, title: string): string {
   return `${doc}\0${anchor}\0${title}`

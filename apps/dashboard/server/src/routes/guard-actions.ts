@@ -14,8 +14,21 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
- *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
- *   POST /:id/guard/undismiss  reverse a dismissal.
+ *   POST /:id/guard/dismiss    dismiss a finding's claim (legacy identity; the
+ *                              claim-level dismiss ACTION is gone from the UI but
+ *                              the route stays for API callers).
+ *   POST /:id/guard/undismiss  reverse a legacy claim dismissal (kept unchanged —
+ *                              it serves pre-existing entries forever).
+ *   POST /:id/guard/dismiss-finding    dismiss ONE finding by its behavior-hash
+ *                              identity `{ doc, anchor, scenarioHash, note? }`;
+ *                              the server resolves the finding in the report it
+ *                              serves for the request's scope and persists its OWN
+ *                              copy of yaml/title/claim (client display fields are
+ *                              neither accepted nor trusted). 409 `stale-report`
+ *                              when the key matches nothing.
+ *   POST /:id/guard/undismiss-finding  reverse a per-finding dismissal by
+ *                              `{ doc, anchor, scenarioHash }` — a pure identity
+ *                              removal, no finding lookup.
  *
  * Concurrency: one guard job per repo at a time. A second trigger while one is in
  * flight is rejected with 409 (the client also disables the buttons). The spec
@@ -38,6 +51,9 @@ import {
 import {
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFinding,
+  undismissGuardFinding,
+  resolveGuardFinding,
   getGuardDecisions,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
@@ -45,7 +61,12 @@ import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
+import {
+  dismissedClaimKey,
+  guardFindingKey,
+  GUARD_DISMISS_NOTE_MAX,
+  type GuardDecisions,
+} from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -119,20 +140,38 @@ async function regenerateIfLastPrFindingDismissed(repoPath: string, pr: number):
 }
 
 // The "this write left zero active findings" gate both regen hooks share: true
-// when the report exists, has findings, and every finding's claim is dismissed —
-// i.e. the dismissal that just landed was the last active one. A finding with no
-// extracted claim can never be dismissed, so it keeps the result false.
+// when the report exists, has findings, and EVERY finding is dismissed — by its
+// server-stamped `findingKey` (the per-finding identity; `readGuardResultForView`
+// stamps at the store-read choke point, since stored reports never carry keys) OR
+// by its legacy claim identity. Kind-uniform. A finding with neither a key
+// (no/underivable yaml) nor a dismissed claim can never be dismissed, so it keeps
+// the result false — same as today's claim-less findings.
 function allFindingsDismissed(
   report: Awaited<ReturnType<typeof readGuardResultForView>>,
   decisions: GuardDecisions,
 ): boolean {
   if (!report || report.birthFindings.length === 0) return false;
-  const dismissed = new Set(
+  const dismissedClaims = new Set(
     decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
   );
-  return report.birthFindings.every(
-    (f) => f.claim != null && dismissed.has(dismissedClaimKey(f.doc, f.anchor, f.claim)),
+  const dismissedKeys = new Set(
+    (decisions.dismissedFindings ?? []).map((f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash)),
   );
+  return report.birthFindings.every(
+    (f) =>
+      (f.findingKey != null && dismissedKeys.has(f.findingKey)) ||
+      (f.claim != null && dismissedClaims.has(dismissedClaimKey(f.doc, f.anchor, f.claim))),
+  );
+}
+
+// The dismissal `note` persists into a git-committed file — hard-capped, rejected
+// (never silently truncated) on BOTH dismiss routes.
+function noteOverCap(res: Response, note: string | undefined): boolean {
+  if (note !== undefined && note.length > GUARD_DISMISS_NOTE_MAX) {
+    res.status(400).json({ error: `note exceeds the ${GUARD_DISMISS_NOTE_MAX}-character cap.` });
+    return true;
+  }
+  return false;
 }
 
 // A guard generate/run is in flight for this repo id. Both actions share the set:
@@ -271,6 +310,7 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
+    if (noteOverCap(res, note)) return;
     const pr = parsed.pr;
     await mutateGuardDecisions(
       repo.path,
@@ -313,6 +353,95 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
     }
     await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
       undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — dismiss ONE finding by its behavior-hash identity. The server resolves
+// the finding by `guardFindingKey` in the SAME report the view serves for the
+// request's scope (repo level, or the PR's pinned gated head — baseline fallback
+// included) and persists its OWN copy of `yaml`/`title`/`claim`: the stored yaml
+// is a git-committed comparison anchor, so a stale or crafted client payload must
+// never write a self-inconsistent entry. A key that matches nothing (the report
+// regenerated between render and click) is a 409 `stale-report`; the client
+// refetches. Two findings sharing a key (byte-identical siblings) is NOT an
+// error — first match wins. Kind-uniform: birth and fidelity findings resolve
+// identically.
+router.post('/:id/guard/dismiss-finding', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const body = (req.body ?? {}) as { doc?: string; anchor?: string; scenarioHash?: string; note?: string };
+    const { doc, anchor, scenarioHash, note } = body;
+    if (!doc || !anchor || !scenarioHash) {
+      res.status(400).json({ error: 'dismiss-finding requires { doc, anchor, scenarioHash }.' });
+      return;
+    }
+    if (noteOverCap(res, note)) return;
+    const pr = parsed.pr;
+
+    // PR scope resolves against the pinned gated head's report — the same head
+    // the PR view and the PR regen trigger read.
+    const head = pr !== undefined ? (await getGuardGateHeadsLookup()?.(repo.path, pr))?.[0] : undefined;
+    const finding = await resolveGuardFinding(repo.path, { doc, anchor, scenarioHash }, head);
+    if (!finding || finding.yaml === undefined) {
+      res.status(409).json({ error: 'stale-report' });
+      return;
+    }
+
+    await mutateGuardDecisions(
+      repo.path,
+      pr,
+      res,
+      (opts) =>
+        dismissGuardFinding(
+          repo.path,
+          {
+            doc,
+            anchor,
+            scenarioHash,
+            yaml: finding.yaml as string,
+            title: finding.title,
+            ...(finding.claim !== undefined ? { claim: finding.claim } : {}),
+            dismissedAt: new Date().toISOString(),
+            ...(note ? { note } : {}),
+          },
+          opts,
+        ),
+      pr === undefined
+        ? () => regenerateIfLastFindingDismissed(repo.path)
+        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST — reverse a per-finding dismissal by `{ doc, anchor, scenarioHash }`. A
+// pure identity removal (the entry may refer to a scenario no report currently
+// serves); no-op when absent. With `?pr=N` the write targets the PR overlay (EE).
+router.post('/:id/guard/undismiss-finding', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const parsed = parsePr(req);
+    if ('error' in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const body = (req.body ?? {}) as { doc?: string; anchor?: string; scenarioHash?: string };
+    const { doc, anchor, scenarioHash } = body;
+    if (!doc || !anchor || !scenarioHash) {
+      res.status(400).json({ error: 'undismiss-finding requires { doc, anchor, scenarioHash }.' });
+      return;
+    }
+    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
+      undismissGuardFinding(repo.path, { doc, anchor, scenarioHash }, opts),
     );
   } catch (e) {
     next(e);

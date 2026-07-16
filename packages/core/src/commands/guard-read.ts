@@ -38,8 +38,10 @@ import {
   type GuardCoverageGapKind,
   type GuardDecisions,
   type GuardClaimIdentity,
+  type GuardBirthFinding,
   type GuardDismissedClaim,
   type GuardDismissedFinding,
+  type GuardFindingIdentity,
   type GuardDocCoverage,
   type GuardLatest,
   type GuardManifest,
@@ -771,6 +773,77 @@ export async function undismissGuardClaim(
   return next
 }
 
+/**
+ * Resolve a served finding by its per-finding identity in the report the
+ * request's scope reads — the SAME `readGuardReport` (stamped, baseline-fallback
+ * included) the report GET serves, so dismiss resolution and the view can't skew.
+ * Two findings can legitimately share a key (byte-identical sibling candidates);
+ * FIRST match wins (report array order) — the copies are behaviorally identical
+ * by definition (only `title` can differ), so which one donates the display
+ * fields is immaterial. `null` = the key matches nothing (stale report).
+ */
+export async function resolveGuardFinding(
+  repoKey: string,
+  identity: GuardFindingIdentity,
+  ref?: string,
+): Promise<GuardBirthFinding | null> {
+  const report = await readGuardReport(repoKey, ref)
+  if (!report) return null
+  const fk = guardFindingKey(identity.doc, identity.anchor, identity.scenarioHash)
+  return report.birthFindings.find((f) => f.findingKey === fk) ?? null
+}
+
+/**
+ * Add a per-finding dismissal (idempotent on doc+anchor+scenarioHash — a
+ * re-dismiss refreshes the entry in place), returning the updated file. With
+ * `opts.pr` the write targets the PR overlay scope ONLY (enterprise-only), same
+ * contract as {@link dismissGuardClaim}. The entry's `yaml`/`title`/`claim` must
+ * be the SERVER's copy of the served finding (see the dismiss route) — never
+ * client-supplied.
+ */
+export async function dismissGuardFinding(
+  repoRoot: string,
+  finding: GuardDismissedFinding,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const key = guardFindingKey(finding.doc, finding.anchor, finding.scenarioHash)
+  const dismissedFindings = (decisions.dismissedFindings ?? []).filter(
+    (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
+  )
+  dismissedFindings.push(finding)
+  const next: GuardDecisions = { ...decisions, dismissedFindings }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
+/**
+ * Remove a per-finding dismissal by identity (no-op when absent), returning the
+ * updated file. Needs no finding lookup — the entry may legitimately refer to a
+ * scenario no report currently serves. With `opts.pr` the read+write target the
+ * PR overlay ONLY (enterprise-only), same semantics as {@link undismissGuardClaim}.
+ */
+export async function undismissGuardFinding(
+  repoRoot: string,
+  identity: GuardFindingIdentity,
+  opts?: { pr?: number },
+): Promise<GuardDecisions> {
+  assertNoGuardPrInPlace(opts?.pr)
+  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
+  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const key = guardFindingKey(identity.doc, identity.anchor, identity.scenarioHash)
+  const next: GuardDecisions = {
+    ...decisions,
+    dismissedFindings: (decisions.dismissedFindings ?? []).filter(
+      (f) => guardFindingKey(f.doc, f.anchor, f.scenarioHash) !== key,
+    ),
+  }
+  await writeGuardDecisionsStore(repoRoot, next, scope)
+  return next
+}
+
 /** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
  *  Exported so the EE gate/regen paths read the same overlay the writes target. */
 export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
@@ -836,7 +909,10 @@ export async function getGuardDecisions(
 export async function promoteGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<boolean> {
   assertNoGuardPrInPlace(pr)
   const overlay = await readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
-  if (overlay.dismissedClaims.length === 0) return false
+  // Empty = carries nothing in EITHER array. Post-feature the typical overlay
+  // holds ONLY dismissedFindings — a claims-only guard would never promote and
+  // every PR-scoped dismissal would silently vanish from the repo view on merge.
+  if (overlay.dismissedClaims.length === 0 && (overlay.dismissedFindings ?? []).length === 0) return false
   const merged = mergeGuardDecisions(await readGuardDecisionsStore(repoRoot), overlay)
   await writeGuardDecisionsStore(repoRoot, merged)
   await deleteGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))

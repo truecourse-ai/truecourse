@@ -20,6 +20,8 @@ import {
   discardGuardDecisionsOverlay,
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFinding,
+  undismissGuardFinding,
   writeGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardStore, resetGuardStore } from '../../packages/core/src/lib/guard-store';
@@ -171,6 +173,44 @@ describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
     expect(repoRow.dismissedClaims.map((c) => c.anchor).sort()).toEqual(['pr', 'repo']);
     expect(repoRow.repoFuture).toEqual([1]);
     expect(repoRow.overlayFuture).toEqual(['x']);
+  });
+
+  it('promotes an overlay whose ONLY content is dismissedFindings (§6 emptiness guard widened)', async () => {
+    await dismissGuardFinding(
+      REPO,
+      {
+        doc: 'docs/cli.md',
+        anchor: 'version',
+        scenarioHash: 'deadbeefdeadbeef',
+        yaml: 'y',
+        title: 't',
+        dismissedAt: '2026-07-16T00:00:00.000Z',
+      },
+      { pr: 7 },
+    );
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(true);
+    const repoRow = await getGuardDecisions(REPO);
+    expect((repoRow.dismissedFindings ?? []).map((f) => f.scenarioHash)).toEqual(['deadbeefdeadbeef']);
+    // The overlay is dropped — a second promote is a no-op.
+    expect(await promoteGuardDecisionsOverlay(REPO, 7)).toBe(false);
+  });
+
+  it('finding dismiss/undismiss with { pr } target the overlay scope only', async () => {
+    const entry = {
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      scenarioHash: 'deadbeefdeadbeef',
+      yaml: 'y',
+      title: 't',
+      dismissedAt: '2026-07-16T00:00:00.000Z',
+    };
+    await dismissGuardFinding(REPO, entry, { pr: 7 });
+    expect(((await getGuardDecisions(REPO)).dismissedFindings ?? [])).toEqual([]);
+    expect(((await getGuardDecisions(REPO, { pr: 7 })).dismissedFindings ?? []).map((f) => f.scenarioHash)).toEqual([
+      'deadbeefdeadbeef',
+    ]);
+    await undismissGuardFinding(REPO, entry, { pr: 7 });
+    expect(((await getGuardDecisions(REPO, { pr: 7 })).dismissedFindings ?? [])).toEqual([]);
   });
 
   it('a PR un-dismiss of a repo-level dismissal is a no-op on the overlay; the merged view still shows it dismissed', async () => {

@@ -7,6 +7,8 @@ import {
   writeGuardDecisions,
   dismissGuardClaim,
   undismissGuardClaim,
+  dismissGuardFinding,
+  undismissGuardFinding,
   guardDecisionsPath,
 } from '../../packages/guard-runner/src/index';
 
@@ -80,5 +82,38 @@ describe('guard decisions store', () => {
     expect(undismissGuardClaim(r, id).dismissedClaims).toEqual([]);
     // A second undismiss (already gone) is a clean no-op.
     expect(undismissGuardClaim(r, id).dismissedClaims).toEqual([]);
+  });
+});
+
+describe('guard finding-dismissal store (per-finding identity)', () => {
+  const entry = (over: Record<string, unknown> = {}) => ({
+    doc: 'docs/cli.md',
+    anchor: 'version',
+    scenarioHash: 'deadbeefdeadbeef',
+    yaml: 'guard: 1\n',
+    title: 'the scenario title',
+    claim: 'the claim text',
+    dismissedAt: '2026-07-16T00:00:00.000Z',
+    ...over,
+  });
+
+  it('dismiss adds an entry; re-dismissing the same identity refreshes in place', () => {
+    const r = repo();
+    dismissGuardFinding(r, entry());
+    const after = dismissGuardFinding(r, entry({ note: 'noise', dismissedAt: 't2' }));
+    expect(after.dismissedFindings).toHaveLength(1);
+    expect(after.dismissedFindings[0]).toMatchObject({ note: 'noise', dismissedAt: 't2' });
+    // The legacy array is untouched.
+    expect(after.dismissedClaims).toEqual([]);
+  });
+
+  it('undismiss removes by identity (no-op when absent) and leaves legacy entries alone', () => {
+    const r = repo();
+    dismissGuardClaim(r, { doc: 'docs/cli.md', anchor: 'version', title: 'legacy claim', dismissedAt: 't0' });
+    dismissGuardFinding(r, entry());
+    const after = undismissGuardFinding(r, { doc: 'docs/cli.md', anchor: 'version', scenarioHash: 'deadbeefdeadbeef' });
+    expect(after.dismissedFindings).toEqual([]);
+    expect(after.dismissedClaims).toHaveLength(1);
+    expect(undismissGuardFinding(r, { doc: 'docs/cli.md', anchor: 'version', scenarioHash: 'deadbeefdeadbeef' }).dismissedFindings).toEqual([]);
   });
 });
