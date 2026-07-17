@@ -149,10 +149,10 @@ internal static class Program
 
         using var workspace = MSBuildWorkspace.Create();
         var failures = new List<string>();
-        workspace.WorkspaceFailed += (_, e) =>
+        using var failedRegistration = workspace.RegisterWorkspaceFailedHandler(e =>
         {
             if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure) failures.Add(e.Diagnostic.Message);
-        };
+        });
 
         var projects = new List<Project>();
         // `.slnx` (newer XML solution format) opens as a solution too — and note
