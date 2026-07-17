@@ -298,8 +298,11 @@ support to produce findings; the `drift-fp` loop verifies C# via the contract-ve
 **C# account .NET prerequisites** (default account needs none):
 - The session must have the **.NET SDK — 10.x** recommended (or ≥ 9.0.2xx). It
   builds the Roslyn host during `build:dist` and, at analyze time, opens `.slnx`
-  solutions (common in modern C# repos) and modern targets. The host itself is
-  `net8.0` with roll-forward, so it *runs* on any ≥ 8 runtime.
+  solutions (common in modern C# repos) and modern targets. The host itself is a
+  `net8.0` DLL with `RollForward=LatestMajor`, so it *runs* on the newest runtime
+  present — deliberately the SDK's own runtime, so `analyze-project`'s
+  MSBuildLocator always finds a usable MSBuild. Loose-text analysis stays on a
+  pinned net8 reference set regardless of that runtime (issue #813).
 - Each C# target must be **`dotnet restore`d before analyze** (see the discover /
   next-fix prompts). The project-aware Roslyn tier **fails-hard** on an
   unrestored project or a missing/unsatisfiable SDK — it aborts the run rather
@@ -645,9 +648,9 @@ One-time, before the first run:
      .NET CDN — so a mid-session install returns 403 from the egress proxy):
      1. **Setup script.** Give the C# account its **own** environment whose
         setup script runs `docs/fp-automation/setup-csharp-env.sh` — it
-        installs the 10.x SDK plus a net8 runtime for the host, once per
-        container, and is idempotent. (The routine prompts also run it as a
-        fallback when `dotnet` is missing.)
+        installs the 10.x SDK (whose runtime the `net8.0` host rolls forward
+        onto), once per container, and is idempotent. (The routine prompts also
+        run it as a fallback when `dotnet` is missing.)
      2. **Network policy.** Widen that environment's egress allowlist to the
         .NET download + NuGet hosts — at least `dot.net`,
         `builds.dotnet.microsoft.com`, `dotnetcli.azureedge.net`,

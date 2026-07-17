@@ -45,13 +45,15 @@ fi
 chmod +x /tmp/dotnet-install.sh
 
 # .NET 10 SDK — abp's global.json pins 10.0.100 (rollForward latestFeature); the
-# roslyn-workspace tier restores abp's real solution with this SDK.
+# roslyn-workspace tier restores abp's real solution with this SDK. Installing the
+# SDK also lays down its matching runtime, which is all the host needs: the host is
+# a net8.0 DLL with RollForward=LatestMajor, so it runs on this SDK's runtime, and
+# `analyze-project`'s MSBuildLocator finds the SDK's MSBuild (running on a separate
+# net8 runtime while only a net10 SDK is present cannot — issue #813). No standalone
+# net8 runtime is installed: the loose-text `analyze` op no longer depends on the
+# runtime BCL (it uses a pinned net8 reference pack), so the host is free to run on
+# the SDK's runtime.
 /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_DIR"
-
-# .NET 8 runtime — the Roslyn host targets net8.0 and is launched framework-
-# dependent (`dotnet <dll>`); .NET does not roll forward across majors by default,
-# so a net8 app will not run on a net10-only runtime.
-/tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir "$DOTNET_DIR"
 
 export DOTNET_ROOT="$DOTNET_DIR"
 export PATH="$DOTNET_DIR:$PATH"

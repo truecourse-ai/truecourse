@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Basic.Reference.Assemblies;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -15,7 +16,7 @@ namespace TrueCourse.RoslynHost;
 // that need a semantic model. See README.md.
 //
 // Two analysis modes:
-//   "analyze"         loose file texts compiled with the runtime's reference
+//   "analyze"         loose file texts compiled against a pinned net8 reference
 //                     set — fast, no restore needed (build-free host rules).
 //   "analyze-project" a real .csproj/.sln opened via MSBuildWorkspace with its
 //                     actual references — full fidelity, unlocks the rules that
@@ -248,18 +249,26 @@ internal static class Program
         if (seen.Add($"{v.RuleKey}\0{v.Path}\0{v.Line}\0{v.Column}")) acc.Add(v);
     }
 
-    // Reference set for the loose-text `analyze` mode = the running runtime's
-    // trusted platform assemblies, so the semantic model resolves System.* /
-    // framework types. `analyze-project` uses the project's real references.
+    // Reference set for the loose-text `analyze` mode. Deliberately a PINNED
+    // net8.0 reference-assembly pack (Basic.Reference.Assemblies.Net80), NOT the
+    // running runtime's TRUSTED_PLATFORM_ASSEMBLIES. Decoupling the BCL from the
+    // process runtime keeps loose-text results deterministic even though the host
+    // rolls forward onto whatever runtime the installed SDK ships (see the
+    // RollForward note in the .csproj and #813) — version-sensitive rules always
+    // bind against net8 metadata. `analyze-project` uses the project's real
+    // references instead, so it is unaffected by this set.
     private static List<MetadataReference> BuildReferences()
     {
-        var tpa = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
-        var refs = new List<MetadataReference>();
-        foreach (var path in tpa)
+        var refs = new List<MetadataReference>(Net80.References.All);
+
+        // A couple of ubiquitous framework types the loose-text rules resolve in
+        // analyzed code (ILogger, Newtonsoft.Json). These come from pinned package
+        // versions (see the .csproj), so their location is stable regardless of
+        // which runtime the host runs on.
+        foreach (var t in new[] { typeof(Microsoft.Extensions.Logging.ILogger), typeof(Newtonsoft.Json.JsonConvert) })
         {
-            try { refs.Add(MetadataReference.CreateFromFile(path)); }
-            catch { /* skip unreadable assemblies */ }
+            try { refs.Add(MetadataReference.CreateFromFile(t.Assembly.Location)); }
+            catch { /* skip if unreadable */ }
         }
         return refs;
     }
