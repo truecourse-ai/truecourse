@@ -13,20 +13,43 @@ export interface ModelPickerOption {
 }
 
 /**
- * The label for one row: which model this is, and nothing else.
+ * The model half of a description: everything before the pitch.
  *
- * Claude Code's descriptions are `"<identity> · <pitch>"` — "Opus 4.8 with 1M
- * context · Best for everyday, complex tasks". Only the identity earns its
- * place here: anyone choosing a model already has Claude Code and knows what
- * Opus is, so the pitch is noise on every row. The identity half is kept whole
- * because the context window ("with 1M context") distinguishes real choices.
+ * Claude Code's descriptions are `"<model> · <pitch>"` — "Opus 4.8 with 1M
+ * context · Best for everyday, complex tasks". Only the model half earns a
+ * place in the list: anyone choosing a model already has Claude Code and knows
+ * what Opus is, so the pitch is noise repeated on every row.
  *
  * Falls back to `displayName` when there's no description, or when cutting the
- * pitch leaves nothing.
+ * pitch leaves nothing behind.
  */
-function labelFor(model: ClaudeModelInfo): string {
-  const identity = model.description?.split('·')[0]?.trim();
-  return identity || model.displayName;
+function modelHalf(model: ClaudeModelInfo): string {
+  return model.description?.split('·')[0]?.trim() || model.displayName;
+}
+
+/**
+ * Drop a trailing context-window note: "Opus 4.8 with 1M context" → "Opus 4.8".
+ *
+ * 1M is not a distinguishing fact — Opus 4.8, Fable 5, and Sonnet 5 all offer
+ * it — so noting it on one row and not the others says nothing about the
+ * choice. Matched narrowly (`with … context`) so unrelated qualifiers survive.
+ */
+function withoutContextNote(label: string): string {
+  return label.replace(/\s+with\s+\S+\s+context$/i, '');
+}
+
+/**
+ * Label every row with its model, shortest form that stays unambiguous.
+ *
+ * The context note is dropped — except where it is the only thing telling two
+ * rows apart. Some installs list a model once per context window (`sonnet` and
+ * `sonnet[1m]`, whose descriptions differ only by "with 1M context"); stripping
+ * it there would render two identical rows and no way to pick between them.
+ */
+function labelsFor(models: ClaudeModelInfo[]): string[] {
+  const short = models.map((m) => withoutContextNote(modelHalf(m)));
+  const collisions = new Set(short.filter((l, i) => short.indexOf(l) !== i));
+  return models.map((m, i) => (collisions.has(short[i]) ? modelHalf(m) : short[i]));
 }
 
 /**
@@ -44,8 +67,9 @@ export function buildModelPickerOptions(models: ClaudeModelInfo[]): {
   options: ModelPickerOption[];
   initialValue: string | undefined;
 } {
+  const labels = labelsFor(models);
   return {
-    options: models.map((m) => ({ value: m.value, label: labelFor(m) })),
+    options: models.map((m, i) => ({ value: m.value, label: labels[i] })),
     initialValue: pickDefaultModel(models)?.value,
   };
 }

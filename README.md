@@ -405,7 +405,7 @@ your account, subscription, and org policy:
 
 ```
 ◆  Which model should LLM rules use?
-│  ● Opus 4.8 with 1M context
+│  ● Opus 4.8
 │  ○ Fable 5
 │  ○ Sonnet 5
 │  ○ Haiku 4.5

@@ -49,18 +49,56 @@ afterEach(() => {
   process.stdin.isTTY = originalTTY;
 });
 
+/**
+ * What the picker actually receives: the `selectableModels`-filtered list, so
+ * without `default`. Mirrors the real flow in `promptModelChoice`.
+ */
+const SELECTABLE = MODELS.filter((m) => m.value !== 'default');
+
 describe('buildModelPickerOptions', () => {
-  it('labels every model with its identity, dropping the sales pitch after the dot', () => {
+  it('labels every model with just the model, dropping the pitch and context note', () => {
     // Not clack's `hint`: that renders only on the focused row, leaving the
     // rest as bare names.
-    const { options } = buildModelPickerOptions(MODELS);
-    expect(options.map((o) => o.label)).toEqual([
-      'Opus 4.8 with 1M context',
-      'Opus 4.8 with 1M context',
-      'Fable 5',
-      'Sonnet 5',
-      'Haiku 4.5',
+    const { options } = buildModelPickerOptions(SELECTABLE);
+    expect(options.map((o) => o.label)).toEqual(['Opus 4.8', 'Fable 5', 'Sonnet 5', 'Haiku 4.5']);
+  });
+
+  it('keeps the context note when it is the only thing telling two rows apart', () => {
+    // Some installs list a model twice, once per context window. Stripping the
+    // note there would leave two rows reading "Sonnet 4.6" and no way to choose.
+    const { options } = buildModelPickerOptions([
+      { value: 'sonnet', displayName: 'Sonnet', description: 'Sonnet 4.6 · Best for everyday' },
+      {
+        value: 'sonnet[1m]',
+        displayName: 'Sonnet (1M context)',
+        description: 'Sonnet 4.6 with 1M context · Billed as extra usage',
+      },
     ]);
+    expect(options.map((o) => o.label)).toEqual(['Sonnet 4.6', 'Sonnet 4.6 with 1M context']);
+  });
+
+  it('strips the context note from an unambiguous row even when a variant pair exists', () => {
+    const { options } = buildModelPickerOptions([
+      { value: 'opus[1m]', displayName: 'Opus', description: 'Opus 4.8 with 1M context · Best' },
+      { value: 'sonnet', displayName: 'Sonnet', description: 'Sonnet 4.6 · Everyday' },
+      {
+        value: 'sonnet[1m]',
+        displayName: 'Sonnet (1M)',
+        description: 'Sonnet 4.6 with 1M context · Extra',
+      },
+    ]);
+    expect(options.map((o) => o.label)).toEqual([
+      'Opus 4.8',
+      'Sonnet 4.6',
+      'Sonnet 4.6 with 1M context',
+    ]);
+  });
+
+  it('leaves a qualifier that is not a context note alone', () => {
+    const { options } = buildModelPickerOptions([
+      { value: 'x', displayName: 'X', description: 'Opus 4.8 with fast mode · Quick' },
+    ]);
+    expect(options[0].label).toBe('Opus 4.8 with fast mode');
   });
 
   it('keeps the whole description when there is no dot to cut at', () => {
@@ -78,7 +116,7 @@ describe('buildModelPickerOptions', () => {
   });
 
   it('never sets a hint, which clack would parenthesize and show on one row only', () => {
-    for (const option of buildModelPickerOptions(MODELS).options) {
+    for (const option of buildModelPickerOptions(SELECTABLE).options) {
       expect(option).not.toHaveProperty('hint');
     }
   });
@@ -89,9 +127,8 @@ describe('buildModelPickerOptions', () => {
   });
 
   it('preserves the order the CLI reported', () => {
-    const { options } = buildModelPickerOptions(MODELS);
+    const { options } = buildModelPickerOptions(SELECTABLE);
     expect(options.map((o) => o.value)).toEqual([
-      'default',
       'opus[1m]',
       'claude-fable-5[1m]',
       'sonnet',
@@ -100,7 +137,7 @@ describe('buildModelPickerOptions', () => {
   });
 
   it('pre-selects an Opus model', () => {
-    expect(buildModelPickerOptions(MODELS).initialValue).toBe('opus[1m]');
+    expect(buildModelPickerOptions(SELECTABLE).initialValue).toBe('opus[1m]');
   });
 
   it('does not pre-select Fable even when it is the only premium option', () => {
