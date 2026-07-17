@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Socket emits call getIO() which throws without an active socket server.
@@ -59,16 +59,17 @@ const E2E_CASES: Array<{ lang: string; fixture: string; markerKey: string; skip:
 ];
 
 /**
- * Copy a directory recursively, skipping `.truecourse/` so fixture pollution
+ * Copy a directory recursively, skipping generated state so fixture pollution
  * from a prior run can't leak into a fresh test invocation.
  */
-function copyDir(src: string, dest: string): void {
+function copyDir(src: string, dest: string, skipDotnetBuildArtifacts = false): void {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     if (entry.name === '.truecourse' || entry.name === 'node_modules' || entry.name === '.git') continue;
+    if (skipDotnetBuildArtifacts && (entry.name === 'bin' || entry.name === 'obj')) continue;
     const s = path.join(src, entry.name);
     const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(s, d);
+    if (entry.isDirectory()) copyDir(s, d, skipDotnetBuildArtifacts);
     else fs.copyFileSync(s, d);
   }
 }
@@ -83,7 +84,7 @@ for (const c of E2E_CASES) {
       // in-place so the shared fixture directory stays pristine across runs
       // and parallel test invocations don't step on each other.
       workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-e2e-analyze-'));
-      copyDir(path.resolve(__dirname, '../fixtures', c.fixture), workDir);
+      copyDir(path.resolve(__dirname, '../fixtures', c.fixture), workDir, c.lang === 'C#');
 
       // Initialize a real (empty) git repo so analyzeInProcess can collect
       // branch/commit metadata — that's what the CLI sees in production.
@@ -97,6 +98,13 @@ for (const c of E2E_CASES) {
       execSync('git init -q -b main', { cwd: workDir, env });
       execSync('git add -A', { cwd: workDir, env });
       execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
+      if (c.lang === 'C#') {
+        execFileSync('dotnet', ['restore', 'SampleCsharpProject.sln'], {
+          cwd: workDir,
+          env,
+          encoding: 'utf8',
+        });
+      }
 
       project = await registerProject(workDir);
 
@@ -104,7 +112,7 @@ for (const c of E2E_CASES) {
       await updateProjectConfig(workDir, { enableLlmRules: false });
 
       clearLatestCache();
-    }, 60_000);
+    }, c.lang === 'C#' ? 300_000 : 60_000);
 
     afterAll(async () => {
       if (project) await unregisterProject(project.slug);
