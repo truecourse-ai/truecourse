@@ -134,6 +134,53 @@ export function hasGuardUniverse(repoRoot: string): boolean {
   return fs.existsSync(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
 }
 
+// A tolerant view of the corpus's scan counts — the kept-doc count plus the
+// (optional, back-compat) persisted stats. Unknown shapes / extra keys pass through.
+const CorpusCountsShape = z
+  .object({
+    docs: z.array(z.unknown()).optional(),
+    skippedDocs: z.array(z.unknown()).optional(),
+    stats: z
+      .object({
+        docsScanned: z.number().optional(),
+        ignoredNonMarkdown: z.record(z.string(), z.number()).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+
+/** The scan counts an empty-corpus classification needs (#807). */
+export interface CorpusScanCounts {
+  /** Docs discovered in scope before the relevance filter (the "Scanned N" number). */
+  docsScanned: number
+  /** Kept docs (the corpus's `docs` length). */
+  docsKept: number
+  /** Ignored doc-like non-markdown files by extension (`.rst` → count), keys carry the dot. */
+  ignoredNonMarkdown: Record<string, number>
+}
+
+/**
+ * Read corpus.json's scan counts tolerantly — `null` when the corpus is absent or
+ * unreadable (a corrupt corpus is a separate problem, not an "empty" one). `docsKept`
+ * is the kept-doc count; `docsScanned` reads the persisted stats, falling back to
+ * kept + skipped for a legacy corpus written before the stats block existed.
+ */
+export function readCorpusScanCounts(repoRoot: string): CorpusScanCounts | null {
+  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
+  if (!fs.existsSync(file)) return null
+  try {
+    const parsed = CorpusCountsShape.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    if (!parsed.success) return null
+    const docsKept = parsed.data.docs?.length ?? 0
+    const skipped = parsed.data.skippedDocs?.length ?? 0
+    const docsScanned = parsed.data.stats?.docsScanned ?? docsKept + skipped
+    return { docsScanned, docsKept, ignoredNonMarkdown: parsed.data.stats?.ignoredNonMarkdown ?? {} }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Plan the deterministic work for a generate run. `recipeFingerprint` defaults to
  * the current recipe-input fingerprint; the driver passes the fingerprint of a

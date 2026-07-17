@@ -79,6 +79,67 @@ describe('curateInProcess', () => {
   });
 });
 
+describe('curateInProcess — empty-corpus signal', () => {
+  it('no-docs-found: a repo with only non-markdown docs forces noChanges false', async () => {
+    // yamllint-shaped repo: rst only, no markdown → nothing discoverable.
+    fs.rmSync(path.join(repo, 'docs'), { recursive: true, force: true });
+    const docs = path.join(repo, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'guide.rst'), 'restructured text');
+    fs.writeFileSync(path.join(docs, 'api.rst'), 'more rst');
+
+    const result = await curateInProcess(repo, {
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.emptyCorpus).toBe('no-docs-found');
+    // Silence-as-success is the bug: an empty corpus is never "nothing changed".
+    expect(result.noChanges).toBe(false);
+    expect(result.curate.stats.docsScanned).toBe(0);
+    expect(result.curate.stats.ignoredNonMarkdown).toEqual({ '.rst': 2 });
+  });
+
+  it('all-docs-dropped: docs scanned but relevance kept none forces noChanges false', async () => {
+    const result = await curateInProcess(repo, {
+      // Drop every doc.
+      relevanceRunner: async ({ doc }: { doc: { path: string } }) => ({
+        path: doc.path,
+        include: false,
+        reason: 'not a spec',
+      }),
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.emptyCorpus).toBe('all-docs-dropped');
+    expect(result.noChanges).toBe(false);
+    expect(result.curate.stats.docsScanned).toBe(2);
+    expect(result.curate.stats.docsKept).toBe(0);
+  });
+
+  it('a non-empty corpus keeps the genuine cache-hit noChanges path (emptyCorpus undefined)', async () => {
+    const opts = {
+      relevanceRunner: includeAll,
+      areaTagRunner: tagByPath,
+      disableOverlapDetection: true,
+      skipGit: true,
+    };
+    // First run populates the per-doc caches (real calls → noChanges false).
+    const first = await curateInProcess(repo, opts);
+    expect(first.emptyCorpus).toBeUndefined();
+    expect(first.noChanges).toBe(false);
+
+    // Re-scan of unchanged docs: every stage is a cache hit (no transport calls),
+    // so the genuine "nothing changed" signal must still fire for a non-empty corpus.
+    const second = await curateInProcess(repo, opts);
+    expect(second.emptyCorpus).toBeUndefined();
+    expect(second.noChanges).toBe(true);
+    expect(second.curate.stats.docsKept).toBeGreaterThan(0);
+  });
+});
+
 describe('generateFromCorpusInProcess', () => {
   it('skips when no corpus.json exists', async () => {
     const { corpus } = await generateFromCorpusInProcess(repo, { disableRepair: true });

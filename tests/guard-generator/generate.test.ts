@@ -1004,6 +1004,53 @@ describe('generateGuards — manifest rewrite + orphans', () => {
   })
 })
 
+// A present-but-empty corpus (#807) is a no-docs FAILURE with a DISTINCT reason — it
+// must never masquerade as "nothing changed", and must never point back at `spec
+// scan` (the corpus IS scanned, it just holds nothing).
+describe('generateGuards — empty corpus (#807)', () => {
+  /** Write a corpus.json with 0 kept docs + the given scan stats. */
+  function writeEmptyCorpus(
+    r: string,
+    stats?: { docsScanned: number; docsKept: number; ignoredNonMarkdown?: Record<string, number> },
+    skippedDocs: { ref: string; reason: string }[] = [],
+  ): void {
+    const target = path.join(r, '.truecourse', 'specs', 'corpus.json')
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(
+      target,
+      JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], skippedDocs, ...(stats ? { stats } : {}) }),
+    )
+  }
+
+  it("'no-docs-found' (docsScanned 0) → no-docs with the empty-corpus reason incl. ignored counts, NOT a spec-scan loop", async () => {
+    const r = repo()
+    writeEmptyCorpus(r, { docsScanned: 0, docsKept: 0, ignoredNonMarkdown: { '.rst': 12 } })
+    const res = await generateGuards({ repoRoot: r })
+    expect(res.status).toBe('no-docs')
+    expect(res.noChanges).toBe(false)
+    expect(res.reason).toContain('No spec documents found')
+    expect(res.reason).toContain('Ignored 12 .rst files.')
+    expect(res.reason).not.toMatch(/spec scan/)
+  })
+
+  it("'all-docs-dropped' (docsScanned > 0, docsKept 0) → no-docs with the drop-reason wording", async () => {
+    const r = repo()
+    writeEmptyCorpus(r, { docsScanned: 4, docsKept: 0 }, [{ ref: 'docs/a.md', reason: 'not relevant' }])
+    const res = await generateGuards({ repoRoot: r })
+    expect(res.status).toBe('no-docs')
+    expect(res.reason).toContain('Scanned 4 docs but kept none')
+    expect(res.reason).not.toMatch(/spec scan/)
+  })
+
+  it('a legacy empty corpus without stats still reads as empty (all-docs-dropped from skippedDocs)', async () => {
+    const r = repo()
+    writeEmptyCorpus(r, undefined, [{ ref: 'docs/a.md', reason: 'dropped' }])
+    const res = await generateGuards({ repoRoot: r })
+    expect(res.status).toBe('no-docs')
+    expect(res.reason).toContain('kept none')
+  })
+})
+
 describe('generateGuards — universe + recipe discovery', () => {
   it('errors with a spec-scan hint when there is no corpus', async () => {
     const r = repo()

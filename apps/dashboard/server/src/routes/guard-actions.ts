@@ -186,6 +186,10 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       noChanges: guard.noChanges,
       written: guard.written.length,
       birthFindings: guard.birthFindings.length,
+      // A non-ok status (`no-docs` / `recipe-failed`) carries a user-facing reason —
+      // the empty-corpus explanation when the last scan found no spec docs (#807).
+      // The client surfaces it as an error toast instead of a false "wrote 0".
+      ...(guard.reason ? { reason: guard.reason } : {}),
     });
   } catch (e) {
     // User declined the cost estimate — a clean cancel, not an error (mirrors the

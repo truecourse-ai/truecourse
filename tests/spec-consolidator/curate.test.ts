@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { planDocChunks } from '@truecourse/shared';
-import { curate, readCorpus, OVERLAP_WINDOW_CHARS } from '../../packages/spec-consolidator/src/index.js';
+import { curate, readCorpus, writeCorpus, CuratedCorpusSchema, OVERLAP_WINDOW_CHARS } from '../../packages/spec-consolidator/src/index.js';
 import type {
   AreaTagRunner,
   DecisionsFile,
@@ -205,6 +205,103 @@ describe('curate', () => {
     });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Corpus stats persistence — docsScanned / docsKept / ignored-non-markdown are
+// written into corpus.json so `spec status`, the guard CLI, and the dashboard
+// can explain an empty corpus without re-running the scan.
+// ---------------------------------------------------------------------------
+
+describe('curate — persisted corpus stats', () => {
+  it('writes docsScanned/docsKept into corpus.json and round-trips', async () => {
+    const result = await run();
+    const read = readCorpus(repo);
+    expect(read!.stats).toBeDefined();
+    expect(read!.stats!.docsScanned).toBe(4);
+    expect(read!.stats!.docsKept).toBe(3);
+    // The in-memory corpus equals the persisted file (stats included).
+    expect(read!.stats).toEqual(result.corpus.stats);
+  });
+
+  it('defaults ignoredNonMarkdown to an empty record when discovery ran via docSource', async () => {
+    const result = await run();
+    // docSource bypasses the filesystem walk → no ignored-extension bookkeeping.
+    expect(result.corpus.stats!.ignoredNonMarkdown).toEqual({});
+  });
+
+  it('back-compat: an older corpus.json with no `stats` field still parses', () => {
+    const legacy = {
+      version: 3,
+      generatedAt: '2026-01-01T00:00:00Z',
+      docs: [],
+      areas: [],
+      skippedDocs: [],
+    };
+    const parsed = CuratedCorpusSchema.parse(legacy);
+    expect(parsed.stats).toBeUndefined();
+    // …and reading it off disk fails soft to the parsed shape (not null).
+    const dir = path.join(repo, '.truecourse', 'specs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'corpus.json'), JSON.stringify(legacy));
+    const read = readCorpus(repo);
+    expect(read).not.toBeNull();
+    expect(read!.stats).toBeUndefined();
+  });
+
+  it('writeCorpus persists the stats it is given', () => {
+    writeCorpus(repo, {
+      docs: [],
+      areas: [],
+      stats: { docsScanned: 9, docsKept: 0, ignoredNonMarkdown: { '.rst': 4 } },
+    });
+    const read = readCorpus(repo);
+    expect(read!.stats).toEqual({ docsScanned: 9, docsKept: 0, ignoredNonMarkdown: { '.rst': 4 } });
+  });
+});
+
+describe('curate — ignored non-markdown from a real walk', () => {
+  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
+  const tagOne: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'x' }], status: 'shipped' });
+
+  function place(rel: string, body: string): void {
+    const full = path.join(repo, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, body);
+  }
+
+  it('counts ignored doc-like files from the filesystem into stats.ignoredNonMarkdown', async () => {
+    place('README.md', '# kept');
+    place('docs/guide.rst', 'rst');
+    place('docs/other.rst', 'rst');
+    place('CHANGES.adoc', 'adoc');
+
+    const result = await curate(repo, {
+      decisions: EMPTY_DECISIONS,
+      relevanceRunner: keepAll,
+      areaTagRunner: tagOne,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.stats.ignoredNonMarkdown).toEqual({ '.rst': 2, '.adoc': 1 });
+    expect(readCorpus(repo)!.stats!.ignoredNonMarkdown).toEqual({ '.rst': 2, '.adoc': 1 });
+  });
+
+  it('rst-only repo: docsScanned 0, ignored counts explain the empty corpus', async () => {
+    place('docs/guide.rst', 'rst');
+    place('docs/api.rst', 'rst');
+
+    const result = await curate(repo, {
+      decisions: EMPTY_DECISIONS,
+      relevanceRunner: keepAll,
+      areaTagRunner: tagOne,
+      disableOverlapDetection: true,
+      skipGit: true,
+    });
+    expect(result.stats.docsScanned).toBe(0);
+    expect(result.stats.docsKept).toBe(0);
+    expect(result.stats.ignoredNonMarkdown).toEqual({ '.rst': 2 });
   });
 });
 

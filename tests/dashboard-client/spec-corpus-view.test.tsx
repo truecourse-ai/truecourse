@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import { render, screen, waitFor, renderHook, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
 import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/SpecScanButton';
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
@@ -149,6 +150,59 @@ describe('SpecCorpusView (left nav)', () => {
   it('shows the empty state when there is no corpus', () => {
     render(<SpecCorpusView corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
+  });
+
+  // Issue #807 — a corpus present but holding no kept docs must be surfaced
+  // explicitly (never a barren "0 documents" tree that reads as success). Two
+  // flavors, distinguished from the persisted scan stats.
+  it('no-docs-found: renders a distinct EmptyState (NOT "No corpus yet") with the ignored-extension breakdown', () => {
+    const empty: SpecCorpusResponse = {
+      corpus: {
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [],
+        areas: [],
+        skippedDocs: [],
+        stats: { docsScanned: 0, docsKept: 0, ignoredNonMarkdown: { '.rst': 23, '.adoc': 2 } },
+      },
+    };
+    render(<SpecCorpusView repoId="r1" corpus={state({ data: empty })} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.getByText('No spec documents found')).toBeInTheDocument();
+    // The shared formatter's wording — only markdown is scanned + the counts.
+    expect(screen.getByText(/only markdown \(\.md\) documents are scanned/)).toBeInTheDocument();
+    expect(screen.getByText(/Ignored 23 \.rst, 2 \.adoc files\./)).toBeInTheDocument();
+    // Distinct from the no-corpus-yet state, and never points at guard generate.
+    expect(screen.queryByText('No corpus yet')).not.toBeInTheDocument();
+    expect(screen.queryByText(/guard generate/i)).not.toBeInTheDocument();
+  });
+
+  it('all-docs-dropped: renders the normal tree with a banner + the "Not included" force-include remedy', async () => {
+    const dropped: SpecCorpusResponse = {
+      corpus: {
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [],
+        areas: [],
+        skippedDocs: [{ ref: 'docs/notes.md', reason: 'low relevance' }],
+        stats: { docsScanned: 4, docsKept: 0, ignoredNonMarkdown: {} },
+      },
+    };
+    const user = userEvent.setup();
+    render(<SpecCorpusView repoId="r1" corpus={state({ data: dropped })} activeKey={null} onOpen={vi.fn()} />);
+    // The banner explains the drop (shared wording) without the no-docs-found EmptyState.
+    expect(screen.getByText(/Scanned 4 docs but kept none/)).toBeInTheDocument();
+    expect(screen.queryByText('No spec documents found')).not.toBeInTheDocument();
+    // The force-include remedy is present: the dropped doc is includable from "Not included".
+    await user.click(screen.getByText('Not included'));
+    expect(screen.getByText('docs/notes.md')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'include' })).toBeInTheDocument();
+  });
+
+  it('a non-empty corpus (docs kept) never triggers the empty-corpus surfaces', () => {
+    render(<SpecCorpusView repoId="r1" corpus={state()} activeKey={null} onOpen={vi.fn()} />);
+    expect(screen.queryByText('No spec documents found')).not.toBeInTheDocument();
+    expect(screen.queryByText(/kept none/)).not.toBeInTheDocument();
+    expect(screen.getByText('Documents')).toBeInTheDocument();
   });
 
   it('renders a corpus carrying a legacy `relations` field without displaying it or crashing', () => {
@@ -443,6 +497,51 @@ describe('SpecCorpusView — conflict verdicts + orphaned housekeeping', () => {
     const del = calls.find((c) => c.method === 'DELETE');
     expect(JSON.parse(del!.body!)).toMatchObject({ docA: 'docs/gone.md', docB: 'docs/moved.md' });
     vi.unstubAllGlobals();
+  });
+});
+
+// Issue #807 — a scan that lands an empty corpus must WARN (with the shared flavor
+// message), never toast the false "nothing changed" success.
+describe('useSpecCorpus — empty-corpus scan warning (#807)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('warns with the flavor message (not a success) when a scan returns emptyCorpus', async () => {
+    const warn = vi.spyOn(toast, 'warning').mockReturnValue('id' as never);
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id' as never);
+    const emptyResp: SpecCorpusResponse = {
+      corpus: {
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [],
+        areas: [],
+        skippedDocs: [],
+        stats: { docsScanned: 0, docsKept: 0, ignoredNonMarkdown: { '.rst': 5 } },
+      },
+      emptyCorpus: 'no-docs-found',
+      noChanges: false,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        // Mount read: no corpus yet (404 → null); the scan returns the empty corpus.
+        if (String(url).includes('/spec/corpus/scan')) return json(emptyResp);
+        return new Response('null', { status: 404 });
+      }),
+    );
+    const { result } = renderHook(() => useSpecCorpus('r1', true));
+    await waitFor(() => expect(result.current.hydrating).toBe(false));
+    await act(async () => {
+      await result.current.scan();
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [, opts] = warn.mock.calls[0] as [string, { description?: string }];
+    expect(opts.description).toMatch(/only markdown \(\.md\) documents are scanned/);
+    expect(opts.description).toMatch(/Ignored 5 \.rst files\./);
+    // Never the "nothing changed" success for an empty corpus.
+    expect(success).not.toHaveBeenCalled();
   });
 });
 

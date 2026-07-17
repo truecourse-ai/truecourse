@@ -74,6 +74,15 @@ const SKIP_DIR_PROBE = '__tc_skipdir_probe__.md';
 
 const PREVIEW_LINE_LIMIT = 200;
 
+/**
+ * Non-markdown extensions we recognize as "doc-like": a repo full of these but no
+ * `.md` (e.g. rst-only yamllint) discovers zero docs, and we count them so the
+ * empty corpus can explain WHY instead of reading as success. Counting only —
+ * these files are never scanned (only `.md` is; rst support is #806). Keys in the
+ * returned record carry the leading dot (`.rst`), matching `path.extname`.
+ */
+const DOC_LIKE_EXTENSIONS = new Set(['.rst', '.adoc', '.asciidoc', '.txt', '.org']);
+
 export interface DiscoveryOptions {
   /**
    * Override the preview line cap. Tests use this to keep previews
@@ -93,6 +102,17 @@ export interface DiscoveryOptions {
   scope?: SpecScope;
 }
 
+/** Discovery output: the markdown candidates plus free bookkeeping from the same walk. */
+export interface DiscoveryResult {
+  docs: DocCandidate[];
+  /**
+   * Doc-like non-markdown files (ext → count, ext with leading dot) that survived
+   * the SAME `.truecourseignore` / SKIP_DIRS / include-scope filters a `.md` would.
+   * Lets an empty corpus explain why nothing was scanned. Empty when none / EE.
+   */
+  ignoredNonMarkdown: Record<string, number>;
+}
+
 /**
  * Walk `rootDir` recursively and return one `DocCandidate` per
  * markdown file found. Order is filesystem-walk-deterministic
@@ -100,8 +120,19 @@ export interface DiscoveryOptions {
  * cache stability.
  */
 export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocCandidate[] {
+  return discoverDocsWithStats(rootDir, opts).docs;
+}
+
+/**
+ * Same walk as {@link discoverDocs}, additionally counting the doc-like
+ * non-markdown files it passes over — so a caller (curate) can persist the
+ * counts and surface an explanation for an otherwise-silent empty corpus. Single
+ * walk: the count is free bookkeeping alongside the markdown collection.
+ */
+export function discoverDocsWithStats(rootDir: string, opts: DiscoveryOptions = {}): DiscoveryResult {
   const previewLines = opts.previewLines ?? PREVIEW_LINE_LIMIT;
   const out: DocCandidate[] = [];
+  const ignoredNonMarkdown: Record<string, number> = {};
   // Repo-root `.truecourseignore` — same exclusions as code analysis.
   const tcIgnore = loadTcIgnore(rootDir);
   // Opt-in include-scope (`spec.include`). Inactive ⇒ everything, and the guard
@@ -145,14 +176,24 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
         continue;
       }
       if (!entry.isFile()) continue;
-      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
-      // Include-scope: when configured, only markdown matching a scope glob
-      // enters the universe. `.truecourseignore` already subtracted above, so a
-      // scope glob can never resurrect an ignored path. Out-of-scope files are
-      // never candidates — they don't appear in skippedDocs either.
+      const ext = path.extname(entry.name).toLowerCase();
+      const isMarkdown = ext === '.md';
+      // Only markdown is scanned; doc-like non-markdown is merely counted. Files
+      // that are neither are ignored entirely (no count, no candidate).
+      if (!isMarkdown && !DOC_LIKE_EXTENSIONS.has(ext)) continue;
+      // Include-scope: when configured, only files matching a scope glob enter
+      // the universe. `.truecourseignore` already subtracted above, so a scope
+      // glob can never resurrect an ignored path. Out-of-scope files are never
+      // candidates (nor counted) — they don't appear in skippedDocs either. The
+      // same gate applies to the doc-like count so it mirrors what a `.md` sees.
       if (scope.active) {
         const rel = path.relative(rootDir, full).split(path.sep).join('/');
         if (!scope.includes(rel)) continue;
+      }
+
+      if (!isMarkdown) {
+        ignoredNonMarkdown[ext] = (ignoredNonMarkdown[ext] ?? 0) + 1;
+        continue;
       }
 
       const candidate = makeCandidate(full, rootDir, previewLines, opts);
@@ -160,7 +201,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
     }
   };
   visit(rootDir);
-  return out;
+  return { docs: out, ignoredNonMarkdown };
 }
 
 function makeCandidate(

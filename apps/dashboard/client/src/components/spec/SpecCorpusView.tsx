@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { buildCorpusConflicts, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
+import { buildCorpusConflicts, deriveEmptyCorpus, formatEmptyCorpus, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
 import { WorkspaceBadge } from './WorkspaceBadge';
@@ -161,6 +161,21 @@ export function useSpecCorpus(
       // confirm — leave existing data untouched.
       if (!res || 'cancelled' in res) return;
       setData(res);
+      // An empty corpus (a fresh scan kept no docs) is a loud WARNING, never the
+      // silent "nothing changed" success (issue #807): the driver forces noChanges
+      // false and reports the flavor, so we explain it here with the shared wording
+      // (identical to the CLI's) rather than pretend the corpus is up to date.
+      if (res.emptyCorpus) {
+        const stats = res.corpus?.stats;
+        toast.warning('No spec corpus', {
+          description: formatEmptyCorpus({
+            flavor: res.emptyCorpus,
+            docsScanned: stats?.docsScanned ?? 0,
+            ignoredNonMarkdown: stats?.ignoredNonMarkdown,
+          }),
+        });
+        return;
+      }
       // Every doc was unchanged (no LLM calls) — toast it, mirroring generate.
       if (res.noChanges) {
         toast.success('Nothing changed', {
@@ -353,6 +368,31 @@ export function SpecCorpusView({
   }
 
   const { corpus: c } = data;
+  // Empty-corpus flavor (issue #807): a corpus present but holding no kept docs is
+  // surfaced explicitly, never as a barren "0 documents" tree that reads as success.
+  //  - no-docs-found: nothing was discoverable → a full EmptyState (below), with the
+  //    ignored-extension breakdown + config remedy (there is nothing to force-include).
+  //  - all-docs-dropped: docs were scanned but the relevance filter kept none → the
+  //    normal tree still renders so its "Not included" list is the force-include remedy,
+  //    with an explanation banner on top. Derived from the persisted scan stats, with a
+  //    legacy fallback (older corpora lack stats) of docsScanned = kept + skipped.
+  const emptyFlavor = deriveEmptyCorpus({
+    docsScanned: c.stats?.docsScanned ?? c.docs.length + (c.skippedDocs?.length ?? 0),
+    docsKept: c.docs.length,
+  });
+  if (emptyFlavor === 'no-docs-found') {
+    return (
+      <EmptyState
+        icon={FileText}
+        title="No spec documents found"
+        body={formatEmptyCorpus({
+          flavor: 'no-docs-found',
+          docsScanned: c.stats?.docsScanned ?? 0,
+          ignoredNonMarkdown: c.stats?.ignoredNonMarkdown,
+        })}
+      />
+    );
+  }
   const manualIncludes = data.manualIncludes ?? [];
   const manualExcludes = data.manualExcludes ?? [];
   // The section rows derive from the decision lists over the unchanged corpus, so
@@ -451,6 +491,11 @@ export function SpecCorpusView({
       {baselineFallback && (
         <div className="border-b border-border bg-card/40 px-4 py-1.5 text-[11px] text-muted-foreground">
           Showing the base spec — this PR changed no docs.
+        </div>
+      )}
+      {emptyFlavor === 'all-docs-dropped' && (
+        <div className="border-b border-border bg-amber-500/10 px-4 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+          {formatEmptyCorpus({ flavor: 'all-docs-dropped', docsScanned: c.stats?.docsScanned ?? 0 })}
         </div>
       )}
       {allTags.length > 1 && (
