@@ -8,6 +8,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import {
   GuardScenarioSchema,
@@ -19,10 +20,26 @@ import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-r
 import type { RawGeneratedScenario } from './schemas.js'
 import type { SectionInput } from './section-plan.js'
 
-/** The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` → `rate-limit`). */
+/**
+ * Cap on the id stem so `<leaf>.<n>.yaml` always fits a 255-byte filename —
+ * a heading can be a whole sentence (a 280-char warning paragraph has been
+ * seen as one), and an uncapped stem crashes the scenario write with
+ * ENAMETOOLONG on every mainstream filesystem.
+ */
+const MAX_LEAF_LENGTH = 100
+
+/**
+ * The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` →
+ * `rate-limit`). An over-long leaf truncates to {@link MAX_LEAF_LENGTH} with an
+ * 8-hex hash of the FULL slug appended, so two long headings differing only
+ * past the cut still yield distinct, deterministic stems.
+ */
 export function anchorLeaf(anchor: string): string {
   const segs = anchor.split('/').filter(Boolean)
-  return slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
+  const full = slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
+  if (full.length <= MAX_LEAF_LENGTH) return full
+  const hash = createHash('sha256').update(full).digest('hex').slice(0, 8)
+  return `${full.slice(0, MAX_LEAF_LENGTH).replace(/-+$/, '')}-${hash}`
 }
 
 /** `<leaf>.<n>`, skipping any id already taken (hand-written or assigned this run). */

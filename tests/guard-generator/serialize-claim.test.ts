@@ -73,3 +73,22 @@ describe('generateGuards — threads ref→claim onto written scenarios', () => 
     expect(written.title).toBe('relkit prints its version and exits clean')
   })
 })
+
+describe('anchorLeaf length cap', () => {
+  it('caps an over-long heading slug and appends a stable disambiguating hash', async () => {
+    const { anchorLeaf } = await import('../../packages/guard-generator/src/serialize.js')
+    const long = 'warning-' + 'marked-does-not-sanitize-the-output-html-please-use-a-sanitize-library-'.repeat(4)
+    const leaf = anchorLeaf(`core-cli/${long}`)
+    expect(leaf.length).toBeLessThanOrEqual(109)
+    expect(leaf).toMatch(/-[0-9a-f]{8}$/)
+    expect(anchorLeaf(`core-cli/${long}`)).toBe(leaf)
+    const sibling = anchorLeaf(`core-cli/${long}different-tail`)
+    expect(sibling).not.toBe(leaf)
+    expect(`${leaf}.1.yaml`.length).toBeLessThan(255)
+  })
+
+  it('leaves ordinary leaves untouched', async () => {
+    const { anchorLeaf } = await import('../../packages/guard-generator/src/serialize.js')
+    expect(anchorLeaf('a/b/rate-limit')).toBe('rate-limit')
+  })
+})
