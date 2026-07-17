@@ -8,6 +8,7 @@ import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDetermin
 import { DOMAIN_ORDER, CODE_DOMAINS } from '../progress.js';
 import { getEnabledRules } from './rules.service.js';
 import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
+import { isLlmSessionLimitError } from '@truecourse/shared/llm';
 import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
@@ -826,6 +827,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const provider = externalProvider ?? createLLMProvider();
   provider.setRepoPath(repoPath);
+  provider.setSessionLimitHandler?.((error) => {
+    const detail = `${error.message} Queued LLM calls stopped; waiting for active calls to finish before ending this run.`;
+    tracker?.ensureStep('llm-session-limit', 'LLM session limit');
+    tracker?.error('llm-session-limit', detail);
+  });
   const allNewLlmItems: DiffViolationItem[] = [];
   const allResolvedLlmIds: string[] = [];
 
@@ -1141,6 +1147,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         }),
       );
 
+      const sessionLimit = codeResults.find(
+        (result) => result.status === 'rejected' && isLlmSessionLimitError(result.reason),
+      );
+      if (sessionLimit?.status === 'rejected') throw sessionLimit.reason;
+
       const rawViolations: CodeViolationRaw[] = [];
       const resolvedIds: string[] = [];
       const unchangedIds: string[] = [];
@@ -1227,6 +1238,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       } catch (err) {
         schemaLl?.onCallDone(started);
+        if (isLlmSessionLimitError(err)) throw err;
         const dur = Date.now() - t0;
         log.warn(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
         if (!domainCodeBatches.has('database')) tracker?.error('database', `Schema LLM failed`);
@@ -1339,6 +1351,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     llmRulePromise,
     ...domainLlmPromises,
   ]);
+
+  const sessionLimit = [llmResult, ...domainLlmResults].find(
+    (result) => result.status === 'rejected' && isLlmSessionLimitError(result.reason),
+  );
+  if (sessionLimit?.status === 'rejected') throw sessionLimit.reason;
 
   if (detResult.status === 'rejected') {
     log.error(`[Violations] Deterministic lifecycle tracking failed: ${detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason)}`);

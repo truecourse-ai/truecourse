@@ -28,6 +28,12 @@ import { resolveClaudeBinary } from '../claude-binary.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 
+export {
+  LlmSessionLimitError,
+  isLlmSessionLimitError,
+  parseLlmSessionLimitError,
+} from './errors.js';
+
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';

@@ -1,6 +1,10 @@
 import type { Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
-import { getDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import {
+  getDefaultTransport,
+  type LlmSessionLimitError,
+  type LlmTransport,
+} from '@truecourse/shared/llm';
 import type { FlowEnrichmentContext } from './prompts.js';
 import type { UsageData } from '../usage.service.js';
 
@@ -253,6 +257,8 @@ export interface LLMProvider {
   setRepoId(repoId: string): void;
   setRepoPath(path: string): void;
   setAbortSignal(signal: AbortSignal): void;
+  /** Report the first provider-wide session limit as soon as its circuit opens. */
+  setSessionLimitHandler?(handler: (error: LlmSessionLimitError) => void): void;
   /**
    * Return the usage records accumulated since the last `setAnalysisId`
    * call and clear the internal buffer. The orchestrator puts these on

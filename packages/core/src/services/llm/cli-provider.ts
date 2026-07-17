@@ -10,7 +10,12 @@ import { registerChildProcess, unregisterChildProcess } from '../analysis-regist
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodType } from 'zod';
 import type { Violation } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
+import {
+  isLlmSessionLimitError,
+  parseLlmSessionLimitError,
+  type LlmSessionLimitError,
+  type LlmTransport,
+} from '@truecourse/shared/llm';
 import { config } from '../../config/index.js';
 import {
   getPrompt,
@@ -91,6 +96,8 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private _repoId: string | null = null;
   private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
+  private _sessionLimitError: LlmSessionLimitError | null = null;
+  private _sessionLimitHandler: ((error: LlmSessionLimitError) => void) | null = null;
   private _usageRecords: UsageRecord[] = [];
   /**
    * When set, LLM calls go through this transport (the agent file-mailbox)
@@ -102,10 +109,15 @@ export abstract class BaseCLIProvider implements LLMProvider {
   setAnalysisId(id: string): void {
     this._analysisId = id;
     this._usageRecords = [];
+    this._sessionLimitError = null;
   }
 
   setAbortSignal(signal: AbortSignal): void {
     this._abortSignal = signal;
+  }
+
+  setSessionLimitHandler(handler: (error: LlmSessionLimitError) => void): void {
+    this._sessionLimitHandler = handler;
   }
 
   /** Set repoId for child process tracking in the analysis registry. */
@@ -259,6 +271,12 @@ export abstract class BaseCLIProvider implements LLMProvider {
           return;
         }
         if (code !== 0) {
+          const sessionLimit =
+            parseLlmSessionLimitError(stdout) ?? parseLlmSessionLimitError(stderr);
+          if (sessionLimit) {
+            reject(sessionLimit);
+            return;
+          }
           const detail = stderr.trim() || stdout.trim().slice(0, 500);
           reject(new Error(`[CLI] ${this.binaryName} exited with code ${code}: ${detail}`));
           return;
@@ -317,6 +335,8 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const usage = this.extractCLIUsage(parsed);
 
     if (parsed.is_error) {
+      const sessionLimit = parseLlmSessionLimitError(parsed);
+      if (sessionLimit) throw sessionLimit;
       throw new Error(`[CLI] Agent returned error: ${parsed.result || parsed.subtype}`);
     }
 
@@ -346,6 +366,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       if (this._abortSignal?.aborted) {
         throw this._abortSignal.reason ?? new DOMException('Analysis cancelled', 'AbortError');
       }
+      if (this._sessionLimitError) throw this._sessionLimitError;
       opts?.onStart?.();
 
       const jsonSchemaStr = this.toJsonSchema(schema);
@@ -360,6 +381,24 @@ export abstract class BaseCLIProvider implements LLMProvider {
         } catch (err) {
           lastError = err as Error;
           if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
+          if (isLlmSessionLimitError(lastError)) {
+            if (!this._sessionLimitError) {
+              this._sessionLimitError = lastError;
+              log.warn(`[CLI] ${lastError.message} Queued LLM calls will be stopped.`);
+              try {
+                this._sessionLimitHandler?.(lastError);
+              } catch (handlerError) {
+                log.warn(
+                  `[CLI] Session-limit notification failed: ${handlerError instanceof Error ? handlerError.message : String(handlerError)}`,
+                );
+              }
+            }
+            throw this._sessionLimitError;
+          }
+          // Another admitted call may have opened the provider-wide circuit
+          // while this call was awaiting a generic failure. Do not start a
+          // retry after that terminal state is known.
+          if (this._sessionLimitError) throw this._sessionLimitError;
           if (attempt < this.maxRetries) {
             log.warn(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
           }
@@ -523,6 +562,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
       )
     ));
 
+    const sessionLimit = settled.find(
+      (outcome) => outcome.status === 'rejected' && isLlmSessionLimitError(outcome.reason),
+    );
+    if (sessionLimit?.status === 'rejected') throw sessionLimit.reason;
+
     const result: AllViolationsResult = {};
     for (let i = 0; i < promises.length; i++) {
       const [key] = promises[i];
@@ -657,6 +701,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
         (err) => { onCallDone?.(baseKey(key), false); throw err; },
       )
     ));
+
+    const sessionLimit = settled.find(
+      (outcome) => outcome.status === 'rejected' && isLlmSessionLimitError(outcome.reason),
+    );
+    if (sessionLimit?.status === 'rejected') throw sessionLimit.reason;
 
     for (let i = 0; i < promises.length; i++) {
       const [key] = promises[i];
@@ -820,6 +869,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const results = await Promise.allSettled(
       batches.map((batch) => this.generateCodeViolations(batch))
     );
+
+    const sessionLimit = results.find(
+      (result) => result.status === 'rejected' && isLlmSessionLimitError(result.reason),
+    );
+    if (sessionLimit?.status === 'rejected') throw sessionLimit.reason;
 
     const allViolations: CodeViolationRaw[] = [];
     const allResolved: string[] = [];
