@@ -107,54 +107,32 @@ export async function discoverRecipe(
     await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
 
-  // Belt against the no-op entry class before the build even runs: `true`/`false`/`:`
-  // would sail through the probe (they exit 0) and mint bogus findings, so reuse the
-  // recipe schema's no-op rejection as the single source of truth for both cached
-  // and fresh proposals.
-  const guarded = RecipeSchema.safeParse(proposal)
-  if (!guarded.success) {
-    return { status: 'verify-failed', reason: `recipe proposal rejected: ${flattenZodError(guarded.error)}`, proposal }
-  }
-
-  // The optional install step runs BEFORE the verification build, exactly as the
-  // runner will run it — a proposal whose install fails is never written.
-  if (proposal.install) {
-    const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
-    if (!install.ok) {
-      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
+  let verdict = await verifyProposal(repoRoot, proposal)
+  if (!verdict.ok) {
+    // The engine's verification failure goes back to the model ONCE, with the
+    // rejected proposal and the failing command's own output — a wrong install
+    // variant or a misnamed build script is exactly the class one look at the
+    // real error fixes. A revised proposal is re-verified; a second failure is
+    // final, reported with the LATEST reason.
+    const revised = await reviseAfterVerifyFailure(inputs, proposal, verdict.reason, runner)
+    if ('error' in revised) {
+      return { status: 'verify-failed', reason: `${verdict.reason} (revision: ${revised.error})`, proposal }
+    }
+    const reGuard = RecipeSchema.safeParse(revised.proposal)
+    if (!reGuard.success) {
       return {
         status: 'verify-failed',
-        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
-        proposal,
+        reason: `revised recipe proposal rejected: ${flattenZodError(reGuard.error)}`,
+        proposal: revised.proposal,
       }
     }
+    proposal = revised.proposal
+    verdict = await verifyProposal(repoRoot, proposal)
+    if (!verdict.ok) return { status: 'verify-failed', reason: verdict.reason, proposal }
+    // The revised, now-verified proposal replaces the cached reject so a re-run
+    // reuses the working recipe instead of re-tripping the same failure.
+    await setCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint), proposal)
   }
-
-  const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
-  if (!build.ok) {
-    const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
-    return {
-      status: 'verify-failed',
-      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
-      proposal,
-    }
-  }
-
-  // Deterministic post-build check: the proposed entry's script file must EXIST
-  // after the build ran. A file-existence check, no output parsing — it catches the
-  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
-  // listing what WAS found next to the missing path so the mixup is one glance.
-  const missing = missingEntryScript(repoRoot, proposal.entry)
-  if (missing) {
-    return {
-      status: 'verify-failed',
-      reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}`,
-      proposal,
-    }
-  }
-
-  const probe = await probeEntry(repoRoot, proposal.entry)
-  if (!probe.ok) return { status: 'verify-failed', reason: probe.reason, proposal }
 
   const recipe: Recipe = {
     ...(proposal.install ? { install: proposal.install } : {}),
@@ -171,6 +149,89 @@ export async function discoverRecipe(
     fingerprint: computeRecipeFingerprint(repoRoot),
     wrotePath: path.relative(repoRoot, target),
   }
+}
+
+/**
+ * Run the full engine verification over one proposal: the no-op-entry schema
+ * guard, then the install, the build, the built-entry existence check, and the
+ * entrypoint probe — in exactly the order the runner will execute them. Each
+ * failure reason carries the failing command and the tail of its own output.
+ */
+async function verifyProposal(
+  repoRoot: string,
+  proposal: RecipeProposal,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // Belt against the no-op entry class before the build even runs: `true`/`false`/`:`
+  // would sail through the probe (they exit 0) and mint bogus findings, so reuse the
+  // recipe schema's no-op rejection as the single source of truth for both cached
+  // and fresh proposals.
+  const guarded = RecipeSchema.safeParse(proposal)
+  if (!guarded.success) {
+    return { ok: false, reason: `recipe proposal rejected: ${flattenZodError(guarded.error)}` }
+  }
+
+  // The optional install step runs BEFORE the verification build, exactly as the
+  // runner will run it — a proposal whose install fails is never written.
+  if (proposal.install) {
+    const install = await runInstall(repoRoot, proposal.install, proposal.env, INSTALL_TIMEOUT_MS)
+    if (!install.ok) {
+      const tail = install.output.trimEnd().split('\n').slice(-5).join(' / ')
+      return {
+        ok: false,
+        reason: `install \`${proposal.install}\` failed${install.timedOut ? ' (timed out)' : ''}: ${tail}`,
+      }
+    }
+  }
+
+  const build = await runBuild(repoRoot, proposal.build, proposal.env, BUILD_TIMEOUT_MS)
+  if (!build.ok) {
+    const tail = build.output.trimEnd().split('\n').slice(-5).join(' / ')
+    return {
+      ok: false,
+      reason: `build \`${proposal.build}\` failed${build.timedOut ? ' (timed out)' : ''}: ${tail}`,
+    }
+  }
+
+  // Deterministic post-build check: the proposed entry's script file must EXIST
+  // after the build ran. A file-existence check, no output parsing — it catches the
+  // proposal naming `dist/cli.js` where the build produced `dist/cli.mjs` loudly,
+  // listing what WAS found next to the missing path so the mixup is one glance.
+  const missing = missingEntryScript(repoRoot, proposal.entry)
+  if (missing) {
+    return { ok: false, reason: `after \`${proposal.build}\`, ${formatMissingEntryScript(missing)}` }
+  }
+
+  const probe = await probeEntry(repoRoot, proposal.entry)
+  if (!probe.ok) return { ok: false, reason: probe.reason }
+  return { ok: true }
+}
+
+/**
+ * Hand a verification failure back to the model for ONE revision: the rejected
+ * proposal and the verifier's reason (which embeds the failing command's own
+ * output) ride the prompt's verification-failure block. An ambiguous reply or an
+ * invalid revision is final — the caller reports the original failure.
+ */
+async function reviseAfterVerifyFailure(
+  input: Omit<RecipeDiscoveryInput, 'correction' | 'verifyFailure'>,
+  rejected: RecipeProposal,
+  reason: string,
+  runner: RecipeRunner,
+): Promise<{ proposal: RecipeProposal } | { error: string }> {
+  let raw: unknown
+  try {
+    raw = await runner({
+      ...input,
+      verifyFailure: { proposal: JSON.stringify(rejected), reason },
+    })
+  } catch (e) {
+    return { error: `revision call failed: ${(e as Error).message}` }
+  }
+  const ambiguous = ambiguousReply(raw)
+  if (ambiguous) return { error: `model declared the repo ambiguous: ${ambiguous}` }
+  const parsed = RecipeProposalSchema.safeParse(raw)
+  if (parsed.success) return { proposal: parsed.data }
+  return { error: `revised proposal invalid: ${flattenZodError(parsed.error)}` }
 }
 
 /**

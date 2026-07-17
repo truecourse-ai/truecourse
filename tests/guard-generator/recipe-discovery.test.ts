@@ -189,3 +189,68 @@ describe('discoverRecipe — fail loudly + no-op belt + ambiguity', () => {
     expect(calls).toBe(1) // ambiguity is deliberate, never re-asked
   })
 })
+
+describe('verification-failure revision', () => {
+  /** A JS repo whose package.json declares a bin the fixture provides directly. */
+  function jsRepo(): string {
+    const repo = bareRepo()
+    write(
+      repo,
+      'package.json',
+      JSON.stringify({ name: 'fix', version: '1.0.0', bin: { fix: 'cli.mjs' } }, null, 2),
+    )
+    write(repo, 'cli.mjs', 'console.log("ok")\n')
+    return repo
+  }
+
+  it('hands the engine failure back once and accepts a revised proposal that verifies', async () => {
+    const repo = jsRepo()
+    const calls: unknown[] = []
+    const runner: RecipeRunner = async (input) => {
+      calls.push(input)
+      // First call proposes an install that fails (npm ci without a lockfile);
+      // the revision drops it.
+      if (calls.length === 1) return { install: 'false', build: 'true', entry: ['node', 'cli.mjs'] }
+      return { build: 'true', entry: ['node', 'cli.mjs'] }
+    }
+
+    const res = await discoverRecipe(repo, runner)
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.recipe.install).toBeUndefined()
+
+    expect(calls).toHaveLength(2)
+    const revision = calls[1] as { verifyFailure?: { proposal: string; reason: string } }
+    expect(revision.verifyFailure).toBeDefined()
+    expect(revision.verifyFailure!.proposal).toContain('"install":"false"')
+    expect(revision.verifyFailure!.reason).toContain('install `false` failed')
+  })
+
+  it('reports the REVISED proposal failure when the revision also dies', async () => {
+    const repo = jsRepo()
+    let n = 0
+    const runner: RecipeRunner = async () => {
+      n++
+      return n === 1
+        ? { install: 'false', build: 'true', entry: ['node', 'cli.mjs'] }
+        : { install: 'false --again', build: 'true', entry: ['node', 'cli.mjs'] }
+    }
+
+    const res = await discoverRecipe(repo, runner)
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toContain('install `false --again` failed')
+    expect(n).toBe(2)
+  })
+
+  it('renders the verification-failure block in the prompt', () => {
+    const prompt = buildRecipeUserPrompt({
+      manifests: [{ path: 'package.json', ecosystem: 'js', content: '{}' }],
+      presentInputs: [],
+      verifyFailure: { proposal: '{"build":"npm ci"}', reason: 'install `npm ci` failed: no lockfile' },
+    })
+    expect(prompt).toContain('VERIFICATION FAILURE')
+    expect(prompt).toContain('install `npm ci` failed: no lockfile')
+    expect(prompt).toContain('Revise the recipe')
+  })
+})

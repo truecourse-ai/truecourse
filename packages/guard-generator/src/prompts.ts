@@ -724,9 +724,12 @@ Concretely:
     "entry": ["<argv>", "..."] }
 
 - install (optional) fetches dependencies before the build runs — the tree may be
-  a fresh clone with nothing installed. Match the ecosystem: js — "npm ci",
-  "pnpm install --frozen-lockfile", "yarn install --immutable" (match the lockfile);
-  python — "python3 -m venv .venv && .venv/bin/pip install -e ." (an editable install
+  a fresh clone with nothing installed. Match the ecosystem AND the lockfile that is
+  actually present (see "Other files present"): js — "pnpm install --frozen-lockfile"
+  with pnpm-lock.yaml, "npm ci" with package-lock.json, "yarn install --immutable"
+  with yarn.lock; when NO lockfile is listed as present, use plain "npm install" —
+  "npm ci" and the frozen/immutable variants FAIL without a lockfile. python —
+  "python3 -m venv .venv && .venv/bin/pip install -e ." (an editable install
   makes [project.scripts] console scripts runnable at .venv/bin/<name>); csharp —
   "dotnet restore". Omit it when the tree needs no dependency fetch.
 - build produces the runnable program (e.g. "pnpm build", "npm run build",
@@ -783,6 +786,12 @@ export interface RecipeDiscoveryInput {
   extraProjectNote?: string
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
+  /**
+   * On a revision after ENGINE VERIFICATION failed (install/build/entry), the
+   * rejected proposal plus the verifier's reason — the model revises the recipe
+   * with the failing command's own error in front of it.
+   */
+  verifyFailure?: { proposal: string; reason: string }
 }
 
 export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
@@ -797,6 +806,21 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
     '',
     `Other files present (presence only, no contents): ${input.presentInputs.join(', ') || '(none)'}`,
   )
+  if (input.verifyFailure) {
+    lines.push(
+      '',
+      'VERIFICATION FAILURE — the engine ran your previous proposal and it did NOT',
+      'work. The proposal was:',
+      input.verifyFailure.proposal,
+      'The failure (the failing command\'s own output is inside it):',
+      input.verifyFailure.reason,
+      'Revise the recipe so the failing step succeeds — fix the install/build command',
+      'or the entry argv to match what this repo actually supports (e.g. an install',
+      'that needs no lockfile, a different build script, the real built path). Return',
+      'exactly one revised JSON proposal, or { "ambiguous": "<why>" } if the failure',
+      'shows this repo cannot be built non-interactively.',
+    )
+  }
   if (input.correction) {
     lines.push(
       '',
