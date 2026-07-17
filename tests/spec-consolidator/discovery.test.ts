@@ -106,6 +106,21 @@ describe('classifyDoc — filename + path signals', () => {
   });
 });
 
+describe('classifyDoc — extension-neutral over non-markdown formats', () => {
+  // The known doc extension is stripped before the filename regexes, so
+  // a `.rst` (or `.adoc`) name classifies exactly like its `.md` twin —
+  // discovery and classification never drift on format.
+  it.each([
+    ['SPEC.rst', 'spec'],
+    ['adr-001-auth.rst', 'adr'],
+    ['rfc-2026-orders.rst', 'rfc'],
+    ['RUNBOOK.rst', 'runbook'],
+    ['README.rst', 'readme'],
+  ])('%s → %s', (file, kind) => {
+    expect(classifyDoc(file, '')).toBe(kind);
+  });
+});
+
 describe('classifyDoc — content fallback for PRDs', () => {
   it('detects a PRD by content shape when filename is generic', () => {
     // PRDs commonly live under docs/whatever.md without a PRD-shaped
@@ -148,6 +163,25 @@ describe('classifyDoc — content fallback for PRDs', () => {
   it('honors filename signal over content (an ADR with PRD-like prose stays an ADR)', () => {
     const prdShapedContent = '## Requirements\nfoo\n## Acceptance Criteria\nbar\n';
     expect(classifyDoc('docs/adr/0007-auth.md', prdShapedContent)).toBe('adr');
+  });
+
+  it('detects an RST PRD by content shape (underline headings)', () => {
+    // The content-shape fallback reads headings through the format's own
+    // scanner, so an rst doc with underline titles is recognized like a
+    // markdown ATX one.
+    const content = [
+      'Feature Z',
+      '=========',
+      '',
+      'Requirements',
+      '------------',
+      '- it shall do the thing',
+      '',
+      'Acceptance Criteria',
+      '-------------------',
+      '- when X, then Y',
+    ].join('\n');
+    expect(classifyDoc('docs/feature-z.rst', content)).toBe('prd');
   });
 });
 
@@ -303,6 +337,28 @@ describe('discoverDocs — walker', () => {
     place('docs/foo.json', '{}');
     const docs = discoverDocs(root, { skipGit: true });
     expect(docs.map((d) => d.path)).toEqual(['docs/foo.md']);
+  });
+
+  it('discovers .rst, .adoc, and .markdown docs (any heading-model format), skipping plain ones', () => {
+    place('SPEC.rst', '# spec');
+    place('guide.adoc', '= guide');
+    place('notes.markdown', '# notes');
+    place('plain.txt', 'plain');
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('SPEC.rst');
+    expect(paths).toContain('guide.adoc');
+    expect(paths).toContain('notes.markdown');
+    expect(paths).not.toContain('plain.txt');
+  });
+
+  it('re-includes a SKIP_DIRS dir via a .rst-shaped allow-list (probes every doc extension)', () => {
+    // The re-include probe asks the ignore file about a synthetic descendant
+    // of each discoverable extension, so an allow-list shaped around *.rst
+    // (which never touches the .md probe) still opts the build subtree in.
+    place('.truecourseignore', '*.rst\n!docs/guides/build/**/*.rst\n');
+    place('docs/guides/build/materialization.rst', '# assets');
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/guides/build/materialization.rst');
   });
 
   it('handles a directory it cannot read without crashing the walk', () => {

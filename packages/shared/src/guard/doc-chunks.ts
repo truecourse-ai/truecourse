@@ -5,10 +5,12 @@
  * everywhere: recursively along its shallowest partitioning heading level until
  * pieces fit the caller's budget, then adjacent pieces greedily repacked up to
  * that budget so calls stay few. A section with no finer heading structure is
- * accepted over budget rather than split mid-section; a non-markdown doc is one
- * chunk regardless of size. Node-free on purpose — this module reaches the
- * dashboard client through the root export.
+ * accepted over budget rather than split mid-section; a headingless ('plain')
+ * doc is one chunk regardless of size. Node-free on purpose — this module
+ * reaches the dashboard client through the root export.
  */
+
+import { hasHeadingModel, scanHeadings } from './doc-format.js'
 
 const MARKDOWN_EXTENSION_RE = /\.(md|markdown|mdown|mkd)$/i
 
@@ -70,9 +72,9 @@ export function parseHeadings(lines: readonly string[]): RawHeading[] {
  * boundary), so example CLI output and shell snippets don't fragment the split.
  */
 export function splitTopLevelSections(doc: string, content: string): string[] {
-  if (!isMarkdownDoc(doc)) return [content]
+  if (!hasHeadingModel(doc)) return [content]
   const lines = content.split('\n')
-  const headings = parseHeadings(lines)
+  const headings = scanHeadings(doc, lines)
   if (headings.length === 0) return [content]
 
   const levels = [...new Set(headings.map((h) => h.level))].sort((a, b) => a - b)
@@ -104,7 +106,8 @@ export interface DocChunk {
 /**
  * Plan a doc's within-budget chunks: shrink it along its headings, then greedily
  * pack adjacent pieces back up to the budget. One chunk (the whole content) when
- * the doc fits, is non-markdown, or has no finer heading structure to split on.
+ * the doc fits, is headingless ('plain'), or has no finer heading structure to
+ * split on.
  */
 export function planDocChunks(docPath: string, content: string, budgetChars: number): DocChunk[] {
   const whole: DocChunk[] = [{ text: content, index: 1, total: 1, isFirst: true }]

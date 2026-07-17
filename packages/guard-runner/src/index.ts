@@ -104,6 +104,9 @@ export {
   normalizeSectionText,
   fingerprintText,
   isMarkdownDoc,
+  hasHeadingModel,
+  docFormat,
+  scanHeadings,
 } from './section-index.js'
 export type { DocSection, DocSectionIndex, BindingResolution, SectionText } from './section-index.js'
 

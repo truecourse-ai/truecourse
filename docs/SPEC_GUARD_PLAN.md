@@ -235,10 +235,18 @@ sections).
 
 Sections are the binding unit. Anchors must survive spec edits without lying.
 
-- **Derivation is deterministic and LLM-free**: parse each corpus-kept markdown doc into its
+- **Derivation is deterministic and LLM-free**: parse each corpus-kept doc into its
   heading tree; a section = a heading plus its body up to the next same-or-higher heading.
   Anchor = slugified heading path. Identity = anchor + **fingerprint** (SHA-256 of
-  whitespace/format-normalized section text). Non-markdown docs fall back to whole-doc anchors.
+  whitespace/format-normalized section text). Discovery and the heading model span **markdown**
+  (`.md`/`.markdown`/`.mdown`/`.mkd`), **reStructuredText** (`.rst`), and **AsciiDoc** (`.adoc`);
+  every other format is `plain` and falls back to a whole-doc anchor. The `RawHeading {level,
+  text, line}` seam is format-agnostic, so anchors/fingerprints/chunking/overlap windows are
+  shared across formats. STATUS: multi-format discovery BUILT 2026-07-17 (#806) —
+  `packages/shared/src/guard/doc-format.ts` dispatches by extension (markdown → the existing
+  ATX parser, rst → docutils-faithful adornment scanner, adoc → ATX-style with delimited-block
+  awareness); before this only `.md` was walked, so an rst/asciidoc-only corpus produced an
+  empty spec universe.
 - The section index is computed **at generate/run time from doc content** — no new fields in
   `corpus.json`, no dependency on scan cadence. `corpus.json` only says *which* docs are in.
 - `scenarios/manifest.json` records, per section: anchor, fingerprint, scenario ids, and the

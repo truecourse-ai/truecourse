@@ -1,4 +1,5 @@
 export * from './doc-chunks.js'
+export * from './doc-format.js'
 export * from './drivers.js'
 export * from './excerpts.js'
 export * from './scenario.js'
