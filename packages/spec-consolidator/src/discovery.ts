@@ -38,6 +38,7 @@ import {
   docFormat,
   hasHeadingModel,
   scanHeadings,
+  DISCOVERABLE_DOC_EXTENSIONS,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
   type SpecScope,
 } from '@truecourse/shared';
@@ -78,7 +79,7 @@ export interface DocCandidate {
 // per discoverable extension because an allow-list can be shaped around a
 // single format (`!.../build/**/*.rst`) — a re-include of ANY of them
 // counts as opting the tree in.
-const SKIP_DIR_PROBES = ['md', 'markdown', 'mdown', 'mkd', 'rst', 'adoc'].map(
+const SKIP_DIR_PROBES = DISCOVERABLE_DOC_EXTENSIONS.map(
   (ext) => `__tc_skipdir_probe__.${ext}`,
 );
 
