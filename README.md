@@ -391,11 +391,24 @@ For packaged installs (`npx truecourse` or `npm install -g truecourse`), the sim
 
 ```
 CLAUDE_CODE_BINARY=claude             # override the `claude` binary on PATH (CLAUDE_CODE_BIN also accepted)
-CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = default)
+CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = default; the analyze picker overrides it)
 CLAUDE_CODE_TIMEOUT_MS=120000         # per-call timeout (ms)
 CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failure
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
 ```
+
+### Choosing the model for LLM rules
+
+When `truecourse analyze` runs LLM rules interactively it asks which model to
+use, listing the models your Claude Code install actually offers — the same set
+as its `/model` picker, scoped to your account, subscription, and org policy. An
+Opus model is pre-selected when you have one; Fable is never pre-selected, since
+it bills well above the Opus tier.
+
+The list is discovered by asking the `claude` CLI directly. It costs nothing —
+no prompt is sent to the API. Where TrueCourse can't ask (a non-interactive run,
+or a CLI too old to answer) it passes no `--model` and Claude Code picks, which
+is the behavior the variables above describe.
 
 Every command that uses Claude (`analyze` with LLM rules, `spec scan`, `guard generate`) runs a quick up-front preflight: it makes one tiny `claude` call to confirm the CLI is installed and logged in, and aborts with the CLI's own error message if not — so an expired login is caught immediately instead of failing every extraction subprocess at the end of a long run. `CLAUDE_CODE_BINARY` is the canonical way to point at a non-default binary; `CLAUDE_CODE_BIN` is honored as a legacy alias.
 

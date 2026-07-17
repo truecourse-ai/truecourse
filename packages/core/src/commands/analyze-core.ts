@@ -130,6 +130,13 @@ export interface AnalyzeCoreOptions {
    * when an explicit `provider` is supplied (tests inject one that way).
    */
   transport?: LlmTransport;
+  /**
+   * Model for the auto-created provider, as chosen in the analyze model picker
+   * (e.g. `opus[1m]`). Omit to let Claude Code pick — the behavior that
+   * predates the picker, and the fallback when model discovery is unavailable.
+   * Ignored when an explicit `provider` is supplied.
+   */
+  selectedModel?: string;
   signal?: AbortSignal;
 }
 
@@ -361,7 +368,7 @@ export async function analyzeCore(
     const provider =
       options.provider ??
       (effectiveLlmRules
-        ? createLLMProvider(options.transport ?? getDefaultTransport())
+        ? createLLMProvider(options.transport ?? getDefaultTransport(), options.selectedModel)
         : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);

@@ -273,7 +273,10 @@ export interface LLMProvider {
  *    no-provider transport when none is set ⇒ EE never silently spawns the
  *    (absent) `claude` binary; LLM work errors clearly instead.
  * Pass an explicit `LlmTransport` to override (e.g. the agent file-mailbox).
+ *
+ * `selectedModel` is the model chosen in the analyze picker. Omit it to leave
+ * model selection to Claude Code, as callers did before the picker existed.
  */
-export function createLLMProvider(transport?: LlmTransport): LLMProvider {
-  return new ClaudeCodeProvider(transport ?? getDefaultTransport());
+export function createLLMProvider(transport?: LlmTransport, selectedModel?: string): LLMProvider {
+  return new ClaudeCodeProvider(transport ?? getDefaultTransport(), selectedModel);
 }

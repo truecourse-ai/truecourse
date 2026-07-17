@@ -50,6 +50,11 @@ export interface AnalyzeInProcessOptions {
   provider?: LLMProvider;
   /** LLM transport for the auto-created provider (cli default; agent for headless). */
   transport?: LlmTransport;
+  /**
+   * Model for the auto-created provider, as chosen in the analyze model picker.
+   * Omit to let Claude Code pick (the pre-picker behavior).
+   */
+  selectedModel?: string;
   signal?: AbortSignal;
   /**
    * Adapter that triggered this run. Auto-emitted in the telemetry payload so
@@ -66,7 +71,9 @@ export async function analyzeInProcess(
 ): Promise<AnalyzeInProcessResult> {
   const startedAt = Date.now();
   log.info(
-    `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
+    `[LLM] Provider: claude-code, model: ${
+      options.selectedModel || config.claudeCodeModel || 'default (chosen by Claude Code)'
+    }, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
   );
   const core = await analyzeCore(project, { ...options, mode: 'full' });
   const result = await persistFullAnalysis(project, core, startedAt);

@@ -220,6 +220,10 @@
       "types": "./dist/services/llm/model-prices.d.ts",
       "import": "./dist/services/llm/model-prices.js"
     },
+    "./services/llm/model-discovery": {
+      "types": "./dist/services/llm/model-discovery.d.ts",
+      "import": "./dist/services/llm/model-discovery.js"
+    },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",
       "import": "./dist/services/telemetry.service.js"

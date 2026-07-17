@@ -867,6 +867,20 @@ export abstract class BaseCLIProvider implements LLMProvider {
 // ---------------------------------------------------------------------------
 
 export class ClaudeCodeProvider extends BaseCLIProvider {
+  /**
+   * The model this run was told to use, from the analyze model picker.
+   *
+   * Undefined means "no explicit choice", in which case we fall back to
+   * `CLAUDE_CODE_MODEL` and then to passing no `--model` at all — letting
+   * Claude Code pick, which is the behavior that predates the picker.
+   */
+  private readonly selectedModel?: string;
+
+  constructor(transport?: LlmTransport, selectedModel?: string) {
+    super(transport);
+    this.selectedModel = selectedModel;
+  }
+
   get binaryName(): string {
     return config.claudeCodeBinary ?? 'claude';
   }
@@ -881,7 +895,9 @@ export class ClaudeCodeProvider extends BaseCLIProvider {
   }
 
   get modelFlag(): string[] {
-    const model = config.claudeCodeModel;
+    // A picked model is a deliberate in-session choice, so it outranks the
+    // CLAUDE_CODE_MODEL background default.
+    const model = this.selectedModel || config.claudeCodeModel;
     return model ? ['--model', model] : [];
   }
 }
