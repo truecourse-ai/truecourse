@@ -104,7 +104,7 @@ Before the per-issue loop:
   or behavior. Run once, right after creating the branch above:
   ```
   git config user.name "Doil Lee"
-  git config user.email "leedoil2222@gmail.com"
+  git config user.email "doil@truecourse.dev"
   ```
 - Track three counters in your head: `successes = 0`, `attempts = 0`,
   and a list `fixed_issues = []` of `(issue_number, rule_key,
