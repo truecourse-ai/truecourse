@@ -23,7 +23,7 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, type GuardManifestSection } from '@truecourse/shared'
+import { GUARD_FORMAT_VERSION, corpusScanCounts, type CorpusScanCounts, type GuardManifestSection } from '@truecourse/shared'
 import { EXTRACT_PROMPT_FINGERPRINT, GENERATE_PROMPT_FINGERPRINT, FIDELITY_PROMPT_FINGERPRINT } from './prompts.js'
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 
@@ -150,21 +150,11 @@ const CorpusCountsShape = z
   })
   .passthrough()
 
-/** The scan counts an empty-corpus classification needs (#807). */
-export interface CorpusScanCounts {
-  /** Docs discovered in scope before the relevance filter (the "Scanned N" number). */
-  docsScanned: number
-  /** Kept docs (the corpus's `docs` length). */
-  docsKept: number
-  /** Ignored doc-like non-markdown files by extension (`.rst` → count), keys carry the dot. */
-  ignoredNonMarkdown: Record<string, number>
-}
-
 /**
  * Read corpus.json's scan counts tolerantly — `null` when the corpus is absent or
- * unreadable (a corrupt corpus is a separate problem, not an "empty" one). `docsKept`
- * is the kept-doc count; `docsScanned` reads the persisted stats, falling back to
- * kept + skipped for a legacy corpus written before the stats block existed.
+ * unreadable (a corrupt corpus is a separate problem, not an "empty" one). The
+ * counts themselves (incl. the legacy kept + skipped fallback for corpora written
+ * before the stats block existed) come from the shared `corpusScanCounts`.
  */
 export function readCorpusScanCounts(repoRoot: string): CorpusScanCounts | null {
   const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json')
@@ -172,10 +162,7 @@ export function readCorpusScanCounts(repoRoot: string): CorpusScanCounts | null 
   try {
     const parsed = CorpusCountsShape.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
     if (!parsed.success) return null
-    const docsKept = parsed.data.docs?.length ?? 0
-    const skipped = parsed.data.skippedDocs?.length ?? 0
-    const docsScanned = parsed.data.stats?.docsScanned ?? docsKept + skipped
-    return { docsScanned, docsKept, ignoredNonMarkdown: parsed.data.stats?.ignoredNonMarkdown ?? {} }
+    return corpusScanCounts({ ...parsed.data, docs: parsed.data.docs ?? [] })
   } catch {
     return null
   }

@@ -18,10 +18,42 @@
 
 export type EmptyCorpusFlavor = 'no-docs-found' | 'all-docs-dropped';
 
-/** The two scan counts that decide empty-corpus flavor (from CurateStats or persisted corpus.json stats). */
+/** The scan counts an empty-corpus classification and message need. */
 export interface CorpusScanCounts {
+  /** Docs discovered in scope before the relevance filter (the "Scanned N" number). */
   docsScanned: number;
+  /** Kept docs (the corpus's `docs` length). */
   docsKept: number;
+  /** Ignored doc-like non-markdown files by extension (`.rst` → count), keys carry the dot. */
+  ignoredNonMarkdown: Record<string, number>;
+}
+
+/**
+ * The minimal persisted-corpus shape `corpusScanCounts` reads — structural, so the
+ * server-side CuratedCorpus, the tolerant guard-generator parse, and the client's
+ * corpus payload all satisfy it without depending on each other's full types.
+ * (Named for its role — `CorpusLike` is taken by the overlap derivation's shape.)
+ */
+export interface CorpusCountsSource {
+  docs: readonly unknown[];
+  skippedDocs?: readonly unknown[];
+  stats?: { docsScanned?: number; ignoredNonMarkdown?: Record<string, number> };
+}
+
+/**
+ * The ONE corpus → scan-counts derivation, including the legacy fallback: a corpus
+ * written before the stats block existed reconstructs `docsScanned` as kept +
+ * skipped (exact — every discovered doc lands in one of the two lists). Accepts
+ * a missing corpus for caller convenience (all-zero counts).
+ */
+export function corpusScanCounts(corpus: CorpusCountsSource | null | undefined): CorpusScanCounts {
+  if (!corpus) return { docsScanned: 0, docsKept: 0, ignoredNonMarkdown: {} };
+  const docsKept = corpus.docs.length;
+  return {
+    docsScanned: corpus.stats?.docsScanned ?? docsKept + (corpus.skippedDocs?.length ?? 0),
+    docsKept,
+    ignoredNonMarkdown: corpus.stats?.ignoredNonMarkdown ?? {},
+  };
 }
 
 /**
@@ -29,7 +61,9 @@ export interface CorpusScanCounts {
  * doc. `no-docs-found` wins whenever nothing was discoverable (docsScanned === 0),
  * regardless of docsKept.
  */
-export function deriveEmptyCorpus(counts: CorpusScanCounts): EmptyCorpusFlavor | undefined {
+export function deriveEmptyCorpus(
+  counts: Pick<CorpusScanCounts, 'docsScanned' | 'docsKept'>,
+): EmptyCorpusFlavor | undefined {
   if (counts.docsScanned === 0) return 'no-docs-found';
   if (counts.docsKept === 0) return 'all-docs-dropped';
   return undefined;

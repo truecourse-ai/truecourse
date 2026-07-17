@@ -317,15 +317,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // and never loops the user back to `spec scan` — there is nothing left to scan.
   const counts = readCorpusScanCounts(repoRoot)
   if (counts) {
-    const flavor = deriveEmptyCorpus({ docsScanned: counts.docsScanned, docsKept: counts.docsKept })
+    const flavor = deriveEmptyCorpus(counts)
     if (flavor) {
-      return emptyResult('no-docs', {
-        reason: formatEmptyCorpus({
-          flavor,
-          docsScanned: counts.docsScanned,
-          ignoredNonMarkdown: counts.ignoredNonMarkdown,
-        }),
-      })
+      return emptyResult('no-docs', { reason: formatEmptyCorpus({ flavor, ...counts }) })
     }
   }
 

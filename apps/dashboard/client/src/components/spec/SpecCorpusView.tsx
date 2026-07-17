@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import { buildCorpusConflicts, deriveEmptyCorpus, formatEmptyCorpus, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
+import { buildCorpusConflicts, corpusScanCounts, deriveEmptyCorpus, formatEmptyCorpus, orphanedConflictResolutions, type ConflictResolutionLike } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
 import { WorkspaceBadge } from './WorkspaceBadge';
@@ -166,13 +166,8 @@ export function useSpecCorpus(
       // false and reports the flavor, so we explain it here with the shared wording
       // (identical to the CLI's) rather than pretend the corpus is up to date.
       if (res.emptyCorpus) {
-        const stats = res.corpus?.stats;
         toast.warning('No spec corpus', {
-          description: formatEmptyCorpus({
-            flavor: res.emptyCorpus,
-            docsScanned: stats?.docsScanned ?? 0,
-            ignoredNonMarkdown: stats?.ignoredNonMarkdown,
-          }),
+          description: formatEmptyCorpus({ flavor: res.emptyCorpus, ...corpusScanCounts(res.corpus) }),
         });
         return;
       }
@@ -376,20 +371,14 @@ export function SpecCorpusView({
   //    normal tree still renders so its "Not included" list is the force-include remedy,
   //    with an explanation banner on top. Derived from the persisted scan stats, with a
   //    legacy fallback (older corpora lack stats) of docsScanned = kept + skipped.
-  const emptyFlavor = deriveEmptyCorpus({
-    docsScanned: c.stats?.docsScanned ?? c.docs.length + (c.skippedDocs?.length ?? 0),
-    docsKept: c.docs.length,
-  });
+  const scanCounts = corpusScanCounts(c);
+  const emptyFlavor = deriveEmptyCorpus(scanCounts);
   if (emptyFlavor === 'no-docs-found') {
     return (
       <EmptyState
         icon={FileText}
         title="No spec documents found"
-        body={formatEmptyCorpus({
-          flavor: 'no-docs-found',
-          docsScanned: c.stats?.docsScanned ?? 0,
-          ignoredNonMarkdown: c.stats?.ignoredNonMarkdown,
-        })}
+        body={formatEmptyCorpus({ flavor: 'no-docs-found', ...scanCounts })}
       />
     );
   }
@@ -495,7 +484,7 @@ export function SpecCorpusView({
       )}
       {emptyFlavor === 'all-docs-dropped' && (
         <div className="border-b border-border bg-amber-500/10 px-4 py-2 text-[11px] text-amber-700 dark:text-amber-300">
-          {formatEmptyCorpus({ flavor: 'all-docs-dropped', docsScanned: c.stats?.docsScanned ?? 0 })}
+          {formatEmptyCorpus({ flavor: 'all-docs-dropped', ...scanCounts })}
         </div>
       )}
       {allTags.length > 1 && (

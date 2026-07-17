@@ -9,7 +9,7 @@
  * doc — callers treat `null` as "no empty-corpus story to tell here".
  */
 import { readCorpus } from "@truecourse/spec-consolidator";
-import { deriveEmptyCorpus, formatEmptyCorpus, type EmptyCorpusFlavor } from "@truecourse/shared";
+import { corpusScanCounts, deriveEmptyCorpus, formatEmptyCorpus, type EmptyCorpusFlavor } from "@truecourse/shared";
 
 export interface EmptyCorpusNotice {
   flavor: EmptyCorpusFlavor;
@@ -20,17 +20,8 @@ export interface EmptyCorpusNotice {
 export function emptyCorpusNotice(repoRoot: string): EmptyCorpusNotice | null {
   const corpus = readCorpus(repoRoot);
   if (!corpus) return null;
-  const docsKept = corpus.docs.length;
-  // Back-compat: a corpus written before the stats block falls back to kept + skipped.
-  const docsScanned = corpus.stats?.docsScanned ?? docsKept + corpus.skippedDocs.length;
-  const flavor = deriveEmptyCorpus({ docsScanned, docsKept });
+  const counts = corpusScanCounts(corpus);
+  const flavor = deriveEmptyCorpus(counts);
   if (!flavor) return null;
-  return {
-    flavor,
-    message: formatEmptyCorpus({
-      flavor,
-      docsScanned,
-      ignoredNonMarkdown: corpus.stats?.ignoredNonMarkdown ?? {},
-    }),
-  };
+  return { flavor, message: formatEmptyCorpus({ flavor, ...counts }) };
 }

@@ -16,6 +16,7 @@ import * as p from "@clack/prompts";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
 import {
   buildCorpusConflicts,
+  corpusScanCounts,
   deriveEmptyCorpus,
   formatEmptyCorpus,
   openConflicts,
@@ -154,16 +155,10 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   // A corpus present but holding no kept docs (#807): explain WHY (derived from the
   // persisted stats + skippedDocs) and DON'T point at `guard generate` — there is
   // nothing to guard.
-  const docsScanned = corpus.stats?.docsScanned ?? corpus.docs.length + corpus.skippedDocs.length;
-  const emptyFlavor = deriveEmptyCorpus({ docsScanned, docsKept: corpus.docs.length });
+  const counts = corpusScanCounts(corpus);
+  const emptyFlavor = deriveEmptyCorpus(counts);
   if (emptyFlavor) {
-    p.log.warn(
-      formatEmptyCorpus({
-        flavor: emptyFlavor,
-        docsScanned,
-        ignoredNonMarkdown: corpus.stats?.ignoredNonMarkdown ?? {},
-      }),
-    );
+    p.log.warn(formatEmptyCorpus({ flavor: emptyFlavor, ...counts }));
     p.outro("Done.");
     return;
   }
