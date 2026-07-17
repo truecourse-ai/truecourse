@@ -405,10 +405,10 @@ your account, subscription, and org policy:
 
 ```
 ◆  Which model should LLM rules use?
-│  ● Opus 4.8 with 1M context · Best for everyday, complex tasks
-│  ○ Fable 5 · Most capable for your hardest and longest-running tasks
-│  ○ Sonnet 5 · Efficient for routine tasks
-│  ○ Haiku 4.5 · Fastest for quick answers
+│  ● Opus 4.8 with 1M context
+│  ○ Fable 5
+│  ○ Sonnet 5
+│  ○ Haiku 4.5
 └
 ```
 

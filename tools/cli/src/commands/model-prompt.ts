@@ -13,27 +13,39 @@ export interface ModelPickerOption {
 }
 
 /**
+ * The label for one row: which model this is, and nothing else.
+ *
+ * Claude Code's descriptions are `"<identity> · <pitch>"` — "Opus 4.8 with 1M
+ * context · Best for everyday, complex tasks". Only the identity earns its
+ * place here: anyone choosing a model already has Claude Code and knows what
+ * Opus is, so the pitch is noise on every row. The identity half is kept whole
+ * because the context window ("with 1M context") distinguishes real choices.
+ *
+ * Falls back to `displayName` when there's no description, or when cutting the
+ * pitch leaves nothing.
+ */
+function labelFor(model: ClaudeModelInfo): string {
+  const identity = model.description?.split('·')[0]?.trim();
+  return identity || model.displayName;
+}
+
+/**
  * Shape the discovered models into picker options.
  *
- * The description becomes the label rather than clack's `hint`, because clack
- * renders a hint only for the row the cursor is on — so exactly one model would
- * describe itself and the rest would show a bare name. Every row should say
+ * The label carries the model's identity rather than clack's `hint`, because
+ * clack renders a hint only for the row the cursor is on — so exactly one model
+ * would name itself and the rest would show a bare alias. Every row should say
  * which model it is. (clack also hardcodes parentheses around hints.)
  *
- * Claude Code's descriptions already lead with the model ("Opus 4.8 with 1M
- * context · …"), so they stand alone; `displayName` is the fallback for an
- * entry that has none. Order is preserved as the CLI reported it, so the list
- * reads like Claude Code's own `/model` picker.
+ * Order is preserved as the CLI reported it, so the list reads like Claude
+ * Code's own `/model` picker.
  */
 export function buildModelPickerOptions(models: ClaudeModelInfo[]): {
   options: ModelPickerOption[];
   initialValue: string | undefined;
 } {
   return {
-    options: models.map((m) => ({
-      value: m.value,
-      label: m.description || m.displayName,
-    })),
+    options: models.map((m) => ({ value: m.value, label: labelFor(m) })),
     initialValue: pickDefaultModel(models)?.value,
   };
 }

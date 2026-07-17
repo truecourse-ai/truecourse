@@ -50,17 +50,31 @@ afterEach(() => {
 });
 
 describe('buildModelPickerOptions', () => {
-  it('labels every model with its description, so each row names its model', () => {
+  it('labels every model with its identity, dropping the sales pitch after the dot', () => {
     // Not clack's `hint`: that renders only on the focused row, leaving the
     // rest as bare names.
     const { options } = buildModelPickerOptions(MODELS);
     expect(options.map((o) => o.label)).toEqual([
-      'Opus 4.8 with 1M context · Best for everyday, complex tasks',
-      'Opus 4.8 with 1M context · Best for everyday, complex tasks',
-      'Fable 5 · Most capable for your hardest and longest-running tasks',
-      'Sonnet 5 · Efficient for routine tasks',
-      'Haiku 4.5 · Fastest for quick answers',
+      'Opus 4.8 with 1M context',
+      'Opus 4.8 with 1M context',
+      'Fable 5',
+      'Sonnet 5',
+      'Haiku 4.5',
     ]);
+  });
+
+  it('keeps the whole description when there is no dot to cut at', () => {
+    const { options } = buildModelPickerOptions([
+      { value: 'sonnet', displayName: 'Sonnet', description: 'Sonnet 5' },
+    ]);
+    expect(options[0].label).toBe('Sonnet 5');
+  });
+
+  it('falls back to the display name when the description is only a pitch', () => {
+    const { options } = buildModelPickerOptions([
+      { value: 'sonnet', displayName: 'Sonnet', description: '· Efficient for routine tasks' },
+    ]);
+    expect(options[0].label).toBe('Sonnet');
   });
 
   it('never sets a hint, which clack would parenthesize and show on one row only', () => {
