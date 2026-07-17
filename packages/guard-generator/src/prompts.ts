@@ -816,9 +816,12 @@ export function buildRecipeUserPrompt(input: RecipeDiscoveryInput): string {
       input.verifyFailure.reason,
       'Revise the recipe so the failing step succeeds — fix the install/build command',
       'or the entry argv to match what this repo actually supports (e.g. an install',
-      'that needs no lockfile, a different build script, the real built path). Return',
-      'exactly one revised JSON proposal, or { "ambiguous": "<why>" } if the failure',
-      'shows this repo cannot be built non-interactively.',
+      'that needs no lockfile, a different build script, the real built path). When',
+      'the INSTALL step is what failed and the entry can plausibly run from the tree',
+      'as-is (a script-file CLI with no runtime dependencies), OMITTING install',
+      'entirely is a valid revision — the engine will verify the entry answers.',
+      'Return exactly one revised JSON proposal, or { "ambiguous": "<why>" } if the',
+      'failure shows this repo cannot be built non-interactively.',
     )
   }
   if (input.correction) {

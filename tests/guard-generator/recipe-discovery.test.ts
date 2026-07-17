@@ -252,6 +252,7 @@ describe('verification-failure revision', () => {
     expect(prompt).toContain('VERIFICATION FAILURE')
     expect(prompt).toContain('install `npm ci` failed: no lockfile')
     expect(prompt).toContain('Revise the recipe')
+    expect(prompt).toContain('OMITTING install')
   })
 })
 
