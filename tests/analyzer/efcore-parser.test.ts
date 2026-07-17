@@ -818,4 +818,81 @@ describe('EF Core project reconciliation', () => {
       fs.rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('reconciles entities and context that live outside any detected service (Clean Architecture)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-efcore-cleanarch-'))
+    try {
+      const web = path.join(root, 'src', 'Web')
+      const write = (filePath: string, content: string): string => {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true })
+        fs.writeFileSync(filePath, content)
+        return filePath
+      }
+      // Only Web is a detected service; it carries the provider package and the
+      // entrypoint. The DbContext and entity POCOs live in class libraries that
+      // are NOT detected services, so they fall into the shared root scope.
+      write(path.join(web, 'Web.csproj'), `
+        <Project Sdk="Microsoft.NET.Sdk">
+          <ItemGroup>
+            <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+          </ItemGroup>
+        </Project>
+      `)
+      const program = write(path.join(web, 'Program.cs'), `
+        using Microsoft.EntityFrameworkCore;
+        var app = builder.Build();
+      `)
+      const context = write(path.join(root, 'src', 'Infrastructure', 'CatalogContext.cs'), `
+        using Microsoft.EntityFrameworkCore;
+        using ApplicationCore.Entities;
+        namespace Infrastructure.Data;
+        public class CatalogContext : DbContext
+        {
+          public DbSet<CatalogItem> CatalogItems { get; set; }
+          public DbSet<CatalogBrand> CatalogBrands { get; set; }
+          protected override void OnConfiguring(DbContextOptionsBuilder o) { o.UseSqlServer("conn"); }
+        }
+      `)
+      // Pure POCOs — no EF import of their own; they carry the columns.
+      const item = write(path.join(root, 'src', 'ApplicationCore', 'CatalogItem.cs'), `
+        namespace ApplicationCore.Entities;
+        public class CatalogItem
+        {
+          public int Id { get; set; }
+          public string Name { get; set; }
+          public int CatalogBrandId { get; set; }
+          public CatalogBrand CatalogBrand { get; set; }
+        }
+      `)
+      const brand = write(path.join(root, 'src', 'ApplicationCore', 'CatalogBrand.cs'), `
+        namespace ApplicationCore.Entities;
+        public class CatalogBrand { public int Id { get; set; } public string Brand { get; set; } }
+      `)
+
+      const analyses = [
+        { filePath: program, language: 'csharp', imports: [{ source: 'Microsoft.EntityFrameworkCore' }] },
+        { filePath: context, language: 'csharp', imports: [{ source: 'Microsoft.EntityFrameworkCore' }] },
+        { filePath: item, language: 'csharp', imports: [] },
+        { filePath: brand, language: 'csharp', imports: [] },
+      ] as unknown as FileAnalysis[]
+      const services = [{ name: 'Web', rootPath: web, files: [program] }] as unknown as Service[]
+
+      const sqlserver = detectDatabases(root, analyses, services).databases
+        .find((database) => database.type === 'sqlserver')
+      const items = sqlserver?.tables.find((table) => table.name === 'CatalogItems')
+
+      // The property-bearing POCOs reach the parser, so tables carry columns
+      // and the FK is drawn — not empty DbSet stubs.
+      expect(items?.columns.map((column) => column.name)).toEqual(['id', 'name', 'catalog_brand_id'])
+      expect(sqlserver?.relations).toContainEqual(
+        expect.objectContaining({
+          sourceTable: 'CatalogItems',
+          targetTable: 'CatalogBrands',
+          foreignKeyColumn: 'catalog_brand_id',
+        }),
+      )
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

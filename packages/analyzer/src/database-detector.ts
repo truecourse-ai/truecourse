@@ -15,6 +15,9 @@ interface DetectedDatabase {
   connectionEnvVar?: string
 }
 
+/** Model scope for C# files that belong to no detected service. */
+const ROOT_MODEL_SCOPE = '__root__'
+
 /**
  * Detect databases used in the codebase by scanning imports, schema files,
  * and Docker Compose configuration.
@@ -135,22 +138,28 @@ export function detectDatabases(
     for (const service of services) {
       for (const filePath of service.files) serviceByFile.set(filePath, service)
     }
+    // The model scope of a C# file: its detected service, or the shared root
+    // bucket for files owned by none. EF entities and their DbContext commonly
+    // live in class libraries (ApplicationCore/Infrastructure) that are not
+    // detected services, so both fall here and must reconcile as one model.
+    // Both loops below derive scope through this single helper so a file can
+    // never register under one name yet be collected under another.
+    const serviceNameOf = (analysis: FileAnalysis): string =>
+      serviceByFile.get(analysis.filePath)?.name ?? ROOT_MODEL_SCOPE
+
     const efServiceNames = new Set(
       detections
         .filter((detection) => detection.driver.startsWith('efcore-'))
         .map((detection) => detection.serviceName),
     )
     for (const analysis of analyses) {
-      if (!efParser.matchesImport(analysis)) continue
-      const service = serviceByFile.get(analysis.filePath)
-      if (service) efServiceNames.add(service.name)
+      if (efParser.matchesImport(analysis)) efServiceNames.add(serviceNameOf(analysis))
     }
 
     for (const analysis of analyses) {
       if (analysis.language !== 'csharp') continue
 
-      const service = serviceByFile.get(analysis.filePath)
-      const serviceName = service?.name ?? '__root__'
+      const serviceName = serviceNameOf(analysis)
       const hasEfEvidence = efParser.matchesImport(analysis)
       if (!hasEfEvidence && !efServiceNames.has(serviceName)) continue
 
