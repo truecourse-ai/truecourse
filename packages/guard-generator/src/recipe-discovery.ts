@@ -296,6 +296,14 @@ export function collectDiscoveryInputs(repoRoot: string): Omit<RecipeDiscoveryIn
   for (const marker of JS_PRESENCE_MARKERS) {
     if (fs.existsSync(path.join(repoRoot, marker))) presentInputs.push(marker)
   }
+  // Monorepos: the CLI usually lives in a workspace member, not the (often
+  // private, bin-less) root — surface every bin-declaring member manifest so
+  // the model can name the real entrypoint instead of declaring the repo
+  // ambiguous. Members are resolved from pnpm-workspace.yaml globs and the root
+  // package.json `workspaces` list.
+  for (const rel of discoverWorkspaceBinManifests(repoRoot)) {
+    manifests.push({ path: rel, ecosystem: 'js', content: readCappedManifest(path.join(repoRoot, rel)) })
+  }
 
   for (const rel of PYTHON_MANIFESTS) {
     const abs = path.join(repoRoot, rel)
@@ -319,6 +327,89 @@ export function collectDiscoveryInputs(repoRoot: string): Omit<RecipeDiscoveryIn
       : undefined
 
   return { manifests, presentInputs, ...(extraProjectNote ? { extraProjectNote } : {}) }
+}
+
+/** Max workspace-member package.json files inlined (bin-bearing only). */
+const MAX_WORKSPACE_MANIFESTS = 8
+
+/**
+ * Workspace member `package.json` paths that declare a `bin`, repo-relative,
+ * sorted for determinism and capped. Member dirs come from pnpm-workspace.yaml
+ * `packages:` globs and the root package.json `workspaces` array; glob support
+ * is the common single-`*` segment (`packages/*`) — a literal path is used
+ * as-is. Anything unreadable is skipped silently: this is an input harvester,
+ * not a validator.
+ */
+function discoverWorkspaceBinManifests(repoRoot: string): string[] {
+  const patterns = new Set<string>()
+
+  const pnpmWs = path.join(repoRoot, 'pnpm-workspace.yaml')
+  if (isFile(pnpmWs)) {
+    // Minimal YAML list parse: lines under `packages:` shaped `- "glob"`.
+    const lines = fs.readFileSync(pnpmWs, 'utf-8').split('\n')
+    let inPackages = false
+    for (const line of lines) {
+      if (/^packages\s*:/.test(line)) {
+        inPackages = true
+        continue
+      }
+      if (inPackages) {
+        const m = /^\s*-\s*['"]?([^'"#\s]+)['"]?/.exec(line)
+        if (m) patterns.add(m[1])
+        else if (/^\S/.test(line)) inPackages = false
+      }
+    }
+  }
+
+  const rootPkg = path.join(repoRoot, 'package.json')
+  if (isFile(rootPkg)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(rootPkg, 'utf-8')) as {
+        workspaces?: string[] | { packages?: string[] }
+      }
+      const ws = Array.isArray(parsed.workspaces) ? parsed.workspaces : parsed.workspaces?.packages
+      for (const p of ws ?? []) patterns.add(p)
+    } catch {
+      // Unparseable root package.json — the inline of its raw text still reaches
+      // the model; there is just no workspace expansion to do.
+    }
+  }
+
+  const memberDirs = new Set<string>()
+  for (const pattern of patterns) {
+    if (pattern.startsWith('!')) continue
+    const starAt = pattern.indexOf('*')
+    if (starAt === -1) {
+      memberDirs.add(pattern)
+      continue
+    }
+    // `dir/*` (and `dir/**`): expand one directory level under the prefix.
+    const prefix = pattern.slice(0, starAt).replace(/\/$/, '')
+    const base = path.join(repoRoot, prefix)
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(base, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) memberDirs.add(path.posix.join(prefix, e.name))
+    }
+  }
+
+  const withBin: string[] = []
+  for (const dir of [...memberDirs].sort()) {
+    const rel = path.posix.join(dir, 'package.json')
+    const abs = path.join(repoRoot, rel)
+    if (!isFile(abs)) continue
+    try {
+      const parsed = JSON.parse(fs.readFileSync(abs, 'utf-8')) as { bin?: unknown }
+      if (parsed.bin) withBin.push(rel)
+    } catch {
+      continue
+    }
+  }
+  return withBin.slice(0, MAX_WORKSPACE_MANIFESTS)
 }
 
 function isFile(abs: string): boolean {

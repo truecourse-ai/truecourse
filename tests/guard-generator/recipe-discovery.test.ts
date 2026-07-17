@@ -254,3 +254,43 @@ describe('verification-failure revision', () => {
     expect(prompt).toContain('Revise the recipe')
   })
 })
+
+describe('workspace member manifests', () => {
+  it('surfaces bin-declaring workspace members from pnpm-workspace globs', () => {
+    const repo = bareRepo()
+    write(repo, 'package.json', JSON.stringify({ name: 'mono', private: true, version: '0.0.0' }, null, 2))
+    write(repo, 'pnpm-workspace.yaml', 'packages:\n  - "@commitlint/*"\n')
+    write(
+      repo,
+      '@commitlint/cli/package.json',
+      JSON.stringify({ name: '@commitlint/cli', version: '1.0.0', bin: { commitlint: 'cli.js' } }, null, 2),
+    )
+    write(
+      repo,
+      '@commitlint/load/package.json',
+      JSON.stringify({ name: '@commitlint/load', version: '1.0.0' }, null, 2),
+    )
+
+    const inputs = collectDiscoveryInputs(repo)
+    const paths = inputs.manifests.map((m) => m.path)
+    expect(paths).toContain('@commitlint/cli/package.json')
+    expect(paths).not.toContain('@commitlint/load/package.json')
+  })
+
+  it('surfaces members from a root package.json workspaces array', () => {
+    const repo = bareRepo()
+    write(
+      repo,
+      'package.json',
+      JSON.stringify({ name: 'mono', private: true, version: '0.0.0', workspaces: ['packages/*'] }, null, 2),
+    )
+    write(
+      repo,
+      'packages/tool/package.json',
+      JSON.stringify({ name: 'tool', version: '1.0.0', bin: { tool: 'index.js' } }, null, 2),
+    )
+
+    const inputs = collectDiscoveryInputs(repo)
+    expect(inputs.manifests.map((m) => m.path)).toContain('packages/tool/package.json')
+  })
+})
