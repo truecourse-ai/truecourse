@@ -5,11 +5,38 @@ import {
 } from '../../tools/cli/src/commands/model-prompt.js';
 import type { ClaudeModelInfo } from '@truecourse/core/services/llm/model-discovery';
 
+/** Mirrors what a real `claude` reports, `default` included. */
 const MODELS: ClaudeModelInfo[] = [
-  { value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-4-8[1m]' },
-  { value: 'opus[1m]', displayName: 'Opus', description: 'Opus 4.8' },
-  { value: 'claude-fable-5[1m]', displayName: 'Fable', description: 'Fable 5' },
-  { value: 'haiku', displayName: 'Haiku', description: 'Haiku 4.5' },
+  {
+    value: 'default',
+    displayName: 'Default (recommended)',
+    description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks',
+    resolvedModel: 'claude-opus-4-8[1m]',
+  },
+  {
+    value: 'opus[1m]',
+    displayName: 'Opus',
+    description: 'Opus 4.8 with 1M context · Best for everyday, complex tasks',
+    resolvedModel: 'claude-opus-4-8[1m]',
+  },
+  {
+    value: 'claude-fable-5[1m]',
+    displayName: 'Fable',
+    description: 'Fable 5 · Most capable for your hardest and longest-running tasks',
+    resolvedModel: 'claude-fable-5',
+  },
+  {
+    value: 'sonnet',
+    displayName: 'Sonnet',
+    description: 'Sonnet 5 · Efficient for routine tasks',
+    resolvedModel: 'claude-sonnet-5',
+  },
+  {
+    value: 'haiku',
+    displayName: 'Haiku',
+    description: 'Haiku 4.5 · Fastest for quick answers',
+    resolvedModel: 'claude-haiku-4-5-20251001',
+  },
 ];
 
 const originalTTY = process.stdin.isTTY;
@@ -23,12 +50,37 @@ afterEach(() => {
 });
 
 describe('buildModelPickerOptions', () => {
-  it('offers every discovered model, in the order the CLI reported them', () => {
+  it('labels every model with its description, so each row names its model', () => {
+    // Not clack's `hint`: that renders only on the focused row, leaving the
+    // rest as bare names.
+    const { options } = buildModelPickerOptions(MODELS);
+    expect(options.map((o) => o.label)).toEqual([
+      'Opus 4.8 with 1M context · Best for everyday, complex tasks',
+      'Opus 4.8 with 1M context · Best for everyday, complex tasks',
+      'Fable 5 · Most capable for your hardest and longest-running tasks',
+      'Sonnet 5 · Efficient for routine tasks',
+      'Haiku 4.5 · Fastest for quick answers',
+    ]);
+  });
+
+  it('never sets a hint, which clack would parenthesize and show on one row only', () => {
+    for (const option of buildModelPickerOptions(MODELS).options) {
+      expect(option).not.toHaveProperty('hint');
+    }
+  });
+
+  it('falls back to the display name when a model has no description', () => {
+    const { options } = buildModelPickerOptions([{ value: 'sonnet', displayName: 'Sonnet' }]);
+    expect(options[0].label).toBe('Sonnet');
+  });
+
+  it('preserves the order the CLI reported', () => {
     const { options } = buildModelPickerOptions(MODELS);
     expect(options.map((o) => o.value)).toEqual([
       'default',
       'opus[1m]',
       'claude-fable-5[1m]',
+      'sonnet',
       'haiku',
     ]);
   });
@@ -43,16 +95,6 @@ describe('buildModelPickerOptions', () => {
       { value: 'haiku', displayName: 'Haiku' },
     ]);
     expect(initialValue).toBe('haiku');
-  });
-
-  it('carries the description through as the option hint', () => {
-    const opus = buildModelPickerOptions(MODELS).options.find((o) => o.value === 'opus[1m]');
-    expect(opus?.hint).toBe('Opus 4.8');
-  });
-
-  it('omits the hint when a model has no description', () => {
-    const dflt = buildModelPickerOptions(MODELS).options.find((o) => o.value === 'default');
-    expect(dflt).not.toHaveProperty('hint');
   });
 });
 
@@ -71,7 +113,31 @@ describe('promptModelChoice', () => {
     await promptModelChoice({ discover: async () => MODELS, select });
 
     expect(select.mock.calls[0][0].initialValue).toBe('opus[1m]');
-    expect(select.mock.calls[0][0].options).toHaveLength(4);
+  });
+
+  it('does not offer `default` — it names no model', async () => {
+    const select = vi.fn(async () => 'opus[1m]');
+
+    await promptModelChoice({ discover: async () => MODELS, select });
+
+    expect(select.mock.calls[0][0].options.map((o) => o.value)).toEqual([
+      'opus[1m]',
+      'claude-fable-5[1m]',
+      'sonnet',
+      'haiku',
+    ]);
+  });
+
+  it('falls back when the only model on offer is an opaque alias', async () => {
+    const select = vi.fn(async () => 'default');
+
+    const chosen = await promptModelChoice({
+      discover: async () => [MODELS[0]],
+      select,
+    });
+
+    expect(chosen).toBeUndefined();
+    expect(select).not.toHaveBeenCalled();
   });
 
   it('returns undefined when discovery fails, keeping the pre-picker default', async () => {

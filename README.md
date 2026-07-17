@@ -400,10 +400,22 @@ CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per ru
 ### Choosing the model for LLM rules
 
 When `truecourse analyze` runs LLM rules interactively it asks which model to
-use, listing the models your Claude Code install actually offers — the same set
-as its `/model` picker, scoped to your account, subscription, and org policy. An
-Opus model is pre-selected when you have one; Fable is never pre-selected, since
-it bills well above the Opus tier.
+use, listing the models your Claude Code install actually offers — scoped to
+your account, subscription, and org policy:
+
+```
+◆  Which model should LLM rules use?
+│  ● Opus 4.8 with 1M context · Best for everyday, complex tasks
+│  ○ Fable 5 · Most capable for your hardest and longest-running tasks
+│  ○ Sonnet 5 · Efficient for routine tasks
+│  ○ Haiku 4.5 · Fastest for quick answers
+└
+```
+
+An Opus model is pre-selected when you have one; Fable is never pre-selected,
+since it bills well above the Opus tier. Claude Code's own `default` entry is
+not offered — it names no model, so picking it would tell you nothing about
+what will run.
 
 The list is discovered by asking the `claude` CLI directly. It costs nothing —
 no prompt is sent to the API. Where TrueCourse can't ask (a non-interactive run,

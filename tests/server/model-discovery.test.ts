@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   discoverClaudeModels,
   pickDefaultModel,
+  selectableModels,
   type ClaudeModelInfo,
 } from '../../packages/core/src/services/llm/model-discovery.js';
 
@@ -76,21 +77,7 @@ describe('pickDefaultModel', () => {
     expect(pickDefaultModel(models)?.value).toBe('sonnet');
   });
 
-  it('identifies Opus via resolvedModel when the alias does not say so', () => {
-    const models = [
-      model({ value: 'haiku', displayName: 'Haiku' }),
-      model({
-        value: 'default',
-        displayName: 'Default (recommended)',
-        resolvedModel: 'claude-opus-4-8[1m]',
-      }),
-    ];
-    expect(pickDefaultModel(models)?.value).toBe('default');
-  });
-
-  it('prefers an explicit Opus entry over the moving `default` alias', () => {
-    // `default` resolves to Opus today but tracks whatever Claude Code prefers
-    // tomorrow. Pinning to it would reintroduce silent model drift.
+  it('prefers an explicit Opus entry over an alias that merely resolves to Opus', () => {
     const models = [
       model({
         value: 'default',
@@ -121,6 +108,65 @@ describe('pickDefaultModel', () => {
 
   it('returns null for an empty list', () => {
     expect(pickDefaultModel([])).toBeNull();
+  });
+});
+
+describe('selectableModels', () => {
+  it('drops the `default` alias, which names no model', () => {
+    // Its label says "Default (recommended)" — picking it tells you nothing
+    // about what will run, which is the whole point of offering a choice.
+    const models = [
+      model({
+        value: 'default',
+        displayName: 'Default (recommended)',
+        resolvedModel: 'claude-opus-4-8[1m]',
+      }),
+      model({ value: 'opus[1m]', displayName: 'Opus', resolvedModel: 'claude-opus-4-8[1m]' }),
+    ];
+    expect(selectableModels(models).map((m) => m.value)).toEqual(['opus[1m]']);
+  });
+
+  it('drops any opaque alias, not just `default`', () => {
+    // `best` tracks whatever Claude Code judges best — same problem as `default`.
+    const models = [
+      model({ value: 'best', displayName: 'Best', resolvedModel: 'claude-opus-4-8' }),
+      model({ value: 'sonnet', displayName: 'Sonnet', resolvedModel: 'claude-sonnet-5' }),
+    ];
+    expect(selectableModels(models).map((m) => m.value)).toEqual(['sonnet']);
+  });
+
+  it('keeps every entry that names its own model family', () => {
+    const models = [
+      model({ value: 'opus[1m]', displayName: 'Opus', resolvedModel: 'claude-opus-4-8[1m]' }),
+      model({
+        value: 'claude-fable-5[1m]',
+        displayName: 'Fable',
+        resolvedModel: 'claude-fable-5',
+      }),
+      model({ value: 'sonnet', displayName: 'Sonnet', resolvedModel: 'claude-sonnet-5' }),
+      model({ value: 'haiku', displayName: 'Haiku', resolvedModel: 'claude-haiku-4-5-20251001' }),
+    ];
+    expect(selectableModels(models)).toHaveLength(4);
+  });
+
+  it('keeps entries with no resolvedModel — the entry is its own identity', () => {
+    const models = [model({ value: 'sonnet', displayName: 'Sonnet', resolvedModel: undefined })];
+    expect(selectableModels(models).map((m) => m.value)).toEqual(['sonnet']);
+  });
+
+  it('keeps an entry whose resolvedModel names no known family', () => {
+    // A future family we don't know about must not be silently hidden.
+    const models = [
+      model({ value: 'mythos', displayName: 'Mythos', resolvedModel: 'claude-mythos-9' }),
+    ];
+    expect(selectableModels(models).map((m) => m.value)).toEqual(['mythos']);
+  });
+
+  it('matches the family case-insensitively', () => {
+    const models = [
+      model({ value: 'OPUS[1m]', displayName: 'Opus', resolvedModel: 'claude-Opus-4-8' }),
+    ];
+    expect(selectableModels(models)).toHaveLength(1);
   });
 });
 

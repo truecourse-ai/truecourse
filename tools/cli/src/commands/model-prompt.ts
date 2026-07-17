@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import {
   discoverClaudeModels,
   pickDefaultModel,
+  selectableModels,
   type ClaudeModelInfo,
 } from "@truecourse/core/services/llm/model-discovery";
 import { isInteractive } from "./helpers.js";
@@ -9,14 +10,20 @@ import { isInteractive } from "./helpers.js";
 export interface ModelPickerOption {
   value: string;
   label: string;
-  hint?: string;
 }
 
 /**
  * Shape the discovered models into picker options.
  *
- * Order is preserved as the CLI reported it, so the list reads the same as
- * Claude Code's own `/model` picker.
+ * The description becomes the label rather than clack's `hint`, because clack
+ * renders a hint only for the row the cursor is on — so exactly one model would
+ * describe itself and the rest would show a bare name. Every row should say
+ * which model it is. (clack also hardcodes parentheses around hints.)
+ *
+ * Claude Code's descriptions already lead with the model ("Opus 4.8 with 1M
+ * context · …"), so they stand alone; `displayName` is the fallback for an
+ * entry that has none. Order is preserved as the CLI reported it, so the list
+ * reads like Claude Code's own `/model` picker.
  */
 export function buildModelPickerOptions(models: ClaudeModelInfo[]): {
   options: ModelPickerOption[];
@@ -25,8 +32,7 @@ export function buildModelPickerOptions(models: ClaudeModelInfo[]): {
   return {
     options: models.map((m) => ({
       value: m.value,
-      label: m.displayName,
-      ...(m.description ? { hint: m.description } : {}),
+      label: m.description || m.displayName,
     })),
     initialValue: pickDefaultModel(models)?.value,
   };
@@ -72,16 +78,18 @@ export async function promptModelChoice({
   const s = p.spinner();
   s.start("Checking which models you can use");
 
-  let models: ClaudeModelInfo[] | null;
+  let discovered: ClaudeModelInfo[] | null;
   try {
-    models = await discover();
+    discovered = await discover();
   } catch {
     // Discovery is a convenience, never a gate: a broken probe must not stop an
     // analysis that would otherwise run fine on Claude Code's default model.
-    models = null;
+    discovered = null;
   }
 
-  if (!models || models.length === 0) {
+  const models = discovered ? selectableModels(discovered) : [];
+
+  if (models.length === 0) {
     s.stop("Using the model Claude Code picks");
     return undefined;
   }

@@ -154,13 +154,16 @@ export async function discoverClaudeModels(
   });
 }
 
+/** Model families we can recognize by name in an id or label. */
+const FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'] as const;
+
 /** Fable bills well above the Opus tier — never auto-select it. */
 function isFable(model: ClaudeModelInfo): boolean {
   return /fable/i.test(`${model.value} ${model.displayName} ${model.resolvedModel ?? ''}`);
 }
 
 /**
- * Whether this entry *names* Opus — an explicit, stable choice.
+ * Whether this entry *names* Opus.
  *
  * Matches identity fields only. Descriptions are marketing prose that name
  * other tiers ("more capable than Opus 4.8"), so they are not evidence.
@@ -169,34 +172,49 @@ function isExplicitOpus(model: ClaudeModelInfo): boolean {
   return /opus/i.test(`${model.value} ${model.displayName}`);
 }
 
-/** Whether this entry currently *resolves* to Opus (e.g. the `default` alias). */
-function resolvesToOpus(model: ClaudeModelInfo): boolean {
-  return /opus/i.test(model.resolvedModel ?? '');
+/**
+ * Whether an entry tells you which model you'd actually get.
+ *
+ * `default` ("Default (recommended)" → `claude-opus-4-8[1m]`) does not: it is a
+ * moving alias for whatever Claude Code currently prefers. Offering it as a
+ * choice would be offering "surprise me", which is the behavior the picker
+ * exists to replace — and it is exactly how analysis silently ended up on a
+ * premium tier before it existed.
+ *
+ * The test is whether the entry names the family it resolves to. That covers
+ * `best` and `opusplan` too, without hardcoding a list of alias names. Entries
+ * with no `resolvedModel`, or one from a family we don't recognize, are kept —
+ * we only drop an entry when we have positive evidence it hides its model.
+ */
+function namesItsModel(model: ClaudeModelInfo): boolean {
+  const resolved = model.resolvedModel?.toLowerCase();
+  if (!resolved) return true;
+  const family = FAMILIES.find((f) => resolved.includes(f));
+  if (!family) return true;
+  return `${model.value} ${model.displayName}`.toLowerCase().includes(family);
 }
 
 /**
- * The model to pre-select when offering the picker. Returns `null` for an
- * empty list.
+ * The models worth offering: every entry whose label tells the user which model
+ * they are choosing. Order is preserved.
+ */
+export function selectableModels(models: ClaudeModelInfo[]): ClaudeModelInfo[] {
+  return models.filter(namesItsModel);
+}
+
+/**
+ * The model to pre-select when offering the picker. Expects an already
+ * `selectableModels`-filtered list. Returns `null` for an empty list.
  *
  * Opus is the deliberate default for analysis — the strongest tier we are
- * willing to spend on a user's behalf without being asked.
+ * willing to spend on a user's behalf without being asked. Failing that, the
+ * first model offered.
  *
- * Preference order:
- *   1. An entry that names Opus (`opus[1m]`) — explicit and stable.
- *   2. An entry that resolves to Opus today (`default` → `claude-opus-4-8`).
- *   3. The first non-Fable model.
- *
- * (1) outranks (2) deliberately: `default` is a moving alias that tracks
- * whatever Claude Code decides to prefer, so pinning analysis to it would
- * re-introduce the silent model drift this picker exists to prevent.
- *
- * Fable is never auto-selected at any tier — it bills well above Opus, and a
- * user should reach that tier by choosing it, not by accepting a default.
+ * Fable is never auto-selected — it bills well above Opus, and a user should
+ * reach that tier by choosing it, not by accepting a default.
  */
 export function pickDefaultModel(models: ClaudeModelInfo[]): ClaudeModelInfo | null {
   if (models.length === 0) return null;
   const candidates = models.filter((m) => !isFable(m));
-  return (
-    candidates.find(isExplicitOpus) ?? candidates.find(resolvesToOpus) ?? candidates[0] ?? null
-  );
+  return candidates.find(isExplicitOpus) ?? candidates[0] ?? null;
 }
