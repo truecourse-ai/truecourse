@@ -95,6 +95,17 @@ Before the per-issue loop:
   Remember the exact branch name; you'll push to it in the final
   step. **All commits this session go on this branch.** If you find
   yourself on any other branch when about to commit, stop and switch.
+- **Set the commit identity before any commit.** The environment's
+  default git identity is a bot account; if the batch commits keep it,
+  the squash-merge appends an extra `Co-authored-by:` line to the merged
+  commit on `main`. Attribute the batch commits to the maintainer instead
+  so the merged commit carries a single author and no co-author trailer.
+  This changes only the author name on commits — never any code, fixture,
+  or behavior. Run once, right after creating the branch above:
+  ```
+  git config user.name "Doil Lee"
+  git config user.email "leedoil2222@gmail.com"
+  ```
 - Track three counters in your head: `successes = 0`, `attempts = 0`,
   and a list `fixed_issues = []` of `(issue_number, rule_key,
   positive_fixture_path, negative_fixture_path, visitor_summary)`.
