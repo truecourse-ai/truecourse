@@ -23,12 +23,11 @@ import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
 import { GuardScenarioDetail } from '@/components/guard/GuardScenarioDetail';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
-import { GuardHeldDetail } from '@/components/guard/GuardHeldDetail';
 import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardReport } from '@/hooks/useGuardReport';
-import { buildAutoResolvedRows, buildFindingRows, buildHeldRows, buildListRows } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFindingRows, buildListRows } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 
 const json = (body: unknown) =>
@@ -118,34 +117,6 @@ const REPORT: GuardGenerateReport = {
 // A generate that settled clean — no findings, no errors (strip is just the summary line).
 const CLEAN_REPORT: GuardGenerateReport = { ...REPORT, birthFindings: [], errors: [] };
 
-// A report that ALSO carries ready-but-held scenarios (birth-passed, section
-// withheld). Two held sections: the auth/rate-limiting section is the finding's
-// own section (so the finding shows its "holds N" blast radius); the sec/z section
-// is held by an authoring error. Distinct human headings so their Held-block group
-// headers never collide with the finding's slug header.
-const HELD_REPORT: GuardGenerateReport = {
-  ...REPORT,
-  heldSections: [
-    {
-      doc: 'docs/auth.md',
-      anchor: 'authentication/login/rate-limiting',
-      headingText: 'Login Rate Limiting',
-      readyScenarios: [
-        { id: 'rate-limiting.1', title: 'held rate limit', yaml: 'guard: 1\nid: rate-limiting.1\ntitle: held rate limit' },
-      ],
-    },
-    {
-      doc: 'd',
-      anchor: 'sec/z',
-      headingText: 'Section Z',
-      readyScenarios: [
-        { id: 'z.1', title: 'held z one', yaml: 'guard: 1\nid: z.1\ntitle: held z one' },
-        { id: 'z.2', title: 'held z two', yaml: 'guard: 1\nid: z.2\ntitle: held z two' },
-      ],
-    },
-  ],
-};
-
 function stubFetch(
   inventory: GuardScenarioInventory | null = INVENTORY,
   latest: GuardLatest | null = LATEST,
@@ -181,11 +152,9 @@ function Harness({ onOpenSpec }: { onOpenSpec: (doc: string, section: string) =>
   const tabs = useGuardScenarioTabs('r');
   const location = useLocation();
   const findingRows = buildFindingRows(report, scenarios.rows);
-  const heldRows = buildHeldRows(report, scenarios.rows);
-  const listRows = buildListRows(scenarios.rows, findingRows, heldRows);
+  const listRows = buildListRows(scenarios.rows, findingRows);
   const activeScenario = tabs.activeId ? scenarios.rows.find((r) => r.id === tabs.activeId) ?? null : null;
   const activeFinding = tabs.activeId ? findingRows.find((r) => r.id === tabs.activeId) ?? null : null;
-  const activeHeld = tabs.activeId ? heldRows.find((r) => r.id === tabs.activeId) ?? null : null;
   return (
     <div>
       <span data-testid="gscn">{new URLSearchParams(location.search).get('gscn') ?? '∅'}</span>
@@ -197,8 +166,6 @@ function Harness({ onOpenSpec }: { onOpenSpec: (doc: string, section: string) =>
           // (RepoPage also passes a distinct finding glyph; the icon is cosmetic
           // and unasserted, so the harness leaves the strip's default.)
           if (f) return { ...t, label: f.title, title: `${f.doc} · ${f.headingText ?? sectionLeaf(f.anchor)}` };
-          const h = heldRows.find((r) => r.id === t.id);
-          if (h) return { ...t, label: h.title, title: `${h.doc} · ${h.headingText ?? sectionLeaf(h.anchor)}` };
           return { ...t, label: t.id, title: t.id };
         })}
         activeId={tabs.activeId}
@@ -231,14 +198,6 @@ function Harness({ onOpenSpec }: { onOpenSpec: (doc: string, section: string) =>
           onOpenSpec={onOpenSpec}
           onDismiss={async () => {}}
           onUndismiss={async () => {}}
-        />
-      ) : activeHeld ? (
-        <GuardHeldDetail
-          key={activeHeld.id}
-          row={activeHeld}
-          onClose={() => tabs.close(activeHeld.id)}
-          onOpenSpec={onOpenSpec}
-          onOpenFinding={(findingId) => tabs.open(findingId, false)}
         />
       ) : (
         <GuardScenariosOverview
@@ -451,101 +410,6 @@ describe('GuardScenariosPanel — birth findings as first-class rows', () => {
   });
 });
 
-// The deterministic held keys — `held:<anchor>:<flat-index>`.
-const HELD_KEY_RATE = 'held:authentication/login/rate-limiting:0';
-const HELD_KEY_Z1 = 'held:sec/z:1';
-
-describe('GuardScenariosPanel — ready-but-held scenarios', () => {
-  beforeEach(() => stubFetch(INVENTORY, LATEST, HELD_REPORT));
-
-  /** The held detail's "What holds it" region — scopes finding-blocker lookups. */
-  const whatHolds = () => screen.getByText('What holds it').parentElement as HTMLElement;
-
-  it('renders held rows between findings and scenarios with a distinct held chip', async () => {
-    renderHarness();
-    await panelRowAsync('held rate limit');
-    const list = inventoryList();
-    expect(within(list).getAllByText('held').length).toBeGreaterThan(0);
-    expect(within(list).queryByText('Held')).not.toBeInTheDocument();
-    // Order: finding first, held next, committed scenarios last.
-    const finding = within(list).getByText('login rate limits');
-    const held = within(list).getByText('held rate limit');
-    const scenario = within(list).getByText('alpha claim');
-    expect(finding.compareDocumentPosition(held) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(held.compareDocumentPosition(scenario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('counts held rows in the count line and offers a "held" status filter', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('held rate limit');
-    expect(screen.getByText(/of 4 scenarios/)).toHaveTextContent('4 of 4 scenarios · 1 finding · 3 held');
-    // The status filter isolates held rows in one click.
-    await user.selectOptions(screen.getByLabelText('Filter by status'), 'held');
-    const list = inventoryList();
-    expect(within(list).getByText('held rate limit')).toBeInTheDocument();
-    expect(within(list).getByText('held z one')).toBeInTheDocument();
-    expect(within(list).queryByText('alpha claim')).not.toBeInTheDocument();
-    expect(within(list).queryByText('login rate limits')).not.toBeInTheDocument();
-  });
-
-  it('a finding row shows its blast radius — "holds N" — when its section holds ready work', async () => {
-    renderHarness();
-    await panelRowAsync('login rate limits');
-    // The finding at auth/rate-limiting holds back 1 ready scenario.
-    expect(within(inventoryList()).getByText('holds 1')).toBeInTheDocument();
-  });
-
-  it('opens a held-row detail showing its blocker (an authoring error) + the authored YAML', async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('held z one');
-    await user.click(within(inventoryList()).getByText('held z one'));
-    // The held detail opens (title heading) with WHAT HOLDS IT + the YAML source.
-    expect(await screen.findByRole('heading', { name: 'held z one' })).toBeInTheDocument();
-    expect(screen.getByText('What holds it')).toBeInTheDocument();
-    // sec/z is held by an authoring error — its message shows verbatim.
-    expect(within(whatHolds()).getByText('invalid verb "wibble" at step 9')).toBeInTheDocument();
-    // The authored YAML lands in the scenario-source block.
-    expect(screen.getByLabelText('scenario source')).toHaveTextContent('title: held z one');
-    // Transient tab, addressable via the deterministic held key.
-    expect(gscn()).toBe(HELD_KEY_Z1);
-  });
-
-  it("a held detail blocked by a finding links through to that finding's tab", async () => {
-    const user = userEvent.setup();
-    renderHarness();
-    await panelRowAsync('held rate limit');
-    await user.click(within(inventoryList()).getByText('held rate limit'));
-    await screen.findByRole('heading', { name: 'held rate limit' });
-    // WHAT HOLDS IT lists the section's birth finding as a click-through.
-    await user.click(within(whatHolds()).getByText('login rate limits'));
-    // The finding's own detail tab opens.
-    expect(await screen.findByRole('heading', { name: 'login rate limits' })).toBeInTheDocument();
-    expect(gscn()).toBe(FINDING_KEY);
-  });
-
-  it('a ?gscn=held:… deep link reopens the held scenario while the report is on disk', async () => {
-    renderHarness(`/repos/r?section=guard&tab=scenarios&gscn=${HELD_KEY_RATE}`);
-    expect(await screen.findByRole('heading', { name: 'held rate limit' })).toBeInTheDocument();
-    expect(screen.getByLabelText('scenario source')).toHaveTextContent('title: held rate limit');
-  });
-
-  it('the held detail jumps into the coverage view via view-in-spec', async () => {
-    const user = userEvent.setup();
-    const { onOpenSpec } = renderHarness(`/repos/r?section=guard&tab=scenarios&gscn=${HELD_KEY_Z1}`);
-    await screen.findByRole('heading', { name: 'held z one' });
-    await user.click(screen.getByText('View in spec'));
-    expect(onOpenSpec).toHaveBeenCalledWith('d', 'sec/z');
-  });
-
-  it('renders a "held" stat chip in the overview counting ready-but-held scenarios', async () => {
-    renderHarness();
-    await screen.findByText('Last generate');
-    const region = overview();
-    expect((within(region).getByText('held').closest('div') as HTMLElement)).toHaveTextContent('3');
-  });
-});
 
 describe('buildFindingRows — section-heading preference', () => {
   // A committed scenario donates a DIFFERENT heading for the same doc/anchor so the
@@ -730,11 +594,11 @@ describe('GuardScenarioDetail — full scenario story', () => {
     expect(screen.queryByText('EVIDENCE-TRANSCRIPT-XYZ')).not.toBeInTheDocument();
   });
 
-  it('the scenario, finding, and held details render no close X of their own', async () => {
+  it('the scenario and finding details render no close X of their own', async () => {
     const user = userEvent.setup();
-    stubFetch(INVENTORY, LATEST, HELD_REPORT);
+    stubFetch(INVENTORY, LATEST, REPORT);
     renderHarness();
-    await panelRowAsync('held z one');
+    await panelRowAsync('alpha claim');
 
     // Scenario detail — its own "Close scenario" X is gone.
     await user.click(within(inventoryList()).getByText('alpha claim'));
@@ -745,11 +609,6 @@ describe('GuardScenarioDetail — full scenario story', () => {
     await user.click(within(inventoryList()).getByText('login rate limits'));
     await screen.findByRole('heading', { name: 'login rate limits' });
     expect(screen.queryByLabelText('Close finding')).not.toBeInTheDocument();
-
-    // Held detail — its own "Close held scenario" X is gone.
-    await user.click(within(inventoryList()).getByText('held z one'));
-    await screen.findByRole('heading', { name: 'held z one' });
-    expect(screen.queryByLabelText('Close held scenario')).not.toBeInTheDocument();
 
     // The only close affordances left are the tab strip's per-tab X buttons.
     expect(screen.getAllByLabelText(/^Close /).length).toBeGreaterThan(0);

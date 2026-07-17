@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FlaskConical, FlaskConicalOff, PauseCircle, Network } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FlaskConical, FlaskConicalOff, Network } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -52,7 +52,6 @@ import { GuardScenariosPanel } from '@/components/guard/GuardScenariosPanel';
 import { GuardScenariosOverview } from '@/components/guard/GuardScenariosOverview';
 import { GuardScenarioDetail } from '@/components/guard/GuardScenarioDetail';
 import { GuardFindingDetail } from '@/components/guard/GuardFindingDetail';
-import { GuardHeldDetail } from '@/components/guard/GuardHeldDetail';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
 import { buildOpenConflictRows, type BlockedConflictRow } from '@/components/guard/GuardBlockedPanel';
 import { GuardTabStrip } from '@/components/guard/GuardTabStrip';
@@ -68,7 +67,7 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { useGuardScenarioTabs } from '@/hooks/useGuardScenarioTabs';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { buildAutoResolvedRows, buildFindingRows, buildHeldRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
+import { buildAutoResolvedRows, buildFindingRows, buildListRows, dismissedKeySet } from '@/lib/guard-list-rows';
 import { sectionLeaf } from '@/lib/guard-drifts';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
@@ -393,15 +392,9 @@ function RepoPageInner() {
     () => buildFindingRows(guardReport, guardScenarios.rows, guardDismissedKeys),
     [guardReport, guardScenarios.rows, guardDismissedKeys],
   );
-  // Ready-but-held scenarios (birth-passed, section withheld) join the SAME left
-  // list as scenarios + findings — a first-class block between them.
-  const guardHeldRows = useMemo(
-    () => buildHeldRows(guardReport, guardScenarios.rows),
-    [guardReport, guardScenarios.rows],
-  );
   const guardListRows = useMemo(
-    () => buildListRows(guardScenarios.rows, guardFindingRows, guardHeldRows),
-    [guardScenarios.rows, guardFindingRows, guardHeldRows],
+    () => buildListRows(guardScenarios.rows, guardFindingRows),
+    [guardScenarios.rows, guardFindingRows],
   );
   // The auto-resolved ledger (item 13) — high-confidence weak scenarios the tool
   // discarded + re-authored itself — renders as a collapsed group at the list bottom.
@@ -1333,15 +1326,6 @@ function RepoPageInner() {
                         icon: FlaskConicalOff,
                       };
                     }
-                    const held = guardHeldRows.find((r) => r.id === t.id);
-                    if (held) {
-                      return {
-                        ...t,
-                        label: held.title,
-                        title: `${held.doc} · ${held.headingText ?? sectionLeaf(held.anchor)}`,
-                        icon: PauseCircle,
-                      };
-                    }
                     return { ...t, label: t.id, title: t.id };
                   })}
                   activeId={guardScenarioTabs.activeId}
@@ -1392,20 +1376,6 @@ function RepoPageInner() {
                             await api.undismissGuardClaim(repoId, claim, prNumber ?? undefined);
                             refetchGuardDecisions();
                           }}
-                        />
-                      );
-                    }
-                    const activeHeld = guardScenarioTabs.activeId
-                      ? guardHeldRows.find((r) => r.id === guardScenarioTabs.activeId) ?? null
-                      : null;
-                    if (activeHeld) {
-                      return (
-                        <GuardHeldDetail
-                          key={activeHeld.id}
-                          row={activeHeld}
-                          onClose={() => guardScenarioTabs.close(activeHeld.id)}
-                          onOpenSpec={openSpecSection}
-                          onOpenFinding={(findingId) => guardScenarioTabs.open(findingId, false)}
                         />
                       );
                     }

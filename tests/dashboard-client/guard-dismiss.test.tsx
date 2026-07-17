@@ -42,7 +42,6 @@ function row(over: Partial<GuardFindingRowData> = {}): GuardFindingRowData {
     headingText: 'Version',
     index: 0,
     finding: FINDING,
-    heldCount: 0,
     dismissed: false,
     ...over,
   };

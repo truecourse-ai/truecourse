@@ -102,23 +102,15 @@ export const GUARD_STATUS_META: Record<GuardSectionCoverageStatus, GuardStatusMe
     badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   },
   ...AWAITING_DRIVER_META,
-  // A birth finding left the section unsettled — a pending human decision, tinted
-  // like a problem (red) but distinct from a run `fail` (nothing committed ran).
+  // A birth finding on a section that committed NOTHING — a pending human decision,
+  // tinted like a problem (red) but distinct from a run `fail` (nothing committed
+  // ran). A section that committed scenarios AND has a finding paints by its outcome.
   finding: {
     label: 'Finding',
     group: 'gap',
     band: 'border-red-500/50 bg-red-500/[0.07]',
     dot: 'bg-red-500',
     badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
-  },
-  // Ready-but-held work whose section did not settle (no active finding — the
-  // blocker was an authoring error). Amber limbo, matching the held chip.
-  held: {
-    label: 'Held',
-    group: 'gap',
-    band: 'border-amber-500/50 bg-amber-500/[0.07]',
-    dot: 'bg-amber-500',
-    badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
   },
   // Generate tried to author a scenario here and failed (its only record is
   // authoring errors). Red like a problem, but a DISTINCT label from the run
@@ -163,7 +155,6 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'pass',
   'guarded',
   'finding',
-  'held',
   'authoring-error',
   ...awaitingDriverIds,
   'blocked-on',

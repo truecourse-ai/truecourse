@@ -55,11 +55,10 @@ function twoRound(first: string, firstSteps = PASSING_STEPS, second = 'fixed', s
     claims.map((c) => ({ ref: c.ref, scenarios: c.retry ? [raw(second, secondSteps)] : [raw(first, firstSteps)] }))
 }
 
-/** birthPassed reconciles: passed === written + held + fidelity-flagged + auto-resolved. */
+/** birthPassed reconciles: passed === written + fidelity-flagged + auto-resolved (item 15). */
 function reconciles(res: GuardGenerateResult): boolean {
-  const held = (res.heldSections ?? []).reduce((n, h) => n + h.readyScenarios.length, 0)
   const flagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-  return res.birthPassed === res.written.length + held + flagged + res.autoResolved.length
+  return res.birthPassed === res.written.length + flagged + res.autoResolved.length
 }
 
 describe('generateGuards — high-confidence fidelity self-heal (item 13)', () => {

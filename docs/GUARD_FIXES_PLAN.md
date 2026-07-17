@@ -464,7 +464,7 @@ ledger rendering in CLI + dashboard; drift verdicts never auto-resolve.
 
 ## 15. Kill held/all-or-nothing settling — every scenario commits on its own merits
 
-STATUS: OPEN
+STATUS: BUILT 2026-07-16
 
 **Problem.** A finding on one claim currently unsettles its whole section and holds
 every sibling scenario hostage (sqlfluff: 61 finding-blocked sections held 111

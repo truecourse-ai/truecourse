@@ -55,7 +55,6 @@ import {
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
   type GuardSectionFinding,
-  type GuardSectionHeldScenario,
   type GuardHistory,
   type GuardHistoryEntry,
   type GuardSectionScenario,
@@ -176,11 +175,13 @@ export function composeDocCoverage(
     if (g.doc === doc) gapByAnchor.set(g.anchor, g)
   }
 
-  // Birth findings + held scenarios from the last generate — an unsettled section
-  // has NO manifest entry, so without this join it would read as bare `unguarded`
-  // when it is actually the section most in need of a decision. Full projections
-  // (not counts) so the section detail can list them; `index` is the finding's
-  // position in the report (the Scenarios-tab finding key derives from it).
+  // Birth findings from the last generate — joined so a committed section (run
+  // outcome / `guarded`) surfaces its finding as context alongside its status, and a
+  // section that committed NOTHING paints `finding` (an unsettled section has no
+  // manifest entry, so without this join it would read as bare `unguarded` when it is
+  // the section most in need of a decision). Full projections (not counts) so the
+  // section detail can list them; `index` is the finding's position in the report
+  // (the Scenarios-tab finding key derives from it).
   const findingsByAnchor = new Map<string, GuardSectionFinding[]>()
   for (const [i, f] of (result?.birthFindings ?? []).entries()) {
     if (f.doc !== doc) continue
@@ -194,14 +195,6 @@ export function composeDocCoverage(
       ...(f.evidencePath ? { evidencePath: f.evidencePath } : {}),
       ...(f.triage ? { triageVerdict: f.triage.verdict } : {}),
     })
-  }
-  const heldByAnchor = new Map<string, GuardSectionHeldScenario[]>()
-  for (const h of result?.heldSections ?? []) {
-    if (h.doc !== doc) continue
-    heldByAnchor.set(
-      h.anchor,
-      h.readyScenarios.map((r) => ({ id: r.id, title: r.title })),
-    )
   }
 
   // Generate authoring errors from the last report — an error-blocked section has
@@ -248,7 +241,6 @@ export function composeDocCoverage(
       manifest: manifestByAnchor.get(sec.anchor),
       gap: gapByAnchor.get(sec.anchor),
       findings: findingsByAnchor.get(sec.anchor) ?? [],
-      heldScenarios: heldByAnchor.get(sec.anchor) ?? [],
       authoringErrors: errorsByAnchor.get(sec.anchor) ?? [],
     })
     // Auto-resolved entries ride as muted context on WHATEVER status the section
@@ -279,7 +271,6 @@ function resolveSectionCoverage(
     manifest?: GuardManifestSection
     gap?: GuardCoverageGap
     findings: GuardSectionFinding[]
-    heldScenarios: GuardSectionHeldScenario[]
     authoringErrors: GuardSectionAuthoringError[]
   },
 ): GuardSectionCoverage {
@@ -291,58 +282,47 @@ function resolveSectionCoverage(
     scenarioIds: [] as string[],
     scenarios: [] as GuardSectionScenario[],
   }
-  const { run, manifest, gap, findings, heldScenarios, authoringErrors } = joins
+  const { run, manifest, gap, findings, authoringErrors } = joins
   const verdict = manifest?.classification
   const withVerdict = verdict ? { classification: verdict } : {}
-  // Sibling authoring errors ride finding/held sections as blocker context (the
-  // unsettled blocker IS an authoring error); a section whose ONLY record is
-  // errors paints `authoring-error` below.
+  // A finding / authoring error no longer withholds its committed siblings (item 15):
+  // it rides a committed section (run outcome / `guarded`) — and a `finding` section —
+  // as CONTEXT, joined by the same doc+anchor. It PAINTS the section (status `finding`
+  // / `authoring-error`) only when the section committed nothing.
+  const withFindings = findings.length > 0 ? { findings: findings.slice() } : {}
   const withErrors = authoringErrors.length > 0 ? { authoringErrors: authoringErrors.slice() } : {}
 
-  // 1. Ran — the worst scenario outcome paints the section.
+  // 1. Ran — the worst scenario outcome paints the section; any finding/error rides
+  //    alongside as context (a committed section can carry a still-open finding).
   if (run.length > 0) {
     return {
       ...base,
       status: worstOutcome(run.map((s) => s.outcome)),
       scenarioIds: run.map((s) => s.id),
       scenarios: run.map(toSectionScenario),
-      ...withVerdict,
-    }
-  }
-
-  // 2. Guarded but absent from the current run (run stale / never run).
-  if (manifest && manifest.scenarioIds.length > 0) {
-    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withVerdict }
-  }
-
-  // 3. Unsettled by the last generate — a birth finding (a pending human
-  // decision) paints the section red; ready-but-held work with no active finding
-  // (its blocker was an authoring error) paints amber; a section whose ONLY
-  // record is authoring errors paints `authoring-error` (never `unguarded`).
-  // Precedence: finding > held > authoring-error, so a held section stays held
-  // even when a sibling authoring error blocked it. All outrank gaps: an
-  // unsettled section never recorded one.
-  if (findings.length > 0) {
-    const held =
-      heldScenarios.length > 0
-        ? ` · holds ${heldScenarios.length} ready scenario${heldScenarios.length === 1 ? '' : 's'}`
-        : ''
-    return {
-      ...base,
-      status: 'finding',
-      reason: `${findings.length} birth finding${findings.length === 1 ? '' : 's'} awaiting a decision${held}`,
-      findings: findings.slice(),
-      ...(heldScenarios.length > 0 ? { heldScenarios: heldScenarios.slice() } : {}),
+      ...withFindings,
       ...withErrors,
       ...withVerdict,
     }
   }
-  if (heldScenarios.length > 0) {
+
+  // 2. Guarded but absent from the current run (run stale / never run); a finding/
+  //    error on a partially-committed section rides alongside as context.
+  if (manifest && manifest.scenarioIds.length > 0) {
+    return { ...base, status: 'guarded', scenarioIds: manifest.scenarioIds.slice(), ...withFindings, ...withErrors, ...withVerdict }
+  }
+
+  // 3. Committed NOTHING but the last generate left a record — a birth finding (a
+  //    pending human decision) paints the section red; a section whose ONLY record is
+  //    authoring errors paints `authoring-error` (never `unguarded`). Precedence:
+  //    finding > authoring-error (a finding's sibling authoring errors ride as blocker
+  //    context). Both outrank gaps: such a section never recorded one.
+  if (findings.length > 0) {
     return {
       ...base,
-      status: 'held',
-      reason: `${heldScenarios.length} ready scenario${heldScenarios.length === 1 ? '' : 's'} held — the section did not settle`,
-      heldScenarios: heldScenarios.slice(),
+      status: 'finding',
+      reason: `${findings.length} birth finding${findings.length === 1 ? '' : 's'} awaiting a decision`,
+      findings: findings.slice(),
       ...withErrors,
       ...withVerdict,
     }
@@ -448,7 +428,6 @@ const COVERAGE_STATUSES = [
   ...RESIDUAL_GAP_KINDS,
   'guarded',
   'finding',
-  'held',
   'authoring-error',
   'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
@@ -567,11 +546,11 @@ async function headingTextIndex(
  * The last-generate report for the DASHBOARD, with each birth finding enriched
  * with its section's human `headingText` — joined at read time from the live doc's
  * section index (the same `headingTextIndex` join `listGuardScenarios` uses). A
- * finding's section is unsettled by definition (it persists no scenario), so it
- * NEVER has a committed scenario to donate the heading client-side; without this
- * server join every findings group header degrades to a slug — and slugs are never
- * UI copy. `result.json` on disk carries no `headingText`; the enrichment is
- * read-side only. A doc/section that is gone contributes no key (tolerant).
+ * finding's section may have committed scenarios (item 15) or none; either way the
+ * server join is the reliable heading source — without it a findings-only group
+ * header degrades to a slug, and slugs are never UI copy. `result.json` on disk
+ * carries no `headingText`; the enrichment is read-side only. A doc/section that is
+ * gone contributes no key (tolerant).
  */
 export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   const scope = await resolveGuardScope(repoKey, ref)
@@ -593,28 +572,14 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
     }
   }
   if (!report) return report
-  const held = report.heldSections ?? []
-  // A held section is unsettled by definition, so — like a finding — no committed
-  // scenario donates its heading client-side; join it server-side the same way.
-  if (report.birthFindings.length === 0 && held.length === 0) return report
-  const headingByDocAnchor = await headingTextIndex(repoKey, [
-    ...report.birthFindings.map((f) => f.doc),
-    ...held.map((h) => h.doc),
-  ], commit)
+  if (report.birthFindings.length === 0) return report
+  const headingByDocAnchor = await headingTextIndex(repoKey, report.birthFindings.map((f) => f.doc), commit)
   return {
     ...report,
     birthFindings: report.birthFindings.map((f) => {
       const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
       return { ...f, ...(headingText ? { headingText } : {}) }
     }),
-    ...(held.length > 0
-      ? {
-          heldSections: held.map((h) => {
-            const headingText = headingByDocAnchor.get(`${h.doc}\0${h.anchor}`)
-            return { ...h, ...(headingText ? { headingText } : {}) }
-          }),
-        }
-      : {}),
   }
 }
 

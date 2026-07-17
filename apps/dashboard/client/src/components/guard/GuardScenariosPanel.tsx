@@ -1,13 +1,12 @@
 /**
  * The Scenarios tab's LEFT PANEL — one FLAT, bad-news-first list: birth findings
- * first (rows asking for a decision), then held scenarios (birth-passed but
- * withheld by an unsettled section), then the committed inventory. No block, doc,
+ * first (rows asking for a decision), then the committed inventory. No block, doc,
  * or section grouping — a row is a compact status chip plus the human title, and
  * the doc › section context lives in the DETAIL pane a click opens. Search / doc /
- * status filters sit at the top (the status filter carries "finding" and "held"
- * options to isolate them). Single-click previews a row in a transient main-pane
- * tab, double-click pins it; the scenario id demotes to small mono meta so a long
- * slug can never be a primary label or stretch the panel.
+ * status filters sit at the top (the status filter carries a "finding" option to
+ * isolate them). Single-click previews a row in a transient main-pane tab,
+ * double-click pins it; the scenario id demotes to small mono meta so a long slug
+ * can never be a primary label or stretch the panel.
  */
 
 import { useMemo, useState } from 'react';
@@ -23,7 +22,6 @@ import {
 } from '@/lib/guard-list-rows';
 import { GuardStatusBadge } from './GuardStatusBadge';
 import { GuardFindingBadge } from './GuardFindingBadge';
-import { GuardHeldBadge } from './GuardHeldBadge';
 
 const SELECT =
   'rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
@@ -97,12 +95,6 @@ function FindingRow({
             dismissed
           </span>
         )}
-        {/* Blast radius: this finding's section holds N birth-passed scenarios back. */}
-        {!row.dismissed && row.heldCount > 0 && (
-          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-0 text-[9px] font-medium text-amber-600 dark:text-amber-400">
-            holds {row.heldCount}
-          </span>
-        )}
         <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">step {row.finding.step}</span>
       </div>
       <span
@@ -112,35 +104,6 @@ function FindingRow({
       >
         {row.title}
       </span>
-    </button>
-  );
-}
-
-function HeldRow({
-  row,
-  active,
-  onOpen,
-}: {
-  row: Extract<GuardListRow, { kind: 'held' }>;
-  active: boolean;
-  onOpen: (id: string, pinned: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="listitem"
-      onClick={() => onOpen(row.id, false)}
-      onDoubleClick={() => onOpen(row.id, true)}
-      title={`${row.title} — ready but held; click to preview, double-click to pin`}
-      className={`${ROW} ${active ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
-    >
-      <div className="flex w-full items-center gap-2">
-        <GuardHeldBadge compact />
-        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-          {row.ready.id}
-        </span>
-      </div>
-      <span className="w-full truncate text-[13px] leading-snug text-foreground">{row.title}</span>
     </button>
   );
 }
@@ -236,18 +199,15 @@ export function GuardScenariosPanel({
     });
   }, [rows, docFilter, statusFilter, search]);
 
-  // Bad-news-first ordering: findings → held → committed scenarios.
+  // Bad-news-first ordering: findings → committed scenarios.
   const findingRows = useMemo(() => visible.filter((r) => r.kind === 'finding'), [visible]);
-  const heldRows = useMemo(() => visible.filter((r) => r.kind === 'held'), [visible]);
   const scenarioRows = useMemo(() => visible.filter((r) => r.kind === 'scenario'), [visible]);
 
-  // Split counts for the honest "N of M scenarios · K findings · H held" line.
+  // Split counts for the honest "N of M scenarios · K findings" line.
   const totalScenarios = useMemo(() => rows.filter((r) => r.kind === 'scenario').length, [rows]);
   const totalFindings = useMemo(() => rows.filter((r) => r.kind === 'finding').length, [rows]);
-  const totalHeld = useMemo(() => rows.filter((r) => r.kind === 'held').length, [rows]);
   const visScenarios = scenarioRows.length;
   const visFindings = findingRows.length;
-  const visHeld = heldRows.length;
 
   if (loading && rows.length === 0) {
     return (
@@ -332,17 +292,11 @@ export function GuardScenariosPanel({
               {visFindings} finding{visFindings === 1 ? '' : 's'}
             </>
           )}
-          {totalHeld > 0 && (
-            <>
-              {' · '}
-              {visHeld} held
-            </>
-          )}
         </div>
       </div>
 
-      {/* One flat, bad-news-first list: findings → held → committed scenarios, then
-          the collapsed auto-resolved ledger pinned to the bottom. */}
+      {/* One flat, bad-news-first list: findings → committed scenarios, then the
+          collapsed auto-resolved ledger pinned to the bottom. */}
       <div className="flex-1 overflow-auto">
         {visible.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
@@ -352,9 +306,6 @@ export function GuardScenariosPanel({
           <div role="list" aria-label="Scenario inventory">
             {findingRows.map((row) => (
               <FindingRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
-            ))}
-            {heldRows.map((row) => (
-              <HeldRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />
             ))}
             {scenarioRows.map((row) => (
               <ScenarioRow key={row.id} row={row} active={activeId === row.id} onOpen={onOpen} />

@@ -95,7 +95,7 @@ describe('generateGuards — fidelity review (item 33)', () => {
     expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
   })
 
-  it('a flagged scenario holds its faithful sibling as ready-but-held (nothing persisted)', async () => {
+  it('a flagged scenario COMMITS its faithful sibling and reports itself (item 15)', async () => {
     const r = seed()
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -106,14 +106,18 @@ describe('generateGuards — fidelity review (item 33)', () => {
       fidelityRunner: reviewBy({ bad: 'miscast: tests a different command than the claim' }),
     })
 
-    expect(res.written).toEqual([])
+    // The faithful sibling COMMITS on its own merits — no longer withheld.
+    expect(res.written.map((w) => w.title)).toEqual(['good'])
+    expect(loadScenarios(r).scenarios.map((s) => s.title)).toEqual(['good'])
+    // The flagged one is still a fidelity finding, reported alongside.
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
     expect(res.birthFindings[0].kind).toBe('fidelity')
 
-    // The faithful sibling is validated work withheld by the all-or-nothing persist.
-    expect(res.heldSections).toHaveLength(1)
-    expect(res.heldSections[0].readyScenarios.map((s) => s.title)).toEqual(['good'])
-    expect(loadScenarios(r).scenarios).toEqual([])
+    // The PARTIAL section records its committed id with a NULL hash, so `bad`
+    // re-attempts next run while `good` stays committed.
+    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
+    expect(entry.scenarioIds).toEqual(['version.1'])
+    expect(entry.generationInputsHash).toBeNull()
   })
 
   it('a retry SURVIVOR is reviewed too (round-2 pass still gets audited)', async () => {

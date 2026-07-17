@@ -435,14 +435,14 @@ describe('generateGuards — birth validation', () => {
     expect(loadScenarios(r).scenarios).toHaveLength(1)
   })
 
-  it('persists nothing for a claim that mixes a pass and a birth finding (clean re-attempt)', async () => {
+  it('commits the passing scenario and reports the failing one as a finding (item 15)', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // One claim, two scenarios: one passes, one always fails at birth (retry keeps
-    // failing). The section is unsettled, so NEITHER is written.
+    // One claim, two scenarios: `good` passes, `bad` always fails at birth (retry
+    // keeps failing). Item 15: `good` COMMITS on its own merits; `bad` is a finding.
     const res = await generateGuards({
       ...stubAuxRunners(),
       repoRoot: r,
@@ -450,10 +450,14 @@ describe('generateGuards — birth validation', () => {
       generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
     })
 
-    expect(res.written).toEqual([])
+    expect(res.written.map((w) => w.title)).toEqual(['good'])
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    expect(loadScenarios(r).scenarios).toEqual([])
-    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')).toBeUndefined()
+    expect(loadScenarios(r).scenarios.map((s) => s.title)).toEqual(['good'])
+    // PARTIAL section: the committed id is recorded with a NULL generationInputsHash
+    // so `bad` re-attempts next run while `good` stays committed.
+    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
+    expect(entry.scenarioIds).toHaveLength(1)
+    expect(entry.generationInputsHash).toBeNull()
   })
 
   it('surfaces a still-failing scenario as a birth finding and never persists it', async () => {
@@ -565,40 +569,74 @@ describe('retryCacheKey — excerpt sensitivity (Fix 1)', () => {
   })
 })
 
-describe('generateGuards — ready-but-held scenarios', () => {
-  it('records an unsettled section\'s birth-passers as heldSections with their YAML', async () => {
+describe('generateGuards — partial section commits (item 15)', () => {
+  it('a section with one finding + two green siblings commits the two and reports the finding', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // One claim, two scenarios: `good` passes birth in both rounds, `bad` always
-    // fails — so the section never settles, yet `good` is validated work withheld.
+    // Three claims in ONE section: two author passing scenarios, one authors a
+    // failing scenario. Item 15: the two greens commit on their own merits; the
+    // third is reported as a finding — no held sibling.
+    const threeClaims = extractBy({
+      version: [{ claim: 'C_G1' }, { claim: 'C_G2' }, { claim: 'C_BAD' }],
+      background: { untestable: 'bg' },
+    })
+    const authorPerClaim: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => ({
+        ref: c.ref,
+        scenarios:
+          c.claim === 'C_BAD'
+            ? [raw('bad', FAILING_STEPS)]
+            : [raw(c.claim === 'C_G1' ? 'g1' : 'g2', PASSING_STEPS)],
+      }))
+
     const res = await generateGuards({
       ...stubAuxRunners(),
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
+      extractRunner: threeClaims,
+      generateRunner: authorPerClaim,
     })
 
-    expect(res.written).toEqual([])
+    expect(res.written.map((w) => w.title).sort()).toEqual(['g1', 'g2'])
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    // The birth-passed candidate lands as a ready-but-held scenario on its section.
-    expect(res.heldSections).toHaveLength(1)
-    const held = res.heldSections[0]
-    expect(held.doc).toBe(DOC)
-    expect(held.anchor).toBe('version')
-    expect(held.readyScenarios.map((s) => s.title)).toEqual(['good'])
-    // The authored YAML rides inline — parseable, bound to the section, its id.
-    const ready = held.readyScenarios[0]
-    expect(ready.id).toBe('version.1')
-    expect(ready.yaml).toContain('title: good')
-    expect(ready.yaml).toContain('section: version')
-    // It was NOT committed to disk — it's held, not persisted.
-    expect(loadScenarios(r).scenarios).toEqual([])
+    // Both greens are committed to disk (never held).
+    expect(loadScenarios(r).scenarios.map((s) => s.title).sort()).toEqual(['g1', 'g2'])
+    // PARTIAL manifest entry — committed ids recorded with a NULL hash so C_BAD
+    // re-attempts next run while the greens stay committed.
+    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
+    expect(entry.scenarioIds).toHaveLength(2)
+    expect(entry.generationInputsHash).toBeNull()
   })
 
-  it('a cleanly settled section contributes no held scenarios', async () => {
+  it('re-generate keeps a partial section\'s committed greens and re-attempts its finding (sweep spares it)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const twoClaims = extractBy({
+      version: [{ claim: 'C_GOOD' }, { claim: 'C_BAD' }],
+      background: { untestable: 'bg' },
+    })
+    const authorPerClaim: GenerateRunner = async ({ claims }) =>
+      claims.map((c) => ({ ref: c.ref, scenarios: c.claim === 'C_BAD' ? [raw('bad', FAILING_STEPS)] : [raw('good', PASSING_STEPS)] }))
+
+    const first = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    expect(first.written.map((w) => w.title)).toEqual(['good'])
+    expect(first.birthFindings.map((f) => f.title)).toEqual(['bad'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.1'])
+
+    // Run 2 — the partial section is WORK again (null hash), re-commits `good`, and
+    // re-finds `bad`. The run-end sweep spares its committed `good` both runs.
+    const second = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
+    expect(second.written.map((w) => w.title)).toEqual(['good'])
+    expect(second.birthFindings.map((f) => f.title)).toEqual(['bad'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.1'])
+  })
+
+  it('a cleanly settled section writes a settled manifest entry (non-null hash)', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -612,7 +650,9 @@ describe('generateGuards — ready-but-held scenarios', () => {
     })
 
     expect(res.written.map((w) => w.anchor)).toEqual(['version'])
-    expect(res.heldSections).toEqual([])
+    const entry = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
+    expect(entry.scenarioIds).toEqual(['version.1'])
+    expect(entry.generationInputsHash).not.toBeNull()
   })
 
   it('a report carrying heldSections round-trips through the report schema', () => {
@@ -663,7 +703,7 @@ describe('generateGuards — ready-but-held scenarios', () => {
 
 describe('generateGuards — dismissed claims (decisions.json)', () => {
   // Two cli claims in ONE section: BAD authors a failing scenario (→ finding), GOOD
-  // a passing one (→ held, because its sibling finding unsettles the section).
+  // a passing one (→ committed on its own merits; the section is PARTIAL — item 15).
   const twoClaims = extractBy({
     version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
     background: { untestable: 'bg' },
@@ -693,37 +733,37 @@ describe('generateGuards — dismissed claims (decisions.json)', () => {
     expect(finding.yaml).toContain('section: version')
   })
 
-  it('dismissing a claim skips it, records a dismissed gap, settles the section, and RELEASES its held sibling', async () => {
+  it('dismissing a claim skips it and settles the partial section clean', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // Run 1 — the finding (BAD) holds back the birth-passed sibling (GOOD).
+    // Run 1 — BAD is a finding, GOOD commits on its own merits (item 15). The section
+    // is PARTIAL: GOOD landed, BAD re-attempts (null hash).
     const first = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
     expect(first.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    expect(first.heldSections.flatMap((h) => h.readyScenarios.map((s) => s.title))).toEqual(['good'])
-    expect(first.written).toEqual([])
-    expect(loadScenarios(r).scenarios).toEqual([]) // nothing committed — held
+    expect(first.written.map((w) => w.title)).toEqual(['good'])
+    expect(loadScenarios(r).scenarios.map((s) => s.title)).toEqual(['good'])
+    expect(readManifest(r)!.sections.find((s) => s.anchor === 'version')!.generationInputsHash).toBeNull()
 
     // The user dismisses BAD as a generation defect / noise.
     dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
 
-    // Run 2 — BAD is skipped (dismissed gap), so the section settles on GOOD alone.
+    // Run 2 — BAD is skipped (dismissed gap), so the section now settles CLEAN on GOOD.
     const second = await generateGuards({ ...stubAuxRunners(), repoRoot: r, extractRunner: twoClaims, generateRunner: authorPerClaim })
     expect(second.birthFindings).toEqual([]) // never re-findinged
-    expect(second.heldSections).toEqual([]) // its held sibling is released
     expect(second.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
     const dismissedGap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
     expect(dismissedGap).toMatchObject({ doc: DOC, anchor: 'version' })
     expect(dismissedGap.reason).toContain('CLAIM_BAD')
 
-    // GOOD is now committed — the released sibling landed.
-    expect(second.written.map((w) => w.title)).toEqual(['good'])
+    // GOOD stays committed and the section now settles clean (non-null hash).
     const committed = loadScenarios(r).scenarios
     expect(committed.map((s) => s.title)).toEqual(['good'])
     const manifestVersion = readManifest(r)!.sections.find((s) => s.anchor === 'version')!
     expect(manifestVersion.scenarioIds).toEqual(committed.map((s) => s.id))
+    expect(manifestVersion.generationInputsHash).not.toBeNull()
   })
 
   it('a dismissal whose claim text no longer matches any live claim surfaces as orphaned', async () => {
@@ -1259,7 +1299,7 @@ describe('generateGuards — live progress', () => {
     ])
   })
 
-  it('reconciles birthPassed with written + held + fidelity-flagged when a sibling forces a retry', async () => {
+  it('reconciles birthPassed with written + fidelity-flagged when a sibling forces a retry', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -1267,8 +1307,8 @@ describe('generateGuards — live progress', () => {
 
     // One claim, two scenarios: `good` always passes, `bad` always fails. `bad` forces
     // a whole-claim retry that re-authors the same pair, so the round-1 `good` pass is
-    // DISCARDED; only the surviving retry `good` pass counts, and it is HELD (its
-    // section never settles — `bad` is a birth finding). The discarded round-1 pass no
+    // DISCARDED; only the surviving retry `good` pass counts — and it COMMITS on its own
+    // merits (item 15) while `bad` is a birth finding. The discarded round-1 pass no
     // longer inflates the count, so birthPassed reconciles exactly.
     const res = await generateGuards({
       ...stubAuxRunners(),
@@ -1277,24 +1317,22 @@ describe('generateGuards — live progress', () => {
       generateRunner: authorBy({ version: [raw('good', PASSING_STEPS), raw('bad', FAILING_STEPS)] }),
     })
 
-    expect(res.written).toEqual([]) // section unsettled → nothing written
+    expect(res.written.map((w) => w.title)).toEqual(['good']) // committed on its own merits
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    const heldReady = res.heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
     const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-    expect(heldReady).toBe(1) // the surviving `good`, held not written
     expect(res.birthPassed).toBe(1) // the discarded round-1 twin no longer counts
-    expect(res.birthPassed).toBe(res.written.length + heldReady + fidelityFlagged)
+    expect(res.birthPassed).toBe(res.written.length + fidelityFlagged + res.autoResolved.length)
   })
 
-  it('reconciles birthPassed when a fidelity flag holds a faithful sibling', async () => {
+  it('reconciles birthPassed when a fidelity flag rides a committed sibling', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
     // One claim, two green scenarios: both pass birth, the fidelity reviewer flags `b`.
-    // `a` is held (its section unsettles on the fidelity finding). Both cleared birth
-    // and reached a reported bucket (`a` → held, `b` → fidelity finding), so both count.
+    // `a` COMMITS on its own merits; `b` is a fidelity finding. Both cleared birth and
+    // reached a reported bucket (`a` → written, `b` → fidelity finding), so both count.
     const res = await generateGuards({
       ...stubAuxRunners(),
       repoRoot: r,
@@ -1303,13 +1341,11 @@ describe('generateGuards — live progress', () => {
       fidelityRunner: reviewBy({ b: 'weak: asserts less than the claim' }),
     })
 
-    expect(res.written).toEqual([])
-    const heldReady = res.heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
+    expect(res.written.map((w) => w.title)).toEqual(['a'])
     const fidelityFlagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-    expect(heldReady).toBe(1) // the faithful `a`
     expect(fidelityFlagged).toBe(1) // the flagged `b`
     expect(res.birthPassed).toBe(2)
-    expect(res.birthPassed).toBe(res.written.length + heldReady + fidelityFlagged)
+    expect(res.birthPassed).toBe(res.written.length + fidelityFlagged + res.autoResolved.length)
   })
 
   it('fires onSectionSettled per settle with the fixed work-section denominator', async () => {

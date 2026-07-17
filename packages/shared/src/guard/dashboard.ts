@@ -29,14 +29,14 @@ import type { GuardScenario } from './scenario.js'
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
- *  - `finding` — the last generate left a birth finding on the section (it never
- *    settled; a human decision is pending);
- *  - `held` — the section is unsettled with ready-but-held scenarios and no
- *    active finding (its blocker was an authoring error);
- *  - `authoring-error` — the section's ONLY record is generate authoring errors
- *    (no findings, no ready scenarios): generate tried and failed, so it is NOT
- *    `unguarded` ("nothing ever tried"). Distinct id from the RUN outcome `error`
- *    — the two must never conflate in totals or meta;
+ *  - `finding` — the last generate left a birth finding on a section that committed
+ *    NOTHING (a human decision is pending). A section with committed scenarios AND a
+ *    finding paints by its run outcome / `guarded` instead, with the finding surfaced
+ *    alongside as context (every scenario commits on its own merits — item 15);
+ *  - `authoring-error` — the section committed NOTHING and its only record is generate
+ *    authoring errors: generate tried and failed, so it is NOT `unguarded` ("nothing
+ *    ever tried"). Distinct id from the RUN outcome `error` — the two must never
+ *    conflate in totals or meta;
  *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
  */
 export type GuardSectionCoverageStatus =
@@ -44,7 +44,6 @@ export type GuardSectionCoverageStatus =
   | GuardGapDisplayKind
   | 'guarded'
   | 'finding'
-  | 'held'
   | 'authoring-error'
   | 'unguarded'
 
@@ -79,12 +78,6 @@ export interface GuardSectionFinding {
   /** The finding's Opus triage verdict, for the coverage row's verdict chip. Absent
    *  when the finding was never triaged (no triage runner / older report). */
   triageVerdict?: GuardTriageVerdict
-}
-
-/** A ready-but-held scenario projected onto its section for the coverage detail. */
-export interface GuardSectionHeldScenario {
-  id: string
-  title: string
 }
 
 /**
@@ -139,10 +132,13 @@ export interface GuardSectionCoverage {
   classification?: GuardTestabilityVerdict
   /** Scenario ids bound to this section (from the run, else the manifest). */
   scenarioIds: string[]
-  /** This section's birth findings from the last generate (status `finding`). */
+  /**
+   * This section's birth findings from the last generate. Present as the section's
+   * STATUS when it committed nothing (status `finding`), and as CONTEXT alongside a
+   * committed section's run outcome / `guarded` status (item 15 — a finding no longer
+   * withholds its committed siblings, so a guarded/run section can still carry one).
+   */
   findings?: GuardSectionFinding[]
-  /** Ready-but-held scenarios from the last generate (status `finding`/`held`). */
-  heldScenarios?: GuardSectionHeldScenario[]
   /**
    * Auto-resolved findings the tool handled itself (item 14) — muted context only.
    * Present on ANY status: they never paint the section, so a section whose only
@@ -151,9 +147,9 @@ export interface GuardSectionCoverage {
   autoResolved?: GuardSectionAutoResolved[]
   /**
    * This section's generate authoring errors, deduped by message with attempt
-   * counts. Present on status `authoring-error` (its sole record), and on
-   * `finding`/`held` sections as blocker context (their unsettled blocker IS an
-   * authoring error, joined by the same doc+anchor).
+   * counts. Present on status `authoring-error` (its sole record), and as blocker
+   * context on a `finding` section or a committed section (run outcome / `guarded`)
+   * that also hit an authoring error, joined by the same doc+anchor.
    */
   authoringErrors?: GuardSectionAuthoringError[]
   /** Per-scenario run results for this section from the last run (empty until run). */

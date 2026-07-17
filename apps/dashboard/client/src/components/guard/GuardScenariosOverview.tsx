@@ -105,7 +105,7 @@ function ErrorsSection({
 /**
  * The "last generate" content — plain, flowing under the recipe card, not a boxed
  * panel: a small-cap heading, the when/status envelope line, a wrap row of stat
- * chips (settled/unsettled · authored · birth-passed · findings · held ·
+ * chips (settled/partial/unsettled · authored · birth-passed · findings ·
  * calls/cost), then the deferred-authoring-errors housekeeping line when any
  * section stayed unsettled.
  */
@@ -123,17 +123,17 @@ function GuardLastGenerateStrip({
   const usage = report.usage;
   const resolveHeading = useMemo(() => makeHeadingResolver(scenarioRows), [scenarioRows]);
 
-  // The generation story as numbers: number-first stat chips. Findings + held
-  // render always (0 is honest); birth-passed/calls/cost only when the report
-  // carries them. Held = birth-passed scenarios an unsettled section withheld.
-  const heldCount = (report.heldSections ?? []).reduce((n, h) => n + h.readyScenarios.length, 0);
+  // The generation story as numbers: number-first stat chips. Findings render
+  // always (0 is honest); `partial` only when any section committed some greens yet
+  // left an open claim (item 15); birth-passed/calls/cost only when the report
+  // carries them.
   const stats: { label: string; value: string | number }[] = [
     { label: 'settled', value: settle.settled },
+    ...(settle.partial > 0 ? [{ label: 'partial', value: settle.partial }] : []),
     { label: 'unsettled', value: settle.unsettled },
     { label: 'authored', value: report.written.length },
     ...(report.birthPassed != null ? [{ label: 'birth-passed', value: report.birthPassed }] : []),
     { label: 'findings', value: report.birthFindings.length },
-    { label: 'held', value: heldCount },
     ...(usage
       ? [{ label: 'calls', value: usage.calls }, { label: 'cost', value: `$${usage.costUsd.toFixed(2)}` }]
       : []),

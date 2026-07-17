@@ -63,7 +63,6 @@ import {
   type GuardCoverageGap,
   type GuardDismissedClaim,
   type GuardEntryPreflight,
-  type GuardHeldSection,
   type GuardManifestSection,
   type GuardOrphanedDismissal,
   type GuardScenario,
@@ -189,23 +188,16 @@ export interface GuardGenerateResult {
   extractionFailures: GuardExtractionFailure[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
-   * Birth passes that SURVIVED to a reported bucket — written, held-ready, or a
-   * fidelity finding. Counted once per surviving candidate: a round-1 pass discarded
-   * when a sibling forced a whole-claim retry does not count (only the retry's own
-   * passes do), and a birth pass whose fidelity review could not complete does not
-   * count (its section re-attempts). So the run reconciles exactly —
-   * `birthPassed === written.length + Σ heldSections.readyScenarios + fidelity findings`
-   * — while still diverging above `written.length` when a passing scenario's section
-   * is left unsettled (a sibling birth finding / authoring error).
+   * Birth passes that SURVIVED to a reported bucket — a written scenario, a fidelity
+   * finding, or an auto-resolved fidelity discard. Counted once per surviving
+   * candidate: a round-1 pass discarded when a sibling forced a whole-claim retry
+   * does not count (only the retry's own passes do), and a birth pass whose fidelity
+   * review could not complete does not count (its section re-attempts). Since item 15
+   * every birth+fidelity-clean candidate COMMITS (no held-ready bucket), so the run
+   * reconciles as `birthPassed === written.length + fidelity findings + fidelity
+   * discards`.
    */
   birthPassed: number
-  /**
-   * Unsettled sections whose birth-passed candidates were withheld by the
-   * all-or-nothing persist — the ready-but-held scenarios (with their authored YAML
-   * inline). Empty when every changed section either settled or had nothing pass at
-   * birth. The blockers live in `birthFindings`/`errors` (same doc+anchor).
-   */
-  heldSections: GuardHeldSection[]
   /**
    * Dismissals in `scenarios/decisions.json` whose claim text matched nothing in a
    * doc this run re-extracted — stale entries surfaced (never silently honored).
@@ -449,7 +441,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       extractionFailures: [],
       orphaned,
       birthPassed: 0,
-      heldSections: [],
       orphanedDismissals: [],
       autoResolved: [],
     }
@@ -721,6 +712,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const workingManifest = new Map<string, GuardManifestSection>(
     priorSections.map((e) => [`${e.doc}\0${e.anchor}`, e]),
   )
+  // Sections that COMMITTED a manifest entry this run — their committed files are
+  // spared by the run-end sweep. Two flavors, told apart only by the entry's
+  // generationInputsHash (see `upsertSection`): a fully-settled section (no
+  // finding/error) stamps the current hash and is skipped as unchanged next run; a
+  // PARTIAL section (committed ≥1 scenario but left a sibling finding/error — item 15)
+  // records its committed ids with a NULL hash, so it re-detects as WORK and
+  // re-attempts its outstanding claim(s) next generate.
   const settledKeys = new Set<string>()
   const writeWorkingManifest = (): void => {
     const sections = [...workingManifest.values()].sort(
@@ -728,7 +726,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
     writeManifest(repoRoot, { guard: GUARD_FORMAT_VERSION, sections })
   }
-  const upsertSection = (section: SectionInput, scenarioIds: string[]): void => {
+  // `settled: false` (a PARTIAL section) leaves generationInputsHash null so the
+  // section re-works next run — its committed ids are still recorded (partial coverage
+  // is real coverage) and its files spared, but its outstanding finding re-attempts.
+  const upsertSection = (section: SectionInput, scenarioIds: string[], opts: { settled: boolean } = { settled: true }): void => {
     const k = key(section)
     const classification = classificationByKey.get(k)
     workingManifest.set(k, {
@@ -736,7 +737,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       anchor: section.anchor,
       fingerprint: section.fingerprint,
       scenarioIds: scenarioIds.slice().sort(),
-      generationInputsHash: generationInputsHash(section.fingerprint, recipeFingerprint, section.suppressionFingerprint),
+      generationInputsHash: opts.settled
+        ? generationInputsHash(section.fingerprint, recipeFingerprint, section.suppressionFingerprint)
+        : null,
       ...(classification ? { classification } : {}),
     })
     settledKeys.add(k)
@@ -747,9 +750,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Result accumulators + progress counters — appended/bumped as sections settle.
   const written: GeneratedScenarioInfo[] = []
   const birthFindings: GuardBirthFinding[] = []
-  // Sections left unsettled (a sibling finding/error) whose candidates ALL passed
-  // birth — recorded so the report/UI can surface the withheld validated work.
-  const heldSections: GuardHeldSection[] = []
   // The auto-resolved ledger — high-confidence fidelity flags the pipeline discarded
   // and re-authored itself (a visible record, never a human task).
   const autoResolved: GuardAutoResolved[] = []
@@ -840,7 +840,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const remaining = (pendingBySection.get(k) ?? 0) - 1
     pendingBySection.set(k, remaining)
     if (remaining > 0) return
-    if (sectionAuthError.has(k)) return // unsettled — errors already recorded
+    // Item 15 — a sibling claim's authoring error no longer short-circuits the whole
+    // section: it still enters the settle chain so its OTHER claims' candidates can
+    // birth + commit on their own merits. The authoring errors are already in the
+    // top-level `errors[]`; settleCliSection reads `sectionAuthError` so a section
+    // carrying one commits PARTIAL (its outstanding claim re-attempts), never clean.
     settleChain = settleChain.then(() => settleCliSection(sectionByKey.get(k)!, refsBySection.get(k)!))
   }
 
@@ -886,8 +890,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // re-author once — an auto-resolved ledger entry, never a human task); flagged at
     // medium/low → a finding, as today; an incomplete review → the section re-attempts.
     // Every completed review is one reconciled birth pass — a high-confidence discard
-    // counts too (it reaches the auto-resolved ledger) — keeping the item-12 invariant
-    // `birthPassed === written + heldReady + fidelityFlagged + autoResolved`.
+    // counts too (it reaches the auto-resolved ledger) — keeping the item-15 invariant
+    // `birthPassed === written + fidelityFlagged + fidelityDiscards`.
     const applyFidelityR1 = (candidate: BirthCandidate, review: FidelityResult): void => {
       if ('error' in review) {
         localErrors.push({ doc: section.doc, anchor: section.anchor, message: `fidelity review ${review.error}` })
@@ -1154,10 +1158,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings.push(...localFindings)
     autoResolved.push(...localAutoResolved)
 
-    // Settled ⇒ persist now: replace this section's OWN prior files with the green
-    // survivors and upsert its manifest entry. A partial persist would leave a
-    // scenario with no manifest ownership, so an unsettled section persists nothing.
-    if (localErrors.length === 0 && localFindings.length === 0) {
+    // Item 15 — every candidate that cleared birth AND fidelity COMMITS on its own
+    // merits, regardless of what happened to its sibling claims. Per-scenario
+    // persistence, not all-or-nothing: a section commits its greens whether it also
+    // produced a finding/error (a PARTIAL section) or came out clean. Replace this
+    // section's OWN prior files with the green survivors and upsert its manifest entry.
+    // A sibling claim whose AUTHORING errored (recorded in the top-level `errors[]`,
+    // flagged by `sectionAuthError`) also keeps the section partial.
+    const clean = !sectionAuthError.has(k) && localErrors.length === 0 && localFindings.length === 0
+    if (clean || persistedHere.length > 0) {
       deleteScenarioFiles(repoRoot, priorIdsOf(k))
       const slug = areaOrDocSlug(section)
       const ids: string[] = []
@@ -1166,21 +1175,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         written.push({ id: c.scenario.id, title: c.scenario.title, doc: section.doc, anchor: section.anchor, file })
         ids.push(c.scenario.id)
       }
-      upsertSection(section, ids)
-    } else if (persistedHere.length > 0) {
-      // Unsettled (a sibling finding/error), but these candidates passed at birth in
-      // one of the rounds — record them as ready-but-held so the validated work is
-      // visible. Their YAML rides inline (they were never written to disk).
-      heldSections.push({
-        doc: section.doc,
-        anchor: section.anchor,
-        readyScenarios: persistedHere.map((c) => ({
-          id: c.scenario.id,
-          title: c.scenario.title,
-          yaml: serializeScenarioYaml(c.scenario),
-        })),
-      })
+      // A clean section stamps the current inputs hash and is skipped next run; a
+      // PARTIAL section (a sibling finding/error remains) records its committed ids
+      // but leaves the hash null so its outstanding claim re-attempts next generate.
+      upsertSection(section, ids, { settled: clean })
     }
+    // A ZERO-SURVIVOR section (committed nothing, only findings/errors) upserts no
+    // entry — the run-end sweep drops its prior files so it re-attempts wholesale.
   }
 
   // Support-claim exemplar packs (item 9): each support claim generates a diverse
@@ -1440,9 +1441,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     birthFindings.push(...humanFindings)
   }
 
-  // 6. Run end — every work section still unsettled (extraction failure, authoring
-  // error, birth finding, birth error) drops its prior files + manifest entry so the
-  // next run re-attempts it. Final whole-manifest write.
+  // 6. Run end — the zero-survivor sweep. Under per-scenario commit (item 15) a work
+  // section committed a manifest entry (`settledKeys`) the moment it landed ≥1 green,
+  // whether it settled clean or PARTIAL (a sibling finding/error still open). Only a
+  // ZERO-SURVIVOR section — committed nothing this run (an extraction failure, an
+  // authoring error, or every claim a birth finding) — reaches here; it drops its
+  // prior files + manifest entry so the next run re-attempts it wholesale. A section
+  // that committed 2 of 3 claims is in `settledKeys`, so its 2 greens are NEVER
+  // deleted just because claim 3 is still a finding (the partial entry's null
+  // generationInputsHash is what re-attempts claim 3 next run). Final manifest write.
   for (const section of plan.work) {
     const k = key(section)
     if (settledKeys.has(k)) continue
@@ -1465,7 +1472,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     extractionFailures,
     orphaned,
     birthPassed,
-    heldSections,
     orphanedDismissals,
     autoResolved,
     manifestPath: manifestPath(repoRoot),
@@ -1560,7 +1566,6 @@ function emptyResult(status: 'no-docs' | 'recipe-failed', extra: { reason: strin
     extractionFailures: [],
     orphaned: [],
     birthPassed: 0,
-    heldSections: [],
     orphanedDismissals: [],
     autoResolved: [],
   }

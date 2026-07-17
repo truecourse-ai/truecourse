@@ -682,22 +682,6 @@ describe('runGuardStatus (printer)', () => {
     expect(out).toContain('2 blocked-on (git 2, db 1)')
   })
 
-  it('surfaces the ready-but-held count in the last-generate block', async () => {
-    const r = repo()
-    writeGuardResult(
-      r,
-      report({
-        sectionsChanged: 2,
-        written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
-        birthPassed: 2,
-        errors: [{ doc: DOC, anchor: 'auth/login', message: 'boom' }],
-        heldSections: [{ doc: DOC, anchor: 'auth/login', readyScenarios: [{ id: 'login.1', title: 'g', yaml: 'y' }] }],
-      }),
-    )
-    await runGuardStatus({ cwd: r })
-    expect(out).toContain('1 ready but held')
-  })
-
   it('mentions the dismissed count as a gaps segment', async () => {
     const r = repo()
     writeGuardResult(
@@ -990,28 +974,34 @@ describe('printGuardGenerateSummary', () => {
     )
   })
 
-  it('renders the ready-but-held line, blamed on its sections\' findings + errors', () => {
+  it('splits sections into settled / partial / unsettled (item 15)', () => {
     const rep = report({
-      sectionsChanged: 3,
+      sectionsChanged: 4,
+      // `version` committed a scenario AND has a finding → PARTIAL. `auth/logout`
+      // committed nothing and only errored → UNSETTLED. Two other changed sections
+      // settled clean. (settled 2 + partial 1 + unsettled 1 = 4.)
       written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
-      birthPassed: 4,
-      birthFindings: [{ doc: DOC, anchor: 'auth/login', title: 'f', step: 1, expected: 'e', actual: 'a' }],
+      birthPassed: 2,
+      birthFindings: [{ doc: DOC, anchor: 'version', title: 'f', step: 1, expected: 'e', actual: 'a' }],
       errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
-      heldSections: [
-        {
-          doc: DOC,
-          anchor: 'auth/login',
-          readyScenarios: [
-            { id: 'login.1', title: 'g1', yaml: 'y' },
-            { id: 'login.2', title: 'g2', yaml: 'y' },
-          ],
-        },
-        { doc: DOC, anchor: 'auth/logout', readyScenarios: [{ id: 'logout.1', title: 'g3', yaml: 'y' }] },
-      ],
     })
     printGuardGenerateSummary(rep, 'p')
-    // 3 held (2 + 1); blocked by 1 finding (auth/login) and 1 error (auth/logout).
-    expect(out).toContain('3 ready but held (1 finding · 1 error)')
+    expect(out).toContain('4 changed · 2 settled · 1 partial · 1 unsettled · 0 unchanged')
+    // The retired all-or-nothing "ready but held" line is gone.
+    expect(out).not.toContain('ready but held')
+  })
+
+  it('omits the partial segment when no section is partial', () => {
+    const rep = report({
+      sectionsChanged: 2,
+      written: [{ id: 'v.1', title: 't', doc: DOC, anchor: 'version', file: 'x.yaml' }],
+      birthPassed: 1,
+      errors: [{ doc: DOC, anchor: 'auth/logout', message: 'boom' }],
+    })
+    printGuardGenerateSummary(rep, 'p')
+    // version settled, auth/logout unsettled (zero survivors) — no partial segment.
+    expect(out).toContain('2 changed · 1 settled · 1 unsettled · 0 unchanged')
+    expect(out).not.toContain('partial')
   })
 })
 

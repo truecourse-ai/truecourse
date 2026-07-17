@@ -102,7 +102,6 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
-    heldSections: [],
     orphanedDismissals: [],
     ...over,
   };
@@ -277,8 +276,7 @@ describe('guard onboarding pipeline', () => {
   // guard store, but the generator reads the CHECKOUT's
   // `scenarios/decisions.json` (file-based, by design: it is committable).
   // The pipeline must materialize the stored decisions into the clone, else a
-  // hosted regenerate re-authors every dismissed claim and its section stays
-  // held forever.
+  // hosted regenerate re-authors every dismissed claim and re-finds it forever.
   // ------------------------------------------------------------------
 
   const GUARD_DECISIONS = {
@@ -367,7 +365,7 @@ describe('guard onboarding pipeline', () => {
   // A PR-head regen must honor the PR's dismissals overlay (`_pr/<n>`) too — the
   // generate-side analog of the gate's foldDismissals. Without the merge, a
   // PR-scoped dismissal never suppresses its claim in the regenerated corpus and
-  // the held section stays held forever.
+  // the section re-finds the dismissed claim forever.
   const PR_OVERLAY = {
     version: 1 as const,
     dismissedClaims: [

@@ -76,7 +76,6 @@ function okGenerateResult(): GuardGenerateResult {
     extractionFailures: [],
     orphaned: [],
     birthPassed: 1,
-    heldSections: [],
     orphanedDismissals: [],
   };
 }

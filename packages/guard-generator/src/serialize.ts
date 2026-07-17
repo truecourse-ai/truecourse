@@ -115,7 +115,7 @@ export function existingScenarioIds(repoRoot: string): Set<string> {
 }
 
 /** The committed YAML form of a scenario — the exact bytes {@link writeScenarioFile}
- *  writes. Reused to carry a ready-but-held candidate's source into the report. */
+ *  writes. Reused to carry a finding candidate's source inline into the report. */
 export function serializeScenarioYaml(scenario: GuardScenario): string {
   return yaml.dump(scenario, { lineWidth: -1, noRefs: true })
 }

@@ -7,13 +7,12 @@
  * reveal its YAML source. Rows are previewable (single-click preview,
  * double-click pin), with inline actions stopping propagation.
  *
- * An unsettled section (status `finding` / `held` / `authoring-error`) lists
- * EVERYTHING bound to it: its birth findings (red rows, expandable to expected →
- * actual), its ready-but-held scenarios (amber rows), and its deduped authoring
- * errors (red rows with attempt counts) — the all-or-nothing persist withheld the
- * scenarios, so no committed scenario exists to list otherwise. On `finding`/`held`
- * the authoring errors ride along as blocker context; on `authoring-error` they are
- * the section's sole record.
+ * A section's birth findings (red rows, expandable to expected → actual) and its
+ * deduped authoring errors (red rows with attempt counts) list at the top — above
+ * whatever committed scenarios the section has. Since item 15 a finding/error no
+ * longer withholds its committed siblings, so these ride ALONGSIDE a committed
+ * section's run outcome / guarded rows as context; on a `finding` / `authoring-error`
+ * section (nothing committed) they are the section's whole story.
  *
  * When the section has no run results — a guarded section with no run yet, or a
  * coverage gap (untestable / driver-not-yet / blocked-on) — the pane explains
@@ -22,7 +21,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { FlaskConical, PlayCircle, X } from 'lucide-react';
-import type { GuardSectionAuthoringError, GuardSectionAutoResolved, GuardSectionCoverage, GuardSectionFinding, GuardSectionHeldScenario, GuardSectionScenario, GuardScenarioSource } from '@truecourse/shared';
+import type { GuardSectionAuthoringError, GuardSectionAutoResolved, GuardSectionCoverage, GuardSectionFinding, GuardSectionScenario, GuardScenarioSource } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -31,7 +30,6 @@ import { GuardStatusBadge } from './GuardStatusBadge';
 import { GuardScenarioStory } from './GuardScenarioStory';
 import { GuardFindingBadge } from './GuardFindingBadge';
 import { GuardTriageChip } from './GuardTriageChip';
-import { GuardHeldBadge } from './GuardHeldBadge';
 
 const OUTCOME_TEXT: Record<string, string> = {
   pass: 'text-emerald-600 dark:text-emerald-400',
@@ -296,19 +294,6 @@ function GuardSectionFindingRow({
   );
 }
 
-/** One ready-but-held scenario — birth-passed work the unsettled section withheld. */
-function GuardSectionHeldRow({ scenario }: { scenario: GuardSectionHeldScenario }) {
-  return (
-    <div className="border-b border-border/60 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <GuardHeldBadge compact />
-        <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">{scenario.id}</span>
-      </div>
-      <span className="mt-0.5 block text-[13px] text-foreground">{scenario.title}</span>
-    </div>
-  );
-}
-
 /** One auto-resolved ledger entry (item 14) — MUTED context, never a red finding.
  *  The tool handled it itself (dismissed / re-attempts / re-authored), so it rides the
  *  section as a struck-through note with its verdict and one-line reason. */
@@ -372,16 +357,16 @@ export function GuardSectionDetail({
     });
 
   const findings = section.findings ?? [];
-  const heldScenarios = section.heldScenarios ?? [];
   const authoringErrors = section.authoringErrors ?? [];
   const autoResolved = section.autoResolved ?? [];
-  const hasUnsettled = findings.length > 0 || heldScenarios.length > 0 || authoringErrors.length > 0;
+  const hasUnsettled = findings.length > 0 || authoringErrors.length > 0;
   const isRunOutcome = section.scenarios.length > 0;
   const isGuardedNoRun = !isRunOutcome && section.scenarioIds.length > 0;
-  // On a finding/held section the errors are blocker context (a labelled header);
-  // when they are the sole record (status `authoring-error`) the reason line above
-  // already frames them, so the plain "Authoring errors" header suffices.
-  const errorsAreBlockerContext = findings.length > 0 || heldScenarios.length > 0;
+  // When authoring errors are the section's SOLE record (status `authoring-error`) the
+  // reason line above already frames them, so the plain "Authoring errors" header
+  // suffices; anywhere else (a committed or `finding` section that also errored) they
+  // are blocker context, so the header says so.
+  const errorsAreBlockerContext = section.status !== 'authoring-error';
 
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
@@ -431,9 +416,6 @@ export function GuardSectionDetail({
             />
           );
         })}
-        {heldScenarios.map((h) => (
-          <GuardSectionHeldRow key={h.id} scenario={h} />
-        ))}
         {authoringErrors.length > 0 && (
           <div>
             <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

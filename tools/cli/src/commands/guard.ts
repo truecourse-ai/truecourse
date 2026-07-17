@@ -339,30 +339,30 @@ function authorFailureLine(f: AuthorFailure): string {
 export function printGuardGenerateSummary(report: GuardGenerateReport, reportPath: string): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
 
-  // Changed sections split into settled (recorded) and unsettled (re-attempt next
-  // run — a birth finding or an authoring error). Extraction failures re-attempt
-  // whole docs and are surfaced on their own line below.
-  const unsettled = new Set<string>();
-  for (const f of report.birthFindings) unsettled.add(`${f.doc}\0${f.anchor}`);
-  for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
-  // A triage-auto-resolved finding (item 14) left `birthFindings`, but its section
-  // committed nothing this run — count it unsettled so `settled` stays honest (an
-  // environment dismissal settles next run; a generation-defect re-attempts).
+  // Changed sections split into settled / partial / unsettled (item 15). A section's
+  // BLOCKERS are its birth findings + authoring errors (plus a triage-auto-resolved
+  // finding, item 14 — it left `birthFindings` but its claim still re-attempts / gets
+  // dismissed next run). A blocked section that ALSO committed ≥1 scenario this run is
+  // PARTIAL (its greens landed, its open claim re-attempts); one that committed NOTHING
+  // is UNSETTLED (zero survivors). `settled` is the rest. settled+partial+unsettled =
+  // changed, so the split stays reconcilable. Extraction failures re-attempt whole docs
+  // and are surfaced on their own line below.
+  const writtenKeys = new Set(report.written.map((w) => `${w.doc}\0${w.anchor}`));
+  const blocked = new Set<string>();
+  for (const f of report.birthFindings) blocked.add(`${f.doc}\0${f.anchor}`);
+  for (const e of report.errors) blocked.add(`${e.doc}\0${e.anchor}`);
   for (const a of report.autoResolved ?? []) {
-    if (a.kind === "triage-dismiss" || a.kind === "triage-resolve") unsettled.add(`${a.doc}\0${a.anchor}`);
+    if (a.kind === "triage-dismiss" || a.kind === "triage-resolve") blocked.add(`${a.doc}\0${a.anchor}`);
   }
-  const settled = Math.max(0, report.sectionsChanged - unsettled.size);
+  let partial = 0;
+  let unsettled = 0;
+  for (const k of blocked) (writtenKeys.has(k) ? partial++ : unsettled++);
+  const settled = Math.max(0, report.sectionsChanged - partial - unsettled);
 
-  p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled · ${unsettled.size} unsettled · ${report.skippedUnchanged} unchanged`);
+  const partialPart = partial > 0 ? ` · ${partial} partial` : "";
+  p.log.step(`sections    ${report.sectionsChanged} changed · ${settled} settled${partialPart} · ${unsettled} unsettled · ${report.skippedUnchanged} unchanged`);
   const birth = g.birthPassed !== null ? ` · ${g.birthPassed} passed birth` : "";
   p.log.step(`scenarios   ${g.written} written${birth}`);
-  // Ready-but-held: birth-passed scenarios an unsettled sibling withheld — validated
-  // work that would otherwise vanish into the authoring cache. Only when any exist.
-  if (g.readyButHeld > 0) {
-    p.log.step(
-      `held        ${g.readyButHeld} ready but held (${g.heldByFindings} finding${g.heldByFindings === 1 ? "" : "s"} · ${g.heldByErrors} error${g.heldByErrors === 1 ? "" : "s"})`,
-    );
-  }
 
   const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
   if (gapTotal > 0) {
@@ -557,7 +557,6 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
           .map(([k, n]) => (k === "blocked-on" ? `${n} blocked-on${blockedOnBreakdown(g.blockedOnCapabilities)}` : `${n} ${k}`));
         detail.push(`${gapTotal} gap${gapTotal === 1 ? "" : "s"} (${kinds.join(", ")})`);
       }
-      if (g.readyButHeld > 0) detail.push(`${g.readyButHeld} ready but held`);
       if (g.birthFindings > 0) detail.push(`${g.birthFindings} birth finding${g.birthFindings === 1 ? "" : "s"}`);
       if (g.errors > 0) detail.push(`${g.errors} error${g.errors === 1 ? "" : "s"}`);
       if (detail.length > 0) p.log.message(`    ${detail.join(" · ")}`);

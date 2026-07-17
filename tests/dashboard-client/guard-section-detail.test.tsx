@@ -1,9 +1,10 @@
 /**
- * The section detail pane for an UNSETTLED section (status `finding` / `held`):
- * it must list everything bound to the section — birth findings (expandable to
- * expected → actual) and ready-but-held scenarios — instead of the bare
- * "no scenario" EmptyState (the all-or-nothing persist means such a section has
- * no committed scenario to list otherwise).
+ * The section detail pane for a section carrying birth findings / authoring errors:
+ * it lists its birth findings (expandable to expected → actual) and deduped authoring
+ * errors — above whatever committed scenarios the section has. Since item 15 a finding
+ * no longer withholds committed siblings, so a finding can ride a committed (guarded /
+ * run) section as context, and a section that committed NOTHING shows only its findings
+ * instead of the bare "no scenario" EmptyState.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -32,23 +33,17 @@ function renderDetail(sec: GuardSectionCoverage) {
 }
 
 describe('GuardSectionDetail — unsettled sections', () => {
-  it('lists the findings and held scenarios of a finding section (no EmptyState)', () => {
+  it('lists the findings of a section that committed nothing (no EmptyState)', () => {
     renderDetail(
       section({
         status: 'finding',
-        reason: '1 birth finding awaiting a decision · holds 2 ready scenarios',
+        reason: '1 birth finding awaiting a decision',
         findings: [{ index: 3, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2' }],
-        heldScenarios: [
-          { id: 'cli-held-one', title: 'held rate limit' },
-          { id: 'cli-held-two', title: 'held verbose flag' },
-        ],
       }),
     );
 
     expect(screen.getByText('exit code drifted')).toBeInTheDocument();
-    expect(screen.getByText('held rate limit')).toBeInTheDocument();
-    expect(screen.getByText('held verbose flag')).toBeInTheDocument();
-    expect(screen.getByText('1 birth finding awaiting a decision · holds 2 ready scenarios')).toBeInTheDocument();
+    expect(screen.getByText('1 birth finding awaiting a decision')).toBeInTheDocument();
     expect(screen.queryByText(/no scenario/i)).not.toBeInTheDocument();
   });
 
@@ -91,17 +86,20 @@ describe('GuardSectionDetail — unsettled sections', () => {
     expect(screen.getByText('fidelity')).toBeInTheDocument();
   });
 
-  it('lists held scenarios for a held section (no EmptyState)', () => {
+  it('shows a finding as context on a committed (guarded) section — item 15', () => {
     renderDetail(
       section({
-        status: 'held',
-        reason: '1 ready scenario held — the section did not settle',
-        heldScenarios: [{ id: 'cli-held-one', title: 'held rate limit' }],
+        status: 'guarded',
+        scenarioIds: ['config-nesting.1'],
+        // A committed section that also left a sibling finding — the finding rides
+        // alongside the committed scenario, never withholds it.
+        findings: [{ index: 0, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2' }],
       }),
     );
 
-    expect(screen.getByText('held rate limit')).toBeInTheDocument();
-    expect(screen.getByText('cli-held-one')).toBeInTheDocument();
+    // Both the finding AND the committed scenario id render — outcome + finding together.
+    expect(screen.getByText('exit code drifted')).toBeInTheDocument();
+    expect(screen.getByText('config-nesting.1')).toBeInTheDocument();
     expect(screen.queryByText(/no scenario/i)).not.toBeInTheDocument();
   });
 

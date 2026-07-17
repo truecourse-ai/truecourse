@@ -260,11 +260,11 @@ export const GuardGenerateErrorSchema = z
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
 
 /**
- * One birth-passed-but-withheld candidate under a held section — validated work
- * the all-or-nothing persist held back. The authored `yaml` rides inline (the
- * exact bytes the section would have committed): `result.json` is gitignored and
- * a few KB per scenario is trivial, so the inline copy beats a server-side
- * authoring-cache lookup for robustness (a cleared cache never blanks the UI).
+ * LEGACY (never written since item 15) — a birth-passed-but-withheld candidate under
+ * a held section, back when a sibling finding held its whole section's validated work
+ * back. Every scenario now commits on its own merits, so nothing is ever held; the
+ * schema survives ONLY so an old `guard/result.json` carrying `heldSections` still
+ * parses.
  */
 export const GuardReadyScenarioSchema = z
   .object({
@@ -277,14 +277,11 @@ export const GuardReadyScenarioSchema = z
 export type GuardReadyScenario = z.infer<typeof GuardReadyScenarioSchema>
 
 /**
- * A section that stayed UNSETTLED (a sibling finding/error) yet whose candidates
- * ALL passed birth — the "ready but held" scenarios the all-or-nothing persist
- * withheld. First-class so the validated work is never invisible. The blockers
- * (what holds it) are the report's top-level `birthFindings`/`errors` keyed by the
- * same `doc`+`anchor`, so they are never duplicated here. `headingText` is the
- * section's human heading, joined SERVER-SIDE at report read time (never written
- * to `result.json` — a held section is unsettled, so no committed scenario donates
- * it; slugs are engine ids, not UI copy).
+ * LEGACY (never written since item 15) — a section that stayed UNSETTLED yet whose
+ * candidates all passed birth, when a sibling finding/error withheld the whole
+ * section's validated work. Item 15 retired all-or-nothing settling: every candidate
+ * that clears birth + fidelity commits regardless of its siblings, so no section is
+ * ever held. The schema survives ONLY so an old `guard/result.json` still parses.
  */
 export const GuardHeldSectionSchema = z
   .object({
@@ -469,27 +466,26 @@ export const GuardGenerateReportSchema = z
     extractionFailures: z.array(GuardExtractionFailureSchema),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
-     * Birth passes that survived to a reported bucket — written, held-ready, a
-     * fidelity finding, or an auto-resolved fidelity discard. Counted once per
-     * surviving candidate. Before item-14 triage auto-resolution the run reconciled
-     * exactly as `birthPassed === written.length + Σ heldSections.readyScenarios +
-     * (birthFindings with kind 'fidelity') + autoResolved.length`; item 14 moves some
+     * Birth passes that survived to a reported bucket — a written scenario, a fidelity
+     * finding, or an auto-resolved fidelity discard. Counted once per surviving
+     * candidate. Since item 15 every birth+fidelity-clean candidate COMMITS (no
+     * held-ready bucket), so the run reconciles as `birthPassed === written.length +
+     * (birthFindings with kind 'fidelity') + autoResolved.length` — item 14 moves some
      * findings from `birthFindings` into `autoResolved`, so the honest invariant is
      * that a triage-auto-resolved entry counts here ONLY when its origin finding
-     * PASSED birth (a fidelity finding) — an auto-resolved BIRTH finding never passed
-     * birth and is not counted. A round-1 pass discarded when a sibling forced a
-     * whole-claim BIRTH retry is NOT counted (only the retry's own passes are), nor is
-     * a birth pass whose fidelity review could not complete. May still exceed
-     * `written.length` when a passing scenario's section didn't settle (it is held).
+     * PASSED birth (a fidelity finding / a fidelity discard) — an auto-resolved BIRTH
+     * finding never passed birth and is not counted. A round-1 pass discarded when a
+     * sibling forced a whole-claim BIRTH retry is NOT counted (only the retry's own
+     * passes are), nor is a birth pass whose fidelity review could not complete.
      * Optional so the report stays a superset of the result AND tolerant reads of
      * older files (written before this field existed) keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
     /**
-     * Unsettled sections whose birth-passed candidates were withheld — the
-     * ready-but-held scenarios, each carrying its authored YAML inline. Optional so
-     * older reports (written before this field existed) keep parsing; absent reads
-     * as "no held work".
+     * LEGACY (never written since item 15) — ready-but-held scenarios a section's
+     * unsettled state withheld. Every scenario now commits on its own merits, so this
+     * is always absent going forward; kept optional ONLY so an old `result.json`
+     * carrying it still parses. Absent reads as "no held work".
      */
     heldSections: z.array(GuardHeldSectionSchema).optional(),
     /**

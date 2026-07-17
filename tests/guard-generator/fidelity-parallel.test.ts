@@ -62,11 +62,10 @@ function seed(content = DOC_CONTENT): string {
   return r
 }
 
-/** birthPassed reconciles: passed === written + held-ready + fidelity-flagged. */
+/** birthPassed reconciles: passed === written + fidelity-flagged + auto-resolved (item 15). */
 function reconciles(res: GuardGenerateResult): boolean {
-  const held = (res.heldSections ?? []).reduce((n, h) => n + h.readyScenarios.length, 0)
   const flagged = res.birthFindings.filter((f) => f.kind === 'fidelity').length
-  return res.birthPassed === res.written.length + held + flagged
+  return res.birthPassed === res.written.length + flagged + res.autoResolved.length
 }
 
 /** An all-pass executor that blocks on `gate` before it produces its verdicts, so a
@@ -217,7 +216,7 @@ describe('generateGuards — fidelity runs in parallel with birth (item 16)', ()
     expect(res.written.map((w) => w.title)).toEqual(['good'])
     expect(res.birthFindings.map((f) => f.title)).toEqual(['vacuous'])
     // Two candidates cleared birth AND were reviewed → birthPassed 2 = 1 written +
-    // 0 held + 1 fidelity-flagged.
+    // 1 fidelity-flagged.
     expect(res.birthPassed).toBe(2)
     expect(reconciles(res)).toBe(true)
   })

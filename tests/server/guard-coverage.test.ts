@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { composeDocCoverage } from '../../packages/core/src/commands/guard-read';
-import { composeBlockedOnReason } from '../../packages/shared/src/guard/report';
+import { composeBlockedOnReason, GuardGenerateReportSchema } from '../../packages/shared/src/guard/report';
 import type {
   GuardManifest,
   GuardLatest,
@@ -27,7 +27,7 @@ const CONTENT = [
   '# S Unguarded', 'l',
   '# S Moved', 'm',
   '# S Finding', 'n',
-  '# S Held', 'o',
+  '# S Partial', 'o',
   '# S Auth Error', 'p',
 ].join('\n');
 
@@ -60,6 +60,9 @@ const manifest: GuardManifest = {
     { doc: DOC, anchor: 's-guarded', fingerprint: fp, scenarioIds: ['sg1'], generationInputsHash: null },
     { doc: DOC, anchor: 's-web', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { driver: 'web', reason: 'browser-only' } },
     { doc: DOC, anchor: 's-untestable', fingerprint: fp, scenarioIds: [], generationInputsHash: null, classification: { untestable: true, reason: 'no CLI surface' } },
+    // A PARTIAL section (item 15): it committed a scenario yet its sibling claim is a
+    // finding — the manifest records the committed id with a null hash (re-attempts).
+    { doc: DOC, anchor: 's-partial', fingerprint: fp, scenarioIds: ['sp1'], generationInputsHash: null },
   ],
 };
 
@@ -82,6 +85,11 @@ const result: GuardGenerateReport = {
     // finding's position in the FULL report array (the Scenarios-tab key basis).
     { doc: 'docs/other.md', anchor: 'elsewhere', title: 'other-doc finding', step: 1, expected: 'a', actual: 'b' },
     { doc: DOC, anchor: 's-finding', title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
+    // A finding on a section that ALSO committed a scenario (item 15) — it rides the
+    // GUARDED status as context, never paints the section itself.
+    { doc: DOC, anchor: 's-partial', title: 'partial claim drifted', step: 1, expected: 'x', actual: 'y' },
+    // A finding on a section with a RUN outcome — rides the run status as context.
+    { doc: DOC, anchor: 's-pass', title: 'pass-section finding', step: 1, expected: 'p', actual: 'q' },
   ],
   errors: [
     // Another doc's error, proving the join filters by doc.
@@ -91,19 +99,9 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
     { doc: DOC, anchor: 's-auth-error', message: 'timed out after 10m' },
     { doc: DOC, anchor: 's-auth-error', message: 'invalid output twice' },
-    // A held section whose blocker WAS an authoring error — held must still win.
-    { doc: DOC, anchor: 's-held', message: 'sibling authoring error' },
   ],
   extractionFailures: [],
   orphaned: [],
-  heldSections: [
-    { doc: DOC, anchor: 's-finding', readyScenarios: [
-      { id: 'hf1', title: 'held by the finding 1', yaml: 'id: hf1' },
-      { id: 'hf2', title: 'held by the finding 2', yaml: 'id: hf2' },
-    ] },
-    { doc: DOC, anchor: 's-held', readyScenarios: [{ id: 'sh1', title: 'held by a sibling error', yaml: 'id: sh1' }] },
-    { doc: 'docs/other.md', anchor: 'elsewhere', readyScenarios: [{ id: 'xx1', title: 'other doc', yaml: 'id: xx1' }] },
-  ],
 };
 
 describe('composeDocCoverage — per-section join (all statuses)', () => {
@@ -159,27 +157,31 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(status('s-unguarded')).toBe('unguarded');
   });
 
-  it('paints an unsettled section with a birth finding, projecting its findings + held scenarios', () => {
+  it('paints a section that committed NOTHING but has a birth finding as finding', () => {
     const sf = byAnchor.get('s-finding')!;
     expect(sf.status).toBe('finding');
-    expect(sf.reason).toBe('1 birth finding awaiting a decision · holds 2 ready scenarios');
+    expect(sf.reason).toBe('1 birth finding awaiting a decision');
     expect(sf.findings).toEqual([
       { index: 1, title: 'exit code drifted', step: 2, expected: 'exit 0', actual: 'exit 2', evidencePath: '.truecourse/guard/evidence/birth/bf' },
     ]);
-    expect(sf.heldScenarios).toEqual([
-      { id: 'hf1', title: 'held by the finding 1' },
-      { id: 'hf2', title: 'held by the finding 2' },
+  });
+
+  it('a GUARDED section with a birth finding paints guarded, with the finding as context (item 15)', () => {
+    const sp = byAnchor.get('s-partial')!;
+    expect(sp.status).toBe('guarded');
+    expect(sp.scenarioIds).toEqual(['sp1']);
+    // The finding rides ALONGSIDE the committed status — never withholds it.
+    expect(sp.findings).toEqual([
+      { index: 2, title: 'partial claim drifted', step: 1, expected: 'x', actual: 'y' },
     ]);
   });
 
-  it('paints an unsettled section with only held scenarios as held, listing its sibling authoring error as blocker context', () => {
-    const sh = byAnchor.get('s-held')!;
-    expect(sh.status).toBe('held');
-    expect(sh.reason).toBe('1 ready scenario held — the section did not settle');
-    expect(sh.heldScenarios).toEqual([{ id: 'sh1', title: 'held by a sibling error' }]);
-    expect(sh.findings).toBeUndefined();
-    // held wins over authoring-error, but the blocker rides along as context.
-    expect(sh.authoringErrors).toEqual([{ message: 'sibling authoring error', attempts: 1 }]);
+  it('a RUN-outcome section with a birth finding paints by its outcome, with the finding as context (item 15)', () => {
+    const sp = byAnchor.get('s-pass')!;
+    expect(sp.status).toBe('pass');
+    expect(sp.findings).toEqual([
+      { index: 3, title: 'pass-section finding', step: 1, expected: 'p', actual: 'q' },
+    ]);
   });
 
   it('paints an error-only section as authoring-error with a deduped, attempt-counted reason', () => {
@@ -225,9 +227,9 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
-      pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
+      pass: 2, fail: 1, error: 1, stale: 1, guarded: 2,
       api: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      finding: 1, held: 1, 'authoring-error': 1, unguarded: 1, orphaned: 0,
+      finding: 1, 'authoring-error': 1, unguarded: 1, orphaned: 0,
     });
   });
 
@@ -289,5 +291,39 @@ describe('composeDocCoverage — auto-resolved findings never paint finding', ()
 
   it('auto-resolved entries never add a finding to the totals', () => {
     expect(cov.totals.finding).toBe(0);
+  });
+});
+
+// Old sqlfluff-era reports carry `heldSections` (retired in item 15). The schema
+// keeps the field optional so they still parse, and the coverage join ignores it —
+// no `held` status is ever painted from a legacy report.
+describe('composeDocCoverage — legacy report with heldSections still composes', () => {
+  const LEGACY_CONTENT = ['# Only', 'body'].join('\n');
+  const legacy = {
+    generatedAt: '2026-01-02T03:04:05.000Z',
+    status: 'ok' as const,
+    sectionsTotal: 1,
+    sectionsChanged: 1,
+    skippedUnchanged: 0,
+    noChanges: false,
+    written: [],
+    coverageGaps: [],
+    birthFindings: [{ doc: DOC, anchor: 'only', title: 'bad', step: 1, expected: 'e', actual: 'a' }],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+    heldSections: [
+      { doc: DOC, anchor: 'only', readyScenarios: [{ id: 'only.1', title: 'good', yaml: 'id: only.1' }] },
+    ],
+  } as unknown as GuardGenerateReport;
+
+  it('parses through the report schema and paints finding (never held) with no held projection', () => {
+    expect(() => GuardGenerateReportSchema.parse(legacy)).not.toThrow();
+    const cov = composeDocCoverage(DOC, LEGACY_CONTENT, { manifest: null, latest: null, result: legacy });
+    const only = cov.sections.find((s) => s.anchor === 'only')!;
+    expect(only.status).toBe('finding');
+    // The legacy held projection is dropped — no `held` status, no `heldScenarios`.
+    expect((only as { heldScenarios?: unknown }).heldScenarios).toBeUndefined();
+    expect(cov.totals).not.toHaveProperty('held');
   });
 });

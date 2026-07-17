@@ -210,13 +210,6 @@ export function GuardFindingDetail({
           </div>
         )}
 
-        {/* Blast radius — resolving this finding releases its section's held work. */}
-        {row.heldCount > 0 && (
-          <div className="text-[13px] font-medium text-amber-600 dark:text-amber-400">
-            Holds back {row.heldCount} ready scenario{row.heldCount === 1 ? '' : 's'}.
-          </div>
-        )}
-
         {/* What went wrong */}
         <div>
           <div className={LABEL}>
@@ -254,7 +247,7 @@ export function GuardFindingDetail({
           </div>
         )}
 
-        {/* The authored YAML the candidate ran — same code-block idiom as the held /
+        {/* The authored YAML the candidate ran — same code-block idiom as the
             scenario-source detail; it rides inline on the finding (item 19). */}
         {f.yaml && (
           <div>
