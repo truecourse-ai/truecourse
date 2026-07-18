@@ -381,12 +381,15 @@ export abstract class BaseCLIProvider implements LLMProvider {
         } catch (err) {
           lastError = err as Error;
           if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
-          if (isLlmSessionLimitError(lastError)) {
+          const sessionLimit = isLlmSessionLimitError(lastError)
+            ? lastError
+            : parseLlmSessionLimitError(lastError);
+          if (sessionLimit) {
             if (!this._sessionLimitError) {
-              this._sessionLimitError = lastError;
-              log.warn(`[CLI] ${lastError.message} Queued LLM calls will be stopped.`);
+              this._sessionLimitError = sessionLimit;
+              log.warn(`[CLI] ${sessionLimit.message} Queued LLM calls will be stopped.`);
               try {
-                this._sessionLimitHandler?.(lastError);
+                this._sessionLimitHandler?.(sessionLimit);
               } catch (handlerError) {
                 log.warn(
                   `[CLI] Session-limit notification failed: ${handlerError instanceof Error ? handlerError.message : String(handlerError)}`,

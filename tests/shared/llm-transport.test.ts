@@ -108,6 +108,43 @@ process.exit(0);
   );
 }
 
+function fakeSessionLimitStreamBin(exitCode: number, includeInit: boolean): string {
+  return fakeNodeBin(
+    `claude-session-limit-${exitCode}-${includeInit ? 'stream' : 'result'}.js`,
+    `
+const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+${includeInit ? "w({ type: 'system', subtype: 'init', session_id: 's' });" : ''}
+w({
+  type: 'result',
+  subtype: 'error',
+  is_error: true,
+  api_error_status: 429,
+  result: "You've hit your session limit · resets 7pm (Africa/Cairo)"
+});
+process.exit(${exitCode});
+`,
+  );
+}
+
+function fakeGenericApiErrorBin(exitCode: number, includeInit: boolean): string {
+  return fakeNodeBin(
+    `claude-generic-error-${exitCode}-${includeInit ? 'stream' : 'result'}.js`,
+    `
+const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+${includeInit ? "w({ type: 'system', subtype: 'init', session_id: 's' });" : ''}
+w({
+  type: 'result',
+  subtype: 'error',
+  is_error: true,
+  api_error_status: 429,
+  result: 'Rate limited. Please retry shortly.'
+});
+process.stderr.write('transport-stderr');
+process.exit(${exitCode});
+`,
+  );
+}
+
 /** Capture the single call record the transport emits, restoring the sink. */
 async function captureRecord(run: () => Promise<unknown>): Promise<{ rec?: LlmCallRecord; error?: unknown }> {
   let rec: LlmCallRecord | undefined;
@@ -209,6 +246,41 @@ describe('agentTransport (filesystem mailbox)', () => {
     fs.mkdirSync(path.join(io, 'responses'), { recursive: true });
     fs.writeFileSync(path.join(io, 'responses', 'err-1.json'), JSON.stringify({ error: 'boom' }));
     await expect(agentTransport(io, { pollMs: 5 })({ id: 'err-1', system: 's', user: 'u' })).rejects.toThrow(/boom/);
+  });
+
+  it('preserves a native Claude session-limit envelope reported through the mailbox', async () => {
+    const io = tmpIo();
+    fs.mkdirSync(path.join(io, 'responses'), { recursive: true });
+    fs.writeFileSync(
+      path.join(io, 'responses', 'limit-1.json'),
+      JSON.stringify({
+        error: {
+          is_error: true,
+          api_error_status: 429,
+          result: "You've hit your session limit · resets 7pm (Africa/Cairo)",
+        },
+      }),
+    );
+
+    await expect(
+      agentTransport(io, { pollMs: 5 })({ id: 'limit-1', system: 's', user: 'u' }),
+    ).rejects.toMatchObject({
+      code: 'LLM_SESSION_LIMIT',
+      resetHint: '7pm (Africa/Cairo)',
+    });
+  });
+
+  it('keeps accepting a successful mailbox response with a nullable error field', async () => {
+    const io = tmpIo();
+    fs.mkdirSync(path.join(io, 'responses'), { recursive: true });
+    fs.writeFileSync(
+      path.join(io, 'responses', 'nullable-error.json'),
+      JSON.stringify({ text: 'ok', error: null }),
+    );
+
+    await expect(
+      agentTransport(io, { pollMs: 5 })({ id: 'nullable-error', system: 's', user: 'u' }),
+    ).resolves.toBe('ok');
   });
 
   it('reuses an existing response without re-writing the request (resume)', async () => {
@@ -352,6 +424,44 @@ describe('cliTransport streaming (stream-json)', () => {
     expect(rec?.cacheCreateTokens).toBe(10);
     expect(rec?.costUsd).toBeCloseTo(0.002);
     expect(rec?.model).toBe('claude-test-1');
+  });
+
+  it('preserves a streamed Claude session-limit envelope when the CLI exits nonzero', async () => {
+    const transport = cliTransport({ bin: fakeSessionLimitStreamBin(1, true) });
+
+    await expect(
+      transport({ id: 'limit-exit-1', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    ).rejects.toMatchObject({
+      code: 'LLM_SESSION_LIMIT',
+      resetHint: '7pm (Africa/Cairo)',
+    });
+  });
+
+  it('classifies a lone exit-zero Claude error result before enforcing successful streaming', async () => {
+    const transport = cliTransport({ bin: fakeSessionLimitStreamBin(0, false) });
+
+    await expect(
+      transport({ id: 'limit-exit-0', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    ).rejects.toMatchObject({
+      code: 'LLM_SESSION_LIMIT',
+      resetHint: '7pm (Africa/Cairo)',
+    });
+  });
+
+  it('keeps nonzero generic API failures on the existing stderr-rich exit path', async () => {
+    const transport = cliTransport({ bin: fakeGenericApiErrorBin(1, true) });
+
+    await expect(
+      transport({ id: 'generic-exit-1', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    ).rejects.toThrow(/claude exited 1: transport-stderr/);
+  });
+
+  it('still rejects a lone exit-zero generic API error as non-streaming output', async () => {
+    const transport = cliTransport({ bin: fakeGenericApiErrorBin(0, false) });
+
+    await expect(
+      transport({ id: 'generic-exit-0', stage: 'test', system: 's', user: 'u', timeoutMs: 5000 }),
+    ).rejects.toThrow(/did not stream.*stream-json/);
   });
 
   it('kills a started-then-silent stream as a stall, distinct from the ceiling', async () => {

@@ -23,6 +23,44 @@ const serviceContext = {
 };
 
 describe('ClaudeCodeProvider session-limit circuit', () => {
+  it('normalizes a definite Claude 429 wrapped by an installed transport before retrying', async () => {
+    let calls = 0;
+    let notifications = 0;
+    const provider = createLLMProvider(async () => {
+      calls++;
+      throw new Error(
+        "claude API error (api 429): You've hit your session limit · resets 7pm (Africa/Cairo)",
+      );
+    });
+    provider.setSessionLimitHandler?.(() => { notifications++; });
+
+    await expect(provider.generateServiceViolations(serviceContext)).rejects.toMatchObject({
+      code: 'LLM_SESSION_LIMIT',
+      resetHint: '7pm (Africa/Cairo)',
+    });
+    await expect(provider.generateServiceViolations(serviceContext)).rejects.toMatchObject({
+      code: 'LLM_SESSION_LIMIT',
+    });
+
+    expect(calls).toBe(1);
+    expect(notifications).toBe(1);
+  });
+
+  it('keeps bounded retries for a wrapped generic 429 from an installed transport', async () => {
+    let calls = 0;
+    let notifications = 0;
+    const provider = createLLMProvider(async () => {
+      calls++;
+      throw new Error('claude API error (api 429): Rate limited. Please retry shortly.');
+    });
+    provider.setSessionLimitHandler?.(() => { notifications++; });
+
+    await expect(provider.generateServiceViolations(serviceContext)).rejects.toThrow(/Rate limited/);
+
+    expect(calls).toBe(3);
+    expect(notifications).toBe(0);
+  });
+
   it('does not start queued requests after one active call reaches the session limit', async () => {
     const concurrency = config.claudeCodeMaxConcurrency;
     const submitted = concurrency * 2;
