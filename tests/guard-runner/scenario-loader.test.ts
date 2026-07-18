@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { loadScenarios } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario } from './helpers.js'
 
@@ -84,5 +87,43 @@ describe('loadScenarios', () => {
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
     expect(errors).toEqual([])
+  })
+})
+
+describe('corpus pack exclusion', () => {
+  it('never parses corpus pack files as scenarios, even yaml-formatted exemplars', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-loader-corpus-'))
+    try {
+      const dir = path.join(repo, '.truecourse', 'scenarios')
+      fs.mkdirSync(path.join(dir, 'corpus', 'sup-versions-abc12345'), { recursive: true })
+      fs.writeFileSync(
+        path.join(dir, 'corpus', 'sup-versions-abc12345', 'exemplar-01.yaml'),
+        'openapi: 3.0.0\ninfo:\n  title: not a scenario\n',
+      )
+      fs.mkdirSync(path.join(dir, 'core-cli'), { recursive: true })
+      fs.writeFileSync(
+        path.join(dir, 'core-cli', 'usage.1.yaml'),
+        [
+          'guard: 1',
+          'id: usage.1',
+          'title: prints usage',
+          'binds:',
+          '  doc: README.md',
+          '  section: usage',
+          "  fingerprint: 'sha256:x'",
+          'driver: cli',
+          'steps:',
+          '  - run: ["--help"]',
+          '    expect:',
+          '      exit: 0',
+        ].join('\n'),
+      )
+
+      const loaded = loadScenarios(repo)
+      expect(loaded.errors).toEqual([])
+      expect(loaded.scenarios.map((s) => s.id)).toEqual(['usage.1'])
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
+    }
   })
 })

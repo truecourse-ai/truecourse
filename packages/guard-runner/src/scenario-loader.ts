@@ -23,14 +23,23 @@ export interface LoadedScenarios {
   errors: ScenarioLoadError[]
 }
 
-/** Recursively collect `*.yaml` / `*.yml` files under the scenarios dir. */
-function collectScenarioFiles(dir: string): string[] {
+/**
+ * Recursively collect `*.yaml` / `*.yml` files under the scenarios dir —
+ * SKIPPING the top-level `corpus/` tree: it holds input-pack DATA files, and a
+ * pack whose subject is itself a YAML format carries `exemplar-NN.yaml` inputs
+ * that must never be parsed as scenario bodies. (The store-sync enumerator
+ * `walkScenarioRelFiles` still includes corpus/ — packs are committable files
+ * that travel with the tree; they are just not scenarios.)
+ */
+function collectScenarioFiles(dir: string, isRoot = true): string[] {
   if (!fs.existsSync(dir)) return []
   const out: string[] = []
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...collectScenarioFiles(full))
-    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full)
+    if (entry.isDirectory()) {
+      if (isRoot && entry.name === 'corpus') continue
+      out.push(...collectScenarioFiles(full, false))
+    } else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full)
   }
   return out.sort()
 }
