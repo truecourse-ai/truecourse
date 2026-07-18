@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/core",
-  "version": "0.7.3-next.9",
+  "version": "0.7.3-next.10",
   "private": true,
   "type": "module",
   "exports": {
