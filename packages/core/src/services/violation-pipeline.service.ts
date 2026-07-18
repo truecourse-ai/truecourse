@@ -7,7 +7,7 @@ import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
 import { DOMAIN_ORDER, CODE_DOMAINS } from '../progress.js';
 import { getEnabledRules } from './rules.service.js';
-import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
+import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationRaw, type CodeViolationsResult, type CodeSourceScope, type DiffViolationItem } from './llm/provider.js';
 import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
@@ -201,6 +201,105 @@ export function compareDeterministicViolations<
   }
 
   return { newDetections, unchangedDetections, resolvedDetections };
+}
+
+export function isPreviousCodeViolationOwnedByBatch(
+  violation: Pick<ActiveViolation, 'ruleKey' | 'filePath' | 'lineStart' | 'lineEnd'>,
+  ruleKeys: ReadonlySet<string>,
+  sourceScopes: CodeSourceScope[],
+): boolean {
+  if (
+    !ruleKeys.has(violation.ruleKey) ||
+    !violation.filePath ||
+    violation.lineStart == null ||
+    violation.lineEnd == null
+  ) {
+    return false;
+  }
+
+  return sourceScopes.some((scope) =>
+    scope.path === violation.filePath && scope.ranges.some((range) =>
+      violation.lineStart! >= range.lineStart && violation.lineEnd! <= range.lineEnd,
+    ),
+  );
+}
+
+export function aggregateCodeBatchOutcomes(
+  batches: Pick<CodeViolationContext, 'existingViolations'>[],
+  results: PromiseSettledResult<CodeViolationsResult>[],
+): {
+  violations: CodeViolationRaw[];
+  resolvedIds: string[];
+  unchangedIds: string[];
+  failures: unknown[];
+} {
+  const violations: CodeViolationRaw[] = [];
+  const resolvedIds: string[] = [];
+  const unchangedIds: string[] = [];
+  const failures: unknown[] = [];
+
+  for (let index = 0; index < results.length; index++) {
+    const result = results[index];
+    if (result.status === 'fulfilled') {
+      violations.push(...result.value.violations);
+      resolvedIds.push(...(result.value.resolvedViolationIds ?? []));
+      unchangedIds.push(...(result.value.unchangedViolationIds ?? []));
+    } else {
+      failures.push(result.reason);
+      unchangedIds.push(...(batches[index]?.existingViolations?.map((violation) => violation.id) ?? []));
+    }
+  }
+
+  return {
+    violations,
+    resolvedIds: [...new Set(resolvedIds)],
+    unchangedIds: [...new Set(unchangedIds)],
+    failures,
+  };
+}
+
+export function hasCodeLifecycleResults(
+  violations: CodeViolation[],
+  resolvedIds: string[],
+  unchangedIds: string[],
+): boolean {
+  return violations.length > 0 || resolvedIds.length > 0 || unchangedIds.length > 0;
+}
+
+export function reconcileCodePriorClassifications(
+  previousIds: string[],
+  resolvedIds: string[],
+  unchangedIds: string[],
+): { resolvedIds: string[]; unchangedIds: string[] } {
+  const unchanged = new Set(unchangedIds);
+  const resolved = new Set(resolvedIds.filter((id) => !unchanged.has(id)));
+
+  for (const id of previousIds) {
+    if (!resolved.has(id) && !unchanged.has(id)) unchanged.add(id);
+  }
+
+  return {
+    resolvedIds: [...resolved],
+    unchangedIds: [...unchanged],
+  };
+}
+
+export function codeDomainViolationTotal(
+  deterministicCount: number,
+  newViolationCount: number,
+  unchangedIds: string[],
+): number {
+  return deterministicCount + newViolationCount + new Set(unchangedIds).size;
+}
+
+export function buildLlmCodeSnippet(
+  sourceTier: CodeViolationRaw['sourceTier'],
+  fileContent: string,
+  lineStart: number,
+  lineEnd: number,
+): string {
+  if (sourceTier === 'metadata') return '';
+  return fileContent.split('\n').slice(lineStart - 1, lineEnd).join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -694,20 +793,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     const contextBatches = routeContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
 
     for (const batch of contextBatches) {
-      const existing = [...prevLlmCodeByFile.entries()]
-        .filter(([fp]) => batch.content.includes(fp))
-        .flatMap(([, violations]) => violations)
-        .map((v) => ({
-          id: v.id,
-          filePath: v.filePath!,
-          lineStart: v.lineStart!,
-          lineEnd: v.lineEnd!,
-          ruleKey: v.ruleKey,
-          severity: v.severity,
-          title: v.title,
-          content: v.content,
-        }));
-
       const rulesByDomain = new Map<string, typeof batch.rules>();
       for (const rule of batch.rules) {
         const domain = rule.key.split('/')[0];
@@ -722,9 +807,25 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
       for (const [domain, rules] of rulesByDomain) {
         if (!domainCodeBatches.has(domain)) domainCodeBatches.set(domain, []);
-        const domainExisting = existing.filter((v) => v.ruleKey.startsWith(`${domain}/`));
+        const ruleKeys = new Set(rules.map((rule) => rule.key));
+        const domainExisting = [...prevLlmCodeByFile.values()]
+          .flat()
+          .filter((violation) =>
+            isPreviousCodeViolationOwnedByBatch(violation, ruleKeys, batch.sourceScopes),
+          )
+          .map((violation) => ({
+            id: violation.id,
+            filePath: violation.filePath!,
+            lineStart: violation.lineStart!,
+            lineEnd: violation.lineEnd!,
+            ruleKey: violation.ruleKey,
+            severity: violation.severity,
+            title: violation.title,
+            content: violation.content,
+          }));
         domainCodeBatches.get(domain)!.push({
           files,
+          sourceScopes: batch.sourceScopes,
           llmRules: rules,
           tier: batch.tier,
           existingViolations: domainExisting.length > 0 ? domainExisting : undefined,
@@ -1141,27 +1242,28 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         }),
       );
 
-      const rawViolations: CodeViolationRaw[] = [];
-      const resolvedIds: string[] = [];
-      const unchangedIds: string[] = [];
-      for (const r of codeResults) {
-        if (r.status === 'fulfilled') {
-          rawViolations.push(...r.value.violations);
-          if (r.value.resolvedViolationIds) resolvedIds.push(...r.value.resolvedViolationIds);
-          if (r.value.unchangedViolationIds) unchangedIds.push(...r.value.unchangedViolationIds);
-        } else {
-          log.warn(`[LLM] ${domain}: batch failed — ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
-        }
+      const aggregate = aggregateCodeBatchOutcomes(batches, codeResults);
+      for (const failure of aggregate.failures) {
+        log.warn(`[LLM] ${domain}: batch failed; previous findings preserved — ${failure instanceof Error ? failure.message : String(failure)}`);
       }
 
       const dur = Date.now() - t0;
       const processed: CodeViolation[] = [];
-      processLlmCodeViolations({ violations: rawViolations }, validFilePaths, fileContents, processed, repoPath);
-      const total = detCount + processed.length;
+      processLlmCodeViolations({ violations: aggregate.violations }, validFilePaths, fileContents, processed, repoPath);
+      const total = codeDomainViolationTotal(detCount, processed.length, aggregate.unchangedIds);
       log.info(`[LLM] ${domain}: done in ${dur}ms — ${processed.length} LLM violations (${total} total)`);
-      tracker?.done(domain, total > 0 ? `${total} violations` : 'Clean');
+      if (aggregate.failures.length > 0) {
+        tracker?.error(domain, `${aggregate.failures.length} LLM check${aggregate.failures.length === 1 ? '' : 's'} failed; previous findings preserved`);
+      } else {
+        tracker?.done(domain, total > 0 ? `${total} violations` : 'Clean');
+      }
 
-      return { domain, violations: processed, resolvedIds, unchangedIds };
+      return {
+        domain,
+        violations: processed,
+        resolvedIds: aggregate.resolvedIds,
+        unchangedIds: aggregate.unchangedIds,
+      };
     })());
   }
 
@@ -1471,7 +1573,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  if (allLlmCodeViolations.length > 0 || allLlmResolvedIds.length > 0) {
+  const priorClassifications = reconcileCodePriorClassifications(
+    previousActiveCodeViolations
+      .filter((previous) => previous.ruleKey.includes('/llm/'))
+      .map((previous) => previous.id),
+    allLlmResolvedIds,
+    allLlmUnchangedIds,
+  );
+  allLlmResolvedIds.splice(0, allLlmResolvedIds.length, ...priorClassifications.resolvedIds);
+  allLlmUnchangedIds.splice(0, allLlmUnchangedIds.length, ...priorClassifications.unchangedIds);
+
+  if (hasCodeLifecycleResults(allLlmCodeViolations, allLlmResolvedIds, allLlmUnchangedIds)) {
     log.info(`[Pipeline] LLM code totals: ${allLlmCodeViolations.length} new, ${allLlmResolvedIds.length} resolved, ${allLlmUnchangedIds.length} unchanged`);
 
     for (const prevId of allLlmUnchangedIds) {
@@ -1583,42 +1695,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       );
     }
 
-    // Carry forward LLM violations for unchanged files
-    const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
-      (v) => v.ruleKey.includes('/llm/') && v.filePath && !scannedFilePaths.has(v.filePath),
-    );
-    for (const prev of llmPrevUnchangedFiles) {
-      unchanged.push({
-        id: randomUUID(),
-        type: 'code',
-        category: prev.category ?? 'rule',
-        subcategory: prev.subcategory ?? null,
-        title: prev.title,
-        content: prev.content,
-        severity: prev.severity,
-        status: 'unchanged',
-        targetServiceId: null,
-        targetDatabaseId: null,
-        targetModuleId: null,
-        targetMethodId: null,
-        targetTable: null,
-        relatedServiceId: null,
-        relatedModuleId: null,
-        fixPrompt: prev.fixPrompt,
-        ruleKey: prev.ruleKey,
-        firstSeenAnalysisId: prev.firstSeenAnalysisId,
-        firstSeenAt: prev.firstSeenAt,
-        previousViolationId: prev.id,
-        resolvedAt: null,
-        filePath: prev.filePath,
-        lineStart: prev.lineStart,
-        lineEnd: prev.lineEnd,
-        columnStart: prev.columnStart,
-        columnEnd: prev.columnEnd,
-        snippet: prev.snippet,
-        createdAt: now,
-      });
-    }
   }
 
   tracker?.done('persist', 'Done');
@@ -1637,7 +1713,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 // ---------------------------------------------------------------------------
 
 function processLlmCodeViolations(
-  codeResult: { violations: { ruleKey: string; filePath: string; lineStart: number; lineEnd: number; severity: string; title: string; content: string; fixPrompt: string | null }[] },
+  codeResult: { violations: { ruleKey: string; filePath: string; lineStart: number; lineEnd: number; severity: string; title: string; content: string; fixPrompt: string | null; sourceTier?: CodeViolationRaw['sourceTier'] }[] },
   validFilePaths: Set<string>,
   fileContents: Map<string, { content: string; lineCount: number }>,
   allCodeViolations: CodeViolation[],
@@ -1663,8 +1739,7 @@ function processLlmCodeViolations(
     const fileInfo = fileContents.get(filePath)!;
     const lineStart = Math.max(1, Math.min(v.lineStart, fileInfo.lineCount));
     const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
-    const lines = fileInfo.content.split('\n');
-    const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
+    const snippet = buildLlmCodeSnippet(v.sourceTier, fileInfo.content, lineStart, lineEnd);
     allCodeViolations.push({
       ruleKey: v.ruleKey,
       filePath,
