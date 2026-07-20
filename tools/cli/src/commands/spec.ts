@@ -88,7 +88,16 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   if (s.scopeGlobs.length > 0) {
     p.log.step(`scope       ${s.scopeGlobs.join(", ")} (config)`);
   }
-  p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped`);
+  // Third-party is broken out of the drop count: an undifferentiated "N dropped"
+  // is what hid a repo's entire API reference vanishing as "vendor" material.
+  // `restored` is the regression detector — it should read 0.
+  const thirdParty =
+    s.thirdPartyDropped > 0
+      ? ` (${s.thirdPartyDropped} third-party, ${s.thirdPartyRestored} restored)`
+      : "";
+  p.log.step(
+    `docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped${thirdParty}`,
+  );
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
   if (s.outOfScopeManualIncludes.length > 0) {

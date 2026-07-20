@@ -26,6 +26,9 @@ import {
   readCorpusDecisions,
   isAreaTagCached,
   RELEVANCE_SYSTEM_PROMPT,
+  relevanceUserPromptChars,
+  resolveRepoIdentity,
+  readRepoIdentityInput,
   AREA_TAGGER_SYSTEM_PROMPT,
   VOCAB_NORMALIZER_SYSTEM_PROMPT,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
@@ -58,6 +61,8 @@ import {
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
 } from '@truecourse/guard-generator';
+import { loadSpecScope } from '@truecourse/shared';
+import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';
@@ -96,11 +101,6 @@ const STAGE_LABELS: Record<string, string> = {
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
 
-function previewChars(): number {
-  // A discovery preview is ~60 lines; assume ~50 chars/line.
-  return 60 * 50;
-}
-
 /**
  * Pre-flight token estimate for `spec scan` (curate). Pass `prices` to add a
  * ceiling cost.
@@ -115,7 +115,7 @@ function previewChars(): number {
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { skipGit?: boolean } = {},
+  opts: { skipGit?: boolean; identity?: RepoIdentity | null } = {},
 ): Promise<LlmEstimate> {
   // Load the user's decisions so the estimate probes the SAME doc set the run
   // classifies. Without the manualIncludes the prefilter (dedup pool) and the
@@ -125,11 +125,25 @@ export async function estimateScanTokens(
   const manualIncludes = decisions.manualIncludes ?? [];
   const manualExcludes = new Set(decisions.manualExcludes ?? []);
 
-  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
+  // Scope-aware, exactly as `curate` discovers: `spec.include` narrows the
+  // universe before anything else runs, and the estimate must see the same doc
+  // set the run will. It also has to, now that identity is part of the relevance
+  // cache key — a different doc set can resolve a different identity, and then
+  // the estimate reads a cache the run never hits.
+  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope: loadSpecScope(repoRoot) });
+  // Resolved AFTER discovery (corpus name expansion reads the docs) and folded
+  // into the relevance cache key. The estimate and the run must resolve the same
+  // identity or they key differently and the estimate under-reports — the
+  // silent-re-spend class this module already documents. An explicit `null` from
+  // the caller (EE) is honored; only `undefined` falls back to resolving here.
+  const identity =
+    opts.identity !== undefined
+      ? opts.identity
+      : resolveRepoIdentity({ ...readRepoIdentityInput(repoRoot), docs });
   // Exact same planner `filterByRelevance` runs: one LLM call per doc whose
   // verdict isn't cached (manual-includes never call). Its `known` verdicts also
   // tell us which docs are kept (feed area-tagging).
-  const plan = await planRelevanceWork(repoRoot, docs, manualIncludes);
+  const plan = await planRelevanceWork(repoRoot, docs, { manualIncludes, identity });
   const nClassify = plan.toClassify.length;
   const relevanceMissDocs = plan.needsCall;
   // Kept without a call = cached-include ∪ manual-include, minus force-excludes
@@ -177,7 +191,7 @@ export async function estimateScanTokens(
       stage: 'relevance',
       model: resolveModel('spec.relevance', undefined, repoRoot),
       calls: nRelevanceCalls,
-      avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, previewChars()),
+      avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, relevanceUserPromptChars(identity)),
       avgOutputTokens: 40,
     },
     {

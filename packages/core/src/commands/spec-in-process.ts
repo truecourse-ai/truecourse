@@ -476,6 +476,13 @@ export interface CurateInProcessOptions {
    */
   docSource?: CurateOptions['docSource'];
   /**
+   * Who this repository is, for the relevance classifier's IDENTITY block.
+   * Omit and curate resolves it from the repo tree (OSS). EE passes it
+   * explicitly — including explicit `null` — because its scan runs on an
+   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`.
+   */
+  repoIdentity?: CurateOptions['repoIdentity'];
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Omit to
    * run without confirmation.
@@ -515,7 +522,10 @@ export async function curateInProcess(
   // there's no LLM work to do (nothing to spend). Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
-    const estimate = await estimateScanTokens(repoRoot, prices);
+    const estimate = await estimateScanTokens(repoRoot, prices, {
+      skipGit: options.skipGit,
+      identity: options.repoIdentity,
+    });
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
       if (!proceed) throw new EstimateDeclined('scan');
@@ -561,6 +571,7 @@ export async function curateInProcess(
         models: resolveCurateModels(repoRoot),
         transport: resolveTransport(options),
         docSource: options.docSource,
+        repoIdentity: options.repoIdentity,
         skipGit: options.skipGit,
         skipCorpusWrite: options.skipCorpusWrite,
         decisions: options.decisions,

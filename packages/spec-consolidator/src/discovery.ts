@@ -67,6 +67,28 @@ export interface DocCandidate {
   size: number;
 }
 
+/**
+ * A doc's full text, wherever it lives: the in-memory `content` an injected
+ * source supplies (EE holds fetched bodies in RAM), the file on disk, or — if
+ * neither is readable — the discovery preview.
+ *
+ * Lives beside `DocCandidate` rather than in any one consumer: the relevance
+ * filter's near-duplicate detector, the third-party backstop, and corpus name
+ * expansion all need it, and a shared home is what keeps `repo-identity` and
+ * `relevance-filter` from importing each other.
+ */
+export function docBody(doc: DocCandidate): string {
+  if (doc.content !== undefined) return doc.content;
+  if (doc.absPath) {
+    try {
+      return fs.readFileSync(doc.absPath, 'utf-8');
+    } catch {
+      /* fall through to preview */
+    }
+  }
+  return doc.preview;
+}
+
 // Synthetic markdown child used to ask `.truecourseignore` whether a
 // `SKIP_DIRS` directory has been explicitly re-included. An allow-list
 // ignore (`*.md` + `!path/build/**`) re-includes the markdown *under* a
