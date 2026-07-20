@@ -422,6 +422,8 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | analyze LLM violation rules | `TRUECOURSE_MODEL_RULES_VIOLATION_GEN` | sonnet |
 | analyze flow enrichment | `TRUECOURSE_MODEL_RULES_FLOW_ENRICH` | haiku |
 
+`CLAUDE_CODE_MODEL` is a deprecated alias for `TRUECOURSE_MODEL`. It is still honored as a global override (with a one-time warning on stderr), but `TRUECOURSE_MODEL` wins when both are set.
+
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
 ### Excluding files from analysis

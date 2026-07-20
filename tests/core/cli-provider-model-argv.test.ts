@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { modelConfigSandbox } from '../helpers/model-config.js';
 
 // OSS installs no default transport (`getDefaultTransport()` is undefined unless
 // EE called `setDefaultTransport`), so the spawn branch is what real users hit —
@@ -11,44 +11,12 @@ import path from 'node:path';
 // real executable that records its argv and emits the buffered
 // `--output-format json` envelope this provider parses.
 
-const ENV_KEYS = [
-  'CLAUDE_CODE_BINARY',
-  'CLAUDE_CODE_BIN',
-  'TRUECOURSE_MODEL',
-  'CLAUDE_CODE_MODEL',
-  'TRUECOURSE_FALLBACK_MODEL',
-  'TRUECOURSE_MODEL_RULES_VIOLATION_GEN',
-  'TRUECOURSE_MODEL_RULES_FLOW_ENRICH',
-  'TC_ARGV_OUT',
-] as const;
-
-const originals = new Map<string, string | undefined>();
-for (const k of ENV_KEYS) originals.set(k, process.env[k]);
-
-const tmpDirs: string[] = [];
-
-function tmp(prefix: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
-
-function makeRepo(config?: unknown): string {
-  const dir = tmp('tc-argv-repo-');
-  fs.mkdirSync(path.join(dir, '.truecourse'), { recursive: true });
-  if (config !== undefined) {
-    fs.writeFileSync(
-      path.join(dir, '.truecourse', 'config.json'),
-      JSON.stringify(config),
-      'utf-8',
-    );
-  }
-  return dir;
-}
+const sandbox = modelConfigSandbox(['CLAUDE_CODE_BINARY', 'CLAUDE_CODE_BIN', 'TC_ARGV_OUT']);
+const { makeRepo, makeTmpDir } = sandbox;
 
 /** Records argv to `$TC_ARGV_OUT`, then emits the buffered JSON envelope. */
 function fakeArgvBin(): string {
-  const dir = tmp('tc-argv-bin-');
+  const dir = makeTmpDir('tc-argv-bin-');
   const p = path.join(dir, 'claude-argv.js');
   fs.writeFileSync(
     p,
@@ -71,7 +39,7 @@ const SERVICE_CTX = { architecture: 'monolith', services: [], dependencies: [], 
 
 /** Spawn one violation call against the fake binary and return its argv. */
 async function argvFor(repoPath: string | null): Promise<string[]> {
-  const argvOut = path.join(tmp('tc-argv-out-'), 'argv.json');
+  const argvOut = path.join(makeTmpDir('tc-argv-out-'), 'argv.json');
   process.env.TC_ARGV_OUT = argvOut;
   process.env.CLAUDE_CODE_BINARY = fakeArgvBin();
 
@@ -86,18 +54,8 @@ async function argvFor(repoPath: string | null): Promise<string[]> {
   return JSON.parse(fs.readFileSync(argvOut, 'utf-8')) as string[];
 }
 
-beforeEach(() => {
-  for (const k of ENV_KEYS) delete process.env[k];
-});
-
-afterEach(() => {
-  for (const k of ENV_KEYS) {
-    const v = originals.get(k);
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
-});
+beforeEach(() => sandbox.reset());
+afterEach(() => sandbox.cleanup());
 
 describe('ClaudeCodeProvider — spawned argv carries the resolved model', () => {
   it('passes the stage default as --model (regression for #799)', async () => {

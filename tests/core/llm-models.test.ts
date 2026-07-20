@@ -1,7 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { modelConfigSandbox } from '../helpers/model-config.js';
 import {
   STAGE_DEFAULTS,
   resolveModel,
@@ -16,47 +14,11 @@ import {
 // itself a `.truecourse` project, so an accidental default-parameter call would
 // read the repo's own config.json and pass/fail by machine state.
 
-const ENV_KEYS = [
-  'TRUECOURSE_MODEL',
-  'CLAUDE_CODE_MODEL',
-  'TRUECOURSE_FALLBACK_MODEL',
-  'TRUECOURSE_MODEL_RULES_VIOLATION_GEN',
-  'TRUECOURSE_MODEL_RULES_FLOW_ENRICH',
-  'TRUECOURSE_MODEL_SPEC_AREA_TAG',
-] as const;
+const sandbox = modelConfigSandbox();
+const { makeRepo } = sandbox;
 
-const originals = new Map<string, string | undefined>();
-for (const k of ENV_KEYS) originals.set(k, process.env[k]);
-
-const tmpDirs: string[] = [];
-
-/** A repo root with a `.truecourse/` marker and optional config.json body. */
-function makeRepo(config?: unknown): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llm-models-'));
-  tmpDirs.push(dir);
-  fs.mkdirSync(path.join(dir, '.truecourse'), { recursive: true });
-  if (config !== undefined) {
-    fs.writeFileSync(
-      path.join(dir, '.truecourse', 'config.json'),
-      typeof config === 'string' ? config : JSON.stringify(config),
-      'utf-8',
-    );
-  }
-  return dir;
-}
-
-beforeEach(() => {
-  for (const k of ENV_KEYS) delete process.env[k];
-});
-
-afterEach(() => {
-  for (const k of ENV_KEYS) {
-    const v = originals.get(k);
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
-});
+beforeEach(() => sandbox.reset());
+afterEach(() => sandbox.cleanup());
 
 describe('STAGE_DEFAULTS — analyze rule stages', () => {
   it('declares both analyze stages with their re-tiered defaults', () => {

@@ -75,10 +75,12 @@ interface SpawnOptions {
   /** Fires once the concurrency limiter grants a slot, before spawnCLI runs. */
   onStart?: () => void;
   /**
-   * Which model-config stage this call bills to. Analyze has two: the
-   * violation rules and the far cheaper flow enrichment.
+   * Which model-config stage this call resolves its model from. Analyze has
+   * two: the violation rules and the far cheaper flow enrichment. Named
+   * `modelStage` to keep it distinct from the transport's own `stage` field
+   * (`analyze.<label>`), which is a finer-grained call-log taxonomy.
    */
-  stage?: StageId;
+  modelStage?: StageId;
 }
 
 interface CLIUsage {
@@ -226,7 +228,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
     const label = opts?.label ?? 'call';
-    const sel = this.resolvedModelSelection(opts?.stage ?? 'rules.violationGen');
+    const sel = this.resolvedModelSelection(opts?.modelStage ?? 'rules.violationGen');
 
     // Agent transport: hand the prompt + schema to the mailbox instead of
     // spawning the CLI. The answer is the raw JSON the model produced; wrap it
@@ -891,7 +893,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     log.info(`[CLI] Flow enrichment call starting for ${context.flowName}...`);
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, FlowEnrichmentOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'flow', stage: 'rules.flowEnrich',
+      extraArgs: ['--tools', ''], label: 'flow', modelStage: 'rules.flowEnrich',
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Flow enrichment done in ${dur}ms`);

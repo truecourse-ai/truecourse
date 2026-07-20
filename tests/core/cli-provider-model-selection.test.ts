@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs';
+import { modelConfigSandbox } from '../helpers/model-config.js';
 import { ClaudeCodeProvider } from '../../packages/core/src/services/llm/cli-provider.js';
 import type { LlmRequest, LlmTransport } from '../../packages/shared/src/llm/transport.js';
 
@@ -9,30 +9,8 @@ import type { LlmRequest, LlmTransport } from '../../packages/shared/src/llm/tra
 // to whatever each developer's ~/.claude/settings.json said. These tests pin the
 // resolved selection to the documented precedence chain instead.
 
-const ENV_KEYS = [
-  'TRUECOURSE_MODEL',
-  'CLAUDE_CODE_MODEL',
-  'TRUECOURSE_FALLBACK_MODEL',
-  'TRUECOURSE_MODEL_RULES_VIOLATION_GEN',
-  'TRUECOURSE_MODEL_RULES_FLOW_ENRICH',
-] as const;
-
-const originals = new Map<string, string | undefined>();
-for (const k of ENV_KEYS) originals.set(k, process.env[k]);
-
-const tmpDirs: string[] = [];
-
-function makeRepo(config?: unknown): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-provider-model-'));
-  tmpDirs.push(dir);
-  fs.mkdirSync(path.join(dir, '.truecourse'), { recursive: true });
-  if (config !== undefined) writeConfig(dir, config);
-  return dir;
-}
-
-function writeConfig(repoDir: string, config: unknown): void {
-  fs.writeFileSync(path.join(repoDir, '.truecourse', 'config.json'), JSON.stringify(config), 'utf-8');
-}
+const sandbox = modelConfigSandbox();
+const { makeRepo, writeConfig, makeTmpDir } = sandbox;
 
 /** Records every request and answers with a schema-valid payload for the call. */
 function captureTransport(seen: LlmRequest[]): LlmTransport {
@@ -60,18 +38,8 @@ const FLOW_CTX = {
   steps: [],
 };
 
-beforeEach(() => {
-  for (const k of ENV_KEYS) delete process.env[k];
-});
-
-afterEach(() => {
-  for (const k of ENV_KEYS) {
-    const v = originals.get(k);
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
-});
+beforeEach(() => sandbox.reset());
+afterEach(() => sandbox.cleanup());
 
 describe('ClaudeCodeProvider — per-stage model selection', () => {
   it('sends the stage default when nothing is configured (regression for #799)', async () => {
@@ -148,8 +116,7 @@ describe('ClaudeCodeProvider — per-stage model selection', () => {
   });
 
   it('degrades to env + defaults when the repo path has no .truecourse marker', async () => {
-    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-provider-bare-'));
-    tmpDirs.push(bare);
+    const bare = makeTmpDir('tc-provider-bare-');
     process.env.TRUECOURSE_MODEL_RULES_VIOLATION_GEN = 'opus';
 
     const seen: LlmRequest[] = [];
