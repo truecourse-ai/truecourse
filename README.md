@@ -391,7 +391,7 @@ For packaged installs (`npx truecourse` or `npm install -g truecourse`), the sim
 
 ```
 CLAUDE_CODE_BINARY=claude             # override the `claude` binary on PATH (CLAUDE_CODE_BIN also accepted)
-CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = default)
+TRUECOURSE_MODEL=                     # global model override (see "Per-stage model selection")
 CLAUDE_CODE_TIMEOUT_MS=120000         # per-call timeout (ms)
 CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failure
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
@@ -419,6 +419,8 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 | guard section classify/extract | `TRUECOURSE_MODEL_GUARD_EXTRACT` | sonnet |
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
+| analyze LLM violation rules | `TRUECOURSE_MODEL_RULES_VIOLATION_GEN` | sonnet |
+| analyze flow enrichment | `TRUECOURSE_MODEL_RULES_FLOW_ENRICH` | haiku |
 
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 

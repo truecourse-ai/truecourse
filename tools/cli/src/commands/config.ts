@@ -38,6 +38,7 @@ const STAGE_LABEL: Record<StageId, string> = {
   "guard.fidelity": "Guard  · fidelity review",
   "guard.recipe": "Guard  · recipe discover",
   "rules.violationGen": "Rules  · violation gen",
+  "rules.flowEnrich": "Rules  · flow enrich",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
