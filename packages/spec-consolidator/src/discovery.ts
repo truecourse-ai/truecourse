@@ -34,6 +34,8 @@ import {
   loadTcIgnore,
   loadSpecScope,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
+  hasMarkdownExtension,
+  stripMarkdownExtension,
   type SpecScope,
 } from '@truecourse/shared';
 import type { DocKind } from './types.js';
@@ -145,7 +147,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
         continue;
       }
       if (!entry.isFile()) continue;
-      if (path.extname(entry.name).toLowerCase() !== '.md') continue;
+      if (!hasMarkdownExtension(entry.name)) continue;
       // Include-scope: when configured, only markdown matching a scope glob
       // enters the universe. `.truecourseignore` already subtracted above, so a
       // scope glob can never resurrect an ignored path. Out-of-scope files are
@@ -231,9 +233,12 @@ function gitLastTouched(rootDir: string, relPath: string): string | null {
 export function classifyDoc(relPath: string, content: string): DocKind {
   const base = path.basename(relPath).toLowerCase();
   const dirParts = path.dirname(relPath).split('/').map((p) => p.toLowerCase());
+  // Match by stem so the markdown flavour (.md / .mdx / .markdown …) never
+  // decides the kind.
+  const stem = stripMarkdownExtension(base);
 
   // SPEC — explicit-name matches.
-  if (/^(specs?|specification|specs?-.*)\.md$/i.test(base)) return 'spec';
+  if (/^(specs?|specification|specs?-.*)$/i.test(stem)) return 'spec';
 
   // ADR — filename or directory name.
   if (/^adr[-_]?\d+/i.test(base) || dirParts.some((p) => p === 'adr' || p === 'adrs')) {
@@ -247,8 +252,9 @@ export function classifyDoc(relPath: string, content: string): DocKind {
 
   // PRD — filename, directory, or content-shape fallback.
   if (
+    // `feature.prd.md` is already caught by the delimiter-bounded match above —
+    // no extension-specific alternative is needed.
     /(^|[^a-z])prd($|[^a-z])/i.test(base) ||
-    /\.prd\.md$/i.test(base) ||
     dirParts.some((p) => p === 'prd' || p === 'prds' || p === 'product')
   ) {
     return 'prd';

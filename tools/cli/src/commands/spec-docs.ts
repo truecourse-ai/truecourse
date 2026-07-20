@@ -16,6 +16,7 @@
 
 import * as p from '@clack/prompts';
 import { readCorpusDecisions } from '@truecourse/spec-consolidator';
+import { hasMarkdownExtension, MARKDOWN_DOC_EXTENSIONS } from '@truecourse/shared';
 import {
   addManualInclude,
   removeManualInclude,
@@ -90,6 +91,19 @@ export async function runSpecDocsInclude(docPaths: string[], opts: RunSpecDocsOp
   const root = repoRoot(opts);
   const paths = docPaths.filter(Boolean);
   if (paths.length === 0) return fail('Missing doc path');
+  // A force-include bypasses the relevance filter, NOT discovery — and
+  // discovery only ever yields markdown. Persisting a non-markdown path would
+  // print "Force-included", re-scan, and change nothing, so the mistake is
+  // caught here where it can still be corrected. Validate the whole batch
+  // before persisting any of it, so one bad path leaves nothing half-recorded.
+  const unsupported = paths.filter((docPath) => !hasMarkdownExtension(docPath));
+  if (unsupported.length > 0) {
+    return fail(
+      `Not a markdown document: ${unsupported.join(', ')}\n` +
+        `Only ${MARKDOWN_DOC_EXTENSIONS.join(', ')} files are discovered, so a force-include ` +
+        `cannot bring these into the corpus.`,
+    );
+  }
   for (const docPath of paths) {
     await addManualInclude(root, docPath);
     p.log.step(`Force-included ${docPath}`);

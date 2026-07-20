@@ -446,6 +446,14 @@ Each LLM-powered pipeline stage resolves its model independently, so you can run
 
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded. `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`). `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`); a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 
+### Which documents are scanned
+
+`truecourse spec scan` discovers every markdown file in the repo — `.md`, `.mdx`, `.markdown`, `.mdown`, and `.mkd` — outside build and vendor directories. MDX is scanned like any other markdown: headings, prose, and fenced code are read normally, and JSX is passed through untouched, so docs sites built on Mintlify, Docusaurus, or Nextra are covered without extra configuration.
+
+Files with any other extension are never discovered, and a force-include (`truecourse spec docs include <path>`) cannot bring one into the corpus — it bypasses the relevance filter, not discovery.
+
+To scan only part of a repo, set `spec.include` globs in `.truecourse/config.json`. Note that scope narrows the set of markdown files considered; it cannot widen it to other file types.
+
 ### Excluding files from analysis
 
 TrueCourse honors `.gitignore` automatically (including nested `.gitignore` files, `.git/info/exclude`, and your configured global excludes file).
