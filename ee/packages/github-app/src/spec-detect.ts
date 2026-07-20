@@ -2,8 +2,10 @@
  * Deterministic detection of spec-document changes in a PR.
  *
  * TrueCourse treats every Markdown file (outside build/output dirs) as a
- * potential spec document — the same discovery rule the scanner uses. So a PR
- * "changes spec docs" when its changed-file list includes any such `.md` file.
+ * potential spec document — the same discovery rule the scanner uses, down to
+ * sharing its extension list, so a doc the scanner reads is never one this gate
+ * ignores. So a PR "changes spec docs" when its changed-file list includes any
+ * such markdown file.
  * This is the cheap, deterministic trigger that offers the (LLM-backed) scan.
  *
  * The repo's opt-in `spec.include` scope (from `.truecourse/config.json`) narrows
@@ -13,7 +15,12 @@
  * over the GitHub API and a fetch/parse failure degrades to "scan everything".
  */
 
-import { DOC_DISCOVERY_SKIP_DIRS, buildSpecScope, type SpecScope } from '@truecourse/shared';
+import {
+  DOC_DISCOVERY_SKIP_DIRS,
+  buildSpecScope,
+  hasMarkdownExtension,
+  type SpecScope,
+} from '@truecourse/shared';
 
 /**
  * Whether a repo-relative path is a discoverable spec document. When a `scope`
@@ -21,7 +28,7 @@ import { DOC_DISCOVERY_SKIP_DIRS, buildSpecScope, type SpecScope } from '@trueco
  * scope means everything (today's behavior).
  */
 export function isSpecDoc(filePath: string, scope?: SpecScope): boolean {
-  if (!/\.(md|markdown)$/i.test(filePath)) return false;
+  if (!hasMarkdownExtension(filePath)) return false;
   if (filePath.split('/').some((seg) => DOC_DISCOVERY_SKIP_DIRS.has(seg))) return false;
   return scope ? scope.includes(filePath) : true;
 }

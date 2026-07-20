@@ -61,6 +61,25 @@ describe('filterByRelevance — deterministic pre-filter', () => {
     expect(out.skipped.find((s) => s.doc.path === 'archive/docs/old-prd.md')!.reason).toMatch(/archive/i);
   });
 
+  // Agent-instruction files are meta, never product spec — which flavour of
+  // markdown they happen to use doesn't change that.
+  it('drops agent-instruction files whatever their markdown extension', async () => {
+    const out = await filterByRelevance(
+      repo,
+      [doc('CLAUDE.mdx'), doc('AGENTS.markdown'), doc('docs/real-spec.md')],
+      { runner: trackingRunner },
+    );
+    expect(out.included.map((d) => d.path)).toEqual(['docs/real-spec.md']);
+    expect(runnerCalls).toEqual(['docs/real-spec.md']);
+  });
+
+  // The stem match must not widen the rule to arbitrary extensions: only
+  // markdown is stripped, so a same-stem non-markdown file is untouched.
+  it('does NOT treat a same-stem non-markdown file as agent-instruction meta', async () => {
+    const out = await filterByRelevance(repo, [doc('prompt.txt')], { runner: trackingRunner });
+    expect(out.included.map((d) => d.path)).toEqual(['prompt.txt']);
+  });
+
   it('does NOT drop a file merely named like an archive segment', async () => {
     // "old-pricing.md" is a filename, not a directory segment → keep.
     const out = await filterByRelevance(repo, [doc('docs/old-pricing.md')], { runner: trackingRunner });

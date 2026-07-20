@@ -41,6 +41,10 @@ describe('classifyDoc — filename + path signals', () => {
     ['SPECS.md', 'spec'],
     ['SPECIFICATION.md', 'spec'],
     ['specs-orders.md', 'spec'],
+    // Kind is a merge-weight signal, not a filter — but it should not depend
+    // on which markdown flavour the spec happens to be written in.
+    ['SPEC.mdx', 'spec'],
+    ['specs-orders.markdown', 'spec'],
   ])('%s → %s', (file, kind) => {
     expect(classifyDoc(file, '')).toBe(kind);
   });
@@ -167,6 +171,30 @@ describe('discoverDocs — walker', () => {
     expect(map.get('docs/PRDs/feature.md')).toBe('prd');
     expect(map.get('docs/adr/0001.md')).toBe('adr');
     expect(map.get('README.md')).toBe('readme');
+  });
+
+  // Docs sites built on Mintlify/Docusaurus/Nextra author in .mdx, and repos
+  // that use .markdown/.mdown/.mkd are common enough that the chunker has
+  // always accepted them. Discovery used to be .md-only, so those docs never
+  // entered the corpus at all — the scan reported success having read a
+  // fraction of the documentation.
+  it('discovers every markdown extension, not just .md', () => {
+    place('docs/mdx.mdx', '# From mdx');
+    place('docs/long.markdown', '# From markdown');
+    place('docs/mdown.mdown', '# From mdown');
+    place('docs/mkd.mkd', '# From mkd');
+    place('docs/plain.md', '# From md');
+    place('docs/notes.txt', 'not a doc');
+    place('docs/script.js', '// not a doc');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path).sort();
+    expect(paths).toEqual([
+      'docs/long.markdown',
+      'docs/mdown.mdown',
+      'docs/mdx.mdx',
+      'docs/mkd.mkd',
+      'docs/plain.md',
+    ]);
   });
 
   it('skips node_modules, .git, dist, build, .next, .turbo, .truecourse, .cache', () => {

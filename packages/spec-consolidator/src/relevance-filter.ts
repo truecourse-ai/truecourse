@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
+import { stripMarkdownExtension } from '@truecourse/shared';
 import type { DocCandidate } from './discovery.js';
 import { defaultConcurrency } from './runner.js';
 
@@ -233,13 +234,18 @@ export async function filterByRelevance(
 
 /** Directory names that mark archived/superseded content. */
 const ARCHIVE_SEGMENTS = new Set(['archive', 'archived', 'deprecated', 'old', 'legacy']);
-/** Filenames that are agent-instruction / prompt meta, never product spec. */
+/**
+ * Filenames that are agent-instruction / prompt meta, never product spec.
+ * Matched by stem so the markdown flavour doesn't matter (`CLAUDE.mdx` is as
+ * much agent meta as `CLAUDE.md`). `.cursorrules` is a dotfile with no
+ * extension and is matched whole.
+ */
 const SKIP_BASENAMES = new Set([
-  'claude.md',
-  'agents.md',
+  'claude',
+  'agents',
   '.cursorrules',
-  'copilot-instructions.md',
-  'prompt.md',
+  'copilot-instructions',
+  'prompt',
 ]);
 
 /** Path/name-based skip reason, or null to defer the call to the LLM. */
@@ -251,7 +257,9 @@ function deterministicSkip(doc: DocCandidate): string | null {
   for (const seg of segs.slice(0, -1)) {
     if (ARCHIVE_SEGMENTS.has(seg)) return `archived/superseded location (under ${seg}/)`;
   }
-  if (SKIP_BASENAMES.has(base)) return `agent-instruction/meta file (${base})`;
+  if (SKIP_BASENAMES.has(stripMarkdownExtension(base))) {
+    return `agent-instruction/meta file (${base})`;
+  }
   return null;
 }
 

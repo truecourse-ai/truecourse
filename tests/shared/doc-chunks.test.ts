@@ -56,6 +56,74 @@ describe('splitTopLevelSections', () => {
     expect(slices).toHaveLength(2)
     expect(slices[0]).toContain('# not a heading')
   })
+
+  // A docs-site .mdx as Mintlify/Docusaurus actually author it: the title lives
+  // in front-matter rather than an H1, prose is wrapped in block-level JSX, and
+  // fenced snippets contain shell comments. None of that is heading structure,
+  // so the file must split exactly like the .md it would otherwise be — the
+  // extension is the only difference between these two inputs.
+  it('splits a JSX-and-front-matter .mdx exactly like its .md equivalent', () => {
+    const content = [
+      '---',
+      'title: "Guide"',
+      '---',
+      '',
+      "import Snippet from '/snippets/objects/order.mdx';",
+      '',
+      'Lead prose.',
+      '',
+      '<CardGroup cols={2}>',
+      '  <Card title="Community" href="https://example.com">',
+      '    Card body prose.',
+      '  </Card>',
+      '</CardGroup>',
+      '',
+      '## Section One',
+      '',
+      'Body one.',
+      '',
+      '```bash',
+      '# a shell comment, not a heading',
+      'echo hi',
+      '```',
+      '',
+      '## Section Two',
+      '',
+      'Body two.',
+      '',
+    ].join('\n')
+
+    expect(parseHeadings(content.split('\n')).map((h) => h.text)).toEqual([
+      'Section One',
+      'Section Two',
+    ])
+
+    const asMdx = splitTopLevelSections('docs/guide.mdx', content)
+    expect(asMdx).toEqual(splitTopLevelSections('docs/guide.md', content))
+    // preamble (front-matter + import + JSX card) + the two H2 sections
+    expect(asMdx).toHaveLength(3)
+    expect(asMdx[0]).toContain('<CardGroup cols={2}>')
+    expect(asMdx[1].startsWith('## Section One')).toBe(true)
+  })
+
+  // Mintlify snippets are transclusion fragments — pure JSX field definitions
+  // with no headings. They are real corpus docs (the component attributes carry
+  // API field names and types), and having no heading structure they are one
+  // whole-doc chunk. Pinned because a filename-derived anchor looks like a bug
+  // to anyone who has not read this test.
+  it('treats a heading-less .mdx fragment as a single chunk', () => {
+    const content = [
+      '<Expandable title="properties">',
+      '  <ResponseField name="total" type="decimal">',
+      '    The total amount of the order',
+      '  </ResponseField>',
+      '</Expandable>',
+      '',
+    ].join('\n')
+
+    expect(parseHeadings(content.split('\n'))).toEqual([])
+    expect(splitTopLevelSections('docs/snippets/order.mdx', content)).toEqual([content])
+  })
 })
 
 describe('isMarkdownDoc / parseHeadings', () => {
@@ -64,6 +132,15 @@ describe('isMarkdownDoc / parseHeadings', () => {
     expect(isMarkdownDoc('docs/guide.MARKDOWN')).toBe(true)
     expect(isMarkdownDoc('notes.txt')).toBe(false)
     expect(isMarkdownDoc('Makefile')).toBe(false)
+  })
+
+  // MDX is markdown-with-JSX: its prose, headings and fences are byte-identical
+  // to markdown, so it gets the same heading-aware treatment. Failing this
+  // predicate is silent — the doc degrades to a single filename-anchored
+  // section rather than being skipped — so it's asserted explicitly.
+  it('recognizes .mdx as markdown', () => {
+    expect(isMarkdownDoc('docs/guide.mdx')).toBe(true)
+    expect(isMarkdownDoc('docs/guide.MDX')).toBe(true)
   })
 
   it('parses ATX headings with levels and lines, skipping fences and bare hashes', () => {
