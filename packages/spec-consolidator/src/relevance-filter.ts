@@ -20,13 +20,38 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
 import { z } from 'zod';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { stripMarkdownExtension } from '@truecourse/shared';
-import type { DocCandidate } from './discovery.js';
+import { docBody, type DocCandidate } from './discovery.js';
+import {
+  aliasMatcher,
+  identityBlock,
+  identityFingerprint,
+  stripForNames,
+  type RepoIdentity,
+} from './repo-identity.js';
 import { defaultConcurrency } from './runner.js';
+
+/**
+ * The closed set of reasons a doc is not spec-source material — one per SKIP
+ * bullet in the system prompt.
+ *
+ * Structured rather than parsed back out of `reason`: the prompt explicitly
+ * asks the model to VARY the reason wording (it is a display string shown in
+ * the dashboard), so branching on its prose would be a workaround, not a fix.
+ */
+export const SkipCategorySchema = z.enum([
+  'third-party',
+  'status-tracking',
+  'superseded',
+  'process',
+  'test-data',
+  'scratch',
+  'agent-meta',
+]);
+export type SkipCategory = z.infer<typeof SkipCategorySchema>;
 
 export interface RelevanceVerdict {
   /** Doc's repo-relative path. */
@@ -35,10 +60,22 @@ export interface RelevanceVerdict {
   include: boolean;
   /** Short human-readable rationale, shown in the dashboard. */
   reason: string;
+  /**
+   * Which SKIP bullet applied, when `include` is false. Advisory — it feeds the
+   * scan counters and the third-party backstop; `include` remains the decision.
+   */
+  category?: SkipCategory;
 }
 
 export interface RelevanceRunnerInput {
   doc: DocCandidate;
+  /**
+   * Who this repository is, or null when nothing identified it. Required (not
+   * optional) at every cache-key-adjacent signature: an optional parameter is
+   * exactly how the estimator and the runtime end up keying differently, which
+   * is the silent-re-spend class already documented in `spec-estimate.ts`.
+   */
+  identity: RepoIdentity | null;
 }
 
 export type RelevanceRunner = (input: RelevanceRunnerInput) => Promise<RelevanceVerdict>;
@@ -68,13 +105,26 @@ export interface RelevanceFilterOptions {
    * `done` increments in completion order, not doc order.
    */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * Who this repository is — stated to the classifier and used by the
+   * third-party backstop. `null` means "nothing identified this repo"; EE
+   * passes it explicitly and the public boundary honors it.
+   */
+  identity?: RepoIdentity | null;
 }
 
 export interface RelevanceFilterOutcome {
   /** Docs to feed downstream claim extraction. */
   included: DocCandidate[];
-  /** Docs the filter dropped. Surfaced in the dashboard for review. */
-  skipped: Array<{ doc: DocCandidate; reason: string }>;
+  /** Docs the filter dropped, with the structured SKIP category where known. */
+  skipped: Array<{ doc: DocCandidate; reason: string; category?: SkipCategory }>;
+  /**
+   * Docs the model dropped as third-party that the deterministic backstop put
+   * back because they name our own product. Reported so the fix is measurable:
+   * if the identity block is working this should be ~0, and a nonzero value
+   * means the prompt half is incomplete and the net is carrying it.
+   */
+  reinstated: Array<{ doc: DocCandidate; originalReason: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,11 +179,18 @@ export interface RelevancePlan {
   known: Map<string, RelevanceVerdict>;
 }
 
+export interface PlanRelevanceOptions {
+  manualIncludes?: string[];
+  /** Required-and-nullable: it is part of the cache key, so it can never default. */
+  identity: RepoIdentity | null;
+}
+
 export async function planRelevanceWork(
   repoRoot: string,
   docs: DocCandidate[],
-  manualIncludes: string[] = [],
+  opts: PlanRelevanceOptions,
 ): Promise<RelevancePlan> {
+  const manualIncludes = opts.manualIncludes ?? [];
   const manualSet = new Set(manualIncludes);
   const { toClassify, skipped } = prefilterDocs(docs, manualIncludes);
   const needsCall: DocCandidate[] = [];
@@ -144,7 +201,7 @@ export async function planRelevanceWork(
         known.set(doc.path, { path: doc.path, include: true, reason: 'manual include' });
         return;
       }
-      const cached = await readCache(repoRoot, computeCacheKey(doc));
+      const cached = await readCache(repoRoot, computeCacheKey(doc, opts.identity));
       if (cached) known.set(doc.path, cached);
       else needsCall.push(doc);
     }),
@@ -158,17 +215,21 @@ export async function filterByRelevance(
   opts: RelevanceFilterOptions = {},
 ): Promise<RelevanceFilterOutcome> {
   if (opts.enabled === false || docs.length === 0) {
-    return { included: docs, skipped: [] };
+    return { included: docs, skipped: [], reinstated: [] };
   }
   const runner =
     opts.runner ??
     spawnRelevanceRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? defaultConcurrency();
+  const identity = opts.identity ?? null;
 
   // Single source of truth for the doc set: the same plan the estimate reads.
   // Prefilter-skipped + cached/manual docs resolve with no LLM call; only
   // `needsCall` reaches the runner.
-  const plan = await planRelevanceWork(repoRoot, docs, opts.manualIncludes ?? []);
+  const plan = await planRelevanceWork(repoRoot, docs, {
+    manualIncludes: opts.manualIncludes ?? [],
+    identity,
+  });
   const prefilterReason = new Map(plan.prefilterSkipped.map((s) => [s.path, s.reason]));
 
   const total = docs.length;
@@ -190,7 +251,7 @@ export async function filterByRelevance(
       while (active < concurrency && cursor < pending.length) {
         const doc = pending[cursor++];
         active++;
-        classifyOne(repoRoot, doc, runner)
+        classifyOne(repoRoot, doc, runner, identity)
           .then((verdict) => {
             verdicts.set(doc.path, verdict);
           })
@@ -214,18 +275,48 @@ export async function filterByRelevance(
   });
 
   const included: DocCandidate[] = [];
-  const skipped: Array<{ doc: DocCandidate; reason: string }> = [];
+  const skipped: Array<{ doc: DocCandidate; reason: string; category?: SkipCategory }> = [];
+  const reinstated: Array<{ doc: DocCandidate; originalReason: string }> = [];
+  // The deterministic net, built once. It runs HERE — in the final assembly loop,
+  // post-cache — deliberately: inside `classifyOne` it would fire only on fresh
+  // classifications, and a doc it rescued would vanish again on the next run when
+  // the (unchanged, still-wrong) verdict came back from cache.
+  const ours = aliasMatcher(identity?.aliases ?? []);
   for (const doc of docs) {
     const pf = prefilterReason.get(doc.path);
     if (pf) {
-      skipped.push({ doc, reason: pf });
+      skipped.push({ doc, reason: pf, category: prefilterCategory(doc) });
       continue;
     }
     const verdict = verdicts.get(doc.path);
-    if (!verdict || verdict.include) included.push(doc);
-    else skipped.push({ doc, reason: verdict.reason });
+    if (!verdict || verdict.include) {
+      included.push(doc);
+      continue;
+    }
+    if (verdict.category === 'third-party' && namesOurProduct(doc, ours)) {
+      included.push(doc);
+      reinstated.push({ doc, originalReason: verdict.reason });
+      continue;
+    }
+    skipped.push({ doc, reason: verdict.reason, category: verdict.category });
   }
-  return { included, skipped };
+  return { included, skipped, reinstated };
+}
+
+/**
+ * Does this doc's PROSE name our own product? Read from the stripped body, never
+ * the raw one — an `import { x } from '@calcom/lib'` inside a fenced block, or
+ * an MDX `<CalcomProvider>` wrapper, appears in plenty of genuine vendor docs
+ * and would turn the backstop into a re-include-everything switch.
+ *
+ * One mention is enough, on purpose. The error is asymmetric in the direction
+ * the system prompt already declares ("dropping a real spec doc costs more than
+ * keeping noise"), so an "unlike Wekan, Trello does X" false re-inclusion is the
+ * cheap side of the trade. Do NOT "fix" this into a 2-mention rule — that loses
+ * exactly the docs this exists to save.
+ */
+function namesOurProduct(doc: DocCandidate, ours: RegExp): boolean {
+  return ours.test(stripForNames(docBody(doc)));
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +339,21 @@ const SKIP_BASENAMES = new Set([
   'prompt',
 ]);
 
+/**
+ * The SKIP category behind a deterministic prefilter drop. The prefilter's two
+ * rules map exactly onto two of the closed categories, so a prefiltered doc is
+ * categorized like an LLM-classified one and the scan counters stay honest.
+ * `undefined` for near-duplicate drops — "superseded" would over-claim, since a
+ * near-dup is a redundant copy, not an older version.
+ */
+function prefilterCategory(doc: DocCandidate): SkipCategory | undefined {
+  const base = doc.path.toLowerCase().split('/').pop() ?? '';
+  if (SKIP_BASENAMES.has(stripMarkdownExtension(base))) return 'agent-meta';
+  const dirs = doc.path.toLowerCase().split('/').slice(0, -1);
+  if (dirs.some((d) => ARCHIVE_SEGMENTS.has(d))) return 'superseded';
+  return undefined;
+}
+
 /** Path/name-based skip reason, or null to defer the call to the LLM. */
 function deterministicSkip(doc: DocCandidate): string | null {
   const segs = doc.path.toLowerCase().split('/');
@@ -261,18 +367,6 @@ function deterministicSkip(doc: DocCandidate): string | null {
     return `agent-instruction/meta file (${base})`;
   }
   return null;
-}
-
-function docBody(doc: DocCandidate): string {
-  if (doc.content !== undefined) return doc.content;
-  if (doc.absPath) {
-    try {
-      return fs.readFileSync(doc.absPath, 'utf-8');
-    } catch {
-      /* fall through to preview */
-    }
-  }
-  return doc.preview;
 }
 
 /** Content lines normalized for similarity (drop blanks + pure-markup lines). */
@@ -335,11 +429,12 @@ async function classifyOne(
   repoRoot: string,
   doc: DocCandidate,
   runner: RelevanceRunner,
+  identity: RepoIdentity | null,
 ): Promise<RelevanceVerdict> {
-  const cacheKey = computeCacheKey(doc);
+  const cacheKey = computeCacheKey(doc, identity);
   const cached = await readCache(repoRoot, cacheKey);
   if (cached) return cached;
-  const verdict = await runner({ doc });
+  const verdict = await runner({ doc, identity });
   await writeCache(repoRoot, cacheKey, verdict);
   return verdict;
 }
@@ -360,7 +455,7 @@ INCLUDE (spec-source material):
 
 SKIP (not spec-source material):
   - Pure status / TODO checklists, kanban boards, release notes / changelog drafts
-  - Docs about a THIRD-PARTY / external system (vendor API research, integration notes) — that is someone else's contract, not ours, and cannot be verified against this codebase
+  - Docs about a THIRD-PARTY / external system (vendor API research, integration notes) — that is someone else's contract, not ours, and cannot be verified against this codebase. "Third-party" means NOT the product named in the IDENTITY block of the user message. A doc about THIS repository's own product, API, or UI is NEVER third-party, however much it reads like public vendor documentation — our own API reference names our own product, and that is not evidence it belongs to someone else.
   - TEST-DATA specs: a doc under a test / fixture / sample / example tree (PATH segments like tests/, fixtures/, __fixtures__/, examples/, sample-*) that describes a FICTIONAL or sample product used as test data for THIS repo's own tooling — that product is not this repository's system, so its "spec" is not ours. (The path is evidence, not proof: if the doc plainly describes THIS repository's real product or engineering, keep it.)
   - SUPERSEDED docs — an older version of a newer doc covering the same subject
   - Process / meta docs not about product behavior: contribution / onboarding guides, code-style guides, deployment runbooks (keep a deployment doc ONLY if it states our runtime contracts)
@@ -371,14 +466,30 @@ Distinguish "states a decision about our system" (INCLUDE) from "tracks status /
 
 Output ONLY a JSON object:
 
-  { "include": true|false, "reason": "short explanation" }
+  { "include": true|false, "category": "<one of the categories below>", "reason": "short explanation" }
+
+"category" is REQUIRED when include is false and OMITTED when include is true. Choose exactly one from this closed list, matching the SKIP bullets above:
+
+  third-party      — describes a DIFFERENT product than the one in the IDENTITY block
+  status-tracking  — status / TODO checklist, kanban board, release notes
+  superseded       — an older version of a newer doc on the same subject
+  process          — contribution / onboarding / style guide, deployment runbook
+  test-data        — spec for a fictional or sample product used as test data
+  scratch          — exploratory notes with no committed decisions
+  agent-meta       — AI-agent instructions, prompt templates, engineering journals
 
 The reason is shown to the user in the dashboard — be specific ("vendor API research (ServiceTitan)", "superseded by capacity-ml-plan-v3", "deployment runbook, no product contracts", "test-data spec for a sample product (tests/fixtures/…)") so they can verify the call.`;
 
-export function buildRelevanceUserPrompt(doc: DocCandidate): string {
+const PREVIEW_LINES = 60;
+
+export function buildRelevanceUserPrompt(doc: DocCandidate, identity: RepoIdentity | null): string {
   // Cap the preview hard — classification doesn't need the full doc.
-  const preview = doc.preview.split('\n').slice(0, 60).join('\n');
+  const preview = doc.preview.split('\n').slice(0, PREVIEW_LINES).join('\n');
   return [
+    // Per-run DATA, so it rides the USER prompt: the system prompt stays the rule
+    // set (a `const`, one fingerprint change ever) and the guardrail table over
+    // the four prompt consts needs no contortion.
+    identityBlock(identity),
     `PATH (repo-relative): ${doc.path}`,
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
@@ -391,9 +502,17 @@ export function buildRelevanceUserPrompt(doc: DocCandidate): string {
   ].join('\n');
 }
 
+/**
+ * `.catch(undefined)` is load-bearing, not defensive clutter. Without it a model
+ * emitting `"category":"vendor"` THROWS in the runner, so the doc falls into the
+ * fail-open catch in `filterByRelevance` — and worse, a bad cached category
+ * fails `safeParse` in `readCache`, is treated as a miss, gets rewritten, and
+ * re-spends forever. The field is advisory; `include` is the decision.
+ */
 const RelevanceVerdictSchema = z.object({
   include: z.boolean(),
   reason: z.string().default(''),
+  category: SkipCategorySchema.optional().catch(undefined),
 });
 
 /** The response schema sent on the request — the API transport enforces it via
@@ -419,14 +538,19 @@ function spawnRelevanceRunner(
       model: opts.model,
       fallbackModel: opts.fallbackModel,
       system: RELEVANCE_SYSTEM_PROMPT,
-      user: buildRelevanceUserPrompt(input.doc),
+      user: buildRelevanceUserPrompt(input.doc, input.identity),
       responseFormat: 'json',
       schema: RELEVANCE_RESPONSE_SCHEMA,
       timeoutMs,
     });
     const inner = JSON.parse(stripCodeFences(raw));
     const parsed = RelevanceVerdictSchema.parse(inner);
-    return { path: input.doc.path, include: parsed.include, reason: parsed.reason };
+    return {
+      path: input.doc.path,
+      include: parsed.include,
+      reason: parsed.reason,
+      category: parsed.category,
+    };
   };
 }
 
@@ -445,9 +569,14 @@ const PROMPT_FINGERPRINT = createHash('sha256')
   .digest('hex')
   .slice(0, 16);
 
-function computeCacheKey(doc: DocCandidate): string {
+/**
+ * Two ORTHOGONAL fingerprints rather than one hash of the effective prompt:
+ * `PROMPT_FINGERPRINT` says the instructions changed, `identityFingerprint` says
+ * the subject did. A miss then tells you which.
+ */
+function computeCacheKey(doc: DocCandidate, identity: RepoIdentity | null): string {
   return createHash('sha256')
-    .update(`${PROMPT_FINGERPRINT}::${doc.path}::${doc.contentHash}`)
+    .update(`${PROMPT_FINGERPRINT}::${identityFingerprint(identity)}::${doc.path}::${doc.contentHash}`)
     .digest('hex');
 }
 
@@ -455,6 +584,7 @@ const CachedVerdictSchema = z.object({
   path: z.string(),
   include: z.boolean(),
   reason: z.string(),
+  category: SkipCategorySchema.optional().catch(undefined),
 });
 
 async function readCache(scope: string, cacheKey: string): Promise<RelevanceVerdict | null> {
@@ -473,6 +603,22 @@ async function writeCache(scope: string, cacheKey: string, verdict: RelevanceVer
  * need an LLM classify on the next run). Reuses the runtime cache key, so the
  * pre-flight estimate sees exactly what the next scan will hit.
  */
-export async function readRelevanceCache(repoRoot: string, doc: DocCandidate): Promise<RelevanceVerdict | null> {
-  return readCache(repoRoot, computeCacheKey(doc));
+export async function readRelevanceCache(
+  repoRoot: string,
+  doc: DocCandidate,
+  identity: RepoIdentity | null,
+): Promise<RelevanceVerdict | null> {
+  return readCache(repoRoot, computeCacheKey(doc, identity));
+}
+
+/**
+ * Characters a relevance USER prompt costs for this identity — the identity
+ * block plus the capped preview plus the fixed field labels. Exported so the
+ * pre-flight estimate reads it from the module that BUILDS the prompt instead of
+ * maintaining its own copy of the preview arithmetic.
+ */
+export function relevanceUserPromptChars(identity: RepoIdentity | null): number {
+  const PREVIEW_CHARS_PER_LINE = 50; // a discovery preview line, roughly
+  const FIELD_LABEL_CHARS = 200; // PATH/kind/size labels + the preview fences
+  return identityBlock(identity).length + PREVIEW_LINES * PREVIEW_CHARS_PER_LINE + FIELD_LABEL_CHARS;
 }

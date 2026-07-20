@@ -16,6 +16,11 @@ import { auditTransport, cliTransport, type LlmTransport, type StageTransportTal
 import { loadSpecScope } from '@truecourse/shared';
 import { discoverDocs, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
+import {
+  resolveRepoIdentity,
+  readRepoIdentityInput,
+  type RepoIdentity,
+} from './repo-identity.js';
 import { tagDocs, type AreaTagRunner } from './area-tagger.js';
 import { normalizeVocabulary, type VocabRunner } from './vocab-normalizer.js';
 import { groupByArea } from './area-grouper.js';
@@ -47,6 +52,14 @@ export interface CurateOptions {
   decisions?: DecisionsFile;
   /** Skip git-log mtime resolution (tests / non-git dirs). */
   skipGit?: boolean;
+  /**
+   * Who this repository is, for the relevance classifier's IDENTITY block.
+   * Omit and curate resolves it from the repo tree. Pass explicit `null` to
+   * state that nothing identifies it — EE does, because its scan runs on an
+   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`, and
+   * resolving there would make that temp name the product's identity.
+   */
+  repoIdentity?: RepoIdentity | null;
   /** Skip writing `corpus.json`. The corpus is still assembled + returned. */
   skipCorpusWrite?: boolean;
 
@@ -77,7 +90,19 @@ export interface CurateStats {
   overlapRefuted: number;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
-  skippedDocs: Array<{ path: string; reason: string }>;
+  skippedDocs: Array<{ path: string; reason: string; category?: string }>;
+  /**
+   * Docs the classifier dropped as belonging to a THIRD-PARTY product. Broken
+   * out because an undifferentiated "7 dropped" is what hid F12: on cal.com that
+   * number silently contained the repo's entire v2 API reference.
+   */
+  thirdPartyDropped: number;
+  /**
+   * Third-party drops the deterministic backstop put back because the doc's
+   * prose names our own product. The regression detector for the prompt half of
+   * the fix — expected ~0 once the IDENTITY block is doing its job.
+   */
+  thirdPartyRestored: number;
   /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
   scopeGlobs: string[];
   /**
@@ -101,7 +126,7 @@ export interface CurateResult {
   /** The assembled corpus (whether or not it was written to disk). */
   corpus: CuratedCorpus;
   /** Docs the relevance filter dropped, with reasons. */
-  skippedDocs: Array<{ path: string; reason: string }>;
+  skippedDocs: Array<{ path: string; reason: string; category?: string }>;
   /** The decisions file that informed the run. */
   decisions: DecisionsFile;
   /** Summary counts for CLI output / dashboard status. */
@@ -151,8 +176,17 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     }
   }
 
+  // Resolve identity AFTER discovery: corpus name-frequency expansion reads the
+  // discovered docs. `!== undefined` rather than `??` so an explicit null is
+  // honored (see `repoIdentity`).
+  const repoIdentity =
+    opts.repoIdentity !== undefined
+      ? opts.repoIdentity
+      : resolveRepoIdentity({ ...readRepoIdentityInput(repoRoot), docs: allDocs });
+
   // ---- Relevance keep/drop --------------------------------------------
   const relevance = await filterByRelevance(repoRoot, allDocs, {
+    identity: repoIdentity,
     runner: opts.relevanceRunner,
     enabled: opts.disableRelevanceFilter !== true,
     manualIncludes: decisions.manualIncludes ?? [],
@@ -170,7 +204,11 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
   const docs = manualExcludes.size
     ? relevance.included.filter((d) => !manualExcludes.has(d.path))
     : relevance.included;
-  const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
+  const skippedDocs = relevance.skipped.map(({ doc, reason, category }) => ({
+    path: doc.path,
+    reason,
+    category,
+  }));
 
   // ---- Tag each doc with its areas ------------------------------------
   const tagsByPath = await tagDocs(repoRoot, docs, {
@@ -232,7 +270,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     areas,
     // Persist the dropped docs so the dashboard can surface them (force-include)
     // without re-running the scan. Map the candidate path to a DocRef.
-    skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason })),
+    skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason, category: s.category })),
   };
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
@@ -253,6 +291,9 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     areaCount: areas.length,
     overlapFlags: openOverlaps.length,
     overlapRefuted: verified.refuted,
+    thirdPartyDropped: relevance.skipped.filter((s) => s.category === 'third-party').length +
+      relevance.reinstated.length,
+    thirdPartyRestored: relevance.reinstated.length,
     openOverlaps,
     skippedDocs,
     scopeGlobs,

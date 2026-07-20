@@ -255,7 +255,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
       runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }),
     });
 
-    const est = await estimateScanTokens(repo);
+    const est = await estimateScanTokens(repo, undefined, { identity: null });
     expect(est.subjectLabel).toBe('all 2 docs cached');
     expect(est.stages).toEqual([]); // every doc cached → no LLM work
     expect(est.totalEstimatedTokens).toBe(0);
@@ -308,6 +308,7 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     // Warm caches as a prior scan would: keep -> included+tagged, vendor -> DROPPED.
     const discovered = discoverDocs(repo, { skipGit: true });
     await filterByRelevance(repo, discovered, {
+      identity: null,
       runner: async ({ doc }) => ({ path: doc.path, include: doc.path === 'docs/keep.md', reason: 's' }),
     });
     await tagDocs(repo, discovered.filter((d) => d.path === 'docs/keep.md'), {
@@ -423,5 +424,57 @@ describe('estimateScanTokens / estimateGenerateTokens (fixture)', () => {
     expect(est.subjectLabel).toBe('all 1 area cached');
     expect(est.stages).toEqual([]); // nothing to do — every area is cached
     expect(est.totalEstimatedTokens).toBe(0);
+  });
+});
+
+/**
+ * The estimate and the run must resolve the SAME repo identity. Identity is part
+ * of the relevance cache key, so if the two disagree the estimate reads a cache
+ * the run will never hit: it reports "all cached", the confirm prompt is skipped,
+ * and the run silently spends the whole corpus. This is the exact failure class
+ * `spec-estimate.ts` already documents, which is why `identity` is
+ * required-and-nullable rather than an optional parameter everywhere it touches
+ * the key. These two tests are what stop someone re-adding a defaulted param.
+ */
+describe('scan estimate — identity is part of the cache key', () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-est-identity-'));
+  });
+  afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
+
+  const IDENTITY_A = { name: 'alpha', aliases: ['Alpha'], sources: ['git-remote'] };
+  const IDENTITY_B = { name: 'beta', aliases: ['Betaa'], sources: ['git-remote'] };
+
+  function writeDocs(): void {
+    const docsDir = path.join(repo, 'docs');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'api.md'), '# API\n' + 'Endpoint requires auth. '.repeat(50));
+  }
+
+  it('a run with the estimated identity leaves nothing to re-estimate', async () => {
+    writeDocs();
+    const before = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(before.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
+
+    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
+      identity: IDENTITY_A,
+      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
+    });
+
+    const after = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(after.stages!.find((s) => s.stage === 'relevance')?.calls ?? 0).toBe(0);
+  });
+
+  it('a run under a DIFFERENT identity does not satisfy the estimate', async () => {
+    writeDocs();
+    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
+      identity: IDENTITY_B,
+      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
+    });
+
+    // Warm under B, estimated under A — still a full relevance call, correctly.
+    const est = await estimateScanTokens(repo, undefined, { skipGit: true, identity: IDENTITY_A });
+    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
   });
 });

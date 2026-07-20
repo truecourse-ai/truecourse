@@ -423,6 +423,46 @@ root fix + the scoped no-tools guardrail; 503 tests green). Awaiting the paid va
    missing from its prefilter/kept set, manualExcludes ignored); fixed by a single shared
    `planRelevanceWork` (spec-consolidator) consumed by both `filterByRelevance` and the
    estimate, with the estimate now loading decisions via `readCorpusDecisions`.
+11b. **Relevance filter has no repo self-identity (F12, measured 2026-07-20).** STATUS: BUILT —
+   `RELEVANCE_SYSTEM_PROMPT` told the model to SKIP docs about "a THIRD-PARTY / external
+   system" but `buildRelevanceUserPrompt` sent only path, kind, size and a 60-line preview:
+   it never said WHICH repository this is, so the model had to infer "who are we" from the
+   document alone. Every decent API reference names its own product, so a repo's own API docs
+   read as a vendor's. Measured: calcom/cal.com dropped all 8 `agents/skills/calcom-api/*` —
+   its whole v2 API reference — as *"vendor API research (Cal.com's authentication API)"*, the
+   sole reason the api driver got zero claims from 462 spec sections in a repo with 82
+   documented endpoints; wekan/wekan dropped 117 of 221 docs with vendor reasoning, including
+   `docs/API/Custom-Fields.md`, as *"…Wekan (external third-party kanban platform)"*. The
+   selectivity is perverse — terse endpoint tables survive because they never name the
+   product, so the better a doc reads the likelier it is discarded. `bca7b357` (.mdx
+   discovery) raised the stakes: it admits exactly the prose API reference this discarded.
+   Fix, four parts: (a) a new `repo-identity.ts` resolves the repo's name + aliases from
+   `repoFullName` / git remote / package.json / pyproject / Cargo / composer / go.mod /
+   README H1, and renders an IDENTITY block into the USER prompt — per-run DATA, so
+   `RELEVANCE_SYSTEM_PROMPT` stays a `const` and the prompt fingerprint moves exactly once;
+   (b) the SKIP bullet now DEFINES third-party against that block ("a doc about this
+   repository's own product is NEVER third-party"); (c) a structured `category` field on the
+   verdict (closed 7-value enum, `.catch(undefined)` so an off-list value can never fail
+   `safeParse` into a permanent cache re-spend) instead of regexing the deliberately-varied
+   `reason` prose; (d) a deterministic backstop in the final assembly loop — post-cache, so it
+   also rescues docs whose wrong verdict is already cached — re-including a `third-party` drop
+   whose STRIPPED body (no code fences, no link targets, no JSX tags) names one of our
+   aliases. Alias discovery is seed-anchored, never threshold-based: cal.com's own brand is
+   23% vs Trello's 9% on wekan, so no cutoff separates them; a corpus term is admitted only
+   if its core stem matches a metadata seed. Aliases below 4 chars are never matchable (`cal`
+   would match everything) though they may still anchor expansion. Two orthogonal fingerprints
+   — `PROMPT_FINGERPRINT` (instructions) and `identityFingerprint` (subject) — so a miss says
+   which changed. **Blast radius: a one-time FULL relevance-cache invalidation across every
+   repo.** Every cached verdict was produced by the identity-blind prompt, so the 117 wrong
+   wekan verdicts *should* miss; it lands on top of `bca7b357`, which already changed the
+   discovered doc set. `identity` is required-and-nullable at every cache-key-adjacent
+   signature (`planRelevanceWork`, `readRelevanceCache`, `classifyOne`, `RelevanceRunnerInput`)
+   — an optional param is exactly how the estimate and the runtime end up keying differently,
+   the silent-re-spend class of item 11; `estimateScanTokens` also became include-scope-aware
+   so it discovers the same doc set `curate` does. Visibility: `CurateStats` gains
+   `thirdPartyDropped` + `thirdPartyRestored` (the CLI docs line shows both) — `restored` is
+   the regression detector, expected ~0 once the prompt half works; a nonzero value means the
+   net is carrying the fix.
 12. **Grounding needs progress (live report 2026-07-07: 5-minute silent gap).** Between
    "Extracting claims" and the first "Authoring scenarios" tick the engine grounds claims
    (real-CLI probe transcripts, 20s timeouts, per-section batches) with NO progress step —

@@ -408,3 +408,89 @@ describe('curate — include-scope', () => {
     expect(result.stats.docsScanned).toBe(2);
   });
 });
+
+/**
+ * F12 visibility: the third-party drop rate is what made the bug invisible for
+ * so long — cal.com's whole v2 API reference vanished into an undifferentiated
+ * "7 dropped". Both counters are reported, not just the first: `restored` is the
+ * regression detector. If the identity block is doing its job it should be ~0; a
+ * nonzero value means the prompt half is incomplete and the deterministic net is
+ * carrying the fix.
+ */
+describe('curate — third-party visibility', () => {
+  const identity = { name: 'wekan', aliases: ['Wekan'], sources: ['git-remote'] };
+
+  const DOCS_WITH_VENDOR = [
+    doc('docs/auth.md', 'How auth works here.'),
+    doc('docs/trello.md', 'Trello is a third-party kanban platform.'),
+    doc('docs/api.md', 'The Wekan API exposes custom fields.'),
+  ];
+
+  // Reproduces the measured failure: the model calls our OWN api doc third-party
+  // because it names our product, exactly like a vendor's docs would.
+  const vendorConfused: RelevanceRunner = async ({ doc }) =>
+    doc.path === 'docs/auth.md'
+      ? { path: doc.path, include: true, reason: 'spec' }
+      : {
+          path: doc.path,
+          include: false,
+          category: 'third-party',
+          reason: `vendor API research (${doc.path})`,
+        };
+
+  it('counts third-party drops and backstop restores separately', async () => {
+    const res = await curate(repo, {
+      docSource: () => DOCS_WITH_VENDOR,
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: identity,
+      relevanceRunner: vendorConfused,
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+
+    expect(res.stats.thirdPartyDropped).toBe(2); // both were dropped as third-party
+    expect(res.stats.thirdPartyRestored).toBe(1); // only ours names our product
+    // The genuine vendor doc stays dropped; our API reference is back.
+    expect(res.stats.docsKept).toBe(2);
+    expect(res.skippedDocs.map((s) => s.path)).toEqual(['docs/trello.md']);
+  });
+
+  it('records the skip category on the corpus so the dashboard can group drops', async () => {
+    const res = await curate(repo, {
+      docSource: () => DOCS_WITH_VENDOR,
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: identity,
+      relevanceRunner: vendorConfused,
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+    expect(res.corpus.skippedDocs).toEqual([
+      { ref: 'docs/trello.md', reason: expect.stringMatching(/vendor/), category: 'third-party' },
+    ]);
+  });
+
+  // EE scans an ephemeral shallow clone in a temp dir. If an explicit null were
+  // treated as "resolve it yourself", the basename `tc-gate-scan-XXXX` would
+  // become the repo's identity.
+  it('honors an explicitly null identity instead of resolving one', async () => {
+    let seen: unknown = 'unset';
+    await curate(repo, {
+      docSource: () => [doc('docs/auth.md')],
+      decisions: EMPTY_DECISIONS,
+      repoIdentity: null,
+      relevanceRunner: async ({ doc, identity }) => {
+        seen = identity;
+        return { path: doc.path, include: true, reason: 'spec' };
+      },
+      areaTagRunner: areaTagger,
+      disableVocabNormalization: true,
+      disableOverlapDetection: true,
+      skipCorpusWrite: true,
+    });
+    expect(seen).toBeNull();
+  });
+});
