@@ -50,6 +50,7 @@ describe('curateInProcess', () => {
     const { curate } = await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -69,6 +70,7 @@ describe('curateInProcess', () => {
         reason: doc.path.includes('auth') ? 'not a spec' : 'ok',
       }),
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -91,6 +93,7 @@ describe('curateInProcess — empty-corpus signal', () => {
     const result = await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -110,6 +113,7 @@ describe('curateInProcess — empty-corpus signal', () => {
         reason: 'not a spec',
       }),
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -119,24 +123,41 @@ describe('curateInProcess — empty-corpus signal', () => {
     expect(result.curate.stats.docsKept).toBe(0);
   });
 
-  it('a non-empty corpus keeps the genuine cache-hit noChanges path (emptyCorpus undefined)', async () => {
+  it('a non-empty corpus is never force-flagged, and its per-doc stages cache on re-scan', async () => {
+    // `noChanges` counts REAL transport calls, which stubbed stages never make —
+    // so this asserts what a hermetic run can actually prove: a non-empty corpus
+    // is left to the genuine llmCalls derivation (never forced false like an
+    // empty one), and the per-doc caches really do absorb the second scan.
+    let relevanceCalls = 0;
+    let tagCalls = 0;
     const opts = {
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
+      relevanceRunner: async (input: { doc: { path: string } }) => {
+        relevanceCalls += 1;
+        return includeAll(input);
+      },
+      areaTagRunner: async (input: { doc: { path: string } }) => {
+        tagCalls += 1;
+        return tagByPath(input);
+      },
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     };
-    // First run populates the per-doc caches (real calls → noChanges false).
     const first = await curateInProcess(repo, opts);
     expect(first.emptyCorpus).toBeUndefined();
-    expect(first.noChanges).toBe(false);
+    expect(first.curate.stats.docsKept).toBe(2);
+    expect(relevanceCalls).toBe(2);
+    expect(tagCalls).toBe(2);
 
-    // Re-scan of unchanged docs: every stage is a cache hit (no transport calls),
-    // so the genuine "nothing changed" signal must still fire for a non-empty corpus.
+    // Re-scan of unchanged docs: every per-doc stage is a content-keyed cache hit,
+    // so neither runner is consulted again and the "nothing changed" signal stands
+    // for a non-empty corpus (only an EMPTY corpus is forced to false).
     const second = await curateInProcess(repo, opts);
     expect(second.emptyCorpus).toBeUndefined();
     expect(second.noChanges).toBe(true);
-    expect(second.curate.stats.docsKept).toBeGreaterThan(0);
+    expect(second.curate.stats.docsKept).toBe(2);
+    expect(relevanceCalls).toBe(2);
+    expect(tagCalls).toBe(2);
   });
 });
 
@@ -150,6 +171,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -179,6 +201,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });
@@ -203,6 +226,7 @@ describe('generateFromCorpusInProcess', () => {
     await curateInProcess(repo, {
       relevanceRunner: includeAll,
       areaTagRunner: tagByPath,
+      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipGit: true,
     });

@@ -493,10 +493,14 @@ export interface CurateInProcessOptions {
   // --- test seams (mirror curate(); production passes none) -----------------
   relevanceRunner?: CurateOptions['relevanceRunner'];
   areaTagRunner?: CurateOptions['areaTagRunner'];
+  // Vocab reconciliation is the one stage with no per-doc cache, so an
+  // un-stubbed test run spawns a real `claude` — the seam keeps tests hermetic.
+  vocabRunner?: CurateOptions['vocabRunner'];
   overlapRunner?: CurateOptions['overlapRunner'];
   verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
   disableRelevanceFilter?: boolean;
   disableAreaTagging?: boolean;
+  disableVocabNormalization?: boolean;
   disableOverlapDetection?: boolean;
 }
 
@@ -575,10 +579,12 @@ export async function curateInProcess(
         decisions: options.decisions,
         relevanceRunner: options.relevanceRunner,
         areaTagRunner: options.areaTagRunner,
+        vocabRunner: options.vocabRunner,
         overlapRunner: options.overlapRunner,
         verifyOverlapRunner: options.verifyOverlapRunner,
         disableRelevanceFilter: options.disableRelevanceFilter,
         disableAreaTagging: options.disableAreaTagging,
+        disableVocabNormalization: options.disableVocabNormalization,
         disableOverlapDetection: options.disableOverlapDetection,
         onRelevanceProgress: (done, total) => {
           if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
