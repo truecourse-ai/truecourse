@@ -114,6 +114,12 @@ punt the residue to the human via escalation.
   costs nothing. Per the taxonomy note: this row is a TOOL-LIMITATION notice, not a
   finding — it renders in the tool-defect surface (beside the auto-resolved ledger),
   never in the findings list, and is excluded from findings counts everywhere.
+- The row carries a third affordance: **Report issue** — a prefilled
+  \`github.com/truecourse-ai/truecourse/issues/new\` link (title + body via query
+  params: the family's one-line description, member count, tool version, target-repo
+  name; no doc content beyond the description). Dashboard: a link button on the row.
+  CLI: the URL printed under the family line. The user reviews/edits the prefill in
+  GitHub before submitting — nothing is sent automatically.
 - Small clusters (<3) keep today's per-claim path. Cost-bounded: the clustering call
   is O(1) per run; family re-authoring costs what the failed claims would have cost
   to retry individually anyway.
