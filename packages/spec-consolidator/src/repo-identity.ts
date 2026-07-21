@@ -30,7 +30,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parse as parseToml } from 'smol-toml';
 import { hasMarkdownExtension } from '@truecourse/shared';
-import type { DocCandidate } from './discovery.js';
+import { docBody, type DocCandidate } from './discovery.js';
 
 export interface RepoIdentityInput {
   /** EE: `req.repoFullName` (`owner/repo`). Authoritative — skips the fs entirely. */
@@ -99,8 +99,13 @@ export function resolveRepoIdentity(input: RepoIdentityInput): RepoIdentity | nu
 
   const cores = new Set<string>();
   for (const seed of seeds) for (const core of coresOf(seed.value)) cores.add(core);
+  // A TLD is not a product stem. `cal.com` contributes the core `com`, and
+  // anchoring on it would admit `Stripe.com`, `Google.com` and every other
+  // vendor domain in the corpus.
+  for (const tld of GENERIC_DOMAIN_CORES) cores.delete(tld);
 
-  const aliases = dedupeAliases(seeds.map((s) => s.value)).filter(
+  const expanded = input.docs?.length ? expandAliasesFromCorpus(input.docs, cores) : [];
+  const aliases = dedupeAliases([...seeds.map((s) => s.value), ...expanded]).filter(
     (a) => a.length >= MIN_MATCHABLE_ALIAS,
   );
 
@@ -110,6 +115,93 @@ export function resolveRepoIdentity(input: RepoIdentityInput): RepoIdentity | nu
     aliases: aliases.slice(0, MAX_ALIASES),
     sources: [...new Set(seeds.map((s) => s.source))],
   };
+}
+
+/** Domain suffixes that name a registry, not a product. */
+const GENERIC_DOMAIN_CORES = new Set([
+  'com', 'io', 'org', 'net', 'dev', 'app', 'co', 'ai', 'sh', 'xyz', 'inc', 'git', 'github',
+]);
+
+// ---------------------------------------------------------------------------
+// Corpus name expansion
+// ---------------------------------------------------------------------------
+
+/** A term must appear in at least this many docs — a floor against typos. */
+const MIN_ALIAS_DOCS = 3;
+/** …and at least this share of them, so the floor scales with a large corpus. */
+const MIN_ALIAS_DOC_FRACTION = 0.03;
+
+/**
+ * Proper-noun-shaped tokens. The `[.\-]` tail is what captures the names that
+ * matter — `Cal.com`, `Cal.diy`, `Next.js` — rather than stopping at `Cal`.
+ */
+const PROPER_NOUN = /\b[A-Z][a-zA-Z0-9]*(?:[.\-][A-Za-z0-9]+)*/g;
+
+/**
+ * Names the repo calls itself that no manifest records. cal.com's own brand
+ * appears in its docs as `Cal.diy` (23%), `Cal.com` (18%) and `calcom` (12%) —
+ * the git remote knows only the last.
+ *
+ * Admission is SEED-ANCHORED, never threshold-based, and the measured
+ * frequencies are what rule thresholds out: cal.com's brand sits at 23% while
+ * Trello sits at 9% in wekan's docs, so no cutoff separates them; and because
+ * cal.com's brand is split three ways, "take the top term" fails too. A term is
+ * admitted only when one of its core stems matches a metadata seed's — which is
+ * why `Cal.diy` is recovered (it shares `cal` with the remote) and why `Google`,
+ * `Stripe` and `Trello` are rejected categorically rather than by rank.
+ *
+ * Frequency then serves exactly one narrow job: a floor against typos.
+ *
+ * Known cost, worth stating: corpus-derived aliases are input-dependent, so in
+ * principle adding one document could shift the alias set and invalidate every
+ * cached verdict. Seed-anchoring, the cap, and hashing only the rendered aliases
+ * are what keep tail churn out of the fingerprint.
+ */
+function expandAliasesFromCorpus(docs: DocCandidate[], seedCores: Set<string>): string[] {
+  const docFreq = new Map<string, number>();
+  const display = new Map<string, string>();
+  // A token seen only at the start of a sentence or heading is almost always an
+  // ordinary capitalized word (`The`, `When`, `Users`). Requiring one
+  // mid-sentence sighting SOMEWHERE in the corpus is the highest-value filter
+  // here, and it replaces a large stopword list.
+  const midSentence = new Set<string>();
+
+  for (const doc of docs) {
+    const seenHere = new Set<string>();
+    for (const line of stripForNames(docBody(doc)).split(/\r?\n/)) {
+      for (const match of line.matchAll(PROPER_NOUN)) {
+        const term = match[0].replace(/[.\-]+$/, ''); // trailing sentence punctuation
+        if (term.length < MIN_MATCHABLE_ALIAS) continue;
+        const key = term.toLowerCase();
+        seenHere.add(key);
+        if (!display.has(key)) display.set(key, term);
+        if (!isInitial(line.slice(0, match.index))) midSentence.add(key);
+      }
+    }
+    // DOCUMENT frequency, not term frequency: a doc saying "Stripe" 200 times
+    // counts once. Term frequency would rank Stripe far above Cal.diy.
+    for (const key of seenHere) docFreq.set(key, (docFreq.get(key) ?? 0) + 1);
+  }
+
+  const floor = Math.max(MIN_ALIAS_DOCS, Math.ceil(docs.length * MIN_ALIAS_DOC_FRACTION));
+  return [...docFreq]
+    .filter(([key, n]) => {
+      if (n < floor || !midSentence.has(key)) return false;
+      return coresOf(key).some((core) => seedCores.has(core));
+    })
+    // Frequency first, then lexicographic. Ties are common, and a
+    // nondeterministic sort would churn the identity fingerprint — which re-keys
+    // every cached relevance verdict in the repo.
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, MAX_ALIASES)
+    .map(([key]) => display.get(key)!);
+}
+
+/** Is this position the start of a sentence, heading, or list item? */
+function isInitial(prefix: string): boolean {
+  const trimmed = prefix.trimEnd();
+  if (trimmed.length === 0) return true;
+  return '.!?#>*|:;'.includes(trimmed[trimmed.length - 1]);
 }
 
 function collectSeeds(input: RepoIdentityInput): Seed[] {
@@ -195,19 +287,34 @@ export function coresOf(value: string): string[] {
 
 /**
  * Collapse aliases that name the same thing: case and separators don't
- * distinguish `Cal.com` from `calcom` (the matcher already treats a separator
- * in an alias as optional). The first — richest — spelling wins.
+ * distinguish `Cal.com` from `calcom` (the matcher already treats a separator in
+ * an alias as optional). Order is preserved (seeds stay ahead of corpus terms),
+ * but the DISPLAY spelling of each survivor is upgraded to the branded form —
+ * the git remote yields lowercase `wekan`/`cal.com`, while the docs write
+ * `Wekan`/`Cal.com`, and the branded spelling is what should reach the prompt.
  */
 function dedupeAliases(values: string[]): string[] {
-  const seen = new Set<string>();
+  const index = new Map<string, number>();
   const out: string[] = [];
   for (const v of values) {
     const key = v.toLowerCase().replace(new RegExp(NAME_SEPARATORS, 'g'), '');
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(v);
+    if (!key) continue;
+    const at = index.get(key);
+    if (at === undefined) {
+      index.set(key, out.length);
+      out.push(v);
+    } else if (brandScore(v) > brandScore(out[at])) {
+      out[at] = v; // same name, richer spelling — upgrade the display form
+    }
   }
   return out;
+}
+
+/** Prefer a spelling that carries capitals and separators (`Cal.com` > `calcom`). */
+function brandScore(v: string): number {
+  const caps = (v.match(/[A-Z]/g) ?? []).length;
+  const seps = (v.match(/[./\-_]/g) ?? []).length;
+  return caps + seps;
 }
 
 // ---------------------------------------------------------------------------
