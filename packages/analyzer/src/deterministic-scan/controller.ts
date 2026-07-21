@@ -22,18 +22,30 @@ export interface DeterministicScanResult {
 export interface ScanControllerOptions {
   /** Per-file wall-clock budget. A file exceeding it is terminated and skipped. */
   fileTimeoutMs: number
+  /**
+   * Budget for the worker's one-time setup (WASM parser init + whole-project
+   * TypeScript program build) — the phase before any file is processed. Bounds
+   * a hang there so it can't freeze the run the way per-file work can't.
+   * Generous by design; defaults to {@link DEFAULT_SETUP_TIMEOUT_MS}.
+   */
+  setupTimeoutMs?: number
   /** Cooperative cancellation (e.g. Ctrl+C). */
   signal?: AbortSignal
   /** Progress reporter — `processed` counts files finished OR skipped, out of `total`. */
   onProgress?(processed: number, total: number): void
   /** Called once per skipped file so the caller can warn. */
   onSkip?(filePath: string, reason: string): void
+  /** Called when no worker could be resolved and the scan runs in-thread (no hang protection). */
+  onFallback?(): void
   /**
    * Override the worker entry path. Normally resolved automatically for the
    * current packaging layout; provided for tests and advanced embedders.
    */
   workerPath?: string
 }
+
+/** Default worker-setup budget — generous, since a large repo's type program build takes minutes. */
+export const DEFAULT_SETUP_TIMEOUT_MS = 600_000
 
 /** Input for the controller — `startIndex` is managed internally across resume passes. */
 export type IsolatedScanInput = Omit<DeterministicScanInput, 'startIndex'>
@@ -78,21 +90,40 @@ function runOneWorkerPass(
     let inFlightIndex = input.startIndex
     let watchdog: ReturnType<typeof setTimeout> | undefined
 
+    const clearWatchdog = () => {
+      if (watchdog) {
+        clearTimeout(watchdog)
+        watchdog = undefined
+      }
+    }
+
     const finish = (outcome: PassOutcome) => {
       if (settled) return
       settled = true
-      if (watchdog) clearTimeout(watchdog)
+      clearWatchdog()
       opts.signal?.removeEventListener('abort', onAbort)
       void worker.terminate()
       resolve(outcome)
     }
 
-    // The watchdog only runs while a file is in flight. It is (re)armed on every
-    // message, so a file that stops producing messages for `fileTimeoutMs` is
-    // deemed stalled. The main thread is otherwise idle, so this timer fires
-    // reliably even while the worker is pinned in synchronous backtracking.
-    const armWatchdog = () => {
-      if (watchdog) clearTimeout(watchdog)
+    // Every phase of the worker's life is covered by a timer, so no hang can go
+    // unbounded. The main thread is otherwise idle, so these timers fire
+    // reliably even while the worker is pinned in synchronous work (regex
+    // backtracking, type-checking):
+    //  - setup (WASM parser init + whole-project TS program build) is bounded by
+    //    `setupTimeoutMs`, armed from spawn until the `setup-done` message.
+    //  - each file is bounded by `fileTimeoutMs`, (re)armed on every message.
+    const setupTimeoutMs = opts.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS
+    const armSetupWatchdog = () => {
+      clearWatchdog()
+      watchdog = setTimeout(
+        () => finish({ kind: 'error', message: `worker setup (parser init + type program build) exceeded ${setupTimeoutMs}ms` }),
+        setupTimeoutMs,
+      )
+      watchdog.unref?.()
+    }
+    const armFileWatchdog = () => {
+      clearWatchdog()
       watchdog = setTimeout(() => finish({ kind: 'stall', stalledIndex: inFlightIndex }), opts.fileTimeoutMs)
       watchdog.unref?.()
     }
@@ -106,16 +137,24 @@ function runOneWorkerPass(
       opts.signal.addEventListener('abort', onAbort, { once: true })
     }
 
+    // Cover setup immediately — before this, the worker sends no messages.
+    armSetupWatchdog()
+
     worker.on('message', (msg: WorkerToMainMessage) => {
       if (settled) return
       switch (msg.type) {
+        case 'setup-done':
+          // Setup finished; switch to per-file budgets. Arm the first file's
+          // watchdog now to cover the gap before its `file-start` arrives.
+          armFileWatchdog()
+          break
         case 'file-start':
           inFlightIndex = msg.index
-          armWatchdog()
+          armFileWatchdog()
           break
         case 'file-result':
           onResult(msg.index, msg.violations)
-          armWatchdog()
+          armFileWatchdog()
           break
         case 'complete':
           finish({ kind: 'complete' })
@@ -172,7 +211,13 @@ export async function runDeterministicScanIsolated(
   opts: ScanControllerOptions,
 ): Promise<DeterministicScanResult> {
   const workerPath = opts.workerPath ?? resolveWorkerPath()
-  if (!workerPath) return runInThread(input, opts)
+  if (!workerPath) {
+    // No worker entry for this layout — the scan still runs, but in-thread and
+    // therefore without the per-file hang protection. Surface it so a user's log
+    // shows which mode they were in (see onFallback → log.warn in the pipeline).
+    opts.onFallback?.()
+    return runInThread(input, opts)
+  }
 
   const total = input.files.length
   const violations: CodeViolation[] = []
@@ -199,6 +244,13 @@ export async function runDeterministicScanIsolated(
     }
 
     // Stall: skip the in-flight file and resume the scan just past it.
+    // Trade-off (accepted, not accidental): a fresh worker re-pays the whole
+    // one-time setup cost — notably the whole-project TypeScript program build,
+    // which dominates on large repos. That's fine because stalls are rare (a
+    // handful of pathological files at most); the run always finishing is worth
+    // more than avoiding the occasional rebuild. Keeping a worker alive across a
+    // stall isn't possible — the isolate holding the type program is exactly
+    // what we must terminate to unstick it.
     const bad = input.files[outcome.stalledIndex]
     const reason = `exceeded the ${opts.fileTimeoutMs}ms per-file budget (possible catastrophic regex backtracking)`
     skipped.push({ filePath: bad.filePath, reason })

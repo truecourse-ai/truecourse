@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { detectLanguage, initParsers, runRoslynHost, runRoslynWorkspace, RoslynHostUnavailableError, runDeterministicScanIsolated } from '@truecourse/analyzer';
+import { detectLanguage, initParsers, runRoslynHost, runRoslynWorkspace, RoslynHostUnavailableError, runDeterministicScanIsolated, DEFAULT_SETUP_TIMEOUT_MS } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -39,6 +39,22 @@ function getDeterministicFileTimeoutMs(): number {
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return DEFAULT_DET_FILE_TIMEOUT_MS;
+}
+
+/**
+ * Budget for the deterministic scan's one-time worker setup (parser init +
+ * whole-project TypeScript program build) — the phase before any file is
+ * processed. Bounds a hang there so it can't freeze the run. Generous, since the
+ * type program build takes minutes on large repos; override with
+ * `TRUECOURSE_DET_SETUP_TIMEOUT_MS`.
+ */
+function getDeterministicSetupTimeoutMs(): number {
+  const raw = process.env.TRUECOURSE_DET_SETUP_TIMEOUT_MS;
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_SETUP_TIMEOUT_MS;
 }
 
 // Locate the C# project(s) to load for project-aware (MSBuildWorkspace) rules.
@@ -177,6 +193,12 @@ export interface ViolationPipelineResult {
   unchanged: ViolationRecord[];
   /** Compact refs for AnalysisSnapshot.violations.resolved (saves space in delta). */
   resolvedRefs: ResolvedViolationRef[];
+  /**
+   * Files the deterministic scan skipped because they exceeded the per-file time
+   * budget (empty on a clean run). Surfaced so callers can report them rather
+   * than the skip being visible only in the log.
+   */
+  skippedDeterministicFiles: { filePath: string; reason: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +269,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const unchanged: ViolationRecord[] = [];
   const resolved: ViolationRecord[] = [];
   const resolvedRefs: ResolvedViolationRef[] = [];
+  // Files the deterministic scan skipped because they blew the per-file time
+  // budget — surfaced in the result (not just the log) so callers/UI can show them.
+  const skippedDeterministicFiles: { filePath: string; reason: string }[] = [];
 
   // Accumulate names alongside the target IDs — the orchestrator needs them
   // to write LATEST.violations (denormalized) and they help downstream
@@ -447,6 +472,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       },
       {
         fileTimeoutMs: getDeterministicFileTimeoutMs(),
+        setupTimeoutMs: getDeterministicSetupTimeoutMs(),
         signal,
         onProgress: (processed, total) => {
           const now = Date.now();
@@ -459,9 +485,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         onSkip: (filePath, reason) => {
           log.warn(`[Pipeline] Skipped deterministic scan of ${filePath}: ${reason}`);
         },
+        onFallback: () => {
+          log.warn('[Pipeline] Deterministic scan worker unavailable — running in-thread WITHOUT per-file hang protection. A single pathological file can still stall this run.');
+        },
       },
     );
     allCodeViolations.push(...scanResult.violations);
+    skippedDeterministicFiles.push(...scanResult.skipped);
     if (scanResult.skipped.length > 0) {
       log.warn(`[Pipeline] Deterministic scan skipped ${scanResult.skipped.length} file(s) that exceeded the per-file time budget.`);
     }
@@ -1630,6 +1660,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     unchanged,
     resolved,
     resolvedRefs,
+    skippedDeterministicFiles,
   };
 }
 

@@ -140,7 +140,7 @@ export { checkCodeRules, hasTypeAwareVisitors, hasSchemaAwareVisitors } from './
  * worker thread with a per-file timeout so one pathological file can't freeze
  * the whole run (falls back to in-thread when no worker entry is available).
  */
-export { runDeterministicScanIsolated, type DeterministicScanResult, type SkippedFile, type ScanControllerOptions, type IsolatedScanInput } from './deterministic-scan/controller.js'
+export { runDeterministicScanIsolated, DEFAULT_SETUP_TIMEOUT_MS, type DeterministicScanResult, type SkippedFile, type ScanControllerOptions, type IsolatedScanInput } from './deterministic-scan/controller.js'
 export { runDeterministicScan, type ScanCallbacks } from './deterministic-scan/run-scan.js'
 export type { DeterministicScanInput, ScanFileInput } from './deterministic-scan/types.js'
 

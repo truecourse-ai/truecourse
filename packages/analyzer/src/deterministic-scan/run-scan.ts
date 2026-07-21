@@ -11,6 +11,8 @@ import type { DeterministicScanInput } from './types.js'
 const YIELD_INTERVAL_MS = 25
 
 export interface ScanCallbacks {
+  /** After one-time setup (type program + schema index) is built, before the first file. */
+  onSetupDone?(): void
   /** Before a file is processed. Drives the watchdog and identifies the in-flight file. */
   onFileStart?(index: number, filePath: string): void
   /** After a file's violations are computed. */
@@ -48,6 +50,10 @@ export async function runDeterministicScan(input: DeterministicScanInput, cb: Sc
   if (hasSchemaAwareVisitors(keySet)) {
     schemaIndex = buildSchemaIndex(databaseResult)
   }
+
+  // Setup (the expensive, message-silent phase) is done — let the controller
+  // retire its setup watchdog and switch to per-file budgets.
+  cb.onSetupDone?.()
 
   let lastYield = Date.now()
   for (let i = startIndex; i < files.length; i++) {

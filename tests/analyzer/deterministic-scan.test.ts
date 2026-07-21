@@ -69,6 +69,18 @@ describe('runDeterministicScanIsolated (controller)', () => {
     expect(result.violations.map((v: any) => v.marker)).toEqual(['a.ts', 'b.ts'])
   }, 20_000)
 
+  it('bounds a setup-phase hang with the setup watchdog', async () => {
+    // The worker pins the thread during setup (before `setup-done`), so only the
+    // setup watchdog — not the per-file one — can catch it. A generous per-file
+    // budget ensures it's the setup timer that fires.
+    const promise = runDeterministicScanIsolated(baseInput(['HANG_SETUP.ts']), {
+      fileTimeoutMs: 60_000,
+      setupTimeoutMs: 300,
+      workerPath: HANG_WORKER,
+    })
+    await expect(promise).rejects.toThrow(/setup/i)
+  }, 15_000)
+
   it('rejects with an AbortError when the signal fires mid-scan', async () => {
     const controller = new AbortController()
     const names = ['HANG.ts'] // worker will pin on the first file

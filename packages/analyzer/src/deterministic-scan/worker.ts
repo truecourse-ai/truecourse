@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   try {
     await initParsers()
     await runDeterministicScan(input, {
+      onSetupDone: () => post({ type: 'setup-done' }),
       onFileStart: (index, filePath) => post({ type: 'file-start', index, filePath }),
       onFileResult: (index, _filePath, violations) => post({ type: 'file-result', index, violations }),
     })

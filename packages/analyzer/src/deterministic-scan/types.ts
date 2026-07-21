@@ -34,6 +34,8 @@ export interface DeterministicScanInput {
 
 /** Messages the worker posts back to the controller on the main thread. */
 export type WorkerToMainMessage =
+  /** Emitted once when one-time setup (parser init + type program build) is done — ends the setup watchdog. */
+  | { type: 'setup-done' }
   /** Emitted immediately before a file is processed — arms/identifies the per-file watchdog. */
   | { type: 'file-start'; index: number; filePath: string }
   /** Emitted after a file's violations are computed. */
