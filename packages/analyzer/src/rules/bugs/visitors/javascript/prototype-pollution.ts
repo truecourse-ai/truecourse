@@ -28,6 +28,15 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
       if (objProp?.text === 'current') return null
     }
 
+    // Skip when the target is a freshly-declared local container in the same
+    // scope — `const state = {}`, `const merged = { ...base }`,
+    // `const next = [...items]`. Writing an app-controlled key into a
+    // throwaway object/array the function just built is not the
+    // user-input → shared/global-object pollution vector this rule targets;
+    // the container is not a shared prototype root. True bugs write into a
+    // *parameter* or otherwise externally-supplied object (`target[key] = …`).
+    if (obj.type === 'identifier' && isFreshLocalContainer(node, obj.text)) return null
+
     // Resolve `const typedKey = key (as T)?` chains so checks downstream see
     // the underlying iteration / counter / param name. Example:
     //   for (const key in obj) {
@@ -96,6 +105,69 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
       `Validate that \`${index.text}\` is not "__proto__", "constructor", or "prototype" before assignment, or use Map instead.`,
     )
   },
+}
+
+/**
+ * True if `objName` is declared in the enclosing function/program scope as a
+ * `const`/`let`/`var` initialised directly from an object or array literal —
+ * `const state = {}`, `const merged = { ...base }`, `const next = [...items]`.
+ * Such a value is a fresh container the function just built, not a shared or
+ * externally-supplied object, so an app-controlled dynamic key on it is not a
+ * prototype-pollution vector.
+ */
+function isFreshLocalContainer(assignmentNode: SyntaxNode, objName: string): boolean {
+  const isScope = (n: SyntaxNode): boolean =>
+    n.type === 'function_declaration' ||
+    n.type === 'function_expression' ||
+    n.type === 'arrow_function' ||
+    n.type === 'method_definition' ||
+    n.type === 'program'
+
+  // Search each enclosing scope from innermost outward — the container is often
+  // declared in an outer function while the write happens inside a nested
+  // callback (`ids.forEach((id) => state[id] = …)`).
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (isScope(scope)) {
+      if (scopeDeclaresContainer(scope, objName)) return true
+      if (scope.type === 'program') break
+    }
+    scope = scope.parent
+  }
+  return false
+}
+
+function scopeDeclaresContainer(scope: SyntaxNode, objName: string): boolean {
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (
+        name?.type === 'identifier' && name.text === objName &&
+        (value?.type === 'object' || value?.type === 'array')
+      ) {
+        found = true
+        return
+      }
+    }
+    // Don't descend into nested functions — declarations there belong to a
+    // different scope than the one we're inspecting.
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return found
 }
 
 /**
