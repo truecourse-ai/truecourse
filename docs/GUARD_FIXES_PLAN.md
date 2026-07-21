@@ -14,7 +14,9 @@ client list keep the two populations separate.
 
 ## 1. Two-sided claims get two-sided tests
 
-STATUS: OPEN
+STATUS: DONE — GENERATE_SYSTEM_PROMPT + FIDELITY_SYSTEM_PROMPT carry the matching
+two-sided rule/criterion (tool-agnostic, overfit-guarded); FIDELITY fingerprint
+re-pinned; e2e via the fixture CLI.
 
 **Problem.** The single largest defect family across 12 battle-tested repos: a claim
 asserting inclusion AND exclusion ("range X matches A, B and does not match C, D")

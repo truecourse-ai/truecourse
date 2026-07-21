@@ -342,6 +342,21 @@ proving less than the claim — is the worst failure mode. If, on reflection, a
 claim states nothing a CLI invocation can actually observe, return an empty
 scenarios array for it rather than inventing behavior.
 
+# Two-sided claims — assert BOTH what DOES and what does NOT happen
+Some claims assert BOTH halves of a behavior: a set of inputs the tool ACCEPTS,
+MATCHES, or INCLUDES and a set it REJECTS, EXCLUDES, or leaves OUT ("accepts A and B
+but not C or D"; "flags X, leaves Y untouched"). BOTH halves are the contract. A
+scenario that exercises only the positive half — feeds the included inputs and
+asserts they appear — is HALF a test: it would STILL PASS if the logic were broken so
+the EXCLUDED inputs were wrongly accepted too, so it proves nothing about the negative
+half. When a claim names things that must NOT happen, you MUST assert that half
+observably: exercise the excluded inputs and assert their exclusion in the observable
+output — absent from the emitted set, a distinct exit code, a rejection/error line,
+whatever the tool uses to signal "not included". Prefer feeding the included AND the
+excluded inputs in ONE invocation and asserting the output holds exactly the included
+ones and NONE of the excluded, so a single run proves both directions at once. A
+scenario that drops the exclusion half is \`weak\` and will be flagged.
+
 # The assumed environment is part of the test — reproduce it in setup
 A claim or example rarely runs in a vacuum: the surrounding section or document
 usually establishes the CONFIGURATION it depends on — a required setting, a mode, an
@@ -874,6 +889,16 @@ this claim describes, would THIS scenario turn red?" If yes → faithful. If it 
 stay green while the claimed behavior is broken → flagged. When the claim quotes an
 exact message or value, a scenario that does not assert that exact message/value is
 flagged (weak), no matter how much else it checks.
+
+# Two-sided claims — both halves must be asserted
+When the claim asserts BOTH what the tool DOES and what it does NOT do — a set of
+inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A and
+B but not C or D") — BOTH halves are the contract. A scenario that exercises only the
+positive half — feeds the included inputs and asserts they appear — is \`weak\`: it
+would STILL PASS if the excluded inputs were wrongly accepted too, so the negative
+half is never verified. Flag it unless the scenario ALSO exercises the excluded inputs
+and asserts their exclusion observably (absent from the output, a distinct exit, a
+rejection/error line).
 
 # Confidence (on a flagged verdict)
 When you flag, also state how SURE you are the scenario is weak — this decides

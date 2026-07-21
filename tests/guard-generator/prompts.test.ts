@@ -337,15 +337,59 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain("the claim's behavior ALONE")
   })
 
-  // Overfit guard — the two item-10 authoring rules must stay tool-agnostic: no
-  // repo-specific token may leak into a prompt. Validated on the exact rule slice.
+  // Overfit guard — the two item-10 authoring rules AND the item-1 two-sided rule must
+  // stay tool-agnostic: no repo-specific token may leak into a prompt. Validated on the
+  // exact rule slices. The forbidden set includes the calibration repos' own vocabulary
+  // (a SQL linter's `dialect`, node-semver's `semver`/`comparator`/version tokens) so a
+  // rule phrased around one battle-test target can never slip through.
+  const REPO_TOKENS = /dialect|sqlfluff|tab_space_size|semver|comparator|\brange\b|version/i
   it('the item-10 authoring rules carry no repo-specific token', () => {
     const start = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
     const end = GENERATE_SYSTEM_PROMPT.indexOf("# Example claims — the doc's own block IS the input")
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const rules = GENERATE_SYSTEM_PROMPT.slice(start, end)
-    expect(rules).not.toMatch(/dialect|sqlfluff|tab_space_size/i)
+    expect(rules).not.toMatch(REPO_TOKENS)
+  })
+
+  // Item 1 — a two-sided claim (asserts both what DOES and does NOT happen) must get a
+  // two-sided test. The GENERATE rule states the requirement; the FIDELITY prompt flags
+  // the one-sided shape with the SAME criterion. Both phrased generally (overfit guard).
+  it('GENERATE_SYSTEM_PROMPT rules a two-sided claim asserts BOTH halves observably', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Two-sided claims — assert BOTH what DOES and what does NOT happen')
+    // Both halves of the behavior are the contract, not just the positive one.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('BOTH halves are the contract')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('would STILL PASS')
+    // The fix: exercise the excluded inputs and assert their exclusion observably.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('exercise the excluded inputs')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('assert their exclusion')
+    // Prefer proving both directions in one invocation.
+    expect(GENERATE_SYSTEM_PROMPT).toContain('ONE invocation')
+  })
+
+  it('FIDELITY_SYSTEM_PROMPT flags a one-sided scenario for a two-sided claim (same criterion)', () => {
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('# Two-sided claims — both halves must be asserted')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('BOTH halves are the contract')
+    // A positive-only scenario is weak — it would still pass if the exclusion broke.
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('exercises only the')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('STILL PASS')
+    // The authoring rule and the flag criterion state the same requirement.
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('exercises the excluded inputs')
+    expect(FIDELITY_SYSTEM_PROMPT).toContain('asserts their exclusion observably')
+  })
+
+  it('the item-1 two-sided rule carries no repo-specific token (both prompts)', () => {
+    const gStart = GENERATE_SYSTEM_PROMPT.indexOf('# Two-sided claims — assert BOTH what DOES')
+    const gEnd = GENERATE_SYSTEM_PROMPT.indexOf('# The assumed environment is part of the test')
+    expect(gStart).toBeGreaterThan(-1)
+    expect(gEnd).toBeGreaterThan(gStart)
+    expect(GENERATE_SYSTEM_PROMPT.slice(gStart, gEnd)).not.toMatch(REPO_TOKENS)
+
+    const fStart = FIDELITY_SYSTEM_PROMPT.indexOf('# Two-sided claims — both halves must be asserted')
+    const fEnd = FIDELITY_SYSTEM_PROMPT.indexOf('# Confidence (on a flagged verdict)')
+    expect(fStart).toBeGreaterThan(-1)
+    expect(fEnd).toBeGreaterThan(fStart)
+    expect(FIDELITY_SYSTEM_PROMPT.slice(fStart, fEnd)).not.toMatch(REPO_TOKENS)
   })
 
   // Item 6b — the seeding constraint, LOUD, in the capabilities block.
@@ -379,7 +423,7 @@ describe('guard-generator prompts', () => {
   })
 
   it('FIDELITY_PROMPT_FINGERPRINT is pinned — moves only with an intended re-review', () => {
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('f27d441e28399ba9')
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('fcac5b0f4e934de5')
   })
 
   it('buildFidelityUserPrompt carries the section text, the claim, and the scenario YAML', () => {
