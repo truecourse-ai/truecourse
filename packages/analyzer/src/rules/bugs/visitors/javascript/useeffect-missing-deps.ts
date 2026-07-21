@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 import { JS_LANGUAGES } from './_helpers.js'
 
 // Detect: useEffect(() => { uses variable X }, []) where X is not in deps array
@@ -270,7 +271,7 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
     // whole node, not just the lines around its opening.
     const nodeStartLine = node.startPosition.row
     const nodeEndLine = node.endPosition.row
-    const sourceLines = sourceCode.split('\n')
+    const sourceLines = splitLines(sourceCode)
     const windowLines = sourceLines.slice(Math.max(0, nodeStartLine - 2), nodeEndLine + 2)
     if (windowLines.some(line => line.includes('eslint-disable'))) return null
 

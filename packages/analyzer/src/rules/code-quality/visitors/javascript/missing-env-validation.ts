@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 
 // Zod / valibot / yup / class-validator chain methods that take an env-var
 // argument as the fallback or transform input. Reading `process.env.X` here
@@ -82,7 +83,7 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
     if (envVarRegex.test(sourceCode)) {
       // Found a reference to the env var in an if-condition somewhere in the file.
       // Now check if there's also a throw or return near it.
-      const lines = sourceCode.split('\n')
+      const lines = splitLines(sourceCode)
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].includes(envVarName) && /\bif\s*\(/.test(lines[i])) {
           // Check the next few lines for throw/return
@@ -119,7 +120,7 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
       assignTarget = directParent.parent.childForFieldName('name')?.text ?? null
     }
     if (assignTarget) {
-      const lines = sourceCode.split('\n')
+      const lines = splitLines(sourceCode)
       for (let i = 0; i < lines.length; i++) {
         // Check if there's an if-statement referencing the assigned variable with throw/return
         if (/\bif\s*\(/.test(lines[i]) && lines[i].includes(assignTarget)) {
@@ -144,7 +145,7 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
     // Final fallback: search for ANY if-statement that references the env var name
     // (by variable or env var name) followed by throw/return within 10 lines
     {
-      const lines = sourceCode.split('\n')
+      const lines = splitLines(sourceCode)
       const searchTerms = [envVarName]
       if (assignTarget) searchTerms.push(assignTarget)
       for (const term of searchTerms) {

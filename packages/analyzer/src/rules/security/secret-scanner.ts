@@ -8,6 +8,7 @@ import { shannonEntropy } from './entropy.js'
 import { STOPWORDS } from './stopwords.js'
 import { GLOBAL_ALLOWLIST } from './exclusions.js'
 import { SECRET_PATTERNS, type SecretPattern } from './secret-rules.js'
+import { splitLines } from '../_shared/source-lines.js'
 
 export interface SecretMatch {
   patternId: string
@@ -140,7 +141,7 @@ export function scanForSecrets(value: string, context?: ScanContext): SecretMatc
     // Composite rule: require a second pattern nearby
     if (rule.requireNearby && context?.sourceCode && context.lineNumber) {
       const withinLines = rule.requireNearby.withinLines ?? 5
-      const lines = context.sourceCode.split('\n')
+      const lines = splitLines(context.sourceCode)
       const startLine = Math.max(0, context.lineNumber - 1 - withinLines)
       const endLine = Math.min(lines.length, context.lineNumber + withinLines)
       const nearbyText = lines.slice(startLine, endLine).join('\n')

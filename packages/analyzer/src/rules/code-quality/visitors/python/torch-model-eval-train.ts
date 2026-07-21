@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { splitLines } from '../../../_shared/source-lines.js'
 
 /**
  * Detects torch model state loading (load_state_dict) without a subsequent
@@ -22,7 +23,7 @@ export const pythonTorchModelEvalTrainVisitor: CodeRuleVisitor = {
 
     // Check if .eval() or .train() is called on the same object in nearby code
     const nodeStart = node.startPosition.row
-    const lines = sourceCode.split('\n')
+    const lines = splitLines(sourceCode)
     const searchRange = lines.slice(nodeStart, nodeStart + 10).join('\n')
 
     if (searchRange.includes(`${modelName}.eval()`) || searchRange.includes(`${modelName}.train()`)) {
