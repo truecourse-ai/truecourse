@@ -80,3 +80,34 @@ fail.
 generation-defect claim does NOT commit; a fixed drift flips the same scenario to
 pass on the next run untouched; counters reconcile under the new rule; CLI + client
 surfaces updated; legacy reports parse.
+
+## 4. Family-level self-healing — diagnose the pattern once, re-author the cluster
+
+STATUS: OPEN
+
+**Problem.** Self-healing is per-claim: each flagged scenario gets one retry with its
+own evidence. A run producing many defects (semver: 24, worst case imaginable: 100+)
+overwhelms that — yet such bursts are near-always a FEW mistakes repeated (semver's 24
+shared one diagnosis). Per-claim loops re-discover the same lesson N times and still
+punt the residue to the human via escalation.
+
+**Fix.** After triage, WITHIN the same run:
+- Cluster same-family defects: group flagged/defect verdicts by their diagnosis
+  similarity (the triage briefs already state the mistake in one sentence; cluster on
+  the brief's normalized shape via one cheap LLM call over the list — in: N briefs,
+  out: K families with member indexes and a one-sentence shared correction).
+- For each family (size >= 3), run ONE family re-author pass: re-author every member
+  claim fresh with the SHARED correction + 1-2 exemplar mismatches from the family in
+  the prompt — the model fixes the pattern, not each instance blindly. Members then
+  re-run birth + fidelity as usual; survivors commit.
+- Families that fail again escalate ONCE as a family ("N claims share an authoring
+  gap the engine cannot fix: <correction>"), not as N separate items — the human sees
+  one line per root cause, never per instance.
+- Small clusters (<3) keep today's per-claim path. Cost-bounded: the clustering call
+  is O(1) per run; family re-authoring costs what the failed claims would have cost
+  to retry individually anyway.
+
+**Tests.** Clustering groups same-brief defects and leaves singletons alone; a family
+re-author carries the shared correction + exemplars in each member's prompt; a
+converging family commits; a non-converging family escalates as one item with the
+member count; counters reconcile.
