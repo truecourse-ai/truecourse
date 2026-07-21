@@ -43,6 +43,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.0",
+    "redos-detector": "^6.1.4",
     "sonner": "^2.0.7",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",

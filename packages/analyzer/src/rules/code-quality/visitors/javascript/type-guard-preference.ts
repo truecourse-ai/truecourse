@@ -22,11 +22,20 @@ function returnTypeIsBoolish(node: SyntaxNode): boolean {
   return t === 'boolean' || t === 'Boolean'
 }
 
+function isNestedFunction(n: SyntaxNode): boolean {
+  return n.type === 'arrow_function' || n.type === 'function_declaration'
+    || n.type === 'function_expression' || n.type === 'function'
+    || n.type === 'method_definition'
+}
+
 function containsTypeNarrowingCheck(bodyNode: SyntaxNode): boolean {
   let found = false
 
   function walk(n: SyntaxNode) {
     if (found) return
+    // Don't recurse into nested functions — an inner callback's `instanceof`/
+    // `typeof` check belongs to that callback, not the function we're judging.
+    if (n !== bodyNode && isNestedFunction(n)) return
     if (n.type === 'binary_expression') {
       const op = n.children.find((c) => c.type === 'instanceof' || c.text === 'instanceof')
       if (op) { found = true; return }
@@ -66,6 +75,9 @@ function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
 
   function walk(n: SyntaxNode) {
     if (found) return
+    // Don't recurse into nested functions — a `return false` inside an inner
+    // callback is not this function's return value.
+    if (n !== bodyNode && isNestedFunction(n)) return
     if (n.type === 'return_statement') {
       let val: SyntaxNode | undefined = n.namedChildren[0]
       // Unwrap parenthesized expressions so `return (typeof x === 'string')`

@@ -25,6 +25,15 @@ internal sealed class StaticFieldInitializeInline : ISemanticRule
                 .FirstOrDefault(c => c.Modifiers.Any(SyntaxKind.StaticKeyword));
             if (cctor?.Body is not { } body) continue;
 
+            // The beforefieldinit win only materializes if inlining removes the ENTIRE
+            // static constructor. That requires every statement in it to be a simple
+            // assignment to a distinct static field of this type. If the cctor does
+            // anything else — a loop, a method call, a local, a multi-statement build,
+            // or member mutation of an already-assigned field — it stays regardless, so
+            // inlining any single field yields no beforefieldinit benefit and is a false
+            // positive. Skip the whole type in that case.
+            if (!StaticCtorFullyLiftable(type, body, model)) continue;
+
             // Inspect every static field declared on this type with no initializer.
             foreach (var fieldDecl in type.Members.OfType<FieldDeclarationSyntax>())
             {
@@ -46,6 +55,39 @@ internal sealed class StaticFieldInitializeInline : ISemanticRule
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// True iff the static constructor could be dropped entirely by inlining: every
+    /// statement is a simple assignment to a *distinct* static field of this type
+    /// (each such field assigned exactly once), and there is at least one. Any other
+    /// statement — a loop, a call, a local, member mutation, or a re-assignment —
+    /// means the cctor survives and no beforefieldinit is gained.
+    /// </summary>
+    private static bool StaticCtorFullyLiftable(TypeDeclarationSyntax type, BlockSyntax body, SemanticModel model)
+    {
+        if (model.GetDeclaredSymbol(type) is not INamedTypeSymbol typeSymbol) return false;
+
+        var assigned = new HashSet<IFieldSymbol>(SymbolEqualityComparer.Default);
+        foreach (var stmt in body.Statements)
+        {
+            if (stmt is not ExpressionStatementSyntax { Expression: AssignmentExpressionSyntax assign }) return false;
+            if (!assign.IsKind(SyntaxKind.SimpleAssignmentExpression)) return false;
+
+            var target = assign.Left switch
+            {
+                MemberAccessExpressionSyntax ma => ma.Name,
+                IdentifierNameSyntax id => (SimpleNameSyntax)id,
+                _ => null,
+            };
+            if (target is null) return false;
+            if (model.GetSymbolInfo(target).Symbol is not IFieldSymbol f) return false;
+            if (!f.IsStatic) return false;
+            if (!SymbolEqualityComparer.Default.Equals(f.ContainingType, typeSymbol)) return false;
+            if (!assigned.Add(f)) return false; // assigned more than once → not a single inline initializer
+        }
+
+        return body.Statements.Count > 0;
     }
 
     /// True iff exactly one statement in the cctor body is a simple assignment whose

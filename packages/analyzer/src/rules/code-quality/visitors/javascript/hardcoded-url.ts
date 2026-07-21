@@ -43,6 +43,13 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
     // paths are owned by the identity provider and have no env-specific form.
     if (/\.well-known\/(openid-configuration|oauth-authorization-server|jwks(?:\.json)?)/.test(text)) return null
 
+    // Skip loopback / unspecified hosts — `0.0.0.0` (all-interfaces / unspecified),
+    // the `127.0.0.0/8` loopback range, and the IPv6 loopback/unspecified
+    // (`[::1]`, `[::]`). Like `localhost`, these are local dev defaults (e.g.
+    // OTEL exporter fallbacks such as `process.env.X ?? "http://0.0.0.0:4318"`),
+    // not environment-specific production endpoints worth hoisting to config.
+    if (/\/\/(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|\[::1?\])(?::\d+)?(?:[/?#"'`]|$)/.test(text)) return null
+
     // Skip URLs assigned to variables whose names suggest placeholder/example/default values
     if (parent?.type === 'variable_declarator' || parent?.type === 'assignment_expression' || parent?.type === 'pair') {
       const nameNode2 = parent.type === 'pair'

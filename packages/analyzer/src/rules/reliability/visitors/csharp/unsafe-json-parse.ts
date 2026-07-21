@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { getCSharpArguments, getCSharpMethodName, getCSharpReceiver } from '../../../_shared/csharp-helpers.js'
+import { getCSharpArguments, getCSharpEnclosingFunction, getCSharpMethodName, getCSharpReceiver } from '../../../_shared/csharp-helpers.js'
 import { isInsideCSharpTryWithCatch, simpleTypeName } from './_helpers.js'
 
 /** receiver → methods that throw on malformed input. */
@@ -28,6 +28,45 @@ function bodyDeclaresMember(body: SyntaxNode, name: string): boolean {
         if (d?.type === 'variable_declarator' && d.childForFieldName('name')?.text === name) return true
       }
     }
+  }
+  return false
+}
+
+/**
+ * True when the enclosing method reads from a `Utf8JsonReader` — a custom
+ * `JsonConverter.Read(ref Utf8JsonReader reader, …)` override or a low-level
+ * reader helper (`Load(ref Utf8JsonReader reader, …)`). Inside these, throwing
+ * `JsonException` on malformed input is the (de)serialization contract that the
+ * caller's pipeline is expected to catch, so wrapping the parse in a try/catch
+ * would be wrong. Keyed on a `Utf8JsonReader` parameter, which is what both the
+ * converter `Read` signature and the reader helpers have in common.
+ */
+function isInsideJsonReaderContext(node: SyntaxNode): boolean {
+  const fn = getCSharpEnclosingFunction(node)
+  const params = fn?.childForFieldName('parameters')
+  if (!params) return false
+  for (const p of params.namedChildren) {
+    if (p?.type === 'parameter' && p.text.includes('Utf8JsonReader')) return true
+  }
+  return false
+}
+
+/**
+ * True when the parse sits inside a custom `JsonConverter` (a type deriving from
+ * System.Text.Json's `JsonConverter<T>` or Newtonsoft's `JsonConverter`). A
+ * converter's Read/Write body is (de)serialization contract code — including
+ * round-trip parses of just-serialized data (`JsonDocument.Parse(stream)` in a
+ * `Write` after `serializer.Serialize(stream)`) — where a `JsonException` is
+ * expected to propagate to the serializer pipeline, not be swallowed locally.
+ */
+function isInsideJsonConverter(node: SyntaxNode): boolean {
+  let current: SyntaxNode | null = node.parent
+  while (current) {
+    if (TYPE_DECLS.has(current.type)) {
+      const baseList = current.namedChildren.find((c) => c?.type === 'base_list')
+      if (baseList?.namedChildren.some((b) => b?.text.includes('JsonConverter'))) return true
+    }
+    current = current.parent
   }
   return false
 }
@@ -83,6 +122,11 @@ export const csharpUnsafeJsonParseVisitor: CodeRuleVisitor = {
     }
 
     if (isInsideCSharpTryWithCatch(node)) return null
+
+    // A parse inside a Utf8JsonReader-based reader method, or anywhere inside a
+    // custom JsonConverter, is expected to throw JsonException as its
+    // (de)serialization contract, not swallow it.
+    if (isInsideJsonReaderContext(node) || isInsideJsonConverter(node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

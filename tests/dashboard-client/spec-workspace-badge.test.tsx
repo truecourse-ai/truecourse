@@ -94,6 +94,8 @@ describe('SpecCorpusView — workspace badge', () => {
     // The inherited doc's kept row carries the badge…
     const wsRow = screen.getByText('Workspace ADR').closest('[role="button"]')!;
     expect(within(wsRow as HTMLElement).getByText('workspace')).toBeInTheDocument();
+    // …as a plain chip — no hover tooltip.
+    expect(within(wsRow as HTMLElement).queryByRole('tooltip')).not.toBeInTheDocument();
     // …the repo-local doc's row does not.
     const localRow = screen.getByText('docs/local.md').closest('[role="button"]')!;
     expect(within(localRow as HTMLElement).queryByText('workspace')).not.toBeInTheDocument();

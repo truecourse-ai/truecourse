@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Same socket stub as analyze.test.ts — emits require a live socket server.
@@ -67,11 +67,16 @@ describe('CLI analyze pipeline (e2e, C#)', () => {
     execSync('git init -q -b main', { cwd: workDir, env });
     execSync('git add -A', { cwd: workDir, env });
     execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
+    execFileSync('dotnet', ['restore', 'SampleCsharpProject.sln'], {
+      cwd: workDir,
+      env,
+      encoding: 'utf8',
+    });
 
     project = await registerProject(workDir);
     await updateProjectConfig(workDir, { enableLlmRules: false });
     clearLatestCache();
-  }, 30_000);
+  }, 300_000);
 
   afterAll(async () => {
     if (project) await unregisterProject(project.slug);

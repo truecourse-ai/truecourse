@@ -56,8 +56,9 @@ fs.mkdirSync(DIST, { recursive: true });
 // 1. Build packages in dependency order:
 //      shared → analyzer
 //      spec-consolidator → contract-verifier → contract-extractor → core
+//      guard-runner → guard-generator → core
 //
-// core's tsc imports the three contract/spec packages, so their .d.ts
+// core's tsc imports the contract/spec/guard packages, so their .d.ts
 // files MUST exist before core compiles. The intra-package graph:
 //
 //   shared             ←  no truecourse deps
@@ -66,10 +67,12 @@ fs.mkdirSync(DIST, { recursive: true });
 //   spec-consolidator  ←  shared + llm
 //   contract-verifier  ←  shared + analyzer
 //   contract-extractor ←  shared + contract-verifier + spec-consolidator + llm
+//   guard-runner       ←  shared
+//   guard-generator    ←  guard-runner (+ shared)
 //   core               ←  all of the above
 //
 // Sequential order below honors that graph. Prior to this, fresh-checkout
-// `pnpm build:dist` failed at core's tsc because the contract/spec
+// `pnpm build:dist` failed at core's tsc because the contract/spec/guard
 // packages weren't built yet — and later at spec-consolidator's tsc because
 // its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
@@ -79,6 +82,8 @@ run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
 run('pnpm --filter @truecourse/contract-extractor build');
+run('pnpm --filter @truecourse/guard-runner build');
+run('pnpm --filter @truecourse/guard-generator build');
 run('pnpm --filter @truecourse/core build');
 
 // 2. Build dashboard client (static export)
@@ -142,6 +147,30 @@ run(
 
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
+
+// 5a. Bundle the deterministic-scan worker as a sibling of cli.mjs/server.mjs.
+// The tree-sitter code rules run in this worker so a single pathological file
+// (catastrophic regex backtracking) can be terminated instead of freezing the
+// whole run. It must be a separate file esbuild does NOT inline into the entry
+// bundles; the controller resolves it at runtime via `det-scan-worker.mjs` next
+// to the entry (see deterministic-scan/controller.ts resolveWorkerPath). Same
+// externals as the entries so web-tree-sitter WASM + typescript resolve from
+// node_modules, and BUNDLED_WASM_DIR (dist/wasm) is shared with the entries.
+console.log('\n=== Bundling deterministic-scan worker ===');
+run(
+  [
+    'npx esbuild packages/analyzer/src/deterministic-scan/worker.ts',
+    '--bundle',
+    '--platform=node',
+    '--target=node20',
+    '--format=esm',
+    '--outfile=dist/det-scan-worker.mjs',
+    '--external:web-tree-sitter',
+    '--external:pyright',
+    '--external:typescript',
+    '--banner:js="import { createRequire as __cRw } from \'node:module\'; const require = __cRw(import.meta.url);"',
+  ].join(' '),
+);
 
 // 5b. Build the C# Roslyn semantic host (framework-dependent, portable). Ships
 // as `dist/roslyn-host/csharp-roslyn-host.dll` and is launched via the user's

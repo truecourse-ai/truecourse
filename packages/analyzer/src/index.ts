@@ -136,6 +136,15 @@ export { getAllDefaultRules } from './rule-engine.js'
 export { checkCodeRules, hasTypeAwareVisitors, hasSchemaAwareVisitors } from './rules/combined-code-checker.js'
 
 /**
+ * Killable deterministic per-file scan. Runs the tree-sitter code rules in a
+ * worker thread with a per-file timeout so one pathological file can't freeze
+ * the whole run (falls back to in-thread when no worker entry is available).
+ */
+export { runDeterministicScanIsolated, DEFAULT_SETUP_TIMEOUT_MS, type DeterministicScanResult, type SkippedFile, type ScanControllerOptions, type IsolatedScanInput } from './deterministic-scan/controller.js'
+export { runDeterministicScan, type ScanCallbacks } from './deterministic-scan/run-scan.js'
+export type { DeterministicScanInput, ScanFileInput } from './deterministic-scan/types.js'
+
+/**
  * High-level function to analyze an entire repository
  * Orchestrates file discovery, analysis, dependency graph, service detection, and layer detection
  */

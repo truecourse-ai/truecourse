@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCodeRules, withParsedTree, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, runRoslynHost, runRoslynWorkspace, RoslynHostUnavailableError, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
+import { detectLanguage, initParsers, runRoslynHost, runRoslynWorkspace, RoslynHostUnavailableError, runDeterministicScanIsolated, DEFAULT_SETUP_TIMEOUT_MS } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -21,6 +21,40 @@ import type { ResolvedViolationRef, ViolationRecord } from '../types/snapshot.js
 /** Throw if the abort signal has been triggered. */
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+}
+
+/**
+ * Per-file wall-clock budget for the deterministic tree-sitter scan. A file that
+ * exceeds it (e.g. catastrophic regex backtracking) is skipped-with-a-warning
+ * instead of freezing the whole run. Generous by design — healthy files scan in
+ * milliseconds — and overridable via `TRUECOURSE_DET_FILE_TIMEOUT_MS` for repos
+ * with unusually large legitimate sources. This is a universal resource bound,
+ * not a per-file heuristic.
+ */
+const DEFAULT_DET_FILE_TIMEOUT_MS = 30_000;
+function getDeterministicFileTimeoutMs(): number {
+  const raw = process.env.TRUECOURSE_DET_FILE_TIMEOUT_MS;
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_DET_FILE_TIMEOUT_MS;
+}
+
+/**
+ * Budget for the deterministic scan's one-time worker setup (parser init +
+ * whole-project TypeScript program build) — the phase before any file is
+ * processed. Bounds a hang there so it can't freeze the run. Generous, since the
+ * type program build takes minutes on large repos; override with
+ * `TRUECOURSE_DET_SETUP_TIMEOUT_MS`.
+ */
+function getDeterministicSetupTimeoutMs(): number {
+  const raw = process.env.TRUECOURSE_DET_SETUP_TIMEOUT_MS;
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_SETUP_TIMEOUT_MS;
 }
 
 // Locate the C# project(s) to load for project-aware (MSBuildWorkspace) rules.
@@ -159,6 +193,12 @@ export interface ViolationPipelineResult {
   unchanged: ViolationRecord[];
   /** Compact refs for AnalysisSnapshot.violations.resolved (saves space in delta). */
   resolvedRefs: ResolvedViolationRef[];
+  /**
+   * Files the deterministic scan skipped because they exceeded the per-file time
+   * budget (empty on a clean run). Surfaced so callers can report them rather
+   * than the skip being visible only in the log.
+   */
+  skippedDeterministicFiles: { filePath: string; reason: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +269,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const unchanged: ViolationRecord[] = [];
   const resolved: ViolationRecord[] = [];
   const resolvedRefs: ResolvedViolationRef[] = [];
+  // Files the deterministic scan skipped because they blew the per-file time
+  // budget — surfaced in the result (not just the log) so callers/UI can show them.
+  const skippedDeterministicFiles: { filePath: string; reason: string }[] = [];
 
   // Accumulate names alongside the target IDs — the orchestrator needs them
   // to write LATEST.violations (denormalized) and they help downstream
@@ -302,24 +345,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  let typeQuery: TypeQueryService | undefined;
+  // TypeQuery / schema-index construction lives inside the deterministic scan
+  // now (it's built once per worker pass — see runDeterministicScanIsolated),
+  // so the pipeline only needs the enabled-key set here.
   const enabledCodeKeys = new Set(enabledCodeRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key));
-  if (hasTypeAwareVisitors(enabledCodeKeys)) {
-    const tsFiles = filesToScan
-      .filter(({ filePath: fp }) => /\.(ts|tsx|js|jsx)$/.test(fp))
-      .map(({ filePath: fp, resolve: res }) =>
-        res ? path.resolve(repoPath, fp) : (path.isAbsolute(fp) ? fp : path.join(repoPath, fp)),
-      );
-    if (tsFiles.length > 0) {
-      const scoped = buildScopedCompilerOptions(repoPath);
-      typeQuery = createTypeQueryService(tsFiles, scoped, repoPath);
-    }
-  }
-
-  let schemaIndex: SchemaIndex | undefined;
-  if (hasSchemaAwareVisitors(enabledCodeKeys)) {
-    schemaIndex = buildSchemaIndex(result.databaseResult);
-  }
 
   if (hasLlm) tracker?.done('scan', `${fileContents.size} files`);
 
@@ -413,56 +442,58 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
     }
 
-    await new Promise((r) => setImmediate(r));
+    // Pre-resolve each file's read path + violation identity so the scan worker
+    // never has to re-implement the pipeline's path/key logic.
+    const scanFiles = filesToScan.map(({ filePath, resolve }) => {
+      const absPath = resolve ? path.resolve(repoPath, filePath) : (path.isAbsolute(filePath) ? filePath : path.join(repoPath, filePath));
+      return { filePath: changedFileSet ? absPath : filePath, absPath };
+    });
+    const tsFiles = filesToScan
+      .filter(({ filePath: fp }) => /\.(ts|tsx|js|jsx)$/.test(fp))
+      .map(({ filePath: fp, resolve: res }) =>
+        res ? path.resolve(repoPath, fp) : (path.isAbsolute(fp) ? fp : path.join(repoPath, fp)),
+      );
 
-    const totalFiles = filesToScan.length;
-    let processed = 0;
-    // Yield every ~25ms (≈40fps headroom against the 80ms spinner) and
-    // refresh the per-domain detail every ~100ms. Det work is CPU-bound,
-    // so we have to manufacture the same breathing room the LLM phase
-    // gets naturally from I/O-bound awaits.
-    const SPINNER_YIELD_MS = 25;
+    const totalFiles = scanFiles.length;
     const DETAIL_UPDATE_MS = 100;
-    let lastYieldMs = Date.now();
-    let lastDetailMs = lastYieldMs;
-    for (const { filePath, resolve } of filesToScan) {
-      try {
-        const lang = detectLanguage(filePath);
-        if (!lang) continue;
-        const absPath = resolve ? path.resolve(repoPath, filePath) : (path.isAbsolute(filePath) ? filePath : path.join(repoPath, filePath));
-        const key = changedFileSet ? absPath : filePath;
-        const fc = fileContents.get(key);
-        if (!fc) continue;
+    let lastDetailMs = Date.now();
 
-        const codeRuleViolations = withParsedTree(filePath, fc.content, lang, (tree) =>
-          checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery, schemaIndex),
-        );
-        allCodeViolations.push(...codeRuleViolations);
-      } catch {
-        // Skip files that fail to parse
-      }
-      processed++;
-
-      // Cheap abort check on every iteration — `signal.aborted` is just a
-      // boolean field flipped by the SIGINT handler, so this is safe to
-      // run per-file. Without it, Ctrl+C only takes effect after the
-      // entire scan finishes.
-      if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
-
-      const now = Date.now();
-      const isLast = processed === totalFiles;
-      if (isLast || now - lastDetailMs >= DETAIL_UPDATE_MS) {
-        const detail = `${processed}/${totalFiles} files`;
-        for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
-        lastDetailMs = now;
-      }
-      if (isLast || now - lastYieldMs >= SPINNER_YIELD_MS) {
-        await new Promise((r) => setImmediate(r));
-        lastYieldMs = Date.now();
-        // Re-check after yielding — the SIGINT handler runs during the
-        // event-loop tick we just gave it, so the flag may have flipped.
-        if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
-      }
+    // Run the tree-sitter code rules in a killable worker with a per-file
+    // timeout. A single pathological file (e.g. catastrophic regex
+    // backtracking) is skipped-with-a-warning instead of freezing the whole
+    // run, and Ctrl+C now takes effect mid-scan because the main thread is free.
+    const scanResult = await runDeterministicScanIsolated(
+      {
+        repoPath,
+        files: scanFiles,
+        enabledRuleKeys: [...enabledCodeKeys],
+        tsFiles,
+        databaseResult: result.databaseResult,
+      },
+      {
+        fileTimeoutMs: getDeterministicFileTimeoutMs(),
+        setupTimeoutMs: getDeterministicSetupTimeoutMs(),
+        signal,
+        onProgress: (processed, total) => {
+          const now = Date.now();
+          if (processed === total || now - lastDetailMs >= DETAIL_UPDATE_MS) {
+            const detail = `${processed}/${total} files`;
+            for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
+            lastDetailMs = now;
+          }
+        },
+        onSkip: (filePath, reason) => {
+          log.warn(`[Pipeline] Skipped deterministic scan of ${filePath}: ${reason}`);
+        },
+        onFallback: () => {
+          log.warn('[Pipeline] Deterministic scan worker unavailable — running in-thread WITHOUT per-file hang protection. A single pathological file can still stall this run.');
+        },
+      },
+    );
+    allCodeViolations.push(...scanResult.violations);
+    skippedDeterministicFiles.push(...scanResult.skipped);
+    if (scanResult.skipped.length > 0) {
+      log.warn(`[Pipeline] Deterministic scan skipped ${scanResult.skipped.length} file(s) that exceeded the per-file time budget.`);
     }
   }
 
@@ -1629,6 +1660,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     unchanged,
     resolved,
     resolvedRefs,
+    skippedDeterministicFiles,
   };
 }
 

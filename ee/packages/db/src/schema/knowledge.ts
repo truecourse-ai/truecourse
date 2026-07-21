@@ -56,6 +56,14 @@ export const knowledgeDocuments = pgTable(
     version: text('version'),
     /** sha256 of the body at last sync — the incremental-sync diff key. */
     contentHash: text('content_hash').notNull(),
+    /**
+     * sha256 of the body the LAST process (consolidation) actually saw; null until
+     * the doc is first processed. The sweep delta compares this against the fetched
+     * `contentHash` — a doc synced but never processed (null), or whose content has
+     * changed since it was consolidated, is pending work. Sync never touches this;
+     * only the processing job stamps it (`markProcessed`).
+     */
+    processedHash: text('processed_hash'),
     lastSyncedAt: ts('last_synced_at').notNull(),
     createdAt: ts('created_at').notNull(),
   },

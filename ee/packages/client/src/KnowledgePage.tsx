@@ -14,19 +14,23 @@
  * workspace-level Scenarios tab.
  *
  * Tabs:
- *   - Spec (default): areas → kept docs + conflicts; right pane = doc markdown /
- *     conflict resolution. Force-include / exclude + pick-a-side verdicts all hit
- *     the workspace decision endpoints.
+ *   - Spec (default): areas → kept docs + conflicts; the right pane opens each in
+ *     the house preview/pin tab strip (single-click preview, double-click pin,
+ *     `?spec=`-synced) — a doc opens the markdown viewer, a conflict the resolution
+ *     detail. Force-include / exclude + pick-a-side verdicts all hit the workspace
+ *     decision endpoints.
  *   - Sources: the provenance ledger (server-paginated, searchable, kind-filtered).
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Database, FileText, Loader2, Search } from 'lucide-react';
+import { BookOpen, Database, FileText, GitMerge, Loader2, Search } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SpecCorpusView, useSpecCorpus, parseSpecKey } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { SpecSourceProvider } from '@/components/spec/spec-source';
+import { GuardTabStrip, type GuardTabStripItem } from '@/components/guard/GuardTabStrip';
+import { useGuardTabs } from '@/hooks/useGuardTabs';
 import { getJson } from './api';
 import { createWorkspaceSpecSource } from './knowledge-spec-source';
 
@@ -88,50 +92,77 @@ export default function KnowledgePage() {
 // ---------------------------------------------------------------------------
 
 function KnowledgeSpecTab() {
-  const [activeKey, setActiveKey] = useState<string | null>(null);
   const corpus = useSpecCorpus('ws', true);
-  const open = useCallback((key: string) => setActiveKey(key), []);
-  const sel = useMemo(() => (activeKey ? parseSpecKey(activeKey) : null), [activeKey]);
+  // The shared preview/pin tab model (single-click preview, double-click pin),
+  // `?spec=`-synced — the same reducer + strip the repo Spec views use.
+  const { activeId, openTabs, open, close, selectOverview } = useGuardTabs('spec', 'ws');
+  const sel = useMemo(() => (activeId ? parseSpecKey(activeId) : null), [activeId]);
   // The kept docs' ledger title + deep link, so a doc preview reads its human title.
   const docMeta = useMemo(
     () => new Map((corpus.data?.corpus.docs ?? []).map((d) => [d.ref, d] as const)),
     [corpus.data],
   );
+  const labelOf = useCallback((ref: string): string => docMeta.get(ref)?.title ?? ref, [docMeta]);
+
+  // Each open tab as a strip item: a doc labels by its ledger title (ref fallback),
+  // a conflict by "a ↔ b" (both titles) — truncated in the strip, full on hover.
+  const tabItems = useMemo<GuardTabStripItem[]>(
+    () =>
+      openTabs.map((t) => {
+        const k = parseSpecKey(t.id);
+        if (k.kind === 'overlap') {
+          const label = `${labelOf(k.a)} ↔ ${labelOf(k.b)}`;
+          return { ...t, label, title: label, icon: GitMerge };
+        }
+        const label = labelOf(k.ref);
+        return { ...t, label, title: label, icon: FileText };
+      }),
+    [openTabs, labelOf],
+  );
 
   return (
     <div className="flex h-full">
       <div className="w-[380px] shrink-0 overflow-auto border-r border-border">
-        <SpecCorpusView repoId="ws" corpus={corpus} activeKey={activeKey} onOpen={open} />
+        <SpecCorpusView repoId="ws" corpus={corpus} activeKey={activeId} onOpen={open} />
       </div>
-      <div className="min-w-0 flex-1 overflow-auto">
-        {sel?.kind === 'overlap' && corpus.data ? (
-          <SpecOverlapDetail
-            repoId="ws"
-            area={sel.area}
-            docA={sel.a}
-            docB={sel.b}
-            data={corpus.data}
-            onResolved={(res) => {
-              if (res) corpus.apply(res);
-              else void corpus.refetch();
-            }}
-            onConflictChange={(list) => corpus.applyConflictResolutions(list)}
-            onClose={() => setActiveKey(null)}
-          />
-        ) : sel?.kind === 'doc' ? (
-          <SpecDocViewer
-            repoId="ws"
-            docRef={sel.ref}
-            title={docMeta.get(sel.ref)?.title}
-            url={docMeta.get(sel.ref)?.url}
-          />
-        ) : (
-          <EmptyState
-            icon={FileText}
-            title="Select a document or conflict"
-            body="Choose a document to read it, or a conflict to resolve it."
-          />
-        )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <GuardTabStrip
+          tabs={tabItems}
+          activeId={activeId}
+          onSelect={(t) => open(t.id, t.pinned)}
+          onSelectOverview={selectOverview}
+          onClose={close}
+        />
+        <div className="min-h-0 flex-1 overflow-auto">
+          {sel?.kind === 'overlap' && corpus.data ? (
+            <SpecOverlapDetail
+              repoId="ws"
+              area={sel.area}
+              docA={sel.a}
+              docB={sel.b}
+              data={corpus.data}
+              onResolved={(res) => {
+                if (res) corpus.apply(res);
+                else void corpus.refetch();
+              }}
+              onConflictChange={(list) => corpus.applyConflictResolutions(list)}
+              onClose={() => activeId && close(activeId)}
+            />
+          ) : sel?.kind === 'doc' ? (
+            <SpecDocViewer
+              repoId="ws"
+              docRef={sel.ref}
+              title={docMeta.get(sel.ref)?.title}
+              url={docMeta.get(sel.ref)?.url}
+            />
+          ) : (
+            <EmptyState
+              icon={FileText}
+              title="Select a document or conflict"
+              body="Choose a document to read it, or a conflict to resolve it."
+            />
+          )}
+        </div>
       </div>
     </div>
   );
