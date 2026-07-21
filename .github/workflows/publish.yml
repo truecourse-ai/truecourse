@@ -26,17 +26,15 @@ on:
   pull_request:
     types: [closed]
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
   # Decide whether this event should release. Kept as a separate gate so the
   # label check can substring-match (catching both the default
   # `fp-campaign-complete` and the C# account's `cs-fp-campaign-complete`),
   # which `if: contains(labels.*.name, …)` can't do (it's exact-match only).
+  # Needs no write access — permissions are scoped to the publish job below.
   gate:
     runs-on: ubuntu-latest
+    permissions: {}
     outputs:
       release: ${{ steps.decide.outputs.release }}
     steps:
@@ -44,6 +42,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           MERGED: ${{ github.event.pull_request.merged }}
+          BASE: ${{ github.event.pull_request.base.ref }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           if [ "$EVENT" = "push" ]; then
@@ -51,8 +50,14 @@ jobs:
             echo "release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$MERGED" = "true" ] && echo "$LABELS" | grep -q 'fp-campaign-complete'; then
-            echo "Merged campaign-close PR — releasing."
+          # PR-merge path: must be merged, into `main`, and carry a
+          # campaign-complete label. The label regex anchors on the quotes in
+          # the JSON array so it matches `fp-campaign-complete` or a scoped
+          # `<scope>-fp-campaign-complete` exactly — never a longer label like
+          # `fp-campaign-complete-docs`.
+          if [ "$MERGED" = "true" ] && [ "$BASE" = "main" ] && \
+             echo "$LABELS" | grep -Eq '"([a-z]+-)?fp-campaign-complete"'; then
+            echo "Merged campaign-close PR into main — releasing."
             echo "release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -63,6 +68,15 @@ jobs:
     needs: gate
     if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the tag + create the GitHub Release
+      id-token: write    # npm OIDC trusted publishing
+    # Serialize releases: if two labeled PRs merge back-to-back, the second
+    # publish waits for the first rather than racing it. Never cancel an
+    # in-progress publish (a half-published release is worse than a queue).
+    concurrency:
+      group: publish
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,7 +121,7 @@ jobs:
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          if git rev-parse "$TAG" >/dev/null 2>&1 || \
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 || \
              git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists — skipping tag creation."
           else

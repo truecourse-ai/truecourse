@@ -574,9 +574,10 @@ trusted-publisher config (pinned to `publish.yml`) matches either way:
 
 - **`push` of a `v*` tag** — manual / prerelease releases (unchanged). The
   version comes from the tag; the tag already exists, so no tag is created.
-- **`pull_request.closed`** where the merged PR carries a
-  `*fp-campaign-complete` label (substring match, so both the default
-  `fp-campaign-complete` and the `cs-`-scoped label are caught) — the
+- **`pull_request.closed`** where the PR was **merged into `main`** and
+  carries a `*fp-campaign-complete` label (anchored match, so both the
+  default `fp-campaign-complete` and a `<scope>-fp-campaign-complete` are
+  caught but a longer label like `fp-campaign-complete-docs` is not) — the
   fp-automation release path. Here the workflow:
   1. reads the version from `tools/cli/package.json` and asserts the four
      version locations agree (fails the release on mismatch — the
