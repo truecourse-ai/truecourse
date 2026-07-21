@@ -37,7 +37,12 @@ both halves (capturing runner inspects the authored steps).
 
 ## 2. Flagged claims re-author fresh — never served the rejected scenario from cache
 
-STATUS: OPEN
+STATUS: DONE — the durable ledger gained a claim-taint set (old files parse via
+defaults); a claim that ends a run flagged (fidelity finding, triage
+generation-defect, or auto-resolution of either) is tainted, so the next generate
+bypasses the author cache and re-authors fresh with the prior mismatch as correction
+evidence (round-1 PRIOR-FLAG block). A faithful pass clears the taint; the 2-strike
+escalation stays as backstop.
 
 **Problem.** "Re-attempt next generate" is a treadmill: the authoring cache serves
 the byte-identical rejected scenario back, it gets flagged again, auto-resolves

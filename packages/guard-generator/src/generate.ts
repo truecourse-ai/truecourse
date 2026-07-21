@@ -56,6 +56,7 @@ import {
   dismissedClaimKey,
   isRunnableDriver,
   type GuardAutoResolutionEntry,
+  type GuardClaimTaint,
   type GuardAutoResolved,
   type GuardBirthFinding,
   type GuardTriage,
@@ -501,6 +502,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const dismissalByKey = new Map<string, GuardDismissedClaim>(
     decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
   )
+
+  // The durable guard ledger (item 14 escalation counts + item 2 claim taints), read
+  // once and rewritten once at run end. A tainted claim (its scenario ended a prior run
+  // flagged) bypasses the author cache below and re-authors fresh; the flagged/cleared
+  // reconciliation happens after settle.
+  const priorLedger = readGuardAutoResolutions(repoRoot)
+  const now = new Date().toISOString()
+  // Claims flagged THIS run (scenario defects) → their taint (re)recorded at run end,
+  // keyed by claim-taint identity.
+  const flaggedClaims = new Map<string, GuardClaimTaint>()
+  // Claims whose ROUND-1 author cache was freshly (over)written this run — their prior
+  // taint is cleared (the poisoned cache entry is gone), unless they re-flag below.
+  const freshlyAuthoredClaimKeys = new Set<string>()
+  // Record a claim's scenario as a run-end defect (fidelity/generation-defect). A
+  // finding with no claim identity can't be keyed, so it's skipped (as auto-dismiss is).
+  const taintClaim = (doc: string, anchor: string, claim: string | undefined, title: string, mismatch: string): void => {
+    if (!claim) return
+    flaggedClaims.set(claimTaintKey(doc, anchor, claim), { doc, anchor, claim, title, mismatch, updatedAt: now })
+  }
   // Orphan honesty: a dismissal whose claim text matched NOTHING in a doc actually
   // re-extracted this run is stale — surfaced, never silently honored. Only docs we
   // re-read can be judged, so track the extracted claim identities + the docs read.
@@ -1151,6 +1171,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             outcome,
           })
         }
+        // Item 2 — a self-heal that did NOT converge leaves the claim re-attempting with
+        // its round-1 author cache still poisoned; taint it so next generate re-authors
+        // fresh. A `resolved` self-heal settles the section clean (skipped next run), so
+        // it needs no taint.
+        if (outcome !== 'resolved') {
+          taintClaim(section.doc, section.anchor, e.task.claim.claim, e.discarded[0].candidate.scenario.title, e.discarded[0].mismatch)
+        }
       }
     }
 
@@ -1232,7 +1259,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       resolveClaim(t, true)
       continue
     }
-    const cached = await readAuthorCache(repoRoot, t.claim, t.section, recipeFingerprint)
+    // Item 2 — a TAINTED claim (its scenario ended a prior run flagged) bypasses the
+    // author cache: the cache still holds the rejected scenario, so re-serving it would
+    // re-flag it and treadmill. Force a miss → fresh author, carrying the prior flag.
+    const isTainted = priorLedger.tainted[claimTaintKey(t.section.doc, t.section.anchor, t.claim.claim)] !== undefined
+    const cached = isTainted ? null : await readAuthorCache(repoRoot, t.claim, t.section, recipeFingerprint)
     if (cached) {
       rawByRef.set(t.ref, cached.scenarios)
       if (cached.scenarios.length === 0 && cached.blockedOn && cached.blockedOn.length > 0) {
@@ -1255,7 +1286,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         limit(async () => {
           const probes = await groundClaims(batch.map((t) => t.claim.claim))
           const attempt = await callAuthorWithReask(
-            buildAuthorCtx(gd, batch, recipe, probes),
+            buildAuthorCtx(gd, batch, recipe, probes, priorLedger.tainted),
             generateRunner,
             authorFailureEmitter(batch, options.onAuthorFailure),
           )
@@ -1279,6 +1310,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               rawByRef.set(t.ref, authored.scenarios)
               if (blocked.length > 0) blockedByRef.set(t.ref, blocked)
               await writeAuthorCache(repoRoot, t.claim, t.section, recipeFingerprint, authored.scenarios, blocked)
+              // The round-1 cache was (over)written — any prior taint on this claim is
+              // cleared at run end unless the fresh scenario re-flags below.
+              freshlyAuthoredClaimKeys.add(claimTaintKey(t.section.doc, t.section.anchor, t.claim.claim))
               resolveClaim(t, false)
             }
           }
@@ -1355,13 +1389,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // to the human with a "re-generation is not fixing this" note — auto-resolution is
   // never an infinite silent loop. The durable per-identity count lives in the
   // gitignored `guard/auto-resolutions.json` (the triage cache key IS the identity).
+  // The escalation counts carried forward (rebuilt from scratch when findings exist,
+  // else left untouched) — written to the durable ledger at run end alongside taints.
+  // `hadFindings` captures the pre-reassignment count so the write below still fires
+  // when EVERY finding auto-resolved (birthFindings is then empty but entries changed).
+  const hadFindings = birthFindings.length > 0
+  let nextEntries: Record<string, GuardAutoResolutionEntry> = priorLedger.entries
   if (birthFindings.length > 0) {
     const escalateAfter = Math.max(1, options.escalateAutoResolveAfter ?? DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER)
-    const priorLedger = readGuardAutoResolutions(repoRoot)
-    const nextEntries: Record<string, GuardAutoResolutionEntry> = {}
+    nextEntries = {}
     const humanFindings: GuardBirthFinding[] = []
     const autoDismissals: GuardDismissedClaim[] = []
-    const now = new Date().toISOString()
 
     for (const finding of birthFindings) {
       const action = finding.triage ? triageAutoResolution(finding.triage) : null
@@ -1415,14 +1453,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           verdict: finding.triage!.verdict,
           brief: finding.triage!.brief,
         })
+        // Item 2 — the claim re-attempts, so taint it: its round-1 author cache still
+        // holds the rejected scenario, and re-serving it would treadmill.
+        taintClaim(finding.doc, finding.anchor, finding.claim, finding.title, finding.triage!.brief)
       }
       nextEntries[key] = { count: priorCount + 1, verdict: finding.triage!.verdict, updatedAt: now }
     }
 
-    // Persist the pruned ledger — only identities still auto-resolving or escalating
-    // survive; a finding that converged (became a human task, or stopped recurring)
-    // drops out so its count resets.
-    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries })
+    // Item 2 — taint every claim that STAYS a scenario-defect finding this run (a
+    // fidelity finding, or a generation-defect triage that didn't auto-resolve —
+    // including an escalated one) so its next re-attempt bypasses the poisoned author
+    // cache. Real doc/code drift is NOT tainted — the scenario is correct; re-authoring
+    // won't help.
+    for (const finding of humanFindings) {
+      const isFidelity = finding.kind === 'fidelity'
+      const isGenDefect = finding.triage?.verdict === 'generation-defect'
+      if (isFidelity || isGenDefect) {
+        taintClaim(finding.doc, finding.anchor, finding.claim, finding.title, isFidelity ? finding.actual : finding.triage?.brief ?? finding.actual)
+      }
+    }
 
     // Land the auto-dismissals in scenarios/decisions.json (read once, merge, write
     // once) so generate honors them on the next run. Idempotent on the (doc, anchor,
@@ -1439,6 +1488,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // ride the `autoResolved` ledger, not the task list.
     birthFindings.length = 0
     birthFindings.push(...humanFindings)
+  }
+
+  // Item 2 — reconcile the durable claim-taint set and write the ledger ONCE (escalation
+  // counts + taints together). A claim FRESHLY re-authored this run had its poisoned
+  // cache overwritten, so its old taint clears; a claim that ended flagged (a scenario
+  // defect) is (re)tainted with the latest evidence. A claim neither re-authored nor
+  // flagged (its section unchanged, or its author call errored so the cache still holds
+  // the bad scenario) keeps its prior taint. Written only when something is (or was) in
+  // the ledger, so a clean no-taint run never creates the file.
+  const nextTainted: Record<string, GuardClaimTaint> = { ...priorLedger.tainted }
+  for (const k of freshlyAuthoredClaimKeys) delete nextTainted[k]
+  for (const [k, taint] of flaggedClaims) nextTainted[k] = taint
+  if (
+    hadFindings ||
+    Object.keys(nextTainted).length > 0 ||
+    Object.keys(priorLedger.tainted).length > 0
+  ) {
+    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
   }
 
   // 6. Run end — the zero-survivor sweep. Under per-scenario commit (item 15) a work
@@ -1497,6 +1564,13 @@ interface AuthTask {
 }
 
 const key = (s: { doc: string; anchor: string }): string => `${s.doc}\0${s.anchor}`
+
+/** The durable claim-taint key (item 2): a hash of the claim identity — the same
+ *  (doc, anchor, claim-text) trio a dismissal keys on. The ledger stores the identity
+ *  fields in the entry, so the hashed key stays opaque and JSON-clean. */
+function claimTaintKey(doc: string, anchor: string, claim: string): string {
+  return createHash('sha256').update(dismissedClaimKey(doc, anchor, claim)).digest('hex')
+}
 
 /**
  * The auto-resolution action a triage verdict warrants (item 14), or `null` when the
@@ -1624,9 +1698,24 @@ function supportOf(task: AuthTask): Pick<AuthorClaim, 'support'> {
   return { support: { kind: s.kind, subject: s.subject, ...(s.extension ? { extension: s.extension } : {}) } }
 }
 
-/** Author context for a batch of AuthTasks (round 1). */
-function buildAuthorCtx(gd: GuardDoc, batch: AuthTask[], recipe: Recipe, probes: ProbeTranscript[]): AuthorUserContext {
-  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim), ...invariantOf(t), ...supportOf(t) }))
+/** The prior-flag payload to thread to a round-1 author call, present only for a
+ *  TAINTED claim (item 2): the rejected scenario's title + why it was rejected, so the
+ *  fresh author avoids reproducing the flagged shape. */
+function priorFlagOf(task: AuthTask, tainted: Record<string, GuardClaimTaint>): Pick<AuthorClaim, 'priorFlag'> {
+  const t = tainted[claimTaintKey(task.section.doc, task.section.anchor, task.claim.claim)]
+  return t ? { priorFlag: { title: t.title, mismatch: t.mismatch } } : {}
+}
+
+/** Author context for a batch of AuthTasks (round 1). Tainted claims (item 2) carry
+ *  their prior flag's evidence as correction. */
+function buildAuthorCtx(
+  gd: GuardDoc,
+  batch: AuthTask[],
+  recipe: Recipe,
+  probes: ProbeTranscript[],
+  tainted: Record<string, GuardClaimTaint>,
+): AuthorUserContext {
+  const claims: AuthorClaim[] = batch.map((t) => ({ ref: t.ref, claim: t.claim.claim, section: t.section, ...exampleOf(t.claim), ...invariantOf(t), ...supportOf(t), ...priorFlagOf(t, tainted) }))
   return buildAuthorCtxFor(gd, claims, recipe, probes)
 }
 

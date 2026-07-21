@@ -546,6 +546,12 @@ export interface AuthorClaim {
   support?: { kind: SupportSubject['kind']; subject: string; extension?: string }
   /** On a birth-validation retry, the prior attempt's failure evidence. */
   retry?: BirthRetryContext
+  /** Present when this claim was TAINTED (item 2): a scenario authored for it on an
+   *  EARLIER generate was flagged and rejected, and the author cache was bypassed so
+   *  this call re-authors fresh. Carries the prior flag's evidence so the model avoids
+   *  reproducing the rejected shape. Rides the ROUND-1 author call (unlike `retry`,
+   *  which is a within-run birth failure). */
+  priorFlag?: { title: string; mismatch: string }
 }
 
 /**
@@ -662,6 +668,17 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         'section promises for supported input — it is accepted (parses/lints/formats clean,',
         'exit 0, no failure marker in the output). Do NOT seed the input yourself; do NOT',
         "assert one input's exact output — the corpus varies file to file.",
+      )
+    }
+    if (c.priorFlag) {
+      lines.push(
+        'PRIOR FLAG — a scenario you authored for this claim on an EARLIER generate did',
+        'NOT truly verify the claim: it was flagged and rejected. Author a DIFFERENT',
+        'scenario that CLOSES the gap below — do NOT reproduce the rejected shape (for a',
+        'two-sided claim, that usually means also exercising the excluded inputs and',
+        'asserting their exclusion). The prior rejection:',
+        `  rejected scenario: ${c.priorFlag.title}`,
+        `  why it was rejected: ${c.priorFlag.mismatch}`,
       )
     }
     if (c.retry) {
