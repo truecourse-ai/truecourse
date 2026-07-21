@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/dashboard-server",
-  "version": "0.7.3-next.10",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "scripts": {
