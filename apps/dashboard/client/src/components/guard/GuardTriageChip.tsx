@@ -1,5 +1,5 @@
 /**
- * The triage-verdict chip — an Opus finding-triage verdict rendered inline beside a
+ * The triage-verdict chip — a finding-triage verdict rendered inline beside a
  * finding (its detail header and the coverage section-detail rows). Colour follows
  * the meaning: the two REAL-drift verdicts are tinted (code-drift red like a bug,
  * doc-drift amber like a doc fix), the two NOISE verdicts (generation-defect,

@@ -1307,7 +1307,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return emptyResult('recipe-failed', { reason: noOpAnomalyReason(noOpAnomaly, recipe.entry) })
   }
 
-  // Triage — one Opus judgment call per birth/fidelity finding, AFTER they all
+  // Triage — one judgment call per birth/fidelity finding, AFTER they all
   // settle. Each verdict + recommendation is attached to its finding in place (the
   // report carries it). Fail-soft and cached per finding identity, so a re-generate
   // re-triages only new/changed findings; a finding simply ships without triage when
@@ -1341,7 +1341,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   // Item 14: high-confidence triage recommendations auto-resolve — the human sees
-  // only real questions. A finding whose Opus triage said `environment` or
+  // only real questions. A finding whose triage said `environment` or
   // `generation-defect` at HIGH confidence is not a human question; the tool acts on
   // it itself and records a ledger entry (never silence, never a task):
   //   - environment       → auto-DISMISS the claim into scenarios/decisions.json

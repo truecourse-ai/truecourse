@@ -394,7 +394,7 @@ const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
  * review (one call per green scenario, item 33) is NOT cache-aware — scenario
  * content isn't known until authoring + birth run — so it counts one review per
  * planned cli claim (the same range as authoring), honestly over-counting a claim
- * that authors several scenarios or none. Finding triage (one Opus call per
+ * that authors several scenarios or none. Finding triage (one triage call per
  * birth/fidelity finding) is likewise not knowable pre-run — the finding count
  * depends on birth outcomes — so it ranges 0..claimsMax with a heuristic point.
  * Support-claim exemplar generation (item 9, one call per support claim, each writing
@@ -486,7 +486,7 @@ export async function estimateGuardTokens(
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
     },
     {
-      // One Opus triage call per birth/fidelity finding, after the sections settle.
+      // One triage call per birth/fidelity finding, after the sections settle.
       // The finding COUNT is unknowable pre-run (it depends on birth/fidelity
       // outcomes), so — following the fidelity stage's per-claim proxy convention —
       // this ranges from 0 (no findings) up to a ceiling of every planned claim's

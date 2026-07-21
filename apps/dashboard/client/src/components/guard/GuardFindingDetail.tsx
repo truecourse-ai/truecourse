@@ -168,7 +168,7 @@ export function GuardFindingDetail({
           )}
         </div>
 
-        {/* Triage — the Opus verdict + recommendation for how to unblock this finding,
+        {/* Triage — the verdict + recommendation for how to unblock this finding,
             following the conflict-resolution brief's layout. A recommendation with
             quoted evidence, never auto-applied. When the verdict recommends dismissal
             (a generation defect / environment artefact) the recommended-action box is

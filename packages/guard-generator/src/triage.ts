@@ -1,6 +1,6 @@
 /**
  * Finding triage — the post-settle judgment stage. Once birth validation and the
- * fidelity review have produced the run's birth/fidelity findings, ONE Opus call
+ * fidelity review have produced the run's birth/fidelity findings, ONE triage call
  * per finding decides what it actually is and how to unblock it: a verdict
  * (`doc-drift` | `code-drift` | `generation-defect` | `environment`), a confidence,
  * a one-paragraph brief, and a concrete recommendation. Everything the call needs
@@ -211,7 +211,7 @@ export interface TriageSectionContext {
 
 /**
  * Triage ONE finding, cached per finding identity so a re-run is a hit and no
- * second Opus call fires for an unchanged finding. Returns the verdict, or `null`
+ * second triage call fires for an unchanged finding. Returns the verdict, or `null`
  * fail-soft — a thrown or (after one corrective re-ask) still-invalid call ships
  * the finding without triage. A validated verdict is cached; a failure is not.
  */

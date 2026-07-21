@@ -1,7 +1,7 @@
 /**
  * OVERLAP VERIFICATION — the precision pass over the recall-biased overlap
- * detector's flags. Detection (`overlap-detector.ts`) is deliberately Haiku-tier
- * and biased to flag-for-human, so it over-flags: most of its "disagreements" are
+ * detector's flags. Detection (`overlap-detector.ts`) is deliberately cheap and
+ * fast and biased to flag-for-human, so it over-flags: most of its "disagreements" are
  * two docs describing different components, one doc merely omitting what the other
  * states, a hedge, or complementary detail — not a real contradiction. This stage
  * re-reads each flagged pair with FULL context and a stronger model and rules

@@ -72,7 +72,7 @@ function fingerprint(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// The diversity prompt (self-contained, optimized for Sonnet)
+// The diversity prompt (self-contained, optimized for the exemplar-generation model)
 // ---------------------------------------------------------------------------
 
 export const EXEMPLAR_SYSTEM_PROMPT = `\

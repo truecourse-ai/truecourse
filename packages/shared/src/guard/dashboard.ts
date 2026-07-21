@@ -75,7 +75,7 @@ export interface GuardSectionFinding {
   actual: string
   /** Repo-relative pointer into `guard/evidence/`, when a transcript was written. */
   evidencePath?: string
-  /** The finding's Opus triage verdict, for the coverage row's verdict chip. Absent
+  /** The finding's triage verdict, for the coverage row's verdict chip. Absent
    *  when the finding was never triaged (no triage runner / older report). */
   triageVerdict?: GuardTriageVerdict
 }

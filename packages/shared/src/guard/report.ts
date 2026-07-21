@@ -130,7 +130,7 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
 }
 
 /**
- * An Opus triage verdict on ONE birth/fidelity finding — the tool's recommendation
+ * A triage verdict on ONE birth/fidelity finding — the tool's recommendation
  * for how to unblock it, produced by a post-settle judgment call over the finding's
  * evidence (claim, section text, authored YAML, expected/actual, the failing run's
  * raw output, and the section's grounding probes). A recommendation with quoted
@@ -227,7 +227,7 @@ export const GuardBirthFindingSchema = z
      */
     headingText: z.string().optional(),
     /**
-     * The Opus triage verdict + recommendation for this finding (see
+     * The triage verdict + recommendation for this finding (see
      * {@link GuardTriageSchema}), attached AT GENERATE by the post-settle triage
      * stage and persisted with the finding (triage is expensive, so it does not
      * re-derive on read). Optional so older `result.json` files — and any run with
@@ -354,7 +354,7 @@ export type GuardOrphanedSection = z.infer<typeof GuardOrphanedSectionSchema>
  *  - `fidelity-discard` (item 13) — a green scenario the fidelity reviewer flagged at
  *    HIGH confidence (weak/vacuous/miscast). Rather than birth a finding, the candidate
  *    is discarded and its claim re-authored ONCE; `outcome` says what that produced.
- *  - `triage-dismiss` (item 14) — a birth/fidelity finding the Opus triage judged
+ *  - `triage-dismiss` (item 14) — a birth/fidelity finding the triage stage judged
  *    `environment` at HIGH confidence: the claim is untestable in this sandbox, so it
  *    is auto-DISMISSED into `scenarios/decisions.json` (marked `auto`) instead of
  *    raising a task. Carries the dismissed `claim` text so the ledger names it.
