@@ -238,6 +238,44 @@ describe('EF Core schema parser', () => {
     expect(result.relations).toEqual([])
   })
 
+  it('honors [ForeignKey] on a navigation for a scalar column ending in Id', () => {
+    const result = parseEfCoreSchema(`
+      using Microsoft.EntityFrameworkCore;
+      using System.ComponentModel.DataAnnotations;
+      using System.ComponentModel.DataAnnotations.Schema;
+
+      public class AppDbContext : DbContext
+      {
+        public DbSet<Article> Articles { get; set; }
+        public DbSet<Account> Accounts { get; set; }
+      }
+
+      public class Account { [Key] public Guid Id { get; set; } }
+
+      public class Article
+      {
+        [Key] public Guid Id { get; set; }
+        public Guid AuthorId { get; set; }
+
+        [ForeignKey(nameof(AuthorId))]
+        public Account Writer { get; set; }
+      }
+    `)
+
+    const articleColumns = result.tables.find((table) => table.name === 'Articles')?.columns
+    expect(articleColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'author_id', isForeignKey: true, referencesTable: 'Accounts' }),
+      ]),
+    )
+    expect(result.relations).toContainEqual({
+      sourceTable: 'Articles',
+      targetTable: 'Accounts',
+      relationType: 'one-to-many',
+      foreignKeyColumn: 'author_id',
+    })
+  })
+
   it('keeps enum-typed properties as scalar columns instead of dropping them', () => {
     const result = parseEfCoreSchema(`
       using Microsoft.EntityFrameworkCore;
@@ -891,6 +929,114 @@ describe('EF Core project reconciliation', () => {
           foreignKeyColumn: 'catalog_brand_id',
         }),
       )
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves an AddDbContext provider hint against a context in another model scope', () => {
+    const results = parseEfCoreProject([
+      projectFile('/repo/Web/Program.cs', `
+        using Microsoft.EntityFrameworkCore;
+        builder.Services.AddDbContext<CatalogContext>(c => c.UseSqlServer(connectionString));
+      `, { serviceName: 'Web', providerTypes: [] }),
+      projectFile('/repo/Infrastructure/CatalogContext.cs', `
+        using Microsoft.EntityFrameworkCore;
+        namespace Shop.Infrastructure;
+        public class CatalogContext : DbContext
+        {
+          public DbSet<Product> Products { get; set; }
+        }
+      `, { serviceName: '__root__', providerTypes: [] }),
+      projectFile('/repo/Infrastructure/Product.cs', `
+        namespace Shop.Infrastructure;
+        public class Product { public Guid Id { get; set; } }
+      `, { serviceName: '__root__', providerTypes: [] }),
+    ])
+
+    expect(results).toHaveLength(1)
+    expect(results[0].contextName).toBe('Shop.Infrastructure.CatalogContext')
+    expect(results[0].tables.length).toBeGreaterThan(0)
+    expect(results[0].dbType).toBe('sqlserver')
+  })
+
+  it('does not resolve an unqualified AddDbContext hint when two contexts share a name', () => {
+    const results = parseEfCoreProject([
+      projectFile('/repo/Program.cs', `
+        using Microsoft.EntityFrameworkCore;
+        builder.Services.AddDbContext<AppDbContext>(c => c.UseSqlServer(connectionString));
+      `, { serviceName: 'Web', providerTypes: [] }),
+      projectFile('/repo/Sales/SalesModel.cs', `
+        using Microsoft.EntityFrameworkCore;
+        namespace Sales;
+        public class AppDbContext : DbContext { public DbSet<Sale> Sales { get; set; } }
+        public class Sale { public Guid Id { get; set; } }
+      `, { serviceName: 'Sales', providerTypes: [] }),
+      projectFile('/repo/Support/SupportModel.cs', `
+        using Microsoft.EntityFrameworkCore;
+        namespace Support;
+        public class AppDbContext : DbContext { public DbSet<Ticket> Tickets { get; set; } }
+        public class Ticket { public Guid Id { get; set; } }
+      `, { serviceName: 'Support', providerTypes: [] }),
+    ])
+
+    expect(results).toHaveLength(2)
+    for (const result of results) expect(result.dbType).toBeNull()
+  })
+
+  it('falls back to a repo-wide unique EF provider for a context outside every service', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-efcore-fallback-'))
+    try {
+      const web = path.join(root, 'src', 'Web')
+      const write = (filePath: string, content: string): string => {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true })
+        fs.writeFileSync(filePath, content)
+        return filePath
+      }
+      // Only Web is a detected service; it carries the provider package. Unlike
+      // the Clean Architecture test above there is NO OnConfiguring and NO
+      // AddDbContext hint, so the provider is known only from the package.
+      write(path.join(web, 'Web.csproj'), `
+        <Project Sdk="Microsoft.NET.Sdk">
+          <ItemGroup>
+            <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+          </ItemGroup>
+        </Project>
+      `)
+      const program = write(path.join(web, 'Program.cs'), `
+        using Microsoft.EntityFrameworkCore;
+        var app = builder.Build();
+      `)
+      const context = write(path.join(root, 'src', 'Infrastructure', 'CatalogContext.cs'), `
+        using Microsoft.EntityFrameworkCore;
+        using ApplicationCore.Entities;
+        namespace Infrastructure.Data;
+        public class CatalogContext : DbContext
+        {
+          public DbSet<CatalogItem> CatalogItems { get; set; }
+        }
+      `)
+      const item = write(path.join(root, 'src', 'ApplicationCore', 'CatalogItem.cs'), `
+        namespace ApplicationCore.Entities;
+        public class CatalogItem
+        {
+          public int Id { get; set; }
+          public string Name { get; set; }
+        }
+      `)
+
+      const analyses = [
+        { filePath: program, language: 'csharp', imports: [{ source: 'Microsoft.EntityFrameworkCore' }] },
+        { filePath: context, language: 'csharp', imports: [{ source: 'Microsoft.EntityFrameworkCore' }] },
+        { filePath: item, language: 'csharp', imports: [] },
+      ] as unknown as FileAnalysis[]
+      const services = [{ name: 'Web', rootPath: web, files: [program] }] as unknown as Service[]
+
+      const sqlserver = detectDatabases(root, analyses, services).databases
+        .find((database) => database.type === 'sqlserver')
+      const items = sqlserver?.tables.find((table) => table.name === 'CatalogItems')
+
+      expect(items?.columns.map((column) => column.name)).toEqual(['id', 'name'])
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }

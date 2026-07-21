@@ -130,20 +130,44 @@ export function parseEfCoreProject(files: EfCoreProjectFile[]): EfCoreProjectSch
     filesByService.set(file.input.serviceName, serviceFiles)
   }
 
-  const schemas: EfCoreProjectSchema[] = []
-
-  for (const [serviceName, serviceFiles] of filesByService) {
+  // Pass 1: reconcile each model scope in isolation. Same-named entities in
+  // different scopes must never merge, so class reconciliation stays per scope;
+  // schema building is deferred until provider hints have been resolved globally.
+  const scopes = [...filesByService].map(([serviceName, serviceFiles]) => {
     const { entities, contexts } = reconcileClassDeclarations(serviceFiles)
     // Enum-typed properties look like reference navigations (PascalCase,
     // non-BCL) but map to scalar columns. Reclassify them once the whole
     // service is visible so an entity's enum columns are not dropped.
     reclassifyEnumColumns(entities, new Set(serviceFiles.flatMap((file) => file.enums)))
     const configurations = serviceFiles.flatMap((file) => file.configurations)
-    const providerHints = serviceFiles.flatMap((file) => file.providerHints)
     const index = buildEntityIndex(entities)
     const providerTypes = dedupe(
       serviceFiles.flatMap((file) => file.input.providerTypes ?? []),
     )
+    return { serviceName, serviceFiles, entities, contexts, configurations, index, providerTypes }
+  })
+
+  // Between passes: an `AddDbContext<T>(...UseX...)` hint and the context it
+  // configures routinely live in different scopes — the entrypoint sits in the
+  // Web service while the DbContext lives in an Infrastructure class library
+  // (the shared root scope). Resolve every hint against the union of all
+  // scopes' contexts so the provider reaches its model. Resolution stays
+  // no-guessing: `resolveNamedCandidate` refuses ambiguous simple-name matches.
+  const allContexts = scopes.flatMap((scope) => scope.contexts)
+  const hintedProviders = new Map<string, DatabaseType[]>()
+  for (const hint of parsedFiles.flatMap((file) => file.providerHints)) {
+    const target = resolveNamedCandidate(hint.contextType, hint.file, allContexts)
+    if (!target) continue
+    hintedProviders.set(
+      target.fullName,
+      dedupe([...(hintedProviders.get(target.fullName) ?? []), hint.dbType]),
+    )
+  }
+
+  // Pass 2: build schemas per scope now that provider hints are known globally.
+  const schemas: EfCoreProjectSchema[] = []
+  for (const scope of scopes) {
+    const { serviceName, serviceFiles, entities, contexts, configurations, index, providerTypes } = scope
     const concreteContexts = contexts.filter((context) => !context.isAbstract)
     if (concreteContexts.length > 0) {
       for (const context of concreteContexts) {
@@ -154,9 +178,8 @@ export function parseEfCoreProject(files: EfCoreProjectFile[]): EfCoreProjectSch
           entities,
           index,
           providerTypes,
-          contexts,
           configurations,
-          providerHints,
+          hintedProviders,
         )
         if (schema.tables.length > 0) schemas.push(schema)
       }
@@ -471,9 +494,8 @@ function buildContextSchema(
   serviceEntities: EntityCandidate[],
   index: EntityIndex,
   serviceProviderTypes: DatabaseType[],
-  serviceContexts: ContextCandidate[],
   configurations: ConfigurationCandidate[],
-  providerHints: ProviderHint[],
+  hintedProviders: Map<string, DatabaseType[]>,
 ): EfCoreProjectSchema {
   const bindings = new Map<string, EntityBinding>()
   const unresolvedDbSets: DbSetCandidate[] = []
@@ -532,15 +554,9 @@ function buildContextSchema(
     })
   }
 
-  const configuredProviders = providerHints
-    .filter((hint) =>
-      resolveNamedCandidate(hint.contextType, hint.file, serviceContexts)?.fullName
-        === context.fullName
-    )
-    .map((hint) => hint.dbType)
   const explicitProviders = dedupe([
     ...context.inlineProviderTypes,
-    ...configuredProviders,
+    ...(hintedProviders.get(context.fullName) ?? []),
   ])
   const dbType = chooseProvider(explicitProviders, serviceProviderTypes)
 
@@ -638,12 +654,18 @@ function buildEntityTable(
       property.name.endsWith('Id') && property.name !== 'Id' && property.name !== `${entity.name}Id`
         ? property.name.slice(0, -2)
         : undefined
-    const navigationName = property.foreignKeyNavigation ?? conventionNavigation
-    const navigation = navigationName
-      ? navigations.get(navigationName)
-      : entity.properties.find((candidate) =>
-        candidate.navigationType && candidate.foreignKeyNavigation === property.name
-      )
+    // Resolve the navigation this column backs, in EF's precedence order:
+    // a [ForeignKey("Nav")] on this scalar, then a reverse [ForeignKey("This")]
+    // carried by a navigation, then the `<Nav>Id` convention. The convention
+    // must come last so an explicit reverse attribute is not shadowed for
+    // columns that happen to end in `Id`.
+    const navigation =
+      (property.foreignKeyNavigation
+        ? navigations.get(property.foreignKeyNavigation)
+        : undefined)
+      ?? entity.properties.find((candidate) =>
+        candidate.navigationType && candidate.foreignKeyNavigation === property.name)
+      ?? (conventionNavigation ? navigations.get(conventionNavigation) : undefined)
     let targetEntity = navigation?.navigationType
       ? resolveEntityReference(navigation.navigationType, navigation.file, index)
       : undefined

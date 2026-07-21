@@ -183,12 +183,27 @@ export function detectDatabases(
       }
     }
 
+    // Last-resort provider for a model the parser could not type (no inline
+    // OnConfiguring, no AddDbContext hint, and its own scope had no provider
+    // package — e.g. a DbContext in a class library outside every service).
+    // Only fall back when the whole repo names exactly one EF provider, so an
+    // ambiguous multi-provider repo still drops the untyped schema.
+    const efProviderTypes = [
+      ...new Set(
+        detections
+          .filter((detection) => detection.driver.startsWith('efcore-'))
+          .map((detection) => detection.type),
+      ),
+    ]
+
     for (const result of parseEfCoreProject(efFiles)) {
-      if (result.dbType === null) continue
-      const existing = schemaResults.get(result.dbType) || { tables: [], relations: [] }
+      const dbType =
+        result.dbType ?? (efProviderTypes.length === 1 ? efProviderTypes[0]! : null)
+      if (dbType === null) continue
+      const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
       existing.tables.push(...result.tables)
       existing.relations.push(...result.relations)
-      schemaResults.set(result.dbType, existing)
+      schemaResults.set(dbType, existing)
     }
   }
 
