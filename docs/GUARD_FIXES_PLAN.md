@@ -4,6 +4,14 @@ Work-plan for the current batch (the agent contract; retired when built). Drivin
 directives: scenarios are ONE kind — committed by default, some pass, some fail, the
 run shows which; and the user must never see tool-caused generation defects.
 
+TAXONOMY (governs every item): a FINDING is a statement about the USER'S repo —
+doc-drift or code-drift, always surfaced, never auto-resolved. A GEN DEFECT is a
+statement about OUR tool and is NOT a finding: it never appears in the findings
+list, findings counts, or finding-styled UI. Gen defects live in their own quiet
+surface (the auto-resolved ledger count, and — rarely — one plain dismissible
+tool-limitation row per family). The report schema, CLI summary lines, and every
+client list keep the two populations separate.
+
 ## 1. Two-sided claims get two-sided tests
 
 STATUS: OPEN
@@ -103,7 +111,9 @@ punt the residue to the human via escalation.
 - Families that fail again escalate ONCE as a family: a single row — count + a
   one-line plain-language description + Dismiss — nothing else. No member list, no
   expansion, no per-claim anything; dismissing resolves the whole family, ignoring
-  costs nothing.
+  costs nothing. Per the taxonomy note: this row is a TOOL-LIMITATION notice, not a
+  finding — it renders in the tool-defect surface (beside the auto-resolved ledger),
+  never in the findings list, and is excluded from findings counts everywhere.
 - Small clusters (<3) keep today's per-claim path. Cost-bounded: the clustering call
   is O(1) per run; family re-authoring costs what the failed claims would have cost
   to retry individually anyway.
