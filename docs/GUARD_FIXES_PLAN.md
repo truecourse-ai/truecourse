@@ -100,9 +100,10 @@ punt the residue to the human via escalation.
   claim fresh with the SHARED correction + 1-2 exemplar mismatches from the family in
   the prompt — the model fixes the pattern, not each instance blindly. Members then
   re-run birth + fidelity as usual; survivors commit.
-- Families that fail again escalate ONCE as a family ("N claims share an authoring
-  gap the engine cannot fix: <correction>"), not as N separate items — the human sees
-  one line per root cause, never per instance.
+- Families that fail again escalate ONCE as a family: a single row — count + a
+  one-line plain-language description + Dismiss — nothing else. No member list, no
+  expansion, no per-claim anything; dismissing resolves the whole family, ignoring
+  costs nothing.
 - Small clusters (<3) keep today's per-claim path. Cost-bounded: the clustering call
   is O(1) per run; family re-authoring costs what the failed claims would have cost
   to retry individually anyway.
