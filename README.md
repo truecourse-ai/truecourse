@@ -121,6 +121,8 @@ TrueCourse ships with **1,200+ deterministic rules** and **100 LLM rules** acros
 
 **Deterministic rules** run via tree-sitter AST visitors — fast, zero-cost, no API calls. **LLM rules** send source code to the configured LLM for semantic analysis — deeper but requires an LLM provider.
 
+The deterministic scan runs in a worker thread with a per-file time budget, so a single pathological file (e.g. one that drives a rule's regex into catastrophic backtracking) is skipped-with-a-warning instead of freezing the whole run — the analysis always completes and writes its output. The budget defaults to 30s per file and is overridable with `TRUECOURSE_DET_FILE_TIMEOUT_MS` (milliseconds) for repos with unusually large legitimate sources.
+
 ## Commands
 
 ```bash

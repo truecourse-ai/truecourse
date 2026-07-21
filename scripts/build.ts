@@ -148,6 +148,30 @@ run(
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
 
+// 5a. Bundle the deterministic-scan worker as a sibling of cli.mjs/server.mjs.
+// The tree-sitter code rules run in this worker so a single pathological file
+// (catastrophic regex backtracking) can be terminated instead of freezing the
+// whole run. It must be a separate file esbuild does NOT inline into the entry
+// bundles; the controller resolves it at runtime via `det-scan-worker.mjs` next
+// to the entry (see deterministic-scan/controller.ts resolveWorkerPath). Same
+// externals as the entries so web-tree-sitter WASM + typescript resolve from
+// node_modules, and BUNDLED_WASM_DIR (dist/wasm) is shared with the entries.
+console.log('\n=== Bundling deterministic-scan worker ===');
+run(
+  [
+    'npx esbuild packages/analyzer/src/deterministic-scan/worker.ts',
+    '--bundle',
+    '--platform=node',
+    '--target=node20',
+    '--format=esm',
+    '--outfile=dist/det-scan-worker.mjs',
+    '--external:web-tree-sitter',
+    '--external:pyright',
+    '--external:typescript',
+    '--banner:js="import { createRequire as __cRw } from \'node:module\'; const require = __cRw(import.meta.url);"',
+  ].join(' '),
+);
+
 // 5b. Build the C# Roslyn semantic host (framework-dependent, portable). Ships
 // as `dist/roslyn-host/csharp-roslyn-host.dll` and is launched via the user's
 // `dotnet` at runtime — one build runs on every OS (no per-platform matrix).
